@@ -1,0 +1,30 @@
+# The fabric-ordering app has no CI: lint, typecheck and test are run by hand,
+# which means they are run when someone remembers. Start with it instead.
+#
+# Database-tier tests skip without DATABASE_URL and that is correct here -- CI
+# has no sandbox to point at, and pointing it at a shared one would let two
+# runs race. Logic that must not go untested belongs in the pure tier.
+name: CI
+
+on:
+  push:
+    branches: [staging, main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          APP_ENV: development
+          DATABASE_ENVIRONMENT: sandbox

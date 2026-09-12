@@ -30,12 +30,3 @@ db/backups/
 *Job Spec Fields*.csv
 *BOQ*.xlsx
 ~$*.xlsx
-
-# Vercel CLI
-.vercel/
-
-# Neon CLI local context
-.neon
-
-# Scratch env pulls (vercel env pull writes whole files; never commit one)
-.env.vercel*

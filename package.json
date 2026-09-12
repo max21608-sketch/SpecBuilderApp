@@ -1,0 +1,48 @@
+{
+  "name": "spec-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate": "node db/run-migrations.mjs",
+    "db:seed": "node db/run-seed.mjs",
+    "db:backup": "node db/backup.mjs",
+    "db:restore": "node db/restore.mjs",
+    "hash-password": "node tools/hash-password.mjs",
+    "create-user": "node tools/create-user.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
+    "@neondatabase/serverless": "^0.10.4",
+    "@vercel/blob": "^2.6.1",
+    "@vercel/queue": "^0.4.0",
+    "csv-parse": "^7.0.2",
+    "jose": "^5.9.6",
+    "next": "^15.1.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "read-excel-file": "^9.3.10",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.4",
+    "@types/react-dom": "^19.0.2",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.18.0",
+    "eslint-config-next": "^15.1.4",
+    "pg": "^8.13.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

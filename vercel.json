@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": [
+    "lhr1"
+  ],
+  "functions": {
+    "src/app/api/queues/[topic]/route.ts": {
+      "maxDuration": 300,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "document-extraction",
+          "consumer": "document-extraction-worker",
+          "retryAfterSeconds": 60,
+          "maxAttempts": 4
+        }
+      ]
+    }
+  }
+}
