@@ -30,3 +30,15 @@ db/backups/
 *Job Spec Fields*.csv
 *BOQ*.xlsx
 ~$*.xlsx
+
+# Vercel CLI
+.vercel/
+
+# Neon CLI local context
+.neon
+
+# Env values staged for pasting into a hosting provider. Real secrets, and
+# NOT covered by the .env*.local pattern above -- which is exactly how the
+# first version of this file lost these three lines to a `cp -R chassis/.`
+# and left a secrets file untracked-but-committable.
+.env.vercel*

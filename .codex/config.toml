@@ -1,0 +1,3 @@
+# Codex reads AGENTS.md; this fallback means a Claude-first repo still works.
+# CLAUDE.md and AGENTS.md are kept byte-identical (cmp -s).
+project_doc_fallback_filenames = ["CLAUDE.md"]
