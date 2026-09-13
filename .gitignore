@@ -42,3 +42,9 @@ db/backups/
 # first version of this file lost these three lines to a `cp -R chassis/.`
 # and left a secrets file untracked-but-committable.
 .env.vercel*
+
+# Reference material: real client documents, read-only, never committed.
+/docs/docs for building/
+
+# Reference material: real client documents, read-only, never committed.
+/docs/docs for building/
