@@ -14,7 +14,9 @@ type Me = {
 // a sitemap, and it should read in the order the work happens. Deliberately
 // empty until M1 ships a screen: an empty nav is honest, a nav of dead links
 // is not.
-const NAV: { href: string; label: string }[] = [];
+const NAV: { href: string; label: string }[] = [
+  { href: "/dashboard/projects", label: "Projects" },
+];
 
 export default function NavShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
