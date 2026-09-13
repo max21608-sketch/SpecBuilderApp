@@ -61,9 +61,14 @@ export function scoreMatch(rawWords: Set<string>, candidateWords: Set<string>): 
 // Returns EVERY candidate tied at the best score, not the first one. The tie is
 // the signal that the caller must not choose.
 export function findBestMatches(raw: string, candidates: MatchCandidate[]): MatchCandidate[] {
+  // EVERY exact match, not the first. `find` here was a silent tie-break: two
+  // different requirements legitimately share a prompt ("Other notes"), and two
+  // spec fields share a name, so `find` returned one id and threw the other
+  // away — the exact failure mode the header of this file forbids. An exact
+  // match still SHORT-CIRCUITS the fuzzy pass; it just no longer chooses.
   const norm = normaliseName(raw);
-  const exact = candidates.find((c) => normaliseName(c.name) === norm);
-  if (exact) return [exact];
+  const exact = candidates.filter((c) => normaliseName(c.name) === norm);
+  if (exact.length > 0) return exact;
 
   const rawWords = wordSet(raw);
   let bestScore = 0;

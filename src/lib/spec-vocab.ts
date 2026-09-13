@@ -46,8 +46,54 @@ export type RefSystem = (typeof REF_SYSTEMS)[number];
 export const SPLIT_REASONS = ["fabric", "configuration"] as const;
 export type SplitReason = (typeof SPLIT_REASONS)[number];
 
-export const INTAKE_STATUSES = ["pending", "parsing", "parsed", "confirmed", "failed"] as const;
+/**
+ * The life of an intake run. Matches `intake_runs_status_check` in 0006.
+ *
+ *   pending    registered; nobody has asked for it to be read. NOT queued work
+ *              — a BOQ never rests here, and a spec document does until a human
+ *              presses Extract, because that is the click that spends money.
+ *   queued     a message is in flight for the current attempt
+ *   parsing    a worker holds the claim, or a BOQ is being read inline
+ *   parsed     staged and awaiting review
+ *   confirmed  no pending proposals remain — applied or explicitly ignored.
+ *              It does NOT mean every answer is settled; label it "Review
+ *              complete".
+ *   failed     terminal for this attempt
+ */
+export const INTAKE_STATUSES = ["pending", "queued", "parsing", "parsed", "confirmed", "failed"] as const;
 export type IntakeStatus = (typeof INTAKE_STATUSES)[number];
+
+/** Matches `intake_runs_source_kind_check`. */
+export const INTAKE_SOURCE_KINDS = ["boq_xlsx", "spec_document"] as const;
+export type IntakeSourceKindValue = (typeof INTAKE_SOURCE_KINDS)[number];
+
+/**
+ * What kind of specification document this is. DECLARED at upload, never
+ * inferred: an FF&E schedule and a BOQ are both .xlsx, and a file extension
+ * identifies bytes, not a workflow. It selects the prompt.
+ *
+ * Matches `intake_runs_document_kind_check`.
+ */
+export const DOCUMENT_KINDS = [
+  "ffe_schedule",
+  "spec_bible",
+  "finishes_schedule",
+  "fabric_schedule",
+  "other",
+] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
+  ffe_schedule: "FF&E schedule",
+  spec_bible: "Specification bible",
+  finishes_schedule: "Finishes schedule",
+  fabric_schedule: "Fabric schedule",
+  other: "Other specification document",
+};
+
+/** The states a staged proposal can be in. Reviewed rows are kept, never removed. */
+export const PROPOSAL_REVIEW_STATUSES = ["pending", "ignored", "applied"] as const;
+export type ProposalReviewStatus = (typeof PROPOSAL_REVIEW_STATUSES)[number];
 
 export const RECORD_STATUSES = ["draft", "active", "retired"] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];

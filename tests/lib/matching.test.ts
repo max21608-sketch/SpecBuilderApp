@@ -63,3 +63,28 @@ describe("matchName", () => {
     expect(matchName(null, candidates)).toEqual({ status: "none" });
   });
 });
+
+describe("exact matches do not silently break a tie", () => {
+  // Two requirements legitimately share a prompt ("Other notes"); two spec
+  // fields share a name. `find` returned the first and discarded the rest,
+  // which is the one thing this module exists to prevent.
+  it("returns every candidate whose name matches exactly", () => {
+    const result = matchName("Frame finish", [
+      { id: "a", name: "Frame finish" },
+      { id: "b", name: "frame  finish" },
+      { id: "c", name: "Seat fabric" },
+    ]);
+    expect(result.status).toBe("ambiguous");
+    if (result.status === "ambiguous") {
+      expect(result.candidates.map((candidate) => candidate.id).sort()).toEqual(["a", "b"]);
+    }
+  });
+
+  it("still resolves a unique exact match confidently", () => {
+    const result = matchName("Frame finish", [
+      { id: "a", name: "Frame finish" },
+      { id: "c", name: "Seat fabric" },
+    ]);
+    expect(result).toMatchObject({ status: "confident", id: "a" });
+  });
+});
