@@ -11,8 +11,7 @@
           "type": "queue/v2beta",
           "topic": "document-extraction",
           "consumer": "document-extraction-worker",
-          "retryAfterSeconds": 60,
-          "maxAttempts": 4
+          "retryAfterSeconds": 60
         }
       ]
     }

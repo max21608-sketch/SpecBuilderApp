@@ -21,6 +21,10 @@ import { runDocumentExtraction, recordExtractionFailure } from "@/lib/extraction
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+// Retry capping lives HERE, not in vercel.json. An earlier chassis declared
+// `maxAttempts` on the trigger; it is not part of the trigger schema and
+// Vercel rejects the whole vercel.json for it, so every deployment failed
+// before a single line of app code ran.
 const MAX_DELIVERIES = 4;
 
 const queueHandler = handleCallback<ExtractionQueueMessage>(
