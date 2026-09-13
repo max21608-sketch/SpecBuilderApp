@@ -46,6 +46,16 @@ describe("extraction timing contract", () => {
     expect(MAX_CLAIMS_PER_ATTEMPT).toBeLessThanOrEqual(4);
   });
 
+  // maxDuration cannot be imported into a route segment config -- Next reads
+  // that statically and rejects an identifier, failing the deployment after the
+  // compile step has already said "Compiled successfully". So the literal in the
+  // route is checked against the constant here instead.
+  it("the queue route's literal maxDuration equals the constant", () => {
+    const route = readFileSync("src/app/api/queues/[topic]/route.ts", "utf8");
+    const match = /export const maxDuration = (\d+);/.exec(route);
+    expect(match?.[1]).toBe(String(MAX_DURATION_SECONDS));
+  });
+
   // The constants and vercel.json must agree. If they disagree, either a job is
   // abandoned with the screen still polling, or a paid model call is retried
   // more times than intended -- and nothing in either file would say so.

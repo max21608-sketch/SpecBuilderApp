@@ -22,14 +22,17 @@
 import { handleCallback, type MessageMetadata } from "@vercel/queue";
 import { type ExtractionQueueMessage } from "@/lib/extraction-queue";
 import { runDocumentExtraction, recordExtractionFailure } from "@/lib/extraction-run";
-import {
-  MAX_DELIVERIES,
-  MAX_DURATION_SECONDS,
-  VISIBILITY_TIMEOUT_SECONDS,
-} from "@/lib/extraction-claim";
+import { MAX_DELIVERIES, VISIBILITY_TIMEOUT_SECONDS } from "@/lib/extraction-claim";
 
 export const runtime = "nodejs";
-export const maxDuration = MAX_DURATION_SECONDS;
+// A LITERAL, not MAX_DURATION_SECONDS. Next reads route segment config
+// statically and refuses an imported identifier here:
+//   "Unknown identifier MAX_DURATION_SECONDS at maxDuration"
+// — which fails the whole deployment at "Collecting page data", AFTER the
+// compile step reports success. Keep it equal to MAX_DURATION_SECONDS and to
+// vercel.json; tests/lib/extraction-timing.test.ts asserts all three agree,
+// because the number cannot be shared by import.
+export const maxDuration = 300;
 
 // The trigger schema is picky and rejecting it fails the whole deployment
 // before any app code runs: `type` must be exactly `queue/v1beta` (the variant
