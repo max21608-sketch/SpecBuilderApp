@@ -21,10 +21,16 @@ import { runDocumentExtraction, recordExtractionFailure } from "@/lib/extraction
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-// Retry capping lives HERE, not in vercel.json. An earlier chassis declared
-// `maxAttempts` on the trigger; it is not part of the trigger schema and
-// Vercel rejects the whole vercel.json for it, so every deployment failed
-// before a single line of app code ran.
+// Must equal `maxDeliveries` on the trigger in vercel.json. The platform stops
+// redelivering at that count; this constant is what decides, on the LAST
+// delivery, to write a terminal status instead of throwing -- so if the two
+// disagree, either a job is abandoned with the screen still polling, or a paid
+// model call is retried more times than intended.
+//
+// The trigger schema is picky and rejecting it fails the whole deployment
+// before any app code runs: `type` must be exactly `queue/v1beta` (the variant
+// that takes a `consumer`), and the cap is `maxDeliveries` -- an earlier
+// chassis wrote `maxAttempts`, which is not a key at all.
 const MAX_DELIVERIES = 4;
 
 const queueHandler = handleCallback<ExtractionQueueMessage>(
