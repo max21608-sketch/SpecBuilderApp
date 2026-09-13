@@ -17,6 +17,7 @@ import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact } from "@/components/projects/ContactsPanel";
+import DocumentUpload from "@/components/projects/DocumentUpload";
 import {
   SPECS_AGREED_LABEL,
   daysUntilSpecsAgreed,
@@ -53,13 +54,14 @@ type DocumentRun = {
 // on another.
 const STATUS_LABELS: Record<string, string> = {
   pending: "Not read yet",
+  queued: "Queued",
   parsing: "Being read",
   parsed: "Ready to review",
   confirmed: "Review complete",
   failed: "Failed",
 };
 
-const SOURCE_LABELS: Record<string, string> = { boq_xlsx: "BOQ" };
+const SOURCE_LABELS: Record<string, string> = { boq_xlsx: "BOQ", spec_document: "Specification document" };
 
 type Form = {
   name: string;
@@ -356,15 +358,16 @@ export default function ProjectOverviewPage() {
       )}
 
       <h2 className="mt-8 font-medium text-neutral-900">Documents</h2>
+      <p className="mt-1 text-xs text-neutral-500">
+        The project&rsquo;s bill of quantities and its specification documents. This is the upload point: the
+        projects list had one BOQ button, which stopped being enough at four document kinds.
+      </p>
+      <DocumentUpload projectId={project.id} onUploaded={() => void load()} />
       {documents === null ? (
         <div className="mt-3"><Spinner label="Loading documents" /></div>
       ) : documents.length === 0 ? (
         <p className="mt-2 text-sm text-neutral-600">
-          Nothing imported yet.{" "}
-          <Link href="/dashboard/projects" className="underline">
-            Import a BOQ
-          </Link>{" "}
-          to create this project&rsquo;s spec records.
+          Nothing imported yet. Start with the bill of quantities — it creates this project&rsquo;s spec records.
         </p>
       ) : (
         <ul className="mt-3 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">

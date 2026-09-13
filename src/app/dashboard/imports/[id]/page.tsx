@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
+import SpecDocumentReview, { type Registers, type SpecImport } from "@/components/imports/SpecDocumentReview";
 
 type Line = {
   index: number; lineNo: number; designer: string | null; boqCategory: string | null;
@@ -20,7 +21,7 @@ type Line = {
 };
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
 type Import = {
-  id: string; status: string; version: number; error: string | null;
+  id: string; status: string; version: number; error: string | null; source_kind: string;
   bws_project_number: string; project_name: string; filename: string | null;
   parsed: { sheet: string; headerRow: number; skippedRows: number; sourcePreserved?: boolean; lines: Line[] } | null;
 };
@@ -36,15 +37,23 @@ const STATUS_LABEL: Record<string, string> = {
 export default function ReviewImportPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [data, setData] = useState<{ import: Import; categories: Category[] } | null>(null);
+  const [data, setData] = useState<{ import: Import; categories: Category[]; registers: Registers | null } | null>(null);
+  const [, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState<{ lineNo: number; code: string | null }[]>([]);
 
-  const load = useCallback(async () => {
-    const res = await apiFetch<{ import: Import; categories: Category[] }>(`/api/imports/${id}`);
+  // `quiet` skips the loading state. The spec-document view re-reads every
+  // three seconds while a document is being read, and blanking the screen out
+  // from under someone reading it would make the page unusable.
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
+    const res = await apiFetch<{ import: Import; categories?: Category[]; registers?: Registers }>(
+      `/api/imports/${id}`,
+    );
+    if (!quiet) setLoading(false);
     if (!res.ok) { setError(res.error); return; }
-    setData({ import: res.data.import, categories: res.data.categories });
+    setData({ import: res.data.import, categories: res.data.categories ?? [], registers: res.data.registers ?? null });
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
@@ -90,6 +99,25 @@ export default function ReviewImportPage() {
   const lines = run.parsed?.lines ?? [];
   const active = lines.filter((line) => !line.ignored);
   const needCategory = active.filter((line) => !line.categoryId).length;
+
+  // Two documents, two review screens, one route. The BOQ view below is
+  // untouched: its lines are a fixed positional list, and nothing about a
+  // model-read document's identified proposals belongs in it.
+  if (run.source_kind === "spec_document") {
+    if (!data.registers) return <Spinner label="Loading the document" />;
+    return (
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-xl font-semibold text-neutral-900">
+          Review document — {run.bws_project_number} {run.project_name}
+        </h1>
+        <SpecDocumentReview
+          data={{ import: run as unknown as SpecImport, registers: data.registers }}
+          reload={() => load()}
+          quietReload={() => load(true)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto">
