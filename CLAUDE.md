@@ -100,18 +100,27 @@ Each of these is a trap, not a preference:
 
 | Table | Notes |
 |---|---|
-| `projects` | BWS project (`P17231`), TOE key dates, shared inbox, Teams channel |
-| `spec_records` | One per client ref, or per split. Client ref is the pre-sale primary key. |
-| `spec_record_splits` | Parent record + `split_reason` (fabric split, configuration split). One client ref → many BWS jobs. |
-| `bws_job_links` | Job number(s), populated post-order when BWQ converts to BENO |
-| `project_materials` | **Project-scoped** dictionary: client material code → BWS field value |
-| `spec_fields` | The BWS field register: JSON id, column letter, field name, category. Seeded from a BWS CSV export; **owned externally** — see the `external-vocabulary-sync` skill. |
-| `spec_values` | Per record × field: value, state (`confirmed`/`tbc`/`missing`/`na`), source (email/document/manual), confirmed_by, confirmed_at |
-| `item_categories`, `category_required_fields` | The cheat sheets as a requirement matrix, each requirement tagged with the gate that needs it |
-| `gate_status` | Per record per gate |
+Built by `0002`–`0004`. This table describes what exists; the migrations carry
+the reasoning.
+
+| Table | Notes |
+|---|---|
+| `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox |
+| `spec_records` | One per BOQ line. `record_no` is the human-facing identifier (`P17231-014`); splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
+| `spec_record_refs` | Every ref an item carries, one row each: `boq_code`, `design_code`, `cos_code`, `compound`, `bws_job`. Unique **per record**, never per project |
+| `spec_fields` | The BWS register: 56 fields, `json_id` as the key, `column_letter` positional and never joined on. **Owned externally** — see `external-vocabulary-sync` |
+| `item_categories` | The 17 cheat sheets, plus `requirements_authored` |
+| `item_category_aliases` | The words a BOQ actually uses ("Sofa" → Armchairs/Benches/Stools/Sofas) |
+| `requirements` | The cheat sheet as a checklist: `kind` (`spec_field`/`readiness`), `prompt`, `section`, `required_at_gate` (**null everywhere** until gates are authored) |
+| `spec_answers` | Per record × requirement × `revision_no`: value, `value_raw`, state, source, confirmed_by/at |
+| `intake_runs` | Staging for any document intake. Generic, not BOQ-shaped |
 | audit / notes | `audit_log` + `status_history` + append-only notes, from the chassis |
 
-None of these exist yet; M1 creates the subset it needs.
+**Not built, deliberately.** `bws_job_links` (a job number arrives as a
+`bws_job` ref until M3 needs dates on it); `project_materials` (M2, when
+extraction starts producing codes that need resolving); `gates` / `gate_status`
+(nothing to read until the assignments exist). An empty table is a promise the
+schema makes that the code has not kept.
 
 ## How to work
 
@@ -216,17 +225,18 @@ discover a constraint the hard way — the entry is worth more than the fix.
 
 The client ref is the key the client, the BOQ, the FF&E schedule and the
 emails all use, and it exists long before a BWS job number does. It is
-therefore the primary key of the pre-sale record, and `bws_job_links` is what
-maps it to job numbers once BWQ converts to BENO. One ref legitimately becomes
+therefore the natural identifier of the pre-sale record — but NOT its key: the
+pilot BOQ contains `SX11A` twice, with different quantities, so records carry a
+surrogate id plus `record_no`, and every ref lives in `spec_record_refs`. A job
+number is a `bws_job` ref until M3 needs dates on it, and that is what maps it to job numbers once BWQ converts to BENO. One ref legitimately becomes
 several jobs (a fabric split, a configuration split), which is why
-`spec_record_splits` carries a parent and a `split_reason` rather than the ref
-being mangled into uniqueness. This tool is the definitive client ref ↔ job
+`spec_records` carries `parent_id` and `split_reason` on the row itself — a
+satellite table would let a child exist with no split reason, or two parents. This tool is the definitive client ref ↔ job
 number mapping; nothing else in the business holds it.
 
 ### Gate rules read state, not strings
 
-- `db/migrations/` (`spec_values.state`, `category_required_fields`,
-  `gate_status`)
+- `db/migrations/` (`spec_answers.state`, `requirements`)
 
 A spec value is `confirmed`, `tbc`, `missing`, or `na`, and those are four
 different things. `TBC` means a human has actively said "not yet decided" —
@@ -237,7 +247,7 @@ record ready for TG1 when it is not. Read the state column.
 
 ### The requirement matrix is seed data, not code
 
-- `db/migrations/` (`item_categories`, `category_required_fields`)
+- `db/migrations/` (`item_categories`, `requirements`, `db/seed/`)
 
 Which fields a category requires, and at which gate, comes from the cheat
 sheets — XLSX/PDF per category in SharePoint, ~19 across Upholstery and
@@ -487,47 +497,61 @@ outstanding until the intended user has actually completed it.
 
 ## Current milestone and scope
 
-**Current milestone:** M1 — the spec table and completion view. A user can
-import a BOQ, see every client ref as a spec record, edit its values, and read
-at a glance which records are complete, which are waiting on a `TBC`, and which
-are missing required fields for the gate ahead. This exists nowhere today.
+**Current milestone:** M1 — the spec table and completion view. **Shipped to
+staging 2026-09-13.** A user can import a BOQ, see every line as a spec record,
+edit its values, and read at a glance what is confirmed, what is `TBC` and what
+nobody has looked at yet.
 
 **Done:**
 
 - Scaffold: chassis forked from `bw-app-kit`, signed-in staging deployment
-  proven end to end. See `docs/plans/README.md` for what was verified.
+  proven end to end.
+- M1. `0002`–`0004` and four seed files: the 56 BWS spec fields, the 17
+  categories, 728 requirements (320 spec-field, 408 readiness), and the BOQ
+  alias vocabulary. BOQ upload → parse → review → one atomic confirm route →
+  record screen under optimistic locking → completion view. Verified against
+  the real pilot BOQ: 59 lines in, 59 records out, `SX11A` landing as two
+  records with different quantities.
 
-**In progress / next (M1):**
+**In progress / next:**
 
-- Seed `spec_fields` with the 56 BWS spec fields (columns AF–CI of the BWS job
-  export; CJ–DE are website/style fields and are excluded; A–AE are metadata).
-- Seed `item_categories` and `category_required_fields` for Upholstery. Create
-  the Cabinetry categories with an **empty** requirement set so they read as
-  not-yet-defined rather than silently complete.
-- Import a BOQ XLSX through `src/lib/intake-source.ts` — deterministic, no AI —
-  into `spec_records` keyed by client ref.
-- Edit spec values under optimistic locking; completion and gate status per
-  record.
+- Nothing. The next milestone has not been chosen. M4 (draft chase emails) is
+  the strongest candidate: it depends only on M1, `eml.ts` and the draft gates
+  are already in the chassis, and it turns a completion view into something
+  that saves an afternoon. M3 still cannot be TESTED — BWS access is
+  unresolved and the AI mirror's import/export does not work — and it carries
+  the wipe-the-fields risk.
 
 **Explicitly excluded for now:**
 
 - Any write to BWS. Automatic email sending. SharePoint writes. BWS Messenger
   and Teams ingestion. The TOE calculator's own logic. Tony's knowledge-base
   integration. The post-order/production flow.
-- M2 AI extraction, M3 CSV export, M4 chase emails, M5 inbox ingestion, M6 VE
-  rounds and TG0 sign-off. Named so they are not built speculatively.
+- M3 CSV export, M4 chase emails, M5 inbox ingestion, M6 VE rounds and TG0
+  sign-off. Named so they are not built speculatively.
 
 **Known gaps or decisions awaiting the user:**
 
-These are the brief's own open questions, not settled matters. The full dated
-list is in `docs/plans/README.md`; the two that change how code is written:
+The full dated list is in `docs/plans/README.md`. The ones that change how code
+gets written:
 
-- **The gate model is unreconciled.** TG0/TG1/TG2 in the handover, plus a
-  proposed pre-sale **TGQ** ("enough info to quote") from 2026-09-12. So model
-  gates as **data, not an enum in code**, and record TGQ as proposed.
-- **Who owns the requirement matrix after M1 seeds it is undecided.** The
-  workflow diagram flags this as the real institutional gap — it currently
-  relies on KAM / sales-support knowledge.
+- **The gate model is unreconciled, and every requirement is seeded ungated.**
+  TG0/TG1/TG2 in the handover, plus a proposed pre-sale **TGQ** from
+  2026-09-12. `requirements.required_at_gate` is null on all 728 rows and there
+  is no `gates` table, so the completion view reports confirmed / TBC / missing
+  and nothing per-gate. When Matthew authors the assignments it is a migration
+  and a re-seed, touching no application logic — which is the whole reason the
+  matrix is seed data rather than code.
+- **Who owns the requirement matrix is undecided.** The workflow diagram flags
+  this as the real institutional gap: it currently relies on KAM /
+  sales-support knowledge.
+- **The question-to-BWS-field mapping is this repo's judgement, not Matthew's.**
+  Only 28 of the 56 BWS fields are reachable from a cheat-sheet question; the
+  other 28 have no route into the tool. Review it before M3 relies on it.
+
+**Resolved 2026-09-13:** Anthropic zero-data-retention, which was blocking M2,
+has been cleared by the user. Client specification documents may go to the
+model. M2 is unblocked.
 
 Keep this section current. A stale status section is worse than no status
 section because agents will make decisions from it.
