@@ -472,3 +472,26 @@ predicted. With Production Branch still `main`, the push produced a *Preview*:
 So all four predicted consequences are now observed rather than argued. Stage E
 resumes the moment Production Branch is `staging` and the variables from
 `.env.vercel-staging` exist.
+
+### Stage E passed 2026-09-13
+
+Production Branch set to `staging` and the eight variables added to Production
+and Preview. Commit `164e1e9` built as **target: production**, READY, in
+`lhr1`, and took the stable aliases including
+`spec-builder-app-rho.vercel.app`. The deployment's source SHA equals the
+pushed commit.
+
+| Check | Result |
+|---|---|
+| `/login` | 200, `<title>Ben Whistler — Project Spec Builder [STAGING]</title>` |
+| Rendered page | sandbox banner and styling correct in a real browser |
+| Signed-out `/dashboard` | 307 → `/login?from=%2Fdashboard` |
+| Signed-out API write | 401 `auth required` |
+| Sign in | 200, cookie `sb_session` |
+| `/api/auth/me` | `appEnv: staging`, `databaseEnvironment: sandbox` |
+| `/dashboard` signed in | 200, names the user, `staging`, `sandbox` |
+| Write as `viewer` | 403 `This is a view-only account` |
+
+State in the six-term vocabulary: **verified in the app.**
+
+Part 2 is complete. Production was not created and remains unauthorized.
