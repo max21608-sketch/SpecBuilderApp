@@ -14,6 +14,27 @@ export async function GET(request: Request): Promise<Response> {
   const projectId = new URL(request.url).searchParams.get("projectId");
   if (!projectId) return json({ ok: false, error: "projectId is required." }, 400);
 
+  // The programme the completion view measures Overdue against. Overdue is
+  // COMPUTED from this date, never stored: writing it onto spec_answers would
+  // bump the version M2's extraction snapshots are taken against, exactly as
+  // Waiting would. A null date means "no programme", which the client must not
+  // render as "on time".
+  const projectRows = await sql`
+    select order_date::text, specs_agreed_by::text, delivery_date::text
+    from projects where id = ${projectId}
+  `;
+  if (!projectRows[0]) return json({ ok: false, error: "No such project." }, 404);
+  // ::text above, not a Date: `pg` parses a date column into LOCAL midnight and
+  // toISOString() then renders the day before in British Summer Time. A day is a
+  // day; do not give it a timezone to lose.
+  const asDate = (value: unknown): string | null =>
+    value === null || value === undefined ? null : String(value).slice(0, 10);
+  const programme = {
+    orderDate: asDate(projectRows[0].order_date),
+    specsAgreedBy: asDate(projectRows[0].specs_agreed_by),
+    deliveryDate: asDate(projectRows[0].delivery_date),
+  };
+
   const rows = await sql`
     select
       r.id,
@@ -68,6 +89,7 @@ export async function GET(request: Request): Promise<Response> {
 
   return json({
     ok: true,
+    programme,
     records: rows.map((row) => ({ ...row, waiting: waitingByRecord.get(String(row.id)) ?? 0 })),
   });
 }

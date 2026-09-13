@@ -6,14 +6,16 @@
 |---|---|---|---|
 | Scaffold | `bw-app-kit` Part 2 plan | — | Built 2026-09-12 |
 | M1 — spec table and completion view | `part-2/` plan + this log | — | **Shipped to staging 2026-09-13** |
-| M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | Unblocked 2026-09-13, not started |
+| M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | **Step C started 2026-09-13** — the project overview screen is built; the extraction pipeline is not |
 | M3 — BWS CSV export (complete dataset) | — | M1; a way to test an import | Named only |
-| M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **Built locally 2026-09-13**, not pushed |
+| M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **Pushed to `staging` 2026-09-13** (`2eb58b3`). No human acceptance; no `.eml` opened in Outlook |
 | M5 — shared-inbox ingestion | `docs/integration.md` | Entra app + scoped mailbox | Named only |
 | M6 — VE rounds, TG0 A/B/C sign-off | — | a settled gate model | Named only |
 
 M3, M5 and M6 are named so they are not built speculatively. M1 is shipped;
-M4 is built; M2 is scoped and blocked on account setup.
+M4 is pushed and awaiting human acceptance; M2 is under way at step C, which
+needs no key and makes no paid call. Step D (the queue, the model wrapper and
+the first real document) still needs a named Anthropic Console owner.
 
 ## Decisions taken 2026-09-12
 
@@ -137,6 +139,39 @@ reader whether the decision still applies.
     remote and lived in one iCloud folder. The cost is that a third app forks
     from this one and strips the domain out; see `docs/kit/README.md`.
 
+## Decisions taken 2026-09-13 (M2 step C, the project overview)
+
+23. **`bws_project_number` is read-only after creation, and the route refuses
+    it by name.** It is the BWS key, every `record_no` label is built from it,
+    and M4 snapshots it into stored chase coverage. An edit would silently
+    re-label history. Ignoring the field would have been the quiet option;
+    refusing it with a reason is the one that teaches. Renaming a project
+    number is a data migration.
+24. **Overdue is computed on read, never stored** — the same reasoning as
+    Waiting (15). A stored flag would have to be written onto `spec_answers`,
+    bumping the version M2's extraction snapshots are taken against for a
+    reason that has nothing to do with the answer. It is a date comparison in
+    `src/lib/project-programme.ts`.
+25. **A null `specs_agreed_by` reads as "no programme", not as "on time".**
+    Both the overview and the spec table say so in words. Rendering an empty
+    programme as healthy is the same class of error as a category with no
+    requirements scoring 0/0 and reading as complete.
+26. **The TOE dates are validated as an ordered set, merged over what is
+    stored.** A request that changes one date is checked against the two it did
+    not send, because a single-field edit can still produce an out-of-order
+    programme. That merge lives in the route and is covered by a db-tier test.
+27. **`date` columns are selected as `::text`, never as a driver `Date`.** Both
+    drivers parse a `date` into LOCAL midnight, and `toISOString()` then renders
+    the day before it in British Summer Time. Because the PATCH writes every
+    column on every save, a read-modify-write that only changed the client name
+    moved all three dates a day earlier — every time. Found by the db tier, and
+    the first version of that test had the same bug in its own assertion
+    helper. Keep the cast on every query that reads these columns.
+28. **`ContactsPanel` is one component mounted in two places** — the project
+    overview (its canonical home) and the chase screen (the bootstrap case: a
+    fresh project has nobody to chase and no draft to hang a contact off). Two
+    forms would drift, and the one that drifted would be the one used less.
+
 ## Still open
 
 Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
@@ -153,8 +188,13 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
 3. **Keeping `spec_fields` in sync with BWS** — mechanism and cadence
    undecided. The `external-vocabulary-sync` skill covers the *how*; the *who*
    and *when* do not exist. Waiting on Matthew.
-4. **TOE dates for P17231 are stale** (order 17/02/2026, delivery 17-Jun, both
-   past), so the overdue and flagging logic has no live dates to run against.
+4. **TOE dates for P17231 are stale, and `specs_agreed_by` has never had a
+   value.** The overview screen (2026-09-13) is now the way to enter them, and
+   the order and delivery dates from the project context (17/02/2026,
+   17/06/2026) have been entered in sandbox. **`specs_agreed_by` is
+   deliberately left null**: no source document names it, and inventing a date
+   for the field that drives Overdue would make every red flag on the spec
+   table a fiction. It needs the real programme date from the user.
 5. **The finishes schedule for P17231 was not found.**
 6. **BWS access.** The user could not log in as of 2026-09-12. The AI mirror
    (`bws-next-ai.whistlercloud.com`) is refreshed daily, discards changes, and
@@ -173,8 +213,12 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
     it, and no generated `.eml` has been opened in the real Outlook client.
     Until that happens, the claim that a human can send one of these is
     untested.
-11. **Nobody owns the Anthropic Console account**, and `ANTHROPIC_API_KEY` is
-    absent from Vercel staging. M2 cannot start without both.
+11. **Nobody owns the Anthropic Console account.** `ANTHROPIC_API_KEY` was
+    reported present by the user on 2026-09-13 and is set in the local
+    environment; whether it is set in **Vercel staging** has not been verified
+    here, and the named Console account owner is still missing. Neither is
+    needed for M2 step C, which runs against synthetic fixtures with no paid
+    call; both are needed before step D.
 12. **The question-to-BWS-field mapping is unreviewed.** 320 of the 728 seeded
     requirements point at a BWS field, and that mapping is this repo's
     judgement, not Matthew's. Only 28 of the 56 fields are reachable from a

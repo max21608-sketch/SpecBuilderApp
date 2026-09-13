@@ -2,12 +2,20 @@
 
 // Who gets chased, and the form to add them.
 //
-// This lives on the chase screen rather than behind a settings page because of
-// the order the work actually happens in: a new project has records with a
-// designer code off the BOQ and nobody to send anything to, so the first thing
-// the screen has to let you do is say who "LCS" is. Hanging contact creation
-// off a draft card would be circular — there are no drafts until there is a
-// contact.
+// ONE component, mounted in TWO places, deliberately:
+//
+//   /dashboard/projects/[id]   the canonical home. Contacts are project data,
+//                              not chase data, and this is where you go to
+//                              look one up or add one outside a chase.
+//   /dashboard/drafts          the bootstrap case. A new project has records
+//                              with a designer code off the BOQ and nobody to
+//                              send anything to, so the chase screen has to let
+//                              you say who "LCS" is before any draft exists.
+//                              Hanging contact creation off a draft card would
+//                              be circular.
+//
+// Two forms in two files would drift, and the one that drifted would be the one
+// used less often.
 //
 // The email is OPTIONAL. Modelling "the LCS design team owe us these answers"
 // is useful before anyone has dug the address out of Outlook; the missing

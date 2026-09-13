@@ -115,9 +115,12 @@ export default function ProjectsPage() {
           {projects.map((project) => (
             <li key={project.id} className="px-4 py-3 flex items-center gap-4">
               <div className="min-w-0 flex-1">
-                <p className="font-medium text-neutral-900">
+                <Link
+                  href={`/dashboard/projects/${project.id}`}
+                  className="font-medium text-neutral-900 underline hover:text-neutral-600"
+                >
                   {project.bws_project_number} — {project.name}
-                </p>
+                </Link>
                 <p className="text-sm text-neutral-500">
                   {project.client ?? "No client recorded"} · {project.record_count} spec record
                   {project.record_count === "1" ? "" : "s"}
@@ -131,6 +134,12 @@ export default function ProjectsPage() {
               >
                 {uploadingFor === project.id ? "Reading…" : "Import BOQ"}
               </button>
+              <Link
+                href={`/dashboard/projects/${project.id}`}
+                className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
+              >
+                Overview
+              </Link>
               <Link
                 href={`/dashboard/drafts?projectId=${project.id}`}
                 className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"

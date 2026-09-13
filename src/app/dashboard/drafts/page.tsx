@@ -20,7 +20,7 @@ import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ChaseDraftCard, { type Draft } from "@/components/drafts/ChaseDraftCard";
-import ContactsPanel from "@/components/drafts/ContactsPanel";
+import ContactsPanel from "@/components/projects/ContactsPanel";
 import { ANSWER_STATE_LABELS, type AnswerState } from "@/lib/spec-vocab";
 
 type Contact = {

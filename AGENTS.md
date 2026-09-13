@@ -289,6 +289,28 @@ question table is generated from the coverage rows. That is what makes the body
 and the coverage provably the same set, which is the guarantee the gate rests
 on. Do not add a whole-body HTML editor.
 
+### TOE dates are calendar days, and must never become a `Date`
+
+- `src/lib/project-programme.ts`, `src/app/api/projects/[id]/route.ts`,
+  `src/app/api/records/route.ts`
+
+`projects.order_date` / `specs_agreed_by` / `delivery_date` are `date` columns.
+Both drivers parse a `date` into **local midnight**, and `toISOString()` then
+renders the day *before* it in British Summer Time. Because the project PATCH
+writes every column on every save, a read-modify-write that changed only the
+client name moved all three dates one day earlier — silently, every time.
+
+Select them as `::text` on every query that reads them, and compare days as
+`YYYY-MM-DD` strings. `project-programme.ts` takes `today` as an argument rather
+than reading the clock, so the comparison is testable and does not depend on
+where the process runs.
+
+**Overdue is computed, never stored**, for the same reason Waiting is: a stored
+flag would have to be written onto `spec_answers` and would bump the version
+M2's extraction snapshots are taken against. And a **null `specs_agreed_by`
+means "no programme", not "not overdue"** — both the overview and the spec table
+have to say so in words, or an empty programme renders as a healthy one.
+
 ### The BWS export is a replacement
 
 - the export route (M3)
@@ -549,15 +571,22 @@ nobody has looked at yet.
 
 **In progress / next:**
 
-- **M4 — draft chase emails. Built locally, not yet pushed or deployed.**
+- **M4 — draft chase emails. Pushed to `staging` (`2eb58b3`).**
   `0005_chase_drafts.sql` applied to sandbox. Contacts, an outstanding-question
   inventory grouped by designer, generate / edit / download `.eml` /
   confirm-sent / undo-confirm, and a derived Waiting state on the spec table.
-  144 tests pass including a 14-case route-level narrative for the gate.
   Outstanding: human acceptance, and opening a generated `.eml` in the real
   Outlook client.
-- M2 (AI extraction) is next and is unblocked, but needs `ANTHROPIC_API_KEY` in
-  Vercel staging and a named owner for the Anthropic Console account.
+- **M2 step C — started 2026-09-13.** The project overview screen
+  (`/dashboard/projects/[id]`) is built: identity under the optimistic lock,
+  the shared inbox's first UI, the three TOE dates, contacts in their canonical
+  home, the project's documents, and the Overdue state those dates unlock on
+  the spec table. Next in step C: migration `0006`, the proposal resolver,
+  stable-id PATCH, the review UI and the confirm boundary — all against
+  synthetic fixtures, no paid call.
+- M2 step D (the queue, the model wrapper, the first real document) still needs
+  a named owner for the Anthropic Console account, and `ANTHROPIC_API_KEY`
+  confirmed in Vercel staging.
 
 **Explicitly excluded for now:**
 
