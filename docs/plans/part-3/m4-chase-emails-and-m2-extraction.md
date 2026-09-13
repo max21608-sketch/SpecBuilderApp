@@ -6,9 +6,17 @@ detail from the first draft. Supersedes both.
 
 **Application repo:** `~/Library/Mobile Documents/com~apple~CloudDocs/Documents/SpecBuilderApp`
 **Reference implementation:** sibling `autofab`, read-only, not authoritative.
-**Kit repo:** sibling `bw-app-kit`, only for the port-backs in §10.
+**The kit** was folded into `docs/kit/` on 2026-09-13; §11's port-backs are
+recorded there as changelog entries rather than applied to a separate repo.
 
-Status: implementation plan. No application changes or deployments made for it.
+**Status, updated 2026-09-13:**
+
+- **M4 (§5, §6) is BUILT and committed** on branch `m4-chase-drafts` (`a94fbee`).
+  Not pushed, not deployed, and not yet used by a human. 144 tests pass.
+- **§7 (the project overview) is new**, added 2026-09-13 at the user's request.
+  Not built.
+- **M2 (§8, §9) is unchanged and not started.** Still blocked on an Anthropic
+  key and a named Console account owner.
 
 ---
 
@@ -67,10 +75,10 @@ Fix these as part of this work; they are not hypothetical.
 1. **`/api/imports` fetches a client-supplied URL with `Bearer
    BLOB_READ_WRITE_TOKEN`.** The `url` comes from the request body. A signed-in
    user can point it anywhere and the server attaches a store-wide credential.
-   → §7.2.
+   → §8.2.
 2. **BOQ confirm allocates `record_no` outside its transaction.** It reads
    `coalesce(max(record_no),0)` then builds statements then commits. Two
-   concurrent imports collide on `spec_records_project_no_key`. → §8.3.
+   concurrent imports collide on `spec_records_project_no_key`. → §9.3.
 3. **`txnClient().transaction([...])` cannot branch.** It takes a pre-built
    array, so every guard in M1's confirm runs *before* the transaction opens —
    read-committed, therefore racy. → §4.
@@ -106,7 +114,7 @@ Four things considered and cut, so nobody re-adds them thinking they were missed
   that an ambiguous failure may cost a second call.
 - **A signed upload-intent endpoint.** The goal — bind project/user/kind to the
   upload — is met by a project-scoped pathname prefix plus `head()` metadata
-  validation at registration (§7.2), without a second signing purpose.
+  validation at registration (§8.2), without a second signing purpose.
 - **A `mode=historical` send confirmation.** A second confirmation path for a
   case nobody has hit. Let the 409 stand until someone does.
 - **A project-row `FOR UPDATE` on every chase and review operation.** That
@@ -133,7 +141,7 @@ Timeouts: 5s connect, 5s `lock_timeout`, 15s `statement_timeout`, inside the
 route's own limit. Never hold a transaction across Blob I/O, queue publishing,
 or a model call.
 
-Use it **only** for the new guarded operations and the BOQ correction in §8.3.
+Use it **only** for the new guarded operations and the BOQ correction in §9.3.
 Ordinary reads and single-statement atomic updates stay on the HTTP driver —
 including the existing `PATCH /api/answers/[id]`, whose version-predicated
 UPDATE is already correct.
@@ -452,9 +460,92 @@ editable draft from the right mailbox with the right Cc.
 
 ---
 
-## 7. M2 — registration and the model
+## 7. The project overview screen
 
-### 7.1 Migration `0006_model_backed_intake.sql`
+**Added 2026-09-13.** Not part of the original plan. Lands with M2 step C,
+because M2 is what gives it a second reason to exist.
+
+### Why it is needed
+
+A project is currently write-once. `/dashboard/projects` creates one and never
+lets you edit it again, and what little is editable is scattered or
+unreachable:
+
+| Field | Reachable today |
+|---|---|
+| `bws_project_number`, `name`, `client` | The create form only |
+| `shared_inbox` — the chase Cc | `PATCH /api/projects/[id]`, **API only, no UI** |
+| Contacts | The chase screen (M4), for a bootstrapping reason |
+| `order_date`, `specs_agreed_by`, `delivery_date` | **Nowhere.** Columns exist, all null |
+
+### `/dashboard/projects/[id]`
+
+One screen, sections in the order the work happens:
+
+1. **Identity** — name and client editable under the optimistic lock the
+   `projects` table already carries. `bws_project_number` is **read-only after
+   creation**: it is the BWS key, it is what `record_no` labels are built from,
+   and changing it silently re-labels every record and every stored coverage
+   snapshot. Renaming a project number is a data migration, not a form field.
+2. **Shared inbox** — the Cc every chase draft snapshots. `PATCH
+   /api/projects/[id]` already exists and is already version-checked; this is
+   the UI it never got.
+3. **TOE key dates** — see below. The interesting part.
+4. **Contacts** — the canonical home. `ContactsPanel` moves from
+   `src/components/drafts/` to `src/components/projects/` and is mounted in
+   **both** places: here, and on the chase screen for the bootstrap case (a
+   fresh project has nobody to chase and no draft to hang a contact off). One
+   component, two mounts — not two forms that drift.
+5. **Documents** — the project's `intake_runs`, with status. This is where the
+   M2 upload entry point belongs once it grows an import-type and
+   document-kind selector; putting that on the projects *list* was fine for one
+   BOQ button and stops being fine at four document kinds.
+6. **Links out** — spec table, chase emails.
+
+### The TOE dates unlock Overdue
+
+`docs/plans/README.md` has carried "TOE dates for P17231 are stale (order
+17/02/2026, delivery 17-Jun, both past)" as an open item since 2026-09-12, and
+the overdue flagging the design requirements ask for has never had a live date
+to compute against. This screen is how that gets fixed.
+
+`AP346-P17231-project-context.md` names the milestone that matters:
+**"Complete Specifications agreed"** — the gate before drawings can be issued.
+That maps to `projects.specs_agreed_by`.
+
+Once it holds a real date, the spec table's status gains its fourth state, and
+the set finally matches what the design requirements asked for:
+
+| State | Meaning |
+|---|---|
+| Complete | Nothing outstanding |
+| Waiting | Every outstanding question has been chased (M4, built) |
+| Action required | Something outstanding has not been asked |
+| **Overdue** | Waiting or Action required, and `specs_agreed_by` has passed |
+
+**Overdue is computed, never stored**, for the same reason Waiting is: writing
+it to `spec_answers` would bump the version that M2's extraction snapshots are
+taken against. It is a date comparison in the completion query.
+
+**A null date must read as "no programme", not as "not overdue".** The screen
+says so plainly when the dates are absent; rendering everything green because
+nobody entered a date would be the same class of error as a category with no
+requirements scoring 0/0 and rendering complete.
+
+### Scope
+
+- `GET`/`PATCH /api/projects/[id]` — PATCH exists for `shared_inbox`; extend it
+  to `name`, `client` and the three dates, still version-checked, still
+  refusing `bws_project_number`.
+- Dates are dates, not timestamps, and are validated as an ordered set: an
+  order date after a delivery date is a typo worth refusing.
+- `useUnsavedChangesWarning` on the form, as the chase card does.
+- Pure tests for the overdue calculation, including the null-date case.
+- No new table. No migration. Every column already exists.
+
+## 8. M2 — registration and the model
+
+### 8.1 Migration `0006_model_backed_intake.sql`
 
 - Add `spec_document` to `intake_runs_source_kind_check`; add `queued` to
   `intake_runs_status_check`. Lifecycle: `pending → queued → parsing → parsed →
@@ -511,7 +602,7 @@ bounded fields; the sketch is not runtime validation.
 array compaction, a second reviewed array, the inverted restore guard, and
 restore-by-reinsertion in one move. Raw model output stays in `raw_response`.
 
-### 7.2 Registration
+### 8.2 Registration
 
 **Import type is declared, not inferred.** The upload UI takes BOQ vs
 specification document, and for the latter a document kind. A file extension
@@ -540,7 +631,7 @@ encryption with a maintained parser; reject encrypted or oversized files with a
 split/unlock instruction. Initial app limit 100 pages, deliberately conservative.
 Keep the existing spreadsheet cell/text bounds.
 
-### 7.3 `src/lib/anthropic.ts` + `extraction-schema.ts`
+### 8.3 `src/lib/anthropic.ts` + `extraction-schema.ts`
 
 Lazily initialised client so `next build` and CI need no key.
 
@@ -599,9 +690,9 @@ approved small sample** before running a real spec bible.
 
 ---
 
-## 8. M2 — queue, review, confirm
+## 9. M2 — queue, review, confirm
 
-### 8.1 Producer and claim
+### 9.1 Producer and claim
 
 `POST /api/imports/[id]/extract` — expected run version and a client-generated
 request UUID reused across retries of the same user action. Only `pending` or
@@ -632,7 +723,7 @@ Keep `MAX_DELIVERIES = 4` equal to `vercel.json`, and keep the proven
 `queue/v1beta` trigger **with** its `consumer` — that exact shape is what the kit
 fixed on 2026-09-13; do not "tidy" it to `v2beta`.
 
-### 8.2 Fenced writes — rewriting `extraction-run.ts`
+### 9.2 Fenced writes — rewriting `extraction-run.ts`
 
 Same file, same structure. The table becomes `intake_runs`; the claim sets
 `parsing`; success writes `parsed` with `parsed`, `model`, `raw_response`,
@@ -665,7 +756,7 @@ stays restricted to `pending`/`failed`.
 There is **no exactly-once billing guarantee**. An ambiguous failure may cost a
 second call. Say so in `docs/stack.md` rather than implying the claim prevents it.
 
-### 8.3 The BOQ concurrency fix
+### 9.3 The BOQ concurrency fix
 
 While extracting `src/lib/confirm-boq.ts` out of the route, move the status /
 version check **and `record_no` allocation** inside `withTransaction`, under the
@@ -674,7 +765,7 @@ refs, initial answers, history and intake status together. Add regression tests
 for double-confirm and for two simultaneous imports allocating record numbers in
 one project. Do not otherwise redesign BOQ parsing or its review UI.
 
-### 8.4 `src/lib/spec-document.ts` — pure, unit-tested
+### 9.4 `src/lib/spec-document.ts` — pure, unit-tested
 
 `resolveProposals(raw, registers)`. Registers are loaded before the call.
 
@@ -703,7 +794,7 @@ Every proposal belongs to exactly one visible section — pending / unmatched /
 ambiguous / ignored / applied — with a diagnostic fallback for anything
 unclassifiable, so a proposal can never be held in the draft yet be invisible.
 
-### 8.5 PATCH and autosave
+### 9.5 PATCH and autosave
 
 `PATCH /api/imports/[id]` for spec documents takes
 `{ proposalId, expectedProposalVersion, changes }`. Locate by `elem.id` in the
@@ -732,7 +823,7 @@ would remount mid-edit. (autofab can key on version only because it has none of
 this machinery.) On explicit reload or focus, update clean proposals and surface
 conflicts for dirty ones.
 
-### 8.6 Review UI
+### 9.6 Review UI
 
 `src/components/imports/SpecDocumentReview.tsx`, selected on `source_kind` from
 `/dashboard/imports/[id]`; the BOQ view is untouched.
@@ -785,7 +876,7 @@ source, not only against model text. Never expose the token; never accept a URL.
 registration, and lists recent runs with human status labels translated in one
 place. A failed list fetch is an error, never an empty queue.
 
-### 8.7 The confirm boundary
+### 9.7 The confirm boundary
 
 `POST /api/imports/[id]/confirm` stays the single boundary, dispatching on
 `source_kind` to `src/lib/confirm-boq.ts` or `src/lib/confirm-spec-document.ts`.
@@ -831,7 +922,7 @@ reopens a completed run to `parsed`, and clears overwrite acknowledgement. An
 `applied` proposal is immutable history — Restore does not undo an answer edit.
 Repeated ignore/restore/confirm conflict rather than pretending to apply twice.
 
-### 8.8 M2 acceptance
+### 9.8 M2 acceptance
 
 | Case | Required result |
 |---|---|
@@ -862,7 +953,7 @@ the sandbox `DATABASE_URL`; a skipped tier is not evidence.
 
 ---
 
-## 9. Sequence
+## 10. Sequence
 
 **A.** `withTransaction` + M4 schema and domain behaviour, with rollback and
 lock behaviour proven on isolated sandbox fixtures. Ship no UI that calls an
@@ -871,9 +962,14 @@ unguarded placeholder.
 **B.** M4 UI and the Outlook acceptance pass. Verify on staging through the
 normal release procedure before M2's paid pipeline starts.
 
-**C.** M2 schema, resolver, stable-id PATCH, review UI, confirm/ignore/restore —
-all against synthetic fixtures with an injected model adapter and controllable
-queue/blob faults. **No key and no paid call needed for this phase.**
+**C.** The project overview screen (§7), then M2 schema, resolver, stable-id
+PATCH, review UI, confirm/ignore/restore — all against synthetic fixtures with
+an injected model adapter and controllable queue/blob faults. **No key and no
+paid call needed for this phase.**
+
+The overview comes first within C because M2's upload entry point moves onto
+it, and because entering a real `specs_agreed_by` is what lets the Overdue
+state be tested against anything.
 
 **D.** Queue fencing and the model wrapper. Deploy schema and consumer *before*
 enabling the producer UI. One approved small document to verify API
@@ -908,7 +1004,7 @@ until actually checked. A normal extraction should show **one** model request.
 
 ---
 
-## 10. Documentation and port-backs
+## 11. Documentation and port-backs
 
 In the same change:
 
@@ -959,7 +1055,7 @@ authoritative.
 
 ---
 
-## 11. Needs you, not me
+## 12. Needs you, not me
 
 - **`ANTHROPIC_API_KEY`** in Vercel staging, plus a named owner for the Console
   account — `docs/plans/README.md` item 7 records the ZDR clearance but leaves
