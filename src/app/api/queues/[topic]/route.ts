@@ -11,48 +11,60 @@
 // retryable: it throws only for infrastructure faults, and a model refusal
 // writes 'failed' and returns without throwing.
 //
-// NOTE: this route exists but has no consumer until a deploy lands that
-// declares its topic in vercel.json under `experimentalTriggers`. Messages
-// sent before then sit in the topic undelivered.
+// A BUSY outcome THROWS. A duplicate delivery that finds a live claim is not a
+// success: by the next delivery either the work is done (and that delivery
+// skips cheaply) or the claim has expired and that delivery is the recovery.
+// Acking it here would spend the delivery recovery depends on.
+//
+// NOTE: this route has no consumer until a deploy lands that declares its topic
+// in vercel.json under `experimentalTriggers`. Messages sent before then sit in
+// the topic undelivered.
 import { handleCallback, type MessageMetadata } from "@vercel/queue";
 import { type ExtractionQueueMessage } from "@/lib/extraction-queue";
 import { runDocumentExtraction, recordExtractionFailure } from "@/lib/extraction-run";
+import {
+  MAX_DELIVERIES,
+  MAX_DURATION_SECONDS,
+  VISIBILITY_TIMEOUT_SECONDS,
+} from "@/lib/extraction-claim";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = MAX_DURATION_SECONDS;
 
-// Must equal `maxDeliveries` on the trigger in vercel.json. The platform stops
-// redelivering at that count; this constant is what decides, on the LAST
-// delivery, to write a terminal status instead of throwing -- so if the two
-// disagree, either a job is abandoned with the screen still polling, or a paid
-// model call is retried more times than intended.
-//
 // The trigger schema is picky and rejecting it fails the whole deployment
 // before any app code runs: `type` must be exactly `queue/v1beta` (the variant
 // that takes a `consumer`), and the cap is `maxDeliveries` -- an earlier
-// chassis wrote `maxAttempts`, which is not a key at all.
-const MAX_DELIVERIES = 4;
-
+// chassis wrote `maxAttempts`, which is not a key at all. MAX_DELIVERIES here
+// must equal the value in vercel.json; if the two disagree, either a job is
+// abandoned with the screen still polling, or a paid model call is retried more
+// times than intended.
 const queueHandler = handleCallback<ExtractionQueueMessage>(
   async (message, metadata) => {
     try {
-      if (message.kind === "document-intake") {
-        await runDocumentExtraction({ extractionId: message.extractionId, actor: message.requestedBy });
-      } else {
-        throw new Error("Unknown extraction queue message");
-      }
+      if (message.kind !== "document-intake") throw new Error("Unknown extraction queue message");
+
+      const outcome = await runDocumentExtraction({
+        extractionId: message.extractionId,
+        attemptId: message.attemptId,
+        actor: message.requestedBy,
+      });
+
+      // Not an error worth a stack trace, but not a success either: throwing
+      // is what makes the platform redeliver, which is the recovery path.
+      if (outcome.outcome === "busy") throw new Error(`busy: ${outcome.reason}`);
     } catch (cause) {
       if (metadata.deliveryCount < MAX_DELIVERIES) throw cause;
-      // Out of attempts. Write a terminal status so the screen stops waiting
-      // on something that is never coming.
+      // Out of attempts. Write a terminal status so the screen stops waiting on
+      // something that is never coming -- unless another invocation holds a
+      // live claim, which recordExtractionFailure checks for itself.
       await recordTerminalFailure(message, cause, metadata);
     }
   },
   {
-    // Longer than the 300s function ceiling, so a run that uses its whole
-    // budget is not redelivered underneath itself — which would have two
-    // invocations racing for the same claim.
-    visibilityTimeoutSeconds: 600,
+    // Longer than the function ceiling, so a run that uses its whole budget is
+    // not redelivered underneath itself -- which would have two invocations
+    // racing for the same claim.
+    visibilityTimeoutSeconds: VISIBILITY_TIMEOUT_SECONDS,
     retry: (_error, metadata) => ({
       afterSeconds: Math.min(300, 15 * 2 ** Math.min(metadata.deliveryCount, 4)),
     }),
@@ -70,5 +82,5 @@ async function recordTerminalFailure(
 ): Promise<void> {
   const error = cause instanceof Error ? cause.message : String(cause);
   const detail = `${error} (gave up after ${metadata.deliveryCount} attempts)`;
-  await recordExtractionFailure(message.extractionId, detail, message.requestedBy);
+  await recordExtractionFailure(message.extractionId, message.attemptId, detail, message.requestedBy);
 }

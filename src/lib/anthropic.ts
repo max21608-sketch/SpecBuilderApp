@@ -30,11 +30,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { DocumentSource } from "@/lib/intake-source";
 import type { DocumentKind } from "@/lib/spec-vocab";
 import { ExtractionOutput, SPEC_DOCUMENT_TOOL, TOOL_NAME } from "@/lib/extraction-schema";
+// One source of truth for the timings. They are an inequality, not three
+// independent knobs -- see the header of extraction-claim.ts.
+import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
 
 export const EXTRACTION_MODEL = "claude-sonnet-5";
-
-/** Below the worker's own ceiling, leaving room to persist the failure. */
-export const MODEL_DEADLINE_MS = 240_000;
 
 const MAX_TOKENS = 128_000;
 

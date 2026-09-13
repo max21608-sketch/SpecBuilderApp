@@ -1,174 +1,331 @@
-// Reading an uploaded document. Runs on the queue, not in the request.
+// Reading an uploaded specification document. Runs on the queue, not in the
+// request that asked for it.
 //
-// This body belongs here rather than in the route because the model call takes
-// minutes: the route only enqueues, and this runs in the queue consumer where
-// nothing is holding a connection open.
-//
-// Nothing operational is written -- the result is STAGED for review.
+// Nothing operational is written — the result is STAGED for review, and a human
+// confirms each proposal into spec_answers at /api/imports/[id]/confirm.
 //
 // ============================================================================
 // WHAT THROWS AND WHAT DOES NOT is the load-bearing distinction in this file,
 // because the caller is a queue that retries on a throw:
 //
-//   - a model refusal or a schema failure is TERMINAL. It writes 'failed' and
-//     returns. Retrying buys the same refusal at full price.
-//   - a wrong file type is terminal too: retrying cannot make it a spreadsheet.
-//   - an infrastructure fault (blob 5xx, DB error) RELEASES the claim and
-//     throws, so the delivery is retried. Releasing matters: the retry backoff
-//     is far shorter than STALE_CLAIM_MINUTES, so a row left at 'processing'
-//     would make every retry a silent no-op.
+//   - a model refusal, a schema failure, a truncation or an auth error is
+//     TERMINAL. It writes 'failed' and RETURNS. Retrying buys the same refusal
+//     at full price.
+//   - an unparseable, encrypted or oversized source is terminal too: retrying
+//     cannot make it a different file.
+//   - an infrastructure fault (blob 5xx, transient model fault, DB error)
+//     RELEASES the claim and THROWS, so the delivery is retried. Releasing
+//     matters and the ORDER matters: retry backoff is far shorter than
+//     CLAIM_EXPIRY_SECONDS, so a row left claimed makes every retry a silent
+//     no-op until the claim ages out.
 //
-// Do NOT wrap this function in one outer try/catch. A release has to throw
-// past the step that raised it; an outer catch converts it back into a
-// terminal failure and deletes the retry, invisibly.
+// Do NOT wrap this function in one outer try/catch. A release has to throw past
+// the step that raised it; an outer catch converts it back into a terminal
+// failure and deletes the retry, invisibly.
+//
+// EVERY write here is fenced on (runId, attemptId, claimToken) plus the status
+// it expects. Zero rows means ownership was lost — stop, do not retry the
+// write, do not escalate it to a terminal failure. An old worker must not be
+// able to clear a newer attempt.
+//
+// This worker locks NOTHING but its own row, and holds no transaction across
+// the blob read or the model call. A worker that took a project or record lock
+// and then spent four minutes in a model call would block every other writer on
+// that project for the duration.
 // ============================================================================
+import { randomUUID } from "node:crypto";
 import { sql } from "@/lib/db";
 import { prepareDocumentSource } from "@/lib/intake-source";
-import { STALE_CLAIM_MINUTES, type ExtractionRunOutcome } from "@/lib/extraction-claim";
+import { readTrustedBlob, UntrustedBlobError, blobPathname } from "@/lib/blob-source";
+import { extractSpecDocument } from "@/lib/anthropic";
+import { resolveProposals, PROPOSAL_SCHEMA_VERSION, type StagedSpecDocument } from "@/lib/spec-document";
+import { loadExtractionRegisters } from "@/lib/spec-document-registers";
+import {
+  CLAIM_EXPIRY_SECONDS,
+  MAX_CLAIMS_PER_ATTEMPT,
+  RUN_ABORT_MS,
+  type ExtractionRunOutcome,
+} from "@/lib/extraction-claim";
+import type { DocumentKind } from "@/lib/spec-vocab";
 
-// M2: `document_extractions` is the table holding staged extractions.
-// Rename it throughout this file if the app calls it something else -- it is
-// written out literally in each statement because a tagged template cannot
-// parameterise an identifier. The table needs at least:
-//   id, attachment_id, status, processing_started_at, error,
-//   model, raw_response jsonb, extracted jsonb, updated_by
+const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
 
-export async function runDocumentExtraction(
-  { extractionId, actor }: { extractionId: string; actor: string },
-): Promise<ExtractionRunOutcome> {
-  // Claim it in ONE predicated statement: `returning` proves this invocation,
-  // and only this one, owns the run. A read-then-write let two deliveries both
+type Claim = {
+  runId: string;
+  attemptId: string;
+  claimToken: string;
+  projectId: string;
+  attachmentId: string | null;
+  documentKind: DocumentKind;
+};
+
+export async function runDocumentExtraction({
+  extractionId,
+  attemptId,
+  actor,
+}: {
+  extractionId: string;
+  attemptId: string;
+  actor: string;
+}): Promise<ExtractionRunOutcome> {
+  const startedAt = Date.now();
+
+  // ONE predicated statement. `returning` proves this invocation — and only
+  // this one — owns the attempt. A read-then-write let two deliveries both
   // believe they had it, and both billed a full model run.
+  //
+  // Never claims 'pending' (nobody has asked for this to be read) and never
+  // claims a terminal 'failed' (a human decides whether to pay again).
+  const claimToken = randomUUID();
   const claimed = await sql`
-    update document_extractions
-    set status = 'processing', processing_started_at = now(), error = null, updated_by = ${actor}
+    update intake_runs
+    set status = 'parsing',
+        claim_token = ${claimToken},
+        claim_count = claim_count + 1,
+        processing_started_at = now(),
+        updated_by = ${actor}
     where id = ${extractionId}
+      and source_kind = 'spec_document'
+      and attempt_id = ${attemptId}
+      and attempt_deadline_at > now()
+      and claim_count < ${MAX_CLAIMS_PER_ATTEMPT}
       and (
-        status in ('queued', 'pending', 'failed')
-        or (status = 'processing' and processing_started_at < now() - make_interval(mins => ${STALE_CLAIM_MINUTES}))
+        status = 'queued'
+        or (status = 'parsing'
+            and processing_started_at < now() - make_interval(secs => ${CLAIM_EXPIRY_SECONDS}))
       )
-    returning id, attachment_id
+    returning id, attempt_id, claim_token, project_id, attachment_id, document_kind
   `;
-  if (!claimed[0]) {
-    const existing = await sql`select status from document_extractions where id = ${extractionId}`;
-    if (!existing[0]) return { outcome: "skipped", reason: "extraction not found" };
-    return { outcome: "skipped", reason: `already ${String(existing[0].status)}` };
+
+  if (!claimed[0]) return await explainFailedClaim(extractionId, attemptId);
+
+  const claim: Claim = {
+    runId: String(claimed[0].id),
+    attemptId: String(claimed[0].attempt_id),
+    claimToken: String(claimed[0].claim_token),
+    projectId: String(claimed[0].project_id),
+    attachmentId: claimed[0].attachment_id ? String(claimed[0].attachment_id) : null,
+    documentKind: String(claimed[0].document_kind) as DocumentKind,
+  };
+
+  if (!claim.attachmentId) {
+    return await fail(claim, actor, "The uploaded document is no longer attached to this import.");
   }
 
+  // ---- the source ---------------------------------------------------------
   let attachment: Record<string, unknown> | undefined;
   try {
-    const attachments = await sql`
-      select storage_path, filename, content_type from attachments where id = ${claimed[0].attachment_id}
+    const rows = await sql`
+      select storage_path, filename, content_type from attachments where id = ${claim.attachmentId}
     `;
-    attachment = attachments[0];
+    attachment = rows[0];
   } catch (cause) {
-    return await releaseAndThrow(extractionId, actor, message(cause));
+    return await releaseAndThrow(claim, actor, message(cause));
   }
-  if (!attachment) return await fail(extractionId, actor, "the uploaded document could not be found");
+  if (!attachment) return await fail(claim, actor, "The uploaded document could not be found.");
 
-  // The blob store is PRIVATE: a server-side read needs the token as a bearer
-  // header. Possession of the URL is not access.
-  let blob: Response;
+  let blob: Awaited<ReturnType<typeof readTrustedBlob>>;
   try {
-    blob = await fetch(String(attachment.storage_path), {
-      headers: { authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+    // Includes reading the body, not just opening it: catching the request and
+    // letting the stream read throw uncaught is the classic version of this bug.
+    blob = await readTrustedBlob(blobPathname(String(attachment.storage_path)), claim.projectId, {
+      maxBytes: MAX_SOURCE_BYTES,
     });
   } catch (cause) {
-    return await releaseAndThrow(extractionId, actor, message(cause));
+    // A refusal by the trust boundary is about THIS file and will say the same
+    // thing every time. A transport fault will not.
+    if (cause instanceof UntrustedBlobError) return await fail(claim, actor, cause.message);
+    return await releaseAndThrow(claim, actor, message(cause));
   }
-  if (!blob.ok) {
-    const detail = `could not read the uploaded document (${blob.status})`;
-    // A 5xx is the blob store having a bad moment; a 4xx will say the same
-    // thing on every retry.
-    if (blob.status >= 500) return await releaseAndThrow(extractionId, actor, detail);
-    return await fail(extractionId, actor, detail);
-  }
-  const bytes = Buffer.from(await blob.arrayBuffer());
 
   // Parsing is deterministic: a file that will not parse parses no better on
-  // the fourth attempt.
+  // the fourth attempt. Encrypted and oversized land here too.
   let source: Awaited<ReturnType<typeof prepareDocumentSource>>;
   try {
-    source = await prepareDocumentSource(bytes, String(attachment.filename), String(attachment.content_type ?? ""));
+    source = await prepareDocumentSource(blob.bytes, String(attachment.filename), String(attachment.content_type ?? ""));
   } catch (cause) {
-    return await fail(extractionId, actor, message(cause));
+    return await fail(claim, actor, message(cause));
   }
 
-  // M2: the model call. It must return a discriminated result
-  // ({ ok: true, output, model, rawResponse } | { ok: false, error }) rather
-  // than throwing on a refusal, so this function can tell a refusal (terminal)
-  // from a socket error (retryable).
-  //
-  //   let result: Awaited<ReturnType<typeof extractSomething>>;
-  //   try {
-  //     result = await extractSomething(source);
-  //   } catch (cause) {
-  //     // The call itself fell over -- a socket, a 5xx, a timeout. Retry.
-  //     return await releaseAndThrow(extractionId, actor, message(cause));
-  //   }
-  //   if (!result.ok) return await fail(extractionId, actor, result.error);
-  //
-  // M2: then resolve against this app's OWN registers and vocabularies
-  // here -- deterministically, in code, not in the prompt. The model reads;
-  // it does not decide. Anything unresolvable becomes a visible flag, never a
-  // plausible-looking guess.
-  void source;
-  return await fail(extractionId, actor, "extraction is not implemented yet");
+  // ---- the registers, loaded BEFORE the model call ------------------------
+  // Deterministic resolution happens in code against these, never in the
+  // prompt. Loading them first also means a register read failure costs
+  // nothing — at this point no model has been called.
+  let registers;
+  try {
+    registers = await loadExtractionRegisters(claim.projectId);
+  } catch (cause) {
+    return await releaseAndThrow(claim, actor, message(cause));
+  }
 
-  // The staging write, once the above is filled in:
-  //
-  //   try {
-  //     await sql`
-  //       update document_extractions
-  //       set status = 'extracted', model = ${result.model}, error = null,
-  //           processing_started_at = null,
-  //           raw_response = ${JSON.stringify(result.rawResponse)}::jsonb,
-  //           extracted = ${JSON.stringify(resolved)}::jsonb,
-  //           updated_by = ${actor}
-  //       where id = ${extractionId}
-  //     `;
-  //     return { outcome: "extracted" };
-  //   } catch (cause) {
-  //     // The model run is already paid for, so releasing re-runs it. That is
-  //     // still the right trade against leaving a stuck row: everything here
-  //     // is a DB fault, which means nothing was written either.
-  //     return await releaseAndThrow(extractionId, actor, message(cause));
-  //   }
+  // ---- the model ----------------------------------------------------------
+  const remaining = RUN_ABORT_MS - (Date.now() - startedAt);
+  if (remaining <= 0) {
+    return await releaseAndThrow(claim, actor, "Preparing the document used the whole time budget.");
+  }
+  const abort = AbortSignal.timeout(remaining);
+
+  const result = await extractSpecDocument(source, claim.documentKind, { signal: abort });
+
+  if (!result.ok) {
+    // The wrapper, not an exception, is what tells a refusal from a socket
+    // error. raw_response is persisted either way: it is the only evidence of
+    // why an extraction was wrong.
+    if (result.retryable) return await releaseAndThrow(claim, actor, result.error, result);
+    return await fail(claim, actor, result.error, result);
+  }
+
+  // ---- staging ------------------------------------------------------------
+  const staged: StagedSpecDocument = {
+    schemaVersion: PROPOSAL_SCHEMA_VERSION,
+    lines: resolveProposals(result.output.proposals, registers, randomUUID),
+    documentNotes: result.output.documentNotes,
+    filename: String(attachment.filename ?? ""),
+  };
+
+  try {
+    const written = await sql`
+      update intake_runs
+      set status = 'parsed',
+          parsed = ${JSON.stringify(staged)}::jsonb,
+          model = ${result.model},
+          raw_response = ${JSON.stringify(result.rawResponse)}::jsonb,
+          model_metadata = ${JSON.stringify({
+            requestId: result.requestId,
+            usage: result.usage,
+            elapsedMs: result.elapsedMs,
+            proposals: staged.lines.length,
+          })}::jsonb,
+          error = null,
+          processing_started_at = null,
+          updated_by = ${actor}
+      where id = ${claim.runId}
+        and attempt_id = ${claim.attemptId}
+        and claim_token = ${claim.claimToken}
+        and status = 'parsing'
+      returning id
+    `;
+    if (!written[0]) {
+      // Ownership was lost while the model was running. Someone else owns this
+      // attempt now; writing anything further would clobber their result.
+      return { outcome: "skipped", reason: "the claim was taken over while the document was being read" };
+    }
+    return { outcome: "parsed" };
+  } catch (cause) {
+    // The model run is already paid for, so releasing re-runs it. That is still
+    // the right trade against leaving a stuck row: this is a DB fault, which
+    // means nothing was staged either.
+    return await releaseAndThrow(claim, actor, message(cause));
+  }
 }
 
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-// Terminal: this will not come out differently on another attempt.
-async function fail(extractionId: string, actor: string, error: string): Promise<ExtractionRunOutcome> {
-  await sql`
-    update document_extractions
-    set status = 'failed', error = ${error}, processing_started_at = null, updated_by = ${actor}
-    where id = ${extractionId}
+/** Why a claim did not land. Never guesses — reads the row and says. */
+async function explainFailedClaim(extractionId: string, attemptId: string): Promise<ExtractionRunOutcome> {
+  const rows = await sql`
+    select status, attempt_id, claim_count, attempt_deadline_at, processing_started_at,
+           (processing_started_at > now() - make_interval(secs => ${CLAIM_EXPIRY_SECONDS})) as claim_live,
+           (attempt_deadline_at > now()) as within_deadline
+    from intake_runs where id = ${extractionId}
   `;
+  const row = rows[0];
+  if (!row) return { outcome: "skipped", reason: "that import no longer exists" };
+  if (String(row.attempt_id ?? "") !== attemptId) {
+    return { outcome: "skipped", reason: "this message belongs to a superseded attempt" };
+  }
+  if (row.status === "parsing" && row.claim_live) {
+    // NOT a success. See the note on `busy` in extraction-claim.ts.
+    return { outcome: "busy", reason: "another worker is reading this document" };
+  }
+  if (!row.within_deadline) return { outcome: "skipped", reason: "this attempt passed its deadline" };
+  if (Number(row.claim_count) >= MAX_CLAIMS_PER_ATTEMPT) {
+    return { outcome: "skipped", reason: "this attempt has used all of its attempts" };
+  }
+  return { outcome: "skipped", reason: `already ${String(row.status)}` };
+}
+
+/** Terminal for this attempt: this will not come out differently on another one. */
+async function fail(
+  claim: Claim,
+  actor: string,
+  error: string,
+  result?: { rawResponse?: unknown; usage?: unknown; requestId?: string | null; elapsedMs?: number },
+): Promise<ExtractionRunOutcome> {
+  const rows = await sql`
+    update intake_runs
+    set status = 'failed',
+        error = ${error},
+        processing_started_at = null,
+        claim_token = null,
+        raw_response = coalesce(${result?.rawResponse ? JSON.stringify(result.rawResponse) : null}::jsonb, raw_response),
+        model_metadata = coalesce(${result ? JSON.stringify({ requestId: result.requestId ?? null, usage: result.usage ?? null, elapsedMs: result.elapsedMs ?? null }) : null}::jsonb, model_metadata),
+        updated_by = ${actor}
+    where id = ${claim.runId}
+      and attempt_id = ${claim.attemptId}
+      and claim_token = ${claim.claimToken}
+      and status = 'parsing'
+    returning id
+  `;
+  if (!rows[0]) return { outcome: "skipped", reason: "the claim was taken over before the failure could be recorded" };
   return { outcome: "failed", error };
 }
 
-// Retryable: hand the row back so the next delivery can claim it, THEN let the
-// queue see the failure. The order matters — throwing first leaves the row
-// claimed and every retry becomes a no-op.
-async function releaseAndThrow(extractionId: string, actor: string, error: string): Promise<never> {
+/**
+ * Retryable: hand the row back so the next delivery can claim it, THEN let the
+ * queue see the failure. The order is the point — throwing first leaves the row
+ * claimed and every retry becomes a no-op.
+ *
+ * The error is recorded while the row returns to `queued`, so the screen has to
+ * render a lingering error on a queued row NEUTRALLY ("Last attempt reported:")
+ * rather than as a failure.
+ */
+async function releaseAndThrow(
+  claim: Claim,
+  actor: string,
+  error: string,
+  result?: { rawResponse?: unknown },
+): Promise<never> {
   await sql`
-    update document_extractions
-    set status = 'queued', error = ${error}, processing_started_at = null, updated_by = ${actor}
-    where id = ${extractionId}
+    update intake_runs
+    set status = 'queued',
+        error = ${error},
+        claim_token = null,
+        processing_started_at = null,
+        raw_response = coalesce(${result?.rawResponse ? JSON.stringify(result.rawResponse) : null}::jsonb, raw_response),
+        updated_by = ${actor}
+    where id = ${claim.runId}
+      and attempt_id = ${claim.attemptId}
+      and claim_token = ${claim.claimToken}
+      and status = 'parsing'
   `;
   throw new Error(error);
 }
 
-// Called by the queue consumer once a message has exhausted its deliveries.
-// Predicated on the non-terminal statuses so it cannot overwrite a result that
-// landed in the meantime.
-export async function recordExtractionFailure(extractionId: string, error: string, actor: string): Promise<void> {
+/**
+ * Called by the consumer once a message has exhausted its deliveries.
+ *
+ * Fenced on the attempt AND on there being no live claim: if another invocation
+ * is legitimately reading the document right now, marking the run failed would
+ * kill work that is about to succeed and has already been paid for.
+ */
+export async function recordExtractionFailure(
+  extractionId: string,
+  attemptId: string,
+  error: string,
+  actor: string,
+): Promise<void> {
   await sql`
-    update document_extractions
-    set status = 'failed', error = ${error}, processing_started_at = null, updated_by = ${actor}
-    where id = ${extractionId} and status in ('queued', 'pending', 'processing')
+    update intake_runs
+    set status = 'failed', error = ${error}, processing_started_at = null, claim_token = null, updated_by = ${actor}
+    where id = ${extractionId}
+      and attempt_id = ${attemptId}
+      and status in ('queued', 'parsing')
+      and (
+        status = 'queued'
+        or processing_started_at < now() - make_interval(secs => ${CLAIM_EXPIRY_SECONDS})
+      )
   `;
 }

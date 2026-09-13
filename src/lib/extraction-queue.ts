@@ -18,15 +18,27 @@ export const EXTRACTION_QUEUE_TOPIC = "document-extraction";
 // `requestedBy` is the session email of whoever asked for the extraction. The
 // consumer has no session of its own, and this is a real acting user rather
 // than a system actor, so it is what lands in `updated_by`.
+// `attemptId` is what makes a redelivery safe. Every worker write is fenced on
+// it, so a message belonging to a superseded attempt writes zero rows instead
+// of clobbering the attempt that replaced it.
+//
+// M1's BOQ import is a deterministic XLSX read and does not come through here
+// at all.
 export type ExtractionQueueMessage = {
-  // M2: one variant per extraction the app runs, e.g.
-  //   | { kind: "ffe-schedule"; extractionId: string; requestedBy: string }
-  // M1's BOQ import is a deterministic XLSX read and does not come through
-  // here at all.
   kind: "document-intake";
   extractionId: string;
+  attemptId: string;
   requestedBy: string;
 };
+
+/**
+ * Stable per (run, attempt) -- NEVER Date.now(). A retried publish of the same
+ * attempt must be recognised as the same message, or one press of Extract
+ * becomes two paid pipelines.
+ */
+export function extractionIdempotencyKey(runId: string, attemptId: string): string {
+  return `spec-document:${runId}:${attemptId}`;
+}
 
 export async function enqueueExtractionJob(
   message: ExtractionQueueMessage,
