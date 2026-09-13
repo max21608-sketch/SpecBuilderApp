@@ -200,12 +200,20 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
         }
 
         // A requirement is only valid inside the chosen record's category.
-        const requirementId = "requirementId" in changes ? changes.requirementId ?? null : proposal.requirementId;
+        //
+        // EXPLICIT and CARRIED-OVER are handled differently, and conflating them
+        // was a bug: moving a proposal to a record in another category carried
+        // the old question along, found it invalid there, and REFUSED the whole
+        // edit — for a question the reviewer had not chosen and could not see.
+        // An explicitly sent question that does not fit is a refusal; one merely
+        // inherited from the old record is silently cleared.
+        const explicitRequirement = "requirementId" in changes;
+        const requirementId = explicitRequirement ? changes.requirementId ?? null : proposal.requirementId;
         const requirement =
           requirementId && record
             ? registers.requirements.find((row) => row.id === requirementId && row.categoryId === record.categoryId) ?? null
             : null;
-        if (requirementId && !requirement) {
+        if (explicitRequirement && requirementId && !requirement) {
           throw new DomainConflictError(
             "requirement_mismatch",
             "That question does not belong to the chosen item's category.",
@@ -216,8 +224,12 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
         next = {
           ...next,
           recordId: record ? record.id : null,
-          // Changing the record invalidates the question chosen under the old
-          // one; the reviewer picks again rather than inheriting a mismatch.
+          // INCOMPATIBLE selections are cleared, not every selection. Moving a
+          // proposal to another record in the SAME category keeps the question
+          // -- it is still one of that item's questions -- but the snapshot
+          // below is rebuilt against the new record's answer, which is what the
+          // reviewer has to see before confirming. Moving it to a record in a
+          // different category leaves `requirement` null and clears it.
           requirementId: requirement ? requirement.id : null,
           target: record && requirement ? buildTargetSnapshot(record, requirement, registers.answers) : null,
           // The old acknowledgement was about a different answer entirely.
