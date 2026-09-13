@@ -267,12 +267,13 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
     it, and no generated `.eml` has been opened in the real Outlook client.
     Until that happens, the claim that a human can send one of these is
     untested.
-11. **Nobody owns the Anthropic Console account.** `ANTHROPIC_API_KEY` was
-    reported present by the user on 2026-09-13 and is set in the local
-    environment; whether it is set in **Vercel staging** has not been verified
-    here, and the named Console account owner is still missing. Neither is
-    needed for M2 step C, which runs against synthetic fixtures with no paid
-    call; both are needed before step D.
+11. **Nobody owns the Anthropic Console account.** `ANTHROPIC_API_KEY` is set
+    locally AND in Vercel staging as of 2026-09-13 (verified in the project's
+    environment variables), so the key is no longer the blocker. The named
+    Console owner still is: account-level retention settings live there, not in
+    this app, and a Vercel region setting does not establish them. Confirm the
+    intended account and model path match the ZDR clearance before a real client
+    document is sent.
 12. **The question-to-BWS-field mapping is unreviewed.** 320 of the 728 seeded
     requirements point at a BWS field, and that mapping is this repo's
     judgement, not Matthew's. Only 28 of the 56 fields are reachable from a
