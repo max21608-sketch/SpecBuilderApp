@@ -132,6 +132,12 @@ export default function ProjectsPage() {
                 {uploadingFor === project.id ? "Reading…" : "Import BOQ"}
               </button>
               <Link
+                href={`/dashboard/drafts?projectId=${project.id}`}
+                className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
+              >
+                Chase emails
+              </Link>
+              <Link
                 href={`/dashboard/records?projectId=${project.id}`}
                 className="shrink-0 text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700"
               >

@@ -18,6 +18,7 @@ type SpecRecord = {
   category_name: string | null; category_family: string | null; requirements_authored: boolean;
   spec_total: string; spec_settled: string; spec_tbc: string; spec_missing: string;
   ready_total: string; ready_settled: string; ready_tbc: string; ready_missing: string;
+  waiting: number;
 };
 
 function Counts({ settled, tbc, missing, total }: { settled: number; tbc: number; missing: number; total: number }) {
@@ -66,7 +67,8 @@ function RecordsTable() {
         {records.length} records · {complete} with nothing outstanding. Counts are
         <span className="text-green-700"> settled</span> /
         <span className="text-amber-700"> TBC</span> /
-        <span className="text-red-700"> missing</span>.
+        <span className="text-red-700"> missing</span>. A record is
+        <span className="text-blue-700"> waiting</span> when every outstanding question has been asked.
       </p>
 
       <div className="mt-4 overflow-x-auto border border-neutral-200 rounded-lg bg-white">
@@ -80,17 +82,31 @@ function RecordsTable() {
               <th className="text-left font-medium px-3 py-2">Qty</th>
               <th className="text-left font-medium px-3 py-2">Spec fields</th>
               <th className="text-left font-medium px-3 py-2">Readiness</th>
+              <th className="text-left font-medium px-3 py-2">Chased</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-200">
             {records.map((record) => {
               const outstanding = n(record.spec_tbc) + n(record.spec_missing) + n(record.ready_tbc) + n(record.ready_missing);
               const anyMissing = n(record.spec_missing) + n(record.ready_missing) > 0;
-              const dot = outstanding === 0 ? "bg-green-500" : anyMissing ? "bg-red-500" : "bg-amber-500";
+              // Waiting only counts when EVERY outstanding question has been
+              // chased. One unasked question means the record still needs work,
+              // and calling that "waiting" would hide it.
+              const allChased = outstanding > 0 && record.waiting >= outstanding;
+              const dot =
+                outstanding === 0
+                  ? "bg-green-500"
+                  : allChased
+                    ? "bg-blue-500"
+                    : anyMissing
+                      ? "bg-red-500"
+                      : "bg-amber-500";
+              const dotLabel =
+                outstanding === 0 ? "Complete" : allChased ? "Waiting for a reply" : "Action required";
               return (
                 <tr key={record.id} className="hover:bg-neutral-50">
                   <td className="px-3 py-2 text-neutral-500 tabular-nums">
-                    <span className={`inline-block w-2 h-2 rounded-full mr-2 align-middle ${dot}`} />
+                    <span title={dotLabel} className={`inline-block w-2 h-2 rounded-full mr-2 align-middle ${dot}`} />
                     {record.record_no}
                   </td>
                   <td className="px-3 py-2 font-medium text-neutral-900">{record.refs ?? "—"}</td>
@@ -112,6 +128,13 @@ function RecordsTable() {
                   </td>
                   <td className="px-3 py-2">
                     <Counts settled={n(record.ready_settled)} tbc={n(record.ready_tbc)} missing={n(record.ready_missing)} total={n(record.ready_total)} />
+                  </td>
+                  <td className="px-3 py-2">
+                    {record.waiting > 0 && (
+                      <span className="text-xs px-2 py-0.5 rounded border text-blue-800 border-blue-300 bg-blue-50">
+                        {allChased ? "Waiting" : `${record.waiting} asked`}
+                      </span>
+                    )}
                   </td>
                 </tr>
               );

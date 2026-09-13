@@ -6,6 +6,7 @@
 // counted separately -- a record whose BWS fields are all confirmed but whose
 // deposit is unresolved is not ready, and one number would hide that.
 import { sql, json } from "@/lib/db";
+import { loadOutstanding, loadSentCoverage, questionKey, waitingByQuestion } from "@/lib/chase-drafts";
 
 export const dynamic = "force-dynamic";
 
@@ -44,5 +45,29 @@ export async function GET(request: Request): Promise<Response> {
     group by r.id, c.name, c.family, c.requirements_authored
     order by r.record_no
   `;
-  return json({ ok: true, records: rows });
+
+  // How many of each record's outstanding questions are currently awaiting a
+  // reply. Derived rather than stored -- recording a chase must not write to
+  // spec_answers, because that bumps the version M2's extraction snapshots are
+  // taken against. See src/lib/chase-drafts.ts.
+  //
+  // "Waiting" is a third thing, distinct from settled and from nobody-looked:
+  // it is the difference between work that needs doing and work that needs
+  // following up.
+  const [outstanding, coverage] = await Promise.all([
+    loadOutstanding(projectId),
+    loadSentCoverage(projectId),
+  ]);
+  const waiting = waitingByQuestion(outstanding, coverage);
+
+  const waitingByRecord = new Map<string, number>();
+  for (const question of outstanding) {
+    if (!waiting.has(questionKey(question.recordId, question.requirementId, 0))) continue;
+    waitingByRecord.set(question.recordId, (waitingByRecord.get(question.recordId) ?? 0) + 1);
+  }
+
+  return json({
+    ok: true,
+    records: rows.map((row) => ({ ...row, waiting: waitingByRecord.get(String(row.id)) ?? 0 })),
+  });
 }

@@ -52,6 +52,31 @@ export type IntakeStatus = (typeof INTAKE_STATUSES)[number];
 export const RECORD_STATUSES = ["draft", "active", "retired"] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];
 
+/**
+ * Who a chase email can be addressed to. `designer` rows additionally carry a
+ * `designer_code` that joins to `spec_records.designer`.
+ */
+export const CONTACT_ROLES = ["designer", "client", "internal"] as const;
+export type ContactRole = (typeof CONTACT_ROLES)[number];
+
+/**
+ * The life of a chase draft. Only `draft` is editable.
+ *
+ *   draft      — being prepared; nothing has been claimed
+ *   sent       — a human attested they sent it. Its content is now history.
+ *   voided     — that attestation was withdrawn. The content and send record
+ *                are preserved; the questions stop reading as Waiting.
+ *   superseded — regeneration replaced it. Kept rather than deleted so a stale
+ *                tab gets a conflict it can explain instead of a 404.
+ */
+export const DRAFT_STATUSES = ["draft", "sent", "voided", "superseded"] as const;
+export type DraftStatus = (typeof DRAFT_STATUSES)[number];
+
+/** A draft is finished being edited once it leaves `draft`. */
+export function isSettledDraft(status: DraftStatus): boolean {
+  return status !== "draft";
+}
+
 export function isAnswerState(value: unknown): value is AnswerState {
   return typeof value === "string" && (ANSWER_STATES as readonly string[]).includes(value);
 }

@@ -1,8 +1,12 @@
-// Builds a downloadable .eml (RFC 5322 message) from a generated draft,
-// so Lenate can open it directly in Outlook rather than copy-pasting.
-// Single-part text/html (current drafts) or text/plain (legacy pre-0007
-// drafts), quoted-printable, plus `X-Unsent: 1` so Outlook opens it as an
-// editable/sendable draft instead of as received mail.
+// Builds a downloadable .eml (RFC 5322 message) from a generated draft, so the
+// person chasing can open it directly in Outlook rather than copy-pasting.
+// Single-part text/html or text/plain, quoted-printable, plus `X-Unsent: 1` so
+// Outlook opens it as an editable/sendable draft instead of as received mail.
+//
+// Deliberately single-part: no multipart, no boundary, no attachments. The
+// whole safety argument for this file is that it is small enough to read.
+//
+// The app never sends. This builds a file a human opens and sends themselves.
 const QP_LINE_LIMIT = 76; // RFC 2045 hard cap on a quoted-printable line, including the soft-break "="
 
 function qpEncodeLine(line: string): string {
@@ -60,9 +64,46 @@ export function encodeHeaderValue(value: string): string {
   return chunks.map((c) => `=?utf-8?B?${Buffer.from(c, "utf8").toString("base64")}?=`).join("\r\n ");
 }
 
+// Characters RFC 5322 calls "specials": a display name containing one of them
+// is not a valid atom sequence and has to be quoted, or the address parses as
+// something else entirely. A bare comma is the dangerous one -- `Lecoadic,
+// Scotto <a@b>` reads as TWO recipients, one of them malformed.
+const ADDRESS_SPECIALS = /[()<>[\]:;@\\,."]/;
+
+/**
+ * Builds one `Display Name <mailbox>` header value safely.
+ *
+ * Concatenating the two by hand is what this replaces. A name is quoted when it
+ * contains specials, RFC 2047 encoded when it is not ASCII (an encoded-word is
+ * NOT allowed inside a quoted string, so those two cases are exclusive), and
+ * dropped entirely when it is blank.
+ */
+export function formatAddress(name: string | null | undefined, email: string): string {
+  const address = stripHeaderBreaks(email).trim();
+  if (!address) return "";
+
+  const display = stripHeaderBreaks(name ?? "").trim();
+  if (!display) return address;
+
+  // Non-ASCII: encoded-word, which may not be wrapped in quotes.
+  if (!/^[\x20-\x7e]*$/.test(display)) {
+    return `${encodeHeaderValue(display)} <${address}>`;
+  }
+  if (ADDRESS_SPECIALS.test(display)) {
+    return `"${display.replace(/([\\"])/g, "\\$1")}" <${address}>`;
+  }
+  return `${display} <${address}>`;
+}
+
 export type BuildEmlInput = {
   from: string; // "Name <email>"
   to: string; // "Name <email>", or "" when no address could be resolved
+  /**
+   * Copied recipients, already formatted. Empty or absent emits no Cc header at
+   * all -- an empty `Cc:` line is not the same as no Cc, and some clients
+   * surface it as a blank recipient chip.
+   */
+  cc?: string;
   subject: string;
   body: string;
   format: "text" | "html";
@@ -77,10 +118,12 @@ function stripHeaderBreaks(value: string): string {
   return value.replace(/[\r\n]+/g, " ");
 }
 
-export function buildEml({ from, to, subject, body, format, date }: BuildEmlInput): string {
+export function buildEml({ from, to, cc, subject, body, format, date }: BuildEmlInput): string {
+  const ccValue = stripHeaderBreaks(cc ?? "").trim();
   const headers = [
     `From: ${stripHeaderBreaks(from)}`,
     `To: ${stripHeaderBreaks(to)}`,
+    ...(ccValue ? [`Cc: ${ccValue}`] : []),
     `Subject: ${encodeHeaderValue(subject)}`,
     `Date: ${date.toUTCString()}`,
     `X-Unsent: 1`,

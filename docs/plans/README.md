@@ -6,13 +6,14 @@
 |---|---|---|---|
 | Scaffold | `bw-app-kit` Part 2 plan | — | Built 2026-09-12 |
 | M1 — spec table and completion view | `part-2/` plan + this log | — | **Shipped to staging 2026-09-13** |
-| M2 — AI extraction of richer documents | — | M1 | Unblocked 2026-09-13, not started |
+| M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | Unblocked 2026-09-13, not started |
 | M3 — BWS CSV export (complete dataset) | — | M1; a way to test an import | Named only |
-| M4 — draft chase emails | — | M1 | Named only |
+| M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **Built locally 2026-09-13**, not pushed |
 | M5 — shared-inbox ingestion | `docs/integration.md` | Entra app + scoped mailbox | Named only |
 | M6 — VE rounds, TG0 A/B/C sign-off | — | a settled gate model | Named only |
 
-M2–M6 are named so they are not built speculatively. Only M1 is scoped.
+M3, M5 and M6 are named so they are not built speculatively. M1 is shipped;
+M4 is built; M2 is scoped and blocked on account setup.
 
 ## Decisions taken 2026-09-12
 
@@ -88,6 +89,54 @@ reader whether the decision still applies.
     primary-key migration on the busiest table when M6 needs the original spec
     and a VE alternative side by side.
 
+## Decisions taken 2026-09-13 (M4, and the kit)
+
+15. **Recording a chase does not write to `spec_answers`.** The obvious design
+    is a `chased_at` column. It fires `bump_version`, which invalidates every
+    M2 extraction snapshot taken against that answer for a reason unrelated to
+    the answer — and writes a communication event into a business record.
+    "Waiting for a reply" is derived instead, by matching sent coverage rows
+    against live questions. The cost is a join on every completion read; the
+    alternative was silently coupling two milestones together.
+16. **Undo therefore does not check `version = snapshot + 1`.** That rule in
+    the `email-draft-and-send-gate` skill exists because the fabric app's
+    confirm mutates the covered rows, so exactly one bump proves nothing else
+    touched them. Nothing is mutated here. Importing the rule without its
+    premise would have blocked the most useful case: noticing the mistake
+    precisely *because* someone has since edited an answer.
+17. **Staleness compares a stored context snapshot, not just versions.**
+    `requirements` and `spec_record_refs` carry no version, so an edited prompt
+    or a corrected client ref would be invisible to a version-only check.
+    Compared with a canonical stringification — `jsonb` does not preserve key
+    order, and a plain `JSON.stringify` comparison made every draft read as
+    stale the instant it was generated.
+18. **Only the opening and closing are editable, as plain text.** The question
+    table is generated from the coverage rows, so the body and the coverage are
+    provably the same set — which is the guarantee the send gate rests on. A
+    whole-body HTML editor would let them drift, and `sanitizeEmailHtml`
+    describes itself as defence-in-depth rather than a sanitiser.
+19. **Readiness questions are never selected by default.** 408 of the 728
+    seeded requirements are readiness questions, including deposit status, COM
+    payment plan and BWS folder setup — Ben Whistler's own commercial
+    checklist. They are selectable, in a separate group, but not by accident.
+20. **Non-production `.eml` exports address the signed-in user in both To and
+    Cc.** A `[STAGING]` subject prefix does not stop anything: the file still
+    carries the designer's real address and the project inbox, and one QA click
+    in Outlook sends it. The intended production recipients are reported
+    separately so the Cc path stays testable.
+21. **A second database driver, for guarded writes only.** The Neon HTTP
+    driver's `transaction([...])` takes a pre-built array and cannot evaluate a
+    guard and abort, so every check ran before the transaction opened, under
+    read-committed. `src/lib/db-transaction.ts` adds short interactive
+    transactions on a real `pg` client for the new routes only; ordinary reads
+    and single-statement updates stay on the HTTP driver.
+22. **The kit is folded into `docs/kit/` and this repo is the only one worked
+    in.** Two folders for one piece of work caused real confusion and bought
+    nothing — the app already contained everything the kit had, verified file
+    by file, apart from four kit-only artifacts. The kit also had no git
+    remote and lived in one iCloud folder. The cost is that a third app forks
+    from this one and strips the domain out; see `docs/kit/README.md`.
+
 ## Still open
 
 Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
@@ -120,7 +169,13 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
 9. **Blob retention.** Nothing in the application deletes an uploaded
    document, ever. M1 is the first real consumer of that store, so the gap is
    now live rather than theoretical. See `db/README.md`.
-10. **The question-to-BWS-field mapping is unreviewed.** 320 of the 728 seeded
+10. **M4 has had no human acceptance.** Automated checks pass; nobody has used
+    it, and no generated `.eml` has been opened in the real Outlook client.
+    Until that happens, the claim that a human can send one of these is
+    untested.
+11. **Nobody owns the Anthropic Console account**, and `ANTHROPIC_API_KEY` is
+    absent from Vercel staging. M2 cannot start without both.
+12. **The question-to-BWS-field mapping is unreviewed.** 320 of the 728 seeded
     requirements point at a BWS field, and that mapping is this repo's
     judgement, not Matthew's. Only 28 of the 56 fields are reachable from a
     cheat-sheet question at all. Review before M3 depends on it.

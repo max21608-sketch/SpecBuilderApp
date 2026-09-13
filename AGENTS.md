@@ -1,8 +1,9 @@
 # Project Spec Builder — project instructions
 
-> Forked from `bw-app-kit` on 2026-09-12. Company-wide standards live in
-> `house/` and are copied in unchanged — do not restate them here, point at
-> them.
+> Forked from `bw-app-kit` on 2026-09-12; the kit was folded into this repo on
+> 2026-09-13 and there is no longer a sibling kit repository to work from. See
+> `docs/kit/README.md`. Company-wide standards live in `house/` and are copied
+> in unchanged — do not restate them here, point at them.
 
 ## Project purpose
 
@@ -59,7 +60,7 @@ These override convenience and speed in every design decision:
 
 ### This app's hard approval gates
 
-- **Confirming an extracted spec value into `spec_values`.** Extraction stages;
+- **Confirming an extracted spec value into `spec_answers`.** Extraction stages;
   only a human confirm writes.
 - **Producing the BWS CSV export.** See the replacement-not-merge invariant
   below — this is the most dangerous operation in the product.
@@ -82,7 +83,7 @@ Each of these is a trap, not a preference:
   state it in a test.
 - **`TBC` is a real, distinct state** from missing and from N/A. At TG0
   "Design to suggest" is an acceptable dimension answer and `TBC` is not — so
-  gate rules read `spec_values.state`, never the presence of a string. Note
+  gate rules read `spec_answers.state`, never the presence of a string. Note
   that `NAME_DENYLIST` in `src/lib/matching.ts` also contains `"tbc"`; that is
   about entity-name matching and is a different meaning. Do not merge them.
 - **VE rounds preserve the original.** Original spec, VE alternative, client
@@ -207,6 +208,8 @@ architecture decision.
 - `docs/recovery.md` — incident triage, recovery, rollback.
 - `docs/integration.md` — external integrations: scope, setup, activation.
 - `docs/plans/README.md` — releases, dated decisions, what is still open.
+- `docs/kit/` — the folded-in app kit: chassis provenance, its changelog, and
+  the procedure for starting another app from this one.
 - `db/README.md` — migrations, seeds, backups, restores.
 
 ## Load-bearing workflows
@@ -256,6 +259,36 @@ so a re-seed and a migration is the whole change, touching no application
 logic. If category rules end up as `if` statements, every cheat-sheet revision
 becomes a code release.
 
+### A chase records that a question was asked, and writes no answer
+
+- `db/migrations/0005_chase_drafts.sql`, `src/lib/chase-drafts.ts`,
+  `src/app/api/drafts/[id]/confirm-sent/route.ts`
+
+Recording a send must NOT write to `spec_answers`. The obvious design is a
+`chased_at` column; it fires `bump_version`, which invalidates every M2
+extraction snapshot taken against that answer for a reason that has nothing to
+do with the answer — and it writes a communication event into a business
+record. "Waiting for a reply" is therefore DERIVED: a question is waiting when
+it is still outstanding and some sent, tracking-eligible `email_draft_items`
+row still matches it.
+
+Two consequences that look like omissions and are not:
+
+- **Undo does not check `version = snapshot + 1`.** The
+  `email-draft-and-send-gate` skill requires it because in the fabric app
+  confirming a send mutates the covered lines, so one bump proves nothing else
+  touched them. Nothing is mutated here, so there is no bump to count.
+- **Staleness compares a context snapshot, not just versions.** `requirements`
+  and `spec_record_refs` carry no version, so an edited prompt or a corrected
+  client ref would otherwise be invisible. Compare with `canonicalJson` — plain
+  `JSON.stringify` fails, because `jsonb` does not preserve key order and every
+  draft then reads as stale the instant it is generated.
+
+Only `intro_text` and `closing_text` are author-edited, as plain text; the
+question table is generated from the coverage rows. That is what makes the body
+and the coverage provably the same set, which is the guarantee the gate rests
+on. Do not add a whole-body HTML editor.
+
 ### The BWS export is a replacement
 
 - the export route (M3)
@@ -272,12 +305,13 @@ is the single most dangerous rule in the brief.
 - `.claude/launch.json` — how the dev server starts.
 - `.codex/config.toml` — `project_doc_fallback_filenames = ["CLAUDE.md"]`.
 
-Skills carried from `bw-app-kit`: `verify`, `new-migration`,
+Skills carried from the kit: `verify`, `new-migration`,
 `ship-to-staging`, `queue-backed-job`, `extraction-pipeline`,
 `review-and-confirm`, `email-draft-and-send-gate`,
-`external-vocabulary-sync`. If a skill goes stale, fix it in the app AND in
-the kit — a stale skill is followed confidently, which is worse than an absent
-one.
+`external-vocabulary-sync`. If a skill goes stale, fix it here and add a dated
+entry to `docs/kit/CHANGELOG.md` — a stale skill is followed confidently,
+which is worse than an absent one. There is no upstream kit to port to any
+more; that changelog is where the reasoning is kept for whoever starts app #3.
 
 ## Trust boundaries and data mutation
 
@@ -515,12 +549,15 @@ nobody has looked at yet.
 
 **In progress / next:**
 
-- Nothing. The next milestone has not been chosen. M4 (draft chase emails) is
-  the strongest candidate: it depends only on M1, `eml.ts` and the draft gates
-  are already in the chassis, and it turns a completion view into something
-  that saves an afternoon. M3 still cannot be TESTED — BWS access is
-  unresolved and the AI mirror's import/export does not work — and it carries
-  the wipe-the-fields risk.
+- **M4 — draft chase emails. Built locally, not yet pushed or deployed.**
+  `0005_chase_drafts.sql` applied to sandbox. Contacts, an outstanding-question
+  inventory grouped by designer, generate / edit / download `.eml` /
+  confirm-sent / undo-confirm, and a derived Waiting state on the spec table.
+  144 tests pass including a 14-case route-level narrative for the gate.
+  Outstanding: human acceptance, and opening a generated `.eml` in the real
+  Outlook client.
+- M2 (AI extraction) is next and is unblocked, but needs `ANTHROPIC_API_KEY` in
+  Vercel staging and a named owner for the Anthropic Console account.
 
 **Explicitly excluded for now:**
 
