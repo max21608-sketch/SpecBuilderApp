@@ -19,7 +19,7 @@
 // It deliberately does NOT: assign categories, resolve refs, deduplicate,
 // or write anything. It returns what the sheet said, with the row number it
 // said it on, so a reviewer can go and look.
-import type { SheetData } from "read-excel-file";
+import type { SheetData } from "read-excel-file/node";
 
 export type BoqLine = {
   /** 1-based row number in the source sheet, for "go and look at line 34". */
@@ -137,7 +137,7 @@ function readRows(
     // A row with neither a code nor a description is a spacer or a totals row.
     // Counted rather than silently dropped, so the reviewer is told.
     if (!itemDescription && !code) {
-      if (row.some((cell) => text(cell) !== null)) skippedRows += 1;
+      if (row.some((cell: unknown) => text(cell) !== null)) skippedRows += 1;
       continue;
     }
 

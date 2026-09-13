@@ -3,7 +3,7 @@
 // descriptions, a totals row) without carrying a single real line of client
 // data. Real BOQs stay in the gitignored reference folder.
 import { describe, it, expect } from "vitest";
-import type { SheetData } from "read-excel-file";
+import type { SheetData } from "read-excel-file/node";
 import { parseBoqSheets, normaliseRef } from "@/lib/boq-import";
 
 const HEADER = ["Designer", "Category", "Code", "Item Description", "Product Reference", "Total Qty Updated"];
