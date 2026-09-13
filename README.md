@@ -38,9 +38,12 @@ mean they ran.
 | `docs/environments.md` | Sandbox/staging vs production |
 | `docs/recovery.md` | When something is broken |
 | `db/README.md` | Migrations, seeds, backups, restores |
-
 | `docs/integration.md` | External integrations: scope, setup, activation |
 | `docs/plans/README.md` | Releases, dated decisions, what is still open |
+| `docs/kit/` | The folded-in app kit: chassis provenance and its changelog |
 
-Started from `bw-app-kit`. Fixes that belong upstream get ported back
-deliberately — this is a fork point, not a dependency.
+Started from `bw-app-kit`, a shared fork point for Ben Whistler apps. That kit
+was folded into `docs/kit/` on 2026-09-13 and there is no sibling repository to
+work from any more — everything is here. Fixes that would once have been
+ported upstream are recorded as dated entries in `docs/kit/CHANGELOG.md`, for
+whoever starts the next app.

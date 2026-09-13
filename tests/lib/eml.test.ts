@@ -1,6 +1,6 @@
 // Pure unit tests for the .eml builder -- no DB/network cost.
 import { describe, expect, it } from "vitest";
-import { buildEml, encodeHeaderValue, quotedPrintableEncode } from "@/lib/eml";
+import { buildEml, encodeHeaderValue, formatAddress, quotedPrintableEncode } from "@/lib/eml";
 
 describe("quotedPrintableEncode", () => {
   it("encodes multi-byte UTF-8 characters (emoji, bullet, curly apostrophe)", () => {
@@ -111,5 +111,79 @@ describe("buildEml", () => {
     const eml = buildEml({ ...base, from: "Lenate\r\n\r\nInjected body <lenate@benwhistler.com>" });
     const [headerBlock] = eml.split("\r\n\r\n");
     expect(headerBlock).toContain("Content-Transfer-Encoding: quoted-printable");
+  });
+});
+
+describe("buildEml — Cc", () => {
+  const base = {
+    from: "Max de Groot <max@benwhistler.com>",
+    to: "Tristan Auer <studio@example.test>",
+    subject: "P17231 — outstanding specification information",
+    body: "Good morning,",
+    format: "html" as const,
+    date: new Date("2026-09-13T09:00:00Z"),
+  };
+
+  it("emits a Cc header immediately after To", () => {
+    const headerBlock = buildEml({ ...base, cc: "p17231@benwhistler.com" }).split("\r\n\r\n")[0] ?? "";
+    const lines = headerBlock.split("\r\n");
+    const toIndex = lines.findIndex((l) => l.startsWith("To:"));
+    expect(lines[toIndex + 1]).toBe("Cc: p17231@benwhistler.com");
+  });
+
+  // An empty `Cc:` is not the same as no Cc -- some clients render it as a
+  // blank recipient chip the sender then has to delete.
+  it("emits no Cc header at all when there is no copied recipient", () => {
+    for (const cc of [undefined, "", "   "]) {
+      const eml = buildEml({ ...base, cc });
+      expect(eml.split("\r\n\r\n")[0]).not.toContain("Cc:");
+    }
+  });
+
+  it("does not let a CRLF in the Cc value inject a header", () => {
+    const eml = buildEml({ ...base, cc: "p17231@benwhistler.com\r\nBcc: attacker@example.test" });
+    const headerBlock = eml.split("\r\n\r\n")[0] ?? "";
+    expect(headerBlock.split("\r\n").some((line) => line.startsWith("Bcc:"))).toBe(false);
+    expect(headerBlock).toContain("Cc: p17231@benwhistler.com Bcc: attacker@example.test");
+  });
+});
+
+describe("formatAddress", () => {
+  it("returns a bare mailbox when there is no display name", () => {
+    expect(formatAddress(null, "a@b.test")).toBe("a@b.test");
+    expect(formatAddress("  ", "a@b.test")).toBe("a@b.test");
+  });
+
+  it("leaves a plain ASCII name unquoted", () => {
+    expect(formatAddress("Tristan Auer", "ta@example.test")).toBe("Tristan Auer <ta@example.test>");
+  });
+
+  // The reason this function exists: a bare comma splits one recipient into
+  // two, the second of them malformed.
+  it("quotes a name containing a comma so it stays ONE recipient", () => {
+    expect(formatAddress("Lecoadic, Scotto", "lcs@example.test")).toBe('"Lecoadic, Scotto" <lcs@example.test>');
+  });
+
+  it("escapes quotes and backslashes inside a quoted name", () => {
+    expect(formatAddress('A "B" \\ C,', "x@y.test")).toBe('"A \\"B\\" \\\\ C," <x@y.test>');
+  });
+
+  it("RFC 2047-encodes a non-ASCII name rather than quoting it", () => {
+    const formatted = formatAddress("Bérénice Lécoadic", "bl@example.test");
+    expect(formatted).toMatch(/^=\?utf-8\?B\?/);
+    expect(formatted.endsWith("<bl@example.test>")).toBe(true);
+    // An encoded-word is not permitted inside a quoted string.
+    expect(formatted).not.toContain('"');
+    expect(/^[\x20-\x7e]*$/.test(formatted)).toBe(true);
+  });
+
+  it("strips CR/LF from both halves", () => {
+    const formatted = formatAddress("A\r\nBcc: x@y.test", "good@z.test\r\nBcc: q@r.test");
+    expect(formatted).not.toContain("\r");
+    expect(formatted).not.toContain("\n");
+  });
+
+  it("returns an empty string when there is no address to format", () => {
+    expect(formatAddress("Someone", "")).toBe("");
   });
 });

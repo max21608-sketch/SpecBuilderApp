@@ -21,7 +21,7 @@ export default async function DashboardPage() {
     <div className="max-w-3xl mx-auto px-4 py-10">
       <h1 className="text-xl font-semibold text-neutral-900">Project Spec Builder</h1>
       <p className="mt-2 text-sm text-neutral-600">
-        No screens yet. M1 adds the spec table and the completion view.
+        Start from Projects: import a BOQ, work through the spec table, then chase what is outstanding.
       </p>
 
       <dl className="mt-8 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white text-sm">

@@ -68,6 +68,18 @@ down stops someone assuming a safety net that is not there.
   no backup. Inherited from the kit and not yet fixed.
 - **No production environment.** Not created, not authorized.
 - **No automated backups.** `db/backup.mjs` is run by a human, or not at all.
+- **No proof that a chase email was sent.** The app generates a `.eml`; the
+  human sends it in Outlook and then tells the app they did. What is
+  guaranteed is narrower: the email body and the recorded coverage are the same
+  set of questions, and every one of them was unchanged at the moment the send
+  was recorded. If the sender edits the message in Outlook, the app cannot know.
+- **No token or cost recording on model calls** (M2, when it exists). The model
+  name and the raw response are kept; the usage block inside that response is
+  never read back for accounting, and there is no cost dashboard.
+- **No exactly-once guarantee on model spend** (M2). A claim stops two
+  deliveries billing concurrently, but a failure after the provider accepted
+  the work cannot be distinguished from one before it. An ambiguous failure may
+  cost a second call.
 
 ## What runs on a schedule
 
