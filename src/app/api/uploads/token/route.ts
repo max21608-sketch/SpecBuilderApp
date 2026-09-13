@@ -27,6 +27,9 @@ export async function POST(request: Request): Promise<Response> {
       body,
       request,
       onBeforeGenerateToken: async () => ({
+        // Private, always: the store holds NDA-covered client documents and a
+        // public URL is access for anyone who has it.
+        access: "private" as const,
         allowedContentTypes: UPLOAD_CONTENT_TYPES,
         maximumSizeInBytes: MAX_UPLOAD_BYTES,
         addRandomSuffix: true,

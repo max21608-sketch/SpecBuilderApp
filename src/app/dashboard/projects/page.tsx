@@ -65,8 +65,11 @@ export default function ProjectsPage() {
       // checkable back against the document they came from.
       let res;
       try {
+        // The store is configured PRIVATE, and must stay that way: these are
+        // NDA-covered client documents, and a public blob URL is readable by
+        // anyone who has it. The server re-reads the blob with a bearer token.
         const blob = await upload(file.name, file, {
-          access: "public",
+          access: "private",
           handleUploadUrl: "/api/uploads/token",
         });
         res = await apiFetch<{ importId: string }>("/api/imports", {
