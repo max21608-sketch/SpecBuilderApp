@@ -447,3 +447,28 @@ checks cannot mean anything.
 
 `chassis/vercel.json` region pin, `chassis/src/app/dashboard/`, and the
 `start-new-app` ordering fix — all in `CHANGELOG.md` dated 2026-09-12.
+
+### Stage E attempted 2026-09-13: the build is fixed, the deploy path is not
+
+**The chassis had never actually been deployed.** Every push errored in
+Vercel's `vercel.json` schema validation, before any application code ran —
+`maxAttempts` is not a trigger key (it is `maxDeliveries`), and `queue/v2beta`
+does not accept a `consumer` (that is `queue/v1beta`). `lint`, `typecheck`,
+`test` and `build` all pass with an invalid `vercel.json`, so nothing short of
+a deployment could have caught it. Fixed here and in the kit.
+
+`4ff019f` then built and reached **READY**, in `lhr1` — the region pin works.
+
+**Stage E's checks still cannot be run**, and the reason is the one this plan
+predicted. With Production Branch still `main`, the push produced a *Preview*:
+
+| Evidence | Reading |
+|---|---|
+| deployment `target: null`, alias `spec-builder-app-git-staging-…` | Preview, not Production |
+| `spec-builder-app-rho.vercel.app/login` → 404 | nothing has ever claimed the alias |
+| `…-git-staging-….vercel.app/login` → 302 "Redirecting…" | Vercel Authentication in front of the app |
+| project env vars: `BLOB_STORE_ID`, `BLOB_WEBHOOK_PUBLIC_KEY` only | a Blob store was connected; the eight app variables are not set |
+
+So all four predicted consequences are now observed rather than argued. Stage E
+resumes the moment Production Branch is `staging` and the variables from
+`.env.vercel-staging` exist.
