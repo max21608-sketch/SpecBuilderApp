@@ -213,12 +213,13 @@ export async function extractSpecDocument(
   const deadline = AbortSignal.timeout(MODEL_DEADLINE_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
 
-  let response: Awaited<ReturnType<ReturnType<typeof anthropicStream>>>;
+  let response: Awaited<ReturnType<ReturnType<typeof anthropicStream>>>["message"];
+  let requestId: string | null = null;
   try {
     // Streamed, and then awaited whole. A multi-minute high-effort run over a
     // long document is exactly the shape of request that a non-streaming call
     // has no way to keep alive.
-    response = await anthropicStream(anthropic)({
+    const streamed = await anthropicStream(anthropic)({
       model: EXTRACTION_MODEL,
       max_tokens: MAX_TOKENS,
       thinking: { type: "adaptive" },
@@ -228,11 +229,11 @@ export async function extractSpecDocument(
       messages: [{ role: "user", content }],
       signal,
     });
+    response = streamed.message;
+    requestId = streamed.requestId;
   } catch (cause) {
     return classifyTransportFailure(cause, elapsed());
   }
-
-  const requestId = (response as { _request_id?: string | null })._request_id ?? null;
 
   // Truncation is terminal. A tool call cut off mid-object is not a thin
   // answer; it is an unparseable one, and the same document will truncate again.
@@ -285,11 +286,19 @@ export async function extractSpecDocument(
 
 // Isolated so a test can see exactly which call is made, and so the streaming
 // shape stays in one place.
+//
+// The request id comes off the STREAM, not off the final message. A verification
+// run on 2026-09-13 recorded `requestId: null` for a perfectly good extraction:
+// `finalMessage()` resolves to an assembled Message, and the non-enumerable
+// `_request_id` that a plain (non-streamed) response carries is not on it. The
+// id is the only handle anyone has when asking the provider about a bad
+// extraction, so it is read from `stream.request_id` and returned explicitly.
 function anthropicStream(anthropic: Anthropic) {
   return async (params: Parameters<typeof anthropic.messages.stream>[0] & { signal?: AbortSignal }) => {
     const { signal, ...body } = params;
     const stream = anthropic.messages.stream(body, signal ? { signal } : undefined);
-    return stream.finalMessage();
+    const message = await stream.finalMessage();
+    return { message, requestId: stream.request_id ?? null };
   };
 }
 

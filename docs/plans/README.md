@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Scaffold | `bw-app-kit` Part 2 plan | — | Built 2026-09-12 |
 | M1 — spec table and completion view | `part-2/` plan + this log | — | **Shipped to staging 2026-09-13** |
-| M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | **Step C complete 2026-09-13**, no model ever called. Step D (first real document) not started |
+| M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | **Built and deployed 2026-09-13.** API verified with one approved synthetic document. A real pilot schedule has not been read, and no human has used the review screen |
 | M3 — BWS CSV export (complete dataset) | — | M1; a way to test an import | Named only |
 | M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **Pushed to `staging` 2026-09-13** (`2eb58b3`). No human acceptance; no `.eml` opened in Outlook |
 | M5 — shared-inbox ingestion | `docs/integration.md` | Entra app + scoped mailbox | Named only |
@@ -226,6 +226,54 @@ reader whether the decision still applies.
     notes"), so `find` silently broke a real tie — the exact failure that
     module's own header forbids. It now returns every exact match.
 
+## Step D evidence — the first real model call, 2026-09-13
+
+One approved synthetic document. Invented refs and finishes, a throwaway
+project, deleted afterwards; no client material was sent. Repeatable with
+`VERIFY_MODEL=1` and `tests/manual/verify-model.test.ts`, which is gated off by
+default because it spends money.
+
+**API compatibility confirmed** against `@anthropic-ai/sdk` 0.110.0 and
+`claude-sonnet-5`: `thinking: { type: "adaptive" }` + `output_config: { effort:
+"high" }` + a forced `tool_choice` + a NON-strict tool schema using `anyOf` for
+nullable enums, streamed and awaited with `finalMessage()`. All accepted.
+
+| Measure | Value |
+|---|---|
+| Source | 7-row CSV FF&E schedule, 380 bytes |
+| Input / output tokens | 2,146 / 1,013 |
+| Model elapsed | 8.4s |
+| Wall clock incl. blob + registers | 9.6s |
+| Requests billed | **1** (`maxRetries: 0` holds) |
+| Proposals returned | 7, one per source row |
+
+**Every safety rule held against real model output**, not a fixture: a literal
+`TBC` became `tbc` and not `confirmed`; `N/A` became `na` with no value;
+"Walnut veneer satin lacquer TBC" got NO state and a blocker asking which it
+is; the two conflicting `Leg finish` rows were BOTH kept rather than one
+winning; and `QA-999`, a ref in no bill of quantities, resolved to no record
+rather than a plausible neighbour. The model's own `documentNotes` named the
+conflict and the unknown ref unprompted.
+
+**One defect found and fixed by this run.** `requestId` came back null for a
+perfectly good extraction: `stream.finalMessage()` resolves to an assembled
+Message, and the non-enumerable `_request_id` that a plain response carries is
+not on it. The id is the only handle anyone has when asking the provider about
+a bad extraction. It is now read from `stream.request_id`.
+
+**The finding that decides the next step: 1 of 7 attributes matched a
+requirement.** Only "Main timber finish" resolved, because it is a cheat-sheet
+question verbatim. "Leg finish", "Seat fabric" and "Piping" matched nothing and
+produced no candidates — the register simply has no question phrased that way.
+Record resolution, by contrast, was 6/6.
+
+That is exactly the shape of decision 10, where BOQ category matching went from
+5/59 to 56/59 on seeded aliases while a lower cutoff would have turned "no
+match" into "confidently wrong". `requirement_aliases` exists and is empty.
+**It cannot be seeded from here**: the rule is verified pilot wording only, and
+inventing aliases would be a confident wrong match wearing a seed file's
+authority. Seeding it needs the real FF&E schedules and cheat sheets.
+
 ## Still open
 
 Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
@@ -242,6 +290,11 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
 3. **Keeping `spec_fields` in sync with BWS** — mechanism and cadence
    undecided. The `external-vocabulary-sync` skill covers the *how*; the *who*
    and *when* do not exist. Waiting on Matthew.
+3b. **`requirement_aliases` is empty, and attribute matching is weak without
+   it.** Measured at 1/7 on the synthetic sample above. Needs the real FF&E
+   schedules and cheat sheets so aliases can be seeded from wording somebody has
+   actually verified. Until then a reviewer places most attributes by hand from
+   the question dropdown, which works but is the slow path.
 4. **TOE dates for P17231 are stale, and `specs_agreed_by` has never had a
    value.** The overview screen (2026-09-13) is now the way to enter them, and
    the order and delivery dates from the project context (17/02/2026,

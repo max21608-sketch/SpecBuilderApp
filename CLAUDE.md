@@ -668,12 +668,18 @@ nobody has looked at yet.
   tool/Zod schemas; the proposal resolver; the queue producer, claim protocol
   and fenced worker; the BOQ `record_no` race fix; the stable-id autosave; the
   review screen; and the single confirm boundary. 265 tests pass with 0 skipped.
-- **M2 step D — not started, and it is the one that spends money.** Deploy the
-  schema and consumer BEFORE enabling the producer UI, then one approved small
-  document to verify API compatibility, shape, persistence and timing, then a
-  representative pilot schedule judged by hand. A successful API response is not
-  extraction quality. Needs a named owner for the Anthropic Console account and
-  `ANTHROPIC_API_KEY` confirmed in Vercel staging.
+- **M2 step D — API verified 2026-09-13 with ONE approved synthetic document.**
+  `claude-sonnet-5` accepted the exact parameter combination; every safety rule
+  held against real model output; one request billed. Evidence and token counts
+  are in `docs/plans/README.md`. `tests/manual/verify-model.test.ts` repeats it,
+  gated on `VERIFY_MODEL=1` because it spends money.
+
+  **What remains is judgement, not code.** A representative pilot schedule read
+  and compared against its source pages by hand — expected vs extracted, misses,
+  wrong values, unresolved matches. A successful API response is not extraction
+  quality, and the KAM has to find the review useful before more documents
+  follow. `requirement_aliases` is empty and attribute matching measured 1/7 on
+  the sample; seed it only from verified pilot wording.
 
 **Deferred, with the reason recorded:**
 
