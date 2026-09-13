@@ -61,11 +61,60 @@ It never silently flips. Already-confirmed is a 409 too.
 
 ## `undo-confirm` — the mirror
 
-Requires `version = snapshot_version + 1` **exactly** — the single bump that
-the confirm itself wrote. Anything else means a human edited the record after
-sending, and undoing would discard that edit. 409.
+### First ask WHICH kind of undo this is
 
-This makes a hard gate recoverable from a misclick without making it soft.
+The two are not variants of one rule; they rest on different premises.
+
+**Business-row undo** — confirming a send MUTATED the covered rows. Then require
+`version = snapshot_version + 1` **exactly**: that single bump is the one the
+confirm itself wrote, so anything else means a human edited the record after
+sending, and undoing would discard their edit. 409.
+
+**History-only undo** — confirming a send wrote NOTHING to the covered rows; it
+recorded that a question was asked. There is no bump to count, and demanding one
+is cargo-culting a rule whose premise does not hold. Undo voids the draft,
+preserves the sent content and every earlier chase, and leaves every answer
+alone. A replacement is a NEW draft, not an edit of the voided one.
+
+Prefer history-only where you can. A `chased_at` column on the answer looks
+simpler and is not: any update fires the version trigger, so marking a question
+chased silently invalidates every extraction snapshot pointing at that answer —
+for a reason that has nothing to do with the answer — and writes a communication
+event into a business record. Derive "waiting for a reply" instead: a question is
+waiting when it is still outstanding and some sent, tracking-eligible coverage
+row still matches it.
+
+Either way this makes a hard gate recoverable from a misclick without making it
+soft.
+
+## Staleness compares CONTEXT, not only versions
+
+Version columns cover only the tables that have them. If the question text, the
+reference or the recipient can change in a table with no version, comparing
+versions alone misses an edited prompt or a corrected ref entirely. Snapshot the
+rendered context too and compare it.
+
+Compare it with a CANONICAL serialization. Plain `JSON.stringify` fails, because
+`jsonb` does not preserve key order and every draft then reads as stale the
+instant it is generated.
+
+## Only prose is editable; the covered set is generated
+
+Let an author edit an opening and a closing as PLAIN TEXT. Generate the table of
+questions from the coverage rows. That is what makes the body and the coverage
+provably the same set, which is the guarantee the whole send gate rests on — and
+it is why there is no whole-body HTML editor. A sanitizer written as
+"defense-in-depth for a single-tenant tool" is not a sanitizer.
+
+Editing the coverage and editing the prose are one operation, so the two can
+never drift apart between requests.
+
+## Navigation guards, and what they do not cover
+
+A `beforeunload` handler plus an anchor-click interceptor covers a reload, a
+close and a link. It does NOT cover the browser Back button, a framework's
+programmatic navigation, or a Cancel that routes. Say so where the hook is
+defined, so nobody takes it for complete protection of an unsaved draft.
 
 ## A gate whose upstream is not ready
 

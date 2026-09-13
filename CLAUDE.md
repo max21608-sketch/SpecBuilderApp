@@ -311,6 +311,91 @@ M2's extraction snapshots are taken against. And a **null `specs_agreed_by`
 means "no programme", not "not overdue"** — both the overview and the spec table
 have to say so in words, or an empty programme renders as a healthy one.
 
+### A staged proposal is addressed by UUID, never by position
+
+- `src/lib/spec-document.ts`, `src/app/api/imports/[id]/route.ts`,
+  `src/lib/confirm-spec-document.ts`
+
+The BOQ's staged lines are a fixed positional list — nothing is added or
+removed, so an index is a stable address. **Extraction proposals are not.**
+Reviewing one changes the set the screen is filtering, so "the proposal at index
+4" means a different row before and after an Ignore. Every operation locates by
+`elem.id` in the live, locked JSON.
+
+Reviewed proposals **stay in `lines`** with `reviewStatus` flipped. Keeping them
+is what removes array compaction, a second reviewed array, an inverted restore
+guard, and restore-by-reinsertion — all at once.
+
+Each proposal carries **its own version**. The run's coarse version is bumped by
+every autosave on every row, so predicating an edit on it would make two people
+editing two different rows conflict for no reason.
+
+**Blockers are computed, never stored.** A retarget clears an overwrite
+acknowledgement and a duplicate-target clash appears and disappears as other
+proposals move, so a blocker frozen into the JSON at extraction time is stale by
+the first edit — and the screen and the confirm route would then disagree about
+whether a card can commit. `proposalBlockers()` is called by both.
+
+### The record is the unit of commit, and a half-applied card is the failure
+
+- `src/lib/confirm-spec-document.ts`, `src/app/api/imports/[id]/confirm/route.ts`
+
+One confirm request names ONE record and ALL of its currently pending assigned
+proposals with the versions the reviewer saw. The server checks that set against
+the live grouping, so a proposal added or retargeted into the record since the
+page loaded refuses the request rather than letting it commit a card the reviewer
+never saw whole.
+
+Any failure rolls back everything. Three finishes written and the fourth refused
+looks finished, and the missing one is invisible until somebody notices the
+answer is wrong.
+
+`status = 'confirmed'` on an intake run means **no pending proposals remain** —
+applied or explicitly ignored. Label it *Review complete*, never "complete":
+settled answers are a different question. Restore accepts **ignored only**; an
+applied proposal is immutable history, and undoing an answer is something a
+person does on the record screen, on purpose.
+
+### An extraction attempt is owned by two identifiers
+
+- `src/lib/extraction-claim.ts`, `src/lib/extraction-run.ts`,
+  `src/app/api/imports/[id]/extract/route.ts`
+
+`attempt_id` is a logical attempt; `claim_token` is one worker invocation inside
+it. Both are needed: a hard-killed worker leaves a claim that expires, a later
+delivery reclaims the same attempt with a NEW token, and if the "dead" worker was
+only slow its writes must then match nothing. Every worker write is fenced on
+`(runId, attemptId, claimToken)` plus the status it expects, and **zero rows
+means ownership was lost** — stop; never escalate that into a terminal failure.
+
+A live claim is a **busy** outcome and it THROWS. Acking a duplicate delivery
+would spend the delivery that recovery depends on.
+
+The timings are an inequality, not three knobs: model deadline < run abort <
+`maxDuration`; claim expiry > `maxDuration`; visibility timeout > claim expiry.
+`tests/lib/extraction-timing.test.ts` asserts each, and asserts them against
+`vercel.json`. There is **no exactly-once billing guarantee**; an ambiguous
+failure can cost a second call, and the UI says so before a human restarts one.
+
+### Never fetch a client-supplied URL with a store credential
+
+- `src/lib/blob-source.ts`, `src/app/api/uploads/token/route.ts`,
+  `src/app/api/imports/route.ts`
+
+M1 took a `url` from the request body and fetched it with
+`Bearer BLOB_READ_WRITE_TOKEN`. Being signed in did not make that safe — the
+token is the store's, not the user's.
+
+The fix is not a better URL check: it is never accepting a URL. A blob is
+addressed by **pathname**, which the store resolves against its own host from the
+token, so there is no host to influence and no redirect to follow. Pathnames are
+scoped to `projects/<projectId>/`, and that scope is checked three times — at
+token issue, at registration, and on every read — because a check in only one of
+them is a check the other two skipped.
+
+The import type is likewise **declared, never inferred**. A BOQ and an FF&E
+schedule are both `.xlsx`; a file extension identifies bytes, not a workflow.
+
 ### The BWS export is a replacement
 
 - the export route (M3)
@@ -577,16 +662,26 @@ nobody has looked at yet.
   confirm-sent / undo-confirm, and a derived Waiting state on the spec table.
   Outstanding: human acceptance, and opening a generated `.eml` in the real
   Outlook client.
-- **M2 step C — started 2026-09-13.** The project overview screen
-  (`/dashboard/projects/[id]`) is built: identity under the optimistic lock,
-  the shared inbox's first UI, the three TOE dates, contacts in their canonical
-  home, the project's documents, and the Overdue state those dates unlock on
-  the spec table. Next in step C: migration `0006`, the proposal resolver,
-  stable-id PATCH, the review UI and the confirm boundary — all against
-  synthetic fixtures, no paid call.
-- M2 step D (the queue, the model wrapper, the first real document) still needs
-  a named owner for the Anthropic Console account, and `ANTHROPIC_API_KEY`
-  confirmed in Vercel staging.
+- **M2 step C — complete 2026-09-13, never having called a model.** The project
+  overview screen; migration `0006` (spec-document intake, attempt ownership,
+  `requirement_aliases`); the blob trust boundary; the model wrapper and its
+  tool/Zod schemas; the proposal resolver; the queue producer, claim protocol
+  and fenced worker; the BOQ `record_no` race fix; the stable-id autosave; the
+  review screen; and the single confirm boundary. 265 tests pass with 0 skipped.
+- **M2 step D — not started, and it is the one that spends money.** Deploy the
+  schema and consumer BEFORE enabling the producer UI, then one approved small
+  document to verify API compatibility, shape, persistence and timing, then a
+  representative pilot schedule judged by hand. A successful API response is not
+  extraction quality. Needs a named owner for the Anthropic Console account and
+  `ANTHROPIC_API_KEY` confirmed in Vercel staging.
+
+**Deferred, with the reason recorded:**
+
+- **`project_materials`.** M2 preserves a material reference on the answer as
+  the document wrote it. The register is not built, because the same client code
+  (`MOR005`) means different things on different projects and one guessed from
+  extraction output would be confidently wrong. Build it when extraction is
+  actually producing codes that need resolving.
 
 **Explicitly excluded for now:**
 

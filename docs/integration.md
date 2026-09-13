@@ -75,7 +75,7 @@ person:
 - [ ] A message sent to the project inbox appears as a staged record.
 - [ ] The original `.eml` is preserved as an attachment row, not just parsed
       text — the source artifact is the evidence.
-- [ ] No `spec_values` row changed as a result of ingestion. Staging only.
+- [ ] No `spec_answers` row changed as a result of ingestion. Staging only.
 - [ ] `Get-ApplicationAccessPolicy` reports **`InScope=True`** for
       `p17231@benwhistler.com` **and `InScope=False` for an unrelated
       mailbox.** Both directions, or the test proves nothing.

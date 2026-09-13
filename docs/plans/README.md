@@ -6,16 +6,18 @@
 |---|---|---|---|
 | Scaffold | `bw-app-kit` Part 2 plan | — | Built 2026-09-12 |
 | M1 — spec table and completion view | `part-2/` plan + this log | — | **Shipped to staging 2026-09-13** |
-| M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | **Step C started 2026-09-13** — the project overview screen is built; the extraction pipeline is not |
+| M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | **Step C complete 2026-09-13**, no model ever called. Step D (first real document) not started |
 | M3 — BWS CSV export (complete dataset) | — | M1; a way to test an import | Named only |
 | M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **Pushed to `staging` 2026-09-13** (`2eb58b3`). No human acceptance; no `.eml` opened in Outlook |
 | M5 — shared-inbox ingestion | `docs/integration.md` | Entra app + scoped mailbox | Named only |
 | M6 — VE rounds, TG0 A/B/C sign-off | — | a settled gate model | Named only |
 
 M3, M5 and M6 are named so they are not built speculatively. M1 is shipped;
-M4 is pushed and awaiting human acceptance; M2 is under way at step C, which
-needs no key and makes no paid call. Step D (the queue, the model wrapper and
-the first real document) still needs a named Anthropic Console owner.
+M4 is pushed and awaiting human acceptance; M2's whole pipeline is built and
+tested without a single model call. What remains is step D — deploy the schema
+and consumer before enabling the producer, then one approved small document,
+then a representative pilot schedule judged by hand. That still needs a named
+Anthropic Console owner.
 
 ## Decisions taken 2026-09-12
 
@@ -171,6 +173,58 @@ reader whether the decision still applies.
     overview (its canonical home) and the chase screen (the bootstrap case: a
     fresh project has nobody to chase and no draft to hang a contact off). Two
     forms would drift, and the one that drifted would be the one used less.
+
+## Decisions taken 2026-09-13 (M2 step C, the extraction pipeline)
+
+29. **One staging table, not two.** M2 extends `intake_runs` rather than adding
+    `document_extractions` beside it, and migration 0006 says why: two staging
+    tables mean two confirm routes, and the second one is always the one that
+    forgets a guard. The kit's `extraction-run.ts` comments told an app to
+    CREATE that second table; that advice is now recorded as wrong in
+    `docs/kit/CHANGELOG.md`.
+30. **One new intake status.** `queued` only. `parsing` was already the
+    in-flight value and `parsed` the staged one; adding `processing`/`extracted`
+    alongside them would give one table two vocabularies for one lifecycle.
+31. **`attempt_id` AND `claim_token`.** They look redundant. The first is a
+    logical attempt and fences a superseded delivery; the second is one worker
+    invocation, so a hard-killed worker whose request is still in flight writes
+    zero rows after a later delivery reclaims. Neither alone does both jobs.
+32. **A live claim is `busy` and the worker THROWS.** Acking a duplicate
+    delivery spends the delivery that recovery depends on: by the next one,
+    either the work is done and that delivery skips cheaply, or the claim has
+    expired and that delivery is the recovery.
+33. **No URL is ever accepted from a client.** M1 fetched a request-body `url`
+    with `Bearer BLOB_READ_WRITE_TOKEN`. The fix is not a better URL check but
+    never taking a URL: a blob is addressed by pathname, resolved by the store
+    against its own host, scoped to `projects/<id>/` and checked at token issue,
+    at registration and on every read.
+34. **The import type is declared, never inferred.** A BOQ and an FF&E schedule
+    are both `.xlsx`. Inferring would eventually feed a schedule to the BOQ
+    parser and create a project's worth of wrong records from a document that
+    was never a bill.
+35. **The model returns observations only** — no record id, no requirement id,
+    no answer state. Resolving `SX11A` is not a language problem: it appears
+    twice in the pilot BOQ, and a model asked to choose will choose confidently
+    and be right half the time. `confirmed` versus `tbc` is likewise an
+    operational decision that belongs in tested code, not a prompt.
+36. **Prompts are static literals, one per document kind.** Nothing is
+    interpolated — no registers, no vocabulary. A prompt built from seed data
+    cannot be unit-tested and drifts silently the moment the seed changes.
+37. **`maxRetries: 0` on the SDK.** The queue owns retries. The SDK retries
+    twice by default, and ×4 deliveries is up to 12 paid calls where at most 4
+    are intended.
+38. **Proposals are keyed by server-generated UUID; reviewed rows stay in
+    `lines`.** Reviewing one changes the set the screen filters, so a position
+    is not an address. Keeping reviewed rows removes compaction, a second array,
+    an inverted restore guard and restore-by-reinsertion at once.
+39. **Blockers are computed on every read, never stored.** A retarget clears an
+    acknowledgement and a duplicate-target clash comes and goes as other rows
+    move; a stored blocker would be stale by the first edit, and the screen and
+    the confirm route would disagree about whether a card can commit.
+40. **`matchName`'s exact-name path returned the FIRST candidate.** Found by a
+    test on 2026-09-13. Two requirements legitimately share a prompt ("Other
+    notes"), so `find` silently broke a real tie — the exact failure that
+    module's own header forbids. It now returns every exact match.
 
 ## Still open
 

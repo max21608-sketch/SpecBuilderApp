@@ -11,6 +11,69 @@ beside it for why. Entries below this line were written while the kit was a
 separate repository; entries above it are recorded here instead of being
 ported upstream, because there is no longer an upstream to port to.
 
+## 2026-09-13 — what building M2 (document extraction) found in the chassis
+
+All of these are applied in this app. They are recorded here because a future
+app forking from this one would otherwise inherit the original faults.
+
+- **The chassis told an app to create a SECOND staging table.** The `M2:`
+  comments in `extraction-run.ts` said to create `document_extractions` and
+  named its columns. Following that advice gives an app two staging tables and
+  therefore two confirm routes — and the `review-and-confirm` skill forbids that
+  outright, because the second route is always the one that forgets a guard. The
+  advice should have been: RENAME this file's statements onto the app's existing
+  generic intake table. `intake_runs` in this app was written generic for exactly
+  that, and 0002 says so.
+
+- **The claim protocol had one identifier where it needs two.** The chassis
+  claimed on `status` plus a stale-processing window. That stops two deliveries
+  claiming at the same moment, but it does not stop a worker whose claim EXPIRED
+  while its request was still in flight from landing its writes on top of the
+  worker that legitimately reclaimed after it. `attempt_id` (a logical attempt)
+  plus `claim_token` (one invocation) fences both, and every write carries both.
+
+- **An unexpired claim was a successful no-op.** A duplicate delivery that found
+  a live claim returned `skipped` and the message was acked. That spends the
+  delivery recovery depends on: if the live worker is then killed, nothing comes
+  back to reclaim it. It is now `busy`, and busy throws.
+
+- **Exhaustion could kill a live run.** `recordExtractionFailure` was predicated
+  only on the non-terminal statuses, so the last delivery of a duplicated
+  message could mark an attempt failed while another invocation was mid-run and
+  already paid for. It is now fenced on the attempt and on the claim having
+  expired.
+
+- **The retriable blob read caught `fetch()` but not `arrayBuffer()`.** The body
+  read throws separately, and it was outside the try.
+
+- **`/api/imports` fetched a client-supplied URL with `Bearer
+  BLOB_READ_WRITE_TOKEN`.** A signed-in user could point it at any host and the
+  server handed over a store-wide credential. The fix is not a better URL check
+  but never taking a URL: blobs are addressed by pathname, resolved by the store
+  against its own host, scoped to a project prefix that is checked at token
+  issue, at registration and on every read. This is the most serious defect the
+  chassis has shipped, and any app forked before today has it.
+
+- **`matchName`'s exact-name path used `find`.** It returned the first candidate
+  whose normalised name matched and discarded the rest — a silent tie-break, in
+  the one module whose header says never to make one. Two register rows
+  legitimately share a name. It now returns every exact match, so a tie stays a
+  tie.
+
+- **The timing constants were scattered and unasserted.** `maxDuration`,
+  `visibilityTimeoutSeconds`, the stale window and the model deadline are an
+  INEQUALITY, not four independent numbers, and two of them also live in
+  `vercel.json`. They are now one module with a test that asserts the
+  relationships and checks them against the deployed trigger.
+
+- **Nothing said the transaction helper was required for real rollback.** A
+  batch API taking a pre-built array of statements cannot evaluate a guard and
+  abort, so every check runs before the transaction opens under read-committed.
+  `db-transaction.ts` exists for that; the skills now say when it is mandatory
+  rather than leaving it as a local convenience. It is worth porting only with
+  its Node-runtime and dependency caveats — do not silently change every app's
+  driver.
+
 ## 2026-09-13 — what building M4 (chase emails) found in the chassis and skills
 
 All of these are already applied or accounted for in this app. They are

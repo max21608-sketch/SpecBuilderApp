@@ -73,13 +73,28 @@ down stops someone assuming a safety net that is not there.
   guaranteed is narrower: the email body and the recorded coverage are the same
   set of questions, and every one of them was unchanged at the moment the send
   was recorded. If the sender edits the message in Outlook, the app cannot know.
-- **No token or cost recording on model calls** (M2, when it exists). The model
-  name and the raw response are kept; the usage block inside that response is
-  never read back for accounting, and there is no cost dashboard.
-- **No exactly-once guarantee on model spend** (M2). A claim stops two
-  deliveries billing concurrently, but a failure after the provider accepted
-  the work cannot be distinguished from one before it. An ambiguous failure may
-  cost a second call.
+- **No token or cost recording on model calls.** The model name, the raw
+  response and the usage block are stored in `model_metadata`, but nothing ever
+  reads them back for accounting and there is no cost dashboard. The only
+  ceiling is structural: four claims per attempt.
+- **No exactly-once guarantee on model spend.** A claim stops two deliveries
+  billing concurrently, but a failure after the provider accepted the work
+  cannot be distinguished from one before it. An ambiguous failure may cost a
+  second call, and the *Start again* action says so before a human takes it.
+- **No automatic dispatch recovery.** If a queue publish fails ambiguously the
+  run stays `queued` with a dispatch error and waits for a human to press
+  *Retry dispatch*. Nothing sweeps for stranded attempts on a schedule.
+- **No document chunking.** One document is one request. Over the size or page
+  limits it is rejected with a split-it instruction rather than silently read in
+  halves — halves that would each be missing the other's context.
+- **No canonical materials register.** M2 preserves a material reference on the
+  answer as the document wrote it. `project_materials` is deliberately not
+  built: the same client code (`MOR005`) means different things on different
+  projects, and a register guessed from extraction output would be confidently
+  wrong. Resolving codes is deferred until extraction is producing them.
+- **No structured page anchoring into the source document.** The reviewer gets
+  the page number the model reported and a link that opens the file; the app
+  does not scroll a viewer to that page.
 
 ## What runs on a schedule
 

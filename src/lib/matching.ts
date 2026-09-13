@@ -31,7 +31,7 @@ const SCORE_CUTOFF = 0.8;
 // wrong, so they are refused before scoring rather than ranked badly.
 // Note the scope: this is about matching an entity NAME (a supplier, a
 // material) where "TBC" means "nobody filled this in". It is unrelated to
-// spec_values.state, where `tbc` is a real, deliberate answer distinct from
+// spec_answers.state, where `tbc` is a real, deliberate answer distinct from
 // missing — see CLAUDE.md. Do not let the two meanings merge.
 export const NAME_DENYLIST = new Set<string>(["tbc", "n a", ""]);
 
