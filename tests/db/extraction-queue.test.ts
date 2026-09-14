@@ -58,7 +58,9 @@ vi.mock("@/lib/anthropic", () => ({
     }
     return {
       ok: true,
-      output: { proposals: [], documentNotes: "__QA notes" },
+      // The payload is discriminated by the SHAPE the model returned, so a
+      // caller that forgets to branch cannot read `proposals` off a drawing.
+      output: { outputKind: "observations", data: { proposals: [], documentNotes: "__QA notes" } },
       model: "__qa-model",
       rawResponse: { __qa: true },
       usage: { input_tokens: 1, output_tokens: 1 },

@@ -44,6 +44,7 @@ describeIfDb("chase drafts", () => {
   let projectId = "";
   let contactId = "";
   let categoryId = "";
+  let runId = "";
   let recordId = "";
   let requirementIds: string[] = [];
 
@@ -72,10 +73,18 @@ describeIfDb("chase drafts", () => {
     );
     categoryId = category.rows[0].id;
 
+    // Every record belongs to a run (0007).
+    const run = await client.query(
+      `insert into spec_runs (project_id, name, created_by, updated_by)
+       values ($1, '__QA Main run', 'qa', 'qa') returning id`,
+      [projectId],
+    );
+    runId = run.rows[0].id;
+
     const record = await client.query(
-      `insert into spec_records (project_id, record_no, status, category_id, item_description, designer, created_by, updated_by)
-       values ($1, 9001, 'active', $2, '__QA Armchair', 'qalcs', 'qa', 'qa') returning id`,
-      [projectId, categoryId],
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, designer, created_by, updated_by)
+       values ($1, $2, 9001, 'active', $3, '__QA Armchair', 'qalcs', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
     );
     recordId = record.rows[0].id;
 
@@ -111,6 +120,7 @@ describeIfDb("chase drafts", () => {
     await client.query(`delete from spec_answers where record_id = $1`, [recordId]);
     await client.query(`delete from spec_record_refs where project_id = $1`, [projectId]);
     await client.query(`delete from spec_records where project_id = $1`, [projectId]);
+    await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
     await client.query(`delete from project_contacts where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
     await client.end();

@@ -23,6 +23,7 @@
     "@vercel/blob": "^2.6.1",
     "@vercel/queue": "^0.4.0",
     "csv-parse": "^7.0.2",
+    "exceljs": "^4.4.0",
     "jose": "^5.9.6",
     "next": "^15.1.4",
     "pg": "^8.13.1",

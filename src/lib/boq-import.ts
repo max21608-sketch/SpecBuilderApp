@@ -6,15 +6,24 @@
 // read, and parsing back out of that would be inventing a second, worse CSV.
 // This works on `read-excel-file`'s positional rows instead.
 //
-// What it must survive, taken from the pilot project's real BOQ:
-//   * Three title rows and a blank row before the header. The header is found,
-//     never assumed to be row 1.
+// What it must survive, taken from the pilot projects' real BOQs:
+//   * Title rows and a blank row before the header. The header is found, never
+//     assumed to be row 1.
 //   * A client code that repeats. `SX11A` is two separate lines with different
 //     quantities, and they are two separate records. Nothing here deduplicates.
 //   * Free-text item descriptions ("Bench @entrance", "Chair @ desk",
 //     "Coffee Table incl GLASS"), which is why category matching happens later,
 //     against a human, rather than here.
 //   * Trailing blank rows, and stray totals rows with no code.
+//   * SEVERAL SHEETS THAT ARE ALL REAL. AP364 carries a mock-up run, a main run
+//     and a value-engineered run as tabs, with the SAME codes and DIFFERENT
+//     quantities. The old version returned on the first sheet with a header and
+//     dropped the rest with no warning anywhere — the reviewer saw a clean
+//     import of a third of their bill. Every sheet with a header is now staged,
+//     and each becomes a run.
+//   * PER-LEVEL QUANTITY COLUMNS (`L1`..`L6`) that must NOT be mistaken for the
+//     total. They are deliberately unlisted below, so they match no synonym and
+//     fall through; only `TOTAL Q-ty` is read.
 //
 // It deliberately does NOT: assign categories, resolve refs, deduplicate,
 // or write anything. It returns what the sheet said, with the row number it
@@ -27,25 +36,65 @@ export type BoqLine = {
   designer: string | null;
   /** The BOQ's own grouping word ("Furniture" / "Seating"), not our category. */
   boqCategory: string | null;
+  /** The area/zone column where the client's template has one ("Rooms"). */
+  area: string | null;
   /** The client's code. NOT unique — see the SX11A note above. */
   code: string | null;
   itemDescription: string;
   productReference: string | null;
   qty: number | null;
+  /** The unit of measure as written ("pcs"). Retained, not yet acted on. */
+  qtyUnit: string | null;
 };
 
-export type BoqParseResult =
-  | { ok: true; sheet: string; headerRow: number; lines: BoqLine[]; skippedRows: number }
-  | { ok: false; error: string };
+/**
+ * The rows ABOVE the header. They carry the revision, the date and the terms
+ * the whole run is priced under ("*All fabrics are COM and should not be
+ * included in the unit costs"). Retained verbatim: a value whose source
+ * caveats were thrown away at parse time is one nobody can re-check.
+ */
+export type BoqSheetMetadata = {
+  revision: string | null;
+  date: string | null;
+  notes: string[];
+};
 
-/** Header synonyms, normalised. The pilot BOQ uses the first of each. */
+export type StagedBoqSheet = {
+  sheetName: string;
+  /** Defaulted from the sheet name, edited by the reviewer, becomes the run. */
+  proposedRunName: string;
+  headerRow: number;
+  skippedRows: number;
+  ignored: boolean;
+  ignoredReason: string | null;
+  metadata: BoqSheetMetadata;
+  lines: BoqLine[];
+};
+
+/** The staged shape of a BOQ intake run. v1 held ONE sheet; 0007 upgraded it. */
+export type BoqDocument = {
+  schemaVersion: 2;
+  filename: string | null;
+  sourcePreserved: boolean;
+  sheets: StagedBoqSheet[];
+};
+
+export type BoqParseResult = { ok: true; sheets: StagedBoqSheet[] } | { ok: false; error: string };
+
+/**
+ * Header synonyms, normalised. `L1`..`L6` are absent on purpose: a per-level
+ * quantity is not the total, and a BOQ that put `L1` where `qty` looked for it
+ * would produce an order for a fraction of the job.
+ */
 const COLUMNS = {
   designer: ["designer"],
   boqCategory: ["category"],
-  code: ["code", "client ref", "client reference", "ref"],
+  area: ["area", "zone", "location"],
+  code: ["code", "ff&e code", "ffe code", "ff&e ref", "client ref", "client reference", "ref"],
   itemDescription: ["item description", "description", "item"],
   productReference: ["product reference", "product ref", "reference"],
-  qty: ["total qty updated", "total qty", "qty", "quantity"],
+  qty: ["total q-ty", "total qty updated", "total qty", "total quantity", "qty", "quantity"],
+  qtyUnit: ["unit", "uom", "unit of measure"],
 } as const;
 
 type ColumnKey = keyof typeof COLUMNS;
@@ -81,18 +130,80 @@ function mapHeader(row: readonly unknown[]): Partial<Record<ColumnKey, number>> 
     for (const [key, synonyms] of Object.entries(COLUMNS) as [ColumnKey, readonly string[]][]) {
       // First match wins: "Product Reference" must not be claimed by `code`'s
       // "reference" synonym once a real "Code" column has been seen.
-      if (found[key] === undefined && synonyms.includes(value)) found[key] = index;
+      if (found[key] === undefined && (synonyms as readonly string[]).includes(value)) found[key] = index;
     }
   });
   return REQUIRED.every((key) => found[key] !== undefined) ? found : null;
 }
 
+const LABEL_ONLY = /^(revision|rev|date)\s*[:\-]?\s*$/i;
+const LABEL_INLINE = /^(revision|rev|date)\s*[:\-]\s*(.+)$/i;
+
 /**
- * Parses the first sheet that looks like a BOQ. Multi-sheet workbooks are
- * common and the data is rarely on sheet 1.
+ * Reads the rows above the header.
+ *
+ * A client template writes `Revision:` in one cell and `0` in the NEXT one, so
+ * a single-cell regex finds the label and no value. Both the split form and the
+ * inline `Revision: 0` form are handled, and anything not consumed as a label
+ * or its value is kept as a note rather than dropped.
+ *
+ * The revision and the date stay STRINGS. "14-Sep-26" is whatever the client
+ * typed; parsing it into a date would hit the same trap as the TOE dates (a
+ * `date` read as local midnight renders the day before it in British Summer
+ * Time) for a value nothing computes with.
+ */
+function readMetadata(data: SheetData, headerIndex: number): BoqSheetMetadata {
+  const metadata: BoqSheetMetadata = { revision: null, date: null, notes: [] };
+
+  for (let rowIndex = 0; rowIndex < headerIndex; rowIndex += 1) {
+    const row = data[rowIndex];
+    if (!row) continue;
+    const cells = row.map((cell) => text(cell));
+
+    for (let i = 0; i < cells.length; i += 1) {
+      const cell = cells[i] ?? null;
+      if (cell === null) continue;
+
+      const inline = LABEL_INLINE.exec(cell);
+      if (inline) {
+        const key = (inline[1] ?? "").toLowerCase().startsWith("rev") ? "revision" : "date";
+        const value = (inline[2] ?? "").trim();
+        if (value !== "" && metadata[key] === null) metadata[key] = value;
+        continue;
+      }
+
+      if (LABEL_ONLY.test(cell)) {
+        const key = cell.toLowerCase().startsWith("rev") ? "revision" : "date";
+        // The value is the next non-empty cell on the same row, if there is one.
+        let value: string | null = null;
+        for (let j = i + 1; j < cells.length; j += 1) {
+          const next = cells[j] ?? null;
+          if (next !== null) {
+            value = next;
+            cells[j] = null; // consumed; do not also record it as a note
+            break;
+          }
+        }
+        if (value !== null && metadata[key] === null) metadata[key] = value;
+        if (value === null) metadata.notes.push(cell);
+        continue;
+      }
+
+      metadata.notes.push(cell);
+    }
+  }
+
+  return metadata;
+}
+
+/**
+ * Parses EVERY sheet that looks like a BOQ. Multi-sheet workbooks are the norm
+ * and each sheet is a run, not an alternative reading of one.
  */
 export function parseBoqSheets(sheets: { sheet: string; data: SheetData }[]): BoqParseResult {
   if (sheets.length === 0) return { ok: false, error: "The file has no sheets." };
+
+  const staged: StagedBoqSheet[] = [];
 
   for (const { sheet, data } of sheets) {
     for (let rowIndex = 0; rowIndex < data.length; rowIndex += 1) {
@@ -100,17 +211,22 @@ export function parseBoqSheets(sheets: { sheet: string; data: SheetData }[]): Bo
       if (!row) continue;
       const header = mapHeader(row);
       if (!header) continue;
-      return readRows(sheet, data, rowIndex, header);
+      staged.push(readRows(sheet, data, rowIndex, header));
+      break;
     }
   }
 
-  return {
-    ok: false,
-    error:
-      "Could not find a header row. A BOQ needs a row naming at least its code column " +
-      `(one of: ${COLUMNS.code.join(", ")}) and its description column ` +
-      `(one of: ${COLUMNS.itemDescription.join(", ")}).`,
-  };
+  if (staged.length === 0) {
+    return {
+      ok: false,
+      error:
+        "Could not find a header row on any sheet. A BOQ needs a row naming at least its code column " +
+        `(one of: ${COLUMNS.code.join(", ")}) and its description column ` +
+        `(one of: ${COLUMNS.itemDescription.join(", ")}).`,
+    };
+  }
+
+  return { ok: true, sheets: staged };
 }
 
 function readRows(
@@ -118,7 +234,7 @@ function readRows(
   data: SheetData,
   headerIndex: number,
   header: Partial<Record<ColumnKey, number>>,
-): BoqParseResult {
+): StagedBoqSheet {
   const at = (row: readonly unknown[], key: ColumnKey): unknown => {
     const index = header[key];
     return index === undefined ? null : row[index];
@@ -145,17 +261,57 @@ function readRows(
       lineNo: rowIndex + 1,
       designer: text(at(row, "designer")),
       boqCategory: text(at(row, "boqCategory")),
+      area: text(at(row, "area")),
       code,
       itemDescription: itemDescription ?? "",
       productReference: text(at(row, "productReference")),
       qty: quantity(at(row, "qty")),
+      qtyUnit: text(at(row, "qtyUnit")),
     });
   }
 
-  if (lines.length === 0) {
-    return { ok: false, error: `Found a header on sheet "${sheet}" but no rows under it.` };
+  // A header with nothing under it is a blank template tab. Staged as ignored
+  // rather than failing the workbook: one empty tab must not cost the reviewer
+  // the three real ones beside it.
+  const empty = lines.length === 0;
+
+  return {
+    sheetName: sheet,
+    proposedRunName: sheet,
+    headerRow: headerIndex + 1,
+    skippedRows,
+    ignored: empty,
+    ignoredReason: empty ? "No rows under the header." : null,
+    metadata: readMetadata(data, headerIndex),
+    lines,
+  };
+}
+
+/**
+ * Reads a staged BOQ run's `parsed` column as v2.
+ *
+ * v1 staged ONE sheet as `{sheet, lines, …}`; migration 0007 rewrote every
+ * stored row. This refuses anything else rather than guessing: a reader that
+ * supports two staged formats is a reader whose second format is exercised
+ * once a year and is wrong when it is.
+ */
+export function assertBoqV2(parsed: unknown): BoqDocument {
+  const doc = parsed as Partial<BoqDocument> | null;
+  if (!doc || typeof doc !== "object" || doc.schemaVersion !== 2 || !Array.isArray(doc.sheets)) {
+    throw new Error(
+      "This import was staged in an older format and cannot be reviewed. Upload the BOQ again.",
+    );
   }
-  return { ok: true, sheet, headerRow: headerIndex + 1, lines, skippedRows };
+  return doc as BoqDocument;
+}
+
+/** The sheets a confirm would actually act on. */
+export function activeSheets(doc: BoqDocument): StagedBoqSheet[] {
+  return doc.sheets.filter((sheet) => !sheet.ignored);
+}
+
+export function countLines(doc: BoqDocument): number {
+  return activeSheets(doc).reduce((total, sheet) => total + sheet.lines.length, 0);
 }
 
 /**

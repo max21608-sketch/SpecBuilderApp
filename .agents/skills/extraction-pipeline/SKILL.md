@@ -161,3 +161,25 @@ Verify the exact parameter combination against the INSTALLED SDK with one small
 approved sample before running a real document. A successful API response is
 also not extraction quality — that needs a human comparing output against source
 pages, and it is a separate, later step.
+
+## Resolve at read time when the output is register-independent
+
+Extraction proposals that will UPDATE an existing row need a target snapshot —
+the row's id, version and current value — taken in the worker, so the confirm
+can tell that somebody edited it underneath the reviewer.
+
+Observations that will INSERT a new row need no such thing. Their model output
+depends on no register at all, so resolution is a pure function that the review
+route and the confirm route both call, and neither stores.
+
+That difference is worth finding before you build, because it decides something
+visible: a document whose output is register-independent can be extracted
+BEFORE the document that creates its targets. Refusing to queue it forces the
+user into an order the post does not arrive in; re-extracting later spends a
+second model call for identical output. Resolve on read, and confirming the
+other document simply makes the targets appear.
+
+The cost is one extra guard: a target that appears between page load and confirm
+must REFUSE the request rather than being written to or skipped. Store the
+reviewer's decision as two lists — chosen and explicitly rejected — so a target
+they never saw is distinguishable from one they dropped.

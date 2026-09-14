@@ -32,6 +32,9 @@ function record(overrides: Partial<RecordEntry> = {}): RecordEntry {
     categoryId: "cat-uph",
     categoryName: "Armchairs, Benches, Stools, Sofas",
     refs: ["SX11A"],
+    boqCodes: ["SX11A"],
+    runId: "run-1",
+    runName: "Main run",
     version: 3,
     ...overrides,
   };

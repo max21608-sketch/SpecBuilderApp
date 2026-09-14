@@ -46,7 +46,9 @@ import {
   RUN_ABORT_MS,
   type ExtractionRunOutcome,
 } from "@/lib/extraction-claim";
-import type { DocumentKind } from "@/lib/spec-vocab";
+import { isRegisterFreeKind, type DocumentKind } from "@/lib/spec-vocab";
+import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { stagePreamble, type StagedPreamble } from "@/lib/preamble-document";
 
 const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
 
@@ -151,9 +153,25 @@ export async function runDocumentExtraction({
   // Deterministic resolution happens in code against these, never in the
   // prompt. Loading them first also means a register read failure costs
   // nothing — at this point no model has been called.
-  let registers;
+  //
+  // SKIPPED for the register-free kinds. A drawing observation and a preamble
+  // note both become NEW rows, so there is no existing value to snapshot and
+  // nothing to resolve against: those two resolve at review time instead, which
+  // is what lets a drawing set be extracted before its BOQ is confirmed. See
+  // the header of drawing-document.ts.
+  let registers: Awaited<ReturnType<typeof loadExtractionRegisters>> | null = null;
+  let fields: SpecFieldEntry[] = [];
   try {
-    registers = await loadExtractionRegisters(claim.projectId);
+    if (isRegisterFreeKind(claim.documentKind)) {
+      // The BWS register, for suggesting which field a callout fills. Small,
+      // fixed, and owned by BWS rather than by the project.
+      if (claim.documentKind === "shop_drawings") {
+        const fieldRows = await sql`select id, json_id, name from spec_fields order by sort_order`;
+        fields = fieldRows.map((row) => ({ id: String(row.id), jsonId: Number(row.json_id), name: String(row.name) }));
+      }
+    } else {
+      registers = await loadExtractionRegisters(claim.projectId);
+    }
   } catch (cause) {
     return await releaseAndThrow(claim, actor, message(cause));
   }
@@ -176,12 +194,32 @@ export async function runDocumentExtraction({
   }
 
   // ---- staging ------------------------------------------------------------
-  const staged: StagedSpecDocument = {
-    schemaVersion: PROPOSAL_SCHEMA_VERSION,
-    lines: resolveProposals(result.output.proposals, registers, randomUUID),
-    documentNotes: result.output.documentNotes,
-    filename: String(attachment.filename ?? ""),
-  };
+  // One staged shape per output shape. The kind chose the prompt, the tool and
+  // the schema together; it chooses the staging too, so a drawing can never be
+  // staged as a list of proposals no reviewer can display.
+  const filename = String(attachment.filename ?? "");
+  let staged: StagedSpecDocument | StagedDrawings | StagedPreamble;
+  let stagedCount: number;
+
+  if (result.output.outputKind === "drawing_items") {
+    const drawings = stageDrawings(result.output.data.items, fields, filename, result.output.data.documentNotes);
+    staged = drawings;
+    stagedCount = drawings.items.reduce((total, item) => total + item.observations.length, 0);
+  } else if (result.output.outputKind === "preamble_notes") {
+    const preamble = stagePreamble(result.output.data.notes, filename, result.output.data.documentNotes);
+    staged = preamble;
+    stagedCount = preamble.notes.length;
+  } else {
+    if (!registers) return await releaseAndThrow(claim, actor, "The registers were not loaded for this document.");
+    const document: StagedSpecDocument = {
+      schemaVersion: PROPOSAL_SCHEMA_VERSION,
+      lines: resolveProposals(result.output.data.proposals, registers, randomUUID),
+      documentNotes: result.output.data.documentNotes,
+      filename,
+    };
+    staged = document;
+    stagedCount = document.lines.length;
+  }
 
   try {
     const written = await sql`
@@ -194,7 +232,7 @@ export async function runDocumentExtraction({
             requestId: result.requestId,
             usage: result.usage,
             elapsedMs: result.elapsedMs,
-            proposals: staged.lines.length,
+            proposals: stagedCount,
           })}::jsonb,
           error = null,
           processing_started_at = null,

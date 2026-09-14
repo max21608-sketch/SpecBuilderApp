@@ -44,6 +44,15 @@ export type RecordEntry = {
   categoryId: string | null;
   categoryName: string | null;
   refs: string[];
+  /**
+   * The `boq_code` refs alone. A drawing's item code is a BOQ code, and
+   * matching it against every ref system would let a COS code or a job number
+   * that happens to read the same claim the drawing.
+   */
+  boqCodes: string[];
+  /** Which run (BOQ tab) this record belongs to. Drawings fan out across runs. */
+  runId: string;
+  runName: string;
   version: number;
 };
 
@@ -156,7 +165,7 @@ export function findRecordsByRef(refRaw: string | null, records: RecordEntry[]):
 
 // Wording that means "not decided yet". Deliberately tight: each of these is a
 // phrase that carries no specification content at all.
-const TBC_TOKENS = ["tbc", "t b c", "to be confirmed", "to be advised", "tba", "to follow", "to be issued"];
+export const TBC_TOKENS = ["tbc", "t b c", "to be confirmed", "to be advised", "tba", "to follow", "to be issued"];
 
 // Wording that means "this question does not apply". Tighter still. "None" is
 // NOT here: "None" for a piping fabric is a real answer, and reading it as

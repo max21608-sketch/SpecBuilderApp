@@ -16,6 +16,7 @@ describeIfDb("0002 spec model", () => {
   const client = new pg.Client({ connectionString: databaseUrl });
   let projectId = "";
   let categoryId = "";
+  let runId = "";
 
   beforeAll(async () => {
     await client.connect();
@@ -26,6 +27,14 @@ describeIfDb("0002 spec model", () => {
     projectId = project.rows[0].id;
     const category = await client.query(`select id from item_categories order by sort_order limit 1`);
     categoryId = category.rows[0].id;
+    // Every record belongs to a run (0007): a record on no run is on no tab and
+    // in no export scope.
+    const run = await client.query(
+      `insert into spec_runs (project_id, name, created_by, updated_by)
+       values ($1, '__QA Main run', 'qa', 'qa') returning id`,
+      [projectId],
+    );
+    runId = run.rows[0].id;
   });
 
   afterAll(async () => {
@@ -33,6 +42,7 @@ describeIfDb("0002 spec model", () => {
     await client.query(`delete from spec_record_refs where project_id = $1`, [projectId]);
     await client.query(`delete from status_history where entity_id in (select id::text::uuid from spec_records where project_id = $1)`, [projectId]).catch(() => undefined);
     await client.query(`delete from spec_records where project_id = $1`, [projectId]);
+    await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
     await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
     await client.end();
@@ -40,9 +50,9 @@ describeIfDb("0002 spec model", () => {
 
   async function makeRecord(recordNo: number, description: string): Promise<string> {
     const row = await client.query(
-      `insert into spec_records (project_id, record_no, category_id, item_description, created_by, updated_by)
-       values ($1, $2, $3, $4, 'qa', 'qa') returning id`,
-      [projectId, recordNo, categoryId, description],
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
+       values ($1, $2, $3, $4, $5, 'qa', 'qa') returning id`,
+      [projectId, runId, recordNo, categoryId, description],
     );
     return row.rows[0].id;
   }
@@ -192,22 +202,22 @@ describeIfDb("0002 spec model", () => {
     const parent = await makeRecord(909, "__QA Parent");
     await expect(
       client.query(
-        `insert into spec_records (project_id, record_no, category_id, item_description, parent_id, depth, created_by, updated_by)
-         values ($1, 910, $2, '__QA Child no reason', $3, 1, 'qa', 'qa')`,
-        [projectId, categoryId, parent],
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, created_by, updated_by)
+         values ($1, $2, 910, $3, '__QA Child no reason', $4, 1, 'qa', 'qa')`,
+        [projectId, runId, categoryId, parent],
       ),
     ).rejects.toThrow(/split_reason/);
 
     const child = await client.query(
-      `insert into spec_records (project_id, record_no, category_id, item_description, parent_id, depth, split_reason, created_by, updated_by)
-       values ($1, 911, $2, '__QA Child', $3, 1, 'fabric', 'qa', 'qa') returning id`,
-      [projectId, categoryId, parent],
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, split_reason, created_by, updated_by)
+       values ($1, $2, 911, $3, '__QA Child', $4, 1, 'fabric', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId, parent],
     );
     await expect(
       client.query(
-        `insert into spec_records (project_id, record_no, category_id, item_description, parent_id, depth, split_reason, created_by, updated_by)
-         values ($1, 912, $2, '__QA Grandchild', $3, 2, 'fabric', 'qa', 'qa')`,
-        [projectId, categoryId, child.rows[0].id],
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, split_reason, created_by, updated_by)
+         values ($1, $2, 912, $3, '__QA Grandchild', $4, 2, 'fabric', 'qa', 'qa')`,
+        [projectId, runId, categoryId, child.rows[0].id],
       ),
     ).rejects.toThrow(/depth/);
   });

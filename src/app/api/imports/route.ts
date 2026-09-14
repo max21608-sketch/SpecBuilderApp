@@ -40,7 +40,7 @@
 // path on something that cannot run in development would mean the import could
 // not be tested end to end without a tunnel.
 import { z } from "zod";
-import readExcelFile from "read-excel-file/node";
+import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind } from "@/lib/intake-source-types";
@@ -75,6 +75,9 @@ const Registration = z
     // Generated once per user action by the browser and reused across retries,
     // so a lost response cannot create a second run for one upload.
     registrationRequestId: UUID.optional(),
+    // The delivery this file arrived in. Optional: a single file uploaded on
+    // its own is still a perfectly good import.
+    batchId: UUID.optional(),
   })
   .strict();
 
@@ -101,6 +104,13 @@ export async function POST(request: Request): Promise<Response> {
 
   const project = await sql`select id from projects where id = ${input.projectId}`;
   if (!project[0]) return json({ ok: false, error: "No such project." }, 404);
+
+  // Checked against the project, not taken on trust: a batch id from another
+  // project would file this document under a pack it does not belong to.
+  if (input.batchId) {
+    const batch = await sql`select id from intake_batches where id = ${input.batchId} and project_id = ${input.projectId}`;
+    if (!batch[0]) return json({ ok: false, error: "No such intake batch on this project.", field: "batchId" }, 404);
+  }
 
   if (input.importType === "spec_document") return registerSpecDocument(input, user.email);
   return registerBlobBoq(input, user.email);
@@ -161,10 +171,10 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
 
       const run = await txn`
         insert into intake_runs
-          (project_id, attachment_id, source_kind, document_kind, status,
+          (project_id, attachment_id, batch_id, source_kind, document_kind, status,
            registration_request_id, created_by, updated_by)
-        values (${input.projectId}, ${attachment[0].id}, 'spec_document', ${input.documentKind}, 'pending',
-                ${input.registrationRequestId ?? null}, ${actor}, ${actor})
+        values (${input.projectId}, ${attachment[0].id}, ${input.batchId ?? null}, 'spec_document',
+                ${input.documentKind}, 'pending', ${input.registrationRequestId ?? null}, ${actor}, ${actor})
         returning id
       `;
       if (!run[0]) throw new Error("the import was not recorded");
@@ -179,10 +189,13 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
 
 // ---- BOQ, uploaded to the blob store ---------------------------------------
 async function registerBlobBoq(input: Registered, actor: string): Promise<Response> {
+  // A BOQ is a grid, and a client exports that grid as .xlsx or as .csv. The
+  // DECLARED import type is what says this file is a bill; the extension only
+  // says how to read its bytes. A PDF still cannot be one — it has no cells.
   const kind = intakeSourceKind(input.filename, input.contentType);
-  if (kind !== "xlsx") {
+  if (kind !== "xlsx" && kind !== "csv" && kind !== "tsv") {
     return json(
-      { ok: false, error: `A bill of quantities is read from .xlsx. "${input.filename}" is ${kind === "unsupported" ? "not a supported file" : `a .${kind} file`}.` },
+      { ok: false, error: `A bill of quantities is read from a spreadsheet. "${input.filename}" is ${kind === "unsupported" ? "not a supported file" : `a .${kind} file`}.` },
       400,
     );
   }
@@ -202,7 +215,10 @@ async function registerBlobBoq(input: Registered, actor: string): Promise<Respon
     returning id
   `;
 
-  return parseBoqInto(input.projectId, String(attachment[0]?.id), input.filename, blob.bytes, actor, true);
+  return parseBoqInto(input.projectId, String(attachment[0]?.id), input.filename, blob.bytes, actor, true, {
+    batchId: input.batchId ?? null,
+    contentType: blob.contentType || input.contentType || "",
+  });
 }
 
 // ---- BOQ, posted straight to this route ------------------------------------
@@ -211,6 +227,16 @@ async function registerDirectBoq(request: Request, actor: string): Promise<Respo
   const file = form.get("file");
   const projectId = String(form.get("projectId") ?? "");
   const importType = String(form.get("importType") ?? "boq");
+  const batchId = String(form.get("batchId") ?? "");
+
+  if (batchId) {
+    // This path keeps no original (there is no attachments row), and a document
+    // in a pack is one a reviewer will want to open against a drawing later.
+    return json(
+      { ok: false, error: "A document in an intake pack must be uploaded to the document store, so its original is kept." },
+      400,
+    );
+  }
 
   if (importType !== "boq") {
     // A specification document has no fallback path: it is read by a model
@@ -231,9 +257,9 @@ async function registerDirectBoq(request: Request, actor: string): Promise<Respo
   if (!projectId) return json({ ok: false, error: "projectId and a file are required." }, 400);
 
   const kind = intakeSourceKind(file.name, file.type);
-  if (kind !== "xlsx") {
+  if (kind !== "xlsx" && kind !== "csv" && kind !== "tsv") {
     return json(
-      { ok: false, error: `A bill of quantities is read from .xlsx. "${file.name}" is ${kind === "unsupported" ? "not a supported file" : `a .${kind} file`}.` },
+      { ok: false, error: `A bill of quantities is read from a spreadsheet. "${file.name}" is ${kind === "unsupported" ? "not a supported file" : `a .${kind} file`}.` },
       400,
     );
   }
@@ -253,10 +279,11 @@ async function parseBoqInto(
   bytes: Buffer,
   actor: string,
   sourcePreserved: boolean,
+  options: { batchId?: string | null; contentType?: string } = {},
 ): Promise<Response> {
   const run = await sql`
-    insert into intake_runs (project_id, attachment_id, source_kind, status, created_by, updated_by)
-    values (${projectId}, ${attachmentId}, 'boq_xlsx', 'parsing', ${actor}, ${actor})
+    insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, created_by, updated_by)
+    values (${projectId}, ${attachmentId}, ${options.batchId ?? null}, 'boq_xlsx', 'parsing', ${actor}, ${actor})
     returning id
   `;
   const runId = String(run[0]?.id);
@@ -265,7 +292,7 @@ async function parseBoqInto(
   // spreadsheet that will not parse never becomes parseable, so it is terminal
   // and says why.
   try {
-    const sheets = await readExcelFile(bytes);
+    const sheets = await readSpreadsheetSheets(bytes, filename, options.contentType ?? "");
     const parsed = parseBoqSheets(sheets);
     if (!parsed.ok) {
       await fail(runId, actor, parsed.error);
@@ -287,7 +314,7 @@ async function parseBoqInto(
       ...aliases.map((a) => ({ id: String(a.category_id), name: String(a.term) })),
     ];
 
-    const staged = parsed.lines.map((line, index) => {
+    const suggest = (line: { itemDescription: string }, index: number) => {
       const match = matchName(line.itemDescription, candidates);
       if (match.status === "confident") {
         return { index, ...line, categoryId: match.id, categoryStatus: "suggested", ignored: false };
@@ -306,24 +333,31 @@ async function parseBoqInto(
         };
       }
       return { index, ...line, categoryId: null, categoryStatus: "none", ignored: false };
-    });
+    };
+
+    // v2: every sheet with a header, each becoming a run at confirm. The line
+    // index is per sheet, so a PATCH addresses ['sheets', s, 'lines', i].
+    const stagedSheets = parsed.sheets.map((sheet) => ({
+      ...sheet,
+      lines: sheet.lines.map(suggest),
+    }));
+    const lineCount = stagedSheets.reduce((total, sheet) => total + (sheet.ignored ? 0 : sheet.lines.length), 0);
+    const skippedRows = parsed.sheets.reduce((total, sheet) => total + sheet.skippedRows, 0);
 
     await sql`
       update intake_runs
       set status = 'parsed',
           parsed = ${JSON.stringify({
-            sheet: parsed.sheet,
-            headerRow: parsed.headerRow,
-            skippedRows: parsed.skippedRows,
+            schemaVersion: 2,
             filename,
             sourcePreserved,
-            lines: staged,
+            sheets: stagedSheets,
           })}::jsonb,
           updated_by = ${actor}
       where id = ${runId}
     `;
     return json(
-      { ok: true, importId: runId, lines: staged.length, skippedRows: parsed.skippedRows, sourcePreserved },
+      { ok: true, importId: runId, lines: lineCount, sheets: stagedSheets.length, skippedRows, sourcePreserved },
       201,
     );
   } catch (cause) {

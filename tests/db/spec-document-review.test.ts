@@ -84,17 +84,25 @@ describeIfDb("spec document review", () => {
     requirementIds = reqs.rows.map((row: { id: string }) => row.id);
     requirementPrompts = reqs.rows.map((row: { prompt: string }) => row.prompt);
 
+    // Every record belongs to a run (0007).
+    const specRun = await client.query(
+      `insert into spec_runs (project_id, name, created_by, updated_by)
+       values ($1, '__QA Main run', 'qa', 'qa') returning id`,
+      [projectId],
+    );
+    runId = specRun.rows[0].id;
+
     const record = await client.query(
-      `insert into spec_records (project_id, record_no, status, category_id, item_description, created_by, updated_by)
-       values ($1, 9101, 'active', $2, '__QA Armchair', 'qa', 'qa') returning id`,
-      [projectId, categoryId],
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9101, 'active', $3, '__QA Armchair', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
     );
     recordId = record.rows[0].id;
 
     const other = await client.query(
-      `insert into spec_records (project_id, record_no, status, category_id, item_description, created_by, updated_by)
-       values ($1, 9102, 'active', $2, '__QA Sofa', 'qa', 'qa') returning id`,
-      [projectId, categoryId],
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9102, 'active', $3, '__QA Sofa', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
     );
     otherRecordId = other.rows[0].id;
 
@@ -115,9 +123,9 @@ describeIfDb("spec document review", () => {
     otherCategoryId = otherCategory.rows[0].id;
 
     const foreignCategoryRecord = await client.query(
-      `insert into spec_records (project_id, record_no, status, category_id, item_description, created_by, updated_by)
-       values ($1, 9103, 'active', $2, '__QA Cabinet', 'qa', 'qa') returning id`,
-      [projectId, otherCategoryId],
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9103, 'active', $3, '__QA Cabinet', 'qa', 'qa') returning id`,
+      [projectId, runId, otherCategoryId],
     );
     otherCategoryRecordId = foreignCategoryRecord.rows[0].id;
 
@@ -146,6 +154,7 @@ describeIfDb("spec document review", () => {
     ]);
     await client.query(`delete from spec_record_refs where project_id = $1`, [projectId]);
     await client.query(`delete from spec_records where project_id = $1`, [projectId]);
+    await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
     await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
     await client.query(`delete from attachments where entity_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
@@ -469,10 +478,16 @@ describeIfDb("spec document review", () => {
       `insert into projects (bws_project_number, name, created_by, updated_by)
        values ('__QA P90005', '__QA Elsewhere', 'qa', 'qa') returning id`,
     );
+    const foreignRun = await client.query(
+      `insert into spec_runs (project_id, name, created_by, updated_by)
+       values ($1, '__QA Elsewhere run', 'qa', 'qa') returning id`,
+      [otherProject.rows[0].id],
+    );
+    const foreignRunId = foreignRun.rows[0].id;
     const foreignRecord = await client.query(
-      `insert into spec_records (project_id, record_no, status, category_id, item_description, created_by, updated_by)
-       values ($1, 1, 'active', $2, '__QA Foreign', 'qa', 'qa') returning id`,
-      [otherProject.rows[0].id, categoryId],
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 1, 'active', $3, '__QA Foreign', 'qa', 'qa') returning id`,
+      [otherProject.rows[0].id, foreignRunId, categoryId],
     );
 
     const a = proposal({
@@ -488,6 +503,7 @@ describeIfDb("spec document review", () => {
 
     await client.query(`delete from spec_answers where record_id = $1`, [foreignRecord.rows[0].id]);
     await client.query(`delete from spec_records where project_id = $1`, [otherProject.rows[0].id]);
+    await client.query(`delete from spec_runs where project_id = $1`, [otherProject.rows[0].id]);
     await client.query(`delete from projects where id = $1`, [otherProject.rows[0].id]);
   });
 

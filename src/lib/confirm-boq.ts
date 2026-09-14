@@ -29,22 +29,24 @@
 // the check and the commit.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { normaliseRef } from "@/lib/boq-import";
+import { assertBoqV2, normaliseRef, type StagedBoqSheet } from "@/lib/boq-import";
 
 type StagedLine = {
   index: number;
   lineNo: number;
   designer: string | null;
   boqCategory: string | null;
+  area: string | null;
   code: string | null;
   itemDescription: string;
   productReference: string | null;
   qty: number | null;
+  qtyUnit: string | null;
   categoryId: string | null;
   ignored: boolean;
 };
 
-export type ConfirmBoqResult = { imported: number; projectId: string };
+export type ConfirmBoqResult = { imported: number; projectId: string; runIds: string[] };
 
 export async function confirmBoqImport(
   txn: TxnSql,
@@ -81,9 +83,13 @@ export async function confirmBoqImport(
   const projects = await txn`select id from projects where id = ${projectId} for update`;
   if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
-  const parsed = (run.parsed ?? null) as { lines: StagedLine[] } | null;
-  const lines = (parsed?.lines ?? []).filter((line) => !line.ignored);
-  if (lines.length === 0) {
+  const parsed = assertBoqV2(run.parsed);
+  const sheets = parsed.sheets.filter((sheet) => !sheet.ignored);
+  const lineCount = sheets.reduce(
+    (total, sheet) => total + (sheet.lines as StagedLine[]).filter((line) => !line.ignored).length,
+    0,
+  );
+  if (lineCount === 0) {
     throw new DomainConflictError("nothing_to_import", "Every line is ignored — there is nothing to import.", {
       status: 400,
     });
@@ -92,61 +98,106 @@ export async function confirmBoqImport(
   // 3. Re-checked server-side against live rows. NO MATCHING IS RE-RUN: what
   //    gets written is what the reviewer approved, not what a fresh match would
   //    produce now.
+  //
+  //    A line with NO CATEGORY is allowed through. Intake must not stall behind
+  //    a classification decision that belongs to a later stage: the record
+  //    exists, carries its refs and its drawing specs, and simply has no
+  //    checklist yet. It says so on the spec table rather than being refused
+  //    here. A category that names a row we do not have is still refused —
+  //    that is a stale screen, not a deferred decision.
   const categories = await txn`select id from item_categories`;
   const known = new Set(categories.map((row) => String(row.id)));
-  const uncategorised = lines.filter((line) => !line.categoryId || !known.has(line.categoryId));
-  if (uncategorised.length > 0) {
+  const unknownCategory = sheets.flatMap((sheet) =>
+    (sheet.lines as StagedLine[]).filter((line) => !line.ignored && line.categoryId && !known.has(line.categoryId)),
+  );
+  if (unknownCategory.length > 0) {
     throw new DomainConflictError(
-      "uncategorised",
-      `${uncategorised.length} line${uncategorised.length === 1 ? "" : "s"} still need a category. A record with no category cannot be measured for completeness.`,
-      { diff: uncategorised.map((line) => ({ index: line.index, lineNo: line.lineNo, code: line.code })) },
+      "unknown_category",
+      `${unknownCategory.length} line${unknownCategory.length === 1 ? "" : "s"} name a category that no longer exists. Reload the review and choose again.`,
+      { diff: unknownCategory.map((line) => ({ index: line.index, lineNo: line.lineNo, code: line.code })) },
     );
   }
 
-  // 4. Allocation, under the lock.
+  // 4. Allocation, under the lock. `record_no` stays project-wide across runs:
+  //    it is the label a person reads, and two records called P17231-014 in
+  //    different tabs would be indistinguishable in an export or an email.
   const startRows = await txn`
     select coalesce(max(record_no), 0) as max_no from spec_records where project_id = ${projectId}
   `;
   let nextNo = Number(startRows[0]?.max_no ?? 0);
 
-  for (const line of lines) {
-    nextNo += 1;
-    const recordNo = nextNo;
+  const sortRows = await txn`
+    select coalesce(max(sort_order), 0) as max_sort from spec_runs where project_id = ${projectId}
+  `;
+  let nextSort = Number(sortRows[0]?.max_sort ?? 0);
+  const runIds: string[] = [];
+  let imported = 0;
 
-    // `returning id` rather than re-selecting by record_no: the id is the key,
-    // and a follow-up select would be a second chance to pick the wrong row.
-    const inserted = await txn`
-      insert into spec_records
-        (project_id, record_no, status, category_id, item_description, product_reference, qty,
-         designer, area, source_import_id, source_line_no, created_by, updated_by)
+  for (const sheet of sheets as StagedBoqSheet[]) {
+    const lines = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
+    if (lines.length === 0) continue;
+
+    nextSort += 1;
+    // One run per sheet. The reviewer's name for it, not the tab's: a tab
+    // called "Feuil1" is not what anybody calls the run.
+    const runRow = await txn`
+      insert into spec_runs
+        (project_id, name, source_sheet, source_import_id, boq_revision, boq_date, header_notes,
+         sort_order, created_by, updated_by)
       values
-        (${projectId}, ${recordNo}, 'active', ${line.categoryId}, ${line.itemDescription},
-         ${line.productReference}, ${line.qty}, ${line.designer}, ${line.boqCategory},
-         ${runId}, ${line.lineNo}, ${actor}, ${actor})
+        (${projectId}, ${sheet.proposedRunName.trim() || sheet.sheetName}, ${sheet.sheetName}, ${runId},
+         ${sheet.metadata?.revision ?? null}, ${sheet.metadata?.date ?? null},
+         ${JSON.stringify(sheet.metadata?.notes ?? [])}::jsonb, ${nextSort}, ${actor}, ${actor})
       returning id
     `;
-    const recordId = String(inserted[0]?.id ?? "");
-    if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
+    const specRunId = String(runRow[0]?.id ?? "");
+    if (!specRunId) throw new Error(`sheet ${sheet.sheetName} produced no run`);
+    runIds.push(specRunId);
 
-    if (line.code) {
-      await txn`
-        insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)
-        values (${recordId}, ${projectId}, 'boq_code', ${line.code}, ${normaliseRef(line.code)}, 'BOQ import', ${actor})
+    for (const line of lines) {
+      nextNo += 1;
+      const recordNo = nextNo;
+
+      // `returning id` rather than re-selecting by record_no: the id is the key,
+      // and a follow-up select would be a second chance to pick the wrong row.
+      const inserted = await txn`
+        insert into spec_records
+          (project_id, run_id, record_no, status, category_id, item_description, product_reference, qty,
+           designer, area, boq_category, source_import_id, source_line_no, created_by, updated_by)
+        values
+          (${projectId}, ${specRunId}, ${recordNo}, 'active', ${line.categoryId ?? null}, ${line.itemDescription},
+           ${line.productReference}, ${line.qty}, ${line.designer},
+           ${line.area ?? line.boqCategory ?? null}, ${line.boqCategory ?? null},
+           ${runId}, ${line.lineNo}, ${actor}, ${actor})
+        returning id
       `;
+      const recordId = String(inserted[0]?.id ?? "");
+      if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
+
+      if (line.code) {
+        await txn`
+          insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)
+          values (${recordId}, ${projectId}, 'boq_code', ${line.code}, ${normaliseRef(line.code)}, 'BOQ import', ${actor})
+        `;
+      }
+
+      // Only where a category was chosen. An uncategorised record has no
+      // questions to be missing — the insert-select below writes nothing for it,
+      // and `PATCH /api/records/[id]` writes them when a category is set.
+      await txn`
+        insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
+        select ${recordId}, q.id, q.spec_field_id, 'missing', 'manual', ${actor}, ${actor}
+        from requirements q
+        join spec_records r on r.category_id = q.category_id
+        where r.id = ${recordId}
+      `;
+
+      await txn`
+        insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
+        values ('spec_record', ${recordId}, null, 'active', ${actor}, ${`Imported from BOQ line ${line.lineNo}`})
+      `;
+      imported += 1;
     }
-
-    await txn`
-      insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
-      select ${recordId}, q.id, q.spec_field_id, 'missing', 'manual', ${actor}, ${actor}
-      from requirements q
-      join spec_records r on r.category_id = q.category_id
-      where r.id = ${recordId}
-    `;
-
-    await txn`
-      insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
-      values ('spec_record', ${recordId}, null, 'active', ${actor}, ${`Imported from BOQ line ${line.lineNo}`})
-    `;
   }
 
   // 5. Predicated on 'parsed' still holding. Zero rows here is a guard result,
@@ -161,5 +212,5 @@ export async function confirmBoqImport(
     throw new DomainConflictError("already_confirmed", "This import was confirmed by someone else a moment ago.");
   }
 
-  return { imported: lines.length, projectId };
+  return { imported, projectId, runIds };
 }

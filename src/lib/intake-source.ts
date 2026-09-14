@@ -41,13 +41,22 @@ export function spreadsheetSheetsToText(sheets: { sheet: string; data: SheetData
   return text;
 }
 
-export async function prepareDocumentSource(bytes: Buffer, filename: string, contentType: string): Promise<DocumentSource> {
+/**
+ * A spreadsheet as positional rows, one entry per sheet.
+ *
+ * Shared by the two readers that must agree about what a workbook contains:
+ * the deterministic BOQ parser and the text flattener that feeds the model. A
+ * .csv becomes one pseudo-sheet named after the file — a BOQ is a BOQ whether
+ * the client exported it as a workbook or as a single comma-separated tab, and
+ * the declared import type, never the extension, is what says so.
+ */
+export async function readSpreadsheetSheets(
+  bytes: Buffer,
+  filename: string,
+  contentType: string,
+): Promise<{ sheet: string; data: SheetData }[]> {
   const kind = intakeSourceKind(filename, contentType);
-  if (kind === "pdf") return { type: "pdf", base64: bytes.toString("base64") };
-  if (kind === "xlsx") {
-    const sheets = await readExcelFile(bytes);
-    return { type: "spreadsheet", text: spreadsheetSheetsToText(sheets) };
-  }
+  if (kind === "xlsx") return readExcelFile(bytes);
   if (kind === "csv" || kind === "tsv") {
     const data = parse(textFromBytes(bytes), {
       delimiter: kind === "csv" ? "," : "\t",
@@ -55,7 +64,16 @@ export async function prepareDocumentSource(bytes: Buffer, filename: string, con
       relax_column_count: true,
       skip_empty_lines: false,
     }) as string[][];
-    return { type: "spreadsheet", text: spreadsheetSheetsToText([{ sheet: filename, data }]) };
+    return [{ sheet: filename, data }];
+  }
+  throw new Error("That file is not a spreadsheet. Upload an .xlsx, .csv or .tsv file.");
+}
+
+export async function prepareDocumentSource(bytes: Buffer, filename: string, contentType: string): Promise<DocumentSource> {
+  const kind = intakeSourceKind(filename, contentType);
+  if (kind === "pdf") return { type: "pdf", base64: bytes.toString("base64") };
+  if (kind === "xlsx" || kind === "csv" || kind === "tsv") {
+    return { type: "spreadsheet", text: spreadsheetSheetsToText(await readSpreadsheetSheets(bytes, filename, contentType)) };
   }
   throw new Error("Unsupported intake file. Upload a PDF, .xlsx, .csv or .tsv file.");
 }

@@ -1,0 +1,413 @@
+// Promoting reviewed drawing observations into canonical record attributes.
+//
+// ============================================================================
+// THE ITEM CARD IS THE UNIT OF COMMIT.
+//
+// The spec-document confirm names one RECORD, because a proposal there targets
+// exactly one. A drawing page targets several: one drawing of S-100 belongs to
+// the mock-up run, the main run and the VE run at once. The card the reviewer
+// reads is therefore the ITEM — one page, its observations, its target records
+// — and that is what commits, atomically.
+//
+// This is the same rule as "the record is the unit of commit", not an exception
+// to it: never commit a card the reviewer did not see whole. A page written to
+// two of its three runs looks finished and is not, and nothing downstream would
+// ever ask why the VE record has no fabric.
+//
+// TARGETS ARE RE-RESOLVED HERE, AND A NEW ONE REFUSES THE REQUEST.
+//
+// Resolution is live (see drawing-document.ts), so confirming the batch's BOQ
+// between page load and confirm can ADD a run. That new record is one the
+// reviewer never saw and never unticked, so the request fails with
+// `targets_changed` rather than quietly writing to it or quietly skipping it.
+//
+// spec_records.version IS NOT TOUCHED. Nothing on the record changes: an
+// attribute is its own row. Bumping the record would invalidate every M2
+// extraction snapshot and every chase coverage row taken against it, for a
+// reason that has nothing to do with them — the same trap as a `chased_at`
+// column.
+// ============================================================================
+import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
+import {
+  assertStagedDrawings,
+  drawingItemBlockers,
+  hasPendingObservations,
+  resolveDrawingTargets,
+  targetRecordIds,
+  type DrawingItem,
+  type DrawingObservation,
+  type StagedDrawings,
+} from "@/lib/drawing-document";
+import type { RecordEntry } from "@/lib/spec-document";
+
+export type ObservationRef = { id: string; version: number };
+
+export type DrawingsConfirmResult = {
+  applied: number;
+  ignored: number;
+  restored: number;
+  records: number;
+  remainingPending: number;
+  status: string;
+};
+
+type LoadedRun = { runId: string; projectId: string; staged: StagedDrawings };
+
+async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | null): Promise<LoadedRun> {
+  const rows = await txn`
+    select id, project_id, status, parsed, version, source_kind, document_kind
+    from intake_runs where id = ${runId}
+    for update
+  `;
+  const run = rows[0];
+  if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  if (run.document_kind !== "shop_drawings") {
+    throw new DomainConflictError("wrong_kind", "That import is not a set of shop drawings.", { status: 400 });
+  }
+  if (run.status !== "parsed" && run.status !== "confirmed") {
+    throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not ready to review.`);
+  }
+  if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
+    throw new DomainConflictError(
+      "import_version_stale",
+      "This import changed while you were reviewing it. Reload and check before confirming.",
+    );
+  }
+  return { runId: String(run.id), projectId: String(run.project_id), staged: assertStagedDrawings(run.parsed) };
+}
+
+/**
+ * The project's active records, with the run identity the fan-out needs.
+ *
+ * Read INSIDE the transaction so the resolution the confirm checks is the one
+ * that is true at commit, not the one the review screen was showing.
+ */
+async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[]> {
+  const rows = await txn`
+    select r.id, r.record_no, r.item_description, r.category_id, r.version,
+           r.run_id, run.name as run_name, p.bws_project_number,
+           coalesce((select array_agg(x.ref_value order by x.ref_value)
+                       from spec_record_refs x where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as boq_codes
+    from spec_records r
+    join projects p on p.id = r.project_id
+    join spec_runs run on run.id = r.run_id
+    where r.project_id = ${projectId} and r.status = 'active'
+    order by run.sort_order, r.record_no
+  `;
+  return rows.map((row) => ({
+    id: String(row.id),
+    recordNo: Number(row.record_no),
+    label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+    itemDescription: String(row.item_description),
+    categoryId: row.category_id ? String(row.category_id) : null,
+    categoryName: null,
+    refs: (row.boq_codes as string[] | null)?.map(String) ?? [],
+    boqCodes: (row.boq_codes as string[] | null)?.map(String) ?? [],
+    runId: String(row.run_id),
+    runName: String(row.run_name),
+    version: Number(row.version),
+  }));
+}
+
+/** Locate by id, never by position. Array index is display order, not identity. */
+function takeObservations(
+  item: DrawingItem,
+  refs: ObservationRef[],
+  allow: DrawingObservation["reviewStatus"][],
+): DrawingObservation[] {
+  const taken: DrawingObservation[] = [];
+  for (const ref of refs) {
+    const observation = item.observations.find((row) => row.id === ref.id);
+    if (!observation) {
+      throw new DomainConflictError("observation_missing", "One of these specs is no longer part of this import. Reload.");
+    }
+    if (!allow.includes(observation.reviewStatus)) {
+      throw new DomainConflictError(
+        "observation_reviewed",
+        `“${observation.labelRaw ?? "That spec"}” has already been ${observation.reviewStatus}. Reload to see the current state.`,
+      );
+    }
+    if (observation.version !== ref.version) {
+      throw new DomainConflictError(
+        "observation_version_stale",
+        `“${observation.labelRaw ?? "One of these specs"}” was edited in another tab. Reload before confirming.`,
+      );
+    }
+    taken.push(observation);
+  }
+  return taken;
+}
+
+function findItem(staged: StagedDrawings, itemId: string): DrawingItem {
+  const item = staged.items.find((row) => row.id === itemId);
+  if (!item) throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
+  return item;
+}
+
+async function writeStaged(txn: TxnSql, run: LoadedRun, actor: string, items: DrawingItem[]): Promise<string> {
+  const staged: StagedDrawings = { ...run.staged, items };
+  // `confirmed` means NO PENDING OBSERVATIONS REMAIN — applied or explicitly
+  // ignored. It does not mean every spec of every item is settled, which is why
+  // the screen labels it "Review complete".
+  const status = hasPendingObservations(staged) ? "parsed" : "confirmed";
+  const rows = await txn`
+    update intake_runs
+    set parsed = ${JSON.stringify(staged)}::jsonb,
+        status = ${status},
+        confirmed_at = ${status === "confirmed" ? new Date().toISOString() : null},
+        updated_by = ${actor}
+    where id = ${run.runId}
+    returning id
+  `;
+  if (!rows[0]) throw new Error("the import was not updated");
+  return status;
+}
+
+function countPending(items: DrawingItem[]): number {
+  return items.reduce(
+    (total, item) => total + item.observations.filter((o) => o.reviewStatus === "pending").length,
+    0,
+  );
+}
+
+// ---- confirm ---------------------------------------------------------------
+
+export async function confirmDrawingItem(
+  txn: TxnSql,
+  {
+    runId,
+    expectedVersion,
+    itemId,
+    itemVersion,
+    observations: refs,
+    actor,
+  }: {
+    runId: string;
+    expectedVersion: number | null;
+    itemId: string;
+    itemVersion: number;
+    observations: ObservationRef[];
+    actor: string;
+  },
+): Promise<DrawingsConfirmResult> {
+  const run = await loadRun(txn, runId, expectedVersion);
+  const item = findItem(run.staged, itemId);
+  if (item.version !== itemVersion) {
+    throw new DomainConflictError(
+      "item_version_stale",
+      "This item's targets changed while you were reviewing it. Reload before confirming.",
+    );
+  }
+
+  const records = await loadRecords(txn, run.projectId);
+  const resolution = resolveDrawingTargets(item.itemCodeRaw, records);
+  const targets = targetRecordIds(item, resolution);
+
+  // The card-changed guard, in its fan-out form. A record the live resolution
+  // suggests that the reviewer neither ticked nor unticked is one that appeared
+  // after the page loaded — a BOQ confirmed in between.
+  const decided = new Set([...(item.targets?.ticked ?? []), ...(item.targets?.unticked ?? [])]);
+  if (item.targets) {
+    const appeared = resolution.suggested.filter((recordId) => !decided.has(recordId));
+    if (appeared.length > 0) {
+      throw new DomainConflictError(
+        "targets_changed",
+        `This item now also appears in ${appeared.length} record${appeared.length === 1 ? "" : "s"} you have not seen. Reload and choose which runs this drawing applies to.`,
+        { diff: appeared },
+      );
+    }
+  }
+
+  // The set the reviewer submitted must be exactly the item's live pending set.
+  const pendingIds = item.observations.filter((o) => o.reviewStatus === "pending").map((o) => o.id);
+  const submitted = new Set(refs.map((ref) => ref.id));
+  if (pendingIds.length !== submitted.size || pendingIds.some((id) => !submitted.has(id))) {
+    throw new DomainConflictError(
+      "card_changed",
+      "The specs on this item changed while you were reviewing it. Reload before confirming.",
+    );
+  }
+
+  const taken = takeObservations(item, refs, ["pending"]);
+  if (taken.length === 0) {
+    throw new DomainConflictError("nothing_to_apply", "There is nothing pending on this item.", { status: 400 });
+  }
+
+  // Blockers are recomputed here, never trusted from the screen. `occupied` is
+  // read live so a slot filled by another card a second ago is caught.
+  const occupied = new Map<string, Set<string>>();
+  if (targets.length > 0) {
+    const occupiedRows = await txn`
+      select record_id, spec_field_id from record_attributes
+      where record_id = any(${targets}::uuid[]) and status = 'active' and spec_field_id is not null
+    `;
+    for (const row of occupiedRows) {
+      const set = occupied.get(String(row.record_id)) ?? new Set<string>();
+      set.add(String(row.spec_field_id));
+      occupied.set(String(row.record_id), set);
+    }
+  }
+  const blockers = drawingItemBlockers(item, resolution, occupied);
+  if (blockers.length > 0) {
+    throw new DomainConflictError("blocked", blockers[0]?.message ?? "This item cannot be confirmed yet.", {
+      diff: blockers,
+    });
+  }
+
+  // Locked in a deterministic order. Two item cards fanning out to overlapping
+  // records would otherwise be able to deadlock against each other.
+  const ordered = [...targets].sort();
+  const locked = await txn`
+    select id, project_id, status from spec_records
+    where id = any(${ordered}::uuid[])
+    order by id
+    for update
+  `;
+  if (locked.length !== ordered.length) {
+    throw new DomainConflictError("record_missing", "One of the target records no longer exists. Reload.");
+  }
+  for (const row of locked) {
+    if (String(row.project_id) !== run.projectId) {
+      throw new DomainConflictError("wrong_project", "A target record belongs to another project.", { status: 400 });
+    }
+    if (String(row.status) !== "active") {
+      throw new DomainConflictError("record_not_active", "A target record is no longer active. Reload.");
+    }
+  }
+
+  const attributeIdsByObservation = new Map<string, string[]>();
+  const now = new Date().toISOString();
+
+  for (const recordId of ordered) {
+    const sortRows = await txn`
+      select coalesce(max(sort_order), 0) as max_sort from record_attributes where record_id = ${recordId}
+    `;
+    let sortOrder = Number(sortRows[0]?.max_sort ?? 0);
+
+    for (const observation of taken) {
+      sortOrder += 1;
+      const inserted = await txn`
+        insert into record_attributes
+          (record_id, attr_group, label, value, unit, material_code, spec_field_id, state,
+           source_run_id, source_page, sort_order, created_by, updated_by)
+        values
+          (${recordId}, ${observation.attrGroup}, ${observation.labelRaw ?? observation.attrGroup},
+           ${observation.value},
+           ${observation.unit}, ${observation.materialCodeRaw}, ${observation.specFieldId},
+           ${observation.state}, ${runId}, ${item.page}, ${sortOrder}, ${actor}, ${actor})
+        returning id
+      `;
+      const attributeId = String(inserted[0]?.id ?? "");
+      if (!attributeId) throw new Error(`observation ${observation.id} was not inserted`);
+      const list = attributeIdsByObservation.get(observation.id) ?? [];
+      list.push(attributeId);
+      attributeIdsByObservation.set(observation.id, list);
+    }
+
+    await txn`
+      insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
+      values ('spec_record', ${recordId}, null, 'active', ${actor},
+              ${`${taken.length} spec${taken.length === 1 ? "" : "s"} confirmed from ${run.staged.filename ?? "shop drawings"}${item.page ? ` page ${item.page}` : ""}`})
+    `;
+  }
+
+  const items = run.staged.items.map((row) =>
+    row.id !== itemId
+      ? row
+      : {
+          ...row,
+          version: row.version + 1,
+          targets: { ticked: ordered, unticked: row.targets?.unticked ?? [] },
+          observations: row.observations.map((observation) =>
+            attributeIdsByObservation.has(observation.id)
+              ? {
+                  ...observation,
+                  version: observation.version + 1,
+                  reviewStatus: "applied" as const,
+                  reviewedAt: now,
+                  reviewedBy: actor,
+                  applied: { attributeIds: attributeIdsByObservation.get(observation.id) ?? [] },
+                }
+              : observation,
+          ),
+        },
+  );
+
+  const status = await writeStaged(txn, run, actor, items);
+
+  await txn`
+    insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
+    values ('intake_run', ${runId}, 'parsed', ${status}, ${actor},
+            ${`${taken.length} spec${taken.length === 1 ? "" : "s"} applied to ${ordered.length} record${ordered.length === 1 ? "" : "s"}`})
+  `;
+
+  return {
+    applied: taken.length * ordered.length,
+    ignored: 0,
+    restored: 0,
+    records: ordered.length,
+    remainingPending: countPending(items),
+    status,
+  };
+}
+
+// ---- ignore and restore ----------------------------------------------------
+
+/**
+ * Every ignore is reversible; an APPLIED observation is not. Undoing a spec
+ * that reached a record is something a person does on the record screen, on
+ * purpose, where they can see what else is there.
+ */
+export async function reviewDrawingObservations(
+  txn: TxnSql,
+  {
+    runId,
+    expectedVersion,
+    itemId,
+    observations: refs,
+    action,
+    actor,
+  }: {
+    runId: string;
+    expectedVersion: number | null;
+    itemId: string;
+    observations: ObservationRef[];
+    action: "ignore" | "restore";
+    actor: string;
+  },
+): Promise<DrawingsConfirmResult> {
+  const run = await loadRun(txn, runId, expectedVersion);
+  const item = findItem(run.staged, itemId);
+  const taken = takeObservations(item, refs, action === "ignore" ? ["pending"] : ["ignored"]);
+  const now = new Date().toISOString();
+  const takenIds = new Set(taken.map((observation) => observation.id));
+
+  const items = run.staged.items.map((row) =>
+    row.id !== itemId
+      ? row
+      : {
+          ...row,
+          observations: row.observations.map((observation) =>
+            takenIds.has(observation.id)
+              ? {
+                  ...observation,
+                  version: observation.version + 1,
+                  reviewStatus: action === "ignore" ? ("ignored" as const) : ("pending" as const),
+                  reviewedAt: action === "ignore" ? now : null,
+                  reviewedBy: action === "ignore" ? actor : null,
+                }
+              : observation,
+          ),
+        },
+  );
+
+  const status = await writeStaged(txn, run, actor, items);
+  return {
+    applied: 0,
+    ignored: action === "ignore" ? taken.length : 0,
+    restored: action === "restore" ? taken.length : 0,
+    records: 0,
+    remainingPending: countPending(items),
+    status,
+  };
+}

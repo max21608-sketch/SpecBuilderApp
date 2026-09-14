@@ -7,8 +7,9 @@
 | Scaffold | `bw-app-kit` Part 2 plan | — | Built 2026-09-12 |
 | M1 — spec table and completion view | `part-2/` plan + this log | — | **Shipped to staging 2026-09-13** |
 | M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | **Built and deployed 2026-09-13.** API verified with one approved synthetic document. A real pilot schedule has not been read, and no human has used the review screen |
-| M3 — BWS CSV export (complete dataset) | — | M1; a way to test an import | Named only |
-| M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **Pushed to `staging` 2026-09-13** (`2eb58b3`). No human acceptance; no `.eml` opened in Outlook |
+| M3 — BWS-layout export (complete dataset) | this log, 2026-09-14 | M1 | **Built 2026-09-14** as a REVIEW file (no Id, no Job Number). Not verified against a real BWS import |
+| M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **HIDDEN 2026-09-14.** Code, routes and tests intact; entry points removed |
+| M7 — the intake rebuild | this log, 2026-09-14 | M1, M2 | **Built 2026-09-14** (`0007`). Packs, runs, drawing attributes, preamble notes, export. No human acceptance; no real drawing set extracted |
 | M5 — shared-inbox ingestion | `docs/integration.md` | Entra app + scoped mailbox | Named only |
 | M6 — VE rounds, TG0 A/B/C sign-off | — | a settled gate model | Named only |
 
@@ -319,6 +320,116 @@ carries real client filenames, revision dates and drive item IDs.
 7. **The folder template is consistent** across GR and Common Areas, which
    matters if the tool is ever to read project folders generically.
 
+## Decisions taken 2026-09-14 (the intake rebuild, migration 0007)
+
+The user redirected the build on 2026-09-14: nail down the INTAKE stage and
+park everything after it. Documents arrive as a pack, a BOQ has tabs, drawings
+carry the real specification content, and the output is an Excel file in the
+BWS job-spec layout. Chasing what is missing is a later stage.
+
+41. **A BOQ tab is a RUN, not a revision and not a project.** `MUR`, `MAIN RUN`
+    and a VE run quote the SAME codes at DIFFERENT quantities, and all three can
+    be live, quoted and ordered at once. They cannot be `spec_answers.
+    revision_no` (that is a VE alternative to one ANSWER, M6) and cannot be
+    separate projects (they share a client, a programme and a document set).
+    `spec_runs` it is, one tab each on the project screen.
+42. **`spec_records.run_id` is NOT NULL, backfilled one run per confirmed
+    import.** Not one per project: the SharePoint survey found two BOQs on the
+    pilot, and merging them would produce an export that claims to be one
+    complete dataset while being two half ones. A record on no run is on no tab
+    and in no export scope — invisible in exactly the way the `unclassified`
+    proposal diagnostic exists to prevent.
+43. **`parseBoqSheets` stages EVERY sheet with a header.** It used to return on
+    the first and drop the rest silently, so a three-tab bill imported as a
+    clean third of itself. `L1`..`L6` are deliberately absent from the header
+    synonyms: they are per-level quantities, and reading one as the total would
+    order 3 sofas instead of 14.
+44. **Drawing specs are `record_attributes`, not `spec_answers`.** A page gives
+    S-100 four dimensions, a fabric and a wood finish. `spec_answers` is one row
+    per (record, requirement, revision), the requirement must belong to the
+    record's category, and an uncategorised record has no questions at all — so
+    two fabrics on one page would collide on the unique key, and a dimension's
+    UNIT has no column to live in. The new table is multi-valued,
+    requirement-free and points straight at a BWS field.
+45. **The COM slot IS the BWS field.** Fabric 1 → `COM 1`, fabric 2 → `COM 2`;
+    wood 1 → `Main timber finish`, wood 2 → `Timber Finish 2`. A partial unique
+    index on `(record_id, spec_field_id)` where the row is active and not a
+    dimension stops two values quietly sharing a slot, which is how an export
+    loses one of them with no error anywhere. Dimensions are exempt: many of
+    them compose into the single `Dimensions` field by design.
+46. **A dimension with no printed unit gets NO unit and a blocker.** The AP364
+    pages mix centimetres (190/79/72, a sofa) and millimetres (550/735, a desk
+    chair) and print neither. `suggestUnit` offers one only when every figure on
+    the page agrees; a mixed page gets nothing. A wrong unit reads as a real
+    measurement and nothing downstream questions it.
+47. **The register-free kinds resolve at READ time, not in the worker.** A
+    spec-document proposal needs a target snapshot to detect a concurrent edit;
+    a drawing observation is an INSERT with no prior value, so its model output
+    depends on no register. Consequence, and it is a feature: a drawing set can
+    be extracted before its BOQ is confirmed, and confirming the bill later
+    resolves everything with no second model call. Refusing to queue would have
+    forced an order the post does not arrive in; re-extracting would have cost a
+    second call for identical output.
+48. **The unit of commit for drawings is the ITEM CARD, not the record.** One
+    drawing of S-100 belongs to three runs at once. The card the reviewer reads
+    is the page, so that is what commits atomically. Same purpose as "the record
+    is the unit of commit": never commit a card somebody did not see whole.
+49. **A code in several runs is a FAN-OUT; the same code twice in ONE run stays
+    ambiguous.** The first is one drawing of one item quoted three ways; the
+    second is the `SX11A` case, two different items sharing a code. A matcher
+    that ignores runs cannot tell them apart, so grouping by run is the whole of
+    `resolveDrawingTargets`.
+50. **Confirming an attribute does not touch `spec_records.version`.** The same
+    reasoning as decision 15: a bump would invalidate every extraction snapshot
+    and chase coverage row taken against the record for a reason unrelated to
+    them.
+51. **Category no longer blocks BOQ confirm, reversing a rule 0002 states.**
+    Intake must not stall behind a classification decision that belongs to a
+    later stage. This opened a gap — a record with no category could never
+    acquire one — which `PATCH /api/records/[id]` closes, creating the answer
+    rows in the same transaction. A category with no answers scores 0/0 and
+    reads as complete, the same error class as an empty programme reading as a
+    healthy one. Changing a category is still refused once anybody has answered
+    under the old one.
+52. **The export is never filtered, and the route enforces it.** Any query
+    parameter other than `runId` and `format` is a 400. A BWS import replaces
+    rather than merges, so "export only what changed" is the erasing case, and a
+    rule that lives only in a comment is one the next caller has already broken.
+53. **The export is a REVIEW file, not an import file.** No `Id`, no `Job
+    Number`: this app has never had BWS access and does not know them. BWS-owned
+    vocabularies (Category, Status, Lifecycle State, KAM, Routing) are left
+    BLANK rather than guessed — a guessed enum is either rejected on import or
+    accepted as a wrong classification. The second sheet lists every attribute
+    long-form, because flattening 56 columns loses the client's material code,
+    the source page, and the second and third dimensions of a slot.
+54. **The 109 export columns are a static constant, not a query.** Only the 56
+    spec fields and the 22 website/style columns carry json ids, so the list
+    cannot be derived from `spec_fields`; `Client Code` (136) is one of the
+    website ids. A test asserts its 56 spec ids equal the seeded ones, which is
+    what catches a BWS column insertion — every letter after it shifts while the
+    ids do not.
+55. **Preamble notes go to a NEW `project_notes` table.** The chassis `notes`
+    table is append-only by trigger, so a model that cut a nineteen-page
+    document in the wrong place would leave an uncorrectable note on the project
+    overview. These are retired, never deleted.
+56. **Two new document kinds under `source_kind = 'spec_document'`, not beside
+    it.** The whole claim protocol — the fenced worker UPDATE,
+    `intake_runs_attempt_shape_check`, the extract route — is keyed on that
+    value. A new source kind would have opted drawings out of every one of those
+    guards silently.
+57. **`.catch([])` removed from the drawing arrays.** It turned an over-long or
+    malformed array into an EMPTY one, so a page with 41 dimensions would stage
+    as a page with none and nothing anywhere would say so. `.default([])` still
+    covers a key the model omitted; a schema failure is terminal and reported.
+58. **Chase emails are hidden, not deleted.** M4 was finished and never
+    accepted; deleting it would throw away working, tested code. The screen
+    redirects and documents how to bring it back.
+59. **`exceljs` adds one new advisory chain** (`uuid`, moderate: a missing
+    buffer bounds check in v3/v5/v6 when a caller passes `buf`). exceljs does
+    not expose that argument, and the `npm audit fix` downgrades exceljs two
+    major versions. Accepted and recorded rather than silently carried; the
+    other eight findings are the pre-existing dev toolchain.
+
 ## Still open
 
 Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
@@ -367,10 +478,21 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
 9. **Blob retention.** Nothing in the application deletes an uploaded
    document, ever. M1 is the first real consumer of that store, so the gap is
    now live rather than theoretical. See `db/README.md`.
-10. **M4 has had no human acceptance.** Automated checks pass; nobody has used
-    it, and no generated `.eml` has been opened in the real Outlook client.
-    Until that happens, the claim that a human can send one of these is
-    untested.
+10. **M4 has had no human acceptance, and is now hidden.** Automated checks
+    pass; nobody has used it, and no generated `.eml` has been opened in the
+    real Outlook client. It was hidden on 2026-09-14 rather than deleted (see
+    decision 58), so that remains true and unresolved.
+10b. **The intake rebuild has had no human acceptance either.** Observed
+    2026-09-14. Four checks pass with the database tier running, and the browser
+    walkthrough exercised the screens; nobody who does this job has used it.
+    Critically, **no real drawing set has been through the model** — the prompts
+    and schemas are written against the AP364 pages but only synthetic fixtures
+    have exercised them. One real extraction judged by eye against its pages is
+    what decides whether intake is usable.
+10c. **The export has never been checked against a real BWS import.** Observed
+    2026-09-14. The 109 columns and the 56 spec ids are verified against the
+    reference export; which job columns BWS actually wants, and in what form, is
+    this repo's judgement.
 11. **Nobody owns the Anthropic Console account.** `ANTHROPIC_API_KEY` is set
     locally AND in Vercel staging as of 2026-09-13 (verified in the project's
     environment variables), so the key is no longer the blocker. The named

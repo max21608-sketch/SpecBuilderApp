@@ -1,25 +1,16 @@
 "use client";
 
-// Who gets chased, and the form to add them.
+// Who to ask about this project, and the form to add them.
 //
-// ONE component, mounted in TWO places, deliberately:
-//
-//   /dashboard/projects/[id]   the canonical home. Contacts are project data,
-//                              not chase data, and this is where you go to
-//                              look one up or add one outside a chase.
-//   /dashboard/drafts          the bootstrap case. A new project has records
-//                              with a designer code off the BOQ and nobody to
-//                              send anything to, so the chase screen has to let
-//                              you say who "LCS" is before any draft exists.
-//                              Hanging contact creation off a draft card would
-//                              be circular.
-//
-// Two forms in two files would drift, and the one that drifted would be the one
-// used less often.
+// Mounted on the project overview, which is the canonical home: contacts are
+// project data. It was also mounted on the chase screen, as the bootstrap case
+// — a new project has records carrying a designer code off the BOQ and nobody
+// to send anything to. That screen is hidden for now (see
+// src/app/dashboard/drafts/page.tsx); this component is unchanged and has no
+// dependency on it, so bringing it back needs no edit here.
 //
 // The email is OPTIONAL. Modelling "the LCS design team owe us these answers"
-// is useful before anyone has dug the address out of Outlook; the missing
-// address blocks recording a send, which is the right place for it.
+// is useful before anyone has dug the address out of Outlook.
 import { useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import { CONTACT_ROLES, type ContactRole } from "@/lib/spec-vocab";

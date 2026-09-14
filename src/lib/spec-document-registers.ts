@@ -22,16 +22,23 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
     select r.id, r.record_no, r.item_description, r.category_id, r.version,
            c.name as category_name,
            p.bws_project_number,
+           r.run_id, run.name as run_name,
            coalesce(
              (select array_agg(x.ref_value order by x.ref_value)
                 from spec_record_refs x where x.record_id = r.id),
              '{}'
-           ) as refs
+           ) as refs,
+           coalesce(
+             (select array_agg(x.ref_value order by x.ref_value)
+                from spec_record_refs x where x.record_id = r.id and x.ref_system = 'boq_code'),
+             '{}'
+           ) as boq_codes
     from spec_records r
     join projects p on p.id = r.project_id
+    join spec_runs run on run.id = r.run_id
     left join item_categories c on c.id = r.category_id
     where r.project_id = ${projectId} and r.status = 'active'
-    order by r.record_no
+    order by run.sort_order, r.record_no
   `;
 
   const records: RecordEntry[] = recordRows.map((row) => ({
@@ -42,6 +49,9 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
     categoryId: row.category_id ? String(row.category_id) : null,
     categoryName: row.category_name ? String(row.category_name) : null,
     refs: (row.refs as string[] | null)?.map(String) ?? [],
+    boqCodes: (row.boq_codes as string[] | null)?.map(String) ?? [],
+    runId: String(row.run_id),
+    runName: String(row.run_name),
     version: Number(row.version),
   }));
 

@@ -1,0 +1,383 @@
+// Composing the BWS job-spec layout from a project's records.
+//
+// ============================================================================
+// WHAT THIS FILE IS, AND IS NOT
+//
+// It is a REVIEW FILE. It carries no `Id` and no `Job Number`, because this app
+// has never had BWS access and does not know them. Nobody can import it back
+// into BWS as it stands, and nothing here should pretend otherwise: BWS is
+// read/download only, forever, and an export that looked importable would be
+// the first step towards a code path that writes to it.
+//
+// THE EXPORT IS ALWAYS THE COMPLETE DATASET FOR ITS SCOPE.
+//
+// A BWS import REPLACES the job's fields; it does not merge. So a partial
+// export silently wipes every field it omits, which makes "export only the
+// records that changed" the most dangerous feature anyone could ask for here.
+// The scope is a whole run or a whole project, never a filter, and the route
+// refuses any query parameter it does not recognise so that a well-meaning
+// `?status=incomplete` cannot become one.
+//
+// THE COLUMN LIST IS A STATIC CONSTANT, NOT A QUERY.
+//
+// 109 columns: A-AE are job metadata, AF-CI are the 56 spec fields this app
+// holds, CJ-DE are website and style fields BWS owns. Only the last two blocks
+// carry json ids, which is why the list cannot be derived from `spec_fields`
+// alone. A test asserts that its 56 spec ids are exactly the seeded ones — that
+// is what catches a BWS column insertion, which shifts every letter after it
+// while the ids stay put.
+// ============================================================================
+import { ATTRIBUTE_GROUP_LABELS, type AttributeGroup, type AttributeState, type AttributeUnit } from "@/lib/spec-vocab";
+
+export type BwsColumn = { name: string; jsonId: number | null };
+
+/** Row 1 of the BWS export, verbatim — including the trailing space on 'Stone '. */
+export const BWS_EXPORT_COLUMNS: BwsColumn[] = [
+  { name: "Id", jsonId: null },
+  { name: "Due Date", jsonId: null },
+  { name: "Job Number", jsonId: null },
+  { name: "Order Number", jsonId: null },
+  { name: "Lifecycle State", jsonId: null },
+  { name: "Buffer Colour", jsonId: null },
+  { name: "Temp", jsonId: null },
+  { name: "Status", jsonId: null },
+  { name: "Client", jsonId: null },
+  { name: "Project Ref", jsonId: null },
+  { name: "Client PO", jsonId: null },
+  { name: "KAM", jsonId: null },
+  { name: "Due Date Notes", jsonId: null },
+  { name: "Name", jsonId: null },
+  { name: "Price", jsonId: null },
+  { name: "Pricing Status", jsonId: null },
+  { name: "Invoicing Status", jsonId: null },
+  { name: "Invoice Notes", jsonId: null },
+  { name: "Paid Amount", jsonId: null },
+  { name: "Category", jsonId: null },
+  { name: "Parent Category", jsonId: null },
+  { name: "Item Count", jsonId: null },
+  { name: "Product Code", jsonId: null },
+  { name: "Specifications i flag", jsonId: null },
+  { name: "RRHS Stream", jsonId: null },
+  { name: "Repeat Reference id", jsonId: null },
+  { name: "Sales Stream name", jsonId: null },
+  { name: "Cluster Name", jsonId: null },
+  { name: "Cluster URL", jsonId: null },
+  { name: "export_to_public_website", jsonId: null },
+  { name: "name_for_public_website", jsonId: null },
+  { name: "Routing", jsonId: 34 },
+  { name: "Ex VAT RRP", jsonId: 230 },
+  { name: "Dimensions", jsonId: 3 },
+  { name: "Mattress setting", jsonId: 36 },
+  { name: "COM 1", jsonId: 1 },
+  { name: "COM 2", jsonId: 2 },
+  { name: "COM 3", jsonId: 14 },
+  { name: "FR Interliner", jsonId: 74 },
+  { name: "Hinges", jsonId: 9 },
+  { name: "Stud spec", jsonId: 16 },
+  { name: "Upholstery free text", jsonId: 267 },
+  { name: "Runners", jsonId: 10 },
+  { name: "Stitching spec", jsonId: 37 },
+  { name: "Seat Upholstery Build", jsonId: 11 },
+  { name: "Swivel Mechs", jsonId: 232 },
+  { name: "Back Upholstery Build", jsonId: 12 },
+  { name: "COM Hardware", jsonId: 8 },
+  { name: "Arm Upholstery Build", jsonId: 13 },
+  { name: "Back Cushion Build", jsonId: 25 },
+  { name: "Main timber finish", jsonId: 4 },
+  { name: "Timber Finish 2", jsonId: 31 },
+  { name: "Timber Finish 3", jsonId: 143 },
+  { name: "Main metal finish", jsonId: 5 },
+  { name: "Metal Finish 2", jsonId: 35 },
+  { name: "Glass & Mirror Spec", jsonId: 15 },
+  { name: "Floor type", jsonId: 39 },
+  { name: "Stone ", jsonId: 147 },
+  { name: "Skirting", jsonId: 72 },
+  { name: "Wall build", jsonId: 73 },
+  { name: "Outdoor", jsonId: 130 },
+  { name: "Access - Select option", jsonId: 6 },
+  { name: "Site Info - survey + dry fit", jsonId: 7 },
+  { name: "Assy guide required", jsonId: 191 },
+  { name: "Blue Label Stock?", jsonId: 186 },
+  { name: "Dimensions checked", jsonId: 189 },
+  { name: "BW Supplied Hardware", jsonId: 75 },
+  { name: "Drawer liner", jsonId: 190 },
+  { name: "BOM 1", jsonId: 110 },
+  { name: "BOM 2", jsonId: 111 },
+  { name: "BOM 3", jsonId: 112 },
+  { name: "BOM Hardware 1", jsonId: 228 },
+  { name: "Finishing - Colour of sample", jsonId: 21 },
+  { name: "Upholstery pictures & Wash-up", jsonId: 187 },
+  { name: "BOM Hardware 2", jsonId: 229 },
+  { name: "Bed - 4 Poster", jsonId: 137 },
+  { name: "Bed - Fitted Headboard", jsonId: 138 },
+  { name: "Bed - Underbed storage", jsonId: 139 },
+  { name: "Bed - Headboard only", jsonId: 140 },
+  { name: "BL Pictures Job", jsonId: 188 },
+  { name: "Job Budget", jsonId: 195 },
+  { name: "Blue Label Product Washed Up?", jsonId: 153 },
+  { name: "Finishing Sheen", jsonId: 22 },
+  { name: "Substrate", jsonId: 192 },
+  { name: "Timber Cut", jsonId: 23 },
+  { name: "Finishing Recipe", jsonId: 150 },
+  { name: "Purchasing Notes", jsonId: 24 },
+  { name: "Image cleaning", jsonId: 141 },
+  { name: "Ready to Order", jsonId: 135 },
+  { name: "Client Code", jsonId: 136 },
+  { name: "BL Original Repeater", jsonId: 152 },
+  { name: "Fitted", jsonId: 131 },
+  { name: "Mechanism", jsonId: 132 },
+  { name: "Hidden Notes", jsonId: 234 },
+  { name: "Fabric requirement", jsonId: 142 },
+  { name: "Style", jsonId: 114 },
+  { name: "Arm style", jsonId: 115 },
+  { name: "Seat style", jsonId: 116 },
+  { name: "Back style", jsonId: 117 },
+  { name: "Upholstery detail", jsonId: 118 },
+  { name: "Legs / Plinth", jsonId: 119 },
+  { name: "Show materials", jsonId: 133 },
+  { name: "Shape", jsonId: 120 },
+  { name: "Main material", jsonId: 121 },
+  { name: "Secondary material", jsonId: 122 },
+  { name: "Base", jsonId: 123 },
+  { name: "Detailing", jsonId: 125 },
+  { name: "Doors", jsonId: 124 },
+  { name: "Has Drawers", jsonId: 134 },
+];
+
+/** The block this app fills: the 56 spec fields at AF-CI. */
+export const SPEC_FIELD_COLUMNS = BWS_EXPORT_COLUMNS.slice(31, 87);
+
+/**
+ * The job-metadata columns this app can honestly fill, addressed BY NAME.
+ *
+ * They are in the A-AE block, which carries NO json ids — row 2 of the export
+ * is blank for all 31 of them. An earlier version of this file matched them by
+ * id anyway, and since ids 9, 10, 14 and 22 all exist further along the row,
+ * the client's name was written into `Hinges` and the item description into
+ * `COM 3`. Every value landed in a real column, so the file looked correct and
+ * a test that also matched by id agreed with it. Address a column by the one
+ * thing it actually has.
+ */
+export const CLIENT_COLUMN_NAME = "Client";
+export const PROJECT_REF_COLUMN_NAME = "Project Ref";
+export const NAME_COLUMN_NAME = "Name";
+export const ITEM_COUNT_COLUMN_NAME = "Item Count";
+
+/** These two DO have ids: 'Client Code' is in the CJ-DE block, Dimensions in AF-CI. */
+export const CLIENT_CODE_JSON_ID = 136;
+export const DIMENSIONS_JSON_ID = 3;
+
+// ---- what a row is composed from -------------------------------------------
+
+export type ExportRecord = {
+  id: string;
+  recordNo: number;
+  label: string;
+  itemDescription: string;
+  qty: number | null;
+  area: string | null;
+  runName: string;
+  boqCodes: string[];
+};
+
+export type ExportAttribute = {
+  recordId: string;
+  attrGroup: AttributeGroup;
+  label: string;
+  value: string | null;
+  unit: AttributeUnit | null;
+  materialCode: string | null;
+  specFieldJsonId: number | null;
+  state: AttributeState;
+  sortOrder: number;
+  sourceFilename: string | null;
+  sourcePage: number | null;
+};
+
+/** A confirmed cheat-sheet answer that maps to a BWS field. */
+export type ExportAnswer = { recordId: string; specFieldJsonId: number; value: string | null };
+
+export type ExportScope = {
+  projectName: string;
+  client: string | null;
+  runName: string | null;
+  records: ExportRecord[];
+  attributes: ExportAttribute[];
+  answers: ExportAnswer[];
+};
+
+/**
+ * How a TBC observation reads in a BWS cell.
+ *
+ * `TBC` must survive the export as itself. A blank cell says "nobody has looked
+ * at this"; TBC says "somebody asked and the client has not decided", and those
+ * two produce different actions on the shop floor.
+ */
+export function renderAttributeValue(attribute: {
+  value: string | null;
+  unit: AttributeUnit | null;
+  state: AttributeState;
+}): string {
+  const value = attribute.value?.trim() ?? "";
+  const withUnit = value && attribute.unit ? `${value}${attribute.unit}` : value;
+  if (attribute.state === "tbc") return withUnit ? `${withUnit} TBC` : "TBC";
+  return withUnit;
+}
+
+/** "Width 190cm; Depth 79cm; Height 72cm" — every dimension, in review order. */
+export function composeDimensions(attributes: ExportAttribute[]): string {
+  return attributes
+    .filter((attribute) => attribute.attrGroup === "dimension")
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((attribute) => {
+      const rendered = renderAttributeValue(attribute);
+      return attribute.label ? `${attribute.label} ${rendered}`.trim() : rendered;
+    })
+    .filter((part) => part !== "")
+    .join("; ");
+}
+
+/**
+ * One record to one row of 109 cells.
+ *
+ * Precedence for a spec field: an attribute the reviewer confirmed off a
+ * document wins, then a confirmed cheat-sheet answer, then blank. An attribute
+ * is a statement from a client document about this item; an answer is somebody
+ * filling in a checklist, and where both exist the document is the one that can
+ * be re-checked against a page.
+ *
+ * BWS-owned vocabularies (Category, Status, Lifecycle State, KAM, Routing) stay
+ * BLANK. This app does not know their allowed values, and a guessed enum is
+ * either rejected on import or accepted as a wrong classification.
+ */
+export function composeRow(scope: ExportScope, record: ExportRecord, attributes: ExportAttribute[], answers: ExportAnswer[]): string[] {
+  const mine = attributes.filter((attribute) => attribute.recordId === record.id);
+  const byField = new Map<number, ExportAttribute>();
+  for (const attribute of mine) {
+    if (attribute.specFieldJsonId !== null && attribute.attrGroup !== "dimension" && !byField.has(attribute.specFieldJsonId)) {
+      byField.set(attribute.specFieldJsonId, attribute);
+    }
+  }
+  const answerByField = new Map<number, string>();
+  for (const answer of answers) {
+    if (answer.recordId === record.id && answer.value?.trim()) answerByField.set(answer.specFieldJsonId, answer.value.trim());
+  }
+
+  const dimensions = composeDimensions(mine);
+
+  return BWS_EXPORT_COLUMNS.map((column) => {
+    // The id-less job-metadata block, by name.
+    if (column.jsonId === null) {
+      switch (column.name) {
+        case CLIENT_COLUMN_NAME:
+          return scope.client ?? "";
+        case PROJECT_REF_COLUMN_NAME:
+          return scope.projectName;
+        case NAME_COLUMN_NAME:
+          return record.itemDescription;
+        case ITEM_COUNT_COLUMN_NAME:
+          return record.qty === null ? "" : String(record.qty);
+        default:
+          // Every other job column is a BWS-owned vocabulary or a value only
+          // BWS knows (Id, Job Number, Status, KAM, Lifecycle State). Blank is
+          // the only honest answer; a guessed enum imports as a wrong
+          // classification.
+          return "";
+      }
+    }
+    if (column.jsonId === CLIENT_CODE_JSON_ID) return record.boqCodes.join(", ");
+    if (column.jsonId === DIMENSIONS_JSON_ID) return dimensions;
+    const attribute = byField.get(column.jsonId);
+    if (attribute) return renderAttributeValue(attribute);
+    return answerByField.get(column.jsonId) ?? "";
+  });
+}
+
+export type Workbook = {
+  jobs: { headerNames: string[]; headerIds: string[]; rows: string[][] };
+  specs: { header: string[]; rows: string[][] };
+};
+
+export const SPECS_SHEET_HEADER = [
+  "Record",
+  "Client code",
+  "Run",
+  "Group",
+  "Label",
+  "Value",
+  "Unit",
+  "Client material code",
+  "BWS field",
+  "State",
+  "Source document",
+  "Page",
+];
+
+/**
+ * The whole export.
+ *
+ * EVERY record in scope produces a row, including one with no attributes and no
+ * answers. That is what "complete dataset" means: a record omitted because it
+ * had nothing to say is a record whose BWS fields would be wiped on import.
+ *
+ * The second sheet lists every attribute long-form, because flattening 56
+ * columns loses the ones that did not fit — the client's own material code, the
+ * page a value came from, the second and third dimensions of a slot. A reviewer
+ * comparing the export against a drawing needs those.
+ */
+export function composeWorkbook(scope: ExportScope): Workbook {
+  const fieldNameById = new Map(BWS_EXPORT_COLUMNS.filter((c) => c.jsonId !== null).map((c) => [c.jsonId as number, c.name]));
+
+  const rows = [...scope.records]
+    .sort((a, b) => a.recordNo - b.recordNo)
+    .map((record) => composeRow(scope, record, scope.attributes, scope.answers));
+
+  const specs = scope.records
+    .sort((a, b) => a.recordNo - b.recordNo)
+    .flatMap((record) =>
+      scope.attributes
+        .filter((attribute) => attribute.recordId === record.id)
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((attribute) => [
+          record.label,
+          record.boqCodes.join(", "),
+          record.runName,
+          ATTRIBUTE_GROUP_LABELS[attribute.attrGroup],
+          attribute.label,
+          attribute.value ?? "",
+          attribute.unit ?? "",
+          attribute.materialCode ?? "",
+          attribute.specFieldJsonId === null ? "" : fieldNameById.get(attribute.specFieldJsonId) ?? "",
+          attribute.state,
+          attribute.sourceFilename ?? "",
+          attribute.sourcePage === null ? "" : String(attribute.sourcePage),
+        ]),
+    );
+
+  return {
+    jobs: {
+      headerNames: BWS_EXPORT_COLUMNS.map((column) => column.name),
+      // Row 2 of the BWS export: json ids, blank for the job-metadata block.
+      headerIds: BWS_EXPORT_COLUMNS.map((column) => (column.jsonId === null ? "" : String(column.jsonId))),
+      rows,
+    },
+    specs: { header: SPECS_SHEET_HEADER, rows: specs },
+  };
+}
+
+/** RFC 4180 with a UTF-8 BOM, which is what the BWS export itself is. */
+export function toCsv(rows: string[][]): string {
+  const escape = (cell: string) => (/[",\r\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell);
+  return "﻿" + rows.map((row) => row.map(escape).join(",")).join("\r\n") + "\r\n";
+}
+
+/**
+ * Allowlisted, so a client's project name cannot put a quote, a newline or a
+ * path separator into a Content-Disposition header. Copied from the .eml route,
+ * which learned it first.
+ */
+export function exportFilename(projectNumber: string, runName: string | null, extension: string): string {
+  const safe = (raw: string) => raw.replace(/[^A-Za-z0-9 &-]/g, "").slice(0, 60).trim();
+  const scope = runName ? ` - ${safe(runName)}` : "";
+  return `${safe(projectNumber) || "export"}${scope} - BWS spec fields.${extension}`;
+}

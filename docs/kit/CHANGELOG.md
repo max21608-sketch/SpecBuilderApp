@@ -214,3 +214,18 @@ Deliberate departures from upstream, all recorded in `chassis/PROVENANCE.md`:
 
 Not fixed, inherited, and documented as open: no blob backup or retention
 policy, and no monitoring or alerting.
+
+## 2026-09-14 — two rules learned from the intake rebuild
+
+- `extraction-pipeline` gains **"resolve at read time when the output is
+  register-independent"**. The kit's advice assumed every extraction resolves in
+  the worker, which is right only when a proposal will UPDATE an existing row
+  and therefore needs a target snapshot. An observation that will INSERT one
+  depends on no register, and resolving it on read is what lets a document be
+  extracted before the document that creates its targets — without a second
+  paid call. The cost is one extra guard, written down with it.
+- `review-and-confirm` gains **"the unit of commit is whatever card the reviewer
+  sees whole"**. The kit said "one record per confirm", which is one INSTANCE of
+  the rule rather than the rule. Where one staged row legitimately targets
+  several canonical rows, the staged row is the boundary. Both shapes are now
+  described, rather than the old wording being generalised in place.

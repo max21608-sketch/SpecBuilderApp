@@ -68,29 +68,53 @@ describeIfDb("BOQ confirm concurrency", () => {
     );
     await client.query(`delete from spec_record_refs where project_id = $1`, [projectId]);
     await client.query(`delete from spec_records where project_id = $1`, [projectId]);
+    await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
     await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
     await client.end();
   });
 
-  async function stageImport(prefix: string, count: number): Promise<string> {
-    const lines = Array.from({ length: count }, (_, index) => ({
-      index,
-      lineNo: index + 1,
-      designer: "__QA",
-      boqCategory: "__QA area",
-      code: `${prefix}${index + 1}`,
-      itemDescription: `__QA item ${prefix}${index + 1}`,
-      productReference: null,
-      qty: 1,
-      categoryId,
-      categoryStatus: "chosen",
+  /** Staged in the v2 shape: a LIST of sheets, each becoming a run. */
+  function sheet(prefix: string, count: number, name: string, categoryOverride?: string | null) {
+    return {
+      sheetName: name,
+      proposedRunName: name,
+      headerRow: 1,
+      skippedRows: 0,
       ignored: false,
-    }));
+      ignoredReason: null as string | null,
+      metadata: { revision: "0", date: "14-Sep-26", notes: ["__QA *All fabrics are COM"] },
+      lines: Array.from({ length: count }, (_, index) => ({
+        index,
+        lineNo: index + 1,
+        designer: "__QA",
+        boqCategory: "__QA Seating",
+        area: "__QA Rooms",
+        code: `${prefix}${index + 1}`,
+        itemDescription: `__QA item ${prefix}${index + 1}`,
+        productReference: null,
+        qty: 1,
+        qtyUnit: "pcs",
+        categoryId: categoryOverride === undefined ? categoryId : categoryOverride,
+        categoryStatus: "chosen",
+        ignored: false,
+      })),
+    };
+  }
+
+  async function stageImport(prefix: string, count: number, sheets?: ReturnType<typeof sheet>[]): Promise<string> {
     const run = await client.query(
       `insert into intake_runs (project_id, source_kind, status, parsed, created_by, updated_by)
        values ($1, 'boq_xlsx', 'parsed', $2::jsonb, 'qa', 'qa') returning id`,
-      [projectId, JSON.stringify({ sheet: "__QA", headerRow: 1, skippedRows: 0, lines })],
+      [
+        projectId,
+        JSON.stringify({
+          schemaVersion: 2,
+          filename: "__QA boq.xlsx",
+          sourcePreserved: false,
+          sheets: sheets ?? [sheet(prefix, count, `__QA ${prefix}`)],
+        }),
+      ],
     );
     return run.rows[0].id;
   }
@@ -138,11 +162,41 @@ describeIfDb("BOQ confirm concurrency", () => {
     expect((await records()).length).toBe(before + 2);
   });
 
-  it("refuses an import with an uncategorised line, and writes nothing", async () => {
+  it("imports a line with NO category rather than refusing the whole bill", async () => {
+    // Intake must not stall behind a classification decision that belongs to a
+    // later stage. The record exists, carries its ref, and simply has no
+    // checklist yet — which the spec table says in words.
     const runId = await stageImport("__QAD", 2);
     await client.query(
       `update intake_runs
-         set parsed = jsonb_set(parsed, '{lines,0,categoryId}', 'null'::jsonb)
+         set parsed = jsonb_set(parsed, '{sheets,0,lines,0,categoryId}', 'null'::jsonb)
+       where id = $1`,
+      [runId],
+    );
+    const before = (await records()).length;
+
+    const res = await confirm(runId);
+    expect(res.status).toBe(200);
+    expect((await records()).length).toBe(before + 2);
+
+    const uncategorised = await client.query(
+      `select id from spec_records where project_id = $1 and item_description = '__QA item __QAD1'`,
+      [projectId],
+    );
+    const answers = await client.query(`select count(*)::int as n from spec_answers where record_id = $1`, [
+      uncategorised.rows[0].id,
+    ]);
+    // No category means no questions — NOT a category with zero questions,
+    // which would score 0/0 and read as complete.
+    expect(answers.rows[0].n).toBe(0);
+  });
+
+  it("refuses a category row that no longer exists, and writes nothing", async () => {
+    // A stale screen is a different thing from a deferred decision.
+    const runId = await stageImport("__QAF", 1);
+    await client.query(
+      `update intake_runs
+         set parsed = jsonb_set(parsed, '{sheets,0,lines,0,categoryId}', '"00000000-0000-0000-0000-000000000009"'::jsonb)
        where id = $1`,
       [runId],
     );
@@ -151,11 +205,97 @@ describeIfDb("BOQ confirm concurrency", () => {
     const res = await confirm(runId);
     const body = await res.json();
     expect(res.status).toBe(409);
-    expect(body.code).toBe("uncategorised");
+    expect(body.code).toBe("unknown_category");
     expect((await records()).length).toBe(before);
-    // And the run is still reviewable, not half-closed.
     const run = await client.query(`select status from intake_runs where id = $1`, [runId]);
     expect(run.rows[0].status).toBe("parsed");
+  });
+
+  it("renames a sheet's run and drops a sheet, addressing each by index", async () => {
+    // The staged sheets are a fixed list, so an index is a stable address —
+    // unlike a proposal, which moves as the set is reviewed.
+    const { PATCH } = await import("@/app/api/imports/[id]/route");
+    const runId = await stageImport("__QAJ", 0, [sheet("__QAJ", 1, "Sheet1"), sheet("__QAK", 1, "Sheet2")]);
+
+    const rename = await PATCH(
+      new Request("http://localhost/test", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sheetIndex: 0, runName: "MUR" }),
+      }),
+      params(runId),
+    );
+    expect(rename.status).toBe(200);
+
+    const drop = await PATCH(
+      new Request("http://localhost/test", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sheetIndex: 1, ignored: true }),
+      }),
+      params(runId),
+    );
+    expect(drop.status).toBe(200);
+
+    // A blank run name is refused: a run needs something to call it.
+    const blank = await PATCH(
+      new Request("http://localhost/test", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sheetIndex: 0, runName: "   " }),
+      }),
+      params(runId),
+    );
+    expect(blank.status).toBe(400);
+
+    // A sheet that is not there is a conflict, not a silent no-op.
+    const missing = await PATCH(
+      new Request("http://localhost/test", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sheetIndex: 9, runName: "Nope" }),
+      }),
+      params(runId),
+    );
+    expect(missing.status).toBe(409);
+
+    expect((await confirm(runId)).status).toBe(200);
+    const runs = await client.query(
+      `select name from spec_runs where project_id = $1 and source_import_id = $2`,
+      [projectId, runId],
+    );
+    // The reviewer's name, and only the sheet they kept.
+    expect(runs.rows.map((row) => row.name)).toEqual(["MUR"]);
+  });
+
+  it("creates ONE RUN PER SHEET, and files each sheet's records under its own", async () => {
+    // The bug 0007 exists for: a three-tab bill imported as one tab, silently.
+    const runId = await stageImport("__QAG", 0, [
+      sheet("__QAG", 2, "MUR"),
+      sheet("__QAH", 3, "MAIN RUN"),
+      { ...sheet("__QAI", 1, "Template"), ignored: true, ignoredReason: "No rows under the header." },
+    ]);
+    expect((await confirm(runId)).status).toBe(200);
+
+    const runs = await client.query(
+      `select id, name, source_sheet, boq_revision, boq_date, header_notes
+         from spec_runs where project_id = $1 and source_import_id = $2 order by sort_order`,
+      [projectId, runId],
+    );
+    expect(runs.rows.map((row) => row.name)).toEqual(["MUR", "MAIN RUN"]);
+    // The ignored sheet produced no run at all.
+    expect(runs.rows).toHaveLength(2);
+    expect(runs.rows[0].boq_revision).toBe("0");
+    // Read back as text, never a Date: the BOQ prints whatever the client typed.
+    expect(runs.rows[0].boq_date).toBe("14-Sep-26");
+    expect(runs.rows[0].header_notes).toEqual(["__QA *All fabrics are COM"]);
+
+    const counts = await client.query(
+      `select run_id, count(*)::int as n from spec_records where project_id = $1 and run_id = any($2::uuid[])
+       group by run_id`,
+      [projectId, runs.rows.map((row) => row.id)],
+    );
+    expect(counts.rows.map((row) => row.n).sort()).toEqual([2, 3]);
   });
 
   it("writes the record, its ref, its answers and its history together", async () => {
@@ -170,6 +310,12 @@ describeIfDb("BOQ confirm concurrency", () => {
 
     const refs = await client.query(`select ref_value from spec_record_refs where record_id = $1`, [recordId]);
     expect(refs.rows[0]?.ref_value).toBe("__QAE1");
+
+    // The BOQ's Area column and its own grouping word stop sharing a column.
+    const stored = await client.query(`select area, boq_category, run_id from spec_records where id = $1`, [recordId]);
+    expect(stored.rows[0].area).toBe("__QA Rooms");
+    expect(stored.rows[0].boq_category).toBe("__QA Seating");
+    expect(stored.rows[0].run_id).toBeTruthy();
 
     const answers = await client.query(`select count(*)::int as n from spec_answers where record_id = $1`, [recordId]);
     const expected = await client.query(`select count(*)::int as n from requirements where category_id = $1`, [

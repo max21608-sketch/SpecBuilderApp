@@ -92,9 +92,22 @@ down stops someone assuming a safety net that is not there.
   built: the same client code (`MOR005`) means different things on different
   projects, and a register guessed from extraction output would be confidently
   wrong. Resolving codes is deferred until extraction is producing them.
-- **No structured page anchoring into the source document.** The reviewer gets
-  the page number the model reported and a link that opens the file; the app
-  does not scroll a viewer to that page.
+- **Page anchoring is a URL fragment, not a viewer.** A source link carries
+  `#page=N`, which Chromium and Firefox honour on an inline PDF and other
+  viewers ignore. The app does not host a viewer of its own.
+- **No write path to BWS, and the export is not an import file.** It carries no
+  `Id` and no `Job Number`, and leaves BWS-owned vocabularies blank. Somebody
+  reads it; nothing uploads it.
+
+## Known gap: one dependency advisory, accepted 2026-09-14
+
+`exceljs` (the .xlsx writer behind the BWS export) depends on a `uuid` version
+carrying a moderate advisory: a missing buffer bounds check in v3/v5/v6 when the
+caller supplies a `buf` argument. exceljs never exposes that argument, and
+`npm audit fix --force` downgrades exceljs two major versions. Accepted
+deliberately and recorded here rather than carried silently. The other eight
+`npm audit` findings are the pre-existing dev toolchain (vitest, vite, postcss,
+esbuild) and reach no deployed code.
 
 ## What runs on a schedule
 

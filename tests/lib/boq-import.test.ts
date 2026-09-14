@@ -1,15 +1,29 @@
 // Pure tier. The fixtures below are SYNTHETIC — they reproduce the SHAPE of a
-// real client BOQ (title rows, a late header, a repeated code, free-text
-// descriptions, a totals row) without carrying a single real line of client
-// data. Real BOQs stay in the gitignored reference folder.
+// real client BOQ (title rows, a late header, a repeated code, per-level
+// quantity columns, free-text descriptions, a totals row) without carrying a
+// single real line of client data. Real BOQs stay in the gitignored reference
+// folder.
 import { describe, it, expect } from "vitest";
 import type { SheetData } from "read-excel-file/node";
-import { parseBoqSheets, normaliseRef } from "@/lib/boq-import";
+import { parseBoqSheets, normaliseRef, assertBoqV2, activeSheets, countLines } from "@/lib/boq-import";
+import type { BoqParseResult, StagedBoqSheet } from "@/lib/boq-import";
 
 const HEADER = ["Designer", "Category", "Code", "Item Description", "Product Reference", "Total Qty Updated"];
 
 function sheet(data: SheetData, name = "Feuil1") {
   return [{ sheet: name, data }];
+}
+
+function ok(result: BoqParseResult): StagedBoqSheet[] {
+  if (!result.ok) throw new Error(result.error);
+  return result.sheets;
+}
+
+function one(result: BoqParseResult): StagedBoqSheet {
+  const sheets = ok(result);
+  const first = sheets[0];
+  if (!first) throw new Error("no sheets staged");
+  return first;
 }
 
 const TYPICAL: SheetData = [
@@ -26,36 +40,49 @@ const TYPICAL: SheetData = [
   [null, null, null, "TOTAL", null, 11],
 ];
 
+// The shape of the AP364 template: a titles block with the revision and date
+// split across two cells, a COM caveat, then a header with an Area column, a
+// unit column and SIX per-level quantity columns before the total.
+const LEVELLED: SheetData = [
+  ["EX364 - Example", null, null, null, null, null, null, null, null, null, null, "Revision: ", "0"],
+  ["TENDER - EXAMPLE PACKAGES", null, null, null, null, null, null, null, null, null, null, "Date: ", "14-Sep-26"],
+  ["VALUE ENGINEERING PROPOSAL", null, null, null, null, null, null, null, null, null, null, null, null],
+  [null, null, null, null, null, null, null, null, null, null, null, "*All fabrics are COM", null],
+  ["Area", "FF&E code", "Item description", "unit", "L1", "L2", "L3", "L4", "L5", "L6", "TOTAL Q-ty", "Unit cost - EUR", "Total cost - EUR"],
+  ["Rooms", "X-100", "Sofa", "pcs", 3, 1, 4, 3, 2, 1, 14, null, null],
+  ["Rooms", "X-200", "Armchair", "pcs", 14, 13, 11, 12, 6, 2, 58, null, null],
+];
+
 describe("parseBoqSheets", () => {
   it("finds a header that is not the first row", () => {
-    const result = parseBoqSheets(sheet(TYPICAL));
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.headerRow).toBe(5);
-    expect(result.sheet).toBe("Feuil1");
+    const staged = one(parseBoqSheets(sheet(TYPICAL)));
+    expect(staged.headerRow).toBe(5);
+    expect(staged.sheetName).toBe("Feuil1");
+    expect(staged.proposedRunName).toBe("Feuil1");
+    expect(staged.ignored).toBe(false);
   });
 
   it("reads every line and keeps the source row number", () => {
-    const result = parseBoqSheets(sheet(TYPICAL));
-    if (!result.ok) throw new Error(result.error);
-    expect(result.lines).toHaveLength(5); // four items + the TOTAL row, which has a description
-    expect(result.lines[0]).toEqual({
+    const staged = one(parseBoqSheets(sheet(TYPICAL)));
+    expect(staged.lines).toHaveLength(5); // four items + the TOTAL row, which has a description
+    expect(staged.lines[0]).toEqual({
       lineNo: 6,
       designer: "AAA",
       boqCategory: "Furniture",
+      area: null,
       code: "EX-100-01",
       itemDescription: "Side Table",
       productReference: "Round, 600 dia",
       qty: 4,
+      qtyUnit: null,
     });
   });
 
   it("keeps a repeated client code as two separate lines", () => {
     // The case that killed the original schema: a BOQ code is not unique, so
     // nothing here may deduplicate. Two rows in, two lines out, different qty.
-    const result = parseBoqSheets(sheet(TYPICAL));
-    if (!result.ok) throw new Error(result.error);
-    const repeated = result.lines.filter((line) => line.code === "ZZ11A");
+    const staged = one(parseBoqSheets(sheet(TYPICAL)));
+    const repeated = staged.lines.filter((line) => line.code === "ZZ11A");
     expect(repeated).toHaveLength(2);
     expect(repeated.map((line) => line.qty)).toEqual([4, 1]);
     expect(repeated.map((line) => line.lineNo)).toEqual([8, 9]);
@@ -63,36 +90,79 @@ describe("parseBoqSheets", () => {
 
   it("counts blank-but-not-empty rows rather than dropping them silently", () => {
     const withStray: SheetData = [...TYPICAL, [null, null, null, null, null, 99]];
-    const result = parseBoqSheets(sheet(withStray));
-    if (!result.ok) throw new Error(result.error);
-    expect(result.skippedRows).toBe(1);
+    const staged = one(parseBoqSheets(sheet(withStray)));
+    expect(staged.skippedRows).toBe(1);
   });
 
-  it("finds the BOQ on a later sheet", () => {
-    const result = parseBoqSheets([
-      { sheet: "Notes", data: [["Some notes"], ["and more"]] },
-      { sheet: "BOQ", data: TYPICAL },
-    ]);
-    if (!result.ok) throw new Error(result.error);
-    expect(result.sheet).toBe("BOQ");
+  it("stages EVERY sheet that has a header, not just the first", () => {
+    // The bug this replaces: a three-tab bill imported as one tab, silently.
+    const staged = ok(
+      parseBoqSheets([
+        { sheet: "Notes", data: [["Some notes"], ["and more"]] },
+        { sheet: "MUR", data: TYPICAL },
+        { sheet: "MAIN RUN", data: TYPICAL },
+        { sheet: "VE", data: TYPICAL },
+      ]),
+    );
+    expect(staged.map((s) => s.sheetName)).toEqual(["MUR", "MAIN RUN", "VE"]);
+    expect(staged.every((s) => s.lines.length === 5)).toBe(true);
+  });
+
+  it("reads the AP364-shaped header: FF&E code, Area, unit and TOTAL Q-ty", () => {
+    const staged = one(parseBoqSheets(sheet(LEVELLED, "MAIN RUN - VE")));
+    expect(staged.lines).toHaveLength(2);
+    expect(staged.lines[0]).toMatchObject({
+      area: "Rooms",
+      code: "X-100",
+      itemDescription: "Sofa",
+      qtyUnit: "pcs",
+      qty: 14,
+    });
+  });
+
+  it("ignores the per-level quantity columns — L1 is not the total", () => {
+    // A BOQ that read L1 where qty belonged would order 3 sofas instead of 14.
+    const staged = one(parseBoqSheets(sheet(LEVELLED)));
+    expect(staged.lines[0]?.qty).toBe(14);
+    expect(staged.lines[1]?.qty).toBe(58);
+  });
+
+  it("captures the revision, the date and the terms above the header", () => {
+    const staged = one(parseBoqSheets(sheet(LEVELLED)));
+    expect(staged.metadata.revision).toBe("0");
+    expect(staged.metadata.date).toBe("14-Sep-26");
+    expect(staged.metadata.notes).toContain("*All fabrics are COM");
+    expect(staged.metadata.notes).toContain("VALUE ENGINEERING PROPOSAL");
+    // The value cell must not ALSO be recorded as a note.
+    expect(staged.metadata.notes).not.toContain("0");
+    expect(staged.metadata.notes).not.toContain("14-Sep-26");
+  });
+
+  it("keeps the date as the string the client typed", () => {
+    // Parsing it into a Date renders the day before it in British Summer Time.
+    const staged = one(parseBoqSheets(sheet(LEVELLED)));
+    expect(typeof staged.metadata.date).toBe("string");
+  });
+
+  it("reads an inline 'Revision: 2' as well as a split one", () => {
+    const staged = one(
+      parseBoqSheets(sheet([["Revision: 2", null, null, null, null, null], HEADER, ["A", "S", "E-1", "Sofa", null, 1]])),
+    );
+    expect(staged.metadata.revision).toBe("2");
   });
 
   it("accepts synonym headers", () => {
-    const result = parseBoqSheets(
-      sheet([["Client Ref", "Description", "Qty"], ["EX-1", "Sofa", 2]]),
-    );
-    if (!result.ok) throw new Error(result.error);
-    expect(result.lines[0]).toMatchObject({ code: "EX-1", itemDescription: "Sofa", qty: 2 });
+    const staged = one(parseBoqSheets(sheet([["Client Ref", "Description", "Qty"], ["EX-1", "Sofa", 2]])));
+    expect(staged.lines[0]).toMatchObject({ code: "EX-1", itemDescription: "Sofa", qty: 2 });
   });
 
   it("does not let a Product Reference column be claimed as the code column", () => {
-    const result = parseBoqSheets(sheet([HEADER, ["AAA", "Seating", "EX-9", "Sofa", "Model Q", 1]]));
-    if (!result.ok) throw new Error(result.error);
-    expect(result.lines[0]?.code).toBe("EX-9");
-    expect(result.lines[0]?.productReference).toBe("Model Q");
+    const staged = one(parseBoqSheets(sheet([HEADER, ["AAA", "Seating", "EX-9", "Sofa", "Model Q", 1]])));
+    expect(staged.lines[0]?.code).toBe("EX-9");
+    expect(staged.lines[0]?.productReference).toBe("Model Q");
   });
 
-  it("names the columns it needed when there is no header", () => {
+  it("names the columns it needed when no sheet has a header", () => {
     const result = parseBoqSheets(sheet([["just"], ["some"], ["text"]]));
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -100,11 +170,13 @@ describe("parseBoqSheets", () => {
     expect(result.error).toMatch(/description column/i);
   });
 
-  it("reports a header with nothing under it rather than returning zero lines", () => {
-    const result = parseBoqSheets(sheet([HEADER]));
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error).toMatch(/no rows under it/);
+  it("stages a header with nothing under it as ignored, not as a failure", () => {
+    // One blank template tab must not cost the reviewer the real tabs beside it.
+    const staged = ok(parseBoqSheets([{ sheet: "Template", data: [HEADER] }, { sheet: "MAIN", data: TYPICAL }]));
+    expect(staged[0]?.ignored).toBe(true);
+    expect(staged[0]?.ignoredReason).toMatch(/no rows under the header/i);
+    expect(staged[1]?.ignored).toBe(false);
+    expect(activeSheets({ schemaVersion: 2, filename: null, sourcePreserved: true, sheets: staged })).toHaveLength(1);
   });
 
   it("refuses an empty workbook", () => {
@@ -112,17 +184,36 @@ describe("parseBoqSheets", () => {
   });
 
   it("tolerates messy quantities and whitespace", () => {
-    const result = parseBoqSheets(
-      sheet([HEADER, ["AAA ", "Seating", " EX-3 ", "  Bench @entrance ", null, " 12 "]]),
+    const staged = one(
+      parseBoqSheets(sheet([HEADER, ["AAA ", "Seating", " EX-3 ", "  Bench @entrance ", null, " 12 "]])),
     );
-    if (!result.ok) throw new Error(result.error);
-    expect(result.lines[0]).toMatchObject({
+    expect(staged.lines[0]).toMatchObject({
       designer: "AAA",
       code: "EX-3",
       itemDescription: "Bench @entrance",
       productReference: null,
       qty: 12,
     });
+  });
+});
+
+describe("assertBoqV2", () => {
+  const v2 = {
+    schemaVersion: 2,
+    filename: "boq.xlsx",
+    sourcePreserved: true,
+    sheets: [{ sheetName: "A", proposedRunName: "A", headerRow: 1, skippedRows: 0, ignored: false, ignoredReason: null, metadata: { revision: null, date: null, notes: [] }, lines: [] }],
+  };
+
+  it("accepts a v2 document and counts only the sheets a confirm would act on", () => {
+    const doc = assertBoqV2(v2);
+    expect(doc.sheets).toHaveLength(1);
+    expect(countLines(doc)).toBe(0);
+  });
+
+  it("refuses a v1 document with an instruction, rather than guessing", () => {
+    expect(() => assertBoqV2({ sheet: "Feuil1", headerRow: 5, lines: [] })).toThrow(/Upload the BOQ again/);
+    expect(() => assertBoqV2(null)).toThrow(/Upload the BOQ again/);
   });
 });
 

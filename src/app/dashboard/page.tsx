@@ -21,7 +21,7 @@ export default async function DashboardPage() {
     <div className="max-w-3xl mx-auto px-4 py-10">
       <h1 className="text-xl font-semibold text-neutral-900">Project Spec Builder</h1>
       <p className="mt-2 text-sm text-neutral-600">
-        Start from Projects: import a BOQ, work through the spec table, then chase what is outstanding.
+        Start from Projects: import a BOQ, work through the spec table, then export it in the BWS layout.
       </p>
 
       <dl className="mt-8 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white text-sm">

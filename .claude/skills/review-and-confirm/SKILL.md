@@ -137,3 +137,27 @@ underlying work being finished, so label it accordingly.
 Write a `status_history` row for every transition, with the actor. `audit_log`
 records every column change forensically; `status_history` is the queryable
 lifecycle you can actually render on a screen.
+
+## The unit of commit is whatever card the reviewer sees whole
+
+"One record per confirm" is not the rule; it is one instance of the rule. The
+rule is that a commit covers exactly what a person read and approved, so that no
+half of a decision can land on its own.
+
+When one staged row legitimately targets SEVERAL canonical rows — one drawing of
+an item that three sub-quotes all buy — the card the reviewer reads is that
+staged row, and that is the transaction boundary. Writing it to two of its three
+targets looks finished and is not, and nothing downstream will ever ask why the
+third is empty.
+
+Whatever the card is:
+
+- lock every target row in a DETERMINISTIC order (sort by id), or two cards with
+  overlapping targets can deadlock against each other;
+- re-check the live grouping against what the reviewer submitted, and refuse on
+  any difference;
+- recompute the blockers server-side, never trust the screen's copy;
+- roll everything back on any failure.
+
+Write the new boundary down beside the old one rather than generalising the old
+one's wording in place. The next reader needs to know both shapes exist.

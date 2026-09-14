@@ -79,6 +79,8 @@ export const DOCUMENT_KINDS = [
   "spec_bible",
   "finishes_schedule",
   "fabric_schedule",
+  "preamble",
+  "shop_drawings",
   "other",
 ] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
@@ -88,8 +90,25 @@ export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
   spec_bible: "Specification bible",
   finishes_schedule: "Finishes schedule",
   fabric_schedule: "Fabric schedule",
+  preamble: "Preamble",
+  shop_drawings: "Shop drawings",
   other: "Other specification document",
 };
+
+/**
+ * The document kinds whose model output does NOT depend on the app's registers,
+ * and which therefore resolve to records at REVIEW time rather than in the
+ * worker. A drawing observation becomes a new attribute row; there is no
+ * existing value to snapshot, so the raw output stays valid however long the
+ * BOQ takes to be confirmed. Extracting drawings before their BOQ is a normal
+ * order of work, not an error, and re-resolving on read costs nothing whereas
+ * re-extracting costs a model call.
+ */
+export const REGISTER_FREE_DOCUMENT_KINDS: readonly DocumentKind[] = ["preamble", "shop_drawings"];
+
+export function isRegisterFreeKind(kind: DocumentKind): boolean {
+  return REGISTER_FREE_DOCUMENT_KINDS.includes(kind);
+}
 
 /** The states a staged proposal can be in. Reviewed rows are kept, never removed. */
 export const PROPOSAL_REVIEW_STATUSES = ["pending", "ignored", "applied"] as const;
@@ -117,6 +136,107 @@ export type ContactRole = (typeof CONTACT_ROLES)[number];
  */
 export const DRAFT_STATUSES = ["draft", "sent", "voided", "superseded"] as const;
 export type DraftStatus = (typeof DRAFT_STATUSES)[number];
+
+/**
+ * How a record attribute is grouped on screen and in the export. A drawing
+ * page mixes all of these, and the group decides what the value means:
+ * only a `dimension` may carry a unit, and only dimensions compose together
+ * into the single BWS `Dimensions` field.
+ *
+ * Matches `record_attributes_group_check` in db/migrations/0007.
+ */
+export const ATTRIBUTE_GROUPS = ["dimension", "material", "finish", "hardware", "note", "other"] as const;
+export type AttributeGroup = (typeof ATTRIBUTE_GROUPS)[number];
+
+export const ATTRIBUTE_GROUP_LABELS: Record<AttributeGroup, string> = {
+  dimension: "Dimensions",
+  material: "Materials and fabrics",
+  finish: "Finishes",
+  hardware: "Hardware",
+  note: "Notes",
+  other: "Other",
+};
+
+/**
+ * Two states, not four. An attribute exists because a document stated
+ * something, so `missing` cannot arise (nothing was observed, so no row) and
+ * `na` is a cheat-sheet answer about a question this table does not have.
+ * `tbc` is the drawing literally saying "PIPING  TBC": an observation that the
+ * client has not decided, which must reach the export as TBC and not as blank.
+ *
+ * Matches `record_attributes_state_check` in db/migrations/0007.
+ */
+export const ATTRIBUTE_STATES = ["confirmed", "tbc"] as const;
+export type AttributeState = (typeof ATTRIBUTE_STATES)[number];
+
+export const ATTRIBUTE_STATE_LABELS: Record<AttributeState, string> = {
+  confirmed: "Stated",
+  tbc: "TBC",
+};
+
+/**
+ * Dimension units. The AP364 drawings print 190/79/72 for a sofa and 550/735
+ * for a desk chair and name the unit on NEITHER page, so this is a controlled
+ * vocabulary the model never returns and a human always chooses. Anything
+ * unrecognised normalises to null — a wrong unit is worse than no unit,
+ * because a 550mm chair recorded as 550cm looks like a real number.
+ *
+ * Matches `record_attributes_unit_check` in db/migrations/0007.
+ */
+export const ATTRIBUTE_UNITS = ["mm", "cm", "m", "in"] as const;
+export type AttributeUnit = (typeof ATTRIBUTE_UNITS)[number];
+
+/** Returns null — never a guess — for anything not in the vocabulary. */
+export function normaliseUnit(raw: unknown): AttributeUnit | null {
+  if (typeof raw !== "string") return null;
+  const value = raw.trim().toLowerCase().replace(/\.$/, "");
+  const aliases: Record<string, AttributeUnit> = {
+    mm: "mm",
+    millimetre: "mm",
+    millimetres: "mm",
+    millimeter: "mm",
+    millimeters: "mm",
+    cm: "cm",
+    centimetre: "cm",
+    centimetres: "cm",
+    centimeter: "cm",
+    centimeters: "cm",
+    m: "m",
+    metre: "m",
+    metres: "m",
+    meter: "m",
+    meters: "m",
+    in: "in",
+    inch: "in",
+    inches: "in",
+    '"': "in",
+  };
+  return aliases[value] ?? null;
+}
+
+export function isAttributeState(value: unknown): value is AttributeState {
+  return typeof value === "string" && (ATTRIBUTE_STATES as readonly string[]).includes(value);
+}
+
+export function isAttributeGroup(value: unknown): value is AttributeGroup {
+  return typeof value === "string" && (ATTRIBUTE_GROUPS as readonly string[]).includes(value);
+}
+
+/**
+ * Runs and notes are retired, never deleted: a run that turned out to be the
+ * wrong BOQ revision still explains why records exist, and a mis-extracted
+ * preamble note is evidence of what the document was read as.
+ *
+ * Matches `spec_runs_status_check` / `project_notes_status_check` in 0007.
+ */
+export const RUN_STATUSES = ["active", "retired"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export const NOTE_STATUSES = ["active", "retired"] as const;
+export type NoteStatus = (typeof NOTE_STATUSES)[number];
+
+export const ATTRIBUTE_STATUSES = ["active", "retired"] as const;
+export type AttributeStatus = (typeof ATTRIBUTE_STATUSES)[number];
 
 /** A draft is finished being edited once it leaves `draft`. */
 export function isSettledDraft(status: DraftStatus): boolean {

@@ -40,6 +40,8 @@ A human confirms each of these, and nothing else may write it:
 
 - Confirming an extracted spec value into `spec_answers`. Extraction stages;
   only a human confirm writes.
+- Confirming drawing specs into `record_attributes`, and preamble notes into
+  `project_notes`. Same rule, two more staging shapes.
 - Producing the BWS CSV export.
 - Sending any chase email. Drafts only, sent by a human from their own Outlook.
   There is no send path in this app.
@@ -63,6 +65,16 @@ Each of these is a trap, not a preference.
   read `spec_answers.state`, never the presence of a string. `NAME_DENYLIST` in
   `src/lib/matching.ts` also contains `"tbc"`; that is entity-name matching and
   a different meaning. Do not merge them.
+- **A BOQ tab is a RUN, not a revision.** `MUR`, `MAIN RUN` and a
+  value-engineered run quote the SAME codes at DIFFERENT quantities and can all
+  be live at once, so they are `spec_runs` rows with their own records —
+  never `spec_answers.revision_no`, which is for a VE alternative to one
+  ANSWER (M6). `spec_records.run_id` is `not null`: a record on no run is on no
+  tab and in no export scope.
+- **The export is never filtered.** `/api/projects/[id]/export` accepts only
+  `runId` and `format` and 400s on anything else, because a BWS import replaces
+  rather than merges. It is also **not an import file**: it carries no `Id` and
+  no `Job Number`, which this app has never known.
 - **VE rounds preserve the original.** Original spec, VE alternative, client
   accept/reject with date; the accepted version becomes live.
 - **Suppliers by modelled Capsule ID**, never free-text name.
@@ -71,6 +83,11 @@ Each of these is a trap, not a preference.
   is silently wrong.
 - **Client ref is the pre-sale primary key** (`SX11A`, `FU-209-15`) — a modelled
   field, not free text. One client ref can split into several BWS jobs.
+- **A drawing dimension without a printed unit gets NO unit.** The AP364 pages
+  mix centimetres and millimetres and state neither. A wrong unit reads as a
+  real measurement and nothing downstream questions it, so `suggestUnit` offers
+  one only when every figure on the page agrees, and a blank one blocks the
+  card.
 
 ## The data model
 
@@ -80,21 +97,26 @@ reasoning.
 | Table | Notes |
 |---|---|
 | `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox |
-| `spec_records` | One per BOQ line. `record_no` is the human-facing identifier (`P17231-014`); splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
+| `spec_runs` | A sub-quote, normally one BOQ tab. Name (editable), `source_sheet`, `boq_revision`/`boq_date` (**text**), `header_notes`. Retired, never deleted; two runs may share a name |
+| `spec_records` | One per BOQ line. `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
+| `record_attributes` | What a document SAID about an item: group, label, value, `unit` (dimensions only), the client's own `material_code`, `spec_field_id`, `state` (`confirmed`/`tbc`), source run and page. Multi-valued, requirement-free |
+| `project_notes` | The preamble, per requirement. NOT the chassis `notes` table, which is append-only by trigger and would make a mis-extracted note permanent |
+| `intake_batches` | One delivery of documents. **No status column** — a batch's state is derived from its runs |
 | `spec_record_refs` | Every ref an item carries, one row each: `boq_code`, `design_code`, `cos_code`, `compound`, `bws_job`. Unique **per record**, never per project |
 | `spec_fields` | The BWS register: 56 fields, `json_id` as the key, `column_letter` positional and never joined on. **Owned externally** — see the `external-vocabulary-sync` skill |
 | `item_categories` | The 17 cheat sheets, plus `requirements_authored` |
 | `item_category_aliases` | The words a BOQ actually uses ("Sofa" → Armchairs/Benches/Stools/Sofas) |
 | `requirements` | The cheat sheet as a checklist: `kind` (`spec_field`/`readiness`), `prompt`, `section`, `required_at_gate` (**null everywhere** until gates are authored) |
 | `spec_answers` | Per record × requirement × `revision_no`: value, `value_raw`, state, source, confirmed_by/at |
-| `intake_runs` | Staging for any document intake. Generic, not BOQ-shaped |
+| `intake_runs` | Staging for any document intake. Generic, not BOQ-shaped. `batch_id` groups a pack; `document_kind` selects the prompt, the tool AND the staged shape |
 | audit / notes | `audit_log` + `status_history` + append-only notes, from the chassis |
 
 **Not built, deliberately.** `bws_job_links` (a job number arrives as a
-`bws_job` ref until M3 needs dates on it); `project_materials` (M2, when
-extraction starts producing codes that need resolving); `gates` / `gate_status`
-(nothing to read until the assignments exist). An empty table is a promise the
-schema makes that the code has not kept.
+`bws_job` ref until something needs dates on it); `project_materials` (the
+client's own `CH-01.1` codes are kept verbatim on the attribute until there is
+a register worth resolving them against); `gates` / `gate_status` (nothing to
+read until the assignments exist). An empty table is a promise the schema makes
+that the code has not kept.
 
 The requirement matrix is **seed data, not code.** Which fields a category
 requires, and at which gate, comes from the cheat sheets, and those will be
@@ -207,6 +229,67 @@ proposals move — so a blocker frozen into the JSON at extraction time is stale
 by the first edit, and the screen and the confirm route would then disagree
 about whether a card can commit. `proposalBlockers()` is called by both.
 
+### A BOQ has tabs, and each tab is a sub-quote
+
+`src/lib/boq-import.ts`, `src/lib/confirm-boq.ts`,
+`db/migrations/0007_intake_batches_runs_attributes.sql`
+
+`parseBoqSheets` returned on the FIRST sheet with a header and dropped the rest
+with no warning anywhere — so a three-tab bill imported as a clean third of
+itself. Every sheet with a header is now staged, and each non-ignored one
+becomes a `spec_runs` row at confirm.
+
+The per-level columns (`L1`..`L6`) are deliberately absent from the header
+synonyms. They are quantities, and a bill that read `L1` where `qty` belonged
+would order 3 sofas instead of 14.
+
+Rows above the header carry the revision, the date and the terms the run is
+priced under. A client template writes `Revision:` in one cell and `0` in the
+NEXT one, so the reader handles the split form as well as the inline one. Both
+stay **strings**: parsing "14-Sep-26" into a `date` hits the TOE-dates trap for
+a value nothing computes with.
+
+### One drawing, several runs: the item card is the unit of commit
+
+`src/lib/drawing-document.ts`, `src/lib/confirm-drawings.ts`
+
+There is ONE drawing of `S-100`, and the mock-up, main and VE runs all quote it.
+So a code matching one record **per run** is a FAN-OUT and the confirm writes to
+all of them; the reviewer unticks a run whose spec genuinely differs. The same
+code matching TWO records in ONE run is the `SX11A` case and stays **ambiguous**
+— candidates offered, nothing chosen. A matcher that ignores runs cannot tell
+those two apart, which is why grouping by run is the whole of the function.
+
+The card the reviewer reads is therefore the ITEM, not the record, and that is
+what commits atomically. This is the same rule as "the record is the unit of
+commit", not an exception to it: never commit a card somebody did not see whole.
+A page written to two of its three runs looks finished and is not.
+
+`spec_records.version` is **not** touched by any of this. An attribute is its
+own row; bumping the record would invalidate every extraction snapshot and chase
+coverage row taken against it, for a reason that has nothing to do with them.
+
+### Register-free kinds resolve at READ time, not in the worker
+
+`src/lib/extraction-run.ts`, `src/app/api/imports/[id]/route.ts`
+
+A spec-document proposal needs a target SNAPSHOT (the existing answer's id,
+version and value) so the confirm can tell that somebody edited it underneath
+the reviewer — which is why that pipeline resolves inside the worker.
+
+A drawing observation and a preamble note both become NEW rows. There is no
+prior value to snapshot and the model output depends on no register at all, so
+resolution is a pure function both the GET route and the confirm route call, and
+neither stores the result. Two consequences worth stating:
+
+- **A drawing set may be extracted before its BOQ is confirmed.** That is a
+  normal order of work, not an error. The raw output stays valid; confirming the
+  bill and reloading resolves everything with no second model call.
+- **A target that APPEARS between page load and confirm refuses the request**
+  (`targets_changed`). The reviewer's ticked and unticked lists are both stored,
+  so a record they never saw is distinguishable from one they deliberately
+  dropped.
+
 ### The record is the unit of commit, and a half-applied card is the failure
 
 `src/lib/confirm-spec-document.ts`, `src/app/api/imports/[id]/confirm/route.ts`
@@ -290,6 +373,10 @@ their responsibilities elsewhere without a deliberate architecture decision.
   is passed as a column, never as connection session state: Neon's HTTP driver
   kills `SET LOCAL`, which is why `write_audit()` falls back to
   `to_jsonb(new)->>'updated_by'`.
+- `src/lib/bws-export.ts` — the 109-column BWS layout as a static constant, and
+  the composer. A test asserts its 56 spec ids equal the seeded `json_id`s,
+  which is what catches a BWS column insertion: every letter after it shifts
+  while the ids do not.
 - `db/migrations/0001_foundation.sql` — users and role check,
   `schema_migrations`, `audit_log` + `write_audit()`, immutability triggers,
   `bump_version()`, polymorphic `attachments`, `pick_lists`, `status_history`.
@@ -359,28 +446,60 @@ decisions from it. The full dated list is in `docs/plans/README.md`.
   atomic confirm → record screen under optimistic locking → completion view.
   Verified against the real pilot BOQ: 59 lines in, 59 records out, `SX11A`
   landing as two records with different quantities.
-- **M4 — draft chase emails** (`2eb58b3`). `0005` applied to sandbox. Contacts,
-  an outstanding-question inventory grouped by designer, generate / edit /
-  download `.eml` / confirm-sent / undo-confirm, and a derived Waiting state.
 - **M2 — extraction** (`0006`). The blob trust boundary, the model wrapper and
   its tool/Zod schemas, the proposal resolver, the queue producer, claim
   protocol and fenced worker, the review screen and the confirm boundary. The
   API was verified on 2026-09-13 with ONE approved synthetic document; every
   safety rule held; one request billed. `tests/manual/verify-model.test.ts`
   repeats it, gated on `VERIFY_MODEL=1` because it spends money.
+- **M4 — draft chase emails** (`2eb58b3`). `0005` applied to sandbox. **HIDDEN
+  as of 2026-09-14, not deleted** — see below.
 
-**Outstanding — judgement, not code.** M4 needs human acceptance and one
-generated `.eml` opened in the real Outlook client. M2 needs a representative
-pilot schedule read and compared against its source pages by hand: expected vs
-extracted, misses, wrong values, unresolved matches. A successful API response
-is not extraction quality, and the KAM must find the review useful before more
-documents follow. `requirement_aliases` is empty and attribute matching measured
-1/7 on the sample; seed it only from verified pilot wording.
+**Built 2026-09-14, the intake rebuild (`0007`).** The product is refocused on
+getting a tender pack in, staged, reviewed and out again:
 
-**Explicitly excluded, so they are not built speculatively:** M3 CSV export, M5
-inbox ingestion, M6 VE rounds and TG0 sign-off. Any write to BWS. Automatic
-email sending. SharePoint writes. BWS Messenger and Teams ingestion. The TOE
-calculator's own logic. The post-order/production flow.
+- **A pack, not a file.** `intake_batches` groups the documents that arrived
+  together; the upload takes several at once and each file's kind is DECLARED.
+- **Runs.** Every BOQ tab is parsed, and each becomes a `spec_runs` row with its
+  own records and its own tab on the project. `record_attributes` holds what a
+  drawing said about an item; `project_notes` holds what a preamble said about
+  the package.
+- **Two new document kinds** (`preamble`, `shop_drawings`) with their own static
+  prompts, tool schemas, staged shapes and review screens.
+- **A BWS-layout export**, per run or per project, xlsx or csv.
+- **Category no longer blocks intake.** `PATCH /api/records/[id]` sets one
+  afterwards and creates the answer rows with it.
+
+**Outstanding — judgement, not code.**
+
+- **Nobody has used any of this.** The four checks pass with the database tier
+  running; human acceptance is outstanding on every screen.
+- **No real drawing set has been through the model.** The prompts and schemas
+  are written against the AP364 seating drawings but only synthetic fixtures
+  have exercised them. One real extraction, compared against its pages by eye —
+  expected vs extracted, misses, wrong values, wrong units — is what decides
+  whether intake is usable.
+- **The export's job columns are this repo's judgement**: `Project Ref` is the
+  project name, `Client` the client, `Name` the item description, `Item Count`
+  the quantity, `Client Code` the BOQ refs. Confirm them against a real BWS
+  import before anybody relies on the file.
+- `requirement_aliases` is empty and attribute matching measured 1/7 on the M2
+  sample; seed it only from verified pilot wording.
+
+**Explicitly excluded, so they are not built speculatively:** feeding preamble
+notes into later model calls; a `project_materials` register for the client's
+`CH-01.1` codes (kept verbatim on the attribute instead); gap and completeness
+checking, and gates; a BWS *import* file carrying job numbers; PDF bills of
+quantities; images and scanned documents; splitting an oversize drawing set. M5
+inbox ingestion and M6 VE rounds. Any write to BWS. Automatic email sending.
+SharePoint writes. BWS Messenger and Teams ingestion. The TOE calculator's own
+logic. The post-order/production flow.
+
+**Chase emails are hidden, not deleted.** `src/app/dashboard/drafts/page.tsx`
+redirects and says how to bring it back; the routes, `chase-drafts.ts`,
+`chase-template.ts`, `eml.ts` and their suites are untouched and still green.
+The spec table's Waiting column and the derivation behind it in
+`src/app/api/records/route.ts` were removed with it.
 
 **Decisions awaiting the user:**
 
@@ -393,11 +512,11 @@ calculator's own logic. The post-order/production flow.
   KAM / sales-support knowledge.
 - **The question-to-BWS-field mapping is this repo's judgement, not Matthew's.**
   Only 28 of the 56 BWS fields are reachable from a cheat-sheet question. Review
-  it before M3 relies on it.
+  it before the export is relied on.
 - **Source-document version precedence is undefined.** The SharePoint survey
   found the same BOQ and COM content at differing sizes in two places, and six
-  incompatible revision conventions across the tree. Each spec value should
-  carry the document and revision it came from.
+  incompatible revision conventions across the tree. A run now records the
+  revision and date its bill printed, which is a start, not the rule.
 
 Keep this section current.
 

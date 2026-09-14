@@ -76,7 +76,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // failed list is an error there, never an empty queue, so this is part of the
   // same read rather than a second fetch that can fail silently.
   const documents = await sql`
-    select r.id, r.source_kind, r.status, r.error, r.created_at, r.created_by,
+    select r.id, r.source_kind, r.document_kind, r.status, r.error, r.created_at, r.created_by,
            -- The attachment is the filename's real home, but the direct-upload
            -- path keeps no attachment at all (see /api/imports) and would leave
            -- every one of those runs reading "Unnamed file". The staged JSON
@@ -90,6 +90,32 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     limit 50
   `;
 
+  // The runs (BOQ tabs) this project quotes. One tab each on the overview, so
+  // the same item code at three different quantities reads as three sub-quotes
+  // rather than as three confusing duplicates in one list.
+  const runs = await sql`
+    select run.id, run.name, run.source_sheet, run.boq_revision, run.boq_date, run.header_notes,
+           run.sort_order, run.status, run.version, run.created_at,
+           (select count(*) from spec_records r where r.run_id = run.id and r.status = 'active') as record_count,
+           (select count(*) from record_attributes a
+              join spec_records r on r.id = a.record_id
+             where r.run_id = run.id and a.status = 'active') as attribute_count
+    from spec_runs run
+    where run.project_id = ${id} and run.status = 'active'
+    order by run.sort_order, run.created_at
+  `;
+
+  // What the preamble said the whole package is built under.
+  const notes = await sql`
+    select n.id, n.topic, n.title, n.body, n.source_page, n.sort_order, n.version, n.created_at, n.created_by,
+           at.filename as source_filename
+    from project_notes n
+    left join intake_runs r on r.id = n.source_run_id
+    left join attachments at on at.id = r.attachment_id
+    where n.project_id = ${id} and n.status = 'active'
+    order by n.sort_order, n.created_at
+  `;
+
   const record = rows[0] as Record<string, unknown>;
   return json({
     ok: true,
@@ -100,6 +126,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       delivery_date: asDate(record.delivery_date),
     },
     documents,
+    runs,
+    notes,
   });
 }
 

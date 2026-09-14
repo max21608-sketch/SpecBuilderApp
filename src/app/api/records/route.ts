@@ -6,13 +6,15 @@
 // counted separately -- a record whose BWS fields are all confirmed but whose
 // deposit is unresolved is not ready, and one number would hide that.
 import { sql, json } from "@/lib/db";
-import { loadOutstanding, loadSentCoverage, questionKey, waitingByQuestion } from "@/lib/chase-drafts";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
-  const projectId = new URL(request.url).searchParams.get("projectId");
+  const url = new URL(request.url);
+  const projectId = url.searchParams.get("projectId");
   if (!projectId) return json({ ok: false, error: "projectId is required." }, 400);
+  // Which run (BOQ tab) to show. Absent means the whole project.
+  const runId = url.searchParams.get("runId");
 
   // The programme the completion view measures Overdue against. Overdue is
   // COMPUTED from this date, never stored: writing it onto spec_answers would
@@ -44,7 +46,14 @@ export async function GET(request: Request): Promise<Response> {
       r.qty,
       r.designer,
       r.area,
+      r.boq_category,
       r.status,
+      r.run_id,
+      run.name as run_name,
+      -- How much a document has actually said about this item. The intake
+      -- stage's own progress measure: the cheat-sheet counts beside it measure
+      -- a checklist that may not have been assigned yet.
+      (select count(*) from record_attributes ra where ra.record_id = r.id and ra.status = 'active') as attribute_count,
       c.name  as category_name,
       c.family as category_family,
       c.requirements_authored,
@@ -59,37 +68,15 @@ export async function GET(request: Request): Promise<Response> {
       count(q.id) filter (where q.kind = 'readiness' and a.state = 'tbc') as ready_tbc,
       count(q.id) filter (where q.kind = 'readiness' and (a.state = 'missing' or a.id is null)) as ready_missing
     from spec_records r
+    join spec_runs run on run.id = r.run_id
     left join item_categories c on c.id = r.category_id
     left join requirements q on q.category_id = r.category_id
     left join spec_answers a on a.record_id = r.id and a.requirement_id = q.id and a.revision_no = 0
     where r.project_id = ${projectId}
-    group by r.id, c.name, c.family, c.requirements_authored
-    order by r.record_no
+      and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
+    group by r.id, c.name, c.family, c.requirements_authored, run.name, run.sort_order
+    order by run.sort_order, r.record_no
   `;
 
-  // How many of each record's outstanding questions are currently awaiting a
-  // reply. Derived rather than stored -- recording a chase must not write to
-  // spec_answers, because that bumps the version M2's extraction snapshots are
-  // taken against. See src/lib/chase-drafts.ts.
-  //
-  // "Waiting" is a third thing, distinct from settled and from nobody-looked:
-  // it is the difference between work that needs doing and work that needs
-  // following up.
-  const [outstanding, coverage] = await Promise.all([
-    loadOutstanding(projectId),
-    loadSentCoverage(projectId),
-  ]);
-  const waiting = waitingByQuestion(outstanding, coverage);
-
-  const waitingByRecord = new Map<string, number>();
-  for (const question of outstanding) {
-    if (!waiting.has(questionKey(question.recordId, question.requirementId, 0))) continue;
-    waitingByRecord.set(question.recordId, (waitingByRecord.get(question.recordId) ?? 0) + 1);
-  }
-
-  return json({
-    ok: true,
-    programme,
-    records: rows.map((row) => ({ ...row, waiting: waitingByRecord.get(String(row.id)) ?? 0 })),
-  });
+  return json({ ok: true, programme, records: rows });
 }

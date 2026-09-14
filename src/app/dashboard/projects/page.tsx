@@ -79,10 +79,10 @@ export default function ProjectsPage() {
                 Overview
               </Link>
               <Link
-                href={`/dashboard/drafts?projectId=${project.id}`}
+                href={`/dashboard/projects/${project.id}`}
                 className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
               >
-                Chase emails
+                Open
               </Link>
               <Link
                 href={`/dashboard/records?projectId=${project.id}`}

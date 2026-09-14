@@ -29,7 +29,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { DocumentSource } from "@/lib/intake-source";
 import type { DocumentKind } from "@/lib/spec-vocab";
-import { ExtractionOutput, SPEC_DOCUMENT_TOOL, TOOL_NAME } from "@/lib/extraction-schema";
+import { TOOLS, type ExtractionPayload } from "@/lib/extraction-schema";
 // One source of truth for the timings. They are an inequality, not three
 // independent knobs -- see the header of extraction-claim.ts.
 import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
@@ -78,7 +78,7 @@ Record what the document SAYS, not what you infer it means:
 // One static prompt per document kind. Adding a kind means adding a literal
 // here and to DOCUMENT_KINDS; there is no default that quietly reads an unknown
 // document with the wrong instructions.
-const PROMPTS: Record<DocumentKind, string> = {
+export const PROMPTS: Record<DocumentKind, string> = {
   ffe_schedule: `You are reading an FF&E schedule for a furniture manufacturer's specification record.
 
 It lists furniture items by reference, with attributes across columns or fields: finishes, fabrics,
@@ -123,11 +123,59 @@ Record every statement it makes about a specific furniture item: finishes, fabri
 dimensions, quantities, areas and construction notes.
 
 ${SHARED_RULES}`,
+
+  // Drawings do not come back as flat observations: a page is one item with
+  // many facts about it, and a flat list would need a ref guessed onto every
+  // row. This prompt matches DRAWINGS_TOOL.
+  shop_drawings: `You are reading a set of furniture shop drawings for a manufacturer's specification record.
+
+Each page normally shows ONE item: elevations and plans with dimension figures, and a panel of
+material swatches with captions. The item code is usually large text in a corner of the page
+("S-100", "UP-101", "S-301"); read it from the page as drawn.
+
+For each item, record:
+- every dimension figure, with the drawing's own label for it where there is one ("Width", "Seat
+  height") or the view it belongs to where there is not;
+- every material, fabric, finish and hardware callout, keeping the PART it names ("SOFA FEET",
+  "ARMCHAIR", "PIPING") separate from the SPECIFICATION ("Dark tinted wood", "Yarn Tessarae
+  YC04158 - 01"), and the client's own finish code ("CH-01.1", "WD-01", "MT-01") where one is shown;
+- anything else stated about the item, including annotations in other languages, as a note.
+
+THESE DRAWINGS DO NOT PRINT THEIR UNITS, and the set mixes millimetres and centimetres between
+pages. Report each dimension as the figure alone, exactly as drawn. Never append, convert or infer a
+unit — a person chooses it afterwards, and a wrong unit is worse than none because it reads as a
+real measurement.
+
+${SHARED_RULES}`,
+
+  // Project-level prose. Nothing here belongs to one item, so it is cut into
+  // notes rather than observations.
+  preamble: `You are reading an FF&E preamble: the general conditions a client imposes on every item in a
+furniture package.
+
+Record the requirements it places on the manufacturer, one entry per requirement. Typical content is
+materials and workmanship standards, flameproofing and fire standards, tagging and identification,
+tolerances, moisture content, finishing procedures, sample approval, delivery, installation and
+maintenance manuals.
+
+Keep the section heading each requirement sits under. Quote or condense the document's own words, and
+never paraphrase a standard, a tolerance, a percentage, a deadline or a named certificate into
+different wording — those are the parts somebody will be held to.
+
+Do not record an item reference, a dimension or a per-item finish here: this document is about the
+package as a whole.
+
+${SHARED_RULES}`,
 };
 
 export type ExtractionSuccess = {
   ok: true;
-  output: ExtractionOutput;
+  /**
+   * Discriminated by the SHAPE the model returned, not by the document kind:
+   * five kinds share the observation shape. A caller that forgets to branch
+   * fails the typecheck rather than reading `proposals` off a drawing.
+   */
+  output: ExtractionPayload;
   model: string;
   rawResponse: unknown;
   usage: unknown;
@@ -167,6 +215,10 @@ export async function extractSpecDocument(
 ): Promise<ExtractionResult> {
   const startedAt = Date.now();
   const elapsed = () => Date.now() - startedAt;
+  // The kind selects the prompt, the tool AND the schema together. They are one
+  // decision: a drawing read under the schedule tool returns a shape the
+  // drawings reviewer cannot display.
+  const spec = TOOLS[documentKind];
 
   // The document goes FIRST and the instructions after it. Anthropic's own
   // guidance for long documents, and it matters most on the biggest inputs,
@@ -224,8 +276,8 @@ export async function extractSpecDocument(
       max_tokens: MAX_TOKENS,
       thinking: { type: "adaptive" },
       output_config: { effort: "high" },
-      tool_choice: { type: "tool", name: TOOL_NAME },
-      tools: [SPEC_DOCUMENT_TOOL],
+      tool_choice: { type: "tool", name: spec.tool.name },
+      tools: [spec.tool],
       messages: [{ role: "user", content }],
       signal,
     });
@@ -254,7 +306,7 @@ export async function extractSpecDocument(
 
   const toolUse = response.content.find(
     (block): block is Extract<typeof block, { type: "tool_use" }> =>
-      block.type === "tool_use" && block.name === TOOL_NAME,
+      block.type === "tool_use" && block.name === spec.tool.name,
   );
   if (!toolUse) {
     return {
@@ -264,7 +316,7 @@ export async function extractSpecDocument(
     };
   }
 
-  const validated = ExtractionOutput.safeParse(toolUse.input);
+  const validated = spec.schema.safeParse(toolUse.input);
   if (!validated.success) {
     return {
       ok: false, retryable: false, code: "schema",
@@ -275,7 +327,7 @@ export async function extractSpecDocument(
 
   return {
     ok: true,
-    output: validated.data,
+    output: { outputKind: spec.outputKind, data: validated.data } as ExtractionPayload,
     model: EXTRACTION_MODEL,
     rawResponse: response,
     usage: response.usage,

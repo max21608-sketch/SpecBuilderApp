@@ -23,26 +23,205 @@ import {
   type Proposal,
   type StagedSpecDocument,
 } from "@/lib/spec-document";
-import { ANSWER_STATES } from "@/lib/spec-vocab";
-
-type StagedLine = {
-  index: number;
-  lineNo: number;
-  designer: string | null;
-  boqCategory: string | null;
-  code: string | null;
-  itemDescription: string;
-  productReference: string | null;
-  qty: number | null;
-  categoryId: string | null;
-  categoryStatus: string;
-  categoryCandidates?: { id: string; name: string }[];
-  ignored: boolean;
-};
-
-type ParsedBoq = { sheet: string; headerRow: number; skippedRows: number; lines: StagedLine[] };
+import { ANSWER_STATES, ATTRIBUTE_GROUPS, ATTRIBUTE_STATES, ATTRIBUTE_UNITS } from "@/lib/spec-vocab";
+import { assertBoqV2 } from "@/lib/boq-import";
+import {
+  assertStagedDrawings,
+  drawingItemBlockers,
+  resolveDrawingTargets,
+  targetRecordIds,
+  type DrawingItem,
+  type StagedDrawings,
+} from "@/lib/drawing-document";
+import { assertStagedPreamble, preambleNoteBlockers, type StagedPreamble } from "@/lib/preamble-document";
 
 export const dynamic = "force-dynamic";
+
+// ---- a drawing observation's autosave --------------------------------------
+// Per id, per version, merged into the locked row — the same discipline as a
+// proposal, for the same reason: two people editing two different rows must not
+// conflict, and a snapshot rewrite silently reverts the other tab.
+
+const DrawingPatch = z
+  .object({
+    itemId: z.string().min(1),
+    // Targets belong to the ITEM (which runs this drawing applies to); values
+    // belong to an OBSERVATION. Two different versions, two different edits.
+    observationId: z.string().min(1).optional(),
+    expectedVersion: z.number().int().nonnegative(),
+    changes: z
+      .object({
+        ticked: z.array(z.string().uuid()).max(200).optional(),
+        unticked: z.array(z.string().uuid()).max(200).optional(),
+        value: z.string().max(4000).nullable().optional(),
+        unit: z.enum(ATTRIBUTE_UNITS).nullable().optional(),
+        attrGroup: z.enum(ATTRIBUTE_GROUPS).optional(),
+        specFieldId: z.string().uuid().nullable().optional(),
+        state: z.enum(ATTRIBUTE_STATES).nullable().optional(),
+        label: z.string().max(300).optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Response> {
+  const parsed = DrawingPatch.safeParse(raw);
+  if (!parsed.success) {
+    return json({ ok: false, error: parsed.error.issues[0]?.message ?? "That change is not valid." }, 400);
+  }
+  const { itemId, observationId, expectedVersion, changes } = parsed.data;
+  if (Object.keys(changes).length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
+
+  try {
+    const result = await withTransaction(async (txn) => {
+      const rows = await txn`
+        select id, project_id, status, parsed, version from intake_runs where id = ${id} for update
+      `;
+      const run = rows[0];
+      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (run.status !== "parsed") {
+        throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
+      }
+      const staged: StagedDrawings = assertStagedDrawings(run.parsed);
+      const item = staged.items.find((row) => row.id === itemId);
+      if (!item) throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
+
+      let items: DrawingItem[];
+
+      if (observationId === undefined) {
+        if (item.version !== expectedVersion) {
+          throw new DomainConflictError("item_version_stale", "This item was edited in another tab. Reload.");
+        }
+        const ticked = changes.ticked ?? item.targets?.ticked ?? [];
+        const unticked = changes.unticked ?? item.targets?.unticked ?? [];
+        // Both lists are the reviewer's DECISION, which is what lets a target
+        // that appears later be told apart from one they deliberately unticked.
+        items = staged.items.map((row) =>
+          row.id === itemId ? { ...row, version: row.version + 1, targets: { ticked, unticked } } : row,
+        );
+      } else {
+        const observation = item.observations.find((row) => row.id === observationId);
+        if (!observation) {
+          throw new DomainConflictError("observation_missing", "That spec is no longer part of this import. Reload.");
+        }
+        if (observation.reviewStatus !== "pending") {
+          throw new DomainConflictError(
+            "observation_reviewed",
+            `That spec has already been ${observation.reviewStatus}. Reload to see the current state.`,
+          );
+        }
+        if (observation.version !== expectedVersion) {
+          throw new DomainConflictError("observation_version_stale", "That spec was edited in another tab. Reload.");
+        }
+        if (changes.specFieldId) {
+          const field = await txn`select id from spec_fields where id = ${changes.specFieldId}`;
+          if (!field[0]) throw new DomainConflictError("unknown_field", "No such BWS field.", { status: 400 });
+        }
+        const next = {
+          ...observation,
+          version: observation.version + 1,
+          ...(changes.value !== undefined ? { value: changes.value } : {}),
+          ...(changes.unit !== undefined ? { unit: changes.unit, unitSuggested: false } : {}),
+          ...(changes.attrGroup !== undefined ? { attrGroup: changes.attrGroup } : {}),
+          ...(changes.specFieldId !== undefined ? { specFieldId: changes.specFieldId } : {}),
+          ...(changes.state !== undefined ? { state: changes.state, stateReason: null } : {}),
+          ...(changes.label !== undefined ? { labelRaw: changes.label } : {}),
+        };
+        // A unit on anything but a dimension is refused by the database; catch
+        // it here so the reviewer gets a sentence instead of a 500.
+        if (next.unit !== null && next.attrGroup !== "dimension") {
+          throw new DomainConflictError("unit_not_a_dimension", "Only a dimension can carry a unit.", { status: 400 });
+        }
+        items = staged.items.map((row) =>
+          row.id !== itemId
+            ? row
+            : { ...row, observations: row.observations.map((o) => (o.id === observationId ? next : o)) },
+        );
+      }
+
+      const written = await txn`
+        update intake_runs
+        set parsed = ${JSON.stringify({ ...staged, items })}::jsonb, updated_by = ${actor}
+        where id = ${id} and status = 'parsed'
+        returning version
+      `;
+      if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+      return { version: Number(written[0].version) };
+    });
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
+// ---- a preamble note's autosave --------------------------------------------
+
+const PreamblePatch = z
+  .object({
+    noteId: z.string().min(1),
+    expectedVersion: z.number().int().nonnegative(),
+    changes: z
+      .object({
+        topic: z.string().max(300).nullable().optional(),
+        title: z.string().max(300).nullable().optional(),
+        body: z.string().max(8000).nullable().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+async function patchPreamble(id: string, raw: unknown, actor: string): Promise<Response> {
+  const parsed = PreamblePatch.safeParse(raw);
+  if (!parsed.success) {
+    return json({ ok: false, error: parsed.error.issues[0]?.message ?? "That change is not valid." }, 400);
+  }
+  const { noteId, expectedVersion, changes } = parsed.data;
+  if (Object.keys(changes).length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
+
+  try {
+    const result = await withTransaction(async (txn) => {
+      const rows = await txn`
+        select id, status, parsed, version from intake_runs where id = ${id} for update
+      `;
+      const run = rows[0];
+      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (run.status !== "parsed") {
+        throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
+      }
+      const staged: StagedPreamble = assertStagedPreamble(run.parsed);
+      const note = staged.notes.find((row) => row.id === noteId);
+      if (!note) throw new DomainConflictError("note_missing", "That note is no longer part of this import. Reload.");
+      if (note.reviewStatus !== "pending") {
+        throw new DomainConflictError(
+          "note_reviewed",
+          `That note has already been ${note.reviewStatus}. Reload to see the current state.`,
+        );
+      }
+      if (note.version !== expectedVersion) {
+        throw new DomainConflictError("note_version_stale", "That note was edited in another tab. Reload.");
+      }
+
+      // The reviewer's text changes; `*Raw` keeps what the document said, so a
+      // value can always be traced back to its page.
+      const notes = staged.notes.map((row) =>
+        row.id === noteId ? { ...row, version: row.version + 1, ...changes } : row,
+      );
+      const written = await txn`
+        update intake_runs
+        set parsed = ${JSON.stringify({ ...staged, notes })}::jsonb, updated_by = ${actor}
+        where id = ${id} and status = 'parsed'
+        returning version
+      `;
+      if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+      return { version: Number(written[0].version) };
+    });
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
+
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
@@ -61,6 +240,35 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   `;
   const run = rows[0];
   if (!run) return json({ ok: false, error: "No such import." }, 404);
+
+  if (run.source_kind === "spec_document" && run.document_kind === "shop_drawings") {
+    // Resolution is LIVE, never stored. Confirming the pack's BOQ after this
+    // extraction ran is normal, and a stored target would be stale from that
+    // moment on — the screen and the confirm route would then disagree about
+    // whether a card can commit, which is what lets a half-reviewed card
+    // through. Both sides call the same functions instead.
+    if (!run.parsed) return json({ ok: true, import: { ...run, parsed: null } });
+    const staged = assertStagedDrawings(run.parsed);
+    const registers = await loadExtractionRegisters(String(run.project_id));
+    const occupied = await loadOccupiedFields(String(run.project_id));
+    const items = staged.items.map((item) => {
+      const resolution = resolveDrawingTargets(item.itemCodeRaw, registers.records);
+      return {
+        id: item.id,
+        resolution,
+        targets: targetRecordIds(item, resolution),
+        blockers: drawingItemBlockers(item, resolution, occupied),
+      };
+    });
+    const fields = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
+    return json({ ok: true, import: { ...run, parsed: staged }, resolution: items, specFields: fields });
+  }
+
+  if (run.source_kind === "spec_document" && run.document_kind === "preamble") {
+    if (!run.parsed) return json({ ok: true, import: { ...run, parsed: null } });
+    const staged = assertStagedPreamble(run.parsed);
+    return json({ ok: true, import: { ...run, parsed: staged }, blockers: preambleNoteBlockers(staged) });
+  }
 
   if (run.source_kind === "spec_document") {
     // The registers the review screen's selects are built from. Loaded here so
@@ -84,7 +292,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // No matching here. Suggestions were computed and stored when the file was
   // parsed, so the reviewer sees exactly what confirm will write. Recomputing
   // on read would let the two drift apart between the screen and the commit.
-  const parsed = (run.parsed ?? null) as ParsedBoq | null;
+  const parsed = run.parsed ? assertBoqV2(run.parsed) : null;
   return json({ ok: true, import: { ...run, parsed }, categories });
 }
 
@@ -92,9 +300,49 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 // Merges the reviewer's change into the line that is still present at that
 // index, rather than writing back an array the client sent -- a snapshot
 // rewrite races another tab's autosave and silently reverts it.
-async function patchBoqLine(id: string, body: { index?: unknown; categoryId?: unknown; ignored?: unknown }, actor: string): Promise<Response> {
+async function patchBoqLine(
+  id: string,
+  body: { sheetIndex?: unknown; index?: unknown; categoryId?: unknown; ignored?: unknown; runName?: unknown },
+  actor: string,
+): Promise<Response> {
+  const sheetIndex = typeof body.sheetIndex === "number" ? body.sheetIndex : null;
+  if (sheetIndex === null) return json({ ok: false, error: "sheetIndex is required." }, 400);
   const index = typeof body.index === "number" ? body.index : null;
-  if (index === null) return json({ ok: false, error: "index is required." }, 400);
+
+  // A SHEET-level change: its run name, or dropping the tab entirely. Addressed
+  // the same way and merged into the live row, never written back wholesale.
+  if (index === null) {
+    const patch: Record<string, unknown> = {};
+    if (typeof body.runName === "string") {
+      const name = body.runName.trim();
+      if (name === "") return json({ ok: false, error: "A run needs a name." }, 400);
+      if (name.length > 200) return json({ ok: false, error: "That run name is too long." }, 400);
+      patch.proposedRunName = name;
+    }
+    if (typeof body.ignored === "boolean") {
+      patch.ignored = body.ignored;
+      patch.ignoredReason = body.ignored ? "Ignored by the reviewer." : null;
+    }
+    if (Object.keys(patch).length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
+
+    const rows = await sql`
+      update intake_runs
+      set parsed = jsonb_set(
+            parsed,
+            array['sheets', ${String(sheetIndex)}],
+            coalesce(parsed->'sheets'->(${sheetIndex}::int), '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb
+          ),
+          updated_by = ${actor}
+      where id = ${id}
+        and status = 'parsed'
+        and parsed->'sheets'->(${sheetIndex}::int) is not null
+      returning version
+    `;
+    if (!rows[0]) {
+      return json({ ok: false, error: "That sheet is no longer in this import, or the import is already confirmed." }, 409);
+    }
+    return json({ ok: true, version: rows[0].version });
+  }
 
   const patch: Record<string, unknown> = {};
   if (typeof body.categoryId === "string" || body.categoryId === null) {
@@ -108,19 +356,43 @@ async function patchBoqLine(id: string, body: { index?: unknown; categoryId?: un
     update intake_runs
     set parsed = jsonb_set(
           parsed,
-          array['lines', ${String(index)}],
-          coalesce(parsed->'lines'->(${index}::int), '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb
+          array['sheets', ${String(sheetIndex)}, 'lines', ${String(index)}],
+          coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
+            || ${JSON.stringify(patch)}::jsonb
         ),
         updated_by = ${actor}
     where id = ${id}
       and status = 'parsed'
-      and parsed->'lines'->(${index}::int) is not null
+      and parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int) is not null
     returning version
   `;
   if (!rows[0]) {
     return json({ ok: false, error: "That line is no longer in this import, or the import is already confirmed." }, 409);
   }
   return json({ ok: true, version: rows[0].version });
+}
+
+/**
+ * Which BWS fields are already spoken for, per record.
+ *
+ * Read live for the same reason the resolution is: a slot filled by another
+ * card a second ago must show as a blocker here, not as a unique-violation 500
+ * at confirm.
+ */
+async function loadOccupiedFields(projectId: string): Promise<Map<string, Set<string>>> {
+  const rows = await sql`
+    select a.record_id, a.spec_field_id
+    from record_attributes a
+    join spec_records r on r.id = a.record_id
+    where r.project_id = ${projectId} and a.status = 'active' and a.spec_field_id is not null
+  `;
+  const occupied = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const set = occupied.get(String(row.record_id)) ?? new Set<string>();
+    set.add(String(row.spec_field_id));
+    occupied.set(String(row.record_id), set);
+  }
+  return occupied;
 }
 
 // ---- a proposal's autosave --------------------------------------------------
@@ -292,9 +564,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   // Which shape, read from the run, not from the request.
-  const rows = await sql`select source_kind from intake_runs where id = ${id}`;
+  const rows = await sql`select source_kind, document_kind from intake_runs where id = ${id}`;
   if (!rows[0]) return json({ ok: false, error: "No such import." }, 404);
 
+  if (rows[0].document_kind === "shop_drawings") return patchDrawing(id, raw, user.email);
+  if (rows[0].document_kind === "preamble") return patchPreamble(id, raw, user.email);
   if (rows[0].source_kind === "spec_document") return patchProposal(id, raw, user.email);
   return patchBoqLine(id, (raw ?? {}) as Record<string, unknown>, user.email);
 }
