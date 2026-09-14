@@ -274,6 +274,51 @@ match" into "confidently wrong". `requirement_aliases` exists and is empty.
 inventing aliases would be a confident wrong match wearing a seed file's
 authority. Seeding it needs the real FF&E schedules and cheat sheets.
 
+## The SharePoint survey, 2026-09-14
+
+A read-only traversal of the P17231 tree. Nothing was modified. The index is
+`docs/docs for building/P17231 SharePoint Index.md` — gitignored, because it
+carries real client filenames, revision dates and drive item IDs.
+
+**Resolved from the handover's "Still Required" list:**
+
+- **The TA FF&E schedules exist — nine of them, not one.** The handover lists
+  only the 211 schedule. The set covers every TA suite except prototypes 218
+  and 314, which have layouts but no schedule. That is a **spec gap, not a
+  filing gap**: nobody has drawn them, so no amount of searching will produce
+  one.
+- **The TOE was located** (`Terms of Engagement V5 ML.xlsx`) and is confirmed
+  stale. It is a spreadsheet date-calculator, not a signed contract.
+- **The finishes schedule is confirmed absent** — see open item 5 below.
+
+**Findings that change what gets built:**
+
+1. **The spec table spans TWO BOQs, not one.** An LCS BOQ exists
+   (`…BOQ Furniture & Seating LCS (3).xlsx`) alongside the TA BOQ every project
+   doc describes. Every doc characterises the BOQ as a single document, and M1
+   was verified against the TA one alone. M3's "complete dataset" rule makes
+   this load-bearing: an export built from one BOQ is a partial export, which
+   is the erasing case.
+2. **Client mark-up documents exist** — MHG comments on the Room Harmonies and
+   the R+1 bible, Gleeds/MHG comments on the material boards. This is the
+   client's written approval trail, i.e. exactly the provenance content the
+   tool exists to capture. It should be a first-class input, not an attachment.
+3. **Room-number keying is zone-prefixed** (`3SG-209`, `5AR-501`, `4SO-324`),
+   and the Room Mix uses a fuller form again (`3SG_P00_01_001`). Any room-based
+   join must normalise these first.
+4. **Parse the cheat sheets' two `TEMPLATE.xlsx` masters, not the 19 PDFs.**
+   The PDFs are Excel exports. The pack exists three times (project root, GR,
+   Common Areas) with byte-identical PDFs; **the GR copy is canonical**,
+   because its masters are larger and therefore later.
+5. **~2.3 GB of the 3.81 GB tree is CGI renders**, concentrated in one folder.
+   Any bulk-ingest routine must exclude it explicitly.
+6. **The BW Quote & Proforma folder is empty** although a live pro-forma exists
+   (PF/36731-BW, BENO-19885). The commercial output is not being filed back to
+   the project folder at all — which is the step the design requirement to
+   *generate* quote text from spec data replaces.
+7. **The folder template is consistent** across GR and Common Areas, which
+   matters if the tool is ever to read project folders generically.
+
 ## Still open
 
 Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
@@ -302,7 +347,13 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
    deliberately left null**: no source document names it, and inventing a date
    for the field that drives Overdue would make every red flag on the spec
    table a fiction. It needs the real programme date from the user.
-5. **The finishes schedule for P17231 was not found.**
+5. **The finishes schedule for P17231 does not exist.** Upgraded from "not
+   found" to **confirmed absent, 2026-09-14**: the three folders that should
+   hold it (`COM & Finishes Schedule`, `GR/…/Finishes Schedule`, and the
+   Common Areas equivalent) are all empty. The nearest substitutes are the Room
+   Harmonies, the Gleeds/MHG commented material boards and the zoning colour
+   schemes — none of which is a finishes schedule. Stop looking; decide what
+   the tool does without one.
 6. **BWS access.** The user could not log in as of 2026-09-12. The AI mirror
    (`bws-next-ai.whistlercloud.com`) is refreshed daily, discards changes, and
    its import/export does not work — a read/reference surface, not an
@@ -331,6 +382,19 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
     requirements point at a BWS field, and that mapping is this repo's
     judgement, not Matthew's. Only 28 of the 56 fields are reachable from a
     cheat-sheet question at all. Review before M3 depends on it.
+13. **Source-document version precedence is undefined, and it is the biggest
+    structural risk the survey found.** Observed 2026-09-14. The same content
+    exists at multiple revisions with no machine-readable ordering across six
+    conventions: French *indice* letter (Ind A → Ind B), REV number, ISO date
+    prefix (`20251105_`), three different date *suffix* formats in two orders
+    (`28052026`, `25.10.16`, `ACOS_26.03.10`), bare "Copy 2", and parenthetical
+    `(3)` / `(002)`. The BOQ and COM files are duplicated across GR root and
+    Submitted Tender Documents **at differing sizes**, so which is current is
+    not determinable from the names. Compounding it, the LCS drawings are
+    Indice 00/B dated **2024** while the bibles are Indice A–E dated **2026**.
+    Two consequences: no bulk ingest until a precedence rule exists, and every
+    spec value must carry the document *and revision* it came from — a value
+    whose source cannot be named is a value nobody can re-check.
 
 ## Running agents in parallel
 
