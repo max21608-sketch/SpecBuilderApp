@@ -1,27 +1,16 @@
-// Asking for a document to be read. THIS IS THE CLICK THAT SPENDS MONEY.
+// Asking for a document to be read, by hand.
 //
-// Registration is free and reads nothing; this route starts an attempt, and an
-// attempt is up to MAX_CLAIMS_PER_ATTEMPT paid model calls. That is why it is a
-// separate, deliberate act by a human rather than something registration does
-// on its own.
+// This route is no longer the only way an attempt starts: registering a
+// specification document dispatches one automatically (see /api/imports).
+// It is what remains for the cases automation cannot cover — a document that
+// FAILED, an attempt the queue never accepted, and an attempt abandoned by a
+// worker that died mid-run. Each of those costs money, which is why each is a
+// deliberate press with the cost stated on the button.
 //
-// ============================================================================
-// COMMIT, THEN PUBLISH. Never the other way round.
-//
-// Publishing inside the transaction would let a worker claim an attempt that
-// the transaction then rolled back — a message pointing at state that never
-// existed. So the attempt is committed first, and the publish is a separate
-// step whose failure is handled explicitly:
-//
-//   DEFINITE rejection   the queue said no. Mark the attempt failed, but only
-//                        if it is still queued and unclaimed — a worker may
-//                        have picked up a message the publisher never saw
-//                        acknowledged.
-//   AMBIGUOUS failure    a socket died with the message possibly sent. STAY
-//                        QUEUED, record a dispatch error, and offer Retry
-//                        dispatch. Marking this failed would kill a run that is
-//                        about to start; retrying blind would double-publish.
-//                        Idempotency on (run, attempt) makes the retry safe.
+// COMMIT, THEN PUBLISH — and the handling of a publish failure — live in
+// src/lib/extraction-dispatch.ts, because registration needs exactly the same
+// protocol and a second copy of it would be a second set of rules about when a
+// paid call may be claimed twice.
 //
 // THREE ACTIONS, and the difference between them is what a human is agreeing to:
 //
@@ -33,15 +22,11 @@
 //                    another model call may be charged, because it may.
 // ============================================================================
 import { z } from "zod";
-import { json, sql } from "@/lib/db";
+import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
-import { enqueueExtractionJob, extractionIdempotencyKey } from "@/lib/extraction-queue";
-import {
-  ATTEMPT_DEADLINE_HOURS,
-  CLAIM_EXPIRY_SECONDS,
-  MAX_CLAIMS_PER_ATTEMPT,
-} from "@/lib/extraction-claim";
+import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
+import { CLAIM_EXPIRY_SECONDS, MAX_CLAIMS_PER_ATTEMPT } from "@/lib/extraction-claim";
 
 export const dynamic = "force-dynamic";
 
@@ -125,7 +110,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             "This attempt has not been abandoned. Wait for it, or reload to see where it got to.",
           );
         }
-        return { attemptId: await openAttempt(txn, id, requestId, user.email), alreadyDispatched: false };
+        return { attemptId: await opened(txn, id, requestId, user.email), alreadyDispatched: false };
       }
 
       // action === 'start'
@@ -142,7 +127,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             : "This document is already being read.",
         );
       }
-      return { attemptId: await openAttempt(txn, id, requestId, user.email), alreadyDispatched: false };
+      return { attemptId: await opened(txn, id, requestId, user.email), alreadyDispatched: false };
     });
   } catch (cause) {
     return transactionErrorResponse(cause);
@@ -154,89 +139,28 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   // Committed. Now publish — outside the transaction, because a queue publish
   // is network I/O and a transaction must never be held across it.
-  try {
-    await enqueueExtractionJob(
-      { kind: "document-intake", extractionId: id, attemptId: attempt.attemptId, requestedBy: user.email },
-      extractionIdempotencyKey(id, attempt.attemptId),
+  const failure = await publishAttempt(id, attempt.attemptId, user.email);
+  if (failure) {
+    return json(
+      failure.code === "dispatch_uncertain"
+        ? { ok: false, code: failure.code, attemptId: attempt.attemptId, error: failure.error }
+        : { ok: false, code: failure.code, error: failure.error },
+      failure.status,
     );
-  } catch (cause) {
-    return await handlePublishFailure(id, attempt.attemptId, user.email, cause);
   }
 
   return json({ ok: true, attemptId: attempt.attemptId, status: "queued" });
 }
 
-type Txn = Parameters<Parameters<typeof withTransaction>[0]>[0];
-
-async function openAttempt(txn: Txn, runId: string, attemptId: string, actor: string): Promise<string> {
-  const rows = await txn`
-    update intake_runs
-    set status = 'queued',
-        attempt_id = ${attemptId},
-        claim_token = null,
-        claim_count = 0,
-        queued_at = now(),
-        attempt_deadline_at = now() + make_interval(hours => ${ATTEMPT_DEADLINE_HOURS}),
-        processing_started_at = null,
-        error = null,
-        updated_by = ${actor}
-    where id = ${runId}
-    returning attempt_id
-  `;
-  if (!rows[0]) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
-  return String(rows[0].attempt_id);
-}
-
 /**
- * A definite rejection carries an HTTP status the queue chose. Anything else —
- * a socket hang-up, a DNS failure, a timeout — may or may not have been
- * delivered, and the difference decides whether it is safe to say the attempt
- * failed.
+ * openAttempt, with this route's reading of "no row matched": it decided from
+ * a locked row a moment ago, so the only way to match nothing is the row
+ * having gone.
  */
-function isDefiniteRejection(cause: unknown): boolean {
-  const status = (cause as { status?: unknown } | null)?.status;
-  return typeof status === "number" && status >= 400 && status < 500;
+async function opened(txn: Txn, runId: string, attemptId: string, actor: string): Promise<string> {
+  const id = await openAttempt(txn, runId, attemptId, actor);
+  if (!id) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+  return id;
 }
 
-async function handlePublishFailure(
-  runId: string,
-  attemptId: string,
-  actor: string,
-  cause: unknown,
-): Promise<Response> {
-  const detail = cause instanceof Error ? cause.message : String(cause);
-
-  if (isDefiniteRejection(cause)) {
-    // Safe to close: the queue refused it outright. Still fenced on "no worker
-    // has claimed it", because the refusal we saw may have followed a delivery
-    // we did not.
-    await sql`
-      update intake_runs
-      set status = 'failed', error = ${`The extraction could not be queued: ${detail}`}, updated_by = ${actor}
-      where id = ${runId} and attempt_id = ${attemptId} and status = 'queued' and claim_count = 0
-    `;
-    return json(
-      { ok: false, code: "dispatch_rejected", error: `The extraction could not be queued: ${detail}` },
-      502,
-    );
-  }
-
-  // Ambiguous. Leave it queued and let a human retry the dispatch of this same
-  // attempt — idempotency makes that safe, and it will not disturb a worker
-  // that already has the message.
-  await sql`
-    update intake_runs
-    set error = ${`The extraction may not have been queued: ${detail}`}, updated_by = ${actor}
-    where id = ${runId} and attempt_id = ${attemptId} and status = 'queued'
-  `;
-  return json(
-    {
-      ok: false,
-      code: "dispatch_uncertain",
-      attemptId,
-      error:
-        "The request may or may not have reached the queue. Nothing has been charged yet. Wait a moment — if it does not start, use Retry dispatch.",
-    },
-    503,
-  );
-}
+type Txn = Parameters<Parameters<typeof withTransaction>[0]>[0];

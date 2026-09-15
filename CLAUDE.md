@@ -349,10 +349,51 @@ settled answers are a different question. Restore accepts **ignored only**; an
 applied proposal is immutable history, and undoing an answer is something a
 person does on the record screen, on purpose.
 
+### Registering a specification document SPENDS MONEY
+
+`src/app/api/imports/route.ts`, `src/lib/extraction-dispatch.ts`,
+`src/components/projects/IntakeBatchUpload.tsx`
+
+It did not until 2026-09-15, and three file headers said so. Registration read
+no body and cost nothing; pressing Read was a separate deliberate act, one
+document at a time, with the charge on the button. A real pack broke that:
+Panther is eleven documents and packs of thirty are expected, so the state
+anybody actually wants — everything read — was reachable only by remembering to
+click thirty times across eleven screens. Asking per document was ceremony, not
+consent.
+
+So an attempt is opened and published as each specification document registers.
+**The upload screen states the count and the charge before anything uploads, and
+that statement is where the human decision now lives.** A bill of quantities is
+not part of it: a bill is parsed synchronously, by code, and no model has ever
+touched one.
+
+Three things about it are load-bearing:
+
+- **`openAttempt` runs in the SAME transaction as the insert; the publish comes
+  after the commit.** A run committed at `pending` with a message already
+  published against it is a paid call against state that may not exist.
+- **A registration returns 201 even when its dispatch fails.** The file is
+  stored and the row exists either way, so the failure is recorded on the run —
+  where the review screens already render it with a Retry — and reported as
+  `autoRead` on the response. Failing the upload would tell somebody their file
+  did not arrive when it did.
+- **A replayed registration must not open a second attempt.** It returns the run
+  it already made; publishing again spends one of only four deliveries.
+
+`src/lib/extraction-dispatch.ts` holds commit-then-publish and the two publish
+failure modes **once**, because the manual route and registration need the same
+protocol and two copies would be two sets of rules about when a paid call may be
+claimed twice. Nothing is retro-active: a document already at `pending` is read
+by the pack screen's *Read all*, not by anything in registration.
+
+There is still no rate limiting anywhere in the enqueue path — see the M8
+outstanding notes.
+
 ### An extraction attempt is owned by two identifiers
 
 `src/lib/extraction-claim.ts`, `src/lib/extraction-run.ts`,
-`src/app/api/imports/[id]/extract/route.ts`
+`src/app/api/imports/[id]/extract/route.ts`, `src/lib/extraction-dispatch.ts`
 
 `attempt_id` is a logical attempt; `claim_token` is one worker invocation inside
 it. Both are needed: a hard-killed worker leaves a claim that expires, a later
@@ -363,6 +404,11 @@ means ownership was lost** — stop; never escalate that into a terminal failure
 
 A live claim is a **busy** outcome and it THROWS. Acking a duplicate delivery
 would spend the delivery that recovery depends on.
+
+The extract route is **no longer the only way an attempt starts** — registration
+dispatches one automatically. What remains manual is what automation cannot
+cover: a document that FAILED, an attempt the queue never accepted, and an
+attempt abandoned by a worker that died mid-run.
 
 The timings are an inequality, not three knobs: model deadline < run abort <
 `maxDuration`; claim expiry > `maxDuration`; visibility timeout > claim expiry.
@@ -567,14 +613,42 @@ which is why `record_attributes_unit_is_dimension` was replaced. Blocks and
 formatting rules: `docs/bws-spec-grid.md`. Pushed to staging; **not yet
 exercised in the app by anyone**.
 
+**Built 2026-09-15, the first run-through's findings.** Max walked the app end
+to end and four things were wrong, all of them flow rather than data:
+
+- **The spec table never merges runs.** A second screen used to mount the table
+  with no run and list every sub-quote in one flat list, and the projects list
+  pointed at it. Deleted. `SpecTable` now REQUIRES a `runId`, the projects list
+  and the BOQ confirm both land on the project's run tabs, and a record screen
+  goes back to the run it is on. `/api/records` still answers without a `runId`
+  — the contacts panel reads the whole project for designer-code hints — but no
+  screen renders that.
+- **Intake is grouped by pack.** The overview listed runs flat, so the pack
+  screen and the combined drawings review were reachable only from the redirect
+  that fires once after upload. Each pack now links to both.
+- **Specification documents are read automatically.** See the section above; it
+  is the one consequential change here.
+- Projects list: the duplicate *Open* button is gone and *Add a project* is at
+  the top. Intake status labels live in `src/lib/intake-status.ts`, because
+  three copies had already drifted on `parsing`.
+
 **Outstanding — judgement, not code.**
 
 - **Nobody has used any of this.** The four checks pass with the database tier
   running; human acceptance is outstanding on every screen.
-- **The drawings review screen has no slot picker yet.** Staging routes a
-  labelled figure to its slot and everything else to a note, so a reviewer
-  cannot currently promote an unlabelled shop-drawing figure to a width. That is
-  the common case on the Panther drawing set, and it blocks step 2 of M8.
+- **Nothing limits how many model calls a pack starts at once.** Registration
+  dispatches a read per specification document, so an eleven-file pack is eleven
+  concurrent workers and eleven concurrent model calls. There is no per-batch
+  cap, no in-flight cap and nothing that sleeps: an Anthropic 429 is retryable
+  but burns one of only four deliveries, so a rate-limited pack can reach
+  `failed`. The client uploads and registers sequentially, which staggers
+  dispatch by upload time — incidental, not a control. Watch the first real
+  Panther delivery; a per-batch cap is the fix if it bites.
+- **The drawings review screen's slot picker is unproven.** `93176dd` added it,
+  and its options and defaults were checked in the browser, but driving a
+  selection through to a save was not. Promoting an unlabelled shop-drawing
+  figure to a width is the common case on the Panther set and step 2 of M8
+  depends on it.
 - **No real drawing set has been through the model.** The prompts and schemas
   are written against the AP364 seating drawings but only synthetic fixtures
   have exercised them. One real extraction, compared against its pages by eye —

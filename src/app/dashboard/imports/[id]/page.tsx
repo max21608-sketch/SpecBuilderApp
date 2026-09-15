@@ -108,7 +108,9 @@ export default function ReviewImportPage() {
         setBlocked(lines);
         return;
       }
-      router.push(`/dashboard/records?projectId=${res.data.projectId}`);
+      // The project's run tabs, with the first one selected. A bill with three
+      // tabs has just become three runs, and they are never shown merged.
+      router.push(`/dashboard/projects/${res.data.projectId}?tab=spec`);
     } finally {
       setBusy(false);
     }

@@ -18,9 +18,9 @@
 // see which was which; a tab each is how the client, the quote and the job
 // already think about them. Overview holds everything that is true of the
 // project as a whole.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact } from "@/components/projects/ContactsPanel";
@@ -35,6 +35,7 @@ import {
 } from "@/lib/project-programme";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import { ATTRIBUTE_UNITS, ATTRIBUTE_UNIT_LABELS } from "@/lib/spec-vocab";
+import { intakeStatusLabel } from "@/lib/intake-status";
 
 type Project = {
   id: string;
@@ -62,6 +63,19 @@ type DocumentRun = {
   created_by: string | null;
   filename: string | null;
   source_preserved: boolean;
+  // Null on anything uploaded before 0007, which is why the grouping below
+  // keeps a home for runs that belong to no pack.
+  batch_id: string | null;
+  batch_label: string | null;
+  batch_created_at: string | null;
+};
+
+/** One delivery, and the runs that arrived in it. */
+type Pack = {
+  id: string | null;
+  label: string | null;
+  createdAt: string;
+  runs: DocumentRun[];
 };
 
 type SpecRun = {
@@ -84,17 +98,6 @@ type ProjectNote = {
   source_page: number | null;
   source_filename: string | null;
   version: number;
-};
-
-// One place, so a status never reads as a raw enum on one screen and a sentence
-// on another.
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Not read yet",
-  queued: "Queued",
-  parsing: "Being read",
-  parsed: "Ready to review",
-  confirmed: "Review complete",
-  failed: "Failed",
 };
 
 const SOURCE_LABELS: Record<string, string> = { boq_xlsx: "BOQ", spec_document: "Specification document" };
@@ -133,8 +136,12 @@ function formOf(project: Project): Form {
   };
 }
 
-export default function ProjectOverviewPage() {
+function ProjectOverview() {
   const projectId = String(useParams().id ?? "");
+  // "?tab=spec" is how the projects list offers the spec table as a destination
+  // of its own. It selects the FIRST run, because there is no merged view to
+  // send anybody to.
+  const wantedTab = useSearchParams().get("tab");
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<DocumentRun[] | null>(null);
   const [runs, setRuns] = useState<SpecRun[]>([]);
@@ -143,6 +150,9 @@ export default function ProjectOverviewPage() {
   // paragraph, and all of them expanded is why this section could not be read.
   const [openNotes, setOpenNotes] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<string>("overview");
+  // Once only, and only before anybody has clicked: re-running it would drag a
+  // reader back to the first run every time the project reloaded.
+  const tabPreselected = useRef(false);
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [suggestedCodes, setSuggestedCodes] = useState<string[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -212,6 +222,54 @@ export default function ProjectOverviewPage() {
     void loadContacts();
     void loadCodes();
   }, [projectId, load, loadContacts, loadCodes]);
+
+  useEffect(() => {
+    if (tabPreselected.current || !wantedTab || runs.length === 0) return;
+    // A run id sends you to that exact run -- the record screen's back link
+    // uses it, because a record number is project-wide and the same code sits
+    // on more than one tab. "spec" just means "the spec table", so it takes
+    // the first run. An id for a run this project does not have falls through
+    // to Overview rather than showing an empty tab nobody selected.
+    const wanted = wantedTab === "spec" ? runs[0] : runs.find((run) => run.id === wantedTab);
+    if (!wanted) return;
+    tabPreselected.current = true;
+    setTab(wanted.id);
+  }, [wantedTab, runs]);
+
+  // Runs grouped into the packs they arrived in, newest first, each pack's own
+  // runs oldest first so they read in the order the work happens.
+  //
+  // Pre-0007 runs have no batch and are collected under a single null pack at
+  // the end -- they are real documents somebody imported and must not vanish
+  // because a later migration gave their successors a grouping.
+  const packs = useMemo<Pack[]>(() => {
+    if (!documents) return [];
+    const byBatch = new Map<string, Pack>();
+    const loose: DocumentRun[] = [];
+    for (const run of documents) {
+      if (!run.batch_id) {
+        loose.push(run);
+        continue;
+      }
+      const existing = byBatch.get(run.batch_id);
+      if (existing) {
+        existing.runs.push(run);
+        continue;
+      }
+      byBatch.set(run.batch_id, {
+        id: run.batch_id,
+        label: run.batch_label,
+        createdAt: run.batch_created_at ?? run.created_at,
+        runs: [run],
+      });
+    }
+    const grouped = [...byBatch.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    for (const pack of grouped) pack.runs.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    if (loose.length > 0) {
+      grouped.push({ id: null, label: null, createdAt: loose[loose.length - 1]?.created_at ?? "", runs: loose });
+    }
+    return grouped;
+  }, [documents]);
 
   const dirty = useMemo(() => {
     if (!project || !form) return false;
@@ -598,58 +656,109 @@ export default function ProjectOverviewPage() {
         cannot say which is which.
       </p>
       <IntakeBatchUpload projectId={project.id} onUploaded={() => void load()} />
-      {documents !== null && documents.length > 0 && (
-        <p className="mt-3 text-xs text-neutral-500">
-          Everything read in so far:
-        </p>
-      )}
+      {/* GROUPED BY PACK, and each pack links to its own screen.
+          A delivery's runs used to be listed flat, so the two screens that
+          read a whole pack -- the pack screen with its Read all, and the
+          combined drawings review, which is the ONLY place a record described
+          by two documents is named -- were reachable solely from the redirect
+          that fires once after upload. Navigate away and there was no route
+          back to either except browser history. */}
       {documents === null ? (
         <div className="mt-3"><Spinner label="Loading documents" /></div>
-      ) : documents.length === 0 ? (
+      ) : packs.length === 0 ? (
         <p className="mt-2 text-sm text-neutral-600">
           Nothing imported yet. Start with the bill of quantities — it creates this project&rsquo;s spec records.
         </p>
       ) : (
-        <ul className="mt-3 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
-          {documents.map((run) => (
-            <li key={run.id} className="px-4 py-3 flex items-center gap-4 text-sm">
-              <div className="min-w-0 flex-1">
-                <p className="text-neutral-900">
-                  {run.filename ?? "Unnamed file"}
-                  <span className="text-neutral-500">
-                    {" · "}
-                    {(run.document_kind && KIND_LABELS[run.document_kind]) ?? SOURCE_LABELS[run.source_kind] ?? run.source_kind}
-                  </span>
+        packs.map((pack) => {
+          const drawings = pack.runs.filter((run) => run.document_kind === "shop_drawings");
+          const unread = pack.runs.filter((run) => run.status === "pending" || run.status === "failed");
+          return (
+            <div key={pack.id ?? "unpacked"} className="mt-3 border border-neutral-200 rounded-lg bg-white">
+              <div className="px-4 py-2 border-b border-neutral-200 bg-neutral-50 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <p className="text-sm font-medium text-neutral-900">
+                  {pack.id
+                    ? (pack.label ?? `${pack.runs.length} document${pack.runs.length === 1 ? "" : "s"}`)
+                    : "Not part of a pack"}
                 </p>
+                {/* The count is NOT repeated here: a pack's default label is
+                    already "10 documents", and the two together read as
+                    twenty. */}
                 <p className="text-xs text-neutral-500">
-                  {new Date(run.created_at).toLocaleString("en-GB")}
-                  {run.created_by ? ` · ${run.created_by}` : ""}
-                  {run.source_preserved ? "" : " · original not kept"}
+                  {pack.id ? (
+                    <>
+                      delivered {new Date(pack.createdAt).toLocaleDateString("en-GB")}
+                      {unread.length > 0 && <> · {unread.length} not read yet</>}
+                    </>
+                  ) : (
+                    <>Uploaded before deliveries were grouped. Nothing is wrong with them.</>
+                  )}
                 </p>
-                {run.status === "failed" && run.error && (
-                  <p className="mt-1 text-xs text-red-700">{run.error}</p>
+                {pack.id && (
+                  <span className="ml-auto flex flex-wrap items-center gap-2">
+                    {/* Only when there is more than one, because the combined
+                        screen exists for what can only be seen ACROSS
+                        documents. One drawing has nothing to compare. */}
+                    {drawings.length > 1 && (
+                      <Link
+                        href={`/dashboard/projects/${project.id}/intake/${pack.id}/drawings`}
+                        className="text-sm px-3 py-1 rounded bg-neutral-900 text-white hover:bg-neutral-700"
+                      >
+                        Review all {drawings.length} drawings together
+                      </Link>
+                    )}
+                    <Link
+                      href={`/dashboard/projects/${project.id}/intake/${pack.id}`}
+                      className="text-sm px-3 py-1 rounded border border-neutral-300 hover:bg-neutral-100"
+                    >
+                      Open the pack
+                    </Link>
+                  </span>
                 )}
               </div>
-              <span
-                className={`shrink-0 text-xs px-2 py-0.5 rounded border ${
-                  run.status === "failed"
-                    ? "text-red-800 border-red-300 bg-red-50"
-                    : run.status === "confirmed"
-                      ? "text-green-800 border-green-300 bg-green-50"
-                      : "text-neutral-700 border-neutral-300 bg-neutral-50"
-                }`}
-              >
-                {STATUS_LABELS[run.status] ?? run.status}
-              </span>
-              <Link
-                href={`/dashboard/imports/${run.id}`}
-                className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
-              >
-                Open
-              </Link>
-            </li>
-          ))}
-        </ul>
+              <ul className="divide-y divide-neutral-200">
+                {pack.runs.map((run) => (
+                  <li key={run.id} className="px-4 py-3 flex items-center gap-4 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-neutral-900">
+                        {run.filename ?? "Unnamed file"}
+                        <span className="text-neutral-500">
+                          {" · "}
+                          {(run.document_kind && KIND_LABELS[run.document_kind]) ?? SOURCE_LABELS[run.source_kind] ?? run.source_kind}
+                        </span>
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        {new Date(run.created_at).toLocaleString("en-GB")}
+                        {run.created_by ? ` · ${run.created_by}` : ""}
+                        {run.source_preserved ? "" : " · original not kept"}
+                      </p>
+                      {run.status === "failed" && run.error && (
+                        <p className="mt-1 text-xs text-red-700">{run.error}</p>
+                      )}
+                    </div>
+                    <span
+                      className={`shrink-0 text-xs px-2 py-0.5 rounded border ${
+                        run.status === "failed"
+                          ? "text-red-800 border-red-300 bg-red-50"
+                          : run.status === "confirmed"
+                            ? "text-green-800 border-green-300 bg-green-50"
+                            : "text-neutral-700 border-neutral-300 bg-neutral-50"
+                      }`}
+                    >
+                      {intakeStatusLabel(run.status)}
+                    </span>
+                    <Link
+                      href={`/dashboard/imports/${run.id}`}
+                      className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
+                    >
+                      Open
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })
       )}
 
       {/* What the preamble said the whole package is built under. LAST on this
@@ -737,13 +846,12 @@ export default function ProjectOverviewPage() {
         </>
       )}
 
+      {/* There is no "every run in one table" link any more. The screen it went
+          to merged the sub-quotes into one list, which is the one thing the run
+          tabs exist to prevent. The project-wide EXPORT is a different matter
+          and stays: a BWS import replaces the fields it is given, so the file
+          has to carry every record in its scope. */}
       <div className="mt-8 flex gap-3">
-        <Link
-          href={`/dashboard/records?projectId=${project.id}`}
-          className="text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
-        >
-          Every run in one table
-        </Link>
         {runs.length > 0 && (
           <a
             href={`/api/projects/${project.id}/export`}
@@ -768,5 +876,15 @@ export default function ProjectOverviewPage() {
       </div>
       </div>
     </div>
+  );
+}
+
+// `useSearchParams` needs a Suspense boundary in the App Router, and the whole
+// screen sits inside it because the parameter decides which tab renders.
+export default function ProjectOverviewPage() {
+  return (
+    <Suspense fallback={<Spinner label="Loading project" />}>
+      <ProjectOverview />
+    </Suspense>
   );
 }

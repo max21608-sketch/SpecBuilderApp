@@ -21,6 +21,7 @@ import { projectUploadPrefix } from "@/lib/blob-source";
 import type { CroppedImage } from "@/lib/pdf-crop";
 
 import { usePoll } from "@/lib/use-poll";
+import { intakeStatusLabel, isIntakeRunWorking } from "@/lib/intake-status";
 import Spinner from "@/components/ui/Spinner";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
@@ -60,15 +61,6 @@ type Payload = {
   specFields: SpecField[];
   duplicates: Duplicate[];
   repeated: Repeated[];
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Not read yet",
-  queued: "Queued",
-  parsing: "Reading",
-  parsed: "Ready to review",
-  confirmed: "Review complete",
-  failed: "Failed",
 };
 
 export default function PackDrawingsReview({ projectId, batchId }: { projectId: string; batchId: string }) {
@@ -135,7 +127,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
   }, [load]);
 
   const runs = useMemo(() => data?.runs ?? [], [data]);
-  const inFlight = runs.some((run) => run.status === "queued" || run.status === "parsing");
+  const inFlight = runs.some((run) => isIntakeRunWorking(run.status));
   usePoll(load, { intervalMs: 3000, active: inFlight });
 
   /** Serialised: two autosaves racing would each write the other's stale copy. */
@@ -372,8 +364,8 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
             <span className="flex-1 min-w-[12rem] truncate text-neutral-900" title={run.filename ?? undefined}>
               {run.filename ?? "Unnamed file"}
             </span>
-            <span className="text-xs text-neutral-600">{STATUS_LABELS[run.status] ?? run.status}</span>
-            {(run.status === "queued" || run.status === "parsing") && <Spinner label="" />}
+            <span className="text-xs text-neutral-600">{intakeStatusLabel(run.status)}</span>
+            {isIntakeRunWorking(run.status) && <Spinner label="" />}
             {run.error && <span className="w-full text-xs text-red-700">{run.error}</span>}
             <Link
               href={`/dashboard/imports/${run.importId}`}

@@ -36,6 +36,13 @@ vi.mock("@/lib/blob-source", async (importOriginal) => {
       size: 4,
       pathname: "projects/qa/doc.pdf",
     }),
+    // Registration asks the store what it actually holds, rather than
+    // believing the client's claim about it.
+    headTrustedBlob: async (pathname: string) => ({
+      pathname,
+      contentType: "application/pdf",
+      size: 4,
+    }),
   };
 });
 
@@ -74,11 +81,18 @@ vi.mock("@/lib/anthropic", () => ({
 // what the database does. A publish that "succeeds" keeps the route on its
 // happy path.
 const published: { key: string; attemptId: string }[] = [];
+// `reject` is a DEFINITE refusal (the queue answered 4xx); `hang` is the
+// ambiguous kind, which must leave the attempt queued rather than failed.
+const queueMode = { mode: "ok" as "ok" | "reject" | "hang" };
 vi.mock("@/lib/extraction-queue", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/extraction-queue")>();
   return {
     ...actual,
     enqueueExtractionJob: async (message: { attemptId: string }, key: string) => {
+      if (queueMode.mode === "reject") {
+        throw Object.assign(new Error("__QA queue refused"), { status: 400 });
+      }
+      if (queueMode.mode === "hang") throw new Error("__QA socket hang up");
       published.push({ key, attemptId: message.attemptId });
     },
   };
@@ -173,6 +187,7 @@ describeIfDb("extraction attempts", () => {
 
   beforeEach(() => {
     model.mode = "ok";
+    queueMode.mode = "ok";
     published.length = 0;
   });
 
@@ -425,6 +440,101 @@ describeIfDb("extraction attempts", () => {
     const { recordExtractionFailure } = await import("@/lib/extraction-run");
     await recordExtractionFailure(runId, randomUUID(), "__QA wrong attempt", "__qa@example.test");
     expect((await row()).status).toBe("queued");
+  });
+
+
+  // ---- registration dispatches its own read --------------------------------
+  // A tender pack is eleven documents and packs of thirty are expected, so the
+  // read is dispatched as each one registers. These tests are the reason the
+  // upload screen may promise that: the row must be committed QUEUED with an
+  // attempt, exactly once, and a dispatch that fails must not lose the file.
+
+  const registerDoc = async (requestId: string, filename = "__QA auto.pdf") => {
+    const { POST } = await import("@/app/api/imports/route");
+    return POST(
+      new Request("http://localhost/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          importType: "spec_document",
+          documentKind: "shop_drawings",
+          pathname: `projects/${projectId}/${filename}`,
+          filename,
+          contentType: "application/pdf",
+          size: 4,
+          registrationRequestId: requestId,
+        }),
+      }),
+    );
+  };
+
+  const runRow = async (id: string) => (await client.query(`select * from intake_runs where id = $1`, [id])).rows[0];
+
+  it("registering a specification document queues its read, once", async () => {
+    const res = await registerDoc(randomUUID());
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.autoRead).toEqual({ dispatched: true });
+
+    const registered = await runRow(body.importId);
+    // Committed QUEUED, not pending: a worker must never be handed a message
+    // for a row that is still waiting to be asked for.
+    expect(registered.status).toBe("queued");
+    expect(registered.attempt_id).toBeTruthy();
+    expect(registered.attempt_deadline_at).toBeTruthy();
+    expect(published).toHaveLength(1);
+    expect(published[0]?.attemptId).toBe(registered.attempt_id);
+    expect(published[0]?.key).toBe(`spec-document:${body.importId}:${registered.attempt_id}`);
+  });
+
+  it("a REPLAYED registration reuses the run and does not open a second attempt", async () => {
+    const requestId = randomUUID();
+    const first = await (await registerDoc(requestId)).json();
+    const openedAttempt = (await runRow(first.importId)).attempt_id;
+    published.length = 0;
+
+    const again = await registerDoc(requestId);
+    const body = await again.json();
+    expect(again.status).toBe(200);
+    expect(body.importId).toBe(first.importId);
+    expect(body.reused).toBe(true);
+    // The decisive assertion: a lost response must not buy a second paid
+    // pipeline over the one already running.
+    expect(published).toHaveLength(0);
+    expect((await runRow(first.importId)).attempt_id).toBe(openedAttempt);
+  });
+
+  it("keeps the registration when the queue REFUSES the read outright", async () => {
+    queueMode.mode = "reject";
+    const res = await registerDoc(randomUUID());
+    const body = await res.json();
+
+    // 201: the document is stored and registered. Whether its read reached the
+    // queue is a separate fact, and failing the upload over it would tell
+    // somebody their file did not arrive when it did.
+    expect(res.status).toBe(201);
+    expect(body.ok).toBe(true);
+    expect(body.autoRead.dispatched).toBe(false);
+    expect(body.autoRead.code).toBe("dispatch_rejected");
+
+    const failed = await runRow(body.importId);
+    expect(failed.status).toBe("failed");
+    expect(String(failed.error)).toContain("could not be queued");
+  });
+
+  it("leaves an AMBIGUOUS dispatch queued, so a retry can recover it", async () => {
+    queueMode.mode = "hang";
+    const res = await registerDoc(randomUUID());
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.autoRead.code).toBe("dispatch_uncertain");
+
+    // Never `failed`: the message may be in flight, and marking it failed kills
+    // a run that is about to start.
+    const uncertain = await runRow(body.importId);
+    expect(uncertain.status).toBe("queued");
+    expect(String(uncertain.error)).toContain("may not have been queued");
   });
 
   // ---- the real race --------------------------------------------------------

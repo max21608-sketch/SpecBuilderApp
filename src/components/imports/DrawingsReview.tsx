@@ -275,6 +275,12 @@ export default function DrawingsReview({ importId }: { importId: string }) {
       (run.status === "parsing" && run.claim_live === false) ||
       (run.status === "queued" && run.within_deadline === false) ||
       run.claim_count >= 4;
+    // Queued, never claimed: the publish may not have landed, and re-sending
+    // the SAME attempt costs nothing new and cannot disturb a worker that
+    // already has it. Without this the row spins for the whole 24-hour
+    // deadline before `restartable` offers anything -- which stopped being a
+    // rare state when every upload began dispatching its own read.
+    const dispatchable = run.status === "queued" && run.claim_count === 0 && run.within_deadline !== false;
     return (
       <div className="mt-6 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6">
         <Spinner label="Reading the drawings" />
@@ -285,6 +291,17 @@ export default function DrawingsReview({ importId }: { importId: string }) {
           <p className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
             Last attempt reported: {run.error}
           </p>
+        )}
+        {dispatchable && (
+          <button
+            type="button"
+            onClick={() => void startExtraction("retry-dispatch")}
+            disabled={busy !== null}
+            className="mt-4 mr-2 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
+            title="Sends the same request again. It charges nothing new, and it will not disturb a worker that already has it."
+          >
+            {busy === "extract" ? "Retrying…" : "Retry dispatch"}
+          </button>
         )}
         {restartable && (
           <button

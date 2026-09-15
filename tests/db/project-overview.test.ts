@@ -69,7 +69,10 @@ describeIfDb("project overview", () => {
   });
 
   afterAll(async () => {
+    // Children first: intake_runs.batch_id is `on delete restrict`, so a batch
+    // cannot be removed while a run still points at it.
     await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
+    await client.query(`delete from intake_batches where project_id = $1`, [projectId]);
     await client.query(`delete from project_contacts where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
     await client.end();
@@ -82,6 +85,45 @@ describeIfDb("project overview", () => {
     expect(body.project.bws_project_number).toBe("__QA P90002");
     expect(body.project.specs_agreed_by).toBeNull();
     expect(Array.isArray(body.documents)).toBe(true);
+  });
+
+  it("says which PACK each document arrived in, and tolerates one that has none", async () => {
+    // The overview groups documents by delivery so that the pack screens --
+    // including the only one that can see a record described by two documents
+    // -- are reachable at all. Without the batch on each run it could only
+    // list them flat, which is how both screens became unreachable.
+    const batch = await client.query(
+      `insert into intake_batches (project_id, label, created_by, updated_by)
+       values ($1, '__QA 2 documents', 'qa', 'qa') returning id`,
+      [projectId],
+    );
+    const batchId = batch.rows[0].id;
+    const inPack = await client.query(
+      `insert into intake_runs (project_id, batch_id, source_kind, document_kind, status, created_by, updated_by)
+       values ($1, $2, 'spec_document', 'shop_drawings', 'pending', 'qa', 'qa') returning id`,
+      [projectId, batchId],
+    );
+    // Pre-0007, and it must still appear: it is a document somebody imported.
+    const loose = await client.query(
+      `insert into intake_runs (project_id, source_kind, status, created_by, updated_by)
+       values ($1, 'boq_xlsx', 'parsed', 'qa', 'qa') returning id`,
+      [projectId],
+    );
+
+    const { GET } = await import("@/app/api/projects/[id]/route");
+    const body = await (await GET(new Request("http://localhost/test"), params(projectId))).json();
+    const rows = body.documents as { id: string; batch_id: string | null; batch_label: string | null }[];
+
+    const grouped = rows.find((row) => row.id === inPack.rows[0].id);
+    expect(grouped?.batch_id).toBe(batchId);
+    expect(grouped?.batch_label).toBe("__QA 2 documents");
+
+    const ungrouped = rows.find((row) => row.id === loose.rows[0].id);
+    expect(ungrouped).toBeDefined();
+    expect(ungrouped?.batch_id).toBeNull();
+
+    await client.query(`delete from intake_runs where project_id = $1`, [projectId]);
+    await client.query(`delete from intake_batches where id = $1`, [batchId]);
   });
 
   it("stores the three TOE dates as days", async () => {

@@ -31,14 +31,44 @@
 // and a proposal a reviewer cannot check against the original page is a
 // proposal they have to take on faith. No preserved source, no extraction.
 //
-// REGISTRATION READS NO DOCUMENT BODY and spends nothing. Pressing Extract on
-// the review screen is the click that costs money, and it is a separate,
-// deliberate act.
+// ============================================================================
+// REGISTERING A SPECIFICATION DOCUMENT NOW SPENDS MONEY.
+//
+// It did not used to. Registration read no body and cost nothing, and pressing
+// Read on the review screen was a separate, deliberate act -- one press, one
+// document, with the charge stated on the button.
+//
+// A real pack broke that. Panther is eleven documents and packs of thirty are
+// expected, so "a deliberate act per document" is thirty presses across
+// eleven screens before anybody can begin reviewing, and the state a reviewer
+// actually wants -- everything read -- was reached only by remembering to
+// click thirty times. Every document in a tender pack is going to be read.
+// Asking about each one separately was ceremony, not consent.
+//
+// So an attempt is opened and published HERE, per document, as it registers.
+// The upload screen states the count and the charge before anything is
+// uploaded; that statement is where the human decision now lives.
+//
+// Two consequences worth being plain about:
+//
+//   A registration SUCCEEDS even when its dispatch fails. The file is stored
+//   and the row exists either way, so the failure is recorded on the run --
+//   where the review screens already render it with a Retry -- and reported as
+//   a footnote on the 201, never as a failed upload.
+//
+//   Nothing is retro-active. A document already sitting at `pending` from
+//   before this change is not read by anything here; the pack screen's
+//   "Read all" is what clears those.
+//
+// The BOQ path is unaffected: a bill is parsed synchronously, by code, and no
+// model has ever been involved in it.
+// ============================================================================
 //
 // Why not @vercel/blob's onUploadCompleted callback: it is an inbound webhook
 // from Vercel, so it never fires against localhost. Building the only write
 // path on something that cannot run in development would mean the import could
 // not be tested end to end without a tunnel.
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { sql, json } from "@/lib/db";
@@ -48,6 +78,7 @@ import { parseBoqSheets } from "@/lib/boq-import";
 import { matchName, type MatchCandidate } from "@/lib/matching";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 
 export const maxDuration = 60;
@@ -119,7 +150,8 @@ export async function POST(request: Request): Promise<Response> {
 type Registered = z.infer<typeof Registration>;
 
 // ---- specification document ------------------------------------------------
-// Registration only. No body is read, no model is called, no money is spent.
+// Register the document, then dispatch the read. No body is read HERE -- the
+// worker does that, minutes later -- but a paid model call is scheduled.
 async function registerSpecDocument(input: Registered, actor: string): Promise<Response> {
   if (!input.documentKind) {
     return json({ ok: false, error: "Say what kind of specification document this is.", field: "documentKind" }, 400);
@@ -158,7 +190,7 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
         const existing = await txn`
           select id, status from intake_runs where registration_request_id = ${input.registrationRequestId}
         `;
-        if (existing[0]) return { importId: String(existing[0].id), reused: true };
+        if (existing[0]) return { importId: String(existing[0].id), reused: true as const };
       }
 
       const attachment = await txn`
@@ -178,10 +210,44 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
         returning id
       `;
       if (!run[0]) throw new Error("the import was not recorded");
-      return { importId: String(run[0].id), reused: false };
+
+      // The attempt is opened in the SAME transaction as the insert, so a run
+      // can never be committed at `pending` with a message already published
+      // against it. The publish itself is below, after the commit.
+      const attemptId = randomUUID();
+      const opened = await openAttempt(txn, String(run[0].id), attemptId, actor, "pending");
+      if (!opened) throw new Error("the import was recorded but could not be queued for reading");
+      return { importId: String(run[0].id), attemptId: opened, reused: false as const };
     });
 
-    return json({ ok: true, importId: result.importId, reused: result.reused, sourcePreserved: true }, result.reused ? 200 : 201);
+    // A REPLAYED registration must not open a second attempt. It returns the
+    // run it already made, whose read was dispatched the first time round;
+    // publishing again here would be a duplicate whose only effect is to spend
+    // one of four deliveries.
+    if (result.reused) {
+      return json({ ok: true, importId: result.importId, reused: true, sourcePreserved: true }, 200);
+    }
+
+    // Committed. Now publish — outside the transaction, because a queue publish
+    // is network I/O and a transaction must never be held across it.
+    const failure = await publishAttempt(result.importId, result.attemptId, actor);
+
+    // 201 EITHER WAY. The document is stored and registered; whether its read
+    // reached the queue is a separate fact about the run, recorded on the run,
+    // and the screens already offer the retry it needs. Failing the upload over
+    // it would tell somebody their file did not arrive when it did.
+    return json(
+      {
+        ok: true,
+        importId: result.importId,
+        reused: false,
+        sourcePreserved: true,
+        autoRead: failure
+          ? { dispatched: false, code: failure.code, error: failure.error }
+          : { dispatched: true },
+      },
+      201,
+    );
   } catch (cause) {
     return transactionErrorResponse(cause);
   }

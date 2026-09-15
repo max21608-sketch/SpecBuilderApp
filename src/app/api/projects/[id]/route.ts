@@ -96,9 +96,17 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   `;
   if (!rows[0]) return json({ ok: false, error: "No such project." }, 404);
 
-  // The project's documents, for the overview screen's Documents section. A
+  // The project's documents, for the overview screen's Intake section. A
   // failed list is an error there, never an empty queue, so this is part of the
   // same read rather than a second fetch that can fail silently.
+  //
+  // The BATCH comes with each run, because a pack is the unit a person
+  // delivered and the unit two of the review screens work on. Without it the
+  // overview could only list runs flat, and the screens that read a whole pack
+  // -- including the only one that can see a record described by two documents
+  // -- were reachable solely from the redirect that fired once after upload.
+  // `batch_id` is null on anything uploaded before 0007, so it is a grouping
+  // the screen has to tolerate being absent, never a required join.
   const documents = await sql`
     select r.id, r.source_kind, r.document_kind, r.status, r.error, r.created_at, r.created_by,
            -- The attachment is the filename's real home, but the direct-upload
@@ -106,9 +114,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            -- every one of those runs reading "Unnamed file". The staged JSON
            -- recorded the name it was given; fall back to it.
            coalesce(a.filename, r.parsed->>'filename') as filename,
-           (r.attachment_id is not null) as source_preserved
+           (r.attachment_id is not null) as source_preserved,
+           r.batch_id,
+           b.label as batch_label,
+           b.created_at as batch_created_at
     from intake_runs r
     left join attachments a on a.id = r.attachment_id
+    left join intake_batches b on b.id = r.batch_id
     where r.project_id = ${id}
     order by r.created_at desc
     limit 50

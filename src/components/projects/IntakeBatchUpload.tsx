@@ -13,8 +13,13 @@
 // BOQ parser and make a project's worth of wrong records. The filename hint
 // below is shown as TEXT next to the select, never used to choose for you.
 //
-// Registering costs nothing and reads nothing. The model is called only when
-// somebody presses Extract on the batch screen.
+// STARTING AN INTAKE SPENDS MONEY, and this screen is where that is said.
+//
+// Every specification document in the queue is sent to the model as it
+// registers -- see /api/imports, which explains why the per-document press
+// went away. So the count and the charge are stated here, before anything is
+// uploaded, rather than N times on the screen after. A bill of quantities is
+// not part of that: it is parsed by code and costs nothing.
 import { useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { apiFetch } from "@/lib/api-fetch";
@@ -82,6 +87,10 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
 
   const undeclared = queue.filter((item) => item.status === "waiting" && !item.choice).length;
   const pending = queue.filter((item) => item.status !== "done");
+  // What will actually be charged: a spec document each, and never the bill.
+  const toRead = pending.filter(
+    (item) => CHOICES.find((choice) => choice.value === item.choice)?.importType === "spec_document",
+  );
 
   async function start() {
     if (queue.length === 0 || undeclared > 0) return;
@@ -124,7 +133,7 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
           });
 
           update(item.key, { status: "registering" });
-          const res = await apiFetch<{ importId: string }>("/api/imports", {
+          const res = await apiFetch<{ importId: string; autoRead?: { dispatched: boolean; error?: string } }>("/api/imports", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
@@ -143,7 +152,15 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
             update(item.key, { status: "failed", error: res.error });
             continue;
           }
-          update(item.key, { status: "done", progress: 100 });
+          // Stored and registered, but its read did not reach the queue. NOT a
+          // failed upload -- the file is there and the pack screen offers the
+          // retry -- so it is said next to the file rather than thrown away.
+          const autoRead = res.data.autoRead;
+          update(item.key, {
+            status: "done",
+            progress: 100,
+            error: autoRead && !autoRead.dispatched ? (autoRead.error ?? "Stored, but not queued for reading.") : null,
+          });
         } catch (cause) {
           const detail = cause instanceof Error ? cause.message : String(cause);
           update(item.key, { status: "failed", error: `Could not be stored: ${detail}` });
@@ -269,8 +286,25 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         )}
       </div>
 
+      {/* Stated before the press, with the count, because the press is what
+          spends the money. Deliberately not a confirm dialog: every document
+          in a tender pack is going to be read, and a modal per pack is
+          ceremony rather than a decision. */}
       <p className="mt-2 text-xs text-neutral-500">
-        Uploading costs nothing and reads nothing. You choose which documents go to the model on the next screen.
+        {toRead.length === 0 ? (
+          <>
+            A bill of quantities is read by code, not by the model, and costs nothing.
+          </>
+        ) : (
+          <>
+            {toRead.length === 1
+              ? "The specification document is sent to the model as soon as it uploads"
+              : `All ${toRead.length} specification documents are sent to the model as soon as they upload`}
+            {" — "}
+            {toRead.length === 1 ? "one charged call" : `${toRead.length} separate charged calls`}, with no further
+            clicking. Reviewing what comes back is still yours.
+          </>
+        )}
       </p>
     </div>
   );

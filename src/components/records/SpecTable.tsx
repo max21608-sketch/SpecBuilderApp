@@ -1,6 +1,14 @@
 "use client";
 
-// The spec table for one run, or for a whole project.
+// The spec table for ONE RUN. Never for several at once.
+//
+// `runId` is required, and that is the point rather than an accident of the
+// call sites. A BOQ's tabs are sub-quotes -- a mock-up run, a main run, a
+// value-engineered run -- quoting the SAME item codes at different quantities,
+// so a table holding all three shows three of everything with no column that
+// says which is which. There used to be a second screen that mounted this
+// without a run and did exactly that; it was deleted rather than fixed,
+// because the merged view is not a view anybody wanted.
 //
 // Extracted from the page so the project screen can mount one per run tab. The
 // SPECS CAPTURED column is the intake stage's own measure: how much a client
@@ -55,19 +63,16 @@ function Counts({ settled, tbc, missing, total }: { settled: number; tbc: number
 export default function SpecTable({
   projectId,
   runId,
-  showExport = true,
 }: {
   projectId: string;
-  runId?: string | null;
-  showExport?: boolean;
+  runId: string;
 }) {
   const [records, setRecords] = useState<SpecRecord[] | null>(null);
   const [programme, setProgramme] = useState<ProgrammeDates | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const query = new URLSearchParams({ projectId });
-    if (runId) query.set("runId", runId);
+    const query = new URLSearchParams({ projectId, runId });
     const res = await apiFetch<{ records: SpecRecord[]; programme: ProgrammeDates }>(`/api/records?${query.toString()}`);
     if (!res.ok) {
       setError(res.error);
@@ -94,7 +99,7 @@ export default function SpecTable({
 
   // The export URL is a plain link, never apiFetch: the helper always reads the
   // body as text, and a workbook is bytes.
-  const exportHref = `/api/projects/${projectId}/export${runId ? `?runId=${runId}` : ""}`;
+  const exportHref = `/api/projects/${projectId}/export?runId=${runId}`;
 
   return (
     <>
@@ -103,22 +108,22 @@ export default function SpecTable({
           {records.length} record{records.length === 1 ? "" : "s"} · {withSpecs} with specs captured
           {uncategorised > 0 && <> · {uncategorised} with no checklist yet</>}
         </p>
-        {showExport && records.length > 0 && (
+        {records.length > 0 && (
           <div className="flex items-center gap-2">
             <a
               href={exportHref}
               className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700"
             >
-              Export {runId ? "this run" : "the project"} (.xlsx)
+              Export this run (.xlsx)
             </a>
-            <a href={`${exportHref}${runId ? "&" : "?"}format=csv`} className="text-sm text-neutral-600 underline hover:text-neutral-900">
+            <a href={`${exportHref}&format=csv`} className="text-sm text-neutral-600 underline hover:text-neutral-900">
               .csv
             </a>
           </div>
         )}
       </div>
 
-      {showExport && records.length > 0 && (
+      {records.length > 0 && (
         <p className="mt-1 text-xs text-neutral-500">
           The export is always every record in scope — a BWS import replaces the fields it is given, so a partial file
           would erase what it left out. It carries no job number: it is a file to read, not to import.

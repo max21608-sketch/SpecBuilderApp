@@ -162,8 +162,15 @@ export default function RecordPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <Link href={`/dashboard/records?projectId=${record.project_id}`} className="text-sm text-neutral-600 underline">
-        ← {record.bws_project_number} spec table
+      {/* Back to the run this record is ON, not to the project's first one. A
+          record's number is project-wide, so the same code appears on the
+          mock-up run and the main run, and landing on the wrong tab means
+          hunting for the row you just left. */}
+      <Link
+        href={`/dashboard/projects/${record.project_id}?tab=${record.run_id}`}
+        className="text-sm text-neutral-600 underline"
+      >
+        ← {record.bws_project_number} · {record.run_name}
       </Link>
 
       <h1 className="mt-2 text-xl font-semibold text-neutral-900">

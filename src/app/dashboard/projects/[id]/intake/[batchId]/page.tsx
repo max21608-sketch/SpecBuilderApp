@@ -15,6 +15,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
+import { intakeStatusLabel, isIntakeRunWorking } from "@/lib/intake-status";
 
 type Run = {
   id: string;
@@ -27,15 +28,6 @@ type Run = {
 };
 
 type Batch = { id: string; label: string | null; created_at: string; runs: Run[] };
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Not read yet",
-  queued: "Queued",
-  parsing: "Reading",
-  parsed: "Ready to review",
-  confirmed: "Review complete",
-  failed: "Failed",
-};
 
 function kindLabel(run: Run): string {
   if (run.sourceKind === "boq_xlsx") return "Bill of quantities";
@@ -76,10 +68,10 @@ export default function IntakeBatchPage({
   }, [load]);
 
   // Only while something is actually in flight. A settled pack polls nothing.
-  const inFlight = (batch?.runs ?? []).some((run) => run.status === "queued" || run.status === "parsing");
+  const inFlight = (batch?.runs ?? []).some((run) => isIntakeRunWorking(run.status));
   usePoll(load, { intervalMs: 3000, active: inFlight });
 
-  async function extract(run: Run) {
+  async function extract(run: Run, action: "start" | "retry-dispatch" = "start") {
     setBusy(run.id);
     setError(null);
     try {
@@ -96,7 +88,7 @@ export default function IntakeBatchPage({
         body: JSON.stringify({
           expectedVersion: current.data.import.version,
           requestId: crypto.randomUUID(),
-          action: "start",
+          action,
         }),
       });
       if (!res.ok) setError(res.error);
@@ -125,9 +117,10 @@ export default function IntakeBatchPage({
       )}
 
       <p className="mt-2 text-sm text-neutral-600">
-        Read the preamble, if the pack has one, and then the bill — the bill is what creates the records that drawings
-        attach to. Drawings can be read before that; their specs simply have nothing to land on until the bill is
-        confirmed.
+        Every specification document is read automatically when it uploads, so this screen is usually somewhere to
+        watch rather than somewhere to click. Review in this order — the preamble, if the pack has one, then the bill,
+        then the drawings. The bill is what creates the records the drawings attach to; a drawing read before that is
+        fine, its specs simply have nothing to land on until the bill is confirmed.
       </p>
 
       {/* At one PDF per line item a pack holds thirty drawing files. Reviewing
@@ -155,7 +148,16 @@ export default function IntakeBatchPage({
         {(batch?.runs ?? []).map((run) => {
           const readable = run.sourceKind === "spec_document";
           const needsExtract = readable && (run.status === "pending" || run.status === "failed");
-          const working = run.status === "queued" || run.status === "parsing";
+          const working = isIntakeRunWorking(run.status);
+          // QUEUED WITH AN ERROR is the ambiguous dispatch: the message may or
+          // may not have reached the queue, so the attempt is deliberately not
+          // failed. Without a way out of it the row spins forever on something
+          // that is never coming -- and since every upload now dispatches a
+          // read, this is no longer a state somebody watched happen to
+          // themselves. Re-publishing the SAME attempt is safe: it is
+          // idempotent on (run, attempt), costs nothing new, and the route
+          // refuses it outright if a worker has already claimed it.
+          const dispatchUncertain = readable && run.status === "queued" && Boolean(run.error);
           return (
             <li key={run.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <div className="flex-1 min-w-[14rem]">
@@ -164,9 +166,21 @@ export default function IntakeBatchPage({
                 {run.error && <p className="mt-1 text-xs text-red-700">{run.error}</p>}
               </div>
 
-              <span className="text-xs text-neutral-600">{STATUS_LABELS[run.status] ?? run.status}</span>
+              <span className="text-xs text-neutral-600">{intakeStatusLabel(run.status)}</span>
 
-              {working && <Spinner label="" />}
+              {working && !dispatchUncertain && <Spinner label="" />}
+
+              {dispatchUncertain && (
+                <button
+                  type="button"
+                  onClick={() => void extract(run, "retry-dispatch")}
+                  disabled={busy !== null}
+                  className="text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
+                  title="Sends the same request again. It charges nothing new, and it will not disturb a worker that already has it."
+                >
+                  {busy === run.id ? "Retrying…" : "Retry dispatch"}
+                </button>
+              )}
 
               {needsExtract && (
                 <button
@@ -176,7 +190,7 @@ export default function IntakeBatchPage({
                   className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
                   title="This sends the document to the model, which costs money."
                 >
-                  {busy === run.id ? "Starting…" : run.status === "failed" ? "Retry (charges again)" : "Read it"}
+                  {busy === run.id ? "Starting…" : run.status === "failed" ? "Retry (charges again)" : "Read it now"}
                 </button>
               )}
 
@@ -194,8 +208,13 @@ export default function IntakeBatchPage({
         )}
       </ul>
 
+      {/* Reading is dispatched at upload now, so a document sitting at "Not
+          read yet" is one of two things: uploaded before that change, or one
+          whose dispatch did not reach the queue. Both are read by this
+          button. */}
       <p className="mt-3 text-xs text-neutral-500">
-        Reading a document sends it to the model and is the step that costs money. Registering it did not.
+        Anything still saying <em>Not read yet</em> was uploaded before documents were read automatically, or its
+        request never reached the queue. Reading it sends it to the model, and each send is charged.
       </p>
     </div>
   );
