@@ -782,7 +782,7 @@ export function repeatedObservations(cards: PackCard[]): RepeatedObservation[] {
       // A bare label with no value is not boilerplate worth grouping; it is a
       // callout somebody still has to fill in, per item.
       if (value === "") continue;
-      const key = `${observation.attrGroup} ${label.toLowerCase()} ${value.toLowerCase()}`;
+      const key = `${observation.attrGroup}\u0000${label.toLowerCase()}\u0000${value.toLowerCase()}`;
 
       const group = groups.get(key) ?? {
         label: label || observation.attrGroup,
