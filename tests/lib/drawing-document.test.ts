@@ -12,6 +12,8 @@ import {
   classifyGroup,
   drawingItemBlockers,
   drawingItemWarnings,
+  duplicateTargets,
+  repeatedObservations,
   implausibleDimension,
   resolveDimensionUnit,
   splitFigureAndUnit,
@@ -20,6 +22,7 @@ import {
   assertStagedDrawings,
   hasPendingObservations,
   type DrawingItem,
+  type PackCard,
   type SpecFieldEntry,
 } from "@/lib/drawing-document";
 import type { RecordEntry } from "@/lib/spec-document";
@@ -560,5 +563,114 @@ describe("suggestAttributeState on the specification sheets' wording", () => {
     const result = suggestAttributeState("Oak, finish to be confirmed");
     expect(result.state).toBeNull();
     expect(result.reason).toMatch(/Choose which this is/);
+  });
+});
+
+// ============================================================================
+// ACROSS A WHOLE PACK. These two failures are invisible from inside one drawing
+// document, and the real Panther pack produces both: a combined shop-drawing
+// set beside ten per-item specification sheets.
+// ============================================================================
+
+function packCard(overrides: Partial<PackCard> & { item: DrawingItem }): PackCard {
+  return { importId: "imp-1", filename: "set.pdf", targets: [], ...overrides };
+}
+
+function cardFrom(code: string, opts: { importId: string; filename: string; notes?: string[]; targets: string[] }): PackCard {
+  const staged = stageDrawings(
+    [rawItem({ itemCodeRaw: code, dimensions: [{ labelRaw: "W", valueRaw: "190" }], notesRaw: opts.notes ?? [] })],
+    FIELDS,
+    opts.filename,
+    null,
+  );
+  return packCard({ importId: opts.importId, filename: opts.filename, item: staged.items[0]!, targets: opts.targets });
+}
+
+describe("duplicateTargets", () => {
+  it("names a record two documents in one pack both describe", () => {
+    // S-100 is a page of the shop-drawing set AND has its own specification
+    // sheet. Dimensions are exempt from the unique field-slot index, so both
+    // sets insert and nothing complains.
+    const cards = [
+      cardFrom("X-100", { importId: "imp-set", filename: "drawings.pdf", targets: ["rec-1"] }),
+      cardFrom("X-100", { importId: "imp-sheet", filename: "SPEC X-100.pdf", targets: ["rec-1"] }),
+    ];
+    const duplicates = duplicateTargets(cards);
+    expect(duplicates).toHaveLength(1);
+    expect(duplicates[0]!.recordId).toBe("rec-1");
+    expect(duplicates[0]!.cards.map((c) => c.filename)).toEqual(["drawings.pdf", "SPEC X-100.pdf"]);
+  });
+
+  it("says nothing when each document describes its own records", () => {
+    const cards = [
+      cardFrom("X-100", { importId: "imp-a", filename: "a.pdf", targets: ["rec-1"] }),
+      cardFrom("X-200", { importId: "imp-b", filename: "b.pdf", targets: ["rec-2"] }),
+    ];
+    expect(duplicateTargets(cards)).toEqual([]);
+  });
+
+  it("is not confused by one card fanning out across runs", () => {
+    // ONE drawing of X-100 landing in the mock-up, main and VE runs is the
+    // fan-out the whole model is built around, not a duplicate.
+    const cards = [cardFrom("X-100", { importId: "imp-a", filename: "a.pdf", targets: ["r-mur", "r-main", "r-ve"] })];
+    expect(duplicateTargets(cards)).toEqual([]);
+  });
+});
+
+describe("repeatedObservations", () => {
+  // The fourteen-bullet REMARKS block every Panther specification sheet
+  // repeats: package conditions, not facts about any one item.
+  const boilerplate = ["ALL MATERIALS MUST COMPLY WITH APPLICABLE FIRE AND SAFETY CODES."];
+
+  it("groups a line that appears on three or more items", () => {
+    const cards = ["X-100", "X-200", "X-300"].map((code, i) =>
+      cardFrom(code, { importId: `imp-${i}`, filename: `SPEC ${code}.pdf`, notes: boilerplate, targets: [`rec-${i}`] }),
+    );
+    const repeated = repeatedObservations(cards);
+    expect(repeated).toHaveLength(1);
+    expect(repeated[0]!.value).toBe(boilerplate[0]);
+    // Every copy, so one action reaches all of them.
+    expect(repeated[0]!.occurrences).toHaveLength(3);
+    expect(new Set(repeated[0]!.occurrences.map((o) => o.importId)).size).toBe(3);
+  });
+
+  it("leaves a line on two items alone", () => {
+    // Two items genuinely sharing a fabric is a coincidence worth nothing.
+    const cards = ["X-100", "X-200"].map((code, i) =>
+      cardFrom(code, { importId: `imp-${i}`, filename: `${code}.pdf`, notes: boilerplate, targets: [] }),
+    );
+    expect(repeatedObservations(cards)).toEqual([]);
+  });
+
+  it("ignores observations somebody has already reviewed", () => {
+    const cards = ["X-100", "X-200", "X-300"].map((code, i) =>
+      cardFrom(code, { importId: `imp-${i}`, filename: `${code}.pdf`, notes: boilerplate, targets: [] }),
+    );
+    // Ignoring one copy drops the group below the threshold, which is why this
+    // is computed on read and never stored.
+    cards[0]!.item.observations = cards[0]!.item.observations.map((o) =>
+      o.attrGroup === "note" ? { ...o, reviewStatus: "ignored" as const } : o,
+    );
+    expect(repeatedObservations(cards)).toEqual([]);
+  });
+
+  it("leaves dimensions and materials alone however often they repeat", () => {
+    // THE RESTRICTION THAT MATTERS. Every fixture here is 190 wide and carries
+    // the same fabric. Those are per-item facts that agree, not boilerplate,
+    // and offering "ignore on all" over them would discard real observations.
+    const cards = ["X-100", "X-200", "X-300", "X-400"].map((code, i) =>
+      cardFrom(code, { importId: `imp-${i}`, filename: `${code}.pdf`, targets: [] }),
+    );
+    expect(repeatedObservations(cards)).toEqual([]);
+  });
+
+  it("does not group a note nobody has filled in", () => {
+    const cards = ["X-100", "X-200", "X-300"].map((code, i) =>
+      cardFrom(code, { importId: `imp-${i}`, filename: `${code}.pdf`, notes: boilerplate, targets: [] }),
+    );
+    for (const card of cards) {
+      card.item.observations = card.item.observations.map((o) => ({ ...o, value: null }));
+    }
+    expect(repeatedObservations(cards)).toEqual([]);
   });
 });

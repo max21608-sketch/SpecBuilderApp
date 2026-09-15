@@ -17,6 +17,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
+import { loadDrawingContext, recordChoices, resolveStagedRun } from "@/lib/drawing-resolution";
 import {
   buildTargetSnapshot,
   suggestState,
@@ -27,11 +28,7 @@ import { ANSWER_STATES, ATTRIBUTE_GROUPS, ATTRIBUTE_STATES, ATTRIBUTE_UNITS } fr
 import { assertBoqV2 } from "@/lib/boq-import";
 import {
   assertStagedDrawings,
-  drawingItemBlockers,
-  drawingItemWarnings,
-  resolveDrawingTargets,
   splitFigureAndUnit,
-  targetRecordIds,
   type DrawingItem,
   type StagedDrawings,
 } from "@/lib/drawing-document";
@@ -355,22 +352,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // through. Both sides call the same functions instead.
     if (!run.parsed) return json({ ok: true, import: { ...run, parsed: null } });
     const staged = assertStagedDrawings(run.parsed);
-    const registers = await loadExtractionRegisters(String(run.project_id));
-    const occupied = await loadOccupiedFields(String(run.project_id));
-    const items = staged.items.map((item) => {
-      const resolution = resolveDrawingTargets(item.itemCodeRaw, registers.records);
-      return {
-        id: item.id,
-        resolution,
-        targets: targetRecordIds(item, resolution),
-        blockers: drawingItemBlockers(item, resolution, occupied),
-        // Separate from blockers on purpose — these do not stop a commit, and
-        // the confirm route never sees them. See drawingItemWarnings().
-        warnings: drawingItemWarnings(item),
-      };
-    });
+    // The same pairing the pack-wide screen uses, so the two can never disagree
+    // about whether a card can commit. See src/lib/drawing-resolution.ts.
+    const context = await loadDrawingContext(String(run.project_id));
+    const items = resolveStagedRun(staged, context);
     const fields = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
-    return json({ ok: true, import: { ...run, parsed: staged }, resolution: items, specFields: fields });
+    return json({
+      ok: true,
+      import: { ...run, parsed: staged },
+      resolution: items,
+      specFields: fields,
+      records: recordChoices(context),
+    });
   }
 
   if (run.source_kind === "spec_document" && run.document_kind === "preamble") {
@@ -479,29 +472,6 @@ async function patchBoqLine(
     return json({ ok: false, error: "That line is no longer in this import, or the import is already confirmed." }, 409);
   }
   return json({ ok: true, version: rows[0].version });
-}
-
-/**
- * Which BWS fields are already spoken for, per record.
- *
- * Read live for the same reason the resolution is: a slot filled by another
- * card a second ago must show as a blocker here, not as a unique-violation 500
- * at confirm.
- */
-async function loadOccupiedFields(projectId: string): Promise<Map<string, Set<string>>> {
-  const rows = await sql`
-    select a.record_id, a.spec_field_id
-    from record_attributes a
-    join spec_records r on r.id = a.record_id
-    where r.project_id = ${projectId} and a.status = 'active' and a.spec_field_id is not null
-  `;
-  const occupied = new Map<string, Set<string>>();
-  for (const row of rows) {
-    const set = occupied.get(String(row.record_id)) ?? new Set<string>();
-    set.add(String(row.spec_field_id));
-    occupied.set(String(row.record_id), set);
-  }
-  return occupied;
 }
 
 // ---- a proposal's autosave --------------------------------------------------

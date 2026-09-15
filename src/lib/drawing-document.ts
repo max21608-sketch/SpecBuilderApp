@@ -574,6 +574,140 @@ export function drawingItemWarnings(item: DrawingItem): DrawingWarning[] {
   return warnings;
 }
 
+// ---- across a whole pack ---------------------------------------------------
+//
+// One drawing run cannot see these. They exist because a tender pack now
+// arrives as SEVERAL drawing documents — the real Panther pack is one combined
+// shop-drawing set plus ten per-item specification sheets — and the two things
+// that go wrong when it does are only visible from above.
+
+/** One card, wherever it came from. The pack-level functions work on these. */
+export type PackCard = {
+  importId: string;
+  filename: string | null;
+  item: DrawingItem;
+  targets: string[];
+};
+
+export type DuplicateTarget = {
+  recordId: string;
+  /** Every card that would write to that record, in the order they were read. */
+  cards: { importId: string; filename: string | null; itemId: string; itemCodeRaw: string | null }[];
+};
+
+/**
+ * Records that TWO documents in one pack both describe.
+ *
+ * `record_attributes_field_slot_key` deliberately excludes dimensions, because
+ * many of them compose into the one BWS `Dimensions` field. That exemption is
+ * correct and it means nothing stops two documents inserting two full sets of
+ * dimensions on the same record — whichever is reviewed second silently doubles
+ * them, with no error anywhere.
+ *
+ * The real pack guarantees this: S-100 is a page of the shop-drawing set AND
+ * has its own specification sheet.
+ *
+ * Reported, never resolved automatically. The two documents may legitimately
+ * disagree, and which one wins is a judgement — the specification sheets
+ * themselves say the signed shop drawings take precedence over them.
+ */
+export function duplicateTargets(cards: PackCard[]): DuplicateTarget[] {
+  const byRecord = new Map<string, DuplicateTarget["cards"]>();
+  for (const card of cards) {
+    for (const recordId of card.targets) {
+      const list = byRecord.get(recordId) ?? [];
+      // One card claiming a record twice is not a duplicate ACROSS documents.
+      if (list.some((entry) => entry.itemId === card.item.id)) continue;
+      list.push({
+        importId: card.importId,
+        filename: card.filename,
+        itemId: card.item.id,
+        itemCodeRaw: card.item.itemCodeRaw,
+      });
+      byRecord.set(recordId, list);
+    }
+  }
+  return [...byRecord.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([recordId, list]) => ({ recordId, cards: list }));
+}
+
+export type RepeatedObservation = {
+  /** The shared text, as the first card wrote it. */
+  label: string;
+  value: string | null;
+  attrGroup: AttributeGroup;
+  /** Every pending copy of it, so one action can reach them all. */
+  occurrences: { importId: string; itemId: string; observationId: string; version: number }[];
+};
+
+/**
+ * How many cards must share a line before it is boilerplate rather than a
+ * coincidence. Two items can genuinely share a fabric; ten cannot genuinely
+ * share fourteen paragraphs of manufacturing conditions.
+ */
+const REPEAT_THRESHOLD = 3;
+
+/**
+ * Lines that appear, word for word, on three or more cards in a pack.
+ *
+ * Every Panther specification sheet carries the same fourteen-bullet REMARKS
+ * block: fire and safety codes, mock-up approval, who approves a finish. Staged
+ * per item that is ~140 note observations to review one at a time, and they are
+ * package conditions rather than facts about any one item.
+ *
+ * Grouped so the reviewer can ignore or confirm all copies at once. NOT
+ * rerouted into `project_notes`: that table is written only by the preamble
+ * confirm path, and quietly giving a second document write access to it is a
+ * bigger change than a review screen should make on its own.
+ *
+ * Computed on read like every other diagnostic here — ignoring one copy changes
+ * the group, so a stored version would be stale immediately.
+ *
+ * NOTES ONLY, and that restriction is load-bearing. Ten chairs sharing a fabric
+ * and three benches sharing a width are per-item FACTS that happen to coincide;
+ * offering "ignore on all" over them invites discarding ten real observations in
+ * one click. A note is prose the document stamps on every sheet, and it is the
+ * only group where a repeat means boilerplate rather than agreement.
+ */
+export function repeatedObservations(cards: PackCard[]): RepeatedObservation[] {
+  const groups = new Map<string, RepeatedObservation>();
+
+  for (const card of cards) {
+    for (const observation of card.item.observations) {
+      if (observation.reviewStatus !== "pending") continue;
+      if (observation.attrGroup !== "note") continue;
+      const label = (observation.labelRaw ?? "").trim();
+      const value = (observation.value ?? "").trim();
+      // A bare label with no value is not boilerplate worth grouping; it is a
+      // callout somebody still has to fill in, per item.
+      if (value === "") continue;
+      const key = `${observation.attrGroup} ${label.toLowerCase()} ${value.toLowerCase()}`;
+
+      const group = groups.get(key) ?? {
+        label: label || observation.attrGroup,
+        value: observation.value,
+        attrGroup: observation.attrGroup,
+        occurrences: [],
+      };
+      // EVERY copy is listed, including two on one card, because the action
+      // this feeds has to reach all of them. How many CARDS share it is what
+      // decides whether it is boilerplate, and that is counted below.
+      group.occurrences.push({
+        importId: card.importId,
+        itemId: card.item.id,
+        observationId: observation.id,
+        version: observation.version,
+      });
+      groups.set(key, group);
+    }
+  }
+
+  return [...groups.values()]
+    .filter((group) => new Set(group.occurrences.map((o) => o.itemId)).size >= REPEAT_THRESHOLD)
+    .sort((a, b) => b.occurrences.length - a.occurrences.length);
+}
+
 // ---- staging ---------------------------------------------------------------
 
 /**

@@ -107,6 +107,8 @@ export default function IntakeBatchPage({
     }
   }
 
+  const drawingRuns = (batch?.runs ?? []).filter((run) => run.documentKind === "shop_drawings");
+
   if (!batch && !error) return <Spinner label="Loading the pack" />;
 
   return (
@@ -123,9 +125,31 @@ export default function IntakeBatchPage({
       )}
 
       <p className="mt-2 text-sm text-neutral-600">
-        Read the preamble and the bill first — the bill is what creates the records that drawings attach to. Drawings
-        can be read before that; their specs simply have nothing to land on until the bill is confirmed.
+        Read the preamble, if the pack has one, and then the bill — the bill is what creates the records that drawings
+        attach to. Drawings can be read before that; their specs simply have nothing to land on until the bill is
+        confirmed.
       </p>
+
+      {/* At one PDF per line item a pack holds thirty drawing files. Reviewing
+          them one screen at a time is thirty screens, and nothing can then see
+          the two problems that only exist across documents. */}
+      {drawingRuns.length > 1 && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
+          <span>
+            This pack has {drawingRuns.length} drawing documents.
+          </span>
+          <Link
+            href={`/dashboard/projects/${projectId}/intake/${batchId}/drawings`}
+            className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700"
+          >
+            Review them together
+          </Link>
+          <span className="text-xs text-neutral-500">
+            One card per item, whichever file it came from — and the only place a record described by two of them shows
+            up.
+          </span>
+        </div>
+      )}
 
       <ul className="mt-4 divide-y divide-neutral-100 border border-neutral-200 rounded-lg bg-white">
         {(batch?.runs ?? []).map((run) => {

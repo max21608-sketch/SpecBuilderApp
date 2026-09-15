@@ -258,6 +258,72 @@ describeIfDb("intake routes", () => {
     expect(stillIgnored.unit).toBeNull();
   });
 
+  it("shows every drawing document in a pack on one screen, with its cross-document warnings", async () => {
+    // The real Panther shape: a combined set and a per-item sheet describing
+    // the same code, and boilerplate repeated on every sheet.
+    const code = "__QAX130";
+    const recordId = await makeRecord(mainRunId, code, "__QA Console");
+    const batch = await client.query(
+      `insert into intake_batches (project_id, label, created_by, updated_by)
+       values ($1, '__QA pack', 'qa', 'qa') returning id`, [projectId]);
+    const batchId = batch.rows[0].id;
+
+    const REMARKS = ["__QA ALL MATERIALS MUST COMPLY WITH APPLICABLE FIRE CODES."];
+    const runIds: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const staged = stageDrawings(
+        [{ ...drawingItem(code), itemCodeRaw: i === 2 ? "__QAX131" : code, notesRaw: REMARKS }],
+        fields, `__QA sheet ${i}.pdf`, null,
+      );
+      const run = await client.query(
+        `insert into intake_runs (project_id, batch_id, source_kind, document_kind, status, parsed, created_by, updated_by)
+         values ($1,$2,'spec_document','shop_drawings','parsed',$3::jsonb,'qa','qa') returning id`,
+        [projectId, batchId, JSON.stringify(staged)]);
+      runIds.push(run.rows[0].id);
+    }
+
+    const { GET } = await import("@/app/api/projects/[id]/batches/[batchId]/drawings/route");
+    const res = await GET(new Request("http://localhost/test"), {
+      params: Promise.resolve({ id: projectId, batchId }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.runs).toHaveLength(3);
+    // Two of the three carry the same code, so they land on the same record.
+    const duplicate = body.duplicates.find((d: { recordId: string }) => d.recordId === recordId);
+    expect(duplicate.cards).toHaveLength(2);
+    expect(duplicate.recordLabel).toContain("__QA Console");
+    // The boilerplate note is on all three.
+    expect(body.repeated).toHaveLength(1);
+    expect(body.repeated[0].occurrences).toHaveLength(3);
+    // And the hand-pick list is there for a card that matched nothing.
+    expect(body.records.some((r: { id: string }) => r.id === recordId)).toBe(true);
+
+    await client.query(`delete from intake_runs where id = any($1::uuid[])`, [runIds]);
+    await client.query(`delete from intake_batches where id = $1`, [batchId]);
+  });
+
+  it("refuses a pack from another project", async () => {
+    // Scoped from the batch's own row, so a batch id from elsewhere 404s rather
+    // than leaking that project's drawings.
+    const other = await client.query(
+      `insert into projects (bws_project_number, name, created_by, updated_by)
+       values ('__QA P90099', '__QA Other', 'qa', 'qa') returning id`);
+    const batch = await client.query(
+      `insert into intake_batches (project_id, label, created_by, updated_by)
+       values ($1, '__QA elsewhere', 'qa', 'qa') returning id`, [other.rows[0].id]);
+
+    const { GET } = await import("@/app/api/projects/[id]/batches/[batchId]/drawings/route");
+    const res = await GET(new Request("http://localhost/test"), {
+      params: Promise.resolve({ id: projectId, batchId: batch.rows[0].id }),
+    });
+    expect(res.status).toBe(404);
+
+    await client.query(`delete from intake_batches where id = $1`, [batch.rows[0].id]);
+    await client.query(`delete from projects where id = $1`, [other.rows[0].id]);
+  });
+
   it("does not touch spec_records.version when an attribute is written", async () => {
     // Bumping it would invalidate every extraction snapshot and chase coverage
     // row taken against the record, for a reason unrelated to them.
