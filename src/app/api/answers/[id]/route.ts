@@ -46,6 +46,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         state        = ${state},
         confirmed_by = ${state === "confirmed" ? user.email : null},
         confirmed_at = ${state === "confirmed" ? new Date().toISOString() : null},
+        -- THE EDIT TAKES OWNERSHIP. An answer filled from a drawing carries
+        -- source_kind 'document' and the run that wrote it, and that pair is
+        -- exactly what tells promote-answers.ts it may recompose the row as
+        -- later slots arrive. The moment a person edits it, it stops being
+        -- that row: marking it 'manual' is what stops the next confirmed
+        -- drawing overwriting what they typed. (Not null -- the column is
+        -- not-null and 'manual' is its default and its honest value here.)
+        source_kind  = 'manual',
+        source_id    = null,
         updated_by   = ${user.email}
     where id = ${id} and version = ${version}
     returning id, value, state, version, confirmed_by, confirmed_at

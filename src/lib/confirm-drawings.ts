@@ -28,6 +28,7 @@
 // column.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
+import { applyAnswerFills, planAnswerFills, type PromotableAttribute } from "@/lib/promote-answers";
 import {
   assertStagedDrawings,
   drawingItemBlockers,
@@ -50,6 +51,8 @@ export type DrawingsConfirmResult = {
   ignored: number;
   restored: number;
   records: number;
+  /** Checklist answers filled from the attributes this confirm wrote. */
+  answersFilled: number;
   remainingPending: number;
   status: string;
 };
@@ -326,6 +329,7 @@ export async function confirmDrawingItem(
 
   const attributeIdsByObservation = new Map<string, string[]>();
   const now = new Date().toISOString();
+  let answersFilled = 0;
 
   for (const recordId of ordered) {
     // One image row per target record, the same fan-out the attributes get, and
@@ -385,10 +389,38 @@ export async function confirmDrawingItem(
       attributeIdsByObservation.set(observation.id, list);
     }
 
+    // ---- through to the checklist ----------------------------------------
+    // Read back from the table rather than from `taken`, because the answer
+    // has to reflect EVERY attribute the record now carries. A card supplying
+    // only the height still has to recompose the whole dimensions cell over
+    // the width and depth an earlier document confirmed -- otherwise the
+    // answer says H720 and the record says W1900 x D790 x H720.
+    const attributeRows = await txn`
+      select attr_group, dimension_slot, spec_field_id, value, unit, state, sort_order
+      from record_attributes
+      where record_id = ${recordId} and status = 'active'
+      order by sort_order
+    `;
+    const promotable: PromotableAttribute[] = attributeRows.map((row) => ({
+      attrGroup: String(row.attr_group),
+      dimensionSlot: row.dimension_slot ? String(row.dimension_slot) : null,
+      specFieldId: row.spec_field_id ? String(row.spec_field_id) : null,
+      value: row.value === null ? null : String(row.value),
+      unit: row.unit === null ? null : String(row.unit),
+      state: String(row.state) as PromotableAttribute["state"],
+      sortOrder: Number(row.sort_order),
+    }));
+    // An uncategorised record has no questions yet, so there is nothing to
+    // fill and that is not a failure -- the attributes are the record of what
+    // the document said either way, and setting a category later creates the
+    // answer rows. It just does not back-fill them; see the gap in CLAUDE.md.
+    const filled = await applyAnswerFills(txn, recordId, runId, actor, planAnswerFills(promotable));
+    answersFilled += filled;
+
     await txn`
       insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
       values ('spec_record', ${recordId}, null, 'active', ${actor},
-              ${`${taken.length} spec${taken.length === 1 ? "" : "s"} confirmed from ${run.staged.filename ?? "shop drawings"}${item.page ? ` page ${item.page}` : ""}`})
+              ${`${taken.length} spec${taken.length === 1 ? "" : "s"} confirmed from ${run.staged.filename ?? "shop drawings"}${item.page ? ` page ${item.page}` : ""}${filled > 0 ? `; ${filled} checklist answer${filled === 1 ? "" : "s"} filled` : ""}`})
     `;
   }
 
@@ -427,6 +459,7 @@ export async function confirmDrawingItem(
     ignored: 0,
     restored: 0,
     records: ordered.length,
+    answersFilled,
     remainingPending: countPending(items),
     status,
   };
@@ -488,6 +521,10 @@ export async function reviewDrawingObservations(
     ignored: action === "ignore" ? taken.length : 0,
     restored: action === "restore" ? taken.length : 0,
     records: 0,
+    // Ignoring writes no attribute, so it answers nothing. It also does NOT
+    // retract an answer a previous confirm filled: undoing an answer is
+    // something a person does on the record screen, on purpose.
+    answersFilled: 0,
     remainingPending: countPending(items),
     status,
   };

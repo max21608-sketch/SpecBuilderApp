@@ -162,6 +162,226 @@ describeIfDb("intake routes", () => {
     confidence: "high" as const,
   });
 
+
+  // ---- through to the checklist --------------------------------------------
+  // Confirming a card writes the attribute AND the checklist answer it
+  // implies. The gate still holds -- a human ticked the observation against
+  // the page -- and the alternative was asking them to retype
+  // "W1900 x D790 x H720", which is where a 790 becomes a 709.
+
+  /** The answer rows a categorised record gets, exactly as confirm-boq makes them. */
+  async function makeAnswers(recordId: string) {
+    await client.query(
+      `insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
+       select $1, q.id, q.spec_field_id, 'missing', 'manual', 'qa', 'qa'
+       from requirements q join spec_records r on r.category_id = q.category_id
+       where r.id = $1`,
+      [recordId],
+    );
+  }
+
+  const dimensionsAnswer = async (recordId: string) =>
+    (
+      await client.query(
+        `select a.value, a.value_raw, a.state, a.source_kind, a.source_id, a.confirmed_by
+           from spec_answers a
+           join requirements q on q.id = a.requirement_id
+           join spec_fields f on f.id = q.spec_field_id
+          where a.record_id = $1 and f.json_id = 3`,
+        [recordId],
+      )
+    ).rows[0];
+
+  const dimsItem = (code: string, dims: { labelRaw: string; valueRaw: string }[]) => ({
+    ...drawingItem(code),
+    materials: [],
+    dimensions: dims,
+  });
+
+  it("fills the dimensions answer with the composed cell, on every run", async () => {
+    const code = "__QAX170";
+    const main = await makeRecord(mainRunId, code, "__QA Sofa main", true);
+    const ve = await makeRecord(veRunId, code, "__QA Sofa VE", true);
+    await makeAnswers(main);
+    await makeAnswers(ve);
+
+    const { runId, version, staged } = await stageDrawingRun(
+      code,
+      dimsItem(code, [
+        { labelRaw: "Width", valueRaw: "1900mm" },
+        { labelRaw: "Depth", valueRaw: "790mm" },
+        { labelRaw: "Height", valueRaw: "720mm" },
+      ]),
+    );
+    const item = staged.items[0]!;
+    const res = await confirmRoute(runId, {
+      version,
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: item.version,
+      observations: item.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Reported back, so a reviewer is told rather than left to notice.
+    expect(body.answersFilled).toBe(2);
+
+    for (const recordId of [main, ve]) {
+      const answer = await dimensionsAnswer(recordId);
+      // One cell, millimetres, unit once at the end -- composeDimensionCell,
+      // the same function the export calls.
+      expect(answer.value).toBe("W1900 x D790 x H720mm");
+      expect(answer.state).toBe("confirmed");
+      expect(answer.confirmed_by).toBe("__qa@example.test");
+      // Provenance, so the answer can be traced back to the page.
+      expect(answer.source_kind).toBe("document");
+      expect(answer.source_id).toBe(runId);
+      expect(String(answer.value_raw)).toContain("W 1900");
+    }
+  });
+
+  it("carries TBC through to the answer instead of confirming it", async () => {
+    const code = "__QAX171";
+    const recordId = await makeRecord(mainRunId, code, "__QA Sofa tbc", true);
+    await makeAnswers(recordId);
+    // A page that prints "WIDTH: TBC" beside a real height. This is the real
+    // Panther shape -- the sofa records four dimensions as TBC.
+    // version and staged are re-read below: setting the unit bumps the run and
+    // rewrites the observations, so the pre-PATCH copies are stale by design.
+    const { runId } = await stageDrawingRun(
+      code,
+      dimsItem(code, [
+        { labelRaw: "Width", valueRaw: "TBC" },
+        { labelRaw: "Height", valueRaw: "720mm" },
+      ]),
+    );
+    // The unit is chosen by the reviewer, exactly as on screen: a unitless
+    // dimension is a BLOCKER and the confirm refuses the card until it is
+    // answered. Nothing about promotion changes that.
+    const { PATCH } = await import("@/app/api/imports/[id]/route");
+    expect((await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm" } }), params(runId))).status).toBe(200);
+
+    const reread = await client.query(`select parsed, version from intake_runs where id = $1`, [runId]);
+    const item = reread.rows[0].parsed.items[0];
+    const res = await confirmRoute(runId, {
+      version: Number(reread.rows[0].version),
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: item.version,
+      observations: item.observations.map((o: { id: string; version: number }) => ({ id: o.id, version: o.version })),
+    });
+    expect(res.status).toBe(200);
+
+    const answer = await dimensionsAnswer(recordId);
+    // The trap this rule exists for: promoted as confirmed, a gate reads
+    // satisfied over a width nobody has decided. TBC is a real, distinct,
+    // gate-blocking state and it survives the trip.
+    expect(answer.state).toBe("tbc");
+    expect(answer.confirmed_by).toBeNull();
+    expect(String(answer.value)).toContain("TBC");
+    expect(String(answer.value)).toContain("H720");
+  });
+
+  it("NEVER overwrites an answer a person typed", async () => {
+    const code = "__QAX172";
+    const recordId = await makeRecord(mainRunId, code, "__QA Sofa owned", true);
+    await makeAnswers(recordId);
+    // A human answer: confirmed and marked 'manual', which is what
+    // /api/answers/[id] leaves behind once somebody edits.
+    await client.query(
+      `update spec_answers a
+          set value = '__QA typed by a person', state = 'confirmed', confirmed_at = now(), confirmed_by = 'qa', source_kind = 'manual', source_id = null
+        from requirements q join spec_fields f on f.id = q.spec_field_id
+        where q.id = a.requirement_id and a.record_id = $1 and f.json_id = 3`,
+      [recordId],
+    );
+
+    const { runId, version, staged } = await stageDrawingRun(
+      code,
+      dimsItem(code, [{ labelRaw: "Width", valueRaw: "1900mm" }]),
+    );
+    const item = staged.items[0]!;
+    const res = await confirmRoute(runId, {
+      version,
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: item.version,
+      observations: item.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    // The card still commits -- the ATTRIBUTE is the record of what the page
+    // said, and it lands either way. Only the answer is left alone.
+    expect(res.status).toBe(200);
+    expect((await res.json()).answersFilled).toBe(0);
+
+    const answer = await dimensionsAnswer(recordId);
+    expect(answer.value).toBe("__QA typed by a person");
+    expect(answer.source_kind).toBe("manual");
+
+    const attrs = await client.query(
+      `select count(*)::int n from record_attributes where record_id = $1 and attr_group = 'dimension'`,
+      [recordId],
+    );
+    expect(attrs.rows[0].n).toBe(1);
+  });
+
+  it("RECOMPOSES its own answer as later slots arrive", async () => {
+    const code = "__QAX173";
+    const recordId = await makeRecord(mainRunId, code, "__QA Sofa growing", true);
+    await makeAnswers(recordId);
+
+    const first = await stageDrawingRun(code, dimsItem(code, [{ labelRaw: "Width", valueRaw: "1900mm" }]));
+    const firstItem = first.staged.items[0]!;
+    await confirmRoute(first.runId, {
+      version: first.version,
+      action: "confirm",
+      itemId: firstItem.id,
+      itemVersion: firstItem.version,
+      observations: firstItem.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    expect((await dimensionsAnswer(recordId)).value).toBe("W1900mm");
+
+    // A SECOND document, carrying the height this one never printed. The
+    // answer has to say W1900 x H720mm -- not H720mm, which is what reading
+    // only the current card would produce.
+    const second = await stageDrawingRun(code, dimsItem(code, [{ labelRaw: "Height", valueRaw: "720mm" }]));
+    const secondItem = second.staged.items[0]!;
+    const res = await confirmRoute(second.runId, {
+      version: second.version,
+      action: "confirm",
+      itemId: secondItem.id,
+      itemVersion: secondItem.version,
+      observations: secondItem.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    expect(res.status).toBe(200);
+    expect((await dimensionsAnswer(recordId)).value).toBe("W1900 x H720mm");
+  });
+
+  it("writes the attribute and no answer when the record has no category yet", async () => {
+    const code = "__QAX174";
+    const recordId = await makeRecord(mainRunId, code, "__QA Sofa uncategorised");
+    const { runId, version, staged } = await stageDrawingRun(
+      code,
+      dimsItem(code, [{ labelRaw: "Width", valueRaw: "1900mm" }]),
+    );
+    const item = staged.items[0]!;
+    const res = await confirmRoute(runId, {
+      version,
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: item.version,
+      observations: item.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    // No questions exist to answer, and that is not a failure: the attribute
+    // is the record of what the document said either way.
+    expect(res.status).toBe(200);
+    expect((await res.json()).answersFilled).toBe(0);
+    const attrs = await client.query(
+      `select count(*)::int n from record_attributes where record_id = $1`,
+      [recordId],
+    );
+    expect(attrs.rows[0].n).toBe(1);
+  });
+
   // ---- drawings ------------------------------------------------------------
 
   it("fans one drawing out to the same code in every run, atomically", async () => {

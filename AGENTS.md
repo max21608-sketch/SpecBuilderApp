@@ -39,7 +39,12 @@ Database scripts print the resolved host before acting; read that line.
 A human confirms each of these, and nothing else may write it:
 
 - Confirming an extracted spec value into `spec_answers`. Extraction stages;
-  only a human confirm writes.
+  only a human confirm writes. **One confirm may write more than one row:**
+  confirming a drawing card also fills the checklist answers its attributes
+  answer (`src/lib/promote-answers.ts`). The gate is that no extracted value
+  reaches an answer unseen, not that each row needs its own click — a reviewer
+  who has just checked `W1900 x D790` against the page is transcribing, not
+  deciding, when they retype it.
 - Confirming drawing specs into `record_attributes`, and preamble notes into
   `project_notes`. Same rule, two more staging shapes.
 - Producing the BWS CSV export.
@@ -330,6 +335,45 @@ neither stores the result. Two consequences worth stating:
   (`targets_changed`). The reviewer's ticked and unticked lists are both stored,
   so a record they never saw is distinguishable from one they deliberately
   dropped.
+
+### An attribute carries through to the checklist automatically
+
+`src/lib/promote-answers.ts`, `src/lib/confirm-drawings.ts`,
+`src/app/api/answers/[id]/route.ts`
+
+`record_attributes` is what a document SAID; `spec_answers` is the checklist.
+Nothing connected them, so the Panther sofa showed `W1900 x D790 x H720 x
+SH440mm` on screen while its Dimensions *question* sat empty — the summary is
+computed for display and no answer was ever written. Confirming a drawing card
+now fills the answers its attributes answer, in the same transaction.
+
+Four rules, each a trap rather than a preference:
+
+- **A `tbc` attribute becomes a `tbc` ANSWER, never confirmed**, and a cell
+  carrying no digit is never confirmed whatever the attribute said. The sofa
+  records four dimensions as TBC and a fabric code reading `TBC – Yarn
+  Collective…`; promoted as confirmed, a gate reports satisfied over values
+  nobody has decided.
+- **A person's answer is never overwritten.** Only an answer still `missing`,
+  or one a SHOP-DRAWINGS run wrote, is touched. `source_kind = 'document'` is
+  not enough on its own — `confirm-spec-document.ts` writes that too, so
+  matching it alone would let a shop drawing quietly beat an answer confirmed
+  off an FF&E schedule. `/api/answers/[id]` marks an edited answer `'manual'`,
+  which is what takes it out of reach for good.
+- **The whole record is recomposed, not the card.** A card supplying only the
+  height still recomposes the cell over the width and depth an earlier document
+  confirmed, so the attributes are re-read from the table rather than taken
+  from the confirmed set. Otherwise the answer says `H720mm` and the record
+  says `W1900 x D790 x H720mm`.
+- **`composeDimensionCell` is still the only composer.** A second
+  implementation is how a screen starts promising what the file does not
+  deliver.
+
+A dimension does not reach its field by `spec_field_id` — it carries a SLOT,
+and all five compose into BWS field 3 (`json_id`, never the column letter).
+An uncategorised record has no questions, fills nothing, and that is not a
+failure. **Nothing back-fills**: setting a category later creates the answer
+rows `missing`, and only the next drawing confirm fills them.
 
 ### The record is the unit of commit, and a half-applied card is the failure
 
@@ -631,6 +675,22 @@ to end and four things were wrong, all of them flow rather than data:
 - Projects list: the duplicate *Open* button is gone and *Add a project* is at
   the top. Intake status labels live in `src/lib/intake-status.ts`, because
   three copies had already drifted on `parsing`.
+
+**Built 2026-09-15, attributes reach the checklist.** Confirming a drawing card
+now fills the checklist answers its attributes answer — see the load-bearing
+section above. It is the first thing that makes `spec_answers` fill from a
+document rather than by typing. Two limits worth knowing before reading the
+result:
+
+- **Only 6 of the Panther project's 33 attributes carry a BWS field**, so apart
+  from dimensions — which work for every record, because all 17 categories ask
+  field 3 — very little else promotes yet. The lever is
+  `requirement_aliases` and attribute matching, which is a seeding job from
+  verified wording, not code.
+- **Nothing back-fills the documents already confirmed.** The existing Panther
+  attributes were written before this existed; their answers stay `missing`
+  until something re-confirms. A one-off promotion pass over existing
+  attributes has NOT been written.
 
 **Outstanding — judgement, not code.**
 
