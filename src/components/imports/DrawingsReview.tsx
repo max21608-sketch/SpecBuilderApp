@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
+import Disclosure, { DisclosureList } from "@/components/ui/Disclosure";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
@@ -377,39 +378,33 @@ function CollapsedList({
   const rows = items.flatMap((item) =>
     item.observations.filter((o) => o.reviewStatus === status).map((observation) => ({ item, observation })),
   );
-  if (rows.length === 0) return null;
 
   return (
-    <div className="mt-6">
-      <button type="button" onClick={onToggle} className="text-sm text-neutral-600 hover:text-neutral-900">
-        {open ? "▾" : "▸"} {title} ({rows.length})
-      </button>
-      {open && (
-        <ul className="mt-2 divide-y divide-neutral-100 border border-neutral-200 rounded bg-white">
-          {rows.map(({ item, observation }) => (
-            <li key={observation.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-              <span className="text-neutral-500 w-24 truncate">{item.itemCodeRaw ?? "—"}</span>
-              <span className="flex-1 text-neutral-800">
-                {observation.labelRaw}: {observation.value ?? observation.valueRaw ?? "—"}
+    <Disclosure title={title} count={rows.length} open={open} onToggle={onToggle}>
+      <DisclosureList>
+        {rows.map(({ item, observation }) => (
+          <li key={observation.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+            <span className="text-neutral-500 w-24 truncate">{item.itemCodeRaw ?? "—"}</span>
+            <span className="flex-1 text-neutral-800">
+              {observation.labelRaw}: {observation.value ?? observation.valueRaw ?? "—"}
+            </span>
+            {status === "applied" ? (
+              <span className="text-xs text-neutral-500">
+                on {observation.applied?.attributeIds.length ?? 0} record
+                {(observation.applied?.attributeIds.length ?? 0) === 1 ? "" : "s"}
               </span>
-              {status === "applied" ? (
-                <span className="text-xs text-neutral-500">
-                  on {observation.applied?.attributeIds.length ?? 0} record
-                  {(observation.applied?.attributeIds.length ?? 0) === 1 ? "" : "s"}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onRestore?.(item, observation)}
-                  className="text-xs text-neutral-500 hover:text-neutral-900"
-                >
-                  Restore
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onRestore?.(item, observation)}
+                className="text-xs text-neutral-500 hover:text-neutral-900"
+              >
+                Restore
+              </button>
+            )}
+          </li>
+        ))}
+      </DisclosureList>
+    </Disclosure>
   );
 }

@@ -498,6 +498,115 @@ describeIfDb("intake routes", () => {
 
   // ---- category ------------------------------------------------------------
 
+  it("flags a note without touching whether it is retired, and 409s on a stale version", async () => {
+    // Two independent facts about one note: `status` is whether it is a correct
+    // reading of the document, `flagged` is whether an accurate note binds.
+    const staged = stagePreamble(
+      [{ topicRaw: "__QA SECTION 9", titleRaw: "__QA Precedence", bodyRaw: "__QA Signed drawings take precedence.", page: 2 }],
+      "__QA preamble flags.pdf",
+      null,
+    );
+    const run = await client.query(
+      `insert into intake_runs (project_id, source_kind, document_kind, status, parsed, created_by, updated_by)
+       values ($1, 'spec_document', 'preamble', 'parsed', $2::jsonb, 'qa', 'qa') returning id, version`,
+      [projectId, JSON.stringify(staged)],
+    );
+    await confirmRoute(run.rows[0].id, {
+      version: Number(run.rows[0].version),
+      action: "confirm",
+      notes: staged.notes.map((note) => ({ id: note.id, version: note.version })),
+    });
+
+    const rows = await client.query(
+      `select id, version from project_notes where project_id = $1 and title = '__QA Precedence'`, [projectId]);
+    const noteId = rows.rows[0].id;
+
+    const { PATCH } = await import("@/app/api/projects/[id]/notes/[noteId]/route");
+    const flag = await PATCH(patch({ flagged: true, version: rows.rows[0].version }), {
+      params: Promise.resolve({ id: projectId, noteId }),
+    });
+    expect(flag.status).toBe(200);
+
+    let after = await client.query(`select status, flagged, version from project_notes where id = $1`, [noteId]);
+    expect(after.rows[0].flagged).toBe(true);
+    // Flagging must not retire it, and must not be confused with retiring.
+    expect(after.rows[0].status).toBe("active");
+
+    // A stale version writes nothing rather than overwriting a change.
+    const stale = await PATCH(patch({ flagged: false, version: 99 }), {
+      params: Promise.resolve({ id: projectId, noteId }),
+    });
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).code).toBe("note_version_stale");
+    expect((await client.query(`select flagged from project_notes where id = $1`, [noteId])).rows[0].flagged).toBe(true);
+
+    // Retiring a flagged note keeps the flag: it is still evidence of what the
+    // document was read as, and of how it was judged.
+    const retire = await PATCH(patch({ status: "retired", version: after.rows[0].version }), {
+      params: Promise.resolve({ id: projectId, noteId }),
+    });
+    expect(retire.status).toBe(200);
+    after = await client.query(`select status, flagged, retired_by from project_notes where id = $1`, [noteId]);
+    expect(after.rows[0].status).toBe("retired");
+    expect(after.rows[0].flagged).toBe(true);
+    expect(after.rows[0].retired_by).toBeTruthy();
+
+    await client.query(`delete from project_notes where id = $1`, [noteId]);
+  });
+
+  it("refuses a note patch that changes nothing", async () => {
+    const { PATCH } = await import("@/app/api/projects/[id]/notes/[noteId]/route");
+    const res = await PATCH(patch({ version: 1 }), {
+      params: Promise.resolve({ id: projectId, noteId: "00000000-0000-0000-0000-000000000000" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/Nothing to change/);
+  });
+
+  it("takes a pack with no preamble all the way through", async () => {
+    // Nothing anywhere requires one, and plenty of projects have none. This
+    // keeps that true rather than true by accident.
+    const batch = await client.query(
+      `insert into intake_batches (project_id, label, created_by, updated_by)
+       values ($1, '__QA bill only', 'qa', 'qa') returning id`, [projectId]);
+    const batchId = batch.rows[0].id;
+
+    const code = "__QAX140";
+    // Idempotent: a retried test must not leave a SECOND record on this code
+    // and then fail resolution as ambiguous against its own first attempt.
+    await client.query(
+      `delete from spec_records where id in (
+         select record_id from spec_record_refs where project_id = $1 and ref_value = $2)`,
+      [projectId, code],
+    );
+    const recordId = await makeRecord(mainRunId, code, "__QA Lamp table");
+    const staged = stageDrawings([drawingItem(code)], fields, "__QA drawings only.pdf", null);
+    const run = await client.query(
+      `insert into intake_runs (project_id, batch_id, source_kind, document_kind, status, parsed, created_by, updated_by)
+       values ($1,$2,'spec_document','shop_drawings','parsed',$3::jsonb,'qa','qa') returning id, version`,
+      [projectId, batchId, JSON.stringify(staged)]);
+
+    const preambles = await client.query(
+      `select count(*)::int as n from intake_runs where batch_id = $1 and document_kind = 'preamble'`, [batchId]);
+    expect(preambles.rows[0].n).toBe(0);
+
+    const item = staged.items[0]!;
+    const res = await confirmRoute(run.rows[0].id, {
+      version: Number(run.rows[0].version),
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: item.version,
+      observations: item.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).records).toBe(1);
+
+    await client.query(`delete from intake_runs where batch_id = $1`, [batchId]);
+    await client.query(`delete from intake_batches where id = $1`, [batchId]);
+    await client.query(`delete from record_attributes where record_id = $1`, [recordId]);
+    await client.query(`delete from spec_records where id = $1`, [recordId]);
+  });
+
   it("sets a category after import and creates the answer rows with it", async () => {
     const recordId = await makeRecord(mainRunId, "__QAX160", "__QA Uncategorised");
     const before = await client.query(`select count(*)::int n from spec_answers where record_id = $1`, [recordId]);

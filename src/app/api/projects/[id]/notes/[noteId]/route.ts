@@ -1,4 +1,4 @@
-// Retiring a preamble note.
+// Retiring a preamble note, and marking the ones that bind.
 //
 // RETIRED, NEVER DELETED. A note is evidence of how a document was read; a
 // mis-extracted one that is deleted takes with it the fact that anybody looked.
@@ -13,12 +13,20 @@ import { getSessionUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
+// Both fields optional, but at least one required. They are independent on
+// purpose: `status` is whether the note is a correct reading of the document,
+// `flagged` is whether an accurate note is load-bearing. Overloading one field
+// with both would make "this is wrong" and "this matters" the same answer.
 const Patch = z
   .object({
-    status: z.enum(["active", "retired"]),
+    status: z.enum(["active", "retired"]).optional(),
+    flagged: z.boolean().optional(),
     version: z.number().int().nonnegative(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.status !== undefined || value.flagged !== undefined, {
+    message: "Nothing to change.",
+  });
 
 export async function PATCH(
   request: Request,
@@ -38,21 +46,32 @@ export async function PATCH(
   if (!parsed.success) {
     return json({ ok: false, error: parsed.error.issues[0]?.message ?? "That change is not valid." }, 400);
   }
-  const { status, version } = parsed.data;
+  const { status, flagged, version } = parsed.data;
+
+  // Read first, so an unsent field keeps its stored value. Writing every column
+  // on every save is what moved the TOE dates a day earlier each time; the same
+  // shape here would silently un-flag a note somebody flagged.
+  const stored = await sql`
+    select status, flagged from project_notes where id = ${noteId} and project_id = ${id}
+  `;
+  if (!stored[0]) return json({ ok: false, error: "No such note." }, 404);
+  const nextStatus = status ?? String(stored[0].status);
+  const nextFlagged = flagged ?? Boolean(stored[0].flagged);
 
   // Predicated on the version, so a stale tab writes zero rows rather than
   // silently overwriting somebody else's change.
   const rows = await sql`
     update project_notes
-    set status = ${status},
-        retired_at = ${status === "retired" ? new Date().toISOString() : null},
-        retired_by = ${status === "retired" ? user.email : null},
+    set status = ${nextStatus},
+        flagged = ${nextFlagged},
+        retired_at = ${nextStatus === "retired" ? new Date().toISOString() : null},
+        retired_by = ${nextStatus === "retired" ? user.email : null},
         updated_by = ${user.email}
     where id = ${noteId} and project_id = ${id} and version = ${version}
-    returning id, status, version
+    returning id, status, flagged, version
   `;
   if (!rows[0]) {
-    const current = await sql`select version, status from project_notes where id = ${noteId} and project_id = ${id}`;
+    const current = await sql`select version, status, flagged from project_notes where id = ${noteId} and project_id = ${id}`;
     if (!current[0]) return json({ ok: false, error: "No such note." }, 404);
     return json(
       {

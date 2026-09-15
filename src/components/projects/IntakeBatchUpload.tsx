@@ -24,6 +24,8 @@ import { projectUploadPrefix } from "@/lib/blob-source";
 
 /** What a person calls the thing, in the order a pack is read. */
 const CHOICES: { value: string; label: string; importType: "boq" | "spec_document"; documentKind: DocumentKind | null }[] = [
+  // Listed first because it is read first WHEN THERE IS ONE. Nothing requires a
+  // pack to include a preamble, and plenty of projects have none.
   { value: "preamble", label: "Preamble (general conditions)", importType: "spec_document", documentKind: "preamble" },
   { value: "boq", label: "Bill of quantities (creates the records)", importType: "boq", documentKind: null },
   { value: "shop_drawings", label: "Shop drawings (specs per item)", importType: "spec_document", documentKind: "shop_drawings" },
@@ -178,7 +180,9 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
           dragging ? "border-neutral-900 bg-neutral-50" : "border-neutral-300"
         }`}
       >
-        <p className="text-sm text-neutral-700">Drop the pack here — the preamble, the BOQ and the drawings together.</p>
+        <p className="text-sm text-neutral-700">
+          Drop the pack here — the BOQ, the drawings, and the preamble if the project has one.
+        </p>
         <input
           ref={fileInput}
           type="file"

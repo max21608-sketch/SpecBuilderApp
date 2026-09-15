@@ -77,6 +77,7 @@ type ProjectNote = {
   topic: string | null;
   title: string | null;
   body: string;
+  flagged: boolean;
   source_page: number | null;
   source_filename: string | null;
   version: number;
@@ -135,6 +136,9 @@ export default function ProjectOverviewPage() {
   const [documents, setDocuments] = useState<DocumentRun[] | null>(null);
   const [runs, setRuns] = useState<SpecRun[]>([]);
   const [notes, setNotes] = useState<ProjectNote[]>([]);
+  // Collapsed by default. A real preamble states thirty things, each a
+  // paragraph, and all of them expanded is why this section could not be read.
+  const [openNotes, setOpenNotes] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<string>("overview");
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [suggestedCodes, setSuggestedCodes] = useState<string[]>([]);
@@ -228,6 +232,33 @@ export default function ProjectOverviewPage() {
     });
   }, [form]);
 
+  const toggleNote = (noteId: string) =>
+    setOpenNotes((current) => {
+      const next = new Set(current);
+      if (next.has(noteId)) next.delete(noteId);
+      else next.add(noteId);
+      return next;
+    });
+
+  /**
+   * Marking a note load-bearing. Independent of `status`, which is whether the
+   * note is a correct reading of the document -- "this is wrong" and "this
+   * matters" are different answers and must not share a field.
+   */
+  async function setNoteFlag(note: ProjectNote, flagged: boolean) {
+    setError(null);
+    const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/notes/${note.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ flagged, version: note.version }),
+    });
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    await load();
+  }
+
   async function retireNote(note: ProjectNote) {
     setError(null);
     const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/notes/${note.id}`, {
@@ -277,6 +308,9 @@ export default function ProjectOverviewPage() {
 
   if (error && !project) return <p className="max-w-4xl mx-auto text-sm text-red-700">{error}</p>;
   if (!project || !form) return <div className="max-w-4xl mx-auto"><Spinner label="Loading project" /></div>;
+
+  const flaggedCount = notes.filter((note) => note.flagged).length;
+  const allNotesOpen = notes.length > 0 && notes.every((note) => openNotes.has(note.id));
 
   const today = todayLocal();
   const untilSpecs = daysUntilSpecsAgreed(project.specs_agreed_by, today);
@@ -486,38 +520,6 @@ export default function ProjectOverviewPage() {
         </div>
       </form>
 
-      {/* What the preamble said the whole package is built under. Retired,
-          never deleted: a mis-read note is still evidence that somebody looked. */}
-      <h2 className="mt-8 font-medium text-neutral-900">From the preamble</h2>
-      {notes.length === 0 ? (
-        <p className="mt-1 text-xs text-neutral-500">
-          Nothing yet. Upload the pack&rsquo;s preamble below and review what it requires.
-        </p>
-      ) : (
-        <ul className="mt-3 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
-          {notes.map((note) => (
-            <li key={note.id} className="px-4 py-3 text-sm">
-              <div className="flex items-baseline justify-between gap-3">
-                <p className="font-medium text-neutral-900">{note.title ?? "Untitled requirement"}</p>
-                <button
-                  type="button"
-                  onClick={() => void retireNote(note)}
-                  className="text-xs text-neutral-500 hover:text-neutral-900"
-                >
-                  Retire
-                </button>
-              </div>
-              <p className="mt-1 text-neutral-700">{note.body}</p>
-              <p className="mt-1 text-xs text-neutral-500">
-                {note.topic}
-                {note.source_filename && <> · {note.source_filename}</>}
-                {note.source_page && <> page {note.source_page}</>}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-
       <h2 className="mt-8 font-medium text-neutral-900">Contacts</h2>
       <p className="mt-1 text-xs text-neutral-500">
         Who to ask about this project. The designer code matches the BOQ&rsquo;s own wording and is what ties a
@@ -538,8 +540,9 @@ export default function ProjectOverviewPage() {
 
       <h2 className="mt-8 font-medium text-neutral-900">Intake</h2>
       <p className="mt-1 text-xs text-neutral-500">
-        Drop the whole tender pack in at once — the preamble, the bill of quantities and the drawings. Each file&rsquo;s
-        kind is declared, because a BOQ and a schedule are both spreadsheets and the bytes cannot say which is which.
+        Drop the whole tender pack in at once — the bill of quantities, the drawings, and the preamble if there is
+        one. Each file&rsquo;s kind is declared, because a BOQ and a schedule are both spreadsheets and the bytes
+        cannot say which is which.
       </p>
       <IntakeBatchUpload projectId={project.id} onUploaded={() => void load()} />
       {documents !== null && documents.length > 0 && (
@@ -594,6 +597,91 @@ export default function ProjectOverviewPage() {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* What the preamble said the whole package is built under. LAST on this
+          screen, because it is reference material: a reader scrolls to it when
+          they want it, and it is the longest thing here by far. Retired, never
+          deleted -- a mis-read note is still evidence that somebody looked. */}
+      <div className="mt-8 flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="font-medium text-neutral-900">
+          From the preamble
+          {flaggedCount > 0 && (
+            <span className="ml-2 text-xs font-normal text-amber-800">{flaggedCount} flagged</span>
+          )}
+        </h2>
+        {notes.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setOpenNotes(allNotesOpen ? new Set() : new Set(notes.map((note) => note.id)))}
+            className="text-xs text-neutral-500 hover:text-neutral-900"
+          >
+            {allNotesOpen ? "Collapse all" : "Expand all"}
+          </button>
+        )}
+      </div>
+      {notes.length === 0 ? (
+        <p className="mt-1 text-xs text-neutral-500">
+          Nothing yet. If the pack came with a preamble, upload it above and review what it requires. Plenty of
+          projects do not have one.
+        </p>
+      ) : (
+        <>
+          <p className="mt-1 text-xs text-neutral-500">
+            The conditions the whole package is built under. Flag the ones that change what gets quoted &mdash; a
+            flameproofing standard, a tolerance, a precedence clause &mdash; so they are not read at the same weight as
+            the boilerplate.
+          </p>
+          <ul className="mt-3 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
+            {notes.map((note) => {
+              const open = openNotes.has(note.id);
+              return (
+                <li
+                  key={note.id}
+                  className={`px-4 py-3 text-sm ${note.flagged ? "bg-amber-50 border-l-2 border-l-amber-400" : ""}`}
+                >
+                  <div className="flex items-baseline justify-between gap-3">
+                    {/* The title is the whole row's toggle: a preamble note's
+                        body runs to a paragraph, and thirty of them expanded is
+                        why this section was unreadable. */}
+                    <button
+                      type="button"
+                      onClick={() => toggleNote(note.id)}
+                      aria-expanded={open}
+                      className={`flex-1 text-left font-medium ${note.flagged ? "text-amber-900" : "text-neutral-900"}`}
+                    >
+                      {open ? "\u25be" : "\u25b8"} {note.title ?? "Untitled requirement"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void setNoteFlag(note, !note.flagged)}
+                      title={note.flagged ? "Stop flagging this" : "Flag this as load-bearing"}
+                      className={`text-xs ${note.flagged ? "text-amber-800 hover:text-amber-900" : "text-neutral-400 hover:text-neutral-900"}`}
+                    >
+                      {note.flagged ? "\u2605 Flagged" : "\u2606 Flag"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void retireNote(note)}
+                      className="text-xs text-neutral-500 hover:text-neutral-900"
+                    >
+                      Retire
+                    </button>
+                  </div>
+                  {open && <p className="mt-1 whitespace-pre-line text-neutral-700">{note.body}</p>}
+                  <p className="mt-1 text-xs text-neutral-500">
+                    {note.topic}
+                    {note.source_filename && <> &middot; {note.source_filename}</>}
+                    {note.source_page && <> page {note.source_page}</>}
+                    {!open && note.body.length > 0 && (
+                      <> &middot; {note.body.length > 90 ? `${note.body.slice(0, 90).trimEnd()}\u2026` : note.body}</>
+                    )}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
 
       <div className="mt-8 flex gap-3">

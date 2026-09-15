@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
+import Disclosure, { DisclosureList } from "@/components/ui/Disclosure";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { PreambleNote, StagedPreamble } from "@/lib/preamble-document";
 
@@ -322,30 +323,24 @@ function Collapsed({
   notes: PreambleNote[];
   onRestore?: (note: PreambleNote) => void;
 }) {
-  if (notes.length === 0) return null;
   return (
-    <div className="mt-6">
-      <button type="button" onClick={onToggle} className="text-sm text-neutral-600 hover:text-neutral-900">
-        {open ? "▾" : "▸"} {title} ({notes.length})
-      </button>
-      {open && (
-        <ul className="mt-2 divide-y divide-neutral-100 border border-neutral-200 rounded bg-white">
-          {notes.map((note) => (
-            <li key={note.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-              <span className="flex-1 text-neutral-800">{note.title ?? note.body?.slice(0, 80)}</span>
-              {onRestore && (
-                <button
-                  type="button"
-                  onClick={() => onRestore(note)}
-                  className="text-xs text-neutral-500 hover:text-neutral-900"
-                >
-                  Restore
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <Disclosure title={title} count={notes.length} open={open} onToggle={onToggle}>
+      <DisclosureList>
+        {notes.map((note) => (
+          <li key={note.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+            <span className="flex-1 text-neutral-800">{note.title ?? note.body?.slice(0, 80)}</span>
+            {onRestore && (
+              <button
+                type="button"
+                onClick={() => onRestore(note)}
+                className="text-xs text-neutral-500 hover:text-neutral-900"
+              >
+                Restore
+              </button>
+            )}
+          </li>
+        ))}
+      </DisclosureList>
+    </Disclosure>
   );
 }

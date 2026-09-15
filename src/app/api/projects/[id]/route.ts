@@ -125,13 +125,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   // What the preamble said the whole package is built under.
   const notes = await sql`
-    select n.id, n.topic, n.title, n.body, n.source_page, n.sort_order, n.version, n.created_at, n.created_by,
+    select n.id, n.topic, n.title, n.body, n.flagged, n.source_page, n.sort_order, n.version, n.created_at, n.created_by,
            at.filename as source_filename
     from project_notes n
     left join intake_runs r on r.id = n.source_run_id
     left join attachments at on at.id = r.attachment_id
     where n.project_id = ${id} and n.status = 'active'
-    order by n.sort_order, n.created_at
+    -- Flagged first: the three that change what gets quoted must not be read
+    -- at the same weight as the thirty that do not.
+    order by n.flagged desc, n.sort_order, n.created_at
   `;
 
   const record = rows[0] as Record<string, unknown>;
