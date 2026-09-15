@@ -115,6 +115,15 @@ describe("composeDimensionCell", () => {
     expect(cell([row("W", "1520 TBC"), row("D", "560"), row("H", "1005")]).text).toBe("W1520 TBC x D560 x H1005mm");
   });
 
+  it("keeps the unit against the last FIGURE, not the end of the string", () => {
+    // Found in the browser, not here: every fixture above happens to put the
+    // TBC first, and appending "mm" to the finished string then read
+    // "SH440 TBCmm". The unit belongs to the number.
+    expect(cell([row("W", "190", "cm"), row("D", "79", "cm"), row("H", "72", "cm"), row("SH", "440", "mm", { state: "tbc" })]).text).toBe(
+      "W1900 x D790 x H720 x SH440mm TBC",
+    );
+  });
+
   it("writes a TBC with no figure as the slot and TBC", () => {
     expect(cell([row("W", null, "mm", { state: "tbc" }), row("D", "560"), row("H", "1005")]).text).toBe(
       "W TBC x D560 x H1005mm",

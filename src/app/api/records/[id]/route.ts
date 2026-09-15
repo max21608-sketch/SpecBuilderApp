@@ -39,7 +39,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // and `source_page` are what make a value re-checkable: a value whose source
   // cannot be named is a value nobody can question.
   const attributes = await sql`
-    select a.id, a.attr_group, a.label, a.value, a.unit, a.material_code, a.state, a.status,
+    select a.id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code, a.state, a.status,
            a.sort_order, a.version, a.source_page, a.source_run_id, a.created_at, a.created_by,
            f.name as field_name, f.json_id, f.field_category,
            src.filename as source_filename, src.document_kind as source_document_kind

@@ -135,7 +135,11 @@ export function composeDimensionCell(rows: DimensionRow[]): DimensionCell {
     }
   }
 
-  const inline: string[] = [];
+  // Each part keeps its figure and its TBC apart, because the unit has to land
+  // between them. Appending "mm" to the finished string produced "SH440 TBCmm"
+  // whenever the LAST slot was the unsettled one — found in the browser, not by
+  // a test, because every fixture happened to put the TBC first.
+  const inline: { text: string; hasFigure: boolean; tbc: boolean }[] = [];
   const trailing: string[] = [];
   let converted = false;
 
@@ -153,7 +157,7 @@ export function composeDimensionCell(rows: DimensionRow[]): DimensionCell {
     // client has not decided — and it must reach BWS as one. A blank here
     // would read as "nobody looked".
     if (figure === null && tbc) {
-      inline.push(`${prefix} TBC`);
+      inline.push({ text: prefix, hasFigure: false, tbc: true });
       continue;
     }
 
@@ -180,13 +184,17 @@ export function composeDimensionCell(rows: DimensionRow[]): DimensionCell {
     const result = toMillimetres(row.value, row.unit);
     if (!result.ok) continue; // unreachable: figure is non-null, so the parse agreed
     converted = true;
-    inline.push(`${prefix}${result.mm}${tbc ? " TBC" : ""}`);
+    inline.push({ text: `${prefix}${result.mm}`, hasFigure: true, tbc });
   }
 
-  // The unit is written once, at the end of the millimetre group — and only
-  // when something was actually converted, so a cell of nothing but TBCs never
-  // claims a measurement it does not have.
-  const group = inline.length > 0 ? `${inline.join(" x ")}${converted ? "mm" : ""}` : "";
+  // The unit is written once, against the LAST FIGURE rather than at the end of
+  // the string — otherwise a TBC on the final slot reads "SH440 TBCmm". And
+  // only when something was actually converted, so a cell of nothing but TBCs
+  // never claims a measurement it does not have.
+  const lastFigure = inline.reduce((last, part, index) => (part.hasFigure ? index : last), -1);
+  const group = inline
+    .map((part, index) => `${part.text}${converted && index === lastFigure ? "mm" : ""}${part.tbc ? " TBC" : ""}`)
+    .join(" x ");
   const conflict = problems.find((problem) => problem.code === "dia_conflict");
   const parts = [group, ...trailing, ...(conflict ? [`[conflict: ${conflict.message}]`] : [])].filter((part) => part !== "");
   return { text: parts.join(" "), problems };

@@ -24,7 +24,10 @@ import {
   type AnswerState,
   type AttributeGroup,
   type AttributeState,
+  type AttributeUnit,
+  type DimensionSlot,
 } from "@/lib/spec-vocab";
+import { composeDimensionCell } from "@/lib/dimensions";
 
 type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
@@ -43,6 +46,7 @@ type SpecRecord = {
 
 type Attribute = {
   id: string; attr_group: AttributeGroup; label: string; value: string | null; unit: string | null;
+  dimension_slot: DimensionSlot | null;
   material_code: string | null; state: AttributeState; sort_order: number; version: number;
   source_page: number | null; source_run_id: string | null; created_by: string | null;
   field_name: string | null; json_id: number | null; field_category: string | null;
@@ -128,6 +132,17 @@ export default function RecordPage() {
   if (!data) return <Spinner label="Loading record" />;
 
   const { record, refs, answers, attributes, categories } = data;
+  const dimensionCell = composeDimensionCell(
+    attributes
+      .filter((attribute) => attribute.attr_group === "dimension" && attribute.dimension_slot)
+      .map((attribute) => ({
+        slot: attribute.dimension_slot as DimensionSlot,
+        value: attribute.value,
+        unit: (attribute.unit ?? null) as AttributeUnit | null,
+        state: attribute.state,
+        sortOrder: attribute.sort_order,
+      })),
+  );
   const byGroup = ATTRIBUTE_GROUPS.map((group) => ({
     group,
     rows: attributes.filter((attribute) => attribute.attr_group === group),
@@ -159,6 +174,22 @@ export default function RecordPage() {
 
       {/* What the documents actually said. */}
       <h2 className="mt-6 text-sm font-semibold text-neutral-500 uppercase tracking-wide">Specs captured</h2>
+
+      {/* What BWS field 3 will receive, composed by the same function the
+          export calls. The rows below keep each figure's ORIGINAL value and
+          unit, which is what makes a converted W1900 checkable against a page
+          that says 190. */}
+      {dimensionCell.text && (
+        <div className="mt-3 border border-neutral-200 rounded-lg bg-white px-4 py-3">
+          <p className="text-xs uppercase tracking-wide text-neutral-500">Dimensions, as BWS will receive them</p>
+          <p className="font-mono text-sm text-neutral-900">{dimensionCell.text}</p>
+          {dimensionCell.problems.map((problem, index) => (
+            <p key={index} className="mt-0.5 text-xs text-amber-700">
+              {problem.message}
+            </p>
+          ))}
+        </div>
+      )}
       {attributes.length === 0 ? (
         <p className="mt-2 text-sm text-neutral-600">
           Nothing captured for this item yet. Upload the shop drawings for this pack and review them — a drawing
