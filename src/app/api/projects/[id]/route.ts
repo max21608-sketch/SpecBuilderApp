@@ -17,7 +17,7 @@ import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
-import { ATTRIBUTE_UNITS, normaliseUnit } from "@/lib/spec-vocab";
+import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -54,6 +54,10 @@ const ProjectPatch = z
     // anything unrecognised is refused below with a sentence naming the four
     // that work. z.enum here would reject "CM" as "invalid enum value".
     defaultDimensionUnit: z.string().trim().max(20).nullable().optional(),
+    // Archived, never deleted. This does NOT make a project read-only -- nothing
+    // here revokes a write, and the screen says so, because a control that
+    // reads as a lock and is not one is worse than no lock at all.
+    status: z.enum(PROJECT_STATUSES).optional(),
   })
   .strict();
 
@@ -66,6 +70,7 @@ const EDITABLE = [
   "specsAgreedBy",
   "deliveryDate",
   "defaultDimensionUnit",
+  "status",
 ] as const;
 
 export const dynamic = "force-dynamic";
@@ -85,6 +90,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   const rows = await sql`
     select id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
+           status, archived_at::text, archived_by,
            order_date::text, specs_agreed_by::text, delivery_date::text, version
     from projects where id = ${id}
   `;
@@ -185,6 +191,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const current = await sql`
     select id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
+           status, archived_at::text, archived_by,
            order_date::text, specs_agreed_by::text, delivery_date::text, version
     from projects where id = ${id}
   `;
@@ -222,6 +229,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   // Resolved through the same function the extraction worker uses, so the
   // column, ATTRIBUTE_UNITS and this route cannot drift into three opinions.
   // Blank clears it, which is how a project says "ask me per page again".
+  const status = pick("status", String(row.status), parsed.data.status ?? "active");
+  // Stamped here rather than left to convention, because the constraint refuses
+  // an archived row with no actor -- "who archived this, and when" is an
+  // unanswerable question later otherwise. Restoring clears both, so a project
+  // archived twice carries the second date rather than the first.
+  const archivingNow = status === "archived" && String(row.status) !== "archived";
+  // NOT through `asDate`. That exists for the `date` columns and slices to ten
+  // characters; `archived_at` is a timestamptz and would lose its time, then be
+  // rewritten as midnight on every later save.
+  const archivedAt =
+    status !== "archived"
+      ? null
+      : archivingNow
+        ? new Date().toISOString()
+        : ((row.archived_at as string | null) ?? new Date().toISOString());
+  // `?? user.email` is defensive rather than expected: the constraint already
+  // guarantees an archived row has an actor, and falling back keeps a row that
+  // somehow lost one from failing every subsequent save with a check violation.
+  const archivedBy =
+    status !== "archived" ? null : archivingNow ? user.email : ((row.archived_by as string | null) ?? user.email);
+
   const submittedUnit = blankToNull(parsed.data.defaultDimensionUnit);
   const defaultDimensionUnit = pick(
     "defaultDimensionUnit",
@@ -244,9 +272,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         specs_agreed_by = ${dates.specsAgreedBy},
         delivery_date = ${dates.deliveryDate},
         default_dimension_unit = ${defaultDimensionUnit},
+        status = ${status},
+        archived_at = ${archivedAt},
+        archived_by = ${archivedBy},
         updated_by = ${user.email}
     where id = ${id} and version = ${parsed.data.version}
     returning id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
+              status, archived_at::text, archived_by,
               order_date::text, specs_agreed_by::text, delivery_date::text, version
   `;
 

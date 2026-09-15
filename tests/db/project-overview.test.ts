@@ -46,6 +46,7 @@ describeIfDb("project overview", () => {
     // test would have hidden it a second time.
     const rows = await client.query(
       `select name, client, shared_inbox, default_dimension_unit,
+              status, archived_at, archived_by,
               order_date::text as order_date,
               specs_agreed_by::text as specs_agreed_by,
               delivery_date::text as delivery_date,
@@ -200,6 +201,79 @@ describeIfDb("project overview", () => {
     );
     expect(res.status).toBe(200);
     expect((await stored()).default_dimension_unit).toBe("cm");
+  });
+
+  // ---- archived, never deleted ---------------------------------------------
+
+  it("archives a project with an actor and a date, and restores it", async () => {
+    const { PATCH } = await import("@/app/api/projects/[id]/route");
+    expect((await stored()).status).toBe("active");
+
+    const archive = await PATCH(patch({ status: "archived", version: (await stored()).version }), params(projectId));
+    expect(archive.status).toBe(200);
+
+    let after = await stored();
+    expect(after.status).toBe("archived");
+    // The constraint refuses an archived row with no actor -- "who archived
+    // this, and when" must be answerable later.
+    expect(after.archived_at).toBeTruthy();
+    expect(after.archived_by).toBeTruthy();
+
+    const restore = await PATCH(patch({ status: "active", version: after.version }), params(projectId));
+    expect(restore.status).toBe(200);
+    after = await stored();
+    expect(after.status).toBe("active");
+    // Cleared, so a project archived twice carries the second date, not the first.
+    expect(after.archived_at).toBeNull();
+    expect(after.archived_by).toBeNull();
+  });
+
+  it("does not re-stamp the archive date on a later unrelated save", async () => {
+    // Every column is written on every save, which is the trap that moved the
+    // TOE dates a day earlier each time. An archived project edited afterwards
+    // must keep the moment it was actually archived.
+    const { PATCH } = await import("@/app/api/projects/[id]/route");
+    await PATCH(patch({ status: "archived", version: (await stored()).version }), params(projectId));
+    const archivedAt = (await stored()).archived_at;
+    expect(archivedAt).toBeTruthy();
+
+    const res = await PATCH(
+      patch({ client: "__QA Archived client", version: (await stored()).version }),
+      params(projectId),
+    );
+    expect(res.status).toBe(200);
+    const after = await stored();
+    expect(after.status).toBe("archived");
+    expect(new Date(after.archived_at).toISOString()).toBe(new Date(archivedAt).toISOString());
+
+    await PATCH(patch({ status: "active", version: after.version }), params(projectId));
+    await PATCH(patch({ client: "__QA New client", version: (await stored()).version }), params(projectId));
+  });
+
+  it("refuses a status the vocabulary does not have, and writes nothing", async () => {
+    // `retired` is what a run and a note are. A project is not, and letting it
+    // through would write a value the check constraint refuses.
+    const { PATCH } = await import("@/app/api/projects/[id]/route");
+    const before = await stored();
+    const res = await PATCH(patch({ status: "retired", version: before.version }), params(projectId));
+    expect(res.status).toBe(400);
+    expect((await stored()).status).toBe(before.status);
+  });
+
+  it("hides an archived project from the list unless it is asked for", async () => {
+    const { PATCH } = await import("@/app/api/projects/[id]/route");
+    const { GET } = await import("@/app/api/projects/route");
+    const ids = async (url: string) =>
+      ((await (await GET(new Request(url))).json()).projects as { id: string }[]).map((p) => p.id);
+
+    expect(await ids("http://localhost/api/projects")).toContain(projectId);
+
+    await PATCH(patch({ status: "archived", version: (await stored()).version }), params(projectId));
+    expect(await ids("http://localhost/api/projects")).not.toContain(projectId);
+    expect(await ids("http://localhost/api/projects?includeArchived=true")).toContain(projectId);
+
+    await PATCH(patch({ status: "active", version: (await stored()).version }), params(projectId));
+    expect(await ids("http://localhost/api/projects")).toContain(projectId);
   });
 
   it("refuses an unknown field, and writes nothing", async () => {

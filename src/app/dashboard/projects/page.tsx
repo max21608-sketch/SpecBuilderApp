@@ -5,7 +5,16 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 
-type Project = { id: string; bws_project_number: string; name: string; client: string | null; record_count: string };
+type Project = {
+  id: string;
+  bws_project_number: string;
+  name: string;
+  client: string | null;
+  record_count: string;
+  status: string;
+  archived_at: string | null;
+  archived_by: string | null;
+};
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -14,13 +23,18 @@ export default function ProjectsPage() {
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
   const [saving, setSaving] = useState(false);
+  // Opt-in. The point of archiving is that a finished project stops being in
+  // the way, so the default list is the work in front of somebody.
+  const [includeArchived, setIncludeArchived] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await apiFetch<{ projects: Project[] }>("/api/projects");
+    const res = await apiFetch<{ projects: Project[] }>(
+      `/api/projects${includeArchived ? "?includeArchived=true" : ""}`,
+    );
     if (!res.ok) { setError(res.error); return; }
     setError(null);
     setProjects(res.data.projects);
-  }, []);
+  }, [includeArchived]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -42,9 +56,24 @@ export default function ProjectsPage() {
     }
   }
 
+  const archivedCount = projects?.filter((project) => project.status === "archived").length ?? 0;
+
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-xl font-semibold text-neutral-900">Projects</h1>
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h1 className="text-xl font-semibold text-neutral-900">Projects</h1>
+        <label className="flex items-center gap-2 text-sm text-neutral-600">
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(event) => setIncludeArchived(event.target.checked)}
+          />
+          Include archived
+          {includeArchived && archivedCount > 0 && (
+            <span className="text-xs text-neutral-500">({archivedCount} shown)</span>
+          )}
+        </label>
+      </div>
 
       {error && (
         <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
@@ -54,12 +83,17 @@ export default function ProjectsPage() {
         <div className="mt-6"><Spinner label="Loading projects" /></div>
       ) : projects.length === 0 ? (
         <p className="mt-6 text-sm text-neutral-600">
-          No projects yet. Add one below, then open it to import its BOQ.
+          {includeArchived
+            ? "No projects yet. Add one below, then open it to import its BOQ."
+            : "Nothing active. Add a project below, or tick Include archived to see finished ones."}
         </p>
       ) : (
         <ul className="mt-6 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
           {projects.map((project) => (
-            <li key={project.id} className="px-4 py-3 flex items-center gap-4">
+            <li
+              key={project.id}
+              className={`px-4 py-3 flex items-center gap-4 ${project.status === "archived" ? "bg-neutral-50" : ""}`}
+            >
               <div className="min-w-0 flex-1">
                 <Link
                   href={`/dashboard/projects/${project.id}`}
@@ -67,9 +101,17 @@ export default function ProjectsPage() {
                 >
                   {project.bws_project_number} — {project.name}
                 </Link>
+                {project.status === "archived" && (
+                  <span className="ml-2 text-xs px-2 py-0.5 rounded border border-neutral-300 bg-white text-neutral-600">
+                    Archived
+                  </span>
+                )}
                 <p className="text-sm text-neutral-500">
                   {project.client ?? "No client recorded"} · {project.record_count} spec record
                   {project.record_count === "1" ? "" : "s"}
+                  {project.status === "archived" && project.archived_at && (
+                    <> · archived {new Date(project.archived_at).toLocaleDateString()}</>
+                  )}
                 </p>
               </div>
               <Link

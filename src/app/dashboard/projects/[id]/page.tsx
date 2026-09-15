@@ -46,6 +46,9 @@ type Project = {
   specs_agreed_by: string | null;
   delivery_date: string | null;
   default_dimension_unit: string | null;
+  status: string;
+  archived_at: string | null;
+  archived_by: string | null;
   version: number;
 };
 
@@ -259,6 +262,35 @@ export default function ProjectOverviewPage() {
     await load();
   }
 
+  /**
+   * Archiving, and its opposite.
+   *
+   * Deliberately NOT part of the Save-changes form. Archiving is a decision
+   * about the project's life, not an edit to one of its fields, and burying it
+   * among the dates would make it something somebody does by accident while
+   * correcting a client name.
+   */
+  async function setArchived(archived: boolean) {
+    if (!project) return;
+    setError(null);
+    setSaving(true);
+    try {
+      const res = await apiFetch<{ project: Project }>(`/api/projects/${encodeURIComponent(projectId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: archived ? "archived" : "active", version: project.version }),
+      });
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      await load();
+    } finally {
+      // Always reset: an HTML error page must not leave the button disabled.
+      setSaving(false);
+    }
+  }
+
   async function retireNote(note: ProjectNote) {
     setError(null);
     const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/notes/${note.id}`, {
@@ -339,6 +371,27 @@ export default function ProjectOverviewPage() {
 
       {error && (
         <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
+      )}
+
+      {/* Says what archiving DID and did not do. A banner that only said
+          "Archived" would read as a lock, and nothing here locks anything. */}
+      {project.status === "archived" && (
+        <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          <span>
+            This project is archived
+            {project.archived_at && <> since {new Date(project.archived_at).toLocaleDateString()}</>}
+            {project.archived_by && <> by {project.archived_by}</>}. It is hidden from the projects list. Everything on
+            it is still editable, still exports, and nothing has been deleted.
+          </span>
+          <button
+            type="button"
+            onClick={() => void setArchived(false)}
+            disabled={saving}
+            className="text-sm px-3 py-1.5 rounded border border-amber-400 text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+          >
+            {saving ? "Restoring…" : "Restore it"}
+          </button>
+        </div>
       )}
 
       {/* One tab per RUN. The same item code appears in several of them at
@@ -698,6 +751,19 @@ export default function ProjectOverviewPage() {
           >
             Export the whole project
           </a>
+        )}
+        {/* At the end, away from Save changes, and only when the project is not
+            already archived -- restoring is offered by the banner instead. */}
+        {project.status === "active" && (
+          <button
+            type="button"
+            onClick={() => void setArchived(true)}
+            disabled={saving}
+            className="ml-auto text-sm px-3 py-1.5 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-100 disabled:opacity-50"
+            title="Hides it from the projects list. Nothing is deleted and nothing becomes read-only."
+          >
+            {saving ? "Archiving…" : "Archive this project"}
+          </button>
         )}
       </div>
       </div>
