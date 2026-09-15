@@ -574,7 +574,11 @@ The spec table's Waiting column and the derivation behind it in
 - **A BWS category boilerplate is a best guess, not a field list.** A complex
   item on a simple template will be short of fields. The tool must surface the
   extra statement rather than discard it, and several BWS columns are post-sale
-  only — the pre-sale grid holds what the client provided.
+  only — the pre-sale grid holds what the client provided. All 47 boilerplates
+  were captured and mapped to `spec_fields` on 2026-09-15 and the feature stays
+  deferred: read `docs/plans/boilerplate-grouping.md` before building grouping,
+  it measures which 21 columns are post-sale and shows why a boilerplate cannot
+  say what an item needs.
 
 Keep this section current.
 

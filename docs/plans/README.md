@@ -471,6 +471,24 @@ From the review of 2026-09-14, circulated by Steve, and confirmed by the user on
     least structure exists today. It stays unauthored while M8 runs: all 728
     requirements remain ungated and there is no `gates` table. A gate over a
     grid that is not yet right would only certify the wrong thing.
+66. **The BWS boilerplates were captured and mapped, and the feature stays
+    deferred.** `docs/plans/boilerplate-grouping.md`. All 47 product codes in
+    the `** BOILERPLATES **` grouping were read on 2026-09-14 and compared
+    against the seeded registers on 2026-09-15: 29 of 34 field labels match a
+    `spec_fields.name_norm` exactly, 2 are judgement renames, 3 do not map.
+    Captured now because the read is cheap and repeatable (one GET per code of
+    `/product_codes/<id>/specifications`) and because the comparison answers a
+    question already open — **24 of the 56 fields are reached by both a
+    cheat-sheet question and a BWS boilerplate, and 21 by neither**, the 21
+    being BOM, Blue Label, finishing detail and purchasing. That is independent
+    support for "several BWS columns are post-sale only", and it is what lets a
+    human reading the export tell a blank that belongs from a blank that is a
+    miss. Deferred rather than built because M8 owns everything and because the
+    data disproves the obvious use: Bar Stools *with Metalwork* carries no metal
+    fields, and three Hero variants equal their plain twin, so a boilerplate
+    cannot state what an item needs. Use it to explain a blank, never to forbid
+    a value. Raw rows stay in `docs/docs for building/` — the repo commits
+    schema, never rows.
 
 ## Still open
 
@@ -545,7 +563,12 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
 12. **The question-to-BWS-field mapping is unreviewed.** 320 of the 728 seeded
     requirements point at a BWS field, and that mapping is this repo's
     judgement, not Matthew's. Only 28 of the 56 fields are reachable from a
-    cheat-sheet question at all. Review before M3 depends on it.
+    cheat-sheet question at all. Review before M3 depends on it. The boilerplate
+    comparison of 2026-09-15 narrows what to review first: 24 of those 28 are
+    corroborated by a BWS boilerplate, 4 are not, and 7 fields a boilerplate
+    carries have no question at all — including `Timber Finish 2` (on 32 of 45
+    boilerplates) and `Metal Finish 2` (29). See
+    `docs/plans/boilerplate-grouping.md`.
 13. **Source-document version precedence is undefined, and it is the biggest
     structural risk the survey found.** Observed 2026-09-14. The same content
     exists at multiple revisions with no machine-readable ordering across six
