@@ -54,6 +54,8 @@ export type PromotableAttribute = {
   unit: string | null;
   state: AttributeState;
   sortOrder: number;
+  /** The intake run that recorded it, so an answer says which document said so. */
+  sourceRunId: string | null;
 };
 
 export type AnswerFill = {
@@ -65,6 +67,13 @@ export type AnswerFill = {
   state: "confirmed" | "tbc";
   /** What the document actually said, kept beside the tidied value. */
   valueRaw: string;
+  /**
+   * Which document the value came from. For a composed cell that is the LAST
+   * contributing slot -- the most recently confirmed drawing -- because a cell
+   * built from three documents has no single source and the newest is the one
+   * a reader would go and check.
+   */
+  sourceRunId: string | null;
 };
 
 /**
@@ -111,6 +120,8 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
         valueRaw: rows
           .map((row) => `${row.slot} ${row.value ?? "—"}${row.unit ? ` ${row.unit}` : ""}`)
           .join(" · "),
+        sourceRunId:
+          [...dimensions].sort((a, b) => a.sortOrder - b.sortOrder)[dimensions.length - 1]?.sourceRunId ?? null,
       });
     }
   }
@@ -140,6 +151,7 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
       value,
       state: attribute.state === "confirmed" ? "confirmed" : "tbc",
       valueRaw: value,
+      sourceRunId: attribute.sourceRunId,
     });
   }
 
@@ -167,7 +179,7 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
 export async function applyAnswerFills(
   txn: TxnSql,
   recordId: string,
-  runId: string,
+  runId: string | null,
   actor: string,
   fills: AnswerFill[],
 ): Promise<number> {
@@ -175,6 +187,10 @@ export async function applyAnswerFills(
   for (const fill of fills) {
     const confirming = fill.state === "confirmed";
     const confirmedAt = confirming ? new Date().toISOString() : null;
+    // The document the VALUE came from, which is not always the run being
+    // confirmed: a card supplying only the height leaves a cell whose newest
+    // slot may be another drawing's.
+    const sourceRunId = fill.sourceRunId ?? runId;
     // Two shapes of fill, two statements. One predicate doing both needed a
     // `case` inside an `is not distinct from` and was unreadable, which is
     // its own kind of bug in a rule about not overwriting somebody's work.
@@ -184,7 +200,7 @@ export async function applyAnswerFills(
             update spec_answers a
             set value = ${fill.value}, value_raw = ${fill.valueRaw}, state = ${fill.state},
                 confirmed_by = ${confirming ? actor : null}, confirmed_at = ${confirmedAt},
-                source_kind = 'document', source_id = ${runId}, updated_by = ${actor}
+                source_kind = 'document', source_id = ${sourceRunId}, updated_by = ${actor}
             where a.record_id = ${recordId}
               and a.revision_no = 0
               -- NEVER a person's answer, and never another DOCUMENT KIND's.
@@ -213,7 +229,7 @@ export async function applyAnswerFills(
             update spec_answers a
             set value = ${fill.value}, value_raw = ${fill.valueRaw}, state = ${fill.state},
                 confirmed_by = ${confirming ? actor : null}, confirmed_at = ${confirmedAt},
-                source_kind = 'document', source_id = ${runId}, updated_by = ${actor}
+                source_kind = 'document', source_id = ${sourceRunId}, updated_by = ${actor}
             where a.record_id = ${recordId}
               and a.revision_no = 0
               -- NEVER a person's answer, and never another DOCUMENT KIND's.

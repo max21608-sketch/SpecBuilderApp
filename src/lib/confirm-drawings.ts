@@ -396,7 +396,7 @@ export async function confirmDrawingItem(
     // the width and depth an earlier document confirmed -- otherwise the
     // answer says H720 and the record says W1900 x D790 x H720.
     const attributeRows = await txn`
-      select attr_group, dimension_slot, spec_field_id, value, unit, state, sort_order
+      select attr_group, dimension_slot, spec_field_id, value, unit, state, sort_order, source_run_id
       from record_attributes
       where record_id = ${recordId} and status = 'active'
       order by sort_order
@@ -409,6 +409,7 @@ export async function confirmDrawingItem(
       unit: row.unit === null ? null : String(row.unit),
       state: String(row.state) as PromotableAttribute["state"],
       sortOrder: Number(row.sort_order),
+      sourceRunId: row.source_run_id ? String(row.source_run_id) : null,
     }));
     // An uncategorised record has no questions yet, so there is nothing to
     // fill and that is not a failure -- the attributes are the record of what

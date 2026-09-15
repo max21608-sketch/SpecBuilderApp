@@ -9,6 +9,7 @@ const attribute = (over: Partial<PromotableAttribute>): PromotableAttribute => (
   unit: "mm",
   state: "confirmed",
   sortOrder: 1,
+  sourceRunId: null,
   ...over,
 });
 
@@ -71,6 +72,16 @@ describe("planAnswerFills", () => {
     const fills = planAnswerFills([dim("W", "TBC", { state: "confirmed" })]);
     expect(fills[0]?.value).toBe("W TBC");
     expect(fills[0]?.state).toBe("tbc");
+  });
+
+  it("attributes a composed cell to the LAST slot's document", () => {
+    // Three drawings can each supply part of one cell, so the cell has no
+    // single source. The newest is the one a reader would go and check.
+    const fills = planAnswerFills([
+      dim("W", "1900", { sourceRunId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", sortOrder: 1 }),
+      dim("H", "720", { sourceRunId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", sortOrder: 2 }),
+    ]);
+    expect(fills[0]?.sourceRunId).toBe("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   });
 
   it("maps a non-dimension attribute straight to its BWS field", () => {

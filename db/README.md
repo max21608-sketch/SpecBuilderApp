@@ -67,6 +67,35 @@ re-inserts the original as a duplicate, and a later cleanup migration then
 fails on a unique constraint. The suite is only safe to re-run *before* any
 manual edits to the same records.
 
+## One-off maintenance passes
+
+```bash
+npm run db:backfill-answers                      # dry run -- writes nothing
+npm run db:backfill-answers -- --apply
+npm run db:backfill-answers -- --project=<uuid>
+```
+
+Fills checklist answers from `record_attributes` that were confirmed before
+`confirm-drawings` started carrying them through. Ran on sandbox 2026-09-15:
+11 answers across five records.
+
+Three things about it are deliberate:
+
+- **Dry run is the default.** It writes to real spec records in bulk, and the
+  useful thing to see first is which ones and what to. The dry run counts with
+  the SAME predicate the writer uses, so it cannot promise more than `--apply`
+  delivers.
+- **It is safe to re-run.** It calls the same `planAnswerFills` /
+  `applyAnswerFills` the confirm route calls, which only touch an answer still
+  `missing` or one a shop-drawings run wrote. A person's answer is never in
+  scope, so a second pass cannot lose work.
+- **It is not a numbered migration.** The composition is
+  `composeDimensionCell`, and rebuilding that in SQL — slot order, a diameter
+  replacing width and depth, the millimetre conversion, the verbatim fallback
+  for a figure it could not derive — is the second composer the dimension
+  design exists to prevent. This is also why `tsx` is a devDependency: a
+  maintenance script has to be able to call the app's own TypeScript.
+
 ## Backups
 
 ```bash
