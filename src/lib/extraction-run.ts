@@ -46,7 +46,7 @@ import {
   RUN_ABORT_MS,
   type ExtractionRunOutcome,
 } from "@/lib/extraction-claim";
-import { isRegisterFreeKind, type DocumentKind } from "@/lib/spec-vocab";
+import { isRegisterFreeKind, normaliseUnit, type AttributeUnit, type DocumentKind } from "@/lib/spec-vocab";
 import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
 import { stagePreamble, type StagedPreamble } from "@/lib/preamble-document";
 
@@ -161,6 +161,10 @@ export async function runDocumentExtraction({
   // the header of drawing-document.ts.
   let registers: Awaited<ReturnType<typeof loadExtractionRegisters>> | null = null;
   let fields: SpecFieldEntry[] = [];
+  // What this project says its drawings are drawn in. Read here with the other
+  // registers rather than at staging, for the same reason they are: a read
+  // failure before the model call costs nothing, and after it costs the call.
+  let projectDefaultUnit: AttributeUnit | null = null;
   try {
     if (isRegisterFreeKind(claim.documentKind)) {
       // The BWS register, for suggesting which field a callout fills. Small,
@@ -168,6 +172,13 @@ export async function runDocumentExtraction({
       if (claim.documentKind === "shop_drawings") {
         const fieldRows = await sql`select id, json_id, name from spec_fields order by sort_order`;
         fields = fieldRows.map((row) => ({ id: String(row.id), jsonId: Number(row.json_id), name: String(row.name) }));
+        const projectRows = await sql`
+          select default_dimension_unit from projects where id = ${claim.projectId}
+        `;
+        // Through `normaliseUnit` rather than cast: the column's check
+        // constraint and ATTRIBUTE_UNITS are two copies of one vocabulary, and
+        // this is the seam where a future drift would otherwise go unnoticed.
+        projectDefaultUnit = normaliseUnit(projectRows[0]?.default_dimension_unit);
       }
     } else {
       registers = await loadExtractionRegisters(claim.projectId);
@@ -202,7 +213,13 @@ export async function runDocumentExtraction({
   let stagedCount: number;
 
   if (result.output.outputKind === "drawing_items") {
-    const drawings = stageDrawings(result.output.data.items, fields, filename, result.output.data.documentNotes);
+    const drawings = stageDrawings(
+      result.output.data.items,
+      fields,
+      filename,
+      result.output.data.documentNotes,
+      projectDefaultUnit,
+    );
     staged = drawings;
     stagedCount = drawings.items.reduce((total, item) => total + item.observations.length, 0);
   } else if (result.output.outputKind === "preamble_notes") {

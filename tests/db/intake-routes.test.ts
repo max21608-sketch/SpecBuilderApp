@@ -135,6 +135,18 @@ describeIfDb("intake routes", () => {
     return { runId: run.rows[0].id as string, version: Number(run.rows[0].version), staged };
   }
 
+  /** Ignore one observation, so a bulk edit has something reviewed to skip. */
+  async function POSTConfirmIgnore(runId: string, itemId: string, observation: { id: string; version: number }) {
+    const runRow = await client.query(`select version from intake_runs where id = $1`, [runId]);
+    const res = await confirmRoute(runId, {
+      version: Number(runRow.rows[0].version),
+      action: "ignore",
+      itemId,
+      observations: [{ id: observation.id, version: observation.version }],
+    });
+    expect(res.status).toBe(200);
+  }
+
   const confirmRoute = async (runId: string, body: unknown) => {
     const { POST } = await import("@/app/api/imports/[id]/confirm/route");
     return POST(post(body), params(runId));
@@ -180,6 +192,70 @@ describeIfDb("intake routes", () => {
       expect(rows.rows[1].material_code).toBe("__QA CH-01");
       expect(rows.rows[0].source_page).toBe(1);
     }
+  });
+
+  it("sets the unit on every pending dimension in one request", async () => {
+    // The escape from answering the same question once per figure. A pack whose
+    // pages print no unit and whose figures disagree arrives with every
+    // dimension blank and every card blocked.
+    const code = "__QAX120";
+    await makeRecord(mainRunId, code, "__QA Bench");
+    const { runId, staged } = await stageDrawingRun(code, {
+      ...drawingItem(code),
+      // 190 and 735 together: suggestUnit abstains, so both arrive blank.
+      dimensions: [
+        { labelRaw: "Width", valueRaw: "190" },
+        { labelRaw: "Seat height", valueRaw: "735" },
+      ],
+    });
+    expect(staged.items[0]!.observations.filter((o) => o.attrGroup === "dimension" && o.unit === null)).toHaveLength(2);
+
+    const { PATCH } = await import("@/app/api/imports/[id]/route");
+    const res = await PATCH(patch({ bulkUnit: { scope: "run", unit: "mm" } }), params(runId));
+    expect(res.status).toBe(200);
+    expect((await res.json()).changed).toBe(2);
+
+    const after = await client.query(`select parsed from intake_runs where id = $1`, [runId]);
+    const observations = after.rows[0].parsed.items[0].observations;
+    const dimensions = observations.filter((o: { attrGroup: string }) => o.attrGroup === "dimension");
+    expect(dimensions.every((o: { unit: string }) => o.unit === "mm")).toBe(true);
+    // A human set it, so it must stop reading as a suggestion.
+    expect(dimensions.every((o: { unitSuggested: boolean }) => !o.unitSuggested)).toBe(true);
+    expect(dimensions.every((o: { version: number }) => o.version === 2)).toBe(true);
+
+    // The material is untouched: the database refuses a unit on one, and
+    // bumping its version would make another tab's edit conflict for nothing.
+    const material = observations.find((o: { attrGroup: string }) => o.attrGroup === "material");
+    expect(material.unit).toBeNull();
+    expect(material.version).toBe(1);
+  });
+
+  it("leaves reviewed observations alone when setting units in bulk", async () => {
+    // An applied observation is history and an ignored one was a decision.
+    const code = "__QAX121";
+    await makeRecord(mainRunId, code, "__QA Stool");
+    const { runId, staged } = await stageDrawingRun(code, {
+      ...drawingItem(code),
+      dimensions: [
+        { labelRaw: "Width", valueRaw: "190" },
+        { labelRaw: "Seat height", valueRaw: "735" },
+      ],
+    });
+    const item = staged.items[0]!;
+    const ignored = item.observations.find((o) => o.labelRaw === "Seat height")!;
+
+    const { PATCH } = await import("@/app/api/imports/[id]/route");
+    await POSTConfirmIgnore(runId, item.id, ignored);
+
+    const res = await PATCH(patch({ bulkUnit: { scope: "item", itemId: item.id, unit: "mm" } }), params(runId));
+    expect(res.status).toBe(200);
+    expect((await res.json()).changed).toBe(1);
+
+    const after = await client.query(`select parsed from intake_runs where id = $1`, [runId]);
+    const rows = after.rows[0].parsed.items[0].observations;
+    const stillIgnored = rows.find((o: { id: string }) => o.id === ignored.id);
+    expect(stillIgnored.reviewStatus).toBe("ignored");
+    expect(stillIgnored.unit).toBeNull();
   });
 
   it("does not touch spec_records.version when an attribute is written", async () => {

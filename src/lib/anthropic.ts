@@ -141,10 +141,13 @@ For each item, record:
   YC04158 - 01"), and the client's own finish code ("CH-01.1", "WD-01", "MT-01") where one is shown;
 - anything else stated about the item, including annotations in other languages, as a note.
 
-THESE DRAWINGS DO NOT PRINT THEIR UNITS, and the set mixes millimetres and centimetres between
-pages. Report each dimension as the figure alone, exactly as drawn. Never append, convert or infer a
-unit — a person chooses it afterwards, and a wrong unit is worse than none because it reads as a
-real measurement.
+UNITS. Put the figure in \`valueRaw\` and the unit, if the page prints one, in \`unitRaw\` — separately,
+never combined into the value. A shop drawing usually prints NO unit and mixes millimetres and
+centimetres between pages, so \`unitRaw\` is null on most of them; a specification sheet often does
+print one ("WIDTH 1800mm"), and then \`valueRaw\` is "1800" and \`unitRaw\` is "mm". Report a unit only
+where you can see it on the page. Never infer one from how large the number is, never convert, and
+never append a unit to the figure — a wrong unit is worse than none, because it reads as a real
+measurement and nothing afterwards questions it.
 
 ${SHARED_RULES}`,
 

@@ -45,7 +45,7 @@ describeIfDb("project overview", () => {
     // Time -- which is how the route's own round-trip bug hid, and how this
     // test would have hidden it a second time.
     const rows = await client.query(
-      `select name, client, shared_inbox,
+      `select name, client, shared_inbox, default_dimension_unit,
               order_date::text as order_date,
               specs_agreed_by::text as specs_agreed_by,
               delivery_date::text as delivery_date,
@@ -151,6 +151,55 @@ describeIfDb("project overview", () => {
     ]);
     expect(rows.rows[0].bws_project_number).toBe("__QA P90002");
     expect(rows.rows[0].version).toBe(before.version);
+  });
+
+  // ---- the project's default dimension unit --------------------------------
+
+  it("stores a default dimension unit, in the spelling the app uses", async () => {
+    const { PATCH } = await import("@/app/api/projects/[id]/route");
+    const before = await stored();
+    // Through normaliseUnit, so a person typing "CM" is not told it is invalid.
+    const res = await PATCH(patch({ version: before.version, defaultDimensionUnit: "CM" }), params(projectId));
+    expect(res.status).toBe(200);
+    expect((await stored()).default_dimension_unit).toBe("cm");
+  });
+
+  it("refuses a unit it does not know, and writes nothing", async () => {
+    // "cms" is close enough to look right and would reach the check constraint
+    // as a 500. It is refused here with a sentence naming the four that work.
+    const { PATCH } = await import("@/app/api/projects/[id]/route");
+    const before = await stored();
+    const res = await PATCH(patch({ version: before.version, defaultDimensionUnit: "cms" }), params(projectId));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/mm, cm, m, in/);
+    expect((await stored()).default_dimension_unit).toBe(before.default_dimension_unit);
+  });
+
+  it("clears the default with an explicit null, which is a real answer", async () => {
+    // Unset means "ask me per dimension" -- the behaviour before the setting
+    // existed -- and a project must be able to go back to it.
+    const { PATCH } = await import("@/app/api/projects/[id]/route");
+    await PATCH(patch({ version: (await stored()).version, defaultDimensionUnit: "mm" }), params(projectId));
+    expect((await stored()).default_dimension_unit).toBe("mm");
+
+    const res = await PATCH(patch({ version: (await stored()).version, defaultDimensionUnit: null }), params(projectId));
+    expect(res.status).toBe(200);
+    expect((await stored()).default_dimension_unit).toBeNull();
+  });
+
+  it("leaves the unit alone when a save does not mention it", async () => {
+    // Same trap as the dates: every column is written on every save.
+    const { PATCH } = await import("@/app/api/projects/[id]/route");
+    await PATCH(patch({ version: (await stored()).version, defaultDimensionUnit: "cm" }), params(projectId));
+    // Deliberately NOT `client` or a date: the tests in this file share one
+    // project row and assert on those, so touching them here would make this
+    // test's side effect somebody else's failure.
+    const res = await PATCH(
+      patch({ version: (await stored()).version, sharedInbox: "__qa-units@example.com" }),
+      params(projectId),
+    );
+    expect(res.status).toBe(200);
+    expect((await stored()).default_dimension_unit).toBe("cm");
   });
 
   it("refuses an unknown field, and writes nothing", async () => {

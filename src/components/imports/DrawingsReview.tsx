@@ -33,6 +33,7 @@ import {
   type AttributeGroup,
   type AttributeState,
 } from "@/lib/spec-vocab";
+import { unitSourceOf } from "@/lib/drawing-document";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 
 type RunResolution =
@@ -44,6 +45,9 @@ type ItemResolution = {
   resolution: { runs: RunResolution[]; suggested: string[] };
   targets: string[];
   blockers: { code: string; message: string; observationId?: string; runId?: string }[];
+  // NOT blockers. These never disable Confirm and the confirm route never sees
+  // them -- see drawingItemWarnings() for why they are a separate type.
+  warnings?: { code: string; message: string; observationId: string }[];
 };
 
 type Run = {
@@ -60,6 +64,42 @@ type Run = {
 };
 
 type SpecField = { id: string; json_id: number; name: string; field_category: string };
+
+/**
+ * Setting the unit on many dimensions at once.
+ *
+ * The per-row select stays the override; this is for the case the project
+ * default exists to solve, where a pack states no unit anywhere and a reviewer
+ * would otherwise answer the same question once per figure. Deliberately only
+ * mm and cm: those are the two a furniture drawing is ever in, and offering
+ * metres beside them invites a misclick that is 100x wrong.
+ */
+function BulkUnit({
+  label,
+  disabled,
+  onSet,
+}: {
+  label: string;
+  disabled: boolean;
+  onSet: (unit: "mm" | "cm") => void;
+}) {
+  return (
+    <span className="flex items-center gap-1 text-xs text-neutral-500">
+      {label}
+      {(["mm", "cm"] as const).map((unit) => (
+        <button
+          key={unit}
+          type="button"
+          disabled={disabled}
+          onClick={() => onSet(unit)}
+          className="px-1.5 py-0.5 rounded border border-neutral-300 text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+        >
+          {unit}
+        </button>
+      ))}
+    </span>
+  );
+}
 
 export default function DrawingsReview({ importId }: { importId: string }) {
   const [run, setRun] = useState<Run | null>(null);
@@ -134,6 +174,18 @@ export default function DrawingsReview({ importId }: { importId: string }) {
           expectedVersion: observation.version,
           changes,
         }),
+      });
+      if (!res.ok) setError(res.error);
+      await load();
+    });
+  }
+
+  async function setBulkUnit(scope: "item" | "run", unit: "mm" | "cm", itemId?: string) {
+    await queueSave(async () => {
+      const res = await apiFetch(`/api/imports/${importId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}) } }),
       });
       if (!res.ok) setError(res.error);
       await load();
@@ -249,6 +301,16 @@ export default function DrawingsReview({ importId }: { importId: string }) {
 
   const pendingItems = staged.items.filter((item) => item.observations.some((o) => o.reviewStatus === "pending"));
   const unresolved = pendingItems.filter((item) => (byItem.get(item.id)?.targets.length ?? 0) === 0);
+  // Counted from the observations rather than from the blockers, so the offer
+  // stands whether or not the card has other reasons it cannot commit.
+  const unitsOutstanding = pendingItems.reduce(
+    (total, item) =>
+      total +
+      item.observations.filter(
+        (o) => o.reviewStatus === "pending" && o.attrGroup === "dimension" && o.unit === null && o.value?.trim(),
+      ).length,
+    0,
+  );
 
   return (
     <div className="mt-6">
@@ -283,6 +345,25 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         </p>
       )}
 
+      {/* Offered only where it is the answer. A set whose pages print their
+          units, or whose figures agree, needs nothing here — showing the
+          control anyway would invite overwriting a unit the page stated. */}
+      {unitsOutstanding > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          <span>
+            {unitsOutstanding} dimension{unitsOutstanding === 1 ? "" : "s"} across this document still need a unit.
+          </span>
+          <BulkUnit
+            label="Set every one to:"
+            disabled={busy !== null}
+            onSet={(unit) => void setBulkUnit("run", unit)}
+          />
+          <span className="text-xs">
+            Setting a project default on the overview does this for future documents.
+          </span>
+        </div>
+      )}
+
       <div className="mt-4 space-y-4">
         {pendingItems.map((item) => (
           <ItemCard
@@ -296,6 +377,7 @@ export default function DrawingsReview({ importId }: { importId: string }) {
             busy={busy === item.id}
             onSaveObservation={saveObservation}
             onSaveTargets={saveTargets}
+            onSetBulkUnit={setBulkUnit}
             onReview={review}
           />
         ))}
@@ -332,6 +414,7 @@ function ItemCard({
   busy,
   onSaveObservation,
   onSaveTargets,
+  onSetBulkUnit,
   onReview,
 }: {
   item: DrawingItem;
@@ -343,12 +426,15 @@ function ItemCard({
   busy: boolean;
   onSaveObservation: (item: DrawingItem, observation: DrawingObservation, changes: Record<string, unknown>) => Promise<void>;
   onSaveTargets: (item: DrawingItem, ticked: string[], unticked: string[]) => Promise<void>;
+  onSetBulkUnit: (scope: "item" | "run", unit: "mm" | "cm", itemId?: string) => Promise<void>;
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
 }) {
   const pending = item.observations.filter((o) => o.reviewStatus === "pending");
   const targets = resolution?.targets ?? [];
   const blockers = resolution?.blockers ?? [];
+  const warnings = resolution?.warnings ?? [];
   const blockerFor = (observationId: string) => blockers.filter((b) => b.observationId === observationId);
+  const warningFor = (observationId: string) => warnings.filter((w) => w.observationId === observationId);
 
   const toggleRun = (recordId: string, on: boolean) => {
     const ticked = new Set(item.targets?.ticked ?? resolution?.resolution.suggested ?? []);
@@ -387,6 +473,13 @@ function ItemCard({
             {item.confidence === "low" && <span className="ml-2 text-amber-700">code was hard to read</span>}
           </p>
         </div>
+        {pending.some((observation) => observation.attrGroup === "dimension") && (
+          <BulkUnit
+            label="All dimensions:"
+            disabled={busy}
+            onSet={(unit) => void onSetBulkUnit("item", unit, item.id)}
+          />
+        )}
       </div>
 
       {/* Which runs this drawing applies to. */}
@@ -459,8 +552,12 @@ function ItemCard({
             const draft = drafts[observation.id] ?? {};
             const value = draft.value !== undefined ? draft.value : observation.value;
             const rowBlockers = blockerFor(observation.id);
+            const rowWarnings = warningFor(observation.id);
             return (
-              <tr key={observation.id} className={rowBlockers.length ? "bg-amber-50/40" : undefined}>
+              <tr
+                key={observation.id}
+                className={rowBlockers.length || rowWarnings.length ? "bg-amber-50/40" : undefined}
+              >
                 <td className="px-4 py-2 align-top">
                   <select
                     value={observation.attrGroup}
@@ -517,8 +614,16 @@ function ItemCard({
                   ) : (
                     <span className="text-xs text-neutral-400">—</span>
                   )}
-                  {observation.unitSuggested && observation.unit && (
+                  {/* A printed unit is NOT a guess and must not be labelled as
+                      one — that is the whole reason provenance is tracked. */}
+                  {unitSourceOf(observation) === "printed" && (
+                    <p className="mt-0.5 text-xs text-neutral-500">printed on the page</p>
+                  )}
+                  {unitSourceOf(observation) === "figures" && (
                     <p className="mt-0.5 text-xs text-amber-700">guessed from the figures</p>
+                  )}
+                  {unitSourceOf(observation) === "project_default" && (
+                    <p className="mt-0.5 text-xs text-amber-700">the project default</p>
                   )}
                 </td>
                 <td className="px-2 py-2 align-top">
@@ -565,9 +670,16 @@ function ItemCard({
                     Ignore
                   </button>
                 </td>
-                {rowBlockers.length > 0 && (
+                {(rowBlockers.length > 0 || rowWarnings.length > 0) && (
                   <td colSpan={7} className="px-4 pb-2 text-xs text-amber-900">
                     {rowBlockers.map((blocker) => blocker.message).join(" ")}
+                    {/* Said out loud, because an amber row that still commits
+                        looks like a bug otherwise. */}
+                    {rowWarnings.length > 0 && (
+                      <span className={rowBlockers.length ? "ml-1" : undefined}>
+                        {rowWarnings.map((warning) => warning.message).join(" ")} This does not stop you confirming.
+                      </span>
+                    )}
                   </td>
                 )}
               </tr>

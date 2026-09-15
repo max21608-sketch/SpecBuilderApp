@@ -196,6 +196,18 @@ export const ATTRIBUTE_STATE_LABELS: Record<AttributeState, string> = {
 export const ATTRIBUTE_UNITS = ["mm", "cm", "m", "in"] as const;
 export type AttributeUnit = (typeof ATTRIBUTE_UNITS)[number];
 
+/**
+ * Spelt out where there is room for it. On a review table `mm` is right beside
+ * the figure and needs no gloss; in a project-level select, picking the wrong
+ * one silently changes every dimension on the project, so it is worth the words.
+ */
+export const ATTRIBUTE_UNIT_LABELS: Record<AttributeUnit, string> = {
+  mm: "Millimetres (mm)",
+  cm: "Centimetres (cm)",
+  m: "Metres (m)",
+  in: "Inches (in)",
+};
+
 /** Returns null — never a guess — for anything not in the vocabulary. */
 export function normaliseUnit(raw: unknown): AttributeUnit | null {
   if (typeof raw !== "string") return null;

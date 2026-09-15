@@ -34,7 +34,7 @@
 // identical to a matcher that ignores runs, which is why grouping by run is the
 // whole of this function.
 // ============================================================================
-import { findRecordsByRef, type RecordEntry, TBC_TOKENS } from "@/lib/spec-document";
+import { containsPhrase, deferredToSomebody, findRecordsByRef, type RecordEntry, TBC_TOKENS } from "@/lib/spec-document";
 import { normaliseName } from "@/lib/matching";
 import {
   normaliseUnit,
@@ -59,6 +59,16 @@ export type DrawingObservation = {
   value: string | null;
   unit: AttributeUnit | null;
   unitSuggested: boolean;
+  /**
+   * WHERE that unit came from, so the screen can say something true about it.
+   *
+   * OPTIONAL, and it must stay optional. Runs staged before this existed are
+   * `schemaVersion: 1` rows sitting in `intake_runs.parsed`, and a required key
+   * would mean rewriting every one of them to add a field the reviewer can see
+   * for themselves. Absent means "staged before provenance was tracked" — read
+   * it through `unitSourceOf()`, never directly.
+   */
+  unitSource?: UnitSource;
   specFieldId: string | null;
   state: AttributeState | null;
   stateReason: string | null;
@@ -168,9 +178,7 @@ export type UnitSuggestion = { status: "confident"; unit: AttributeUnit } | { st
  * whereas a blank one stops the card.
  */
 export function suggestUnit(values: (string | null)[]): UnitSuggestion {
-  const numbers = values
-    .map((value) => Number(String(value ?? "").replace(/[^0-9.]/g, "")))
-    .filter((n) => Number.isFinite(n) && n > 0);
+  const numbers = values.map(figureOf).filter((n): n is number => n !== null);
   if (numbers.length === 0) return { status: "none" };
 
   const allSmall = numbers.every((n) => n < 300);
@@ -178,6 +186,152 @@ export function suggestUnit(values: (string | null)[]): UnitSuggestion {
   if (allSmall) return { status: "confident", unit: "cm" };
   if (allLarge) return { status: "confident", unit: "mm" };
   return { status: "ambiguous" };
+}
+
+// ---- a unit the page actually printed --------------------------------------
+
+/**
+ * Where a staged unit came from. The three are not interchangeable and the
+ * screen must not call all of them "guessed":
+ *
+ *   printed         the page stated it. Not a guess at all.
+ *   figures         `suggestUnit` inferred it from the magnitudes on the page.
+ *   project_default the project said what its drawings are drawn in, and this
+ *                   page offered nothing to go on.
+ */
+export const UNIT_SOURCES = ["printed", "figures", "project_default"] as const;
+export type UnitSource = (typeof UNIT_SOURCES)[number];
+
+/** The numeric part of a drawn figure, or null if there isn't one. */
+function figureOf(raw: string | null): number | null {
+  const digits = String(raw ?? "").replace(/[^0-9.]/g, "");
+  if (digits === "") return null;
+  const n = Number(digits);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export type SplitFigure = { value: string | null; unit: AttributeUnit | null };
+
+/**
+ * Separates "1800mm" into "1800" and `mm`.
+ *
+ * The model is asked to keep the figure and the unit apart, and on the Panther
+ * specification sheets it can, because the page prints them apart. This exists
+ * for when it does not — a sheet whose text layer runs them together, or a
+ * model that helpfully combined them.
+ *
+ * WHY IT MATTERS MORE THAN IT LOOKS: `bws-export.ts` appends the unit to the
+ * value with no separator, so a value of "1800" with unit `mm` renders "1800mm"
+ * and a value of "1800mm" with unit `mm` renders "1800mmmm". A trailing unit
+ * left on the value is not cosmetic; it reaches BWS.
+ *
+ * Conservative on purpose. It only splits a value that is ENTIRELY a number
+ * followed by a recognised unit. "190 x 79 x 72" keeps its wording, and so does
+ * "1800mm nominal" — anything with more in it is a sentence a human should read,
+ * not a figure this function should take apart.
+ */
+export function splitFigureAndUnit(valueRaw: string | null): SplitFigure {
+  const text = (valueRaw ?? "").trim();
+  if (text === "") return { value: valueRaw, unit: null };
+
+  const match = /^([0-9]+(?:[.,][0-9]+)?)\s*([a-zA-Z"']+\.?)$/.exec(text);
+  if (!match) return { value: valueRaw, unit: null };
+
+  const unit = normaliseUnit(match[2]);
+  // An unrecognised suffix is not a unit we know: "1800off" keeps its wording
+  // rather than being silently truncated to "1800".
+  if (!unit) return { value: valueRaw, unit: null };
+
+  return { value: match[1] ?? valueRaw, unit };
+}
+
+export type ResolvedUnit = { unit: AttributeUnit | null; source: UnitSource | null };
+
+/**
+ * Which unit a staged dimension gets, and why. The order is the whole point.
+ *
+ *   1. PRINTED on the page, whether the model reported it in `unitRaw` or left
+ *      it stuck to the figure. A document that states its unit has answered the
+ *      question and nothing downstream should second-guess it.
+ *   2. The page's own FIGURES agreeing (`suggestUnit`). Evidence from this
+ *      page beats a setting about the project: a project is not more
+ *      authoritative about a page than the page is.
+ *   3. The PROJECT DEFAULT. Reached only when the page states nothing and its
+ *      figures do not agree — which, before this existed, was the case that
+ *      blocked every dimension on the card and made a reviewer answer the same
+ *      question a few hundred times.
+ *   4. Nothing, and `unit_missing` still blocks. A project that has not set a
+ *      default behaves exactly as it did before.
+ */
+export function resolveDimensionUnit(input: {
+  printed: AttributeUnit | null;
+  pageGuess: UnitSuggestion;
+  projectDefault: AttributeUnit | null;
+}): ResolvedUnit {
+  if (input.printed) return { unit: input.printed, source: "printed" };
+  if (input.pageGuess.status === "confident") return { unit: input.pageGuess.unit, source: "figures" };
+  if (input.projectDefault) return { unit: input.projectDefault, source: "project_default" };
+  return { unit: null, source: null };
+}
+
+/**
+ * The provenance of an already-staged unit, tolerating rows written before
+ * `unitSource` existed and rows a human has since edited.
+ */
+export function unitSourceOf(observation: Pick<DrawingObservation, "unit" | "unitSuggested" | "unitSource">): UnitSource | null {
+  if (observation.unit === null) return null;
+  if (observation.unitSource) return observation.unitSource;
+  // Older staged rows carry only the boolean. `true` meant exactly one thing
+  // then: suggestUnit was confident. `false` with a unit present means a human
+  // chose it, which has no source and needs no badge.
+  return observation.unitSuggested ? "figures" : null;
+}
+
+// ---- does this measurement describe real furniture? ------------------------
+
+/** Multipliers to millimetres. `normaliseUnit` guarantees the key exists. */
+const TO_MM: Record<AttributeUnit, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
+
+// A drawer pull is about 64mm and a long banquette is about 3.5m. Outside
+// 20mm-4000mm we are no longer looking at a piece of furniture or a part of
+// one, we are looking at a unit that is wrong by a factor of ten.
+const MIN_PLAUSIBLE_MM = 20;
+const MAX_PLAUSIBLE_MM = 4000;
+
+/**
+ * A sentence to show beside a dimension whose size does not describe furniture,
+ * or null.
+ *
+ * THIS IS A WARNING, NOT A BLOCKER, and the distinction is deliberate. The
+ * project default exists so a reviewer stops being asked about every dimension;
+ * turning its output into a blocker would ask them about every dimension again.
+ * So the card still commits, and this marks the handful worth a second look.
+ *
+ * WHAT IT CATCHES: a 10x unit error, always — that is the error the project
+ * default risks, and it always moves a real object out of this range.
+ *
+ * WHAT IT DOES NOT CATCH, stated so nobody trusts it further than it goes:
+ * a cm/inch confusion (2.54x, usually still in range), and a genuinely small
+ * component whose figure is correct. It is a smoke alarm, not a proof.
+ */
+export function implausibleDimension(value: string | null, unit: AttributeUnit | null): string | null {
+  if (!unit) return null;
+  const figure = figureOf(value);
+  // A value that is not a single figure ("190 x 79 x 72", "TBC") is not
+  // something this check can reason about, and guessing at it would produce
+  // warnings nobody can act on.
+  if (figure === null) return null;
+
+  const mm = figure * TO_MM[unit];
+  if (mm >= MIN_PLAUSIBLE_MM && mm <= MAX_PLAUSIBLE_MM) return null;
+
+  const asMetres = mm / 1000;
+  const rendered = asMetres >= 1 ? `${round(asMetres)}m` : `${round(mm)}mm`;
+  return `${value}${unit} is ${rendered} — check the unit on this one.`;
+}
+
+function round(n: number): string {
+  return String(Math.round(n * 100) / 100);
 }
 
 // ---- state suggestion ------------------------------------------------------
@@ -207,11 +361,26 @@ export function suggestAttributeState(valueRaw: string | null): AttributeStateSu
 
   // "Dark tinted wood TBC" states a value AND says it is not settled. Neither
   // this code nor the model decides which one won.
-  if (TBC_TOKENS.some((token) => norm.split(" ").includes(token))) {
+  //
+  // `containsPhrase`, not a word-set test: the multi-word tokens ("to be
+  // confirmed") could never match a single-word lookup, so "Oak, finish to be
+  // confirmed" was silently reading as a settled value.
+  if (TBC_TOKENS.some((token) => containsPhrase(norm, token))) {
     return {
       state: null,
       value,
       reason: "The drawing gives a value and also marks it TBC. Choose which this is.",
+    };
+  }
+
+  // "Argenta to confirm" names who decides, which is content worth keeping —
+  // so it is neither collapsed to TBC nor taken as a settled value. The
+  // reviewer is asked, and both readings survive until they answer.
+  if (deferredToSomebody(norm)) {
+    return {
+      state: null,
+      value,
+      reason: "The drawing says somebody else will confirm this. Record it as TBC, or give the value if you have it.",
     };
   }
 
@@ -377,6 +546,34 @@ export function drawingItemBlockers(
   return blockers;
 }
 
+// ---- warnings --------------------------------------------------------------
+
+export type DrawingWarning = { code: "unit_implausible"; message: string; observationId: string };
+
+/**
+ * Things worth a second look that must NOT stop a commit.
+ *
+ * Kept as a separate type from `DrawingBlocker` rather than as a `severity`
+ * field on one, because the difference is not presentational. A blocker is
+ * re-checked inside the confirm transaction and refuses the write; a warning is
+ * never checked there at all. One type with two meanings is how the confirm
+ * route eventually starts refusing things the reviewer was only being told
+ * about — so the confirm route cannot even name these.
+ *
+ * Computed on every read, never stored, for the same reason blockers are:
+ * choosing a unit clears one, and a stored warning is stale by the first edit.
+ */
+export function drawingItemWarnings(item: DrawingItem): DrawingWarning[] {
+  const warnings: DrawingWarning[] = [];
+  for (const observation of item.observations) {
+    if (observation.reviewStatus !== "pending") continue;
+    if (observation.attrGroup !== "dimension") continue;
+    const message = implausibleDimension(observation.value, observation.unit);
+    if (message) warnings.push({ code: "unit_implausible", observationId: observation.id, message });
+  }
+  return warnings;
+}
+
 // ---- staging ---------------------------------------------------------------
 
 /**
@@ -402,18 +599,35 @@ const nextId = (): string =>
 
 /**
  * Model output to staged items. Deterministic apart from the ids, and it
- * decides NOTHING a human could not check against the page: the unit is a
- * suggestion carrying `unitSuggested` so the screen can say it was guessed, and
- * a field slot is only claimed where the wording plainly names one.
+ * decides NOTHING a human could not check against the page: every unit carries
+ * a `unitSource` saying where it came from, and a field slot is only claimed
+ * where the wording plainly names one.
+ *
+ * `projectDefaultUnit` is the project's answer to "what are this project's
+ * drawings drawn in", used only where the page states nothing and its figures
+ * do not agree. Pass null for a project that has not said, and this behaves
+ * exactly as it did before the setting existed.
  */
 export function stageDrawings(
   items: RawDrawingItem[],
   fields: SpecFieldEntry[],
   filename: string | null,
   documentNotes: string | null,
+  projectDefaultUnit: AttributeUnit | null = null,
 ): StagedDrawings {
   const staged: DrawingItem[] = items.map((item) => {
-    const unitGuess = suggestUnit(item.dimensions.map((dimension) => dimension.valueRaw));
+    // Split before guessing. A page that prints "1800mm" would otherwise have
+    // its figures read as 1800/1120/120 — all >= 300, so `mm` by luck here and
+    // by coincidence on the next page.
+    const dimensions = item.dimensions.map((dimension) => {
+      const split = splitFigureAndUnit(dimension.valueRaw);
+      return {
+        ...dimension,
+        valueRaw: split.value,
+        printedUnit: normaliseUnit(dimension.unitRaw) ?? split.unit,
+      };
+    });
+    const unitGuess = suggestUnit(dimensions.map((dimension) => dimension.valueRaw));
     const taken = new Set<string>();
     const observations: DrawingObservation[] = [];
 
@@ -423,9 +637,14 @@ export function stageDrawings(
     // reviewer can tell the eight apart instead of reading "dimension" eight
     // times.
     let dimensionNo = 0;
-    for (const dimension of item.dimensions) {
+    for (const dimension of dimensions) {
       dimensionNo += 1;
       const state = suggestAttributeState(dimension.valueRaw);
+      const resolved = resolveDimensionUnit({
+        printed: dimension.printedUnit,
+        pageGuess: unitGuess,
+        projectDefault: projectDefaultUnit,
+      });
       observations.push({
         id: nextId(),
         version: 1,
@@ -434,8 +653,13 @@ export function stageDrawings(
         valueRaw: dimension.valueRaw,
         materialCodeRaw: null,
         value: state.value,
-        unit: unitGuess.status === "confident" ? unitGuess.unit : null,
-        unitSuggested: unitGuess.status === "confident",
+        unit: resolved.unit,
+        // Kept in step with `unitSource` rather than replaced by it: the
+        // existing screen, the PATCH route and every staged row already read
+        // this boolean. A PRINTED unit is not a suggestion and must not read as
+        // one, which is the whole reason the two are no longer the same fact.
+        unitSuggested: resolved.source === "figures" || resolved.source === "project_default",
+        ...(resolved.source ? { unitSource: resolved.source } : {}),
         specFieldId: null,
         state: state.state,
         stateReason: state.reason,

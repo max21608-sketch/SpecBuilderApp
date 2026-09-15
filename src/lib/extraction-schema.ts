@@ -163,13 +163,19 @@ export type ExtractionOutput = z.infer<typeof ExtractionOutput>;
 //   * Dimension figures with leader lines and no unit printed anywhere. 190/79/
 //     72 is a sofa in centimetres; 550/735 is a desk chair in millimetres. The
 //     model reports the FIGURES; the unit is a human's decision afterwards.
+//
+// The Panther specification sheets that arrive in the same pack are the other
+// half of this. One PDF per line item, and they DO print the unit: "WIDTH
+// 1800mm". So `unitRaw` asks for the unit the page shows and forbids inferring
+// one it does not. A unit the document states is not a guess, and no amount of
+// downstream care recovers a stated unit that was never read.
 //   * Swatch captions pairing a part with a material: "SOFA / Yarn Tessarae
 //     YC04158 - 01", "SOFA FEET / Dark tinted wood".
 //   * The client's own finish codes beside the swatches: CH-01.1, WD-01, MT-01.
 //   * Deferred decisions written on the drawing: "PIPING  TBC".
 //
-// Still no unit, no state, no record id, no BWS field. Same rule as above: the
-// model reads, the resolver decides, a human confirms.
+// Still no state, no record id, no BWS field, and no unit this app INVENTED.
+// Same rule as above: the model reads, the resolver decides, a human confirms.
 // ============================================================================
 
 export const DRAWINGS_TOOL_NAME = "record_drawing_items";
@@ -193,6 +199,25 @@ const drawingObservationProperties = {
     maxLength: MAX_VALUE,
     description:
       "The value exactly as written, including 'TBC' where the drawing says so. For a dimension, the figure alone ('190'). Never add a unit the drawing does not print.",
+  },
+};
+
+// Dimensions only, and REPORTED rather than decided. The AP364 shop drawings
+// print no unit anywhere; the Panther specification sheets print "WIDTH 1800mm"
+// outright. Asking the model to report a unit it can SEE is reading, not
+// inference — and it is strictly better than the app guessing from magnitude at
+// a document that already said so.
+//
+// It stays raw text. `normaliseUnit` resolves it against the app's own
+// vocabulary afterwards, in code, which is the exact/fuzzy split house
+// convention 6 requires: the model decides which text is the unit, the resolver
+// decides what this app calls it.
+const dimensionUnitProperty = {
+  unitRaw: {
+    type: ["string", "null"],
+    maxLength: MAX_SHORT,
+    description:
+      "The unit PRINTED beside this figure, copied exactly ('mm', 'cm', '\"'). Null if the page prints no unit for it — which is the normal case on a shop drawing. Never infer one from how large the number is.",
   },
 };
 
@@ -229,12 +254,12 @@ export const DRAWINGS_TOOL = {
               type: "array",
               maxItems: MAX_PER_ITEM,
               description:
-                "Every dimension figure on the page. Report the number as drawn and NEVER a unit: these drawings do not print one.",
+                "Every dimension figure on the page. Report the number as drawn, and the unit ONLY where the page prints one beside it.",
               items: {
                 type: "object",
                 additionalProperties: false,
-                properties: drawingObservationProperties,
-                required: ["labelRaw", "valueRaw"],
+                properties: { ...drawingObservationProperties, ...dimensionUnitProperty },
+                required: ["labelRaw", "valueRaw", "unitRaw"],
               },
             },
             materials: {
@@ -287,6 +312,19 @@ export const RawDrawingObservation = z.object({
   valueRaw: nullableText(MAX_VALUE),
 });
 
+// `.optional().catch(null)` on unitRaw, unlike the arrays above: a model that
+// omits it or returns something odd should lose the unit and fall through to
+// the figures and then the project default, not fail an extraction that has
+// already been paid for. Losing a unit is recoverable on the review screen;
+// losing the whole run costs another call.
+//
+// Optional in the INFERRED type too, deliberately. Most dimensions this app
+// will ever see carry no printed unit, so a caller constructing one should not
+// have to write `unitRaw: null` to say the ordinary thing.
+export const RawDrawingDimension = RawDrawingObservation.extend({
+  unitRaw: nullableText(MAX_SHORT).optional().catch(null),
+});
+
 export const RawDrawingMaterial = RawDrawingObservation.extend({
   materialCodeRaw: nullableText(MAX_SHORT),
 });
@@ -298,13 +336,14 @@ export const RawDrawingItem = z.object({
   // NOT `.catch([])`: that turns an over-long or malformed array into an EMPTY
   // one, so a page with 41 dimensions would stage as a page with none and
   // nothing anywhere would say so. A schema failure is terminal and reported.
-  dimensions: z.array(RawDrawingObservation).max(MAX_PER_ITEM).default([]),
+  dimensions: z.array(RawDrawingDimension).max(MAX_PER_ITEM).default([]),
   materials: z.array(RawDrawingMaterial).max(MAX_PER_ITEM).default([]),
   notesRaw: z.array(z.string().max(MAX_VALUE)).max(MAX_PER_ITEM).default([]),
   confidence: z.enum(["high", "medium", "low"]).nullable().catch(null).default(null),
 });
 
 export type RawDrawingItem = z.infer<typeof RawDrawingItem>;
+export type RawDrawingDimension = z.infer<typeof RawDrawingDimension>;
 export type RawDrawingMaterial = z.infer<typeof RawDrawingMaterial>;
 export type RawDrawingObservation = z.infer<typeof RawDrawingObservation>;
 

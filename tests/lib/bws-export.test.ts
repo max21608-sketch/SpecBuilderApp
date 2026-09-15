@@ -138,6 +138,23 @@ describe("composeRow", () => {
     expect(row[indexOfField(3)]).toBe("Width 190cm; Depth 79cm; Height 72cm");
   });
 
+  it("appends the unit exactly once, so a value must never carry its own", () => {
+    // renderAttributeValue concatenates value and unit with no separator. That
+    // is correct and deliberate -- but it means a value of "1800mm" with unit
+    // `mm` renders "1800mmmm" straight into a BWS cell. Nothing here can tell
+    // the difference, so the split happens upstream: splitFigureAndUnit() at
+    // staging, and again in the drawings PATCH when a reviewer types one.
+    // This test pins the contract those two rely on.
+    expect(renderAttributeValue({ value: "1800", unit: "mm", state: "confirmed" })).toBe("1800mm");
+    expect(renderAttributeValue({ value: "1800mm", unit: "mm", state: "confirmed" })).toBe("1800mmmm");
+
+    const attributes = [
+      attribute({ attrGroup: "dimension", label: "WIDTH", value: "1800", unit: "mm", specFieldJsonId: null, sortOrder: 0 }),
+      attribute({ attrGroup: "dimension", label: "HEIGHT", value: "1120", unit: "mm", specFieldJsonId: null, sortOrder: 1 }),
+    ];
+    expect(composeDimensions(attributes)).toBe("WIDTH 1800mm; HEIGHT 1120mm");
+  });
+
   it("exports TBC as TBC, never as a blank", () => {
     // A blank says nobody looked; TBC says the client has not decided.
     const attributes = [attribute({ label: "PIPING", value: null, state: "tbc", specFieldJsonId: 1 })];

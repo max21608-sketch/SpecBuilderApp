@@ -34,6 +34,7 @@ import {
   validateProgramme,
 } from "@/lib/project-programme";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
+import { ATTRIBUTE_UNITS, ATTRIBUTE_UNIT_LABELS } from "@/lib/spec-vocab";
 
 type Project = {
   id: string;
@@ -44,6 +45,7 @@ type Project = {
   order_date: string | null;
   specs_agreed_by: string | null;
   delivery_date: string | null;
+  default_dimension_unit: string | null;
   version: number;
 };
 
@@ -112,6 +114,7 @@ type Form = {
   orderDate: string;
   specsAgreedBy: string;
   deliveryDate: string;
+  defaultDimensionUnit: string;
 };
 
 function formOf(project: Project): Form {
@@ -122,6 +125,7 @@ function formOf(project: Project): Form {
     orderDate: project.order_date ?? "",
     specsAgreedBy: project.specs_agreed_by ?? "",
     deliveryDate: project.delivery_date ?? "",
+    defaultDimensionUnit: project.default_dimension_unit ?? "",
   };
 }
 
@@ -256,6 +260,7 @@ export default function ProjectOverviewPage() {
           orderDate: form.orderDate.trim() || null,
           specsAgreedBy: form.specsAgreedBy.trim() || null,
           deliveryDate: form.deliveryDate.trim() || null,
+          defaultDimensionUnit: form.defaultDimensionUnit.trim() || null,
         }),
       });
       if (!res.ok) {
@@ -388,6 +393,35 @@ export default function ProjectOverviewPage() {
           placeholder="p17231@benwhistler.com"
           className={`mt-2 sm:max-w-sm ${field("sharedInbox").className}`}
         />
+
+        {/* The unit question, asked once instead of once per dimension. It is
+            the LAST resort of three — a unit printed on the page wins, and the
+            page's own figures agreeing wins after that — so the copy has to say
+            when it is used, or it reads as "force everything to centimetres". */}
+        <h2 className="mt-6 font-medium text-neutral-900">Drawing units</h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          What this project&rsquo;s drawings are drawn in. Used only where a page prints no unit and its own figures
+          do not agree — a unit printed on the page always wins. Leave it unset and every such dimension asks you
+          individually, which is the old behaviour.
+        </p>
+        <select
+          value={form.defaultDimensionUnit}
+          onChange={(event) => setForm({ ...form, defaultDimensionUnit: event.target.value })}
+          className="mt-2 border border-neutral-300 rounded px-3 py-2 text-sm"
+        >
+          <option value="">Not set — ask me per dimension</option>
+          {ATTRIBUTE_UNITS.map((unit) => (
+            <option key={unit} value={unit}>
+              {ATTRIBUTE_UNIT_LABELS[unit]}
+            </option>
+          ))}
+        </select>
+        {form.defaultDimensionUnit && (
+          <p className="mt-1 text-xs text-amber-800">
+            A dimension that would be implausible at this unit is flagged for a second look, but it is still
+            confirmable — this setting trades a check for speed.
+          </p>
+        )}
 
         <h2 className="mt-6 font-medium text-neutral-900">TOE key dates</h2>
         <p className="mt-1 text-xs text-neutral-500">

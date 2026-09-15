@@ -17,6 +17,7 @@ import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
+import { ATTRIBUTE_UNITS, normaliseUnit } from "@/lib/spec-vocab";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -44,11 +45,28 @@ const ProjectPatch = z
     orderDate: optionalDate,
     specsAgreedBy: optionalDate,
     deliveryDate: optionalDate,
+    // What this project's drawings are drawn in, answered once. Used only when
+    // a drawing page prints no unit AND its own figures do not agree -- see
+    // resolveDimensionUnit() in drawing-document.ts for the full order.
+    //
+    // A plain string rather than z.enum, so the alias table in `normaliseUnit`
+    // is what decides: "CM" and "mm." are the same answer as "cm" and "mm", and
+    // anything unrecognised is refused below with a sentence naming the four
+    // that work. z.enum here would reject "CM" as "invalid enum value".
+    defaultDimensionUnit: z.string().trim().max(20).nullable().optional(),
   })
   .strict();
 
 /** The fields this route will write. `version` is the lock, not a change. */
-const EDITABLE = ["name", "client", "sharedInbox", "orderDate", "specsAgreedBy", "deliveryDate"] as const;
+const EDITABLE = [
+  "name",
+  "client",
+  "sharedInbox",
+  "orderDate",
+  "specsAgreedBy",
+  "deliveryDate",
+  "defaultDimensionUnit",
+] as const;
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +84,7 @@ function asDate(value: unknown): string | null {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
   const rows = await sql`
-    select id, bws_project_number, name, client, shared_inbox,
+    select id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
            order_date::text, specs_agreed_by::text, delivery_date::text, version
     from projects where id = ${id}
   `;
@@ -164,7 +182,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (changed.length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
 
   const current = await sql`
-    select id, bws_project_number, name, client, shared_inbox,
+    select id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
            order_date::text, specs_agreed_by::text, delivery_date::text, version
     from projects where id = ${id}
   `;
@@ -199,6 +217,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   if (!name) return json({ ok: false, error: "A project name is required." }, 400);
 
+  // Resolved through the same function the extraction worker uses, so the
+  // column, ATTRIBUTE_UNITS and this route cannot drift into three opinions.
+  // Blank clears it, which is how a project says "ask me per page again".
+  const submittedUnit = blankToNull(parsed.data.defaultDimensionUnit);
+  const defaultDimensionUnit = pick(
+    "defaultDimensionUnit",
+    (row.default_dimension_unit as string | null) ?? null,
+    submittedUnit === null ? null : normaliseUnit(submittedUnit),
+  );
+  if (submittedUnit !== null && defaultDimensionUnit === null && "defaultDimensionUnit" in parsed.data) {
+    return json(
+      { ok: false, error: `\"${submittedUnit}\" is not a unit this app knows. Use ${ATTRIBUTE_UNITS.join(", ")}.` },
+      400,
+    );
+  }
+
   const rows = await sql`
     update projects
     set name = ${name},
@@ -207,9 +241,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         order_date = ${dates.orderDate},
         specs_agreed_by = ${dates.specsAgreedBy},
         delivery_date = ${dates.deliveryDate},
+        default_dimension_unit = ${defaultDimensionUnit},
         updated_by = ${user.email}
     where id = ${id} and version = ${parsed.data.version}
-    returning id, bws_project_number, name, client, shared_inbox,
+    returning id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
               order_date::text, specs_agreed_by::text, delivery_date::text, version
   `;
 

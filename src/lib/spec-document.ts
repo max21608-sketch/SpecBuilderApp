@@ -165,7 +165,54 @@ export function findRecordsByRef(refRaw: string | null, records: RecordEntry[]):
 
 // Wording that means "not decided yet". Deliberately tight: each of these is a
 // phrase that carries no specification content at all.
-export const TBC_TOKENS = ["tbc", "t b c", "to be confirmed", "to be advised", "tba", "to follow", "to be issued"];
+//
+// `pending` and `to bid` were added from the Panther specification sheets,
+// which write "TIMBER  PENDING" and "SUPPLIER  TO BID" where the AP364 drawings
+// write "TBC". Same meaning, and the export must carry all three through as TBC
+// rather than as a stated value — a blank supplier reads as "no supplier", and
+// a supplier of "TO BID" reads as a company.
+export const TBC_TOKENS = [
+  "tbc",
+  "t b c",
+  "to be confirmed",
+  "to be advised",
+  "tba",
+  "to follow",
+  "to be issued",
+  "pending",
+  "to bid",
+];
+
+/**
+ * "Argenta to confirm", "designer to confirm" — somebody else will decide.
+ *
+ * NOT added to TBC_TOKENS, because the phrase names WHO, and that is content
+ * worth keeping rather than collapsing to "TBC". It is also not a settled
+ * value. So it takes the third outcome this module already has: no state, the
+ * wording preserved, and a reviewer told what they are being asked. A rule that
+ * guessed either way would be wrong on one of the two readings every time.
+ *
+ * Anchored at the end so "confirmed by the client on 4 June" — a settled fact
+ * written in the past tense — does not match.
+ */
+const DEFERRED_TO_SOMEBODY = /\bto confirm$/;
+
+/** Shared with `suggestAttributeState`, so the two pipelines read it alike. */
+export function deferredToSomebody(normalised: string): boolean {
+  return DEFERRED_TO_SOMEBODY.test(normalised);
+}
+
+/**
+ * Whether a normalised string contains a token as whole words.
+ *
+ * `normaliseName` has already lowercased, turned punctuation into spaces and
+ * collapsed runs of whitespace, so padding both sides and testing for the
+ * padded token is enough — and it works for the multi-word tokens ("to be
+ * confirmed") that a word-set intersection would not.
+ */
+export function containsPhrase(normalised: string, token: string): boolean {
+  return ` ${normalised} `.includes(` ${token} `);
+}
 
 // Wording that means "this question does not apply". Tighter still. "None" is
 // NOT here: "None" for a piping fabric is a real answer, and reading it as
@@ -203,12 +250,28 @@ export function suggestState(valueRaw: string | null): StateSuggestion {
 
   // "Antique brass, finish TBC" says two things. Neither this code nor the
   // model gets to decide which one won.
-  const contradicts = TBC_TOKENS.some((token) => norm.includes(token)) || NA_TOKENS.some((token) => norm.split(" ").includes(token));
+  //
+  // Matched on WHOLE WORDS, not as a substring. A bare `includes` was safe
+  // while every token was a distinctive abbreviation, and stopped being safe
+  // the moment "pending" joined them: "depending on the finish" is a
+  // specification, not a deferral.
+  const contradicts =
+    TBC_TOKENS.some((token) => containsPhrase(norm, token)) || NA_TOKENS.some((token) => containsPhrase(norm, token));
   if (contradicts) {
     return {
       state: null,
       value,
       reason: "The document gives a value and also says it is not settled. Choose which this is.",
+    };
+  }
+
+  // "Argenta to confirm" names who decides. That is worth keeping, and it is
+  // not an answer — so the reviewer is asked rather than either half guessed.
+  if (deferredToSomebody(norm)) {
+    return {
+      state: null,
+      value,
+      reason: "The document says somebody else will confirm this. Record it as TBC, or give the value if you have it.",
     };
   }
 

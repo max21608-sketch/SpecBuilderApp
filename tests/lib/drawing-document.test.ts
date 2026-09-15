@@ -11,6 +11,11 @@ import {
   suggestSpecField,
   classifyGroup,
   drawingItemBlockers,
+  drawingItemWarnings,
+  implausibleDimension,
+  resolveDimensionUnit,
+  splitFigureAndUnit,
+  unitSourceOf,
   stageDrawings,
   assertStagedDrawings,
   hasPendingObservations,
@@ -327,5 +332,233 @@ describe("assertStagedDrawings", () => {
     expect(hasPendingObservations(doc)).toBe(true);
     doc.items[0]!.observations[0]!.reviewStatus = "applied";
     expect(hasPendingObservations(doc)).toBe(false);
+  });
+});
+
+// ============================================================================
+// UNITS: printed, guessed, defaulted — and what happens when the answer is
+// implausible. The Panther pack is why all of this exists: its shop-drawing set
+// prints no unit anywhere, and the ten per-item specification sheets beside it
+// print "WIDTH 1800mm".
+// ============================================================================
+
+describe("splitFigureAndUnit", () => {
+  it("separates a figure from a unit printed against it", () => {
+    expect(splitFigureAndUnit("1800mm")).toEqual({ value: "1800", unit: "mm" });
+    expect(splitFigureAndUnit("120 mm")).toEqual({ value: "120", unit: "mm" });
+    expect(splitFigureAndUnit("72cm")).toEqual({ value: "72", unit: "cm" });
+  });
+
+  it("accepts the spellings normaliseUnit knows", () => {
+    expect(splitFigureAndUnit("1800MM")).toEqual({ value: "1800", unit: "mm" });
+    expect(splitFigureAndUnit("180 centimetres")).toEqual({ value: "180", unit: "cm" });
+    expect(splitFigureAndUnit('36"')).toEqual({ value: "36", unit: "in" });
+  });
+
+  it("leaves a value alone when the suffix is not a unit it knows", () => {
+    // Truncating "1800off" to "1800" would invent a measurement.
+    expect(splitFigureAndUnit("1800off")).toEqual({ value: "1800off", unit: null });
+  });
+
+  it("leaves anything that is not one figure alone", () => {
+    // A composite or a sentence is for a human to read, not for this to take
+    // apart. "190 x 79 x 72" is a real thing a drawing writes.
+    expect(splitFigureAndUnit("190 x 79 x 72")).toEqual({ value: "190 x 79 x 72", unit: null });
+    expect(splitFigureAndUnit("1800mm nominal")).toEqual({ value: "1800mm nominal", unit: null });
+    expect(splitFigureAndUnit("TBC")).toEqual({ value: "TBC", unit: null });
+    expect(splitFigureAndUnit(null)).toEqual({ value: null, unit: null });
+  });
+});
+
+describe("resolveDimensionUnit", () => {
+  const guess = { status: "confident", unit: "cm" } as const;
+
+  it("puts a printed unit above everything else", () => {
+    // The page said so. Neither a magnitude heuristic nor a project setting
+    // gets to overrule a document that stated its own unit.
+    expect(
+      resolveDimensionUnit({ printed: "mm", pageGuess: guess, projectDefault: "m" }),
+    ).toEqual({ unit: "mm", source: "printed" });
+  });
+
+  it("puts the page's own figures above the project default", () => {
+    // A project is not more authoritative about a page than the page is.
+    expect(
+      resolveDimensionUnit({ printed: null, pageGuess: guess, projectDefault: "mm" }),
+    ).toEqual({ unit: "cm", source: "figures" });
+  });
+
+  it("falls back to the project default only when the page offers nothing", () => {
+    expect(
+      resolveDimensionUnit({ printed: null, pageGuess: { status: "ambiguous" }, projectDefault: "cm" }),
+    ).toEqual({ unit: "cm", source: "project_default" });
+    expect(
+      resolveDimensionUnit({ printed: null, pageGuess: { status: "none" }, projectDefault: "cm" }),
+    ).toEqual({ unit: "cm", source: "project_default" });
+  });
+
+  it("gives nothing when the project has no default, exactly as before", () => {
+    expect(
+      resolveDimensionUnit({ printed: null, pageGuess: { status: "ambiguous" }, projectDefault: null }),
+    ).toEqual({ unit: null, source: null });
+  });
+});
+
+describe("implausibleDimension", () => {
+  it("says nothing about furniture-sized measurements", () => {
+    expect(implausibleDimension("190", "cm")).toBeNull();
+    expect(implausibleDimension("1800", "mm")).toBeNull();
+    expect(implausibleDimension("1.8", "m")).toBeNull();
+    expect(implausibleDimension("36", "in")).toBeNull();
+  });
+
+  it("catches the 10x error a project default can introduce", () => {
+    // 550 is a seat height in millimetres. Read as centimetres it is 5.5m.
+    expect(implausibleDimension("550", "cm")).toMatch(/5\.5m/);
+    // And the other way: 190cm read as millimetres is a 19cm sofa.
+    expect(implausibleDimension("19", "mm")).toMatch(/19mm/);
+  });
+
+  it("says nothing when there is no unit to be wrong about", () => {
+    // A blank unit is still the `unit_missing` BLOCKER's business, not this.
+    expect(implausibleDimension("550", null)).toBeNull();
+  });
+
+  it("says nothing about a value it cannot reason about", () => {
+    expect(implausibleDimension("TBC", "cm")).toBeNull();
+    expect(implausibleDimension(null, "cm")).toBeNull();
+  });
+});
+
+describe("stageDrawings units", () => {
+  it("reads the unit a specification sheet prints, and strips it off the value", () => {
+    // The shape of a Panther SPEC-346 sheet: figures with their unit printed.
+    // If the unit stayed on the value, bws-export would render "1800mmmm".
+    const sheet = rawItem({
+      dimensions: [
+        { labelRaw: "WIDTH", valueRaw: "1800", unitRaw: "mm" },
+        { labelRaw: "HEIGHT", valueRaw: "1120", unitRaw: "mm" },
+        { labelRaw: "DEPTH", valueRaw: "120mm" },
+      ],
+      materials: [],
+      notesRaw: [],
+    });
+    const staged = stageDrawings([sheet], FIELDS, null, null);
+    const dimensions = staged.items[0]!.observations.filter((o) => o.attrGroup === "dimension");
+    expect(dimensions.map((o) => o.value)).toEqual(["1800", "1120", "120"]);
+    expect(dimensions.every((o) => o.unit === "mm")).toBe(true);
+    expect(dimensions.every((o) => o.unitSource === "printed")).toBe(true);
+    // A printed unit is not a guess and must not be badged as one.
+    expect(dimensions.every((o) => !o.unitSuggested)).toBe(true);
+  });
+
+  it("applies the project default on a page whose figures do not agree", () => {
+    const mixed = rawItem({ dimensions: [{ labelRaw: "W", valueRaw: "190" }, { labelRaw: "H", valueRaw: "735" }] });
+    const staged = stageDrawings([mixed], FIELDS, null, null, "cm");
+    const dimensions = staged.items[0]!.observations;
+    expect(dimensions.every((o) => o.unit === "cm" && o.unitSource === "project_default")).toBe(true);
+    // Still flagged as not-from-the-page, so the screen can say where it came from.
+    expect(dimensions.every((o) => o.unitSuggested)).toBe(true);
+  });
+
+  it("does not let a project default overrule the page", () => {
+    const small = rawItem({ dimensions: [{ labelRaw: "W", valueRaw: "190" }, { labelRaw: "H", valueRaw: "72" }] });
+    const staged = stageDrawings([small], FIELDS, null, null, "mm");
+    expect(staged.items[0]!.observations.every((o) => o.unit === "cm" && o.unitSource === "figures")).toBe(true);
+  });
+
+  it("clears the blocker the project default exists to clear", () => {
+    const mixed = rawItem({ dimensions: [{ labelRaw: "W", valueRaw: "190" }, { labelRaw: "H", valueRaw: "735" }] });
+    const resolution = resolveDrawingTargets("X-100", [record()]);
+
+    const without = stageDrawings([mixed], FIELDS, null, null, null).items[0]!;
+    expect(drawingItemBlockers(without, resolution, new Map()).filter((b) => b.code === "unit_missing")).toHaveLength(2);
+
+    const withDefault = stageDrawings([mixed], FIELDS, null, null, "cm").items[0]!;
+    expect(drawingItemBlockers(withDefault, resolution, new Map()).filter((b) => b.code === "unit_missing")).toHaveLength(0);
+  });
+});
+
+describe("drawingItemWarnings", () => {
+  it("flags a dimension the chosen unit makes implausible, without blocking it", () => {
+    // 550 and 735 are millimetres. A project defaulted to centimetres fills
+    // them in as 5.5m and 7.35m — plausible-looking numbers that are not.
+    const page = rawItem({
+      dimensions: [{ labelRaw: "Seat height", valueRaw: "550" }, { labelRaw: "W", valueRaw: "19" }],
+    });
+    const item = stageDrawings([page], FIELDS, null, null, "cm").items[0]!;
+    const resolution = resolveDrawingTargets("X-100", [record()]);
+    const idOf = (label: string) => item.observations.find((o) => o.labelRaw === label)!.id;
+
+    // Only the one that is actually wrong. 19cm is 190mm — a small component,
+    // but a real measurement — and warning about it too would make the flag
+    // worth ignoring, which is the failure mode of every over-eager check.
+    const warnings = drawingItemWarnings(item);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.code).toBe("unit_implausible");
+    expect(warnings[0]!.observationId).toBe(idOf("Seat height"));
+    expect(warnings[0]!.message).toMatch(/5\.5m/);
+
+    // THE POINT: the card still commits. A warning that blocked would put the
+    // reviewer back where the project default was meant to get them out of.
+    expect(drawingItemBlockers(item, resolution, new Map())).toHaveLength(0);
+  });
+
+  it("says nothing about a page that reads sensibly", () => {
+    const page = rawItem({ dimensions: [{ labelRaw: "W", valueRaw: "190" }, { labelRaw: "D", valueRaw: "79" }] });
+    expect(drawingItemWarnings(stageDrawings([page], FIELDS, null, null).items[0]!)).toEqual([]);
+  });
+});
+
+describe("unitSourceOf", () => {
+  const base = { unit: "cm" as const, unitSuggested: false };
+
+  it("reads the recorded source when there is one", () => {
+    expect(unitSourceOf({ ...base, unitSource: "printed" })).toBe("printed");
+    expect(unitSourceOf({ ...base, unitSource: "project_default" })).toBe("project_default");
+  });
+
+  it("falls back for rows staged before the source was tracked", () => {
+    // `unitSuggested: true` meant exactly one thing then.
+    expect(unitSourceOf({ unit: "cm", unitSuggested: true })).toBe("figures");
+    // A unit with neither flag is one a human chose. No badge.
+    expect(unitSourceOf({ unit: "cm", unitSuggested: false })).toBeNull();
+  });
+
+  it("has no source to report when there is no unit", () => {
+    expect(unitSourceOf({ unit: null, unitSuggested: false })).toBeNull();
+  });
+});
+
+describe("suggestAttributeState on the specification sheets' wording", () => {
+  it("reads the other words for 'not decided yet' as TBC", () => {
+    // The Panther sheets write PENDING for timber and TO BID for supplier
+    // where the AP364 drawings write TBC. A blank supplier reads as "none";
+    // a supplier of "TO BID" reads as the name of a company.
+    expect(suggestAttributeState("PENDING")).toEqual({ state: "tbc", value: "PENDING", reason: null });
+    expect(suggestAttributeState("TO BID")).toEqual({ state: "tbc", value: "TO BID", reason: null });
+  });
+
+  it("asks rather than guessing when the document names who will confirm", () => {
+    // "Argenta to confirm" is not a value and is not plain TBC either — it
+    // says WHO decides, which is worth keeping. So the reviewer is asked.
+    const result = suggestAttributeState("Argenta to confirm");
+    expect(result.state).toBeNull();
+    expect(result.value).toBe("Argenta to confirm");
+    expect(result.reason).toMatch(/somebody else will confirm/i);
+  });
+
+  it("does not read a real specification as a deferral", () => {
+    // The substring trap: "depending" contains "pending". Matching whole words
+    // is what keeps this a specification.
+    expect(suggestAttributeState("Finish depending on the veneer").state).toBe("confirmed");
+    // And the past tense is a settled fact, not a deferral.
+    expect(suggestAttributeState("Confirmed by the client on 4 June").state).toBe("confirmed");
+  });
+
+  it("still catches a value that also says it is unsettled", () => {
+    const result = suggestAttributeState("Oak, finish to be confirmed");
+    expect(result.state).toBeNull();
+    expect(result.reason).toMatch(/Choose which this is/);
   });
 });

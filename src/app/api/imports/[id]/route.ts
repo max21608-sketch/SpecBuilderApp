@@ -28,7 +28,9 @@ import { assertBoqV2 } from "@/lib/boq-import";
 import {
   assertStagedDrawings,
   drawingItemBlockers,
+  drawingItemWarnings,
   resolveDrawingTargets,
+  splitFigureAndUnit,
   targetRecordIds,
   type DrawingItem,
   type StagedDrawings,
@@ -37,11 +39,98 @@ import { assertStagedPreamble, preambleNoteBlockers, type StagedPreamble } from 
 
 export const dynamic = "force-dynamic";
 
+// ---- setting the unit on many dimensions at once ---------------------------
+// The per-observation select stays; this is the escape from answering the same
+// question a few hundred times on a pack whose pages state no unit.
+//
+// NO per-observation `expectedVersion`. The run row is held with `for update`
+// for the whole statement, so nothing can interleave, and every observation's
+// version still bumps — a tab that was editing one of them gets its own stale
+// conflict on its next write, which is the behaviour a per-row check would
+// have produced anyway.
+//
+// PENDING DIMENSIONS ONLY. An applied observation is history, an ignored one
+// was a decision, and a material cannot carry a unit at all
+// (`record_attributes_unit_is_dimension`).
+const BulkUnitPatch = z
+  .object({
+    bulkUnit: z
+      .object({
+        scope: z.enum(["item", "run"]),
+        itemId: z.string().min(1).optional(),
+        unit: z.enum(ATTRIBUTE_UNITS),
+      })
+      .strict()
+      .refine((value) => value.scope === "run" || Boolean(value.itemId), {
+        message: "Setting the unit on one item needs to say which item.",
+      }),
+  })
+  .strict();
+
+async function patchBulkUnit(id: string, raw: unknown, actor: string): Promise<Response> {
+  const parsed = BulkUnitPatch.safeParse(raw);
+  if (!parsed.success) {
+    return json({ ok: false, error: parsed.error.issues[0]?.message ?? "That change is not valid." }, 400);
+  }
+  const { scope, itemId, unit } = parsed.data.bulkUnit;
+
+  try {
+    const result = await withTransaction(async (txn) => {
+      const rows = await txn`
+        select id, status, parsed, version from intake_runs where id = ${id} for update
+      `;
+      const run = rows[0];
+      if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+      if (run.status !== "parsed") {
+        throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
+      }
+      const staged: StagedDrawings = assertStagedDrawings(run.parsed);
+      if (scope === "item" && !staged.items.some((item) => item.id === itemId)) {
+        throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
+      }
+
+      let changed = 0;
+      const items = staged.items.map((item) => {
+        if (scope === "item" && item.id !== itemId) return item;
+        let touched = false;
+        const observations = item.observations.map((observation) => {
+          if (observation.reviewStatus !== "pending") return observation;
+          if (observation.attrGroup !== "dimension") return observation;
+          if (observation.unit === unit) return observation;
+          touched = true;
+          changed += 1;
+          return {
+            ...observation,
+            version: observation.version + 1,
+            unit,
+            // A human set this. It is no longer a suggestion from anywhere, so
+            // the screen must stop calling it one.
+            unitSuggested: false,
+            unitSource: undefined,
+          };
+        });
+        return touched ? { ...item, observations } : item;
+      });
+
+      const written = await txn`
+        update intake_runs
+        set parsed = ${JSON.stringify({ ...staged, items })}::jsonb, updated_by = ${actor}
+        where id = ${id} and status = 'parsed'
+        returning version
+      `;
+      if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+      return { version: Number(written[0].version), changed };
+    });
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
 // ---- a drawing observation's autosave --------------------------------------
 // Per id, per version, merged into the locked row — the same discipline as a
 // proposal, for the same reason: two people editing two different rows must not
 // conflict, and a snapshot rewrite silently reverts the other tab.
-
 const DrawingPatch = z
   .object({
     itemId: z.string().min(1),
@@ -117,11 +206,28 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
           const field = await txn`select id from spec_fields where id = ${changes.specFieldId}`;
           if (!field[0]) throw new DomainConflictError("unknown_field", "No such BWS field.", { status: 400 });
         }
+        // A reviewer typing "1800mm" into a dimension's value means the same
+        // thing the page did, and the export appends the unit column with no
+        // separator — so leaving it there renders "1800mmmm" in BWS. Split it
+        // through the SAME function staging uses, rather than a second rule
+        // that would eventually disagree with it.
+        const typed =
+          changes.value !== undefined && observation.attrGroup === "dimension"
+            ? splitFigureAndUnit(changes.value)
+            : null;
+
         const next = {
           ...observation,
           version: observation.version + 1,
-          ...(changes.value !== undefined ? { value: changes.value } : {}),
-          ...(changes.unit !== undefined ? { unit: changes.unit, unitSuggested: false } : {}),
+          ...(changes.value !== undefined ? { value: typed?.value ?? changes.value } : {}),
+          // An explicit `unit` in the same request still wins — the select is
+          // the reviewer being deliberate about the unit, the text box is not.
+          ...(typed?.unit && changes.unit === undefined
+            ? { unit: typed.unit, unitSuggested: false, unitSource: undefined }
+            : {}),
+          ...(changes.unit !== undefined
+            ? { unit: changes.unit, unitSuggested: false, unitSource: undefined }
+            : {}),
           ...(changes.attrGroup !== undefined ? { attrGroup: changes.attrGroup } : {}),
           ...(changes.specFieldId !== undefined ? { specFieldId: changes.specFieldId } : {}),
           ...(changes.state !== undefined ? { state: changes.state, stateReason: null } : {}),
@@ -258,6 +364,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         resolution,
         targets: targetRecordIds(item, resolution),
         blockers: drawingItemBlockers(item, resolution, occupied),
+        // Separate from blockers on purpose — these do not stop a commit, and
+        // the confirm route never sees them. See drawingItemWarnings().
+        warnings: drawingItemWarnings(item),
       };
     });
     const fields = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
@@ -567,7 +676,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const rows = await sql`select source_kind, document_kind from intake_runs where id = ${id}`;
   if (!rows[0]) return json({ ok: false, error: "No such import." }, 404);
 
-  if (rows[0].document_kind === "shop_drawings") return patchDrawing(id, raw, user.email);
+  if (rows[0].document_kind === "shop_drawings") {
+    // Two shapes on one route, told apart by the key the body carries rather
+    // than by a mode flag: a bulk set names no observation and carries no
+    // version, so it cannot be validated by `DrawingPatch` at all.
+    if (raw && typeof raw === "object" && "bulkUnit" in raw) return patchBulkUnit(id, raw, user.email);
+    return patchDrawing(id, raw, user.email);
+  }
   if (rows[0].document_kind === "preamble") return patchPreamble(id, raw, user.email);
   if (rows[0].source_kind === "spec_document") return patchProposal(id, raw, user.email);
   return patchBoqLine(id, (raw ?? {}) as Record<string, unknown>, user.email);

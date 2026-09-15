@@ -39,9 +39,18 @@ describe("per-kind extraction contract", () => {
   });
 
   it("tells the model not to invent a unit the drawings do not print", () => {
-    // The set mixes millimetres and centimetres between pages and prints
-    // neither, so a converted figure would read as a real measurement.
-    expect(PROMPTS.shop_drawings).toMatch(/never append, convert or infer a\s*\n?unit/i);
+    // A shop drawing set mixes millimetres and centimetres between pages and
+    // prints neither, so an inferred figure would read as a real measurement.
+    expect(PROMPTS.shop_drawings).toMatch(/never infer one from how large the number is/i);
+    expect(PROMPTS.shop_drawings).toMatch(/never convert/i);
+  });
+
+  it("tells the model to report a unit the page DOES print, separately from the figure", () => {
+    // The Panther specification sheets state "WIDTH 1800mm". Reading a unit
+    // that is on the page is not inference, and guessing from magnitude at a
+    // document that already said so would be strictly worse.
+    expect(PROMPTS.shop_drawings).toMatch(/unitRaw/);
+    expect(PROMPTS.shop_drawings).toMatch(/never combined into the value/i);
   });
 
   it("gives the model no operational field to be talked into", () => {
@@ -62,6 +71,11 @@ describe("per-kind extraction contract", () => {
     for (const forbidden of ["recordId", "requirementId", "state", "confirmed", "specFieldId", "unit"]) {
       expect(names).not.toContain(forbidden);
     }
+    // `unitRaw` is allowed and `unit` is not, and the difference is the whole
+    // rule rather than a naming accident. `unitRaw` is what the page printed;
+    // `unit` is the app's controlled vocabulary value, which `normaliseUnit`
+    // decides afterwards. Same split as labelRaw/valueRaw/materialCodeRaw.
+    expect(names).toContain("unitRaw");
   });
 });
 
