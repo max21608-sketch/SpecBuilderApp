@@ -10,6 +10,7 @@
 | M3 — BWS-layout export (complete dataset) | this log, 2026-09-14 | M1 | **Built 2026-09-14** as a REVIEW file (no Id, no Job Number). Not verified against a real BWS import |
 | M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **HIDDEN 2026-09-14.** Code, routes and tests intact; entry points removed |
 | M7 — the intake rebuild | this log, 2026-09-14 | M1, M2 | **Built 2026-09-14** (`0007`). Packs, runs, drawing attributes, preamble notes, export. No human acceptance; no real drawing set extracted |
+| **M8 — the Panther pass** | this log, 2026-09-15 | M7 | **In progress from 2026-09-15.** The pilot pack in, transposed not inferred, and a BWS-layout export a human calls correct. THE milestone |
 | M5 — shared-inbox ingestion | `docs/integration.md` | Entra app + scoped mailbox | Named only |
 | M6 — VE rounds, TG0 A/B/C sign-off | — | a settled gate model | Named only |
 
@@ -429,6 +430,47 @@ BWS job-spec layout. Chasing what is missing is a later stage.
     not expose that argument, and the `npm audit fix` downgrades exceljs two
     major versions. Accepted and recorded rather than silently carried; the
     other eight findings are the pre-existing dev toolchain.
+
+## Decisions taken 2026-09-15 (the Panther pilot)
+
+From the review of 2026-09-14, circulated by Steve, and confirmed by the user on
+2026-09-15. The scope statement lives in `CLAUDE.md`; the reasoning lives here.
+
+60. **Project Panther (`AP364`, BWS `P17726`) is the pilot; Maybourne Paris is
+    deferred.** The SharePoint survey (2026-09-14) found the same content at
+    several revisions with no machine-readable ordering, and nobody can yet say
+    which copy is current — Hayley confirms that before AP346 is used again.
+    Panther's set is small enough for Matthew to curate by hand, which removes
+    the one variable that would otherwise be blamed for every bad extraction.
+61. **The pilot reads a curated folder and a named mailbox, not the raw tree.**
+    Our project folders are hand-made and inconsistent, so automated discovery
+    is unreliable; Tim's BWS workflow will generate the reference, inbox and
+    folder set at quote creation, and the pipeline should be proved on a clean
+    input first. Consequence for anyone working here: do not build discovery,
+    and do not crawl outside the curated folder.
+62. **The first pass transposes and does not infer.** Gaps are `TBC`, which is
+    already a distinct state in `spec_answers`, not a blank to be helpfully
+    filled. A grid that quietly completes itself is worse than one with holes,
+    because the holes are what the quote needs to price and chase. This is also
+    why `record_attributes` is requirement-free: a statement with no matching
+    question is retained, not discarded for failing to fit a template — BWS
+    category boilerplates are a best guess at the fields per product code, and a
+    complex item on a simple template will be short of them.
+63. **"Flawless export" is a human acceptance test.** The four checks are the
+    floor. The milestone completes when a person reads the exported workbook
+    against the pack line by line and says it is right — which is also the first
+    real check of the export's job columns, this repo's judgement since
+    2026-09-14.
+64. **"Trained on the Panther BOQ" means tuned against it, not fine-tuned.** The
+    levers are prompts, `item_category_aliases`, `requirement_aliases` and unit
+    handling, seeded only from verified Panther wording. Recording this because
+    the phrase recurs in meeting notes and would otherwise be read as a model
+    training plan that does not exist and is not wanted.
+65. **TGQ — the minimum specification needed to issue a quote — is the gate the
+    tool is aiming at**, ahead of TG0 and TG1, because pre-sale is where the
+    least structure exists today. It stays unauthored while M8 runs: all 728
+    requirements remain ungated and there is no `gates` table. A gate over a
+    grid that is not yet right would only certify the wrong thing.
 
 ## Still open
 

@@ -426,10 +426,21 @@ material — the BOQ, the BWS job export, the SharePoint cheat sheets — never
 enters this repo, a fixture, or a seed. **The schema is what gets committed,
 never a row.**
 
-`docs/docs for building/P17231 SharePoint Index.md` maps the pilot project's
-SharePoint tree: where each source document is, which copies conflict, and what
-is confirmed absent. Read it before assuming a document exists or that a given
-copy is current.
+`docs/docs for building/P17231 SharePoint Index.md` maps the AP346 / Maybourne
+Paris tree: where each source document is, which copies conflict, and what is
+confirmed absent. Read it before assuming a document exists or that a given copy
+is current. It is the survey that **deferred** that project — see the milestone
+below.
+
+The pilot pack is now **Project Panther**, curated by Matthew and read-only, at
+`Enterprise/Shared Documents/Work Instructions/Projects/ap364-project-panther
+p17726/Project Specs and BOQ`. Listed 2026-09-15: the seating BOQ
+(`AP364 - Apx 2`, `.xlsx`), the shop-drawing set (`Apx 1a`) and nine
+`SPEC-346` specification sheets (`S-100`/`S-101` sofa, `S-200`/`S-201`/`S-203`
+armchair, `S-301` desk chair, `S-402` bench, `UP-100`/`UP-101` headboard). The
+FF&E preamble (`Apx 1b`, Argenta) is part of the pack but was **not** in that
+folder on that date. The point of a curated folder is that discovery is a
+person's job, not the tool's: do not crawl the wider tree for Panther documents.
 
 Never silently "clean up" an uncertain source value; retain or flag it.
 
@@ -437,6 +448,42 @@ Never silently "clean up" an uncertain source value; retain or flag it.
 
 A stale status section is worse than none, because agents and people both make
 decisions from it. The full dated list is in `docs/plans/README.md`.
+
+### M8 — the Panther pass. This is the milestone; everything else waits.
+
+Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
+pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
+curated document set — **not** Maybourne Paris, whose documents exist in several
+revisions nobody has reconciled. One pack in, one export out, and the export has
+to be right.
+
+Done means all four, in order:
+
+1. **The curated pack goes in as one delivery.** One `intake_batches` row: the
+   seating BOQ with each tab a run, the shop-drawing set, the nine `SPEC-346`
+   specification sheets, and the preamble when it reaches the folder.
+2. **Every BOQ line becomes a record keyed by its client item ref**, and every
+   drawing spec lands on the right record in the right run.
+3. **The first pass transposes; it does not complete.** What the documents say
+   is recorded with its source; what they do not say is `TBC` or missing.
+   Inferring a value, or filling a gap from a sister item or a category
+   template, is the failure this milestone exists to prove against. A statement
+   the requirement matrix has no question for is kept as a `record_attributes`
+   row — that is why attributes are requirement-free — never dropped for not
+   fitting the template.
+4. **The BWS-layout export is judged flawless by a human**, read line by line
+   against the pack. Tim's CSV grid importer is the target shape; the file is
+   still a complete dataset a person uploads, never a delta and never a write.
+
+Two readings to head off. "Trained on the Panther BOQ" means tuned against it —
+prompts, `item_category_aliases`, `requirement_aliases`, unit handling, seeded
+only from verified Panther wording. **No model is fine-tuned and none will be.**
+And "flawless" is a human acceptance test, not a passing suite: the four checks
+passing is the floor, not the milestone.
+
+Everything under *Explicitly excluded* stays excluded while this runs, including
+the gate model — a grid that is right is worth more than a gate over a grid that
+is not.
 
 **Shipped to staging:**
 
@@ -478,7 +525,8 @@ getting a tender pack in, staged, reviewed and out again:
   are written against the AP364 seating drawings but only synthetic fixtures
   have exercised them. One real extraction, compared against its pages by eye —
   expected vs extracted, misses, wrong values, wrong units — is what decides
-  whether intake is usable.
+  whether intake is usable. This is step 2 of M8, and the AP364 drawings it was
+  written against are the pilot pack itself.
 - **The export's job columns are this repo's judgement**: `Project Ref` is the
   project name, `Client` the client, `Name` the item description, `Item Count`
   the quantity, `Client Code` the BOQ refs. Confirm them against a real BWS
@@ -516,7 +564,17 @@ The spec table's Waiting column and the derivation behind it in
 - **Source-document version precedence is undefined.** The SharePoint survey
   found the same BOQ and COM content at differing sizes in two places, and six
   incompatible revision conventions across the tree. A run now records the
-  revision and date its bill printed, which is a start, not the rule.
+  revision and date its bill printed, which is a start, not the rule. Curating
+  the Panther folder sidesteps this for the pilot; it does not answer it, and
+  Maybourne Paris stays deferred until Hayley confirms which revisions are
+  current.
+- **The Panther mailbox is not confirmed.** `projects.shared_inbox` has a column
+  waiting for it and M5 ingestion stays disabled either way, so this blocks
+  nothing in M8.
+- **A BWS category boilerplate is a best guess, not a field list.** A complex
+  item on a simple template will be short of fields. The tool must surface the
+  extra statement rather than discard it, and several BWS columns are post-sale
+  only — the pre-sale grid holds what the client provided.
 
 Keep this section current.
 
