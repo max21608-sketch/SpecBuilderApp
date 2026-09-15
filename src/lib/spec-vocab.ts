@@ -177,11 +177,21 @@ export const ATTRIBUTE_STATE_LABELS: Record<AttributeState, string> = {
 /**
  * Dimension units. The AP364 drawings print 190/79/72 for a sofa and 550/735
  * for a desk chair and name the unit on NEITHER page, so this is a controlled
- * vocabulary the model never returns and a human always chooses. Anything
- * unrecognised normalises to null — a wrong unit is worse than no unit,
- * because a 550mm chair recorded as 550cm looks like a real number.
+ * vocabulary a human always chooses. Anything unrecognised normalises to null —
+ * a wrong unit is worse than no unit, because a 550mm chair recorded as 550cm
+ * looks like a real number.
  *
- * Matches `record_attributes_unit_check` in db/migrations/0007.
+ * The model may now REPORT a unit, and only when the page prints one beside the
+ * figure ("WIDTH 1800mm" on a Panther specification sheet). That is an
+ * observation of what the document says, not a choice — it still arrives as
+ * `unitRaw` text and is resolved here by `normaliseUnit`, which is the exact/
+ * fuzzy split house convention 6 requires.
+ *
+ * Matches `record_attributes_unit_check` in db/migrations/0007 and
+ * `projects_default_unit_check` in 0008 — the same four values serve a
+ * project's `default_dimension_unit`, which is the fallback when a page states
+ * nothing and its own figures do not agree. One vocabulary, three places that
+ * must stay in step; see the `external-vocabulary-sync` skill.
  */
 export const ATTRIBUTE_UNITS = ["mm", "cm", "m", "in"] as const;
 export type AttributeUnit = (typeof ATTRIBUTE_UNITS)[number];
@@ -231,6 +241,24 @@ export function isAttributeGroup(value: unknown): value is AttributeGroup {
  */
 export const RUN_STATUSES = ["active", "retired"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
+
+/**
+ * A project is archived, never deleted — and for a stronger reason than a run
+ * is. A delivered project holds the client ref → BWS job number mapping, and
+ * nothing else in the business holds it.
+ *
+ * `archived` hides a project from the default list. It does NOT make it
+ * read-only; nothing revokes a write, and the screen has to say so rather than
+ * showing a control that reads as a lock and is not one.
+ *
+ * Matches `projects_status_check` in db/migrations/0008.
+ */
+export const PROJECT_STATUSES = ["active", "archived"] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+export function isProjectStatus(value: unknown): value is ProjectStatus {
+  return typeof value === "string" && (PROJECT_STATUSES as readonly string[]).includes(value);
+}
 
 export const NOTE_STATUSES = ["active", "retired"] as const;
 export type NoteStatus = (typeof NOTE_STATUSES)[number];
