@@ -41,6 +41,7 @@ import {
 } from "@/lib/drawing-document";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
+import { assertProjectScopedPathname } from "@/lib/blob-source";
 
 export type ObservationRef = { id: string; version: number };
 
@@ -174,6 +175,22 @@ function countPending(items: DrawingItem[]): number {
 
 // ---- confirm ---------------------------------------------------------------
 
+/**
+ * A crop of the source drawing that the reviewer looked at before confirming.
+ *
+ * `pathname`, never a URL. The store resolves a pathname against its own host
+ * from the token, so there is no host for a client to influence and no redirect
+ * to follow -- see the header of blob-source.ts for the defect that rule exists
+ * to close.
+ */
+export type ItemImage = {
+  pathname: string;
+  filename?: string | null;
+  width?: number | null;
+  height?: number | null;
+  size?: number | null;
+};
+
 export async function confirmDrawingItem(
   txn: TxnSql,
   {
@@ -182,6 +199,7 @@ export async function confirmDrawingItem(
     itemId,
     itemVersion,
     observations: refs,
+    image,
     actor,
   }: {
     runId: string;
@@ -189,6 +207,8 @@ export async function confirmDrawingItem(
     itemId: string;
     itemVersion: number;
     observations: ObservationRef[];
+    /** The crop the reviewer looked at, already uploaded. Null for none. */
+    image?: ItemImage | null;
     actor: string;
   },
 ): Promise<DrawingsConfirmResult> {
@@ -290,10 +310,49 @@ export async function confirmDrawingItem(
     }
   }
 
+  // The picture, if the reviewer kept one. Validated HERE and not trusted from
+  // the screen: the pathname has to be one of THIS project's, or a signed-in
+  // user could attach any blob in the store to any record by editing a request.
+  let imagePath: string | null = null;
+  if (image) {
+    try {
+      imagePath = assertProjectScopedPathname(image.pathname, run.projectId);
+    } catch {
+      throw new DomainConflictError("image_not_this_project", "That image is not one of this project's files.", {
+        status: 400,
+      });
+    }
+  }
+
   const attributeIdsByObservation = new Map<string, string[]>();
   const now = new Date().toISOString();
 
   for (const recordId of ordered) {
+    // One image row per target record, the same fan-out the attributes get, and
+    // correct for the same reason: it is ONE drawing of one item, and the runs
+    // quoting it are quoting that item.
+    //
+    // REPLACES rather than accumulates. Confirming a second card for the same
+    // record should leave one picture, not two with nothing to say which is
+    // current. The old row is deleted rather than kept, because unlike an
+    // attribute an image carries no observation anybody reasoned from -- the
+    // source PDF is preserved and the crop can always be re-made.
+    if (imagePath) {
+      await txn`
+        delete from attachments
+        where entity_type = 'spec_records' and entity_id = ${recordId} and kind = 'item_image'
+      `;
+      await txn`
+        insert into attachments
+          (entity_type, entity_id, kind, storage_path, filename, content_type, size,
+           image_width, image_height, uploaded_by)
+        values
+          ('spec_records', ${recordId}, 'item_image', ${imagePath},
+           ${image?.filename ?? "item.png"}, 'image/png', ${image?.size ?? null},
+           ${image?.width ?? null}, ${image?.height ?? null}, ${actor})
+      `;
+    }
+
     const sortRows = await txn`
       select coalesce(max(sort_order), 0) as max_sort from record_attributes where record_id = ${recordId}
     `;

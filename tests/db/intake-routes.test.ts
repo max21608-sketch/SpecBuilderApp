@@ -324,6 +324,103 @@ describeIfDb("intake routes", () => {
     await client.query(`delete from projects where id = $1`, [other.rows[0].id]);
   });
 
+  it("attaches the confirmed picture to every record the drawing fans out to", async () => {
+    const code = "__QAX150";
+    const main = await makeRecord(mainRunId, code, "__QA Console main");
+    const ve = await makeRecord(veRunId, code, "__QA Console VE");
+    const { runId, version, staged } = await stageDrawingRun(code, drawingItem(code));
+    const item = staged.items[0]!;
+
+    const res = await confirmRoute(runId, {
+      version,
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: item.version,
+      observations: item.observations.map((o) => ({ id: o.id, version: o.version })),
+      image: {
+        pathname: `projects/${projectId}/item-images/__QA-${code}.png`,
+        filename: "__QA console.png",
+        width: 640,
+        height: 420,
+        size: 12_345,
+      },
+    });
+    expect(res.status).toBe(200);
+
+    // ONE drawing of one item; the runs quoting it are quoting that item, so
+    // the picture fans out exactly as the attributes do.
+    for (const recordId of [main, ve]) {
+      const rows = await client.query(
+        `select storage_path, content_type, image_width, image_height, size
+         from attachments where entity_type = 'spec_records' and entity_id = $1 and kind = 'item_image'`,
+        [recordId],
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0].content_type).toBe("image/png");
+      expect(rows.rows[0].image_width).toBe(640);
+      expect(rows.rows[0].image_height).toBe(420);
+    }
+
+    await client.query(
+      `delete from attachments where entity_type = 'spec_records' and entity_id = any($1::uuid[])`,
+      [[main, ve]],
+    );
+  });
+
+  it("refuses an image pathname that is not this project's file", async () => {
+    // Being signed in does not make an arbitrary pathname this project's. The
+    // blob token is the STORE's, not the user's, so a client-chosen address
+    // would point a store-wide credential wherever it liked.
+    const code = "__QAX151";
+    await makeRecord(mainRunId, code, "__QA Mirror");
+    const { runId, version, staged } = await stageDrawingRun(code, drawingItem(code));
+    const item = staged.items[0]!;
+
+    const res = await confirmRoute(runId, {
+      version,
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: item.version,
+      observations: item.observations.map((o) => ({ id: o.id, version: o.version })),
+      image: { pathname: "projects/00000000-0000-0000-0000-000000000000/item-images/someone-else.png" },
+    });
+    // 400, not 409: this is a malformed request rather than a lost race.
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("image_not_this_project");
+
+    // Nothing was written -- not the picture, and not the specs either.
+    const attrs = await client.query(
+      `select count(*)::int n from record_attributes where source_run_id = $1`, [runId]);
+    expect(attrs.rows[0].n).toBe(0);
+  });
+
+  it("serves an item image only from the record's own attachment row", async () => {
+    const { GET } = await import("@/app/api/records/[id]/image/route");
+    const code = "__QAX152";
+    const recordId = await makeRecord(mainRunId, code, "__QA Lamp");
+
+    // No row yet: a fact the screen renders in words, not a broken image.
+    const missing = await GET(new Request("http://localhost/test"), {
+      params: Promise.resolve({ id: recordId }),
+    });
+    expect(missing.status).toBe(404);
+
+    await client.query(
+      `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, uploaded_by)
+       values ('spec_records', $1, 'item_image', $2, '__QA lamp.png', 'image/png', 'qa')`,
+      [recordId, `projects/${projectId}/item-images/__QA-${code}.png`],
+    );
+    // The blob itself does not exist in the store, so this reaches the read and
+    // fails there -- which is the point: it got past the lookup without the
+    // caller ever naming a path.
+    const found = await GET(new Request("http://localhost/test"), {
+      params: Promise.resolve({ id: recordId }),
+    });
+    expect([404, 502]).toContain(found.status);
+
+    await client.query(`delete from attachments where entity_type = 'spec_records' and entity_id = $1`, [recordId]);
+  });
+
   it("does not touch spec_records.version when an attribute is written", async () => {
     // Bumping it would invalidate every extraction snapshot and chase coverage
     // row taken against the record, for a reason unrelated to them.

@@ -44,6 +44,22 @@ const ConfirmBody = z
     itemId: z.string().min(1).optional(),
     itemVersion: z.number().int().nonnegative().optional(),
     observations: z.array(StagedRef).min(1).max(500).optional(),
+    // The picture the reviewer kept, already uploaded to the project's own
+    // blob prefix by the review screen. A PATHNAME, never a URL -- the store
+    // resolves it against its own host from the token, so there is no host to
+    // influence. Re-checked against this run's project inside the transaction;
+    // being signed in does not make an arbitrary pathname this project's file.
+    image: z
+      .object({
+        pathname: z.string().min(1).max(1024),
+        filename: z.string().max(300).nullable().optional(),
+        width: z.number().int().positive().max(20_000).nullable().optional(),
+        height: z.number().int().positive().max(20_000).nullable().optional(),
+        size: z.number().int().nonnegative().max(32 * 1024 * 1024).nullable().optional(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
     // Preamble notes.
     notes: z.array(StagedRef).min(1).max(500).optional(),
   })
@@ -108,6 +124,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             itemId: body.itemId as string,
             itemVersion: body.itemVersion as number,
             observations,
+            image: body.image ?? null,
             actor: user.email,
           }),
         );

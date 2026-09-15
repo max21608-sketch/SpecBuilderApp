@@ -45,7 +45,7 @@ import {
   type AttributeUnit,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
-import type { RawDrawingItem } from "@/lib/extraction-schema";
+import type { RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
 
 // ---- the staged shape ------------------------------------------------------
 
@@ -112,6 +112,29 @@ export type DrawingItem = {
    */
   targets: { ticked: string[]; unticked: string[] } | null;
   observations: DrawingObservation[];
+  /**
+   * Every picture of this item the model found, in the order it reported them.
+   *
+   * OPTIONAL, like `unitSource` and `dimensionSlot`, so `schemaVersion: 1`
+   * documents already sitting in `intake_runs.parsed` keep reading. Absent
+   * means the run was staged before pictures existed, which is a card where the
+   * reviewer drags a box themselves -- not an error.
+   */
+  viewRegions?: ItemView[];
+  /**
+   * Which of them `pickItemView` chose, or null when it had nothing to choose
+   * from. A SUGGESTION: the reviewer sees the actual crop rendered before
+   * anything is saved, and can pick another view or drag their own box.
+   */
+  imageProposal?: ItemView | null;
+};
+
+/** One picture of an item, and where it sits on its page. */
+export type ItemView = {
+  viewType: ViewType;
+  page: number | null;
+  /** [x0, y0, x1, y1] as fractions of the page, origin top-left. */
+  bbox: [number, number, number, number];
 };
 
 export type StagedDrawings = {
@@ -674,6 +697,85 @@ export function drawingItemWarnings(item: DrawingItem): DrawingWarning[] {
   return warnings;
 }
 
+// ---- which picture of the item to show -------------------------------------
+
+/**
+ * The kinds of picture a page carries, in the order we would rather have them.
+ *
+ * "Prefer the 3D view, fall back to a front view" is the rule this encodes, and
+ * a photograph or a render counts as satisfying the first half: on a
+ * specification sheet the 3D view IS a photograph or a CGI visual, and it is
+ * the most recognisable thing on the page. The elevations come next because a
+ * front view still identifies an item; a plan rarely does, and a detail almost
+ * never does.
+ *
+ * The MODEL never sees this order. It reports what each picture is, and the
+ * choice happens here, in code, where it can be tested -- house convention 6.
+ */
+export const VIEW_PREFERENCE = [
+  "photo",
+  "render",
+  "3d",
+  "front",
+  "side",
+  "back",
+  "plan",
+  "detail",
+  "other",
+] as const;
+export type ViewType = (typeof VIEW_PREFERENCE)[number];
+
+/** A bbox that is the right shape, the right way round, and not a sliver. */
+function usableBox(bbox: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(bbox) || bbox.length !== 4) return null;
+  const [x0, y0, x1, y1] = bbox.map((n) => (typeof n === "number" && Number.isFinite(n) ? n : NaN));
+  if ([x0, y0, x1, y1].some((n) => Number.isNaN(n))) return null;
+  // Clamp rather than reject: a model that reports 1.02 for the right edge of a
+  // full-width photograph means the edge of the page, and throwing that away
+  // would lose a good crop over a rounding error.
+  const clamp = (n: number) => Math.min(1, Math.max(0, n));
+  const box: [number, number, number, number] = [clamp(x0!), clamp(y0!), clamp(x1!), clamp(y1!)];
+  // Inverted or degenerate. A 1% sliver is not a picture of anything, and
+  // rendering one produces a smear the reviewer has to notice to reject.
+  if (box[2] - box[0] < 0.02 || box[3] - box[1] < 0.02) return null;
+  return box;
+}
+
+/** The reported views, cleaned: bad boxes dropped, page defaulted to the item's. */
+export function usableViews(raw: readonly RawViewRegion[] | undefined, itemPage: number | null): ItemView[] {
+  if (!raw) return [];
+  const views: ItemView[] = [];
+  for (const region of raw) {
+    const bbox = usableBox(region.bbox);
+    if (!bbox) continue;
+    views.push({
+      viewType: (VIEW_PREFERENCE as readonly string[]).includes(region.viewType)
+        ? (region.viewType as ViewType)
+        : "other",
+      // A model that reported the region but not its page almost certainly
+      // meant the page the item is on, which is the only page it was shown.
+      page: region.page ?? itemPage,
+      bbox,
+    });
+  }
+  return views;
+}
+
+/**
+ * The one picture to propose, or null.
+ *
+ * Preference order first; among equals, the LARGEST, because on a page with a
+ * big 3D view and a small inset the big one is the one somebody drew to be
+ * looked at. Ties after that fall to the order the model reported them, which
+ * is the order they appear on the page.
+ */
+export function pickItemView(views: readonly ItemView[]): ItemView | null {
+  if (views.length === 0) return null;
+  const area = (view: ItemView) => (view.bbox[2] - view.bbox[0]) * (view.bbox[3] - view.bbox[1]);
+  const rank = (view: ItemView) => VIEW_PREFERENCE.indexOf(view.viewType);
+  return [...views].sort((a, b) => rank(a) - rank(b) || area(b) - area(a))[0] ?? null;
+}
+
 // ---- across a whole pack ---------------------------------------------------
 //
 // One drawing run cannot see these. They exist because a tender pack now
@@ -862,6 +964,7 @@ export function stageDrawings(
       };
     });
     const unitGuess = suggestUnit(dimensions.map((dimension) => dimension.valueRaw));
+    const views = usableViews(item.viewRegions, item.page);
     const taken = new Set<string>();
     const observations: DrawingObservation[] = [];
 
@@ -977,6 +1080,7 @@ export function stageDrawings(
       confidence: item.confidence,
       targets: null,
       observations,
+      ...(views.length > 0 ? { viewRegions: views, imageProposal: pickItemView(views) } : {}),
     };
   });
 
@@ -988,7 +1092,49 @@ export function assertStagedDrawings(parsed: unknown): StagedDrawings {
   if (!doc || typeof doc !== "object" || doc.kind !== "shop_drawings" || !Array.isArray(doc.items)) {
     throw new Error("This run was not staged as shop drawings. Upload the drawings again.");
   }
-  return doc as StagedDrawings;
+  return upgradeDimensionSlots(doc as StagedDrawings);
+}
+
+/**
+ * Bring a run staged before slots existed up to the current shape, IN MEMORY.
+ *
+ * Runs staged before 0011 hold observations with `attrGroup: "dimension"` and
+ * no slot — a shape the database now refuses. Without this, every pending
+ * dimension on an existing run shows a `dimension_slot_missing` blocker, and a
+ * real pack carries hundreds of them: a reviewer would face a screen of errors
+ * describing a decision the app used not to ask for.
+ *
+ * So the same rule staging applies is applied on READ: a label the vocabulary
+ * recognises becomes that slot, and everything else becomes a note with its
+ * label, figure and unit intact. `Side view width` becomes a note rather than a
+ * width, because in a side elevation the horizontal dimension is the DEPTH.
+ *
+ * NEVER WRITTEN BACK HERE. A read that rewrote `intake_runs.parsed` would bump
+ * the run version under whoever else has the page open, and would do it inside
+ * a GET. The next autosave persists it; until then every reader computes the
+ * same answer from the same input, which is all the screen and the confirm
+ * route need in order to agree.
+ *
+ * An APPLIED observation is left exactly as it is. It is history: its
+ * `record_attributes` rows were already migrated by 0011, and rewriting the
+ * record of what was reviewed would make the two disagree about what happened.
+ */
+function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
+  let touched = false;
+  const items = doc.items.map((item) => {
+    const observations = item.observations.map((observation) => {
+      if (observation.reviewStatus === "applied") return observation;
+      if (observation.attrGroup !== "dimension") return observation;
+      if (observation.dimensionSlot) return observation;
+      touched = true;
+      const slot = normaliseDimensionSlot(observation.labelRaw);
+      return slot
+        ? { ...observation, dimensionSlot: slot, slotSuggested: false }
+        : { ...observation, attrGroup: "note" as AttributeGroup, dimensionSlot: null, slotSuggested: false };
+    });
+    return touched ? { ...item, observations } : item;
+  });
+  return touched ? { ...doc, items } : doc;
 }
 
 export function hasPendingObservations(doc: StagedDrawings): boolean {

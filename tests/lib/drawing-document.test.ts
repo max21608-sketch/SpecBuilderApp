@@ -13,6 +13,8 @@ import {
   drawingItemBlockers,
   drawingItemWarnings,
   duplicateTargets,
+  pickItemView,
+  usableViews,
   repeatedObservations,
   implausibleDimension,
   resolveDimensionUnit,
@@ -676,5 +678,109 @@ describe("repeatedObservations", () => {
       card.item.observations = card.item.observations.map((o) => ({ ...o, value: null }));
     }
     expect(repeatedObservations(cards)).toEqual([]);
+  });
+});
+
+// ============================================================================
+// WHICH PICTURE OF THE ITEM. "Prefer the 3D view, fall back to a front view" —
+// decided here, in code, from what the model reported seeing. Never by the
+// model, which is given no "best" field to fill in.
+// ============================================================================
+
+const view = (viewType: string, bbox: [number, number, number, number], page: number | null = 1) =>
+  ({ viewType, page, bbox }) as never;
+
+describe("usableViews", () => {
+  it("keeps a well-formed region as it was reported", () => {
+    expect(usableViews([view("3d", [0.1, 0.1, 0.5, 0.6])], 4)).toEqual([
+      { viewType: "3d", page: 1, bbox: [0.1, 0.1, 0.5, 0.6] },
+    ]);
+  });
+
+  it("falls back to the item's own page when the region names none", () => {
+    // The model was shown one page; a region with no page meant that one.
+    expect(usableViews([view("front", [0, 0, 1, 1], null)], 7)[0]!.page).toBe(7);
+  });
+
+  it("clamps an edge that overshoots rather than dropping the crop", () => {
+    // 1.02 for the right edge of a full-width photograph means the page edge.
+    expect(usableViews([view("photo", [-0.01, 0, 1.02, 0.4])], 1)[0]!.bbox).toEqual([0, 0, 1, 0.4]);
+  });
+
+  it("drops a box that is not a picture of anything", () => {
+    // Inverted, degenerate, a 1% sliver, or simply malformed. Rendering one
+    // produces a smear the reviewer has to notice in order to reject.
+    expect(usableViews([view("3d", [0.5, 0.1, 0.2, 0.6])], 1)).toEqual([]);
+    expect(usableViews([view("3d", [0.1, 0.1, 0.11, 0.6])], 1)).toEqual([]);
+    expect(usableViews([view("3d", [0, 0, 1] as never)], 1)).toEqual([]);
+    expect(usableViews(undefined, 1)).toEqual([]);
+  });
+
+  it("reads an unknown view type as 'other' rather than dropping the picture", () => {
+    expect(usableViews([view("elevation-ish", [0.1, 0.1, 0.9, 0.9])], 1)[0]!.viewType).toBe("other");
+  });
+});
+
+describe("pickItemView", () => {
+  it("prefers a photograph or a render — on a spec sheet that IS the 3D view", () => {
+    const views = usableViews(
+      [view("front", [0, 0, 0.4, 0.4]), view("photo", [0.5, 0, 0.9, 0.4])],
+      1,
+    );
+    expect(pickItemView(views)!.viewType).toBe("photo");
+  });
+
+  it("prefers a 3D line view over an elevation on a shop drawing", () => {
+    const views = usableViews([view("plan", [0, 0, 0.4, 0.4]), view("3d", [0.5, 0, 0.9, 0.4])], 1);
+    expect(pickItemView(views)!.viewType).toBe("3d");
+  });
+
+  it("falls back to the front view when there is no 3D one", () => {
+    // Literally the rule as asked for.
+    const views = usableViews([view("detail", [0, 0, 0.3, 0.3]), view("front", [0.4, 0, 0.8, 0.5])], 1);
+    expect(pickItemView(views)!.viewType).toBe("front");
+  });
+
+  it("takes the largest of equals — the big one is the one drawn to be looked at", () => {
+    const views = usableViews(
+      [view("3d", [0, 0, 0.2, 0.2]), view("3d", [0.3, 0.1, 0.95, 0.8])],
+      1,
+    );
+    expect(pickItemView(views)!.bbox).toEqual([0.3, 0.1, 0.95, 0.8]);
+  });
+
+  it("has nothing to propose when nothing usable was reported", () => {
+    expect(pickItemView([])).toBeNull();
+    expect(pickItemView(usableViews([view("3d", [0.5, 0.5, 0.5, 0.5])], 1))).toBeNull();
+  });
+});
+
+describe("stageDrawings pictures", () => {
+  it("proposes one and keeps the rest to switch between", () => {
+    const staged = stageDrawings(
+      [
+        rawItem({
+          page: 2,
+          viewRegions: [
+            { viewType: "front", page: 2, bbox: [0.05, 0.4, 0.45, 0.9] },
+            { viewType: "photo", page: 2, bbox: [0.55, 0.05, 0.95, 0.35] },
+          ],
+        }),
+      ],
+      FIELDS,
+      null,
+      null,
+    );
+    const item = staged.items[0]!;
+    expect(item.viewRegions).toHaveLength(2);
+    expect(item.imageProposal!.viewType).toBe("photo");
+  });
+
+  it("stages no proposal at all when the page offered no picture", () => {
+    // Absent, not an empty object: a card with nothing proposed is one where
+    // the reviewer drags a box, and that is a normal state rather than a fault.
+    const item = stageDrawings([rawItem({})], FIELDS, null, null).items[0]!;
+    expect(item.viewRegions).toBeUndefined();
+    expect(item.imageProposal).toBeUndefined();
   });
 });

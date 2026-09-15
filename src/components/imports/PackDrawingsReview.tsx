@@ -16,6 +16,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
+import { upload } from "@vercel/blob/client";
+import { projectUploadPrefix } from "@/lib/blob-source";
+import type { CroppedImage } from "@/lib/pdf-crop";
+
 import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
@@ -73,6 +77,46 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
   const [busy, setBusy] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<DrawingObservation>>>({});
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+
+  // The crop each card currently holds, kept in a ref rather than state: it
+  // changes on every re-render of a picker and nothing on this screen needs to
+  // re-render when it does.
+  const images = useRef<Map<string, CroppedImage | null>>(new Map());
+  const rememberImage = useCallback((itemId: string, image: CroppedImage | null) => {
+    images.current.set(itemId, image);
+  }, []);
+
+  /**
+   * Upload the crop, at confirm time and not before.
+   *
+   * A card that is never confirmed leaves no bytes in the store. The pathname
+   * is scoped to the project, which the token route checks at issue, the
+   * confirm route re-checks against the run's own project, and every later read
+   * checks again -- three times, because a check in only one of them is a check
+   * the other two skipped.
+   */
+  async function uploadImage(itemId: string, projectId: string) {
+    const image = images.current.get(itemId);
+    if (!image) return null;
+    const blob = await upload(
+      `${projectUploadPrefix(projectId)}item-images/${itemId}-${Date.now()}.png`,
+      image.blob,
+      {
+        access: "private",
+        handleUploadUrl: "/api/uploads/token",
+        clientPayload: projectId,
+        contentType: "image/png",
+      },
+    );
+    return {
+      pathname: blob.pathname,
+      filename: `${itemId}.png`,
+      width: image.width,
+      height: image.height,
+      size: image.blob.size,
+    };
+  }
+
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(
@@ -163,13 +207,28 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     setBusy(item.id);
     setError(null);
     try {
+      // Before the confirm, so a failed upload refuses the card rather than
+      // committing its specs and silently losing the picture.
+      let image = null;
+      if (action === "confirm") {
+        try {
+          image = await uploadImage(item.id, projectId);
+        } catch (cause) {
+          setError(
+            `The picture could not be stored, so nothing was confirmed: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+          );
+          return;
+        }
+      }
       const res = await apiFetch(`/api/imports/${run.importId}/confirm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action,
           itemId: item.id,
-          ...(action === "confirm" ? { itemVersion: item.version } : {}),
+          ...(action === "confirm" ? { itemVersion: item.version, image } : {}),
           observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
         }),
       });
@@ -429,6 +488,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
               onSaveObservation={saveObservation}
               onSaveTargets={saveTargets}
               onSetBulkUnit={setBulkUnit}
+              onImage={rememberImage}
               onReview={review}
             />
           </div>

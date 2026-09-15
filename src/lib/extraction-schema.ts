@@ -186,6 +186,10 @@ export const MAX_DRAWING_ITEMS = 400;
 // extraction after the call was paid for. Generous enough for a dense page,
 // still bounded — a document cannot talk this process into unbounded memory.
 export const MAX_PER_ITEM = 120;
+// A page shows a 3D view, three or four elevations, sometimes a photograph and
+// a couple of details. Twelve is generous; a page reporting more than that is
+// reporting furniture in swatches, not views of one item.
+export const MAX_VIEW_REGIONS = 12;
 
 const drawingObservationProperties = {
   labelRaw: {
@@ -293,6 +297,43 @@ export const DRAWINGS_TOOL = {
               anyOf: [{ type: "string", enum: ["high", "medium", "low"] }, { type: "null" }],
               description: "How clearly the page identifies this item. 'low' if the code was hard to read.",
             },
+            // WHERE the pictures of this item are, so one can be shown against
+            // the record. The model reports every view it can see and which
+            // kind each is; WHICH ONE to use is decided afterwards by
+            // pickItemView(), in code, and the crop a human actually gets is
+            // rendered in front of them before anything is saved.
+            //
+            // No "best" or "preferred" field, deliberately. That would be the
+            // model making the choice, and this app's rule is that it reads and
+            // decides nothing.
+            viewRegions: {
+              type: "array",
+              maxItems: MAX_VIEW_REGIONS,
+              description:
+                "Every drawn view or photograph of this item on the page — a 3D view, a product photograph or render, front/side/plan elevations. Omit title blocks, logos, swatch chips, dimension-only details and anything that is not a picture of the item itself.",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  viewType: {
+                    type: "string",
+                    enum: ["photo", "render", "3d", "front", "side", "back", "plan", "detail", "other"],
+                    description:
+                      "What this picture is. 'photo' for a photograph, 'render' for a CGI visual, '3d' for an isometric or perspective line drawing, then the named elevations. 'other' is an honest answer.",
+                  },
+                  page: { type: ["integer", "null"], minimum: 1, description: "1-based page the view is on." },
+                  bbox: {
+                    type: "array",
+                    minItems: 4,
+                    maxItems: 4,
+                    items: { type: "number", minimum: 0, maximum: 1 },
+                    description:
+                      "Where it sits on that page as [x0, y0, x1, y1], each a FRACTION of the page from 0 to 1, origin top-left. Enclose the picture and nothing else — no caption, no dimension lines, no border.",
+                  },
+                },
+                required: ["viewType", "page", "bbox"],
+              },
+            },
           },
           required: ["itemCodeRaw", "itemNameRaw", "page", "dimensions", "materials", "notesRaw", "confidence"],
         },
@@ -329,6 +370,20 @@ export const RawDrawingMaterial = RawDrawingObservation.extend({
   materialCodeRaw: nullableText(MAX_SHORT),
 });
 
+/**
+ * `.catch(...)` on every field: a malformed region should be DROPPED, not fail
+ * an extraction that has already been paid for. A missing picture is a card
+ * where the reviewer drags a box themselves; a failed run is another call.
+ */
+export const RawViewRegion = z.object({
+  viewType: z
+    .enum(["photo", "render", "3d", "front", "side", "back", "plan", "detail", "other"])
+    .catch("other")
+    .default("other"),
+  page: z.number().int().min(1).max(100_000).nullable().catch(null).default(null),
+  bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable().catch(null).default(null),
+});
+
 export const RawDrawingItem = z.object({
   itemCodeRaw: nullableText(MAX_SHORT),
   itemNameRaw: nullableText(MAX_SHORT),
@@ -340,9 +395,20 @@ export const RawDrawingItem = z.object({
   materials: z.array(RawDrawingMaterial).max(MAX_PER_ITEM).default([]),
   notesRaw: z.array(z.string().max(MAX_VALUE)).max(MAX_PER_ITEM).default([]),
   confidence: z.enum(["high", "medium", "low"]).nullable().catch(null).default(null),
+  // `.catch([])` HERE, unlike the observation arrays above, and the difference
+  // is what each one costs when it goes wrong. Losing an over-long dimensions
+  // array silently stages a page as having no dimensions, which nothing would
+  // ever notice; losing the view regions stages a card with no picture
+  // proposed, which is visible on screen and fixable by dragging a box.
+  //
+  // Optional in the INFERRED type as well, like `unitRaw`: most callers and
+  // every fixture describe an item that proposes no picture, and making them
+  // write `viewRegions: []` to say the ordinary thing is noise.
+  viewRegions: z.array(RawViewRegion).max(MAX_VIEW_REGIONS).catch([]).optional(),
 });
 
 export type RawDrawingItem = z.infer<typeof RawDrawingItem>;
+export type RawViewRegion = z.infer<typeof RawViewRegion>;
 export type RawDrawingDimension = z.infer<typeof RawDrawingDimension>;
 export type RawDrawingMaterial = z.infer<typeof RawDrawingMaterial>;
 export type RawDrawingObservation = z.infer<typeof RawDrawingObservation>;

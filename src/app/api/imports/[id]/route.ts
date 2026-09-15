@@ -24,7 +24,7 @@ import {
   type Proposal,
   type StagedSpecDocument,
 } from "@/lib/spec-document";
-import { ANSWER_STATES, ATTRIBUTE_GROUPS, ATTRIBUTE_STATES, ATTRIBUTE_UNITS } from "@/lib/spec-vocab";
+import { ANSWER_STATES, ATTRIBUTE_GROUPS, ATTRIBUTE_STATES, ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
 import { assertBoqV2 } from "@/lib/boq-import";
 import {
   assertStagedDrawings,
@@ -142,6 +142,7 @@ const DrawingPatch = z
         value: z.string().max(4000).nullable().optional(),
         unit: z.enum(ATTRIBUTE_UNITS).nullable().optional(),
         attrGroup: z.enum(ATTRIBUTE_GROUPS).optional(),
+        dimensionSlot: z.enum(DIMENSION_SLOTS).nullable().optional(),
         specFieldId: z.string().uuid().nullable().optional(),
         state: z.enum(ATTRIBUTE_STATES).nullable().optional(),
         label: z.string().max(300).optional(),
@@ -226,14 +227,31 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
             ? { unit: changes.unit, unitSuggested: false, unitSource: undefined }
             : {}),
           ...(changes.attrGroup !== undefined ? { attrGroup: changes.attrGroup } : {}),
+          ...(changes.dimensionSlot !== undefined ? { dimensionSlot: changes.dimensionSlot, slotSuggested: false } : {}),
           ...(changes.specFieldId !== undefined ? { specFieldId: changes.specFieldId } : {}),
           ...(changes.state !== undefined ? { state: changes.state, stateReason: null } : {}),
           ...(changes.label !== undefined ? { labelRaw: changes.label } : {}),
         };
-        // A unit on anything but a dimension is refused by the database; catch
-        // it here so the reviewer gets a sentence instead of a 500.
-        if (next.unit !== null && next.attrGroup !== "dimension") {
-          throw new DomainConflictError("unit_not_a_dimension", "Only a dimension can carry a unit.", { status: 400 });
+        // Refused by the database; caught here so the reviewer gets a
+        // sentence instead of a 500. A NOTE may carry a unit — 0011 widened
+        // that so "ARM HEIGHT 520mm" keeps its unit in its own column.
+        if (next.unit !== null && next.attrGroup !== "dimension" && next.attrGroup !== "note") {
+          throw new DomainConflictError("unit_not_a_measurement", "Only a dimension or a note can carry a unit.", {
+            status: 400,
+          });
+        }
+        // 0011's biconditional: a dimension has a slot, nothing else does. The
+        // screen sends both in ONE patch, so the staged row is never left in a
+        // shape the database would refuse at confirm.
+        if (next.attrGroup === "dimension" && !next.dimensionSlot) {
+          throw new DomainConflictError(
+            "dimension_needs_slot",
+            "Say which dimension this is — width, depth, height, seat height or diameter.",
+            { status: 400 },
+          );
+        }
+        if (next.attrGroup !== "dimension" && next.dimensionSlot) {
+          next.dimensionSlot = null;
         }
         items = staged.items.map((row) =>
           row.id !== itemId

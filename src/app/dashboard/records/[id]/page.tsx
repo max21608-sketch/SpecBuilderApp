@@ -77,6 +77,10 @@ export default function RecordPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savingCategory, setSavingCategory] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
+  // Optimistic: the image is requested, and the 404 for a record that has none
+  // turns it off. Asking first would be a second round trip on every record to
+  // learn something the image request itself reports.
+  const [hasImage, setHasImage] = useState(true);
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
@@ -86,6 +90,9 @@ export default function RecordPage() {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+  // Moving from a record with no picture to one with a picture reuses this
+  // component, so a sticky `false` would hide every image after the first miss.
+  useEffect(() => { setHasImage(true); }, [id]);
 
   async function save(answer: Answer, value: string, state: AnswerState) {
     // Reachable only if a requirement was added to the category after this
@@ -171,6 +178,26 @@ export default function RecordPage() {
       </p>
 
       {error && <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
+
+      {/* The picture, first, because it is what a person recognises. A record
+          was a description and a quantity, and nobody could look at one and
+          tell which item it was. Rendered from a crop somebody confirmed off
+          the drawings; `hasImage` goes false on a 404 so a record without one
+          says so in words instead of showing a broken image. */}
+      {hasImage && (
+        <div className="mt-6 float-right ml-4 mb-2 w-44 border border-neutral-200 rounded-lg bg-white p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element --
+              an authenticated same-origin route that streams from private blob
+              storage; next/image cannot fetch it with the session cookie. */}
+          <img
+            src={`/api/records/${record.id}/image`}
+            alt={`${record.item_description}`}
+            onError={() => setHasImage(false)}
+            className="w-full h-auto rounded"
+          />
+          <p className="mt-1 text-center text-xs text-neutral-500">From the drawings</p>
+        </div>
+      )}
 
       {/* What the documents actually said. */}
       <h2 className="mt-6 text-sm font-semibold text-neutral-500 uppercase tracking-wide">Specs captured</h2>

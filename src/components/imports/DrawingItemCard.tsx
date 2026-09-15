@@ -30,11 +30,17 @@ import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
   ATTRIBUTE_UNITS,
+  DIMENSION_SLOTS,
+  DIMENSION_SLOT_LABELS,
   type AttributeGroup,
   type AttributeState,
+  type DimensionSlot,
 } from "@/lib/spec-vocab";
+import { composeDimensionCell } from "@/lib/dimensions";
 import { unitSourceOf } from "@/lib/drawing-document";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
+import ItemImagePicker from "@/components/imports/ItemImagePicker";
+import type { CroppedImage } from "@/lib/pdf-crop";
 
 export type RunResolution =
   | { runId: string; runName: string; status: "matched"; record: { id: string; label: string; itemDescription: string } }
@@ -104,6 +110,7 @@ export default function ItemCard({
   onSaveTargets,
   onSetBulkUnit,
   onReview,
+  onImage,
 }: {
   item: DrawingItem;
   importId: string;
@@ -117,6 +124,8 @@ export default function ItemCard({
   onSaveTargets: (item: DrawingItem, ticked: string[], unticked: string[]) => Promise<void>;
   onSetBulkUnit: (scope: "item" | "run", unit: "mm" | "cm", itemId?: string) => Promise<void>;
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
+  /** The crop this card currently holds, remembered by the screen until confirm. */
+  onImage: (itemId: string, image: CroppedImage | null) => void;
 }) {
   const pending = item.observations.filter((o) => o.reviewStatus === "pending");
   const targets = resolution?.targets ?? [];
@@ -124,6 +133,25 @@ export default function ItemCard({
   const warnings = resolution?.warnings ?? [];
   const blockerFor = (observationId: string) => blockers.filter((b) => b.observationId === observationId);
   const warningFor = (observationId: string) => warnings.filter((w) => w.observationId === observationId);
+
+  // What BWS will actually receive in field 3, from this card's pending rows,
+  // through the same function the export calls.
+  //
+  // This is the only place a human can check the whole ruling at a glance, and
+  // it is what makes the positional W x D x H assumption on a combined line
+  // acceptable: a transposed order is obvious here in a second, where ticking a
+  // per-row confirmation a hundred times would catch nothing.
+  const dimensionCell = composeDimensionCell(
+    pending
+      .filter((o) => o.attrGroup === "dimension" && o.dimensionSlot)
+      .map((o, index) => ({
+        slot: o.dimensionSlot as DimensionSlot,
+        value: drafts[o.id]?.value !== undefined ? (drafts[o.id]?.value ?? null) : o.value,
+        unit: o.unit,
+        state: o.state ?? "confirmed",
+        sortOrder: index,
+      })),
+  );
 
   const toggleRun = (recordId: string, on: boolean) => {
     const ticked = new Set(item.targets?.ticked ?? resolution?.resolution.suggested ?? []);
@@ -170,6 +198,29 @@ export default function ItemCard({
           />
         )}
       </div>
+
+      {dimensionCell.text && (
+        <div className="px-4 py-2 border-b border-neutral-100 bg-neutral-50">
+          <p className="text-xs uppercase tracking-wide text-neutral-500">BWS Dimensions</p>
+          <p className="font-mono text-sm text-neutral-900">{dimensionCell.text}</p>
+          {dimensionCell.problems.map((problem, index) => (
+            <p key={index} className="text-xs text-amber-700">
+              {problem.message}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* The picture, rendered from the real PDF so what is confirmed is what
+          was looked at. Shown whether or not the model proposed one: a card
+          with nothing proposed is one where a box can still be dragged. */}
+      <ItemImagePicker
+        importId={importId}
+        itemPage={item.page}
+        proposal={item.imageProposal ?? null}
+        views={item.viewRegions ?? []}
+        onCropped={(image) => onImage(item.id, image)}
+      />
 
       {/* Which runs this drawing applies to. */}
       <div className="px-4 py-3 border-b border-neutral-100">
@@ -268,7 +319,7 @@ export default function ItemCard({
             <th className="px-2 py-2 font-medium">Label</th>
             <th className="px-2 py-2 font-medium">Value</th>
             <th className="px-2 py-2 font-medium">Unit</th>
-            <th className="px-2 py-2 font-medium">BWS field</th>
+            <th className="px-2 py-2 font-medium">Dimension / BWS field</th>
             <th className="px-2 py-2 font-medium">State</th>
             <th className="px-4 py-2" />
           </tr>
@@ -320,7 +371,10 @@ export default function ItemCard({
                   )}
                 </td>
                 <td className="px-2 py-2 align-top">
-                  {observation.attrGroup === "dimension" ? (
+                  {/* A note may carry one too: ARM HEIGHT 520mm is a real
+                      measurement that simply has no BWS slot, and 0011 keeps
+                      its unit in its own column rather than in its text. */}
+                  {observation.attrGroup === "dimension" || observation.attrGroup === "note" ? (
                     <select
                       value={observation.unit ?? ""}
                       onChange={(event) =>
@@ -353,8 +407,42 @@ export default function ItemCard({
                   )}
                 </td>
                 <td className="px-2 py-2 align-top">
-                  {observation.attrGroup === "dimension" ? (
-                    <span className="text-xs text-neutral-500">Dimensions</span>
+                  {observation.attrGroup === "dimension" || observation.attrGroup === "note" ? (
+                    // The question the reviewer is actually being asked. A shop
+                    // drawing labels nothing, so its figures stage as notes and
+                    // this is where one becomes the width — and where a figure
+                    // the page DID label, but as something outside the five
+                    // (ARM HEIGHT), stays a note without losing anything.
+                    //
+                    // Both fields go in ONE patch: 0011 refuses a dimension
+                    // with no slot and a note with one, so sending them apart
+                    // would leave the staged row in a shape the confirm cannot
+                    // write.
+                    <div className="flex flex-col gap-0.5">
+                      <select
+                        value={observation.dimensionSlot ?? ""}
+                        onChange={(event) => {
+                          const slot = event.target.value;
+                          void onSaveObservation(item, observation, {
+                            attrGroup: slot ? "dimension" : "note",
+                            dimensionSlot: slot ? (slot as DimensionSlot) : null,
+                          });
+                        }}
+                        className={`border rounded px-1 py-0.5 text-xs ${
+                          observation.slotSuggested ? "border-amber-400 bg-amber-50" : "border-neutral-300"
+                        }`}
+                      >
+                        <option value="">Keep as a note</option>
+                        {DIMENSION_SLOTS.map((slot) => (
+                          <option key={slot} value={slot}>
+                            {DIMENSION_SLOT_LABELS[slot]}
+                          </option>
+                        ))}
+                      </select>
+                      {observation.slotSuggested && observation.dimensionSlot ? (
+                        <span className="text-[11px] text-amber-700">order assumed W × D × H</span>
+                      ) : null}
+                    </div>
                   ) : (
                     <select
                       value={observation.specFieldId ?? ""}

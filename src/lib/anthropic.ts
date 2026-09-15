@@ -149,6 +149,14 @@ where you can see it on the page. Never infer one from how large the number is, 
 never append a unit to the figure — a wrong unit is worse than none, because it reads as a real
 measurement and nothing afterwards questions it.
 
+PICTURES OF THE ITEM. In \`viewRegions\`, report every drawn view or photograph OF THE ITEM ITSELF and
+where each sits on its page, as fractions of the page from 0 to 1 with the origin at the top left.
+A specification sheet usually carries one photograph or render; a shop drawing usually carries a 3D
+view and several elevations. Enclose the picture and nothing else — not its caption, not its
+dimension lines, not a surrounding border. Leave out title blocks, logos, fabric swatch chips,
+North arrows and dimension-only details: those are not pictures of the item. Say which kind each one
+is and nothing about which is best — a person picks, and sees the actual crop before it is saved.
+
 ${SHARED_RULES}`,
 
   // Project-level prose. Nothing here belongs to one item, so it is cut into

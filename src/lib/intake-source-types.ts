@@ -9,12 +9,33 @@ export const INTAKE_UPLOAD_ACCEPT = [
   "text/tab-separated-values",
 ].join(",");
 
+// What the upload token will sign for. Note that `INTAKE_UPLOAD_ACCEPT` above
+// is the file picker's filter and this is the SERVER's rule -- they are not the
+// same list and must not be merged.
+//
+// `image/png` is here for a reason worth stating, because it is a change of
+// kind rather than one more document format. Every other entry is a file a
+// CLIENT sent us, uploaded whole and preserved so a value can be traced back to
+// it. A PNG is DERIVED: a crop of one of those documents, rendered and encoded
+// by the reviewer's own browser, uploaded as a new object. The source PDF is
+// still kept, so the crop can always be re-made, and the pathname scoping in
+// blob-source.ts applies to it unchanged -- but "the store holds only what a
+// client sent us" stopped being true when this line was added.
+//
+// It is deliberately NOT in INTAKE_UPLOAD_ACCEPT: nobody picks a PNG off their
+// disk as an intake document. It is only ever written by the review screen.
 export const UPLOAD_CONTENT_TYPES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/csv",
   "text/tab-separated-values",
+  "image/png",
 ];
+
+/** Where an item image lives, under the project's own prefix. */
+export function itemImagePath(projectId: string, recordScopedName: string): string {
+  return `projects/${projectId}/item-images/${recordScopedName}.png`;
+}
 
 export type IntakeSourceKind = "pdf" | "xlsx" | "csv" | "tsv" | "unsupported";
 
