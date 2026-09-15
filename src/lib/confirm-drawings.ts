@@ -36,8 +36,10 @@ import {
   targetRecordIds,
   type DrawingItem,
   type DrawingObservation,
+  type OccupiedSlots,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
 
 export type ObservationRef = { id: string; version: number };
@@ -235,16 +237,29 @@ export async function confirmDrawingItem(
 
   // Blockers are recomputed here, never trusted from the screen. `occupied` is
   // read live so a slot filled by another card a second ago is caught.
-  const occupied = new Map<string, Set<string>>();
+  // Both halves, for the reason loadOccupiedSlots gives: a BWS field and a
+  // dimension slot are two uniqueness rules, and reading one would let the
+  // other collide at insert.
+  const occupied: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
   if (targets.length > 0) {
     const occupiedRows = await txn`
-      select record_id, spec_field_id from record_attributes
-      where record_id = any(${targets}::uuid[]) and status = 'active' and spec_field_id is not null
+      select record_id, spec_field_id, dimension_slot from record_attributes
+      where record_id = any(${targets}::uuid[])
+        and status = 'active'
+        and (spec_field_id is not null or dimension_slot is not null)
     `;
     for (const row of occupiedRows) {
-      const set = occupied.get(String(row.record_id)) ?? new Set<string>();
-      set.add(String(row.spec_field_id));
-      occupied.set(String(row.record_id), set);
+      const recordId = String(row.record_id);
+      if (row.spec_field_id) {
+        const set = occupied.fields.get(recordId) ?? new Set<string>();
+        set.add(String(row.spec_field_id));
+        occupied.fields.set(recordId, set);
+      }
+      if (isDimensionSlot(row.dimension_slot)) {
+        const set = occupied.dimensions.get(recordId) ?? new Set<DimensionSlot>();
+        set.add(row.dimension_slot);
+        occupied.dimensions.set(recordId, set);
+      }
     }
   }
   const blockers = drawingItemBlockers(item, resolution, occupied);
@@ -288,10 +303,17 @@ export async function confirmDrawingItem(
       sortOrder += 1;
       const inserted = await txn`
         insert into record_attributes
-          (record_id, attr_group, label, value, unit, material_code, spec_field_id, state,
+          (record_id, attr_group, dimension_slot, label, value, unit, material_code, spec_field_id, state,
            source_run_id, source_page, sort_order, created_by, updated_by)
         values
-          (${recordId}, ${observation.attrGroup}, ${observation.labelRaw ?? observation.attrGroup},
+          (${recordId}, ${observation.attrGroup},
+           -- Only a dimension carries one, and 0011's biconditional makes the
+           -- pairing unrepresentable otherwise: a dimension with no slot and a
+           -- note with one are both refused at insert. Normalised here rather
+           -- than trusted from the staged JSON, because a row staged before
+           -- 0011 carries no slot key at all.
+           ${observation.attrGroup === "dimension" ? (observation.dimensionSlot ?? null) : null},
+           ${observation.labelRaw ?? observation.attrGroup},
            ${observation.value},
            ${observation.unit}, ${observation.materialCodeRaw}, ${observation.specFieldId},
            ${observation.state}, ${runId}, ${item.page}, ${sortOrder}, ${actor}, ${actor})

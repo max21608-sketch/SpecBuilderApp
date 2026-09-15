@@ -25,6 +25,7 @@ import {
   type ExportAttribute,
   type ExportRecord,
 } from "@/lib/bws-export";
+import { isDimensionSlot } from "@/lib/spec-vocab";
 import type { AttributeGroup, AttributeState, AttributeUnit } from "@/lib/spec-vocab";
 
 export const dynamic = "force-dynamic";
@@ -100,7 +101,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const attributeRows = recordIds.length
     ? await sql`
-        select a.record_id, a.attr_group, a.label, a.value, a.unit, a.material_code, a.state, a.sort_order,
+        select a.record_id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code, a.state, a.sort_order,
                a.source_page, f.json_id, at.filename as source_filename
         from record_attributes a
         left join spec_fields f on f.id = a.spec_field_id
@@ -117,6 +118,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     label: String(row.label),
     value: row.value === null || row.value === undefined ? null : String(row.value),
     unit: row.unit === null || row.unit === undefined ? null : (String(row.unit) as AttributeUnit),
+    dimensionSlot: isDimensionSlot(row.dimension_slot) ? row.dimension_slot : null,
     materialCode: row.material_code === null || row.material_code === undefined ? null : String(row.material_code),
     specFieldJsonId: row.json_id === null || row.json_id === undefined ? null : Number(row.json_id),
     state: String(row.state) as AttributeState,

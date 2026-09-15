@@ -27,7 +27,15 @@
 // is what catches a BWS column insertion, which shifts every letter after it
 // while the ids stay put.
 // ============================================================================
-import { ATTRIBUTE_GROUP_LABELS, type AttributeGroup, type AttributeState, type AttributeUnit } from "@/lib/spec-vocab";
+import {
+  ATTRIBUTE_GROUP_LABELS,
+  DIMENSION_SLOT_LABELS,
+  type AttributeGroup,
+  type AttributeState,
+  type AttributeUnit,
+  type DimensionSlot,
+} from "@/lib/spec-vocab";
+import { composeDimensionCell } from "@/lib/dimensions";
 
 export type BwsColumn = { name: string; jsonId: number | null };
 
@@ -186,6 +194,8 @@ export type ExportAttribute = {
   label: string;
   value: string | null;
   unit: AttributeUnit | null;
+  /** One of the five, on a dimension and nowhere else — 0011 enforces the pairing. */
+  dimensionSlot: DimensionSlot | null;
   materialCode: string | null;
   specFieldJsonId: number | null;
   state: AttributeState;
@@ -224,17 +234,33 @@ export function renderAttributeValue(attribute: {
   return withUnit;
 }
 
-/** "Width 190cm; Depth 79cm; Height 72cm" — every dimension, in review order. */
+/**
+ * "W1900 x D790 x H720 x SH440mm" — the five slots, in Matthew's order.
+ *
+ * This used to emit "Width 190cm; Depth 79cm; Height 72cm": every label a
+ * document printed, in review order, in whatever unit the page was drawn in. On
+ * the real Panther pack that produced a cell nobody could read, because one
+ * armchair page carries 44 figures and the sheets label five more of them
+ * "WIDTH SEAT", "DEPTH BACK", "ARM HEIGHT".
+ *
+ * The composition itself lives in `@/lib/dimensions` because the record screen
+ * and the drawings review preview the same string, and a second implementation
+ * is how a screen starts promising what the file does not deliver. This is the
+ * adapter: attributes in, cell out. Its `problems` are surfaced on those
+ * screens, not in the cell's own column.
+ */
 export function composeDimensions(attributes: ExportAttribute[]): string {
-  return attributes
-    .filter((attribute) => attribute.attrGroup === "dimension")
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((attribute) => {
-      const rendered = renderAttributeValue(attribute);
-      return attribute.label ? `${attribute.label} ${rendered}`.trim() : rendered;
-    })
-    .filter((part) => part !== "")
-    .join("; ");
+  return composeDimensionCell(
+    attributes
+      .filter((attribute) => attribute.attrGroup === "dimension" && attribute.dimensionSlot !== null)
+      .map((attribute) => ({
+        slot: attribute.dimensionSlot as DimensionSlot,
+        value: attribute.value,
+        unit: attribute.unit,
+        state: attribute.state,
+        sortOrder: attribute.sortOrder,
+      })),
+  ).text;
 }
 
 /**
@@ -304,6 +330,11 @@ export const SPECS_SHEET_HEADER = [
   "Run",
   "Group",
   "Label",
+  // The slot a dimension claims. Without it the long-form sheet cannot explain
+  // why the Dimensions cell reads W1900 when this row says 190 — which is the
+  // whole point of a sheet that exists to make a converted figure re-checkable
+  // against its page.
+  "Dimension",
   "Value",
   "Unit",
   "Client material code",
@@ -344,6 +375,7 @@ export function composeWorkbook(scope: ExportScope): Workbook {
           record.runName,
           ATTRIBUTE_GROUP_LABELS[attribute.attrGroup],
           attribute.label,
+          attribute.dimensionSlot === null ? "" : DIMENSION_SLOT_LABELS[attribute.dimensionSlot],
           attribute.value ?? "",
           attribute.unit ?? "",
           attribute.materialCode ?? "",

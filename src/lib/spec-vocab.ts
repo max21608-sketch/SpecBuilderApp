@@ -236,6 +236,92 @@ export function normaliseUnit(raw: unknown): AttributeUnit | null {
   return aliases[value] ?? null;
 }
 
+/**
+ * The five dimensions BWS field 3 can hold, and nothing else.
+ *
+ * Matthew's ruling, 2026-09-15: the cell is written `W*** x D*** x H***mm`,
+ * everything in millimetres with the unit once at the end; seat height appended
+ * as `SH***`; a round item written `Dia.***` IN PLACE OF `W*** x D***`.
+ *
+ * Before this, a dimension carried whatever label a document printed. One real
+ * AP364 armchair page came back with 44 of them, and the Panther specification
+ * sheets add WIDTH SEAT, DEPTH SEAT, WIDTH BACK, DEPTH BACK and ARM HEIGHT on
+ * top of width/depth/height. Composed into one cell that is unreadable and
+ * uncheckable. Every other measurement is still KEPT — as a `note`, with its
+ * label, its value and its unit — it has just stopped claiming a BWS dimension.
+ *
+ * The stored token is the comparison key; `Dia.` is a rendering rule of one
+ * external system and lives in the composer, not here. Comparing dimension
+ * LABELS as strings is the `"sqm"` vs `"m"` failure the
+ * `external-vocabulary-sync` skill is written around: two spellings of one
+ * concept, matching nothing, erroring nowhere.
+ *
+ * Matches `record_attributes_dimension_slot_check` in db/migrations/0011.
+ */
+export const DIMENSION_SLOTS = ["W", "D", "H", "SH", "DIA"] as const;
+export type DimensionSlot = (typeof DIMENSION_SLOTS)[number];
+
+export const DIMENSION_SLOT_LABELS: Record<DimensionSlot, string> = {
+  W: "Width",
+  D: "Depth",
+  H: "Height",
+  SH: "Seat height",
+  DIA: "Diameter",
+};
+
+/**
+ * Returns null — never a guess — for anything not in the vocabulary.
+ *
+ * THE LOOKUP IS EXACT, ON THE WHOLE FOLDED LABEL, AND THAT IS THE POINT. A
+ * substring rule reads `WIDTH SEAT` as a width and overwrites the item's real
+ * width with a seat measurement; it reads `ARM HEIGHT` as a height and
+ * overwrites the item's real height with 520. Both labels are printed verbatim
+ * on the Panther S-100 sheet, beside the width and height it would destroy.
+ *
+ * Note the asymmetry, which looks like a bug and is not: `HEIGHT SEAT` maps to
+ * `SH` because that is where that template prints the seat height Matthew wants,
+ * while `WIDTH SEAT` maps to NOTHING because a seat-only width has no slot. Do
+ * not "make these consistent".
+ */
+export function normaliseDimensionSlot(raw: unknown): DimensionSlot | null {
+  if (typeof raw !== "string") return null;
+  const folded = raw
+    .toLowerCase()
+    .replace(/[ø⌀]/g, "dia")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const aliases: Record<string, DimensionSlot> = {
+    w: "W",
+    width: "W",
+    wide: "W",
+    "overall width": "W",
+    "width overall": "W",
+    d: "D",
+    depth: "D",
+    deep: "D",
+    "overall depth": "D",
+    "depth overall": "D",
+    h: "H",
+    ht: "H",
+    height: "H",
+    high: "H",
+    "overall height": "H",
+    "height overall": "H",
+    sh: "SH",
+    "seat height": "SH",
+    "height seat": "SH",
+    "seat ht": "SH",
+    "seat h": "SH",
+    dia: "DIA",
+    diameter: "DIA",
+  };
+  return aliases[folded] ?? null;
+}
+
+export function isDimensionSlot(value: unknown): value is DimensionSlot {
+  return typeof value === "string" && (DIMENSION_SLOTS as readonly string[]).includes(value);
+}
+
 export function isAttributeState(value: unknown): value is AttributeState {
   return typeof value === "string" && (ATTRIBUTE_STATES as readonly string[]).includes(value);
 }

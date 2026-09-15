@@ -34,6 +34,7 @@ const attribute = (overrides: Partial<ExportAttribute> = {}): ExportAttribute =>
   label: "SOFA",
   value: "Yarn Tessarae YC04158 - 01",
   unit: null,
+  dimensionSlot: null,
   materialCode: null,
   specFieldJsonId: 1,
   state: "confirmed",
@@ -128,31 +129,53 @@ describe("composeRow", () => {
     expect(row[indexOfField(2)]).toBe("Tibor Blob");
   });
 
-  it("composes every dimension into the single Dimensions field", () => {
+  it("composes the dimension slots into the single Dimensions field, in millimetres", () => {
+    // Matthew's ruling, 2026-09-15. This used to read
+    // "Width 190cm; Depth 79cm; Height 72cm" — every label a page printed, in
+    // whatever unit it was drawn in. Every output string is pinned in
+    // tests/lib/dimensions.test.ts; this asserts it reaches cell 3.
     const attributes = [
-      attribute({ attrGroup: "dimension", label: "Width", value: "190", unit: "cm", specFieldJsonId: null, sortOrder: 0 }),
-      attribute({ attrGroup: "dimension", label: "Depth", value: "79", unit: "cm", specFieldJsonId: null, sortOrder: 1 }),
-      attribute({ attrGroup: "dimension", label: "Height", value: "72", unit: "cm", specFieldJsonId: null, sortOrder: 2 }),
+      attribute({ attrGroup: "dimension", dimensionSlot: "W", label: "WIDTH", value: "190", unit: "cm", specFieldJsonId: null, sortOrder: 0 }),
+      attribute({ attrGroup: "dimension", dimensionSlot: "D", label: "DEPTH", value: "79", unit: "cm", specFieldJsonId: null, sortOrder: 1 }),
+      attribute({ attrGroup: "dimension", dimensionSlot: "H", label: "HEIGHT", value: "72", unit: "cm", specFieldJsonId: null, sortOrder: 2 }),
     ];
     const row = composeRow(scope({ attributes }), record(), attributes, []);
-    expect(row[indexOfField(3)]).toBe("Width 190cm; Depth 79cm; Height 72cm");
+    expect(row[indexOfField(3)]).toBe("W1900 x D790 x H720mm");
+  });
+
+  it("leaves a dimension that never got a slot out of the cell rather than guessing", () => {
+    // 0011 cannot store one, so this is a legacy or hand-edited row. It is
+    // still listed long-form on the second sheet — the cell is a summary, the
+    // sheet is the record.
+    const attributes = [
+      attribute({ attrGroup: "dimension", dimensionSlot: "W", label: "WIDTH", value: "1900", unit: "mm", specFieldJsonId: null, sortOrder: 0 }),
+      attribute({ attrGroup: "dimension", dimensionSlot: null, label: "Side view width", value: "790", unit: "mm", specFieldJsonId: null, sortOrder: 1 }),
+    ];
+    expect(composeDimensions(attributes)).toBe("W1900mm");
   });
 
   it("appends the unit exactly once, so a value must never carry its own", () => {
     // renderAttributeValue concatenates value and unit with no separator. That
-    // is correct and deliberate -- but it means a value of "1800mm" with unit
-    // `mm` renders "1800mmmm" straight into a BWS cell. Nothing here can tell
-    // the difference, so the split happens upstream: splitFigureAndUnit() at
-    // staging, and again in the drawings PATCH when a reviewer types one.
-    // This test pins the contract those two rely on.
+    // is correct and deliberate for a material or a finish -- but it means a
+    // value of "1800mm" with unit `mm` renders "1800mmmm" straight into a BWS
+    // cell. Nothing here can tell the difference, so the split happens
+    // upstream: splitFigureAndUnit() at staging, and again in the drawings
+    // PATCH when a reviewer types one. This test pins the contract those rely on.
     expect(renderAttributeValue({ value: "1800", unit: "mm", state: "confirmed" })).toBe("1800mm");
     expect(renderAttributeValue({ value: "1800mm", unit: "mm", state: "confirmed" })).toBe("1800mmmm");
 
+    // A DIMENSION can no longer reach that shape at all, which is a stronger
+    // guarantee than the split upstream: the cell is composed from a parsed
+    // figure, so "1800mm" is not a number and is rendered loudly instead of
+    // being concatenated into "1800mmmm".
     const attributes = [
-      attribute({ attrGroup: "dimension", label: "WIDTH", value: "1800", unit: "mm", specFieldJsonId: null, sortOrder: 0 }),
-      attribute({ attrGroup: "dimension", label: "HEIGHT", value: "1120", unit: "mm", specFieldJsonId: null, sortOrder: 1 }),
+      attribute({ attrGroup: "dimension", dimensionSlot: "W", label: "WIDTH", value: "1800", unit: "mm", specFieldJsonId: null, sortOrder: 0 }),
+      attribute({ attrGroup: "dimension", dimensionSlot: "H", label: "HEIGHT", value: "1120", unit: "mm", specFieldJsonId: null, sortOrder: 1 }),
     ];
-    expect(composeDimensions(attributes)).toBe("WIDTH 1800mm; HEIGHT 1120mm");
+    expect(composeDimensions(attributes)).toBe("W1800 x H1120mm");
+    expect(
+      composeDimensions([attribute({ attrGroup: "dimension", dimensionSlot: "W", value: "1800mm", unit: "mm", specFieldJsonId: null })]),
+    ).toBe('[W "1800mm" — not a number]');
   });
 
   it("exports TBC as TBC, never as a blank", () => {
@@ -209,14 +232,21 @@ describe("composeWorkbook", () => {
   it("lists every attribute long-form so flattening loses nothing", () => {
     const attributes = [
       attribute({ label: "SOFA FEET", value: "Dark tinted wood", materialCode: "WD-01", specFieldJsonId: 4, attrGroup: "finish", sourcePage: 1 }),
-      attribute({ attrGroup: "dimension", label: "Width", value: "190", unit: "cm", specFieldJsonId: null, sortOrder: 1 }),
+      attribute({ attrGroup: "dimension", dimensionSlot: "W", label: "WIDTH", value: "190", unit: "cm", specFieldJsonId: null, sortOrder: 1 }),
     ];
     const workbook = composeWorkbook(scope({ attributes }));
     expect(workbook.specs.rows).toHaveLength(2);
     expect(workbook.specs.rows[0]).toEqual([
-      "P00001-001", "X-100", "Main run", "Finishes", "SOFA FEET", "Dark tinted wood", "", "WD-01",
+      "P00001-001", "X-100", "Main run", "Finishes", "SOFA FEET", "", "Dark tinted wood", "", "WD-01",
       "Main timber finish", "confirmed", "drawings.pdf", "1",
     ]);
+    // The ORIGINAL value and unit, beside the slot — which is what lets a
+    // reviewer check the converted W1900 in cell 3 against a page saying 190.
+    expect(workbook.specs.rows[1]).toEqual([
+      "P00001-001", "X-100", "Main run", "Dimensions", "WIDTH", "Width", "190", "cm", "",
+      "", "confirmed", "drawings.pdf", "1",
+    ]);
+    expect(workbook.specs.header).toHaveLength(13);
   });
 });
 

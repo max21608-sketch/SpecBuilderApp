@@ -26,8 +26,10 @@ import {
   type DrawingBlocker,
   type DrawingResolution,
   type DrawingWarning,
+  type OccupiedSlots,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 
 export type ResolvedItem = {
   id: string;
@@ -38,33 +40,49 @@ export type ResolvedItem = {
 };
 
 /**
- * Which BWS fields are already spoken for, per record.
+ * Which BWS fields and which dimension slots are already spoken for, per record.
  *
  * Read live for the same reason the resolution is: a slot filled by another
  * card a second ago must show as a blocker here, not as a unique-violation 500
  * at confirm.
+ *
+ * Both halves come back together on purpose — 0007 makes a BWS field unique per
+ * record and 0011 does the same for a dimension slot, so a caller that loaded
+ * one and forgot the other would let exactly one of those two collisions
+ * through to the database.
  */
-export async function loadOccupiedFields(projectId: string): Promise<Map<string, Set<string>>> {
+export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlots> {
   const rows = await sql`
-    select a.record_id, a.spec_field_id
+    select a.record_id, a.spec_field_id, a.dimension_slot
     from record_attributes a
     join spec_records r on r.id = a.record_id
-    where r.project_id = ${projectId} and a.status = 'active' and a.spec_field_id is not null
+    where r.project_id = ${projectId}
+      and a.status = 'active'
+      and (a.spec_field_id is not null or a.dimension_slot is not null)
   `;
-  const occupied = new Map<string, Set<string>>();
+  const fields = new Map<string, Set<string>>();
+  const dimensions = new Map<string, Set<DimensionSlot>>();
   for (const row of rows) {
-    const set = occupied.get(String(row.record_id)) ?? new Set<string>();
-    set.add(String(row.spec_field_id));
-    occupied.set(String(row.record_id), set);
+    const recordId = String(row.record_id);
+    if (row.spec_field_id) {
+      const set = fields.get(recordId) ?? new Set<string>();
+      set.add(String(row.spec_field_id));
+      fields.set(recordId, set);
+    }
+    if (isDimensionSlot(row.dimension_slot)) {
+      const set = dimensions.get(recordId) ?? new Set<DimensionSlot>();
+      set.add(row.dimension_slot);
+      dimensions.set(recordId, set);
+    }
   }
-  return occupied;
+  return { fields, dimensions };
 }
 
 /** The registers a drawings screen needs, read once for any number of runs. */
 export async function loadDrawingContext(projectId: string) {
   const [registers, occupied] = await Promise.all([
     loadExtractionRegisters(projectId),
-    loadOccupiedFields(projectId),
+    loadOccupiedSlots(projectId),
   ]);
   return { records: registers.records, occupied };
 }

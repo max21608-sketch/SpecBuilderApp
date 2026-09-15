@@ -127,9 +127,14 @@ describeIfDb("0007 intake model", () => {
     expect(replacement.rows[0].id).toBeTruthy();
   });
 
-  it("allows many dimensions, which compose into one BWS field", async () => {
-    for (const [label, value] of [["Width", "190"], ["Depth", "79"], ["Height", "72"]]) {
-      await addAttribute({ attr_group: "dimension", label: `__QA ${label}`, value, unit: "cm", spec_field_id: null });
+  it("allows many dimensions, which compose into one BWS field — one per slot", async () => {
+    // 0011 narrowed this: three dimensions distinguished only by LABEL is now
+    // an illegal row shape, and that is the point. They are distinguished by
+    // slot, and five of them still compose into json id 3.
+    for (const [slot, value] of [["W", "190"], ["D", "79"], ["H", "72"]]) {
+      await addAttribute({
+        attr_group: "dimension", dimension_slot: slot, label: `__QA ${slot}`, value, unit: "cm", spec_field_id: null,
+      });
     }
     const rows = await client.query(
       `select count(*)::int n from record_attributes where record_id = $1 and attr_group = 'dimension'`,
@@ -138,15 +143,64 @@ describeIfDb("0007 intake model", () => {
     expect(rows.rows[0].n).toBe(3);
   });
 
-  it("refuses a unit on anything but a dimension", async () => {
+  it("refuses a second active value in one dimension slot", async () => {
+    // Its own slot: these tests share one record, so a slot another test filled
+    // would make this pass for the wrong reason.
+    await client.query(`delete from record_attributes where record_id = $1 and dimension_slot = 'SH'`, [recordId]);
+    await addAttribute({ attr_group: "dimension", dimension_slot: "SH", label: "__QA SH", value: "440", unit: "mm", spec_field_id: null });
+    await expect(
+      addAttribute({ attr_group: "dimension", dimension_slot: "SH", label: "__QA SH again", value: "420", unit: "mm", spec_field_id: null }),
+    ).rejects.toThrow(/record_attributes_dimension_slot_key/);
+  });
+
+  it("frees a dimension slot when its occupant is retired", async () => {
+    await client.query(`delete from record_attributes where record_id = $1 and dimension_slot = 'DIA'`, [recordId]);
+    const first = await addAttribute({
+      attr_group: "dimension", dimension_slot: "DIA", label: "__QA DIA", value: "460", unit: "mm", spec_field_id: null,
+    });
+    await client.query(`update record_attributes set status = 'retired', retired_at = now(), retired_by = 'qa' where id = $1`, [
+      first.rows[0].id,
+    ]);
+    const replacement = await addAttribute({
+      attr_group: "dimension", dimension_slot: "DIA", label: "__QA DIA", value: "465", unit: "mm", spec_field_id: null,
+    });
+    expect(replacement.rows[0].id).toBeTruthy();
+  });
+
+  it("refuses a dimension with no slot, and a slot on anything else", async () => {
+    // The biconditional. It is what makes composeDimensionCell total: there is
+    // no such thing as a slotless dimension for it to drop on the floor.
+    await expect(
+      addAttribute({ attr_group: "dimension", label: "__QA Width", value: "190", unit: "cm", spec_field_id: null }),
+    ).rejects.toThrow(/record_attributes_dimension_has_slot/);
+    await expect(addAttribute({ attr_group: "note", dimension_slot: "W", label: "__QA note" })).rejects.toThrow(
+      /record_attributes_dimension_has_slot/,
+    );
+  });
+
+  it("refuses an unknown slot", async () => {
+    await expect(
+      addAttribute({ attr_group: "dimension", dimension_slot: "WIDTH", label: "__QA Width", value: "190", unit: "cm", spec_field_id: null }),
+    ).rejects.toThrow(/record_attributes_dimension_slot_check/);
+  });
+
+  it("lets a NOTE carry a unit, because a measurement outside the five is still a measurement", async () => {
+    // ARM HEIGHT 520mm. 0011 replaced record_attributes_unit_is_dimension for
+    // exactly this: folding "520" and "mm" into one string is what the
+    // extraction prompt forbids the model to do.
+    const note = await addAttribute({ attr_group: "note", label: "__QA ARM HEIGHT", value: "520", unit: "mm" });
+    expect(note.rows[0].id).toBeTruthy();
+  });
+
+  it("still refuses a unit on a material, which has none", async () => {
     await expect(addAttribute({ attr_group: "material", label: "__QA Fabric", unit: "cm" })).rejects.toThrow(
-      /record_attributes_unit_is_dimension/,
+      /record_attributes_unit_is_measurement/,
     );
   });
 
   it("refuses an unknown unit", async () => {
     await expect(
-      addAttribute({ attr_group: "dimension", label: "__QA Width", value: "190", unit: "cms" }),
+      addAttribute({ attr_group: "dimension", dimension_slot: "W", label: "__QA Width", value: "190", unit: "cms" }),
     ).rejects.toThrow(/record_attributes_unit_check/);
   });
 

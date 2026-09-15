@@ -22,11 +22,15 @@ import {
   assertStagedDrawings,
   hasPendingObservations,
   type DrawingItem,
+  type OccupiedSlots,
   type PackCard,
   type SpecFieldEntry,
 } from "@/lib/drawing-document";
 import type { RecordEntry } from "@/lib/spec-document";
 import type { RawDrawingItem } from "@/lib/extraction-schema";
+
+/** A project where nothing is spoken for yet. */
+const NO_OCCUPANCY: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
 
 function record(overrides: Partial<RecordEntry> = {}): RecordEntry {
   return {
@@ -281,7 +285,7 @@ describe("drawingItemBlockers", () => {
 
   it("blocks a card whose code resolves to no record, and says why", () => {
     const item = staged(rawItem());
-    const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-999", [record()]), new Map());
+    const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-999", [record()]), NO_OCCUPANCY);
     expect(blockers[0]?.code).toBe("no_targets");
     expect(blockers[0]?.message).toMatch(/Confirm the BOQ/);
   });
@@ -291,25 +295,25 @@ describe("drawingItemBlockers", () => {
       record({ id: "r-a", runId: "run-main", runName: "Main run" }),
       record({ id: "r-b", runId: "run-main", runName: "Main run" }),
     ];
-    const blockers = drawingItemBlockers(staged(rawItem()), resolveDrawingTargets("X-100", records), new Map());
+    const blockers = drawingItemBlockers(staged(rawItem()), resolveDrawingTargets("X-100", records), NO_OCCUPANCY);
     expect(blockers.some((b) => b.code === "ambiguous_run" && b.message.includes("Main run"))).toBe(true);
   });
 
   it("blocks a dimension with no unit", () => {
     const item = staged(rawItem({ dimensions: [{ labelRaw: "W", valueRaw: "190" }, { labelRaw: "H", valueRaw: "735" }] }));
-    const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), new Map());
+    const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), NO_OCCUPANCY);
     expect(blockers.filter((b) => b.code === "unit_missing")).toHaveLength(2);
   });
 
   it("blocks a value the drawing both states and marks TBC", () => {
     const item = staged(rawItem({ materials: [{ labelRaw: "WOOD", valueRaw: "Dark tinted wood TBC", materialCodeRaw: null }] }));
-    const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), new Map());
+    const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), NO_OCCUPANCY);
     expect(blockers.some((b) => b.code === "no_state")).toBe(true);
   });
 
   it("blocks a BWS field that already has a value on a target record", () => {
     const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Tessarae", materialCodeRaw: null }] }));
-    const occupied = new Map([["rec-1", new Set(["f-com1"])]]);
+    const occupied = { fields: new Map([["rec-1", new Set(["f-com1"])]]), dimensions: new Map() };
     const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), occupied);
     expect(blockers.some((b) => b.code === "slot_taken")).toBe(true);
   });
@@ -321,7 +325,7 @@ describe("drawingItemBlockers", () => {
         materials: [{ labelRaw: "SOFA", valueRaw: "Yarn Tessarae", materialCodeRaw: null }],
       }),
     );
-    expect(drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), new Map())).toEqual([]);
+    expect(drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), NO_OCCUPANCY)).toEqual([]);
   });
 });
 
@@ -475,10 +479,10 @@ describe("stageDrawings units", () => {
     const resolution = resolveDrawingTargets("X-100", [record()]);
 
     const without = stageDrawings([mixed], FIELDS, null, null, null).items[0]!;
-    expect(drawingItemBlockers(without, resolution, new Map()).filter((b) => b.code === "unit_missing")).toHaveLength(2);
+    expect(drawingItemBlockers(without, resolution, NO_OCCUPANCY).filter((b) => b.code === "unit_missing")).toHaveLength(2);
 
     const withDefault = stageDrawings([mixed], FIELDS, null, null, "cm").items[0]!;
-    expect(drawingItemBlockers(withDefault, resolution, new Map()).filter((b) => b.code === "unit_missing")).toHaveLength(0);
+    expect(drawingItemBlockers(withDefault, resolution, NO_OCCUPANCY).filter((b) => b.code === "unit_missing")).toHaveLength(0);
   });
 });
 
@@ -504,7 +508,7 @@ describe("drawingItemWarnings", () => {
 
     // THE POINT: the card still commits. A warning that blocked would put the
     // reviewer back where the project default was meant to get them out of.
-    expect(drawingItemBlockers(item, resolution, new Map())).toHaveLength(0);
+    expect(drawingItemBlockers(item, resolution, NO_OCCUPANCY)).toHaveLength(0);
   });
 
   it("says nothing about a page that reads sensibly", () => {

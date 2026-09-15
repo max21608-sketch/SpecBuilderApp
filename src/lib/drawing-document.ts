@@ -37,10 +37,13 @@
 import { containsPhrase, deferredToSomebody, findRecordsByRef, type RecordEntry, TBC_TOKENS } from "@/lib/spec-document";
 import { normaliseName } from "@/lib/matching";
 import {
+  DIMENSION_SLOT_LABELS,
+  normaliseDimensionSlot,
   normaliseUnit,
   type AttributeGroup,
   type AttributeState,
   type AttributeUnit,
+  type DimensionSlot,
 } from "@/lib/spec-vocab";
 import type { RawDrawingItem } from "@/lib/extraction-schema";
 
@@ -69,6 +72,22 @@ export type DrawingObservation = {
    * it through `unitSourceOf()`, never directly.
    */
   unitSource?: UnitSource;
+  /**
+   * Which of Matthew's five slots this figure fills, or null.
+   *
+   * OPTIONAL for the same reason `unitSource` is: `schemaVersion: 1` documents
+   * are already sitting in `intake_runs.parsed` and must not need rewriting to
+   * be read. Absent and null both mean "no slot yet"; the DB refuses to store a
+   * dimension without one, so the gap is closed by a blocker, not by a guess.
+   */
+  dimensionSlot?: DimensionSlot | null;
+  /**
+   * True only when the slot was read from printed ORDER ("80 x 70 x 90 cm"),
+   * never from a label. The screen badges it, exactly as it badges a guessed
+   * unit, because an assumed W x D x H is the one inference here that the page
+   * did not actually state.
+   */
+  slotSuggested?: boolean;
   specFieldId: string | null;
   state: AttributeState | null;
   stateReason: string | null;
@@ -452,7 +471,23 @@ export type DrawingBlocker =
   | { code: "unit_missing"; message: string; observationId: string }
   | { code: "no_state"; message: string; observationId: string }
   | { code: "empty_value"; message: string; observationId: string }
-  | { code: "slot_taken"; message: string; observationId: string };
+  | { code: "slot_taken"; message: string; observationId: string }
+  | { code: "dimension_slot_missing"; message: string; observationId: string }
+  | { code: "dimension_slot_taken"; message: string; observationId: string }
+  | { code: "dia_conflict"; message: string; observationId: string };
+
+/**
+ * What the target records already carry, read live.
+ *
+ * Both halves travel together so a caller cannot supply one and forget the
+ * other: the BWS field slots (COM 1, Timber Finish 2 …) and the five dimension
+ * slots. They are separate maps because they are separate uniqueness rules in
+ * 0007 and 0011, and a field and a dimension never contend for the same space.
+ */
+export type OccupiedSlots = {
+  fields: Map<string, Set<string>>;
+  dimensions: Map<string, Set<DimensionSlot>>;
+};
 
 /**
  * Computed on every read, never stored.
@@ -465,9 +500,10 @@ export type DrawingBlocker =
 export function drawingItemBlockers(
   item: DrawingItem,
   resolution: DrawingResolution,
-  occupiedFields: Map<string, Set<string>>,
+  occupied: OccupiedSlots,
 ): DrawingBlocker[] {
   const blockers: DrawingBlocker[] = [];
+  const occupiedFields = occupied.fields;
   const targets = targetRecordIds(item, resolution);
   const pending = item.observations.filter((observation) => observation.reviewStatus === "pending");
 
@@ -512,6 +548,29 @@ export function drawingItemBlockers(
         message: "These drawings do not print their units. Choose millimetres or centimetres.",
       });
     }
+    if (observation.attrGroup === "dimension") {
+      // 0011 cannot store a dimension without a slot, so this must be a
+      // sentence on the screen rather than a check-constraint violation at
+      // confirm. Reachable only by editing a row's group to `dimension`
+      // without saying which dimension it is.
+      if (!observation.dimensionSlot) {
+        blockers.push({
+          code: "dimension_slot_missing",
+          observationId: observation.id,
+          message: "Say which dimension this is — width, depth, height, seat height or diameter — or keep it as a note.",
+        });
+      } else {
+        const slot = observation.dimensionSlot;
+        const clash = targets.find((recordId) => occupied.dimensions.get(recordId)?.has(slot));
+        if (clash) {
+          blockers.push({
+            code: "dimension_slot_taken",
+            observationId: observation.id,
+            message: `One of these records already has a ${DIMENSION_SLOT_LABELS[slot].toLowerCase()} from another page. Retire that one, or make this a note.`,
+          });
+        }
+      }
+    }
     if (observation.specFieldId && observation.attrGroup !== "dimension") {
       // Pre-checked so an occupied slot is a sentence the reviewer can act on,
       // rather than a unique-violation 500 from the database.
@@ -541,6 +600,47 @@ export function drawingItemBlockers(
     } else {
       claimed.set(observation.specFieldId, observation.id);
     }
+  }
+
+  // The same rule for dimension slots: two widths in one card satisfy the
+  // live check above (neither is written yet) and collide at insert.
+  const claimedSlots = new Map<DimensionSlot, string>();
+  for (const observation of pending) {
+    if (observation.attrGroup !== "dimension" || !observation.dimensionSlot) continue;
+    if (claimedSlots.has(observation.dimensionSlot)) {
+      blockers.push({
+        code: "dimension_slot_taken",
+        observationId: observation.id,
+        message: `Two of these are the ${DIMENSION_SLOT_LABELS[observation.dimensionSlot].toLowerCase()}. Change one, or make it a note.`,
+      });
+    } else {
+      claimedSlots.set(observation.dimensionSlot, observation.id);
+    }
+  }
+
+  // Dia. REPLACES W x D, so a record carrying both would export a cell that
+  // silently drops two real measurements. Cross-row, so no check constraint
+  // can hold it — it is caught here, against the card AND what the target
+  // records already carry, and named on the export cell too.
+  const diaHere = pending.find((o) => o.attrGroup === "dimension" && o.dimensionSlot === "DIA");
+  const squareHere = pending.filter((o) => o.attrGroup === "dimension" && (o.dimensionSlot === "W" || o.dimensionSlot === "D"));
+  const squareThere = targets.some(
+    (recordId) => occupied.dimensions.get(recordId)?.has("W") || occupied.dimensions.get(recordId)?.has("D"),
+  );
+  const diaThere = targets.some((recordId) => occupied.dimensions.get(recordId)?.has("DIA"));
+  if (diaHere && (squareHere.length > 0 || squareThere)) {
+    blockers.push({
+      code: "dia_conflict",
+      observationId: diaHere.id,
+      message: "This item has a diameter and a width or depth. A round item is written Dia. instead of W x D — remove one.",
+    });
+  }
+  if (!diaHere && diaThere && squareHere.length > 0) {
+    blockers.push({
+      code: "dia_conflict",
+      observationId: squareHere[0]!.id,
+      message: "One of these records already has a diameter. A round item is written Dia. instead of W x D — make this a note, or retire the diameter.",
+    });
   }
 
   return blockers;
@@ -779,10 +879,25 @@ export function stageDrawings(
         pageGuess: unitGuess,
         projectDefault: projectDefaultUnit,
       });
+      // WHICH OF THE FIVE SLOTS, OR NONE — and "none" is not a failure.
+      //
+      // A label the vocabulary recognises gives the slot. Everything else stays
+      // exactly as the page wrote it and becomes a NOTE: `ARM HEIGHT 520mm`
+      // keeps its label, its figure and its unit, and simply stops claiming a
+      // BWS dimension. So does an unlabelled figure off a shop drawing, where
+      // the page genuinely did not say which measurement it is — the reviewer
+      // promotes it to a slot on the review screen, seeing the page.
+      //
+      // The alternative was to stage it as a slotless dimension and block. That
+      // reads as an error for the commonest case on a drawing set, and 0011
+      // cannot store one anyway.
+      const slot = normaliseDimensionSlot(dimension.labelRaw);
       observations.push({
         id: nextId(),
         version: 1,
-        attrGroup: "dimension",
+        attrGroup: slot ? "dimension" : "note",
+        dimensionSlot: slot,
+        slotSuggested: false,
         labelRaw: dimension.labelRaw ?? `Dimension ${dimensionNo}`,
         valueRaw: dimension.valueRaw,
         materialCodeRaw: null,
