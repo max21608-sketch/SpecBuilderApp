@@ -70,10 +70,16 @@ manual edits to the same records.
 ## One-off maintenance passes
 
 ```bash
-npm run db:backfill-answers                      # dry run -- writes nothing
-npm run db:backfill-answers -- --apply
-npm run db:backfill-answers -- --project=<uuid>
+npx tsx --env-file=.env.local db/backfill-answers.ts             # dry run
+npx tsx --env-file=.env.local db/backfill-answers.ts --apply
+npx tsx --env-file=.env.local db/backfill-answers.ts --project=<uuid>
 ```
+
+The env file is named on every invocation, exactly like the scripts above it.
+`npm run db:backfill-answers` is the discoverable name and fails without
+`DATABASE_URL` — `npm run` cannot pass `--env-file` through to the runtime, and
+baking one in would make the target database implicit, which is the thing this
+whole section is arranged to prevent.
 
 Fills checklist answers from `record_attributes` that were confirmed before
 `confirm-drawings` started carrying them through. Ran on sandbox 2026-09-15:

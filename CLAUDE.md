@@ -28,7 +28,7 @@ one agent.
 | `npm run db:migrate` | applies every pending file in sorted order, ledger-backed |
 | `npm run db:seed` | re-seeds the requirement matrix and vocabularies |
 | `npm run db:backup` · `npm run db:restore` | backups write **outside** the repo by default |
-| `npm run db:backfill-answers` | one-off: fills checklist answers from attributes confirmed before promotion existed. Dry run unless `--apply`; safe to re-run |
+| `npx tsx --env-file=.env.local db/backfill-answers.ts` | one-off: fills checklist answers from attributes confirmed before promotion existed. Dry run unless `--apply`; safe to re-run |
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
 
 Tests run in three tiers — pure / db-gated / route. The database tiers skip
@@ -374,8 +374,8 @@ A dimension does not reach its field by `spec_field_id` — it carries a SLOT,
 and all five compose into BWS field 3 (`json_id`, never the column letter).
 An uncategorised record has no questions, fills nothing, and that is not a
 failure. Setting a category later creates the answer rows `missing`, and only
-the next drawing confirm fills them — or `npm run db:backfill-answers`, which
-runs these same functions over attributes already on record.
+the next drawing confirm fills them — or `db/backfill-answers.ts`, which runs
+these same functions over attributes already on record.
 
 `source_id` records WHICH document a value came from, and for a composed cell
 that is the last contributing slot: a cell built from three drawings has no
@@ -694,7 +694,7 @@ result:
   `requirement_aliases` and attribute matching, which is a seeding job from
   verified wording, not code.
 - **The existing attributes were back-filled on 2026-09-15** by
-  `npm run db:backfill-answers` — 11 answers across five records, sandbox.
+  `db/backfill-answers.ts` — 11 answers across five records, sandbox.
   The script is dry-run by default, prints the resolved host before acting,
   refuses production without `--yes-production`, and is safe to re-run: it
   calls the SAME `planAnswerFills`/`applyAnswerFills` the confirm route calls,

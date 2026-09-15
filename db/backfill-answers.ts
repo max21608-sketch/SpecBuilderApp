@@ -2,9 +2,15 @@
 // A ONE-OFF pass: fill checklist answers from attributes that were confirmed
 // before anything carried them through.
 //
-//   npm run db:backfill-answers                 -- dry run, writes nothing
-//   npm run db:backfill-answers -- --apply      -- writes
-//   npm run db:backfill-answers -- --project=<uuid>
+//   npx tsx --env-file=.env.local db/backfill-answers.ts            dry run
+//   npx tsx --env-file=.env.local db/backfill-answers.ts --apply    writes
+//   npx tsx --env-file=.env.local db/backfill-answers.ts --project=<uuid>
+//
+// The env file is named on every invocation, like every other db/ script and
+// for the same reason: it is the line that says WHICH DATABASE this is about
+// to touch, and making it implicit is how a maintenance pass finds production
+// by accident. `npm run db:backfill-answers` is a name, not a shortcut past
+// that -- it fails without DATABASE_URL, deliberately.
 //
 // ============================================================================
 // WHY THIS EXISTS AND WHY IT IS NOT A MIGRATION.
@@ -36,12 +42,17 @@ const DATABASE_ENVIRONMENTS = ["sandbox", "production"];
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
-  console.error("DATABASE_URL is not set. Run with: node --env-file=.env.local ...");
+  // The exact command, not a shape to work out. Whoever hits this line has
+  // just typed something that did not work.
+  console.error("DATABASE_URL is not set. Run with:");
+  console.error("  npx tsx --env-file=.env.local db/backfill-answers.ts");
+  console.error("Add --apply to write; without it this is a dry run.");
   process.exit(1);
 }
 const environment = process.env.DATABASE_ENVIRONMENT ?? "";
 if (!DATABASE_ENVIRONMENTS.includes(environment)) {
   console.error(`DATABASE_ENVIRONMENT must be one of: ${DATABASE_ENVIRONMENTS.join(", ")}.`);
+  console.error("Set it in the same env file as DATABASE_URL, so this script knows which database it is about to touch.");
   process.exit(1);
 }
 let host = "unknown host";
@@ -89,6 +100,8 @@ try {
   let wouldWrite = 0;
   let written = 0;
   let untouched = 0;
+  let unchanged = 0;
+  let rewritten = 0;
 
   for (const record of records.rows) {
     const attributeRows = await client.query(
@@ -121,7 +134,7 @@ try {
       // uses, so the dry run cannot promise more than the apply delivers.
       for (const fill of fills) {
         const eligible = await client.query(
-          `select a.id, a.state
+          `select a.id, a.state, a.value
              from spec_answers a
              join requirements q on q.id = a.requirement_id
              left join spec_fields f on f.id = q.spec_field_id
@@ -135,8 +148,16 @@ try {
               and ($3::uuid is null or q.spec_field_id = $3::uuid)`,
           [record.id, fill.jsonId, fill.specFieldId],
         );
-        if (eligible.rows.length > 0) {
-          wouldWrite += eligible.rows.length;
+        // ELIGIBLE is not the same as CHANGED. After a pass has run, its own
+        // answers stay eligible -- that is what makes recomposition work when
+        // a later drawing supplies another slot -- so counting eligibility
+        // would report 11 answers moving on a re-run that changes nothing.
+        const changing = eligible.rows.filter(
+          (row) => String(row.value ?? "") !== fill.value || String(row.state) !== fill.state,
+        );
+        unchanged += eligible.rows.length - changing.length;
+        if (changing.length > 0) {
+          wouldWrite += changing.length;
           console.log(`  ${label}`);
           console.log(`    ${fill.state.toUpperCase().padEnd(9)} ${fill.value}`);
         }
@@ -165,10 +186,33 @@ try {
       let count = 0;
       const landed: typeof fills = [];
       for (const fill of fills) {
+        // What the answer says NOW, so the log can separate a real change from
+        // an identical rewrite -- the same distinction the dry run makes. A
+        // re-run rewrites every eligible answer, and reporting 11 written when
+        // one changed is the third version of the misreport this script keeps
+        // attracting.
+        const before = await client.query(
+          `select a.value, a.state
+             from spec_answers a
+             join requirements q on q.id = a.requirement_id
+             left join spec_fields f on f.id = q.spec_field_id
+            where a.record_id = $1 and a.revision_no = 0
+              and ($2::int is null or f.json_id = $2::int)
+              and ($3::uuid is null or q.spec_field_id = $3::uuid)`,
+          [record.id, fill.jsonId, fill.specFieldId],
+        );
+        const differs = before.rows.some(
+          (row) => String(row.value ?? "") !== fill.value || String(row.state) !== fill.state,
+        );
+
         // No fallback run: every fill carries the document its value came from.
         const moved = await applyAnswerFills(txn, String(record.id), null, actor, [fill]);
-        count += moved;
-        if (moved > 0) landed.push(fill);
+        if (moved > 0 && differs) {
+          count += moved;
+          landed.push(fill);
+        } else if (moved > 0) {
+          rewritten += moved;
+        }
       }
       await client.query("commit");
       if (count > 0) {
@@ -187,9 +231,15 @@ try {
   console.log(`Records with nothing promotable: ${untouched}`);
   console.log(`Answers planned from attributes: ${planned}`);
   if (apply) {
-    console.log(`Answers written: ${written}`);
+    console.log(`Answers CHANGED: ${written}`);
+    if (rewritten > 0) {
+      console.log(`Answers already holding this value, rewritten identically: ${rewritten}`);
+    }
   } else {
-    console.log(`Answers a run would move: ${wouldWrite}`);
+    console.log(`Answers a run would CHANGE: ${wouldWrite}`);
+    if (unchanged > 0) {
+      console.log(`Answers already holding this value: ${unchanged} (a re-run would rewrite them identically)`);
+    }
     console.log("\nDRY RUN — nothing was written. Re-run with --apply to write.");
   }
 } finally {
