@@ -490,6 +490,70 @@ From the review of 2026-09-14, circulated by Steve, and confirmed by the user on
     a value. Raw rows stay in `docs/docs for building/` — the repo commits
     schema, never rows.
 
+## Decisions taken 2026-09-15 (Matthew's spec grid, migration 0011)
+
+Matthew circulated a tidied field grid with worked example rows on 2026-09-15,
+alongside the Panther pack. The blocks and formatting rules are in
+`docs/bws-spec-grid.md`; the reasoning for what changed in the app is here.
+
+67. **A dimension is one of five named slots — W, D, H, SH, Dia — and nothing
+    else.** It used to carry whatever label a document printed. That is not a
+    worry, it is a measured output: one AP364 armchair page returned 44 figures,
+    and the Panther specification sheets label five more of them WIDTH SEAT,
+    DEPTH SEAT, WIDTH BACK, DEPTH BACK and ARM HEIGHT. Composed into BWS field 3
+    that produced a cell nobody could read and nobody could check against a
+    page. The user's words on being shown it: "we don't need endless dimensions."
+68. **`normaliseDimensionSlot` matches the WHOLE folded label, never a
+    substring, and that is the load-bearing line in the change.** A substring
+    rule reads `WIDTH SEAT` as a width and overwrites the item's real width with
+    a seat measurement; it reads `ARM HEIGHT` as a height and overwrites the
+    real height with 520. Both are printed on the S-100 sheet beside the values
+    they would destroy. The asymmetry that follows looks like a bug and is not:
+    `HEIGHT SEAT` maps to `SH` because that is where the template prints the
+    seat height, while `WIDTH SEAT` maps to nothing because a seat-only width
+    has no slot. The sandbox's own QA rows made the same point independently —
+    they were labelled `Front view width` and `Side view width`, and in a side
+    elevation the horizontal dimension is the DEPTH.
+69. **Every other measurement is kept as a NOTE, intact — which is why
+    `record_attributes_unit_is_dimension` had to be replaced.** `ARM HEIGHT
+    520mm` keeps its label, figure, unit, source run and page, and still prints
+    on the export's long-form sheet; it has only stopped claiming a BWS
+    dimension. The old constraint forbade a unit on a note, so the alternative
+    was folding "520" and "mm" into one string — the exact thing
+    `src/lib/anthropic.ts` tells the MODEL never to do. `0011` replaces it with
+    `record_attributes_unit_is_measurement`; a material still cannot carry one.
+    Found the hard way: the first run of `0011` failed on a real QA row because
+    it demoted the rows before swapping the constraint. The `begin; … commit;`
+    wrapper rolled the whole file back, which is what that wrapper is for.
+70. **Round is inferred from the `Dia` slot being filled; there is no shape
+    flag.** A flag is a second source of truth that can disagree with the data,
+    and it is another decision per record. `Dia.` together with a `W` or `D` is
+    a CONFLICT — cross-row, so no check constraint can express it and a trigger
+    would fire mid-fan-out naming a row the reviewer never saw. It is a computed
+    blocker and a named problem on the cell, like every other blocker here.
+71. **The composer refuses to emit a number it could not derive.** A figure with
+    no unit, or a value like "approx 720-740", is rendered verbatim outside the
+    millimetre group in a bracket saying why. A guessed conversion looks exactly
+    like a real measurement, and nothing downstream would ever question it. Loud
+    beats tidy. The cell is a SUMMARY; the long-form sheet still carries every
+    original value, unit and page — and now the slot too, which is what makes a
+    converted `W1900` re-checkable against a page that says 190.
+72. **`0011` half-lifts `0007`'s slot-uniqueness exemption.**
+    `record_attributes_field_slot_key` exempted dimensions because many compose
+    into one field — still true, five of them still do. But with a fixed slot
+    set, "one active W per record" is enforceable, and a second drawing page
+    adding a second W is precisely the silent overwrite that index exists to
+    prevent. The field index is untouched; a slot index sits beside it.
+    **Known risk, recorded rather than discovered later:** a nest of three
+    tables, or a pair of bedsides, quoted as ONE BOQ line has three widths. The
+    index refuses that and the extras land as notes — Still open 21.
+73. **The grid's 36-field subset is presentation, not schema.** Applying it to
+    the export file would be the erasing case decision 52 exists to prevent: a
+    BWS import replaces rather than merges, so a 36-column file wipes the other
+    73. It drives how the app's own screens group and order fields, and every
+    seeded field stays available everywhere — a field that cannot be selected is
+    a spec value that cannot be recorded, and nothing anywhere would say so.
+
 ## Still open
 
 Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
@@ -582,6 +646,93 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
     Two consequences: no bulk ingest until a precedence rule exists, and every
     spec value must carry the document *and revision* it came from — a value
     whose source cannot be named is a value nobody can re-check.
+    **First hard evidence, 2026-09-15:** the Panther specification sheets state
+    a precedence rule in their own body text — the signed shop drawings and the
+    approved samples take precedence over the spec sheets. That is one pack's
+    rule, printed on the pack, not a general one; it is a starting point for the
+    rule this item asks for rather than the rule itself.
+
+Observed 2026-09-15, from Matthew's spec grid. See `docs/bws-spec-grid.md`.
+
+14. **`job_client_item_reference` — does it exist in BWS, and where?** Matthew
+    added the column to his grid at position B and says it already exists in
+    BWS, to be used for the client item code. It appears nowhere in our captured
+    109 columns nor in `docs/docs for building/BWS Job Spec Fields.csv`. Its
+    snake_case spelling matches `export_to_public_website` and
+    `name_for_public_website`, the only other snake_case names in the layout and
+    both id-less job columns — so "BWS has it and our header capture is stale"
+    is at least as likely as "it is his own name for something". **No 110th
+    column was added**: his sheet is his own re-ordering, so a position in it is
+    not evidence of a position in BWS, and a header BWS does not recognise
+    either fails the import or is silently ignored — the silent case being
+    worse, because we would believe we had sent the client's code. The client
+    item reference is already modelled as a `spec_record_refs` row with
+    `ref_system = 'boq_code'` and reaches the export as `Client Code` (136).
+    Needs from Matthew: the exact header and position in a fresh export, whether
+    it carries a json id, and whether the client's item code belongs there
+    rather than in `Client Code` — **his job block omits `Client Code`
+    entirely**, which is a hint it might.
+15. **Does column A `Id` mean the export should ever become an import file?**
+    Matthew's grid keeps `Id` and `Job Number` and he notes `Id` is "important
+    for BWS to know where to put the info when we upload it, post sale".
+    `CLAUDE.md` lists a BWS *import* file carrying job numbers as explicitly
+    excluded, and the export is deliberately a REVIEW file with neither value,
+    because this app has never had BWS access and does not know them. **This is
+    not a small question**: an importable file is one step from a code path that
+    writes to BWS, which is a hard invariant. Keeping `Id` in a tidy-up
+    spreadsheet is not a request to build one. Confirm the intent before
+    anything reads it as one.
+16. **"We also need a field for free text" — which field?** From Matthew's
+    email. `Upholstery free text` (267) is in his grid and is upholstery-only;
+    `Purchasing Notes` (24) is in the register and not in his grid; `Hidden
+    Notes` (234) is in CJ–DE, not seeded, and reads as internal. His cabinetry
+    block has twelve structured fields and no prose field at all, so "a
+    cabinetry equivalent of 267" is the likeliest reading. Nothing was invented:
+    a `note`-group attribute with no `spec_field_id` already is free text
+    against an item with its source page, and it reaches the record screen and
+    the export's second sheet but **not** the 109-column jobs sheet. Needs one
+    sentence from him naming the BWS column.
+17. **Two columns in the grid's upholstery-build block have a colour, a
+    position, no header and no id.** They were kept and colour-blocked
+    deliberately, so they mean something. Nothing in the app can act on them
+    until they are named. They may be the answer to item 16.
+18. **`Timber Finish 1` / `Metal Finish 1` vs `Main timber finish` / `Main metal
+    finish`.** Our export constant and seed both carry the `Main …` spellings,
+    verbatim from the export header. `docs/docs for building/BWS-spec-system-reference.md`
+    independently records the BWS *screen* showing `Timber Finish 1`, and the
+    boilerplate capture of 2026-09-15 calls the same pair a judgement rename —
+    so this reads as a UI-label vs export-header difference, not a rename. The
+    ids match, which is the only key that matters. **Do not "fix" the names:** a
+    tidied header is a column BWS will not recognise on import. Confirm, then
+    decide whether the app should show the screen label beside the export name.
+19. **Multi-COM overflow past COM 3.** Matthew raised it himself: "We have one
+    for required, but only one so multi COM items would need more fields."
+    `FABRIC_SLOTS` is exactly three and `record_attributes` is unique on
+    `(record_id, spec_field_id)`, so a fourth fabric on one item has nowhere to
+    go and the reviewer gets a duplicate-slot blocker with no resolution. **What
+    BWS does with a fourth COM is unknown** — a free-text field, a split job, or
+    nothing. Do not invent slots 4 and 5. Blocking, and saying why, is the right
+    failure while it is unknown.
+20. **Nothing re-pulls the BWS export header row, and item 14 is the first
+    concrete symptom.** The guard test compares `BWS_EXPORT_COLUMNS` against
+    `db/seed/0001_spec_fields.sql`; both are this repo's copies and can be stale
+    together. `spec_fields.synced_at` is written by the seed and read by
+    nothing. The `external-vocabulary-sync` skill's re-sync loop — import the
+    current list, produce an added/removed/renamed diff, a human reviews it,
+    apply as a migration — has never been run, because nobody can log into BWS
+    (item 6). This is item 3's *how* becoming urgent.
+21. **One active W per record may be too strict.** Observed 2026-09-15 while
+    writing `0011`. A nest of three tables, or a pair of bedsides, quoted as ONE
+    BOQ line legitimately has three widths; the new unique index refuses that
+    and the extras land as notes. Nothing in the Panther pack exercises it —
+    every line there is a single item — so this is untested either way. **The
+    highest-risk assumption in the dimension model.** Ask whether a
+    multiple-item BOQ line is real here before the pilot meets one.
+22. **Two details of Matthew's dimension ruling he has not shown.** The `mm`
+    spacing — his rule says `H***mm` and his own worked example says `H1005 mm`;
+    pinned to no space. And a slot marked TBC with no figure at all, pinned as
+    `W TBC x D560 x H1005mm`; he has only shown the inline form `W1520 TBC`.
+    Both settle in a word and neither blocks anything.
 
 ## Running agents in parallel
 

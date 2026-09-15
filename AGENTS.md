@@ -83,11 +83,22 @@ Each of these is a trap, not a preference.
   is silently wrong.
 - **Client ref is the pre-sale primary key** (`SX11A`, `FU-209-15`) — a modelled
   field, not free text. One client ref can split into several BWS jobs.
-- **A drawing dimension without a printed unit gets NO unit.** The AP364 pages
-  mix centimetres and millimetres and state neither. A wrong unit reads as a
-  real measurement and nothing downstream questions it, so `suggestUnit` offers
-  one only when every figure on the page agrees, and a blank one blocks the
-  card.
+- **A drawing dimension's unit is never inferred from its size.** The AP364
+  pages mix centimetres and millimetres and state neither. A wrong unit reads as
+  a real measurement and nothing downstream questions it, so the unit resolves
+  in one fixed order and stops: **printed on the page** (the Panther spec sheets
+  do print it), then **the page's own figures agreeing** (`suggestUnit`, which
+  abstains on a mixed page), then **`projects.default_dimension_unit`**, then
+  nothing — and nothing still blocks the card. A project is not more
+  authoritative about a page than the page is, which is why the default is last.
+- **A dimension is one of five slots — W, D, H, SH, Dia — and nothing else.**
+  `0011` makes `attr_group = 'dimension'` *mean* that. Everything else a
+  document measures (`ARM HEIGHT`, `WIDTH SEAT`, an unlabelled figure off a shop
+  drawing) is kept as a **note**, with its label, figure and unit intact.
+  `normaliseDimensionSlot` matches the whole folded label, **never a
+  substring**: a substring rule maps `WIDTH SEAT` onto the real width and
+  `ARM HEIGHT` onto the real height, and both labels are printed beside the
+  values they would destroy.
 
 ## The data model
 
@@ -130,6 +141,36 @@ Invariants that are not obvious from reading the code, and that a
 reasonable-looking change breaks silently. **Read the named files before
 changing the behaviour they govern.** Add to this section whenever you discover
 a constraint the hard way — the entry is worth more than the fix.
+
+### The field grid is a screen layout, never a file layout
+
+`docs/bws-spec-grid.md`, `src/lib/dimensions.ts`, `src/lib/bws-export.ts`
+
+Matthew's grid re-orders the 109 export columns into colour blocks and shows
+only the fields one project needs. It governs how screens group fields, and it
+is **not** a description of the file. Applying it to the export — reordering the
+columns, or emitting only the 36 — produces an import that wipes the 73 it left
+out: the same trap as a filtered export, on the most dangerous file in the
+product. The blocks therefore never *filter*; a field outside the grid still
+appears, because a field nobody can select is a spec value nobody can record.
+
+The one thing the grid does govern is **how a value is written**, and the
+dimension rule is the load-bearing one: `W*** x D*** x H***mm`, millimetres,
+unit once at the end, `SH***` appended, `Dia.***` replacing `W x D` on a round
+item. `composeDimensionCell` is the single implementation — the export, the
+record screen and the drawings review all call it, because a second one is how a
+screen starts promising what the file does not deliver.
+
+It **refuses to emit a number it could not derive**. A figure with no unit, or a
+value like "approx 720-740", renders verbatim outside the millimetre group in a
+bracket saying why. A guessed conversion looks exactly like a real measurement.
+The cell is a SUMMARY; the long-form sheet carries every original value, unit,
+slot and page, which is what makes a converted `W1900` re-checkable against a
+page that says 190.
+
+`Dia.` beside a `W` or `D` is a **conflict**, caught as a computed blocker and
+named on the cell — cross-row, so no check constraint can hold it and a trigger
+would fire mid-fan-out naming a row the reviewer never saw.
 
 ### The spec record and its client ref
 
@@ -407,6 +448,7 @@ in the UK.
 | Which deployment is which; the two naming traps | `docs/environments.md` |
 | Incident triage, recovery, rollback | `docs/recovery.md` |
 | External integrations: scope, setup, activation | `docs/integration.md` |
+| The BWS field grid: blocks, order, and how each field is written | `docs/bws-spec-grid.md` |
 | Releases, dated decisions, what is still open | `docs/plans/README.md` |
 | Migrations, seeds, backups, restores | `db/README.md` |
 | Chassis provenance and how to start another app | `docs/kit/` |
@@ -517,10 +559,22 @@ getting a tender pack in, staged, reviewed and out again:
 - **Category no longer blocks intake.** `PATCH /api/records/[id]` sets one
   afterwards and creates the answer rows with it.
 
+**Built 2026-09-15, dimension slots (`0011`).** Matthew's grid ruled what BWS
+field 3 contains, so a dimension is now one of five slots — W, D, H, SH, Dia —
+composed into `W1900 x D790 x H720 x SH440mm` by `src/lib/dimensions.ts`.
+Everything else a document measures is kept as a note with its unit intact,
+which is why `record_attributes_unit_is_dimension` was replaced. Blocks and
+formatting rules: `docs/bws-spec-grid.md`. Pushed to staging; **not yet
+exercised in the app by anyone**.
+
 **Outstanding — judgement, not code.**
 
 - **Nobody has used any of this.** The four checks pass with the database tier
   running; human acceptance is outstanding on every screen.
+- **The drawings review screen has no slot picker yet.** Staging routes a
+  labelled figure to its slot and everything else to a note, so a reviewer
+  cannot currently promote an unlabelled shop-drawing figure to a width. That is
+  the common case on the Panther drawing set, and it blocks step 2 of M8.
 - **No real drawing set has been through the model.** The prompts and schemas
   are written against the AP364 seating drawings but only synthetic fixtures
   have exercised them. One real extraction, compared against its pages by eye —
