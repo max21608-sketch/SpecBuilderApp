@@ -25,7 +25,8 @@ import {
   type StagedSpecDocument,
 } from "@/lib/spec-document";
 import { ANSWER_STATES, ATTRIBUTE_GROUPS, ATTRIBUTE_STATES, ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
-import { assertBoqV2 } from "@/lib/boq-import";
+import { assertBoqDocument } from "@/lib/boq-import";
+import { reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
 import {
   assertStagedDrawings,
   splitFigureAndUnit,
@@ -430,8 +431,80 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // No matching here. Suggestions were computed and stored when the file was
   // parsed, so the reviewer sees exactly what confirm will write. Recomputing
   // on read would let the two drift apart between the screen and the commit.
-  const parsed = run.parsed ? assertBoqV2(run.parsed) : null;
-  return json({ ok: true, import: { ...run, parsed }, categories });
+  const parsed = run.parsed ? assertBoqDocument(run.parsed) : null;
+
+  // The runs this bill could be a revision OF, and — for a sheet that names
+  // one — how its lines line up against that run's records.
+  //
+  // Computed on READ rather than stored, which is the opposite of the line
+  // suggestions above, and deliberately: a suggestion is a proposal the
+  // reviewer edits and the confirm writes, so it has to be frozen. A
+  // reconciliation is a VIEW of live records, and those move — a record
+  // retired or re-categorised since the page loaded must show as it is now.
+  // What the confirm writes is the reviewer's stored `replaces`, never this.
+  const runs = await sql`
+    select r.id, r.name, r.status, r.boq_revision, r.boq_date,
+           (select count(*)::int from spec_records x where x.run_id = r.id and x.status = 'active') as record_count
+    from spec_runs r
+    where r.project_id = ${run.project_id} and r.status = 'active'
+    order by r.sort_order, r.created_at
+  `;
+
+  const reconciliation: Record<number, unknown> = {};
+  if (parsed) {
+    for (const [sheetIndex, sheet] of parsed.sheets.entries()) {
+      const replacesRunId = sheet.replacesRunId ?? null;
+      if (!replacesRunId) continue;
+      const recordRows = await sql`
+        select r.id, r.version, r.record_no, r.item_description, r.product_reference, r.qty,
+               r.designer, r.area, r.boq_category, p.bws_project_number,
+               coalesce((select array_agg(x.ref_value order by x.ref_value)
+                           from spec_record_refs x
+                          where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as codes,
+               (select count(*)::int from record_attributes a where a.record_id = r.id and a.status = 'active') as attribute_count,
+               exists (select 1 from attachments at
+                        where at.entity_type = 'spec_records' and at.entity_id = r.id and at.kind = 'item_image') as has_image,
+               (select count(*)::int from spec_answers a
+                 where a.record_id = r.id and a.revision_no = 0 and a.state <> 'missing') as settled_answers
+        from spec_records r
+        join projects p on p.id = r.project_id
+        where r.run_id = ${replacesRunId} and r.status = 'active'
+        order by r.record_no
+      `;
+      const existing: ExistingRecord[] = recordRows.map((row) => ({
+        id: String(row.id),
+        version: Number(row.version),
+        recordNo: Number(row.record_no),
+        label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+        itemDescription: String(row.item_description),
+        productReference: row.product_reference === null || row.product_reference === undefined ? null : String(row.product_reference),
+        qty: row.qty === null || row.qty === undefined ? null : Number(row.qty),
+        designer: row.designer === null || row.designer === undefined ? null : String(row.designer),
+        area: row.area === null || row.area === undefined ? null : String(row.area),
+        boqCategory: row.boq_category === null || row.boq_category === undefined ? null : String(row.boq_category),
+        codes: (row.codes as string[] | null)?.map(String) ?? [],
+        attributeCount: Number(row.attribute_count),
+        hasImage: Boolean(row.has_image),
+        settledAnswers: Number(row.settled_answers),
+      }));
+      const lines: RevisedLine[] = sheet.lines.map((line) => ({
+        index: line.index,
+        lineNo: line.lineNo,
+        code: line.code,
+        itemDescription: line.itemDescription,
+        productReference: line.productReference,
+        qty: line.qty,
+        designer: line.designer,
+        area: line.area,
+        boqCategory: line.boqCategory,
+        ignored: line.ignored,
+        replaces: line.replaces ?? null,
+      }));
+      reconciliation[sheetIndex] = { ...reconcileSheet(lines, existing), records: existing };
+    }
+  }
+
+  return json({ ok: true, import: { ...run, parsed }, categories, runs, reconciliation });
 }
 
 // ---- the BOQ's positional autosave -----------------------------------------
@@ -440,7 +513,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 // rewrite races another tab's autosave and silently reverts it.
 async function patchBoqLine(
   id: string,
-  body: { sheetIndex?: unknown; index?: unknown; categoryId?: unknown; ignored?: unknown; runName?: unknown },
+  body: {
+    sheetIndex?: unknown;
+    index?: unknown;
+    categoryId?: unknown;
+    ignored?: unknown;
+    runName?: unknown;
+    replacesRunId?: unknown;
+    replaces?: unknown;
+  },
   actor: string,
 ): Promise<Response> {
   const sheetIndex = typeof body.sheetIndex === "number" ? body.sheetIndex : null;
@@ -451,6 +532,11 @@ async function patchBoqLine(
   // the same way and merged into the live row, never written back wholesale.
   if (index === null) {
     const patch: Record<string, unknown> = {};
+    // Changing what a sheet revises invalidates every pairing under it: a line
+    // paired to a record on the OLD run would otherwise be written into the
+    // new one. The confirm refuses that too, but a pairing left on screen that
+    // the confirm will reject is a trap rather than a safeguard.
+    let clearPairings = false;
     if (typeof body.runName === "string") {
       const name = body.runName.trim();
       if (name === "") return json({ ok: false, error: "A run needs a name." }, 400);
@@ -460,6 +546,16 @@ async function patchBoqLine(
     if (typeof body.ignored === "boolean") {
       patch.ignored = body.ignored;
       patch.ignoredReason = body.ignored ? "Ignored by the reviewer." : null;
+    }
+    // Which run this sheet REVISES, or null for a new run. Stored rather than
+    // inferred at confirm: pairing a revised bill to an existing run is
+    // matching, and the confirm writes what the reviewer approved.
+    if (body.replacesRunId !== undefined) {
+      if (body.replacesRunId !== null && typeof body.replacesRunId !== "string") {
+        return json({ ok: false, error: "replacesRunId must be a run id or null." }, 400);
+      }
+      patch.replacesRunId = body.replacesRunId;
+      clearPairings = true;
     }
     if (Object.keys(patch).length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
 
@@ -476,6 +572,21 @@ async function patchBoqLine(
         and parsed->'sheets'->(${sheetIndex}::int) is not null
       returning version
     `;
+    if (rows[0] && clearPairings) {
+      await sql`
+        update intake_runs
+        set parsed = jsonb_set(
+              parsed,
+              array['sheets', ${String(sheetIndex)}, 'lines'],
+              (
+                select coalesce(jsonb_agg(line || '{"replaces": null}'::jsonb), '[]'::jsonb)
+                from jsonb_array_elements(coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines', '[]'::jsonb)) as line
+              )
+            ),
+            updated_by = ${actor}
+        where id = ${id} and status = 'parsed'
+      `;
+    }
     if (!rows[0]) {
       return json({ ok: false, error: "That sheet is no longer in this import, or the import is already confirmed." }, 409);
     }
@@ -488,6 +599,19 @@ async function patchBoqLine(
     patch.categoryStatus = body.categoryId ? "chosen" : "none";
   }
   if (typeof body.ignored === "boolean") patch.ignored = body.ignored;
+  // The record this line continues. `null` breaks the pairing, which makes the
+  // line new and the record missing — both visible, neither silent.
+  if (body.replaces !== undefined) {
+    if (body.replaces === null) {
+      patch.replaces = null;
+    } else {
+      const replaces = body.replaces as { recordId?: unknown; recordVersion?: unknown };
+      if (typeof replaces?.recordId !== "string" || typeof replaces?.recordVersion !== "number") {
+        return json({ ok: false, error: "A pairing names a record and the version you were shown." }, 400);
+      }
+      patch.replaces = { recordId: replaces.recordId, recordVersion: replaces.recordVersion };
+    }
+  }
   if (Object.keys(patch).length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
 
   const rows = await sql`

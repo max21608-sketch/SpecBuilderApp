@@ -16,6 +16,7 @@ import DrawingsReview from "@/components/imports/DrawingsReview";
 import PreambleReview from "@/components/imports/PreambleReview";
 
 type Line = {
+  replaces?: { recordId: string; recordVersion: number } | null;
   index: number; lineNo: number; designer: string | null; boqCategory: string | null;
   area: string | null; code: string | null; itemDescription: string; productReference: string | null;
   qty: number | null; qtyUnit: string | null;
@@ -26,14 +27,34 @@ type Category = { id: string; slug: string; family: string; name: string; requir
 type Sheet = {
   sheetName: string; proposedRunName: string; headerRow: number; skippedRows: number;
   ignored: boolean; ignoredReason: string | null;
+  replacesRunId?: string | null;
   metadata: { revision: string | null; date: string | null; notes: string[] };
   lines: Line[];
+};
+type ProjectRun = {
+  id: string; name: string; status: string; boq_revision: string | null; boq_date: string | null;
+  record_count: number;
+};
+type Reconciliation = {
+  lines: {
+    index: number; lineNo: number; code: string | null;
+    status: "paired" | "new" | "ambiguous";
+    suggestedRecordId: string | null;
+    candidates: string[];
+    deltas: { field: string; label: string; was: string | null; now: string | null }[];
+  }[];
+  missing: {
+    recordId: string; label: string; itemDescription: string; codes: string[];
+    attributeCount: number; hasImage: boolean; settledAnswers: number;
+  }[];
+  counts: { paired: number; changed: number; new: number; ambiguous: number; missing: number };
+  records: { id: string; version: number; label: string; itemDescription: string; qty: number | null }[];
 };
 type Import = {
   id: string; status: string; version: number; error: string | null; source_kind: string;
   document_kind: string | null;
   bws_project_number: string; project_name: string; filename: string | null;
-  parsed: { schemaVersion: 2; filename: string | null; sourcePreserved?: boolean; sheets: Sheet[] } | null;
+  parsed: { schemaVersion: 3; filename: string | null; sourcePreserved?: boolean; sheets: Sheet[] } | null;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -47,7 +68,13 @@ const STATUS_LABEL: Record<string, string> = {
 export default function ReviewImportPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [data, setData] = useState<{ import: Import; categories: Category[]; registers: Registers | null } | null>(null);
+  const [data, setData] = useState<{
+    import: Import;
+    categories: Category[];
+    registers: Registers | null;
+    runs: ProjectRun[];
+    reconciliation: Record<number, Reconciliation>;
+  } | null>(null);
   const [, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,17 +85,31 @@ export default function ReviewImportPage() {
   // from under someone reading it would make the page unusable.
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
-    const res = await apiFetch<{ import: Import; categories?: Category[]; registers?: Registers }>(
-      `/api/imports/${id}`,
-    );
+    const res = await apiFetch<{
+      import: Import;
+      categories?: Category[];
+      registers?: Registers;
+      runs?: ProjectRun[];
+      reconciliation?: Record<number, Reconciliation>;
+    }>(`/api/imports/${id}`);
     if (!quiet) setLoading(false);
     if (!res.ok) { setError(res.error); return; }
-    setData({ import: res.data.import, categories: res.data.categories ?? [], registers: res.data.registers ?? null });
+    setData({
+      import: res.data.import,
+      categories: res.data.categories ?? [],
+      registers: res.data.registers ?? null,
+      runs: res.data.runs ?? [],
+      reconciliation: res.data.reconciliation ?? {},
+    });
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
 
-  async function setLine(sheetIndex: number, index: number, patch: { categoryId?: string | null; ignored?: boolean }) {
+  async function setLine(
+    sheetIndex: number,
+    index: number,
+    patch: { categoryId?: string | null; ignored?: boolean; replaces?: { recordId: string; recordVersion: number } | null },
+  ) {
     setError(null);
     const res = await apiFetch(`/api/imports/${id}`, {
       method: "PATCH",
@@ -80,7 +121,10 @@ export default function ReviewImportPage() {
   }
 
   /** A sheet's run name, or dropping the tab. Addressed the same way. */
-  async function setSheet(sheetIndex: number, patch: { runName?: string; ignored?: boolean }) {
+  async function setSheet(
+    sheetIndex: number,
+    patch: { runName?: string; ignored?: boolean; replacesRunId?: string | null },
+  ) {
     setError(null);
     const res = await apiFetch(`/api/imports/${id}`, {
       method: "PATCH",
@@ -121,6 +165,10 @@ export default function ReviewImportPage() {
 
   const run = data.import;
   const sheets = run.parsed?.sheets ?? [];
+  // The runs this bill could revise, and the live per-sheet reconciliation.
+  // Both come from the server on every read: a record retired or paired since
+  // the page loaded has to show as it is now.
+  const runs = data.runs.filter((projectRun) => projectRun.status === "active");
   const activeSheets = sheets.filter((sheet) => !sheet.ignored);
   const activeLines = activeSheets.flatMap((sheet) => sheet.lines.filter((line) => !line.ignored));
 
@@ -205,7 +253,10 @@ export default function ReviewImportPage() {
         </div>
       )}
 
-      {sheets.map((sheet, sheetIndex) => (
+      {sheets.map((sheet, sheetIndex) => {
+        const reconciliation = data.reconciliation[sheetIndex] ?? null;
+        const pairingFor = (index: number) => reconciliation?.lines.find((line) => line.index === index) ?? null;
+        return (
         <section key={sheet.sheetName + String(sheetIndex)} className={`mt-6 ${sheet.ignored ? "opacity-50" : ""}`}>
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-xs text-neutral-500">
@@ -237,6 +288,82 @@ export default function ReviewImportPage() {
           </div>
 
           {sheet.ignoredReason && <p className="mt-1 text-xs text-neutral-500">{sheet.ignoredReason}</p>}
+
+          {/* IS THIS A NEW RUN, OR A REVISION OF ONE?
+              Never chosen automatically. A revised bill that silently replaced
+              a run would rewrite quantities on records somebody is already
+              working from; one that silently made a new run leaves the work
+              stranded on the old copy. Both are consequential, so a person
+              says which. */}
+          {!sheet.ignored && runs.length > 0 && run.status === "parsed" && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+              <label className="text-neutral-600">
+                This sheet is
+                <select
+                  value={sheet.replacesRunId ?? ""}
+                  disabled={busy}
+                  onChange={(event) => void setSheet(sheetIndex, { replacesRunId: event.target.value || null })}
+                  className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
+                >
+                  <option value="">a new run</option>
+                  {runs.map((projectRun) => (
+                    <option key={projectRun.id} value={projectRun.id}>
+                      a revision of “{projectRun.name}” ({projectRun.record_count} items
+                      {projectRun.boq_revision ? `, ${projectRun.boq_revision}` : ""})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+
+          {reconciliation && (
+            <div className="mt-2 border border-blue-300 bg-blue-50 rounded-lg px-4 py-3 text-sm">
+              <p className="text-blue-900">
+                <span className="font-medium">{reconciliation.counts.changed} changed</span> ·{" "}
+                {reconciliation.counts.paired - reconciliation.counts.changed} unchanged · {reconciliation.counts.new} new ·{" "}
+                {reconciliation.counts.missing} no longer listed
+                {reconciliation.counts.ambiguous > 0 && (
+                  <> · <span className="font-medium text-amber-800">{reconciliation.counts.ambiguous} to pair by hand</span></>
+                )}
+              </p>
+              <p className="mt-0.5 text-xs text-blue-800">
+                Items carried forward keep their record — and with it their drawings, their specs, their picture and
+                their answers. Only the bill&rsquo;s own columns are written over.
+              </p>
+              {reconciliation.missing.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs font-medium text-blue-900">
+                    Not in this revision — these will be retired, not deleted:
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {reconciliation.missing.map((missing) => (
+                      <li key={missing.recordId} className="text-xs text-blue-900">
+                        <span className="font-mono">{missing.label}</span> {missing.itemDescription}
+                        {missing.codes.length > 0 && <span className="text-blue-700"> · {missing.codes.join(", ")}</span>}
+                        {/* Named, not counted. A record with 14 specs and a
+                            picture is somebody's afternoon, and pairing it is
+                            usually what was meant. */}
+                        {(missing.attributeCount > 0 || missing.hasImage || missing.settledAnswers > 0) && (
+                          <span className="text-amber-800">
+                            {" — carries "}
+                            {[
+                              missing.attributeCount > 0 ? `${missing.attributeCount} spec${missing.attributeCount === 1 ? "" : "s"}` : null,
+                              missing.settledAnswers > 0 ? `${missing.settledAnswers} answer${missing.settledAnswers === 1 ? "" : "s"}` : null,
+                              missing.hasImage ? "a picture" : null,
+                            ]
+                              .filter(Boolean)
+                              .join(", ")}
+                            . Pair it with a line above, or it stops being live.
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
           {(sheet.metadata?.notes?.length ?? 0) > 0 && (
             <p className="mt-1 text-xs text-neutral-500">
               From above the header: {sheet.metadata.notes.join(" · ")}
@@ -254,6 +381,7 @@ export default function ReviewImportPage() {
                     <th className="text-left font-medium px-3 py-2">Area</th>
                     <th className="text-left font-medium px-3 py-2">Qty</th>
                     <th className="text-left font-medium px-3 py-2">Category (optional)</th>
+                    {reconciliation && <th className="text-left font-medium px-3 py-2">Against the run</th>}
                     <th className="text-left font-medium px-3 py-2"> </th>
                   </tr>
                 </thead>
@@ -271,6 +399,64 @@ export default function ReviewImportPage() {
                         {line.qty ?? "—"}
                         {line.qtyUnit && <span className="text-neutral-400"> {line.qtyUnit}</span>}
                       </td>
+                      {reconciliation && (
+                        <td className="px-3 py-2 align-top">
+                          {(() => {
+                            const pairing = pairingFor(line.index);
+                            if (!pairing || line.ignored) return <span className="text-neutral-400">—</span>;
+                            return (
+                              <div>
+                                <select
+                                  value={line.replaces?.recordId ?? (pairing.status === "paired" ? (pairing.suggestedRecordId ?? "") : "")}
+                                  disabled={run.status !== "parsed" || busy}
+                                  onChange={(event) => {
+                                    const recordId = event.target.value;
+                                    const record = reconciliation.records.find((row) => row.id === recordId);
+                                    void setLine(sheetIndex, line.index, {
+                                      // The VERSION the reviewer is looking at
+                                      // travels with the pairing, so a record
+                                      // edited since refuses the confirm rather
+                                      // than being quietly overwritten.
+                                      replaces: record ? { recordId: record.id, recordVersion: record.version } : null,
+                                    });
+                                  }}
+                                  className={`border rounded px-2 py-1 text-xs max-w-[13rem] disabled:opacity-50 ${
+                                    pairing.status === "ambiguous" && !line.replaces
+                                      ? "border-amber-400 bg-amber-50"
+                                      : "border-neutral-300"
+                                  }`}
+                                >
+                                  <option value="">new item</option>
+                                  {reconciliation.records.map((record) => (
+                                    <option key={record.id} value={record.id}>
+                                      {record.label} · {record.itemDescription.slice(0, 32)}
+                                    </option>
+                                  ))}
+                                </select>
+                                {pairing.status === "ambiguous" && !line.replaces && (
+                                  <p className="mt-0.5 text-xs text-amber-800">
+                                    This code is on {pairing.candidates.length} records. Choose which one, or leave it
+                                    as a new item.
+                                  </p>
+                                )}
+                                {pairing.deltas.length > 0 && (
+                                  <ul className="mt-0.5 text-xs text-neutral-600">
+                                    {pairing.deltas.map((delta) => (
+                                      <li key={delta.field}>
+                                        {delta.label}: <span className="line-through text-neutral-400">{delta.was ?? "—"}</span>{" "}
+                                        → <span className="text-neutral-900">{delta.now ?? "—"}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                                {pairing.status === "paired" && pairing.deltas.length === 0 && (
+                                  <p className="mt-0.5 text-xs text-neutral-500">unchanged</p>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                      )}
                       <td className="px-3 py-2">
                         <select
                           value={line.categoryId ?? ""}
@@ -308,7 +494,8 @@ export default function ReviewImportPage() {
             </div>
           )}
         </section>
-      ))}
+        );
+      })}
 
       <div className="mt-4 flex items-center gap-3">
         <button

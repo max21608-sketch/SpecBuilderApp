@@ -98,7 +98,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const result = await withTransaction((txn) =>
         confirmBoqImport(txn, { runId: id, expectedVersion, actor: user.email }),
       );
-      return json({ ok: true, imported: result.imported, projectId: result.projectId, runs: result.runIds.length });
+      return json({
+        ok: true,
+        imported: result.imported,
+        updated: result.updated,
+        retired: result.retired,
+        projectId: result.projectId,
+        runs: result.runIds.length,
+      });
     }
 
     if (run.source_kind !== "spec_document") {

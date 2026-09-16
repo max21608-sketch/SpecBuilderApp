@@ -5,8 +5,8 @@
 // folder.
 import { describe, it, expect } from "vitest";
 import type { SheetData } from "read-excel-file/node";
-import { parseBoqSheets, normaliseRef, assertBoqV2, activeSheets, countLines } from "@/lib/boq-import";
-import type { BoqParseResult, StagedBoqSheet } from "@/lib/boq-import";
+import { parseBoqSheets, normaliseRef, assertBoqDocument, activeSheets, countLines } from "@/lib/boq-import";
+import type { BoqParseResult, ParsedBoqSheet } from "@/lib/boq-import";
 
 const HEADER = ["Designer", "Category", "Code", "Item Description", "Product Reference", "Total Qty Updated"];
 
@@ -14,12 +14,12 @@ function sheet(data: SheetData, name = "Feuil1") {
   return [{ sheet: name, data }];
 }
 
-function ok(result: BoqParseResult): StagedBoqSheet[] {
+function ok(result: BoqParseResult): ParsedBoqSheet[] {
   if (!result.ok) throw new Error(result.error);
   return result.sheets;
 }
 
-function one(result: BoqParseResult): StagedBoqSheet {
+function one(result: BoqParseResult): ParsedBoqSheet {
   const sheets = ok(result);
   const first = sheets[0];
   if (!first) throw new Error("no sheets staged");
@@ -176,7 +176,10 @@ describe("parseBoqSheets", () => {
     expect(staged[0]?.ignored).toBe(true);
     expect(staged[0]?.ignoredReason).toMatch(/no rows under the header/i);
     expect(staged[1]?.ignored).toBe(false);
-    expect(activeSheets({ schemaVersion: 2, filename: null, sourcePreserved: true, sheets: staged })).toHaveLength(1);
+    // activeSheets reads a STAGED doc; the parser's output becomes one when
+    // /api/imports adds each line's index and category suggestion.
+    const asStaged = staged.map((sheet) => ({ ...sheet, lines: [] }));
+    expect(activeSheets({ schemaVersion: 3, filename: null, sourcePreserved: true, sheets: asStaged })).toHaveLength(1);
   });
 
   it("refuses an empty workbook", () => {
@@ -197,23 +200,25 @@ describe("parseBoqSheets", () => {
   });
 });
 
-describe("assertBoqV2", () => {
+describe("assertBoqDocument", () => {
   const v2 = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     filename: "boq.xlsx",
     sourcePreserved: true,
     sheets: [{ sheetName: "A", proposedRunName: "A", headerRow: 1, skippedRows: 0, ignored: false, ignoredReason: null, metadata: { revision: null, date: null, notes: [] }, lines: [] }],
   };
 
   it("accepts a v2 document and counts only the sheets a confirm would act on", () => {
-    const doc = assertBoqV2(v2);
+    const doc = assertBoqDocument(v2);
     expect(doc.sheets).toHaveLength(1);
     expect(countLines(doc)).toBe(0);
   });
 
   it("refuses a v1 document with an instruction, rather than guessing", () => {
-    expect(() => assertBoqV2({ sheet: "Feuil1", headerRow: 5, lines: [] })).toThrow(/Upload the BOQ again/);
-    expect(() => assertBoqV2(null)).toThrow(/Upload the BOQ again/);
+    expect(() => assertBoqDocument({ sheet: "Feuil1", headerRow: 5, lines: [] })).toThrow(/Upload the BOQ again/);
+    // A v2 row that 0017 did not reach is refused rather than read as v3.
+    expect(() => assertBoqDocument({ schemaVersion: 2, sheets: [] })).toThrow(/Upload the BOQ again/);
+    expect(() => assertBoqDocument(null)).toThrow(/Upload the BOQ again/);
   });
 });
 

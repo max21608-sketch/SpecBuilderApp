@@ -33,6 +33,7 @@ import {
 
 export type SpecRecord = {
   id: string; record_no: number; item_description: string; product_reference: string | null;
+  status: string; retired_at: string | null; retired_by: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
   refs: string | null; run_id: string; run_name: string; attribute_count: string;
   category_name: string | null; category_family: string | null; requirements_authored: boolean;
@@ -70,10 +71,18 @@ export default function SpecTable({
   const [records, setRecords] = useState<SpecRecord[] | null>(null);
   const [programme, setProgramme] = useState<ProgrammeDates | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retiredCount, setRetiredCount] = useState(0);
+  // Out by default. The export takes only active records, so a table that
+  // listed retired ones beside the rest would describe a different set from
+  // the file.
+  const [showRetired, setShowRetired] = useState(false);
 
   const load = useCallback(async () => {
     const query = new URLSearchParams({ projectId, runId });
-    const res = await apiFetch<{ records: SpecRecord[]; programme: ProgrammeDates }>(`/api/records?${query.toString()}`);
+    if (showRetired) query.set("includeRetired", "1");
+    const res = await apiFetch<{ records: SpecRecord[]; programme: ProgrammeDates; retiredCount: number }>(
+      `/api/records?${query.toString()}`,
+    );
     if (!res.ok) {
       setError(res.error);
       return;
@@ -81,7 +90,8 @@ export default function SpecTable({
     setError(null);
     setRecords(res.data.records);
     setProgramme(res.data.programme);
-  }, [projectId, runId]);
+    setRetiredCount(Number(res.data.retiredCount ?? 0));
+  }, [projectId, runId, showRetired]);
 
   useEffect(() => {
     void load();
@@ -107,6 +117,22 @@ export default function SpecTable({
         <p className="text-sm text-neutral-600">
           {records.length} record{records.length === 1 ? "" : "s"} · {withSpecs} with specs captured
           {uncategorised > 0 && <> · {uncategorised} with no checklist yet</>}
+          {/* Said out loud, so "38 records" cannot quietly mean "38 of 41".
+              A record retired by a BOQ revision is out of the export, and a
+              BWS job created from it is NOT deleted by that absence — so
+              somebody has to be able to find it. */}
+          {retiredCount > 0 && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                onClick={() => setShowRetired((value) => !value)}
+                className="underline hover:text-neutral-900"
+              >
+                {showRetired ? `hide the ${retiredCount} retired` : `${retiredCount} retired — show`}
+              </button>
+            </>
+          )}
         </p>
         {records.length > 0 && (
           <div className="flex items-center gap-2">
@@ -190,7 +216,15 @@ export default function SpecTable({
                   const dot = urgency === "action_required" && !anyMissing ? "bg-amber-500" : DOTS[urgency];
                   const attributes = n(record.attribute_count);
                   return (
-                    <tr key={record.id} className="hover:bg-neutral-50">
+                    <tr
+                      key={record.id}
+                      className={record.status === "retired" ? "bg-neutral-50 text-neutral-400" : "hover:bg-neutral-50"}
+                      title={
+                        record.status === "retired"
+                          ? `Retired${record.retired_by ? ` by ${record.retired_by}` : ""}${record.retired_at ? ` on ${new Date(record.retired_at).toLocaleDateString()}` : ""}. Not in the export.`
+                          : undefined
+                      }
+                    >
                       <td className="px-3 py-2 text-neutral-500 tabular-nums">
                         <span
                           title={URGENCY_LABELS[urgency]}
@@ -198,7 +232,9 @@ export default function SpecTable({
                         />
                         {record.record_no}
                       </td>
-                      <td className="px-3 py-2 font-medium text-neutral-900">{record.refs ?? "—"}</td>
+                      <td className={`px-3 py-2 font-medium ${record.status === "retired" ? "text-neutral-400 line-through" : "text-neutral-900"}`}>
+                        {record.refs ?? "—"}
+                      </td>
                       <td className="px-3 py-2">
                         <Link
                           href={`/dashboard/records/${record.id}`}

@@ -29,7 +29,7 @@
 // the check and the commit.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { assertBoqV2, normaliseRef, type StagedBoqSheet } from "@/lib/boq-import";
+import { assertBoqDocument, normaliseRef, type StagedBoqSheet } from "@/lib/boq-import";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 
@@ -46,9 +46,20 @@ type StagedLine = {
   qtyUnit: string | null;
   categoryId: string | null;
   ignored: boolean;
+  /** The record this line continues, at the version the reviewer was shown. */
+  replaces?: { recordId: string; recordVersion: number } | null;
 };
 
-export type ConfirmBoqResult = { imported: number; projectId: string; runIds: string[]; changeSetId: string };
+export type ConfirmBoqResult = {
+  imported: number;
+  /** Existing records a revision carried forward, updated in place. */
+  updated: number;
+  /** Records the revision no longer lists, retired rather than deleted. */
+  retired: number;
+  projectId: string;
+  runIds: string[];
+  changeSetId: string;
+};
 
 export async function confirmBoqImport(
   txn: TxnSql,
@@ -85,17 +96,7 @@ export async function confirmBoqImport(
   const projects = await txn`select id from projects where id = ${projectId} for update`;
   if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
-  // The change this import is. Opened BEFORE the first insert, because
-  // write_audit() reads it from the transaction: a change set created after
-  // the writes would leave every one of them belonging to nothing.
-  const changeSetId = await openChangeSet(txn, {
-    projectId,
-    kind: "boq_confirm",
-    actor,
-    sourceIntakeRunId: runId,
-  });
-
-  const parsed = assertBoqV2(run.parsed);
+  const parsed = assertBoqDocument(run.parsed);
   const sheets = parsed.sheets.filter((sheet) => !sheet.ignored);
   const lineCount = sheets.reduce(
     (total, sheet) => total + (sheet.lines as StagedLine[]).filter((line) => !line.ignored).length,
@@ -130,6 +131,45 @@ export async function confirmBoqImport(
     );
   }
 
+  // A sheet naming a run it revises makes this a REVISION rather than a fresh
+  // import. The two read differently in the trail, and a revision additionally
+  // updates and retires rather than only inserting.
+  const revisedRunIds = sheets
+    .map((sheet) => (sheet as StagedBoqSheet).replacesRunId ?? null)
+    .filter((id): id is string => id !== null);
+
+  // Every run a sheet claims to revise must still be this project's, and
+  // active. Re-checked rather than trusted: the reviewer chose it minutes or
+  // days ago, and a retired run is not something to write a revision into.
+  if (revisedRunIds.length > 0) {
+    const targetRuns = await txn`
+      select id, project_id, status from spec_runs where id = any(${revisedRunIds}::uuid[])
+    `;
+    if (targetRuns.length !== new Set(revisedRunIds).size) {
+      throw new DomainConflictError("run_missing", "A run this revision replaces no longer exists. Reload the review.");
+    }
+    for (const target of targetRuns) {
+      if (String(target.project_id) !== projectId) {
+        throw new DomainConflictError("wrong_project", "A run this revision replaces belongs to another project.", {
+          status: 400,
+        });
+      }
+      if (String(target.status) !== "active") {
+        throw new DomainConflictError("run_retired", "A run this revision replaces has been retired. Reload the review.");
+      }
+    }
+  }
+
+  // The change this import is. Opened BEFORE the first write, because
+  // write_audit() reads it from the transaction: a change set created after
+  // them would leave every one belonging to nothing.
+  const changeSetId = await openChangeSet(txn, {
+    projectId,
+    kind: revisedRunIds.length > 0 ? "boq_revision" : "boq_confirm",
+    actor,
+    sourceIntakeRunId: runId,
+  });
+
   // 4. Allocation, under the lock. `record_no` stays project-wide across runs:
   //    it is the label a person reads, and two records called P17231-014 in
   //    different tabs would be indistinguishable in an export or an email.
@@ -145,29 +185,124 @@ export async function confirmBoqImport(
   const runIds: string[] = [];
   const recordIds: string[] = [];
   let imported = 0;
+  let updated = 0;
+  let retired = 0;
 
   for (const sheet of sheets as StagedBoqSheet[]) {
     const lines = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
     if (lines.length === 0) continue;
 
-    nextSort += 1;
-    // One run per sheet. The reviewer's name for it, not the tab's: a tab
-    // called "Feuil1" is not what anybody calls the run.
-    const runRow = await txn`
-      insert into spec_runs
-        (project_id, name, source_sheet, source_import_id, boq_revision, boq_date, header_notes,
-         sort_order, created_by, updated_by)
-      values
-        (${projectId}, ${sheet.proposedRunName.trim() || sheet.sheetName}, ${sheet.sheetName}, ${runId},
-         ${sheet.metadata?.revision ?? null}, ${sheet.metadata?.date ?? null},
-         ${JSON.stringify(sheet.metadata?.notes ?? [])}::jsonb, ${nextSort}, ${actor}, ${actor})
-      returning id
-    `;
-    const specRunId = String(runRow[0]?.id ?? "");
-    if (!specRunId) throw new Error(`sheet ${sheet.sheetName} produced no run`);
+    const replacesRunId = sheet.replacesRunId ?? null;
+
+    let specRunId: string;
+    if (replacesRunId) {
+      // ---- A REVISION. The run KEEPS ITS IDENTITY -----------------------
+      // Its records keep their ids, and therefore their drawings, their
+      // specs, their picture and their checklist answers. That carry-over is
+      // the entire point: a revised bill that created a second set of
+      // records would strand every bit of work done against the first.
+      specRunId = replacesRunId;
+      await txn`
+        update spec_runs
+        set boq_revision = ${sheet.metadata?.revision ?? null},
+            boq_date = ${sheet.metadata?.date ?? null},
+            header_notes = ${JSON.stringify(sheet.metadata?.notes ?? [])}::jsonb,
+            source_import_id = ${runId},
+            updated_by = ${actor}
+        where id = ${specRunId}
+      `;
+    } else {
+      nextSort += 1;
+      // One run per sheet. The reviewer's name for it, not the tab's: a tab
+      // called "Feuil1" is not what anybody calls the run.
+      const runRow = await txn`
+        insert into spec_runs
+          (project_id, name, source_sheet, source_import_id, boq_revision, boq_date, header_notes,
+           sort_order, created_by, updated_by)
+        values
+          (${projectId}, ${sheet.proposedRunName.trim() || sheet.sheetName}, ${sheet.sheetName}, ${runId},
+           ${sheet.metadata?.revision ?? null}, ${sheet.metadata?.date ?? null},
+           ${JSON.stringify(sheet.metadata?.notes ?? [])}::jsonb, ${nextSort}, ${actor}, ${actor})
+        returning id
+      `;
+      specRunId = String(runRow[0]?.id ?? "");
+      if (!specRunId) throw new Error(`sheet ${sheet.sheetName} produced no run`);
+    }
     runIds.push(specRunId);
 
+    /**
+     * Every record this sheet LEAVES LIVE — the ones it carried forward AND
+     * the ones it has just created. The retire step below subtracts this from
+     * the run's active records, so a new line omitted from it would be
+     * inserted and retired by the same confirm.
+     */
+    const carriedForward = new Set<string>();
+
     for (const line of lines) {
+      // ---- a line the reviewer PAIRED with an existing record -----------
+      // Version-predicated, so a record edited since the review refuses the
+      // whole confirm rather than silently overwriting somebody's work.
+      // Attributes, answers and the item image are NOT touched.
+      if (line.replaces) {
+        const target = line.replaces;
+        // A pairing is only meaningful against the run this sheet revises. A
+        // line paired to a record on some OTHER run would move that record
+        // between tabs, which is not what a revision does and not what the
+        // reviewer was looking at.
+        if (!replacesRunId) {
+          throw new DomainConflictError(
+            "pairing_without_revision",
+            `BOQ line ${line.lineNo} is paired to an existing record, but this sheet is not marked as revising a run. Reload the review.`,
+          );
+        }
+        const changed = await txn`
+          update spec_records
+          set item_description = ${line.itemDescription},
+              product_reference = ${line.productReference},
+              qty = ${line.qty},
+              designer = ${line.designer},
+              area = ${line.area ?? line.boqCategory ?? null},
+              boq_category = ${line.boqCategory ?? null},
+              source_import_id = ${runId},
+              source_line_no = ${line.lineNo},
+              run_id = ${specRunId},
+              updated_by = ${actor}
+          where id = ${target.recordId}
+            and project_id = ${projectId}
+            and run_id = ${replacesRunId}
+            and status = 'active'
+            and version = ${target.recordVersion}
+          returning id
+        `;
+        if (!changed[0]) {
+          throw new DomainConflictError(
+            "record_changed",
+            `The record paired with BOQ line ${line.lineNo} has changed, moved run, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
+          );
+        }
+        carriedForward.add(target.recordId);
+        recordIds.push(target.recordId);
+
+        // The client ref can be re-punctuated between revisions. Refs are
+        // write-once-and-delete by design (0002), so the old one goes and the
+        // new one is written rather than edited in place.
+        if (line.code) {
+          await txn`
+            delete from spec_record_refs
+            where record_id = ${target.recordId} and ref_system = 'boq_code'
+              and ref_value_norm <> ${normaliseRef(line.code)}
+          `;
+          await txn`
+            insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, source, created_by)
+            values (${target.recordId}, ${projectId}, 'boq_code', ${line.code}, ${normaliseRef(line.code)}, 'BOQ revision', ${actor})
+            on conflict (record_id, ref_system, ref_value_norm) do nothing
+          `;
+        }
+
+        updated += 1;
+        continue;
+      }
+
       nextNo += 1;
       const recordNo = nextNo;
 
@@ -187,6 +322,9 @@ export async function confirmBoqImport(
       const recordId = String(inserted[0]?.id ?? "");
       if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
       recordIds.push(recordId);
+      // A line new to a REVISION is on the run from this moment, and must not
+      // be swept up by the retirement of what the revision no longer lists.
+      carriedForward.add(recordId);
 
       if (line.code) {
         await txn`
@@ -208,6 +346,25 @@ export async function confirmBoqImport(
 
       imported += 1;
     }
+
+    // ---- what the revision no longer lists ------------------------------
+    // RETIRED, NEVER DELETED. A record is the only place a client ref maps to
+    // a BWS job, and that job may already exist — deleting the record loses
+    // the mapping for work that is already in the factory. It leaves the tabs
+    // and the export; it does not leave the history.
+    if (replacesRunId) {
+      const gone = await txn`
+        update spec_records
+        set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+        where run_id = ${replacesRunId}
+          and project_id = ${projectId}
+          and status = 'active'
+          and not (id = any(${[...carriedForward]}::uuid[]))
+        returning id
+      `;
+      for (const row of gone) recordIds.push(String(row.id));
+      retired += gone.length;
+    }
   }
 
   // 5. Predicated on 'parsed' still holding. Zero rows here is a guard result,
@@ -226,5 +383,5 @@ export async function confirmBoqImport(
   // rows written above it, not the bare row the insert returned.
   await snapshotRecords(txn, recordIds, changeSetId);
 
-  return { imported, projectId, runIds, changeSetId };
+  return { imported, updated, retired, projectId, runIds, changeSetId };
 }

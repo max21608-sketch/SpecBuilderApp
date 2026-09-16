@@ -48,6 +48,25 @@ export type BoqLine = {
 };
 
 /**
+ * A staged line: the parsed row plus everything the reviewer decides about it.
+ *
+ * `index` is its position in the sheet, which is a stable address HERE and
+ * nowhere else in the app: the BOQ's staged list is fixed — reviewing a line
+ * flips a flag rather than removing it — so nothing renumbers underneath an
+ * open tab. Extraction proposals are the opposite case and are addressed by
+ * id; see src/lib/spec-document.ts.
+ */
+export type StagedBoqLine = BoqLine & {
+  index: number;
+  categoryId: string | null;
+  categoryStatus: string;
+  categoryCandidates?: { id: string; name: string }[];
+  ignored: boolean;
+  /** The record this line continues, at the version the reviewer was shown. */
+  replaces?: { recordId: string; recordVersion: number } | null;
+};
+
+/**
  * The rows ABOVE the header. They carry the revision, the date and the terms
  * the whole run is priced under ("*All fabrics are COM and should not be
  * included in the unit costs"). Retained verbatim: a value whose source
@@ -61,6 +80,14 @@ export type BoqSheetMetadata = {
 
 export type StagedBoqSheet = {
   sheetName: string;
+  /**
+   * The run this sheet REVISES, or null for a new run.
+   *
+   * Set by the reviewer, never inferred at confirm: pairing a revised bill to
+   * an existing run is matching, and confirm-boq.ts writes what the reviewer
+   * approved rather than what a fresh match would produce now.
+   */
+  replacesRunId?: string | null;
   /** Defaulted from the sheet name, edited by the reviewer, becomes the run. */
   proposedRunName: string;
   headerRow: number;
@@ -68,18 +95,33 @@ export type StagedBoqSheet = {
   ignored: boolean;
   ignoredReason: string | null;
   metadata: BoqSheetMetadata;
-  lines: BoqLine[];
+  lines: StagedBoqLine[];
 };
 
-/** The staged shape of a BOQ intake run. v1 held ONE sheet; 0007 upgraded it. */
+/**
+ * The staged shape of a BOQ intake run.
+ *
+ * v1 held ONE sheet; 0007 upgraded it to a list. v3 (0017) adds the reviewer's
+ * revision decisions: `replacesRunId` per sheet and `replaces` per line.
+ */
 export type BoqDocument = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   filename: string | null;
   sourcePreserved: boolean;
   sheets: StagedBoqSheet[];
 };
 
-export type BoqParseResult = { ok: true; sheets: StagedBoqSheet[] } | { ok: false; error: string };
+/**
+ * What the PARSER produces, before a reviewer has decided anything about it.
+ *
+ * Separate from StagedBoqSheet because the two are genuinely different: this
+ * is what the spreadsheet says, and the staged shape is that plus every
+ * decision made since. One type for both meant the parser looked as though it
+ * emitted category choices and revision pairings.
+ */
+export type ParsedBoqSheet = Omit<StagedBoqSheet, "lines" | "replacesRunId"> & { lines: BoqLine[] };
+
+export type BoqParseResult = { ok: true; sheets: ParsedBoqSheet[] } | { ok: false; error: string };
 
 /**
  * Header synonyms, normalised. `L1`..`L6` are absent on purpose: a per-level
@@ -203,7 +245,7 @@ function readMetadata(data: SheetData, headerIndex: number): BoqSheetMetadata {
 export function parseBoqSheets(sheets: { sheet: string; data: SheetData }[]): BoqParseResult {
   if (sheets.length === 0) return { ok: false, error: "The file has no sheets." };
 
-  const staged: StagedBoqSheet[] = [];
+  const staged: ParsedBoqSheet[] = [];
 
   for (const { sheet, data } of sheets) {
     for (let rowIndex = 0; rowIndex < data.length; rowIndex += 1) {
@@ -234,7 +276,7 @@ function readRows(
   data: SheetData,
   headerIndex: number,
   header: Partial<Record<ColumnKey, number>>,
-): StagedBoqSheet {
+): ParsedBoqSheet {
   const at = (row: readonly unknown[], key: ColumnKey): unknown => {
     const index = header[key];
     return index === undefined ? null : row[index];
@@ -284,7 +326,7 @@ function readRows(
     ignoredReason: empty ? "No rows under the header." : null,
     metadata: readMetadata(data, headerIndex),
     lines,
-  };
+  } satisfies ParsedBoqSheet;
 }
 
 /**
@@ -295,9 +337,18 @@ function readRows(
  * supports two staged formats is a reader whose second format is exercised
  * once a year and is wrong when it is.
  */
-export function assertBoqV2(parsed: unknown): BoqDocument {
+/**
+ * A staged BOQ, at the shape this build understands.
+ *
+ * v3 (0017) is v2 plus the reviewer's revision decisions. 0017 upgraded every
+ * v2 row in place, exactly as 0007 upgraded v1 — a reader that supports two
+ * staged formats has a second format that is exercised once a year and is
+ * wrong when it is. The keys it adds are nullable, so a v3 row that has never
+ * been touched reads identically to the v2 it came from.
+ */
+export function assertBoqDocument(parsed: unknown): BoqDocument {
   const doc = parsed as Partial<BoqDocument> | null;
-  if (!doc || typeof doc !== "object" || doc.schemaVersion !== 2 || !Array.isArray(doc.sheets)) {
+  if (!doc || typeof doc !== "object" || doc.schemaVersion !== 3 || !Array.isArray(doc.sheets)) {
     throw new Error(
       "This import was staged in an older format and cannot be reviewed. Upload the BOQ again.",
     );
@@ -322,3 +373,6 @@ export function countLines(doc: BoqDocument): number {
 export function normaliseRef(raw: string): string {
   return raw.replace(/\s+/g, "").replace(/[–—]/g, "-").toUpperCase();
 }
+
+/** The staged-shape version this build writes. Bumped with its migration. */
+export const BOQ_SCHEMA_VERSION = 3;

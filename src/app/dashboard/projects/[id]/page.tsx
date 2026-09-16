@@ -152,6 +152,9 @@ function ProjectOverview() {
   // paragraph, and all of them expanded is why this section could not be read.
   const [openNotes, setOpenNotes] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<string>("overview");
+  const [retiringRun, setRetiringRun] = useState<string | null>(null);
+  const [retireRunReason, setRetireRunReason] = useState("");
+  const [retiringBusy, setRetiringBusy] = useState(false);
   // Once only, and only before anybody has clicked: re-running it would drag a
   // reader back to the first run every time the project reloaded.
   const tabPreselected = useRef(false);
@@ -180,6 +183,35 @@ function ProjectOverview() {
     setNotes(res.data.notes ?? []);
     setForm(formOf(res.data.project));
   }, [projectId]);
+
+  async function retireRun(runId: string) {
+    if (!retireRunReason.trim()) return;
+    setRetiringBusy(true);
+    try {
+      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/runs/${runId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "retired", reason: retireRunReason.trim() }),
+      });
+      // Reload first, then report. This screen clears its banner on a
+      // successful load, so setting the message first would show a refusal for
+      // a few milliseconds and then nothing at all.
+      await load();
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setError(null);
+      setRetiringRun(null);
+      setRetireRunReason("");
+      // The retired run has left the tabs, so the tab it was on no longer
+      // exists. Back to the overview rather than a blank panel.
+      setTab("overview");
+    } finally {
+      // Always reset: a non-JSON error must not leave the dialog frozen.
+      setRetiringBusy(false);
+    }
+  }
 
   const loadContacts = useCallback(async () => {
     const res = await apiFetch<{
@@ -518,6 +550,57 @@ function ProjectOverview() {
               </p>
             )}
             <SpecTable projectId={project.id} runId={run.id} />
+
+            {/* Retiring a run takes a whole sub-quote out of the tabs and out
+                of the export. Every record on it goes with it, and both can be
+                brought back — but the reason is required, because whoever
+                finds the gap later needs to know why it is there. */}
+            {retiringRun === run.id ? (
+              <div className="mt-3 border border-red-300 bg-red-50 rounded-lg px-4 py-3">
+                <p className="text-sm font-medium text-red-900">Retire “{run.name}”?</p>
+                <p className="mt-0.5 text-xs text-red-800">
+                  Its {run.record_count} record{Number(run.record_count) === 1 ? "" : "s"} stop being live: they leave this
+                  project&rsquo;s export and its tabs. Nothing is deleted, and the run can be brought back. A BWS job
+                  already created from one of these records is NOT removed by its absence from the export — check those
+                  by hand.
+                </p>
+                <input
+                  value={retireRunReason}
+                  autoFocus
+                  onChange={(event) => setRetireRunReason(event.target.value)}
+                  placeholder="Superseded by the Rev B bill confirmed on 16 Sep"
+                  className="mt-2 w-full border border-red-300 rounded px-2 py-1 text-sm bg-white"
+                />
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void retireRun(run.id)}
+                    disabled={!retireRunReason.trim() || retiringBusy}
+                    className="border border-red-400 bg-white rounded px-3 py-1 text-sm hover:bg-red-100 disabled:opacity-50"
+                  >
+                    {retiringBusy ? "Retiring…" : "Retire the run"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRetiringRun(null)}
+                    className="text-sm text-red-800 hover:text-red-950"
+                  >
+                    Keep it
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setRetiringRun(run.id);
+                  setRetireRunReason("");
+                }}
+                className="mt-3 text-xs text-neutral-500 underline hover:text-red-700"
+              >
+                Retire this run
+              </button>
+            )}
           </section>
         ) : null,
       )}

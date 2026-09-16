@@ -109,7 +109,7 @@ describeIfDb("BOQ confirm concurrency", () => {
       [
         projectId,
         JSON.stringify({
-          schemaVersion: 2,
+          schemaVersion: 3,
           filename: "__QA boq.xlsx",
           sourcePreserved: false,
           sheets: sheets ?? [sheet(prefix, count, `__QA ${prefix}`)],

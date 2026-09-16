@@ -74,7 +74,7 @@ import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind } from "@/lib/intake-source-types";
-import { parseBoqSheets } from "@/lib/boq-import";
+import { parseBoqSheets, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
 import { matchName, type MatchCandidate } from "@/lib/matching";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
@@ -414,7 +414,7 @@ async function parseBoqInto(
       update intake_runs
       set status = 'parsed',
           parsed = ${JSON.stringify({
-            schemaVersion: 2,
+            schemaVersion: BOQ_SCHEMA_VERSION,
             filename,
             sourcePreserved,
             sheets: stagedSheets,

@@ -16,6 +16,14 @@ export async function GET(request: Request): Promise<Response> {
   // Which run (BOQ tab) to show. Absent means the whole project.
   const runId = url.searchParams.get("runId");
 
+  // RETIRED RECORDS ARE OUT BY DEFAULT, and that is not cosmetic: the export
+  // scope takes only active records, so a table that listed retired ones
+  // beside the rest would describe a different set from the file — the exact
+  // disagreement the check sheet exists to prevent. They are still reachable,
+  // because a record retired by a BOQ revision is a thing somebody has to go
+  // and look at (a BWS job may already exist for it).
+  const includeRetired = url.searchParams.get("includeRetired") === "1";
+
   // The programme the completion view measures Overdue against. Overdue is
   // COMPUTED from this date, never stored: writing it onto spec_answers would
   // bump the version M2's extraction snapshots are taken against, exactly as
@@ -48,6 +56,8 @@ export async function GET(request: Request): Promise<Response> {
       r.area,
       r.boq_category,
       r.status,
+      r.retired_at,
+      r.retired_by,
       r.run_id,
       run.name as run_name,
       -- How much a document has actually said about this item. The intake
@@ -73,10 +83,27 @@ export async function GET(request: Request): Promise<Response> {
     left join requirements q on q.category_id = r.category_id
     left join spec_answers a on a.record_id = r.id and a.requirement_id = q.id and a.revision_no = 0
     where r.project_id = ${projectId}
+      and (${includeRetired}::boolean or r.status = 'active')
       and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
     group by r.id, c.name, c.family, c.requirements_authored, run.name, run.sort_order
     order by run.sort_order, r.record_no
   `;
 
-  return json({ ok: true, programme, records: rows });
+  // How many the table is NOT showing, so "38 records" cannot quietly mean
+  // "38 of 41". Counted even when they are included, so the toggle can say
+  // what it would hide.
+  const retiredRows = await sql`
+    select count(*)::int as n from spec_records r
+    where r.project_id = ${projectId}
+      and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
+      and r.status = 'retired'
+  `;
+
+  return json({
+    ok: true,
+    programme,
+    records: rows,
+    retiredCount: Number(retiredRows[0]?.n ?? 0),
+    includeRetired,
+  });
 }
