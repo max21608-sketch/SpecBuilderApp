@@ -298,7 +298,7 @@ describeIfDb("BOQ confirm concurrency", () => {
     expect(counts.rows.map((row) => row.n).sort()).toEqual([2, 3]);
   });
 
-  it("writes the record, its ref, its answers and its history together", async () => {
+  it("writes the record, its ref, its answers and its first version together", async () => {
     const runId = await stageImport("__QAE", 1);
     expect((await confirm(runId)).status).toBe(200);
 
@@ -323,10 +323,26 @@ describeIfDb("BOQ confirm concurrency", () => {
     ]);
     expect(answers.rows[0].n).toBe(expected.rows[0].n);
 
-    const history = await client.query(
-      `select to_status from status_history where entity_type = 'spec_record' and entity_id = $1`,
+    // 0012 replaced the per-record status_history line with a CHANGE SET and
+    // a version. The change names the document that caused it, which the
+    // status_history note never did, and the version holds what the record
+    // looked like the moment it was imported.
+    const versions = await client.query(
+      `select s.snapshot_no, s.atoms, cs.kind, cs.actor, cs.source_intake_run_id
+         from record_snapshots s join change_sets cs on cs.id = s.change_set_id
+        where s.record_id = $1`,
       [recordId],
     );
-    expect(history.rows[0]?.to_status).toBe("active");
+    expect(versions.rows).toHaveLength(1);
+    expect(versions.rows[0].snapshot_no).toBe(1);
+    expect(versions.rows[0].kind).toBe("boq_confirm");
+    expect(versions.rows[0].source_intake_run_id).toBe(runId);
+
+    // The version holds the refs and the answer rows written after the record
+    // insert, not the bare row the insert returned.
+    const atoms = versions.rows[0].atoms;
+    expect(atoms.record.itemDescription).toBe("__QA item __QAE1");
+    expect(atoms.refs.map((ref: { value: string }) => ref.value)).toContain("__QAE1");
+    expect(atoms.answers.length).toBe(expected.rows[0].n);
   });
 });

@@ -1,0 +1,246 @@
+// Database tier. Skips silently without DATABASE_URL — a green `npm test` does
+// not mean these ran. Run them with:
+//   DATABASE_URL=$(grep '^DATABASE_URL=' .env.local | cut -d= -f2-) npm test
+//
+// Every row it creates is prefixed `__QA ` and deleted in FK-safe order.
+// audit_log is deliberately left alone: it is append-only by design.
+// change_sets and record_snapshots ARE cleaned up, because unlike audit_log
+// they are scoped to a project this test created and would otherwise leave a
+// project's whole trail behind.
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import pg from "pg";
+
+const databaseUrl = process.env.DATABASE_URL;
+const describeIfDb = databaseUrl ? describe : describe.skip;
+
+/** The tables whose every audited write must belong to a change set. */
+const SPEC_CONTENT_TABLES = ["spec_records", "spec_answers", "record_attributes", "spec_record_refs"];
+
+describeIfDb("0012 change sets and versions", () => {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  let projectId = "";
+  let runId = "";
+  let categoryId = "";
+
+  beforeAll(async () => {
+    await client.connect();
+    const project = await client.query(
+      `insert into projects (bws_project_number, name, created_by, updated_by)
+       values ('__QA P00012', '__QA Change history', 'qa', 'qa') returning id`,
+    );
+    projectId = project.rows[0].id;
+    const run = await client.query(
+      `insert into spec_runs (project_id, name, created_by, updated_by)
+       values ($1, '__QA Main run', 'qa', 'qa') returning id`,
+      [projectId],
+    );
+    runId = run.rows[0].id;
+    const category = await client.query(`select id from item_categories order by sort_order limit 1`);
+    categoryId = category.rows[0].id;
+  });
+
+  afterAll(async () => {
+    await client.query(
+      `delete from spec_answers where record_id in (select id from spec_records where project_id = $1)`,
+      [projectId],
+    );
+    await client.query(`delete from spec_record_refs where project_id = $1`, [projectId]);
+    await client.query(
+      `delete from record_attributes where record_id in (select id from spec_records where project_id = $1)`,
+      [projectId],
+    );
+    // Records first: 0013 lets a version go with the record it describes, and
+    // refuses it any other way. The project goes last and its change sets go
+    // with it by cascade (0014) — they cannot be deleted while it exists.
+    await client.query(`delete from spec_records where project_id = $1`, [projectId]);
+    await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
+    await client.query(`delete from projects where id = $1`, [projectId]);
+    await client.end();
+  });
+
+  async function openChange(kind: string, reason: string | null = null): Promise<string> {
+    const row = await client.query(
+      `insert into change_sets (project_id, kind, reason, closed_at, actor)
+       values ($1, $2, $3, now(), 'qa') returning id`,
+      [projectId, kind, reason],
+    );
+    return row.rows[0].id;
+  }
+
+  it("stamps every audited write in the transaction with the change set", async () => {
+    await client.query("begin");
+    const changeSetId = await openChange("boq_confirm");
+    await client.query(`select set_config('app.change_set_id', $1, true)`, [changeSetId]);
+    const record = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9001, $3, '__QA Sofa', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
+    );
+    // Every real write path ends by taking a version. This fixture does the
+    // same, because the coverage test at the bottom checks that it did — and
+    // a fixture exempt from the rule it is testing proves nothing.
+    await client.query(
+      `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
+       values ($1, $2, 1, '{}'::jsonb, '[]'::jsonb)`,
+      [record.rows[0].id, changeSetId],
+    );
+    await client.query("commit");
+
+    const log = await client.query(
+      `select change_set_id from audit_log where table_name = 'spec_records' and row_id = $1`,
+      [record.rows[0].id],
+    );
+    expect(log.rows).toHaveLength(1);
+    expect(log.rows[0].change_set_id).toBe(changeSetId);
+  });
+
+  it("records nothing on a write outside a change, rather than failing it", async () => {
+    // Phase 1 records the gap; it does not refuse the write. A hard refusal
+    // here would have broken every path between this migration and the one
+    // that converts them.
+    const record = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9002, $3, '__QA Unlinked', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
+    );
+    const log = await client.query(
+      `select change_set_id from audit_log where table_name = 'spec_records' and row_id = $1`,
+      [record.rows[0].id],
+    );
+    expect(log.rows[0].change_set_id).toBeNull();
+  });
+
+  it("numbers versions per record, from 1", async () => {
+    const record = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9003, $3, '__QA Numbered', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
+    );
+    const recordId = record.rows[0].id;
+    const atoms = JSON.stringify({ schemaVersion: 1 });
+    for (const no of [1, 2, 3]) {
+      const changeSetId = await openChange("manual_edit");
+      await client.query(
+        `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
+         values ($1, $2, $3, $4::jsonb, '[]'::jsonb)`,
+        [recordId, changeSetId, no, atoms],
+      );
+    }
+    const rows = await client.query(
+      `select snapshot_no from record_snapshots where record_id = $1 order by snapshot_no`,
+      [recordId],
+    );
+    expect(rows.rows.map((row) => row.snapshot_no)).toEqual([1, 2, 3]);
+  });
+
+  it("refuses a second version of one record under the same change", async () => {
+    const record = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9004, $3, '__QA One per change', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
+    );
+    const changeSetId = await openChange("drawing_confirm");
+    await client.query(
+      `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
+       values ($1, $2, 1, '{}'::jsonb, '[]'::jsonb)`,
+      [record.rows[0].id, changeSetId],
+    );
+    await expect(
+      client.query(
+        `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
+         values ($1, $2, 2, '{}'::jsonb, '[]'::jsonb)`,
+        [record.rows[0].id, changeSetId],
+      ),
+    ).rejects.toThrow(/record_snapshots_record_change_key/);
+  });
+
+  it("holds versions append-only", async () => {
+    const rows = await client.query(
+      `select id from record_snapshots where record_id in (select id from spec_records where project_id = $1) limit 1`,
+      [projectId],
+    );
+    const id = rows.rows[0].id;
+    await expect(client.query(`update record_snapshots set snapshot_no = 99 where id = $1`, [id])).rejects.toThrow(
+      /append-only/,
+    );
+    await expect(client.query(`delete from record_snapshots where id = $1`, [id])).rejects.toThrow(/append-only/);
+  });
+
+  it("refuses to rewrite a change, but allows it to be closed once", async () => {
+    const row = await client.query(
+      `insert into change_sets (project_id, kind, actor) values ($1, 'manual_edit', 'qa') returning id`,
+      [projectId],
+    );
+    const id = row.rows[0].id;
+    await expect(client.query(`update change_sets set reason = 'rewritten' where id = $1`, [id])).rejects.toThrow(
+      /append-only/,
+    );
+    await client.query(`update change_sets set closed_at = now() where id = $1`, [id]);
+    await expect(client.query(`update change_sets set closed_at = now() where id = $1`, [id])).rejects.toThrow(
+      /already closed/,
+    );
+    await expect(client.query(`delete from change_sets where id = $1`, [id])).rejects.toThrow(/append-only/);
+  });
+
+  it("requires a reason where the change overrides a decision", async () => {
+    for (const kind of ["attribute_retire", "run_retire", "finish_edit", "finish_unlink"]) {
+      await expect(
+        client.query(`insert into change_sets (project_id, kind, actor) values ($1, $2, 'qa')`, [projectId, kind]),
+      ).rejects.toThrow(/change_sets_reason_required/);
+    }
+    // And does not demand one where the change simply records something.
+    await client.query(`insert into change_sets (project_id, kind, closed_at, actor) values ($1, 'manual_edit', now(), 'qa')`, [
+      projectId,
+    ]);
+  });
+
+  it("names a baseline, and refuses a name on anything else", async () => {
+    await expect(
+      client.query(`insert into change_sets (project_id, kind, reason, actor) values ($1, 'baseline', 'issued', 'qa')`, [
+        projectId,
+      ]),
+    ).rejects.toThrow(/change_sets_label_is_baseline/);
+    await expect(
+      client.query(
+        `insert into change_sets (project_id, kind, label, closed_at, actor) values ($1, 'manual_edit', 'named', now(), 'qa')`,
+        [projectId],
+      ),
+    ).rejects.toThrow(/change_sets_label_is_baseline/);
+  });
+
+  it("allows only one open change per actor per project", async () => {
+    await client.query(`insert into change_sets (project_id, kind, actor) values ($1, 'manual_edit', '__qa_one')`, [
+      projectId,
+    ]);
+    await expect(
+      client.query(`insert into change_sets (project_id, kind, actor) values ($1, 'manual_edit', '__qa_one')`, [projectId]),
+    ).rejects.toThrow(/change_sets_one_open_per_actor/);
+    // A different person may have their own open change at the same time.
+    await client.query(`insert into change_sets (project_id, kind, actor) values ($1, 'manual_edit', '__qa_two')`, [
+      projectId,
+    ]);
+  });
+
+  it("COVERAGE: every spec-content write in the DATABASE belongs to a change that took a version", async () => {
+    // The check that catches a write path forgetting to snapshot, and the
+    // reason 0013 does not add a trigger for it.
+    //
+    // Deliberately whole-database rather than scoped to this test's project:
+    // the failure worth catching is a real confirm path in the sandbox that
+    // wrote spec content and recorded no version, and a scoped query would
+    // only ever see fixtures. Rows written before 0012 carry a null
+    // change_set_id and are not joined, so history starting today does not
+    // fail this.
+    const uncovered = await client.query(
+      `select cs.id, cs.kind, cs.actor, cs.created_at, count(*)::int as writes
+         from change_sets cs
+         join audit_log al on al.change_set_id = cs.id
+        where al.table_name = any($1::text[])
+          and not exists (select 1 from record_snapshots s where s.change_set_id = cs.id)
+        group by cs.id, cs.kind, cs.actor, cs.created_at
+        order by cs.created_at`,
+      [SPEC_CONTENT_TABLES],
+    );
+    expect(uncovered.rows).toEqual([]);
+  });
+});

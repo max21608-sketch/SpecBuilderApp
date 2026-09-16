@@ -177,6 +177,16 @@ export const DIMENSIONS_JSON_ID = 3;
 
 // ---- what a row is composed from -------------------------------------------
 
+/**
+ * Bumped by hand when composeRowCells changes in a way that alters its output.
+ *
+ * Stored on every version, so a reader can tell a real edit from a rule
+ * change: two versions that differ only in composer_version were composed
+ * under different rules, and the difference between their stored cells is not
+ * something anybody did to the record.
+ */
+export const COMPOSER_VERSION = 1;
+
 export type ExportRecord = {
   id: string;
   recordNo: number;
@@ -189,6 +199,8 @@ export type ExportRecord = {
 };
 
 export type ExportAttribute = {
+  /** The row's own id. A version diff keys on it, so a value edited in place is one change and not a delete plus an add. */
+  id: string;
   recordId: string;
   attrGroup: AttributeGroup;
   label: string;

@@ -10,6 +10,7 @@
 // cut a requirement in the wrong place, and an uncorrectable mis-extraction
 // sitting on the project overview is worse than no extraction at all.
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
+import { openChangeSet } from "@/lib/change-sets";
 import {
   assertStagedPreamble,
   hasPendingNotes,
@@ -112,6 +113,18 @@ export async function confirmPreambleNotes(
   if (blockers.length > 0) {
     throw new DomainConflictError("blocked", blockers[0]?.message ?? "A note cannot be added yet.", { diff: blockers });
   }
+
+  // A preamble writes project_notes, not records, so this change set carries
+  // no versions. It is opened anyway: the project's trail has to show that a
+  // preamble was read, and an audited write with no change behind it is the
+  // one thing the coverage check is looking for.
+  await openChangeSet(txn, {
+    projectId: run.projectId,
+    kind: "preamble_confirm",
+    actor,
+    reason: `${taken.length} note${taken.length === 1 ? "" : "s"} from ${run.staged.filename ?? "the preamble"}`,
+    sourceIntakeRunId: runId,
+  });
 
   const sortRows = await txn`
     select coalesce(max(sort_order), 0) as max_sort from project_notes where project_id = ${run.projectId}

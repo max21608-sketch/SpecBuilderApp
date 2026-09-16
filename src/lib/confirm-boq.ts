@@ -30,6 +30,8 @@
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { assertBoqV2, normaliseRef, type StagedBoqSheet } from "@/lib/boq-import";
+import { openChangeSet } from "@/lib/change-sets";
+import { snapshotRecords } from "@/lib/record-snapshot";
 
 type StagedLine = {
   index: number;
@@ -46,7 +48,7 @@ type StagedLine = {
   ignored: boolean;
 };
 
-export type ConfirmBoqResult = { imported: number; projectId: string; runIds: string[] };
+export type ConfirmBoqResult = { imported: number; projectId: string; runIds: string[]; changeSetId: string };
 
 export async function confirmBoqImport(
   txn: TxnSql,
@@ -82,6 +84,16 @@ export async function confirmBoqImport(
   //    below now happens with no other import able to interleave.
   const projects = await txn`select id from projects where id = ${projectId} for update`;
   if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
+
+  // The change this import is. Opened BEFORE the first insert, because
+  // write_audit() reads it from the transaction: a change set created after
+  // the writes would leave every one of them belonging to nothing.
+  const changeSetId = await openChangeSet(txn, {
+    projectId,
+    kind: "boq_confirm",
+    actor,
+    sourceIntakeRunId: runId,
+  });
 
   const parsed = assertBoqV2(run.parsed);
   const sheets = parsed.sheets.filter((sheet) => !sheet.ignored);
@@ -131,6 +143,7 @@ export async function confirmBoqImport(
   `;
   let nextSort = Number(sortRows[0]?.max_sort ?? 0);
   const runIds: string[] = [];
+  const recordIds: string[] = [];
   let imported = 0;
 
   for (const sheet of sheets as StagedBoqSheet[]) {
@@ -173,6 +186,7 @@ export async function confirmBoqImport(
       `;
       const recordId = String(inserted[0]?.id ?? "");
       if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
+      recordIds.push(recordId);
 
       if (line.code) {
         await txn`
@@ -192,10 +206,6 @@ export async function confirmBoqImport(
         where r.id = ${recordId}
       `;
 
-      await txn`
-        insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
-        values ('spec_record', ${recordId}, null, 'active', ${actor}, ${`Imported from BOQ line ${line.lineNo}`})
-      `;
       imported += 1;
     }
   }
@@ -212,5 +222,9 @@ export async function confirmBoqImport(
     throw new DomainConflictError("already_confirmed", "This import was confirmed by someone else a moment ago.");
   }
 
-  return { imported, projectId, runIds };
+  // v1 of every record, LAST: the version has to hold the refs and the answer
+  // rows written above it, not the bare row the insert returned.
+  await snapshotRecords(txn, recordIds, changeSetId);
+
+  return { imported, projectId, runIds, changeSetId };
 }

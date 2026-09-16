@@ -1,0 +1,282 @@
+// What changed between two versions of a record.
+//
+// ============================================================================
+// PURE, AND OVER ATOMS.
+//
+// Two rules here are load-bearing.
+//
+// 1. THE DIFF RUNS OVER ATOMS, NEVER OVER STORED CELLS. `record_snapshots`
+//    keeps the 109 composed cells as they were on the day, because "what did
+//    the file we sent actually say" is a real question. It is the WRONG input
+//    for a diff: `composeRowCells` changes (the Timber Finish naming question
+//    is open right now), and a diff over cells stored under two different sets
+//    of rules reports edits on records nobody touched. So the cell view is
+//    RECOMPOSED from both ends with today's composer, and a change shown there
+//    is always a change in the data.
+//
+// 2. EVERYTHING IS KEYED BY A STABLE ID. Attributes key on the row id and
+//    answers on the requirement id, so a value corrected in place is one
+//    "changed" line rather than a delete beside an add — which is the
+//    difference between a reviewer seeing "W1900 → W1520" and seeing two
+//    unrelated lines they have to pair up themselves.
+//
+// A snapshot's jsonb is untrusted by age: it was written by an older build
+// than the one reading it. `parseAtoms` validates with Zod and upgrades, the
+// same discipline as `upgradeDimensionSlots`.
+// ============================================================================
+import { z } from "zod";
+import { composeRowCells, BWS_EXPORT_COLUMNS } from "@/lib/bws-export";
+import { exportAnswers, scopeForAtoms, RECORD_ATOMS_SCHEMA_VERSION, type RecordAtoms } from "@/lib/record-atoms";
+
+// ---- validating a stored snapshot -----------------------------------------
+
+const AtomAttribute = z.object({
+  id: z.string(),
+  recordId: z.string(),
+  attrGroup: z.string(),
+  label: z.string(),
+  value: z.string().nullable(),
+  unit: z.string().nullable(),
+  dimensionSlot: z.string().nullable(),
+  materialCode: z.string().nullable(),
+  specFieldJsonId: z.number().nullable(),
+  state: z.string(),
+  sortOrder: z.number(),
+  sourceFilename: z.string().nullable(),
+  sourcePage: z.number().nullable(),
+});
+
+const AtomAnswer = z.object({
+  id: z.string(),
+  requirementId: z.string(),
+  prompt: z.string(),
+  section: z.string().nullable(),
+  kind: z.string(),
+  specFieldJsonId: z.number().nullable(),
+  specFieldName: z.string().nullable(),
+  value: z.string().nullable(),
+  state: z.string(),
+  sourceKind: z.string(),
+  sourceId: z.string().nullable(),
+});
+
+const AtomSchema = z.object({
+  schemaVersion: z.number(),
+  project: z.object({ number: z.string(), name: z.string(), client: z.string().nullable() }),
+  record: z.object({
+    id: z.string(),
+    recordNo: z.number(),
+    label: z.string(),
+    itemDescription: z.string(),
+    qty: z.number().nullable(),
+    area: z.string().nullable(),
+    runName: z.string(),
+    boqCodes: z.array(z.string()),
+  }),
+  runId: z.string(),
+  runName: z.string(),
+  status: z.string(),
+  categoryId: z.string().nullable(),
+  categoryName: z.string().nullable(),
+  productReference: z.string().nullable(),
+  designer: z.string().nullable(),
+  boqCategory: z.string().nullable(),
+  parentId: z.string().nullable(),
+  splitReason: z.string().nullable(),
+  refs: z.array(z.object({ system: z.string(), value: z.string() })),
+  attributes: z.array(AtomAttribute),
+  answers: z.array(AtomAnswer),
+  itemImage: z.object({ attachmentId: z.string(), storagePath: z.string() }).nullable(),
+});
+
+/**
+ * A stored snapshot back into atoms.
+ *
+ * Throws rather than returning a partial: a version screen showing a record
+ * with its attributes silently dropped would read as "everything was deleted
+ * that day", which is a worse answer than an error.
+ */
+export function parseAtoms(value: unknown): RecordAtoms {
+  const parsed = AtomSchema.parse(value);
+  if (parsed.schemaVersion > RECORD_ATOMS_SCHEMA_VERSION) {
+    throw new Error(
+      `This version was written by a newer build (schema ${parsed.schemaVersion}) than this one understands (${RECORD_ATOMS_SCHEMA_VERSION}).`,
+    );
+  }
+  return parsed as RecordAtoms;
+}
+
+// ---- the diff --------------------------------------------------------------
+
+export type FieldChange = { field: string; label: string; was: string | null; now: string | null };
+
+export type ListChange = {
+  key: string;
+  label: string;
+  change: "added" | "removed" | "changed";
+  fields: FieldChange[];
+};
+
+export type SnapshotDiff = {
+  core: FieldChange[];
+  refs: ListChange[];
+  attributes: ListChange[];
+  answers: ListChange[];
+  /** Recomposed with today's rules from both ends — never the stored cells. */
+  cells: FieldChange[];
+  isEmpty: boolean;
+};
+
+function show(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
+}
+
+function compare(field: string, label: string, was: unknown, now: unknown): FieldChange | null {
+  const a = show(was);
+  const b = show(now);
+  return a === b ? null : { field, label, was: a, now: b };
+}
+
+const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; read: (atoms: RecordAtoms) => unknown }[] = [
+  { field: "itemDescription", label: "Item", read: (a) => a.record.itemDescription },
+  { field: "qty", label: "Quantity", read: (a) => a.record.qty },
+  { field: "area", label: "Area", read: (a) => a.record.area },
+  { field: "productReference", label: "Product reference", read: (a) => a.productReference },
+  { field: "designer", label: "Designer", read: (a) => a.designer },
+  { field: "boqCategory", label: "BOQ category", read: (a) => a.boqCategory },
+  { field: "categoryName", label: "Category", read: (a) => a.categoryName },
+  { field: "status", label: "Status", read: (a) => a.status },
+  { field: "runName", label: "Run", read: (a) => a.runName },
+  { field: "splitReason", label: "Split reason", read: (a) => a.splitReason },
+  { field: "itemImage", label: "Picture", read: (a) => a.itemImage?.storagePath ?? null },
+];
+
+function attributeFields(attribute: RecordAtoms["attributes"][number]): { field: string; label: string; value: unknown }[] {
+  return [
+    { field: "value", label: "Value", value: attribute.value },
+    { field: "unit", label: "Unit", value: attribute.unit },
+    { field: "label", label: "Label", value: attribute.label },
+    { field: "attrGroup", label: "Group", value: attribute.attrGroup },
+    { field: "dimensionSlot", label: "Slot", value: attribute.dimensionSlot },
+    { field: "state", label: "State", value: attribute.state },
+    { field: "materialCode", label: "Finish code", value: attribute.materialCode },
+    { field: "specFieldJsonId", label: "BWS field", value: attribute.specFieldJsonId },
+    { field: "source", label: "Source", value: attribute.sourceFilename },
+  ];
+}
+
+function answerFields(answer: RecordAtoms["answers"][number]): { field: string; label: string; value: unknown }[] {
+  return [
+    { field: "value", label: "Value", value: answer.value },
+    { field: "state", label: "State", value: answer.state },
+    { field: "sourceKind", label: "Source", value: answer.sourceKind },
+  ];
+}
+
+function diffKeyed<T>(
+  before: T[],
+  after: T[],
+  key: (item: T) => string,
+  label: (item: T) => string,
+  fields: (item: T) => { field: string; label: string; value: unknown }[],
+): ListChange[] {
+  const a = new Map(before.map((item) => [key(item), item]));
+  const b = new Map(after.map((item) => [key(item), item]));
+  const out: ListChange[] = [];
+
+  for (const [id, item] of b) {
+    const previous = a.get(id);
+    if (!previous) {
+      out.push({
+        key: id,
+        label: label(item),
+        change: "added",
+        fields: fields(item)
+          .map((f) => compare(f.field, f.label, null, f.value))
+          .filter((f): f is FieldChange => f !== null),
+      });
+      continue;
+    }
+    const before_ = fields(previous);
+    const after_ = fields(item);
+    const changed = after_
+      .map((f, index) => compare(f.field, f.label, before_[index]?.value, f.value))
+      .filter((f): f is FieldChange => f !== null);
+    if (changed.length > 0) out.push({ key: id, label: label(item), change: "changed", fields: changed });
+  }
+
+  for (const [id, item] of a) {
+    if (b.has(id)) continue;
+    out.push({
+      key: id,
+      label: label(item),
+      change: "removed",
+      fields: fields(item)
+        .map((f) => compare(f.field, f.label, f.value, null))
+        .filter((f): f is FieldChange => f !== null),
+    });
+  }
+
+  return out;
+}
+
+/** The 109 export cells at both ends, composed with TODAY's rules. */
+export function diffCells(before: RecordAtoms, after: RecordAtoms): FieldChange[] {
+  const a = composeRowCells(scopeForAtoms(before), before.record, before.attributes, exportAnswers(before));
+  const b = composeRowCells(scopeForAtoms(after), after.record, after.attributes, exportAnswers(after));
+  const out: FieldChange[] = [];
+  for (let index = 0; index < BWS_EXPORT_COLUMNS.length; index += 1) {
+    const column = BWS_EXPORT_COLUMNS[index];
+    if (!column) continue;
+    const change = compare(column.name, column.name.trim(), a[index]?.value, b[index]?.value);
+    if (change) out.push(change);
+  }
+  return out;
+}
+
+export function diffSnapshots(before: RecordAtoms, after: RecordAtoms): SnapshotDiff {
+  const core = CORE_FIELDS.map((f) => compare(String(f.field), f.label, f.read(before), f.read(after))).filter(
+    (f): f is FieldChange => f !== null,
+  );
+
+  const refs = diffKeyed(
+    before.refs,
+    after.refs,
+    (ref) => `${ref.system}:${ref.value}`,
+    (ref) => ref.value,
+    (ref) => [{ field: "value", label: ref.system, value: ref.value }],
+  );
+
+  const attributes = diffKeyed(
+    before.attributes,
+    after.attributes,
+    (attribute) => attribute.id,
+    (attribute) => attribute.label,
+    attributeFields,
+  );
+
+  // Keyed on the REQUIREMENT, not the answer row. Setting a category deletes
+  // the old category's `missing` rows and inserts the new category's, so a
+  // question that exists under both would otherwise read as removed-and-added
+  // with the same prompt printed twice.
+  const answers = diffKeyed(
+    before.answers,
+    after.answers,
+    (answer) => answer.requirementId,
+    (answer) => answer.prompt,
+    answerFields,
+  );
+
+  const cells = diffCells(before, after);
+
+  return {
+    core,
+    refs,
+    attributes,
+    answers,
+    cells,
+    isEmpty: core.length === 0 && refs.length === 0 && attributes.length === 0 && answers.length === 0 && cells.length === 0,
+  };
+}

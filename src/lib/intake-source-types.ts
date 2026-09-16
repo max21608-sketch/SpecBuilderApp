@@ -30,7 +30,27 @@ export const UPLOAD_CONTENT_TYPES = [
   "text/csv",
   "text/tab-separated-values",
   "image/png",
+  // EVIDENCE: the email that asked for a change, attached to a change set.
+  //
+  // `message/rfc822` is a saved .eml. `application/vnd.ms-outlook` is a .msg,
+  // which is binary OLE and which nothing in this app parses — the link on a
+  // change DOWNLOADS it and it opens in Outlook. An Outlook drag-out often
+  // arrives with an empty or generic type, which is why the last two are here;
+  // the file is never executed, never rendered and never sniffed (the read
+  // route sets nosniff and content-disposition: attachment).
+  "message/rfc822",
+  "application/vnd.ms-outlook",
+  "application/octet-stream",
+  "image/jpeg",
 ];
+
+/** What a browser may attach as evidence. Checked by extension, server-side. */
+export const EVIDENCE_EXTENSIONS = [".eml", ".msg", ".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".csv", ".txt"];
+
+export function isEvidenceFilename(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  return EVIDENCE_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
 
 /** Where an item image lives, under the project's own prefix. */
 export function itemImagePath(projectId: string, recordScopedName: string): string {

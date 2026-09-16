@@ -28,6 +28,9 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
+import RecordHistory from "@/components/history/RecordHistory";
+import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
+import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
 
 type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
@@ -81,6 +84,13 @@ export default function RecordPage() {
   // turns it off. Asking first would be a second round trip on every record to
   // learn something the image request itself reports.
   const [hasImage, setHasImage] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  // Bumped after every successful write, so the history list below reloads
+  // under the edit that caused it instead of going stale until a page reload.
+  const [historyKey, setHistoryKey] = useState(0);
+  // Set when the server refuses an edit for want of a reason. Holds everything
+  // needed to replay the same edit once the reviewer has said why.
+  const [pendingReason, setPendingReason] = useState<PendingReason | null>(null);
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
@@ -90,11 +100,32 @@ export default function RecordPage() {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /**
+   * Reload first, report afterwards.
+   *
+   * `load()` clears the banner on a successful fetch, so `setError(...)`
+   * followed by `await load()` showed a refusal for a few milliseconds and
+   * then nothing at all — the click simply looked as though it had not
+   * registered. The reload itself is still required: a refused request means
+   * this screen is out of date. Same rule as both drawings screens.
+   */
+  async function reloadThen(message: string | null) {
+    await load();
+    if (message) setError(message);
+    setHistoryKey((key) => key + 1);
+  }
   // Moving from a record with no picture to one with a picture reuses this
   // component, so a sticky `false` would hide every image after the first miss.
   useEffect(() => { setHasImage(true); }, [id]);
 
-  async function save(answer: Answer, value: string, state: AnswerState) {
+  async function save(
+    answer: Answer,
+    value: string,
+    state: AnswerState,
+    reason?: string,
+    evidence?: UploadedEvidence | null,
+  ) {
     // Reachable only if a requirement was added to the category after this
     // record was given one. Choosing the category again creates the missing
     // rows; re-importing is no longer the only way out.
@@ -108,10 +139,21 @@ export default function RecordPage() {
       const res = await apiFetch(`/api/answers/${answer.answer_id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value, state, version: answer.version }),
+        body: JSON.stringify({ value, state, version: answer.version, reason, evidence }),
       });
-      if (!res.ok) { setError(res.error); }
-      await load();
+      if (!res.ok) {
+        // The server asks for a reason only when the edit OVERRIDES a settled
+        // answer. It is asked for here rather than on every keystroke, and it
+        // carries the original edit so nothing has to be retyped.
+        if (res.data?.code === "reason_required") {
+          setPendingReason({ prompt: answer.prompt, answerId: answer.answer_id, value, state, version: answer.version });
+          await reloadThen(null);
+          return;
+        }
+        await reloadThen(res.error);
+        return;
+      }
+      await reloadThen(null);
     } finally {
       setSavingId(null);
     }
@@ -127,12 +169,26 @@ export default function RecordPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ categoryId, version: data.record.version }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     } finally {
       // Always reset: an HTML error page must not leave the select disabled.
       setSavingCategory(false);
     }
+  }
+
+  /** Replays the edit the server refused, now that there is a reason for it. */
+  async function saveWithReason(reason: string, evidence: UploadedEvidence | null) {
+    if (!data || !pendingReason) return;
+    const answer = data.answers.find((row) => row.answer_id === pendingReason.answerId);
+    // The answer moved under the prompt — a stale screen, so say so rather
+    // than writing to whatever is at that id now.
+    if (!answer) {
+      setPendingReason(null);
+      await reloadThen("That question changed while the reason box was open. Nothing was saved — check it and try again.");
+      return;
+    }
+    await save(answer, pendingReason.value, pendingReason.state, reason, evidence);
+    setPendingReason(null);
   }
 
   if (error && !data) return <p className="text-sm text-red-700">{error}</p>;
@@ -185,6 +241,15 @@ export default function RecordPage() {
       </p>
 
       {error && <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
+
+      {pendingReason && (
+        <ReasonPrompt
+          pending={pendingReason}
+          projectId={record.project_id}
+          onCancel={() => setPendingReason(null)}
+          onSubmit={saveWithReason}
+        />
+      )}
 
       {/* The picture, first, because it is what a person recognises. A record
           was a description and a quantity, and nobody could look at one and
@@ -331,6 +396,12 @@ export default function RecordPage() {
                 </div>
                 <div className="mt-2 flex items-center gap-2">
                   <input
+                    /* Re-keyed on every reload, so the box always shows what
+                       the SERVER holds. Uncontrolled inputs keep whatever was
+                       typed across a re-render, so a refused edit used to
+                       leave the rejected text sitting on screen looking
+                       saved — which is the worst of both readings. */
+                    key={`${answer.answer_id}:${answer.version}:${historyKey}`}
                     defaultValue={answer.value ?? ""}
                     placeholder="Value"
                     disabled={savingId === answer.answer_id}
@@ -363,6 +434,19 @@ export default function RecordPage() {
           </ul>
         </section>
       ))}
+
+      {/* Every version of this item, and what changed at each. Collapsed by
+          default: the question it answers is asked occasionally, and the specs
+          above are what the screen is for. */}
+      <h2 className="mt-8 text-sm font-semibold text-neutral-500 uppercase tracking-wide">History</h2>
+      <button
+        type="button"
+        onClick={() => setShowHistory((value) => !value)}
+        className="mt-1 text-sm text-neutral-600 hover:text-neutral-900"
+      >
+        {showHistory ? "▾ Hide versions" : "▸ Show versions and what changed"}
+      </button>
+      {showHistory && <RecordHistory recordId={record.id} reloadKey={historyKey} />}
     </div>
   );
 }

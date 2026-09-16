@@ -22,6 +22,8 @@
 // "the proposal at index 4" a phrase nobody has to say.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
+import { openChangeSet } from "@/lib/change-sets";
+import { snapshotRecords } from "@/lib/record-snapshot";
 import {
   hasPendingProposals,
   proposalBlockers,
@@ -185,6 +187,17 @@ export async function confirmSpecDocumentRecord(
     throw new DomainConflictError("record_inactive", "That spec record is no longer active.");
   }
 
+  // Opened before the first answer is written: write_audit() reads the change
+  // from the transaction, so one created afterwards would leave every row it
+  // covers belonging to nothing.
+  const changeSetId = await openChangeSet(txn, {
+    projectId: run.projectId,
+    kind: "spec_document_confirm",
+    actor,
+    reason: `${chosen.length} answer${chosen.length === 1 ? "" : "s"} from ${run.staged.filename ?? "a specification document"}`,
+    sourceIntakeRunId: run.runId,
+  });
+
   const applied = new Map<string, Proposal["applied"]>();
 
   for (const proposal of chosen) {
@@ -281,6 +294,8 @@ export async function confirmSpecDocumentRecord(
   });
 
   const status = await writeStaged(txn, run, actor, lines);
+
+  await snapshotRecords(txn, [recordId], changeSetId);
 
   await txn`
     insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)

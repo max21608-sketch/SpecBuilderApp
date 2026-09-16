@@ -11,10 +11,18 @@
 // The scope is a whole RUN or a whole PROJECT and is never filtered further.
 // That rule is enforced in the routes, where a stray query parameter is a 400;
 // this loader simply has nowhere to express a narrower scope.
+//
+// ---- AND WHY THE ATOMS COME FROM record-atoms.ts -------------------------
+//
+// A version snapshot has to hold what a record was, and the only honest
+// definition of that is the one the export uses. Both now call
+// `loadRecordAtoms`, so a snapshot cannot describe a record differently from
+// the file — which is what makes "what changed between these two exports" a
+// question with an answer. This function keeps only the part that is genuinely
+// about scope: which records are in it.
 // ============================================================================
 import { sql } from "@/lib/db";
-import { isDimensionSlot } from "@/lib/spec-vocab";
-import type { AttributeGroup, AttributeState, AttributeUnit } from "@/lib/spec-vocab";
+import { exportAnswers, loadRecordAtoms, type RecordAtoms } from "@/lib/record-atoms";
 import type { ExportAnswer, ExportAttribute, ExportRecord, ExportScope } from "@/lib/bws-export";
 
 export type LoadedExportScope = {
@@ -46,78 +54,33 @@ export async function loadExportScope(projectId: string, runId: string | null): 
   // EVERY active record in scope, including ones with nothing on them. A record
   // omitted because it had nothing to say is a record whose BWS fields would be
   // wiped on import.
-  const recordRows = await sql`
-    select r.id, r.record_no, r.item_description, r.qty, r.area,
-           p.bws_project_number, run.name as run_name,
-           coalesce((select array_agg(x.ref_value order by x.ref_value)
-                       from spec_record_refs x
-                      where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as boq_codes
+  //
+  // A RETIRED RUN is out of scope even when its records were somehow left
+  // active: the run is the tab a person retired, and an export that still
+  // carried it would re-import work the project has moved on from.
+  const idRows = await sql`
+    select r.id
     from spec_records r
-    join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id
     where r.project_id = ${projectId}
       and r.status = 'active'
+      and run.status = 'active'
       and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
     order by r.record_no
   `;
+  const recordIds = idRows.map((row) => String(row.id));
+  const atoms = await loadRecordAtoms(sql, recordIds);
 
-  const records: ExportRecord[] = recordRows.map((row) => ({
-    id: String(row.id),
-    recordNo: Number(row.record_no),
-    label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
-    itemDescription: String(row.item_description),
-    qty: row.qty === null || row.qty === undefined ? null : Number(row.qty),
-    area: row.area === null || row.area === undefined ? null : String(row.area),
-    runName: String(row.run_name),
-    boqCodes: (row.boq_codes as string[] | null)?.map(String) ?? [],
-  }));
-
-  const recordIds = records.map((record) => record.id);
-
-  const attributeRows = recordIds.length
-    ? await sql`
-        select a.record_id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code, a.state, a.sort_order,
-               a.source_page, f.json_id, at.filename as source_filename
-        from record_attributes a
-        left join spec_fields f on f.id = a.spec_field_id
-        left join intake_runs ir on ir.id = a.source_run_id
-        left join attachments at on at.id = ir.attachment_id
-        where a.record_id = any(${recordIds}::uuid[]) and a.status = 'active'
-        order by a.sort_order, a.created_at
-      `
-    : [];
-
-  const attributes: ExportAttribute[] = attributeRows.map((row) => ({
-    recordId: String(row.record_id),
-    attrGroup: String(row.attr_group) as AttributeGroup,
-    label: String(row.label),
-    value: row.value === null || row.value === undefined ? null : String(row.value),
-    unit: row.unit === null || row.unit === undefined ? null : (String(row.unit) as AttributeUnit),
-    dimensionSlot: isDimensionSlot(row.dimension_slot) ? row.dimension_slot : null,
-    materialCode: row.material_code === null || row.material_code === undefined ? null : String(row.material_code),
-    specFieldJsonId: row.json_id === null || row.json_id === undefined ? null : Number(row.json_id),
-    state: String(row.state) as AttributeState,
-    sortOrder: Number(row.sort_order),
-    sourceFilename: row.source_filename === null || row.source_filename === undefined ? null : String(row.source_filename),
-    sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
-  }));
-
-  // Confirmed cheat-sheet answers that map to a BWS field. `na` is settled but
-  // carries no value, and `tbc`/`missing` are not answers to export.
-  const answerRows = recordIds.length
-    ? await sql`
-        select a.record_id, a.value, f.json_id
-        from spec_answers a
-        join spec_fields f on f.id = a.spec_field_id
-        where a.record_id = any(${recordIds}::uuid[]) and a.revision_no = 0 and a.state = 'confirmed'
-      `
-    : [];
-
-  const answers: ExportAnswer[] = answerRows.map((row) => ({
-    recordId: String(row.record_id),
-    specFieldJsonId: Number(row.json_id),
-    value: row.value === null || row.value === undefined ? null : String(row.value),
-  }));
+  const records: ExportRecord[] = [];
+  const attributes: ExportAttribute[] = [];
+  const answers: ExportAnswer[] = [];
+  for (const id of recordIds) {
+    const record = atoms.get(id);
+    if (!record) continue;
+    records.push(record.record);
+    attributes.push(...record.attributes);
+    answers.push(...exportAnswers(record));
+  }
 
   return {
     projectNumber: String(project.bws_project_number),
@@ -135,3 +98,5 @@ export async function loadExportScope(projectId: string, runId: string | null): 
 export function isScopeFailure(result: LoadedExportScope | ScopeFailure): result is ScopeFailure {
   return "error" in result;
 }
+
+export type { RecordAtoms };

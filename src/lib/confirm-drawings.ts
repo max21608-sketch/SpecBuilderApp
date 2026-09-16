@@ -43,6 +43,8 @@ import {
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
+import { openChangeSet } from "@/lib/change-sets";
+import { snapshotRecords } from "@/lib/record-snapshot";
 
 export type ObservationRef = { id: string; version: number };
 
@@ -327,6 +329,18 @@ export async function confirmDrawingItem(
     }
   }
 
+  // The change this confirm is, opened before the first write so write_audit()
+  // can stamp every row it produces. Its reason is generated rather than asked
+  // for: the page and the document ARE the reason, and a reviewer typing "from
+  // the drawings" on every card is ceremony, not consent.
+  const changeSetId = await openChangeSet(txn, {
+    projectId: run.projectId,
+    kind: "drawing_confirm",
+    actor,
+    reason: `${taken.length} spec${taken.length === 1 ? "" : "s"} from ${run.staged.filename ?? "the shop drawings"}${item.page ? ` page ${item.page}` : ""}${item.itemCodeRaw ? ` (${item.itemCodeRaw})` : ""}`,
+    sourceIntakeRunId: runId,
+  });
+
   const attributeIdsByObservation = new Map<string, string[]>();
   const now = new Date().toISOString();
   let answersFilled = 0;
@@ -418,12 +432,12 @@ export async function confirmDrawingItem(
     const filled = await applyAnswerFills(txn, recordId, runId, actor, planAnswerFills(promotable));
     answersFilled += filled;
 
-    await txn`
-      insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
-      values ('spec_record', ${recordId}, null, 'active', ${actor},
-              ${`${taken.length} spec${taken.length === 1 ? "" : "s"} confirmed from ${run.staged.filename ?? "shop drawings"}${item.page ? ` page ${item.page}` : ""}${filled > 0 ? `; ${filled} checklist answer${filled === 1 ? "" : "s"} filled` : ""}`})
-    `;
   }
+
+  // One version per target record, taken AFTER the answers were promoted: a
+  // version showing the new attribute but not the checklist answer it filled
+  // would be a version of a state the record was never in.
+  await snapshotRecords(txn, ordered, changeSetId);
 
   const items = run.staged.items.map((row) =>
     row.id !== itemId

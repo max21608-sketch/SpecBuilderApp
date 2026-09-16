@@ -4,16 +4,33 @@
 // predicated on it, and zero rows back means somebody else changed the row
 // first. That is a 409 naming the field, never a silent overwrite of their
 // work. bump_version() and write_audit() do the rest in the database.
-import { sql, json } from "@/lib/db";
+//
+// Since 0012 the edit also belongs to a CHANGE SET, which is why it runs in a
+// transaction rather than as one autocommitted statement — see answer-edit.ts
+// for why that is not optional. The guards live there; this is the boundary.
+import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
+import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
+import { editAnswer } from "@/lib/answer-edit";
+import { z } from "zod";
 import { isAnswerState, type AnswerState } from "@/lib/spec-vocab";
+
+const Evidence = z
+  .object({
+    pathname: z.string().min(1).max(1024),
+    filename: z.string().max(300).nullable().optional(),
+    contentType: z.string().max(200).nullable().optional(),
+    size: z.number().int().nonnegative().max(32 * 1024 * 1024).nullable().optional(),
+  })
+  .strict()
+  .nullable();
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
 
-  let body: { value?: unknown; state?: unknown; version?: unknown };
+  let body: { value?: unknown; state?: unknown; version?: unknown; reason?: unknown; evidence?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -29,6 +46,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const raw = typeof body.value === "string" ? body.value.trim() : "";
   const value = raw === "" ? null : raw;
+  const reason = typeof body.reason === "string" ? body.reason.trim() || null : null;
+
+  // The email that asked for the change, already uploaded to this project's
+  // own blob prefix by the browser. A PATHNAME, never a URL — the store
+  // resolves it against its own host from the token, so there is no host to
+  // influence and no redirect to follow. Re-checked against the project
+  // inside the transaction.
+  const parsedEvidence = Evidence.safeParse(body.evidence ?? null);
+  if (!parsedEvidence.success) {
+    return json({ ok: false, error: "That attachment is not valid." }, 400);
+  }
+  const evidence = parsedEvidence.data;
 
   // The database refuses `confirmed` without a value and an actor, and refuses
   // a value on `na`. Saying so here gives the reviewer a sentence rather than a
@@ -40,43 +69,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return json({ ok: false, error: "N/A cannot carry a value." }, 400);
   }
 
-  const rows = await sql`
-    update spec_answers
-    set value        = ${value},
-        state        = ${state},
-        confirmed_by = ${state === "confirmed" ? user.email : null},
-        confirmed_at = ${state === "confirmed" ? new Date().toISOString() : null},
-        -- THE EDIT TAKES OWNERSHIP. An answer filled from a drawing carries
-        -- source_kind 'document' and the run that wrote it, and that pair is
-        -- exactly what tells promote-answers.ts it may recompose the row as
-        -- later slots arrive. The moment a person edits it, it stops being
-        -- that row: marking it 'manual' is what stops the next confirmed
-        -- drawing overwriting what they typed. (Not null -- the column is
-        -- not-null and 'manual' is its default and its honest value here.)
-        source_kind  = 'manual',
-        source_id    = null,
-        updated_by   = ${user.email}
-    where id = ${id} and version = ${version}
-    returning id, value, state, version, confirmed_by, confirmed_at
-  `;
-
-  if (!rows[0]) {
-    const current = await sql`
-      select a.version, a.state, a.value, a.updated_by, q.prompt
-      from spec_answers a join requirements q on q.id = a.requirement_id
-      where a.id = ${id}
-    `;
-    if (!current[0]) return json({ ok: false, error: "No such answer." }, 404);
-    return json(
-      {
-        ok: false,
-        conflict: true,
-        error: `"${String(current[0].prompt)}" was changed by ${String(current[0].updated_by ?? "someone else")} while you were editing. Their answer is shown; yours was not saved.`,
-        current: current[0],
-      },
-      409,
+  try {
+    const result = await withTransaction((txn) =>
+      editAnswer(txn, {
+        answerId: id,
+        value,
+        state,
+        expectedVersion: version,
+        reason,
+        evidence,
+        actor: user.email,
+      }),
     );
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
   }
-
-  return json({ ok: true, answer: rows[0] });
 }

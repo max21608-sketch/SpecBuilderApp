@@ -16,7 +16,9 @@
     "db:restore": "node --env-file-if-exists=.env.local db/restore.mjs",
     "hash-password": "node tools/hash-password.mjs",
     "create-user": "node tools/create-user.mjs",
-    "db:backfill-answers": "tsx --env-file-if-exists=.env.local db/backfill-answers.ts"
+    "db:backfill-answers": "tsx --env-file-if-exists=.env.local db/backfill-answers.ts",
+    "db:backfill-snapshots": "tsx --env-file-if-exists=.env.local db/backfill-snapshots.ts",
+    "db:qa-clean": "node --env-file-if-exists=.env.local tools/qa-clean.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
