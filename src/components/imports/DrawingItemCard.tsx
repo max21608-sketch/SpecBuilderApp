@@ -25,7 +25,15 @@
 // code twice shows its candidates as buttons with nothing chosen. A dimension
 // gets a unit only from the page, from figures that agree, or from the
 // project's own setting -- and the card says which.
+//
+// A PAGE WITH NO CODE ON IT IS STILL AN ITEM. The model is told to record an
+// absent reference as null rather than guess whose page it is, so a second page
+// of views, a legend or a cover sheet stages as a card of its own. That card is
+// correct and it is also unactionable, so it opens COLLAPSED and carries one
+// button that ignores the whole page. It is never dropped: dismissing it is a
+// reviewer's decision, taken once instead of once per row.
 // ============================================================================
+import { useEffect, useState } from "react";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
@@ -128,6 +136,23 @@ export default function ItemCard({
   onImage: (itemId: string, image: CroppedImage | null) => void;
 }) {
   const pending = item.observations.filter((o) => o.reviewStatus === "pending");
+
+  // A page whose code could not be read opens CLOSED.
+  //
+  // It cannot commit — no code means no resolved runs means the no_targets
+  // blocker — so a full card of rows, a rendered PDF crop and a record select
+  // is a lot of screen for something most reviewers will dismiss. What it is
+  // stays on the summary line, and the count above still reports it as
+  // outstanding: this hides detail, never the item.
+  const [open, setOpen] = useState(item.itemCodeRaw !== null);
+
+  // Ignoring the page in one action, two-step rather than a window.confirm.
+  // Restore is per row, so an accidental whole-page ignore costs one click per
+  // row to undo — worth one deliberate second click here. Disarmed whenever
+  // the set it would ignore changes underneath it.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => setArmed(false), [pending.length]);
+
   const targets = resolution?.targets ?? [];
   const blockers = resolution?.blockers ?? [];
   const warnings = resolution?.warnings ?? [];
@@ -166,38 +191,105 @@ export default function ItemCard({
     void onSaveTargets(item, [...ticked], [...unticked]);
   };
 
-  return (
-    <div className="border border-neutral-200 rounded-lg bg-white">
-      <div className="flex flex-wrap items-baseline justify-between gap-3 px-4 py-3 border-b border-neutral-100">
-        <div>
-          <h3 className="text-base font-semibold text-neutral-900">
-            {item.itemCodeRaw ?? "No item code on this page"}
-            {item.itemNameRaw && <span className="ml-2 text-sm font-normal text-neutral-600">{item.itemNameRaw}</span>}
-          </h3>
-          <p className="text-xs text-neutral-500">
-            {item.page ? (
-              <a
-                href={`/api/imports/${importId}/source#page=${item.page}`}
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-neutral-900"
-              >
-                Page {item.page}
-              </a>
-            ) : (
-              "Page unknown"
-            )}
-            {item.confidence === "low" && <span className="ml-2 text-amber-700">code was hard to read</span>}
-          </p>
-        </div>
-        {pending.some((observation) => observation.attrGroup === "dimension") && (
+  const ignorePage = (
+    <button
+      type="button"
+      onClick={() => {
+        if (!armed) {
+          setArmed(true);
+          return;
+        }
+        // Disarmed as it is sent, not after it succeeds: a refused request
+        // leaves the card on screen, and a button still primed there would
+        // ignore the page on the next single click.
+        setArmed(false);
+        void onReview(item, pending, "ignore");
+      }}
+      disabled={busy || pending.length === 0}
+      className={`text-xs px-2 py-1 rounded border disabled:opacity-50 ${
+        armed
+          ? "border-amber-400 bg-amber-50 text-amber-900"
+          : "border-neutral-300 text-neutral-600 hover:bg-neutral-50"
+      }`}
+    >
+      {armed ? `Ignore all ${pending.length} row${pending.length === 1 ? "" : "s"}?` : "Ignore this page"}
+    </button>
+  );
+
+  const header = (
+    <div className="flex flex-wrap items-baseline justify-between gap-3 px-4 py-3 border-b border-neutral-100">
+      <div>
+        <h3 className="text-base font-semibold text-neutral-900">
+          {item.itemCodeRaw ?? "No item code on this page"}
+          {item.itemNameRaw && <span className="ml-2 text-sm font-normal text-neutral-600">{item.itemNameRaw}</span>}
+        </h3>
+        <p className="text-xs text-neutral-500">
+          {item.page ? (
+            <a
+              href={`/api/imports/${importId}/source#page=${item.page}`}
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-neutral-900"
+            >
+              Page {item.page}
+            </a>
+          ) : (
+            "Page unknown"
+          )}
+          {item.confidence === "low" && <span className="ml-2 text-amber-700">code was hard to read</span>}
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
+        {open && pending.some((observation) => observation.attrGroup === "dimension") && (
           <BulkUnit
             label="All dimensions:"
             disabled={busy}
             onSet={(unit) => void onSetBulkUnit("item", unit, item.id)}
           />
         )}
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="text-xs text-neutral-500 underline hover:text-neutral-900"
+        >
+          {open ? "Collapse" : "Expand"}
+        </button>
       </div>
+    </div>
+  );
+
+  if (!open) {
+    // Enough to decide without opening it: how many specs, whether anything
+    // matched, and the first few labels in the reviewer's own words.
+    const labels = pending
+      .map((observation) => observation.labelRaw)
+      .filter((label): label is string => Boolean(label));
+    return (
+      <div className="border border-neutral-200 rounded-lg bg-white">
+        {header}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <p className="text-sm text-neutral-600">
+            {pending.length} spec{pending.length === 1 ? "" : "s"}
+            {targets.length === 0
+              ? ", nothing matched a record"
+              : `, on ${targets.length} record${targets.length === 1 ? "" : "s"}`}
+            {labels.length > 0 && (
+              <span className="text-neutral-500">
+                {" — "}
+                {labels.slice(0, 3).join(", ")}
+                {labels.length > 3 ? "…" : ""}
+              </span>
+            )}
+          </p>
+          {ignorePage}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border border-neutral-200 rounded-lg bg-white">
+      {header}
 
       {dimensionCell.text && (
         <div className="px-4 py-2 border-b border-neutral-100 bg-neutral-50">
@@ -352,36 +444,68 @@ export default function ItemCard({
                 </td>
                 <td className="px-2 py-2 align-top text-neutral-700">{observation.labelRaw ?? "—"}</td>
                 <td className="px-2 py-2 align-top">
-                  <input
-                    value={value ?? ""}
-                    onChange={(event) =>
-                      setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
-                    }
-                    onBlur={(event) => {
-                      if (event.target.value === (observation.value ?? "")) return;
-                      void onSaveObservation(item, observation, { value: event.target.value || null });
-                    }}
-                    className="w-full border border-neutral-300 rounded px-2 py-1 text-sm"
-                  />
-                  {observation.valueRaw !== null && observation.valueRaw !== observation.value && (
-                    <p className="mt-0.5 text-xs text-neutral-400">drawing said: {observation.valueRaw}</p>
+                  {/* A sheet's note block is many lines in one row, so it gets
+                      a box it fits in. Every line stays editable text: the
+                      merge joined rows, it did not rewrite words. */}
+                  {(value ?? "").includes("\n") ? (
+                    <textarea
+                      value={value ?? ""}
+                      rows={Math.min(12, (value ?? "").split("\n").length + 1)}
+                      onChange={(event) =>
+                        setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
+                      }
+                      onBlur={(event) => {
+                        if (event.target.value === (observation.value ?? "")) return;
+                        void onSaveObservation(item, observation, { value: event.target.value || null });
+                      }}
+                      className="w-full min-w-[18rem] border border-neutral-300 rounded px-2 py-1 text-sm"
+                    />
+                  ) : (
+                    <input
+                      value={value ?? ""}
+                      onChange={(event) =>
+                        setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
+                      }
+                      onBlur={(event) => {
+                        if (event.target.value === (observation.value ?? "")) return;
+                        void onSaveObservation(item, observation, { value: event.target.value || null });
+                      }}
+                      className="w-full border border-neutral-300 rounded px-2 py-1 text-sm"
+                    />
                   )}
+                  {/* Not for a block: its raw form is the same lines with the
+                      heading repeated down every one of them. */}
+                  {observation.valueRaw !== null &&
+                    observation.valueRaw !== observation.value &&
+                    !(value ?? "").includes("\n") && (
+                      <p className="mt-0.5 text-xs text-neutral-400">drawing said: {observation.valueRaw}</p>
+                    )}
                   {observation.materialCodeRaw && (
                     <p className="mt-0.5 text-xs text-neutral-500">code {observation.materialCodeRaw}</p>
                   )}
                 </td>
                 <td className="px-2 py-2 align-top">
-                  {/* A note may carry one too: ARM HEIGHT 520mm is a real
-                      measurement that simply has no BWS slot, and 0011 keeps
-                      its unit in its own column rather than in its text. */}
-                  {observation.attrGroup === "dimension" || observation.attrGroup === "note" ? (
+                  {/* A NOTE IS NEVER ASKED FOR A UNIT. "REMARKS: SUBMIT SHOP
+                      DRAWINGS FOR REVIEW" is not a measurement, and an empty
+                      amber select beside fifteen of them reads as fifteen
+                      unanswered questions where there are none — nothing blocks
+                      a unitless note.
+                      Where a note DOES carry one, it is shown and stays
+                      editable: `ARM HEIGHT 520` is a real measurement that
+                      simply has no BWS slot, and 0011 keeps its unit in its own
+                      column rather than in its text — a wrong mm must still be
+                      correctable without promoting the row to a slot. */}
+                  {observation.attrGroup === "dimension" ||
+                  (observation.attrGroup === "note" && observation.unit !== null) ? (
                     <select
                       value={observation.unit ?? ""}
                       onChange={(event) =>
                         void onSaveObservation(item, observation, { unit: event.target.value || null })
                       }
                       className={`border rounded px-1 py-0.5 text-xs ${
-                        observation.unit === null ? "border-amber-400 bg-amber-50" : "border-neutral-300"
+                        observation.unit === null && observation.attrGroup === "dimension"
+                          ? "border-amber-400 bg-amber-50"
+                          : "border-neutral-300"
                       }`}
                     >
                       <option value="">Choose…</option>
@@ -508,14 +632,17 @@ export default function ItemCard({
             ? blockers.filter((b) => !b.observationId).map((b) => b.message).join(" ")
             : `Writes ${pending.length} spec${pending.length === 1 ? "" : "s"} to ${targets.length} record${targets.length === 1 ? "" : "s"}.`}
         </p>
-        <button
-          type="button"
-          onClick={() => void onReview(item, pending, "confirm")}
-          disabled={busy || blockers.length > 0 || pending.length === 0 || targets.length === 0}
-          className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
-        >
-          {busy ? "Confirming…" : `Confirm ${pending.length} spec${pending.length === 1 ? "" : "s"}`}
-        </button>
+        <div className="flex items-center gap-2">
+          {ignorePage}
+          <button
+            type="button"
+            onClick={() => void onReview(item, pending, "confirm")}
+            disabled={busy || blockers.length > 0 || pending.length === 0 || targets.length === 0}
+            className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
+          >
+            {busy ? "Confirming…" : `Confirm ${pending.length} spec${pending.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
       </div>
     </div>
   );

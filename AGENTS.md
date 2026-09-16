@@ -497,6 +497,46 @@ only one of them is a check the other two skipped.
 The import type is likewise **declared, never inferred**. A BOQ and an FF&E
 schedule are both `.xlsx`; a file extension identifies bytes, not a workflow.
 
+### A page the reviewer will dismiss must not cost what a page costs
+
+`src/components/imports/DrawingItemCard.tsx`, `src/lib/drawing-document.ts`
+
+Two shapes arrive on every specification sheet and neither is a fact anybody
+has to decide.
+
+**A page with no item code is still an item.** The model is told to record an
+absent reference as null rather than guess whose page it is, so a second page
+of views, a legend or a cover sheet stages as a card of its own — and that card
+can never commit, because no code means no resolved runs. It is therefore
+COLLAPSED on arrival, to a summary line, and carries one button that ignores
+the whole page instead of one Ignore per row. It is never dropped: dismissing
+it is a reviewer's decision, taken once. The `no_targets` blocker and the
+review screen's banner both say the true reason — confirming the bill of
+quantities will never match a page that carries nothing to match on.
+
+**The lines a sheet prints under one heading are ONE row.** The Panther sheets
+stamp each line of their general conditions with its field (`REMARKS:`,
+`SUPPLIER:`, `REQUIRED SUBMITTALS:`), and fifteen REMARKS rows bury the four
+facts on the page a reviewer actually has to rule on. `mergeNoteBlocks` joins
+them: every line verbatim, in printed order, one per line inside the value, the
+heading moved to the label. It runs at staging AND at read time — the block
+takes the FIRST line's id and version, so the same staged JSON merges to the
+same ids on every read, which is what lets the screen, the autosave and the
+confirm route agree. Same discipline as `upgradeDimensionSlots`, for the same
+reason: a pack read before this existed is reviewable without re-reading it.
+
+The test is deliberately narrow — the staging label `Note`, no unit, no slot,
+no BWS field, still pending. `ARM HEIGHT 520` is also a note, and merging a
+measurement into a paragraph would destroy it. The merged state is the most
+cautious of the lines it joins, so one unruled line leaves the block unruled
+rather than inheriting a confidence none of them had.
+
+A note is never ASKED for a unit: nothing blocks a unitless note, so an empty
+amber select beside fifteen remarks reads as fifteen unanswered questions where
+there are none. Where a note already carries one it stays editable, because a
+wrong `mm` on `ARM HEIGHT` must be correctable without promoting the row to a
+slot it does not belong in.
+
 ### The UI must survive a response that is not JSON
 
 Client code must not assume every API response is JSON. Check the status and
@@ -506,6 +546,14 @@ network failure or an unexpected payload cannot leave the interface frozen.
 Exercise the error path in browser verification, not only the success path.
 When a symptom is ambiguous, read the actual network response and the hosted
 runtime logs before guessing at causes such as invalid credentials.
+
+**A reload must not swallow the message that caused it.** A screen that
+refreshes after every action clears its banner on a successful load, so
+`setError(...)` followed by `await load()` showed a 409 for a few milliseconds
+and then nothing at all — the card simply looked as though the click had not
+registered. Reload first and report afterwards (`reloadThen` on both drawings
+screens). The reload itself is still required: a refused request means the
+screen is out of date.
 
 ## Load-bearing files
 
@@ -686,6 +734,16 @@ same change made `suggestUnit` count only values that are one figure — it
 stripped every non-digit, so `80 x 70 x 90` read as 807090, one value far over
 the threshold, enough to carry the page's vote to millimetres and record an
 80cm armchair as 8 metres.
+
+**Built 2026-09-16, tidying what a drawing review asks of a reviewer.** The
+first real S-100 and S-101 sheets produced a card nobody could act on and a card
+nobody could read: a codeless second page with twelve rows, and 34 rows of which
+fifteen were one block of preamble REMARKS. Codeless pages now collapse and can
+be ignored whole; a sheet's note block merges into one row, at staging and on
+read, id-stable; a note no longer asks for a unit; and a failed action's message
+survives the reload it triggers. No prompt, schema or model change — nothing was
+re-read and nothing was charged again. Verified in the browser against copies of
+the real Panther S-100 and S-101 runs; **not yet accepted by Max**.
 
 **Built 2026-09-15, the first run-through's findings.** Max walked the app end
 to end and four things were wrong, all of them flow rather than data:

@@ -127,6 +127,21 @@ export default function DrawingsReview({ importId }: { importId: string }) {
     setRecords(res.data.records ?? []);
   }, [importId]);
 
+  /**
+   * Say what an action returned, AFTER the reload it triggers.
+   *
+   * `load()` clears the banner when it succeeds — right for a poll, wrong
+   * directly after a failed action: a 409 from a confirm was set and then wiped
+   * by the reload that followed it, so a conflict showed NOTHING and the card
+   * just looked as though the click had not registered. The reload still has to
+   * happen (the refused request means this screen is out of date), so the
+   * message is put back after it.
+   */
+  async function reloadThen(failure: string | null) {
+    await load();
+    if (failure) setError(failure);
+  }
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -146,8 +161,7 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: run.version, requestId: crypto.randomUUID(), action }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     } finally {
       setBusy(null);
     }
@@ -171,8 +185,7 @@ export default function DrawingsReview({ importId }: { importId: string }) {
           changes,
         }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     });
   }
 
@@ -183,8 +196,7 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}) } }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     });
   }
 
@@ -195,8 +207,7 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ itemId: item.id, expectedVersion: item.version, changes: { ticked, unticked } }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     });
   }
 
@@ -233,8 +244,7 @@ export default function DrawingsReview({ importId }: { importId: string }) {
           observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
         }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     } finally {
       setBusy(null);
     }
@@ -328,7 +338,13 @@ export default function DrawingsReview({ importId }: { importId: string }) {
   }
 
   const pendingItems = staged.items.filter((item) => item.observations.some((o) => o.reviewStatus === "pending"));
-  const unresolved = pendingItems.filter((item) => (byItem.get(item.id)?.targets.length ?? 0) === 0);
+  // Split, because the two have different answers. A page whose CODE matched
+  // nothing is waiting for the bill of quantities; a page with no code at all
+  // will never match one however many bills are confirmed, so sending its
+  // reviewer to the BOQ is advice that cannot work.
+  const noTarget = pendingItems.filter((item) => (byItem.get(item.id)?.targets.length ?? 0) === 0);
+  const unresolved = noTarget.filter((item) => item.itemCodeRaw !== null);
+  const codeless = noTarget.filter((item) => item.itemCodeRaw === null);
   // Counted from the observations rather than from the blockers, so the offer
   // stands whether or not the card has other reasons it cannot commit.
   const unitsOutstanding = pendingItems.reduce(
@@ -370,6 +386,14 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         <p className="mt-3 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
           {unresolved.length} item{unresolved.length === 1 ? "" : "s"} match no record yet. Confirm this pack&apos;s bill
           of quantities and reload — nothing needs re-reading, and you will not be charged again.
+        </p>
+      )}
+
+      {codeless.length > 0 && (
+        <p className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
+          {codeless.length} page{codeless.length === 1 ? "" : "s"} carr{codeless.length === 1 ? "ies" : "y"} no item
+          code, so nothing matched {codeless.length === 1 ? "it" : "them"} — usually further views of the item on an
+          earlier page. Each one is collapsed below: open it to say which record it is, or ignore the page.
         </p>
       )}
 

@@ -538,9 +538,15 @@ export function drawingItemBlockers(
   if (targets.length === 0) {
     blockers.push({
       code: "no_targets",
+      // A page with NO code is a different answer from a page whose code
+      // matched nothing. The second is waiting for the bill; the first will
+      // never match one however many bills are confirmed, so sending its
+      // reviewer to the BOQ is advice that cannot work.
       message: resolution.runs.length
         ? "Every run this item appears in is unticked or unresolved."
-        : "No record carries this item code yet. Confirm the BOQ for this pack first.",
+        : item.itemCodeRaw === null
+          ? "This page carries no item code, so nothing matched it. Say which record it is, or ignore the page."
+          : "No record carries this item code yet. Confirm the BOQ for this pack first.",
     });
   }
 
@@ -949,6 +955,117 @@ const nextId = (): string =>
  * do not agree. Pass null for a project that has not said, and this behaves
  * exactly as it did before the setting existed.
  */
+// ---- the notes a sheet prints as one statement ------------------------------
+
+/**
+ * The sheet's own field name at the head of a note line.
+ *
+ * The Panther specification sheets print their general conditions as a column
+ * of lines, each stamped with the field it sits under: `REMARKS: SUBMIT SHOP
+ * DRAWINGS FOR REVIEW…`, `SUPPLIER: TO BID`, `REQUIRED SUBMITTALS: …`. Fifteen
+ * REMARKS lines are ONE statement the sheet makes about the item.
+ *
+ * Uppercase only, and the colon must be followed by text: a sentence that
+ * happens to contain a colon is not a field name, and neither is a note that
+ * opens with a lower-case word.
+ */
+function splitNotePrefix(text: string): { prefix: string | null; rest: string } {
+  const trimmed = text.trim();
+  const match = /^([A-Z][A-Z0-9 &/()'\u2019.-]{0,38}):[ \t]+(\S[\s\S]*)$/.exec(trimmed);
+  if (!match) return { prefix: null, rest: trimmed };
+  return { prefix: match[1]!.trim(), rest: match[2]!.trim() };
+}
+
+/** REQUIRED SUBMITTALS -> Required submittals. The page shouted; the screen need not. */
+function noteLabel(prefix: string): string {
+  const lower = prefix.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+/**
+ * Only a row that is still a plain, untouched note off `notesRaw` joins a block.
+ *
+ * A dimension figure the vocabulary could not place is also a note — `ARM
+ * HEIGHT`, `Dimension 3` — and it keeps its own label, its figure and its unit.
+ * Merging one of those into a paragraph would destroy a measurement. So the
+ * test is narrow on purpose: the staging label, no unit, no slot, no BWS field,
+ * and still pending. A row somebody has already merged reads as `Remarks` and
+ * is therefore skipped on every later pass, which is what makes this stable to
+ * run again on the same document.
+ */
+function isMergeableNote(observation: DrawingObservation): boolean {
+  return (
+    observation.reviewStatus === "pending" &&
+    observation.attrGroup === "note" &&
+    observation.labelRaw === "Note" &&
+    observation.unit === null &&
+    !observation.dimensionSlot &&
+    !observation.specFieldId
+  );
+}
+
+/**
+ * The lines a sheet prints under one heading, as ONE row.
+ *
+ * Fifteen REMARKS rows are fifteen states to choose and fifteen Ignores, and
+ * they bury the four facts on the page a reviewer actually has to decide. Every
+ * line survives verbatim, in printed order, one per line inside the value —
+ * this joins rows, it never edits, drops or reworders a word. The heading moves
+ * to the label, where it stops being repeated down the column.
+ *
+ * DETERMINISTIC AND ID-STABLE: the block takes the FIRST line's id and version,
+ * so the same staged JSON merges to the same ids on every read. That is what
+ * lets it run at read time as well as at staging — the screen, the autosave and
+ * the confirm route all see the same set — exactly as the dimension-slot
+ * upgrade does.
+ *
+ * The state is the most cautious of the lines it joins: one line nobody has
+ * ruled on leaves the whole block unanswered rather than inheriting a
+ * confidence none of them had.
+ */
+export function mergeNoteBlocks(observations: DrawingObservation[]): DrawingObservation[] {
+  const members = new Map<string, DrawingObservation[]>();
+  const prefixes = new Map<string, string | null>();
+  const layout: ({ key: string } | DrawingObservation)[] = [];
+
+  for (const observation of observations) {
+    if (!isMergeableNote(observation)) {
+      layout.push(observation);
+      continue;
+    }
+    const { prefix } = splitNotePrefix(observation.value ?? observation.valueRaw ?? "");
+    const key = prefix ? `p:${prefix.toLowerCase()}` : "plain";
+    if (!members.has(key)) {
+      members.set(key, []);
+      prefixes.set(key, prefix);
+      layout.push({ key });
+    }
+    members.get(key)!.push(observation);
+  }
+
+  return layout.map((entry) => {
+    if (!("key" in entry)) return entry;
+    const group = members.get(entry.key)!;
+    const prefix = prefixes.get(entry.key) ?? null;
+    // A single unheaded note is already one row saying what the page said.
+    if (group.length === 1 && !prefix) return group[0]!;
+    const first = group[0]!;
+    const state: AttributeState | null = group.some((row) => row.state === null)
+      ? null
+      : group.some((row) => row.state === "tbc")
+        ? "tbc"
+        : "confirmed";
+    return {
+      ...first,
+      labelRaw: prefix ? noteLabel(prefix) : "Notes",
+      value: group.map((row) => splitNotePrefix(row.value ?? row.valueRaw ?? "").rest).join("\n"),
+      valueRaw: group.map((row) => row.valueRaw ?? "").join("\n"),
+      state,
+      stateReason: group.find((row) => row.state === state)?.stateReason ?? null,
+    };
+  });
+}
+
 export function stageDrawings(
   items: RawDrawingItem[],
   fields: SpecFieldEntry[],
@@ -1149,7 +1266,7 @@ export function stageDrawings(
       itemNameRaw: item.itemNameRaw,
       confidence: item.confidence,
       targets: null,
-      observations,
+      observations: mergeNoteBlocks(observations),
       ...(views.length > 0 ? { viewRegions: views, imageProposal: pickItemView(views) } : {}),
     };
   });
@@ -1192,7 +1309,7 @@ export function assertStagedDrawings(parsed: unknown): StagedDrawings {
 function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
   let touched = false;
   const items = doc.items.map((item) => {
-    const observations = item.observations.map((observation) => {
+    const slotted = item.observations.map((observation) => {
       if (observation.reviewStatus === "applied") return observation;
       if (observation.attrGroup !== "dimension") return observation;
       if (observation.dimensionSlot) return observation;
@@ -1202,6 +1319,16 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
         ? { ...observation, dimensionSlot: slot, slotSuggested: false }
         : { ...observation, attrGroup: "note" as AttributeGroup, dimensionSlot: null, slotSuggested: false };
     });
+    // The same read-time, never-written-back treatment for a sheet's note
+    // block: a pack staged before this existed holds fifteen REMARKS rows, and
+    // a reviewer would face them a page at a time. Ids are stable, so the
+    // screen and the confirm route agree about what the card holds.
+    const observations = mergeNoteBlocks(slotted);
+    // Identity, not length: a lone `SUPPLIER: TO BID` is rewritten in place to
+    // a Supplier row, and a length check would throw that away.
+    if (observations.length !== slotted.length || observations.some((row, index) => row !== slotted[index])) {
+      touched = true;
+    }
     return touched ? { ...item, observations } : item;
   });
   return touched ? { ...doc, items } : doc;

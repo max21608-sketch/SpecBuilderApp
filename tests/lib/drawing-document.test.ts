@@ -23,6 +23,7 @@ import {
   stageDrawings,
   assertStagedDrawings,
   hasPendingObservations,
+  mergeNoteBlocks,
   type DrawingItem,
   type OccupiedSlots,
   type PackCard,
@@ -284,6 +285,81 @@ describe("stageDrawings", () => {
   });
 });
 
+describe("mergeNoteBlocks", () => {
+  // The Panther specification sheets print their general conditions as a
+  // column of REMARKS lines. Fifteen rows of them bury the four facts on the
+  // page a reviewer actually has to decide.
+  const sheetNotes = [
+    "ITEM: REFER TO THE DESIGNER'S DRAWINGS",
+    "SUPPLIER: TO BID",
+    "REMARKS: SUBMIT SHOP DRAWINGS FOR REVIEW AND APPROVAL PRIOR TO FABRICATION.",
+    "REMARKS: CONSTRUCTION TO BE OF COMMERCIAL QUALITY.",
+    "REMARKS: MOCKUP SAMPLE FOR APPROVAL IS TO BE MADE PRIOR TO MANUFACTURING",
+  ];
+  const notesItem = () => stageDrawings([rawItem({ notesRaw: sheetNotes })], FIELDS, null, null).items[0]!;
+
+  it("joins the lines a sheet prints under one heading into one row", () => {
+    const notes = notesItem().observations.filter((o) => o.attrGroup === "note");
+    const remarks = notes.find((o) => o.labelRaw === "Remarks")!;
+    expect(notes).toHaveLength(3);
+    expect(remarks.value?.split("\n")).toEqual([
+      "SUBMIT SHOP DRAWINGS FOR REVIEW AND APPROVAL PRIOR TO FABRICATION.",
+      "CONSTRUCTION TO BE OF COMMERCIAL QUALITY.",
+      "MOCKUP SAMPLE FOR APPROVAL IS TO BE MADE PRIOR TO MANUFACTURING",
+    ]);
+    // Nothing is reworded, dropped or reordered: the raw lines are still there,
+    // headings and all, for anyone checking the row against the page.
+    expect(remarks.valueRaw).toBe(sheetNotes.slice(2).join("\n"));
+  });
+
+  it("gives a lone heading its own name instead of calling it Note", () => {
+    const supplier = notesItem().observations.find((o) => o.labelRaw === "Supplier")!;
+    expect(supplier.value).toBe("TO BID");
+    expect(supplier.valueRaw).toBe("SUPPLIER: TO BID");
+  });
+
+  it("never touches a figure the vocabulary could not place", () => {
+    // ARM HEIGHT is a real measurement with no BWS slot. Merged into a
+    // paragraph it would stop being a measurement at all.
+    const item = stageDrawings(
+      [rawItem({ dimensions: [{ labelRaw: "ARM HEIGHT", valueRaw: "520" }], notesRaw: ["REMARKS: A", "REMARKS: B"] })],
+      FIELDS,
+      null,
+      null,
+    ).items[0]!;
+    const arm = item.observations.find((o) => o.labelRaw === "ARM HEIGHT");
+    expect(arm).toBeDefined();
+    expect(arm?.attrGroup).toBe("note");
+    expect(item.observations.filter((o) => o.labelRaw === "Remarks")).toHaveLength(1);
+  });
+
+  it("leaves the whole block unanswered when one line is", () => {
+    const item = stageDrawings(
+      [rawItem({ notesRaw: ["REMARKS: SUBMIT SHOP DRAWINGS.", "REMARKS: QUANTITY TBC — the client will confirm"] })],
+      FIELDS,
+      null,
+      null,
+    ).items[0]!;
+    const remarks = item.observations.find((o) => o.labelRaw === "Remarks")!;
+    expect(remarks.state).not.toBe("confirmed");
+  });
+
+  it("is stable: the same rows merge to the same ids however often it runs", () => {
+    const once = notesItem().observations;
+    const twice = mergeNoteBlocks(once);
+    expect(twice.map((o) => o.id)).toEqual(once.map((o) => o.id));
+    expect(twice.map((o) => o.value)).toEqual(once.map((o) => o.value));
+  });
+
+  it("leaves a reviewed row exactly as it was", () => {
+    const [first, ...rest] = notesItem().observations.filter((o) => o.labelRaw === "Remarks" || o.labelRaw === "Notes");
+    void rest;
+    const reviewed = { ...first!, reviewStatus: "ignored" as const, labelRaw: "Note", value: "REMARKS: ONE" };
+    const merged = mergeNoteBlocks([reviewed]);
+    expect(merged[0]).toBe(reviewed);
+  });
+});
+
 describe("drawingItemBlockers", () => {
   const staged = (raw: RawDrawingItem) => stageDrawings([raw], FIELDS, null, null).items[0]!;
 
@@ -292,6 +368,17 @@ describe("drawingItemBlockers", () => {
     const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-999", [record()]), NO_OCCUPANCY);
     expect(blockers[0]?.code).toBe("no_targets");
     expect(blockers[0]?.message).toMatch(/Confirm the BOQ/);
+  });
+
+  it("tells a page with no code at all that the BOQ is not the answer", () => {
+    // The Panther two-page sheet: page 1 is S-100, page 2 is the same sofa
+    // drawn with no code in its title block. Confirming a bill will never
+    // match a page that carries nothing to match on.
+    const item = staged(rawItem({ itemCodeRaw: null, page: 2 }));
+    const blockers = drawingItemBlockers(item, resolveDrawingTargets(null, [record()]), NO_OCCUPANCY);
+    expect(blockers[0]?.code).toBe("no_targets");
+    expect(blockers[0]?.message).toMatch(/no item code/);
+    expect(blockers[0]?.message).not.toMatch(/Confirm the BOQ/);
   });
 
   it("blocks an ambiguous run by name", () => {

@@ -122,6 +122,21 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     setData(res.data);
   }, [projectId, batchId]);
 
+  /**
+   * Say what an action returned, AFTER the reload it triggers.
+   *
+   * `load()` clears the banner when it succeeds — right for a poll, wrong
+   * directly after a failed action: a 409 from a confirm was set and then wiped
+   * by the reload that followed it, so a conflict showed NOTHING and the card
+   * just looked as though the click had not registered. The reload still has to
+   * happen (the refused request means this screen is out of date), so the
+   * message is put back after it.
+   */
+  async function reloadThen(failure: string | null) {
+    await load();
+    if (failure) setError(failure);
+  }
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -151,8 +166,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ itemId: item.id, observationId: observation.id, expectedVersion: observation.version, changes }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     });
   }
 
@@ -165,8 +179,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ itemId: item.id, expectedVersion: item.version, changes: { ticked, unticked } }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     });
   }
 
@@ -176,6 +189,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     // own run; there is no pack-wide transaction and there should not be.
     const targets = scope === "item" ? [runOf(itemId ?? "")].filter(Boolean) : runs.filter((run) => run.staged);
     await queueSave(async () => {
+      let failure: string | null = null;
       for (const run of targets) {
         if (!run) continue;
         const res = await apiFetch(`/api/imports/${run.importId}`, {
@@ -184,11 +198,11 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
           body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}) } }),
         });
         if (!res.ok) {
-          setError(res.error);
+          failure = res.error;
           break;
         }
       }
-      await load();
+      await reloadThen(failure);
     });
   }
 
@@ -224,8 +238,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
           observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
         }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     } finally {
       setBusy(null);
     }
@@ -252,6 +265,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
         entry.refs.push({ id: occurrence.observationId, version: occurrence.version });
         byCard.set(key, entry);
       }
+      let failure: string | null = null;
       for (const card of byCard.values()) {
         const res = await apiFetch(`/api/imports/${card.importId}/confirm`, {
           method: "POST",
@@ -259,11 +273,11 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
           body: JSON.stringify({ action: "ignore", itemId: card.itemId, observations: card.refs }),
         });
         if (!res.ok) {
-          setError(res.error);
+          failure = res.error;
           break;
         }
       }
-      await load();
+      await reloadThen(failure);
     } finally {
       setBusy(null);
     }
@@ -284,13 +298,14 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     setBusy("read-all");
     setError(null);
     try {
+      let failure: string | null = null;
       for (const run of unread) {
         // Version read fresh per run: the extract route refuses a mismatch
         // rather than starting a second attempt, and this screen holds no
         // version of its own.
         const current = await apiFetch<{ import: { version: number } }>(`/api/imports/${run.importId}`);
         if (!current.ok) {
-          setError(current.error);
+          failure = current.error;
           break;
         }
         const res = await apiFetch(`/api/imports/${run.importId}/extract`, {
@@ -303,11 +318,11 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
           }),
         });
         if (!res.ok) {
-          setError(res.error);
+          failure = res.error;
           break;
         }
       }
-      await load();
+      await reloadThen(failure);
     } finally {
       // Always reset: an HTML error page must not leave the button spinning.
       setBusy(null);
