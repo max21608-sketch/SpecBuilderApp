@@ -22,94 +22,23 @@
 //   node tools/tgq-checklist.mjs [--out <path.xlsx>]
 // ==========================================================================
 
-import { readFileSync, mkdirSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import ExcelJS from 'exceljs'
-
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const read = (p) => readFileSync(resolve(repoRoot, p), 'utf8')
-
-// -- the seed files -------------------------------------------------------
-
-const unquote = (s) => (s === 'NULL' ? null : s.slice(1, -1).replace(/''/g, "'"))
-
-function readSpecFields() {
-  const re = /\((\d+), '([A-Z]{1,2})', '((?:[^']|'')*)', '(?:[^']|'')*', '((?:[^']|'')*)', \d+, 'seed', 'seed'\)/g
-  const fields = new Map()
-  const sql = read('db/seed/0001_spec_fields.sql')
-  let m
-  while ((m = re.exec(sql))) {
-    fields.set(Number(m[1]), {
-      jsonId: Number(m[1]),
-      column: m[2],
-      name: m[3].replace(/''/g, "'").trim(),
-      family: m[4],
-    })
-  }
-  return fields
-}
-
-function readCategories() {
-  const re = /\('([a-z0-9-]+)', '(cabinetry|upholstery)', '((?:[^']|'')*)', (true|false), (\d+), 'seed', 'seed'\)/g
-  const cats = []
-  const sql = read('db/seed/0002_item_categories.sql')
-  let m
-  while ((m = re.exec(sql))) {
-    cats.push({ slug: m[1], family: m[2], name: m[3].replace(/''/g, "'"), sort: Number(m[5]) })
-  }
-  return cats.sort((a, b) => a.sort - b.sort)
-}
-
-function readRequirements() {
-  const re =
-    /\(\(select id from item_categories where slug = '([^']+)'\), '(spec_field|readiness)', (?:NULL|\(select id from spec_fields where json_id = (\d+)\)), ('(?:[^']|'')*'), ('(?:[^']|'')*'|NULL), ('(?:[^']|'')*'), (\d+), 'seed', 'seed'\)/g
-  const rows = []
-  const sql = read('db/seed/0003_requirements.sql')
-  let m
-  while ((m = re.exec(sql))) {
-    rows.push({
-      slug: m[1],
-      kind: m[2],
-      jsonId: m[3] ? Number(m[3]) : null,
-      prompt: unquote(m[4]),
-      help: unquote(m[5]),
-      section: unquote(m[6]),
-      sort: Number(m[7]),
-    })
-  }
-  return rows
-}
+import {
+  repoRoot,
+  SHARED_SECTION,
+  readSpecFields,
+  readCategories,
+  readRequirements,
+  assertSharedBlockIdentical,
+  bwsFieldLabel as bwsField,
+} from './lib/requirement-seed.mjs'
 
 const specFields = readSpecFields()
 const categories = readCategories()
 const requirements = readRequirements()
-
-if (requirements.length !== 728) {
-  throw new Error(`expected 728 requirements, parsed ${requirements.length} -- the seed's row shape changed`)
-}
-if (categories.length !== 17) {
-  throw new Error(`expected 17 categories, parsed ${categories.length}`)
-}
-
-// The hoist is only safe while the block really is identical everywhere.
-// Checked, not assumed: if a future cheat sheet revision makes one category's
-// commercial questions differ, this stops rather than silently dropping them.
-const SHARED_SECTION = 'Project / commercial'
-const sharedByCategory = categories.map((c) => ({
-  slug: c.slug,
-  rows: requirements.filter((r) => r.slug === c.slug && r.section === SHARED_SECTION),
-}))
-const signature = (rows) => JSON.stringify(rows.map((r) => [r.prompt, r.help, r.jsonId]))
-const sharedReference = sharedByCategory[0].rows
-const divergent = sharedByCategory.filter((c) => signature(c.rows) !== signature(sharedReference))
-if (divergent.length) {
-  throw new Error(
-    `the "${SHARED_SECTION}" block is no longer identical across categories (${divergent
-      .map((c) => c.slug)
-      .join(', ')}). Hoisting it would hide a real difference -- fix this script before shipping the workbook.`,
-  )
-}
+const sharedReference = assertSharedBlockIdentical(requirements, categories)
 
 const itemRows = requirements.filter((r) => r.section !== SHARED_SECTION)
 
@@ -139,11 +68,11 @@ function headerRow(sheet, rowNumber) {
   })
 }
 
+// The workbook wants the short form -- `Dimensions (AH)` -- in a narrow grey
+// column, where the shared helper spells "column" out for prose.
 function bwsFieldLabel(jsonId) {
-  if (jsonId == null) return ''
-  const f = specFields.get(jsonId)
-  if (!f) return `field ${jsonId} (not in the register)`
-  return `${f.name} (${f.column})`
+  const label = bwsField(specFields, jsonId)
+  return label ? label.replace(' (column ', ' (') : ''
 }
 
 // The three tick cells on one row: colour by answer, and a fill that marks

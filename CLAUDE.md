@@ -886,15 +886,23 @@ The spec table's Waiting column and the derivation behind it in
   `requirements.required_at_gate` is null on all 728 rows and there is no
   `gates` table, so the completion view reports confirmed / TBC / missing and
   nothing per-gate.
-- **TGQ is out with Matthew** (2026-09-16). `tools/tgq-checklist.mjs` builds a
-  workbook from the seed files asking, per category and per **level** — simple
-  / complex / hero, the three-level system Matthew described and BWS's
-  boilerplates already name — which questions gate a QUOTE. Read
-  `docs/plans/tgq-checklist-for-matthew.md` before acting on the answers. Two
-  things it settles and one it does not: the 17 "Project / commercial"
-  questions are byte-identical in all 17 categories and are therefore asked
-  once, asserted by the generator rather than assumed; **N/A** prunes a
-  question off a category's sheet at the same time; and **an item's level is
+- **TGQ is out with Matthew** (2026-09-16), as a spoken interview. Read
+  `docs/plans/tgq-for-matthew.md` before acting on the answers. The 728
+  requirement rows are only **62 distinct questions** — "Stitching spec" is on
+  fifteen cheat sheets and the commercial block is identical on all seventeen —
+  so whether a question gates a QUOTE is one decision, not fifteen.
+  `tools/tgq-interview.mjs` asks each once, per **level** (simple / complex /
+  hero, the system Matthew described and BWS's boilerplates already name), and
+  `tools/tgq-answers.mjs` expands the answer back over every category that asks
+  it. `tools/tgq-checklist.mjs` is the same decision as a workbook, for reading
+  rather than talking. Four things they settle and one they do not: an answer
+  is inferred from nothing — unreached is `-` and unsure is `?`, both reported
+  rather than defaulted to "No"; an exception is only recorded where Matthew
+  named a category, and one naming a category that does not ask the question is
+  REFUSED as invented; question ids are positional, so the pack carries a
+  fingerprint of its question list and a stale answer sheet is refused rather
+  than landing answers on shifted questions; **N/A** prunes a question off a
+  category at the same sitting. What they do not settle: **an item's level is
   recorded nowhere**, so a TGQ rule has nothing to read until somebody sets a
   level on a record the way they set a category. Applying the answers is a
   re-seed plus a migration, not application logic.
