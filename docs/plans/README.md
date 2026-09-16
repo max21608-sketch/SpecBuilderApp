@@ -671,7 +671,10 @@ Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.
     corroborated by a BWS boilerplate, 4 are not, and 7 fields a boilerplate
     carries have no question at all — including `Timber Finish 2` (on 32 of 45
     boilerplates) and `Metal Finish 2` (29). See
-    `docs/plans/boilerplate-grouping.md`.
+    `docs/plans/boilerplate-grouping.md`. **Written up for Matthew as four
+    answerable questions on 2026-09-16** —
+    `docs/plans/questions-for-matthew.md`, which adds the export's five job
+    columns to the same ask. Awaiting his answers.
 13. **Source-document version precedence is undefined, and it is the biggest
     structural risk the survey found.** Observed 2026-09-14. The same content
     exists at multiple revisions with no machine-readable ordering across six
