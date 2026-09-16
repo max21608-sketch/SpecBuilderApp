@@ -895,12 +895,18 @@ The spec table's Waiting column and the derivation behind it in
   hero, the system Matthew described and BWS's boilerplates already name), and
   `tools/tgq-answers.mjs` expands the answer back over every category that asks
   it. `tools/tgq-checklist.mjs` is the same decision as a workbook, and is the
-  route in use: **every cell is pre-filled `Yes`**, so the job is striking out
-  what we can quote WITHOUT — which states today's position rather than
-  inventing one, since all 728 questions are required of everything now. Its
-  cost is that a blank no longer proves nobody looked, which the per-category
-  **"Been through it?"** tick recovers at 17 clicks rather than 1,368. Four
-  things they settle and one they do not: an answer
+  route in use: **three tick boxes per question, all empty, and a tick means
+  NOT needed to quote**. Empty states today's position rather than inventing
+  one, since all 728 questions are required of everything now, so the value in
+  the returned file is what Matthew strikes out. Three traps in that: the box
+  is a bordered cell and the tick a plain `X` (Excel's own checkbox is a cell
+  format exceljs cannot write, and 1,368 Form Controls make an unscrollable
+  file); an empty box must be `null`, never `''`, which exceljs writes as a
+  shared-string cell that `COUNTA` counts as ticked; and an empty box means
+  "needed" AND "not looked at yet", which the per-category **"Been through
+  it?"** tick disambiguates at 17 clicks rather than 1,368. **N/A** and unsure
+  no longer have a control and go in Notes. Four things they settle and one
+  they do not: an answer
   is inferred from nothing — unreached is `-` and unsure is `?`, both reported
   rather than defaulted to "No"; an exception is only recorded where Matthew
   named a category, and one naming a category that does not ask the question is

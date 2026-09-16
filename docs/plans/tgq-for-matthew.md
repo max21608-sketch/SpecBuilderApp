@@ -8,7 +8,7 @@ it is the same decision spoken rather than typed.
 
 | | Built by | Asks | Costs Matthew |
 |---|---|---|---|
-| **Workbook** | `tools/tgq-checklist.mjs` | 1,368 cells, **all pre-filled Yes** | strike out what we can quote without |
+| **Workbook** | `tools/tgq-checklist.mjs` | **1,368 tick boxes, all empty** | tick what we can quote without |
 | Interview pack | `tools/tgq-interview.mjs` | 62 questions, spoken | 5 chats, 20–30 min each |
 
 Interview answers come back through `tools/tgq-answers.mjs`; the workbook comes
@@ -49,28 +49,48 @@ Matthew rename the levels to whatever the business actually says.
 sheets, dropdowns of Yes / No / N/A / ?, one long filterable Checklist sheet
 plus the commercial block hoisted onto its own.
 
-### Every cell starts at Yes
+### Three boxes per question, and a tick means NOT needed
 
-**The job is striking out what we can quote WITHOUT, not ticking 1,368 cells to
-say what we need.** That pre-fill is not an invented position: all 728
-questions are required of everything today, so Yes everywhere *is* the current
-state, and the value in the returned file is entirely in what Matthew takes
-away.
+Simple, Complex, Hero. **An empty box means the question is needed to quote; a
+ticked box means we can quote that level without it.** Empty is therefore
+today's position — all 728 questions required of everything — so the file states
+the current state and the value in the returned copy is entirely what Matthew
+strikes out.
 
-Two consequences follow, and both are built in rather than left to be noticed:
+Three things about how the box is built:
 
-- **Colour marks the departures, not the default.** A green wall of 1,368 Yeses
-  would hide the handful of real decisions in it, so Yes is left plain and
-  No / N/A / ? are picked out. The progress table counts cells changed *away*
-  from Yes — `COUNTIF "<>Yes"`, because with everything pre-filled a count of
-  non-empty cells is always the row count and says nothing.
-- **A blank cell no longer proves nobody looked.** This is the real cost of the
-  pre-fill: a category Matthew never opened is indistinguishable from one he
-  read and agreed with, and the second is a decision while the first is a
-  silence. The **"Been through it?"** column on the Level names sheet recovers
-  it — Done / Part way / Not yet, seventeen ticks rather than 1,368, left blank
-  and never pre-filled, because it is the one cell in the workbook whose whole
-  job is to say a human looked.
+- **It is a bordered empty cell and the tick is a plain `X`.** Excel's own
+  click-to-toggle checkbox (Microsoft 365, 2024) is a cell format this
+  toolchain cannot write, and legacy Form Control checkboxes are one drawing
+  object each — 1,368 of those makes a file nobody can scroll. A bordered cell
+  is what a checkbox looks like on paper and costs one keystroke. If the real
+  control is wanted later, the move is to select the three columns in Excel and
+  use Insert → Checkbox.
+- **No ballot-box glyph** (`☐` / `☑`). It renders as tofu wherever the font
+  lacks it, and a checklist whose boxes show as missing characters is worse than
+  one drawn with borders. **Anything** in the cell counts as ticked, so a typed
+  x, a tick character or a pick from the dropdown all read the same; validation
+  is warning-only, because blocking validation on a checkbox rejects the one
+  gesture people actually use.
+- **An empty box is genuinely empty, never `''`.** exceljs writes an empty
+  string as a real shared-string cell, which Excel does not treat as blank —
+  `COUNTA` then counts every untouched box as ticked and an untouched file
+  reports 1,368 of 1,368 struck out. The cells carry a style and no value.
+
+### What the box cannot say, and what covers it
+
+The four-value dropdown it replaces could say **N/A** (this question does not
+belong on this category at all) and **?** (unsure). A box cannot. Both now go in
+the **Notes** column, which the Start here sheet asks for explicitly — the
+capability is kept, the control is not.
+
+And the cost of a single mark: **an empty box means "needed to quote" and "not
+looked at yet" at the same time**, so a category Matthew never opened is
+indistinguishable from one he read and agreed with, and the second is a decision
+where the first is a silence. The **"Been through it?"** column on the Level
+names sheet recovers it — Done / Part way / Not yet, seventeen ticks rather than
+1,368, left blank and never pre-filled, because it is the one cell in the
+workbook whose whole job is to say a human looked.
 
 ### The hoist
 

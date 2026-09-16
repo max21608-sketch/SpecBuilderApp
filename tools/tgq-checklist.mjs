@@ -50,28 +50,43 @@ const RULE = 'FFD1D5DB'
 const HEADER_BG = 'FF1F2937'
 const BAND_BG = 'FFF7F7F5'
 const TICK_BG = 'FFFFFDF5'
+const BOX_EDGE = 'FF94A3B8'
 
-const ANSWERS = ['Yes', 'No', 'N/A', '?']
 const TICK_COLUMNS = ['Simple', 'Complex', 'Hero']
 
-// Every tick starts at Yes, so the job is striking out what we can quote
-// WITHOUT rather than ticking 1,368 cells to say what we need. That is how the
-// matrix stands today -- all 728 questions required of everything -- so the
-// pre-fill states the current position rather than inventing one, and the
-// value is in what Matthew takes away.
+// Three boxes per question, one per level. An EMPTY box means the question is
+// needed to quote -- which is where the matrix stands today, all 728 required
+// of everything -- so the file states the current position and the value in it
+// is entirely what Matthew strikes out. A ticked box means "we can quote this
+// level without it".
 //
-// The cost is that a blank cell no longer proves nobody looked: a category he
-// never opened reads exactly like one he read and agreed with. The
-// "Been through it?" tick on the Level names sheet is what recovers that, at
-// seventeen clicks rather than 1,368.
-const DEFAULT_ANSWER = 'Yes'
+// The box is a bordered empty cell and the tick is a plain `X`, deliberately:
+//
+//   - Excel's own click-to-toggle checkbox (Microsoft 365, 2024) is a cell
+//     format this toolchain cannot write, and legacy Form Control checkboxes
+//     are one drawing object each -- 1,368 of them makes a file nobody can
+//     scroll. A bordered cell is what a checkbox looks like on paper and costs
+//     one keystroke.
+//   - No ballot-box glyph (U+2610 / U+2611). It renders as tofu wherever the
+//     font lacks it, and a checklist whose boxes show as missing characters is
+//     worse than one drawn with borders.
+//
+// Anything in the cell counts as ticked, so a typed x, a tick character or a
+// pick from the dropdown all read the same way.
+const TICK = 'X'
+// null, never '': exceljs writes an empty STRING as a real shared-string cell,
+// which is not blank to Excel. COUNTA then counts every untouched box as
+// ticked and the progress figures read 1,368 out of 1,368 on an untouched
+// file. An empty box has to be genuinely empty.
+const UNTICKED = null
+const TICK_HEADERS = TICK_COLUMNS.map((level) => `${level}\ntick = NOT needed`)
 
 const titleStyle = { font: { name: 'Calibri', size: 16, bold: true, color: { argb: INK } } }
 const noteStyle = { font: { name: 'Calibri', size: 11, color: { argb: MUTED } }, alignment: { wrapText: true, vertical: 'top' } }
 
 function headerRow(sheet, rowNumber) {
   const row = sheet.getRow(rowNumber)
-  row.height = 30
+  row.height = 38
   row.eachCell((cell) => {
     cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } }
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } }
@@ -84,19 +99,20 @@ function headerRow(sheet, rowNumber) {
 // column, where the shared helper spells "column" out for prose.
 function bwsFieldLabel(jsonId) {
   const label = bwsField(specFields, jsonId)
-  return label ? label.replace(' (column ', ' (') : ''
+  return label ? label.replace(' (column ', ' (') : null
 }
 
-// The three tick cells on one row: colour by answer, and a fill that marks
-// them as the part to touch. The dropdown is added ONCE per sheet, over the
-// whole block -- see addAnswerDropdown.
+// Draw the three boxes. All four borders, so each cell reads as a box rather
+// than as a column of a table -- that outline is the whole of the checkbox.
 function decorateTicks(sheet, rowNumber, firstCol, lastCol) {
+  const edge = { style: 'thin', color: { argb: BOX_EDGE } }
   for (let c = firstCol; c <= lastCol; c += 1) {
     const cell = sheet.getRow(rowNumber).getCell(c)
-    cell.value = DEFAULT_ANSWER
+    cell.value = UNTICKED
+    cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF1E40AF' } }
     cell.alignment = { horizontal: 'center', vertical: 'middle' }
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TICK_BG } }
-    cell.border = { left: { style: 'hair', color: { argb: RULE } }, right: { style: 'hair', color: { argb: RULE } } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }
+    cell.border = { top: edge, left: edge, bottom: edge, right: edge }
   }
 }
 
@@ -107,40 +123,35 @@ function addValidation(sheet, range, validation) {
   sheet.dataValidations.add(range, validation)
 }
 
+// The dropdown is a convenience, not a constraint: warning-style and
+// allowBlank, so the box can equally be ticked by typing. Blocking validation
+// on a checkbox would reject the one gesture people actually use.
 function addAnswerDropdown(sheet, range) {
   addValidation(sheet, range, {
     type: 'list',
     allowBlank: true,
-    formulae: [`"${ANSWERS.join(',')}"`],
-    showErrorMessage: true,
-    errorStyle: 'warning',
-    errorTitle: 'Not one of the four',
-    error: 'Use Yes, No, N/A or ? — every cell starts at Yes, so change the ones we can quote without.',
+    formulae: [`"${TICK}"`],
+    showErrorMessage: false,
   })
 }
 
-// The colour marks what Matthew CHANGED. Painting the default green would
-// make a 1,368-cell wall of green in which the handful of real decisions are
-// invisible -- the opposite of what the sheet is for -- so Yes is left plain
-// and every departure from it is picked out.
-//
-// cellIs/equal rather than containsText: Excel's containsText compiles to
-// SEARCH(), where "?" is a single-character WILDCARD -- the "?" rule would
-// then paint every answered cell amber.
+// A ticked box fills; an empty one stays white. `notContainsBlanks` rather
+// than a test against `X`, so a tick typed as a tick character, a `y` or
+// anything else still reads as ticked -- the box is about whether somebody
+// marked it, not about which character they used.
 function tickConditionalFormatting(sheet, range) {
-  const rule = (answer, bg, fg, priority) => ({
-    type: 'cellIs',
-    operator: 'equal',
-    formulae: [`"${answer}"`],
-    priority,
-    style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: bg } }, font: { color: { argb: fg }, bold: true } },
-  })
   sheet.addConditionalFormatting({
     ref: range,
     rules: [
-      rule('No', 'FFE3EDF7', 'FF1E40AF', 1),
-      rule('N/A', 'FFE7E5E4', 'FF57534E', 2),
-      rule('?', 'FFFDF0CE', 'FF92400E', 3),
+      {
+        type: 'containsText',
+        operator: 'notContainsBlanks',
+        priority: 1,
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDCE9F8' } },
+          font: { color: { argb: 'FF1E40AF' }, bold: true },
+        },
+      },
     ],
   })
 }
@@ -201,25 +212,25 @@ para(
 
 heading('How to fill it in')
 para(
-  'Every cell already says Yes. That is today\u2019s position — all 728 questions required of everything — so the job is not ' +
-    'ticking what we need, it is striking out what we can quote WITHOUT. The value in this document is what you take away.',
+  'Every question has THREE BOXES — Simple, Complex, Hero. Tick a box where we can quote that level WITHOUT this answer. ' +
+    'Leave it empty where we cannot.',
   { font: { bold: true } },
 )
-para('Work on the "Checklist" sheet. Filter the Category column to one category and work down it. Four answers:')
-para('Yes  —  we cannot quote this level without it  (already filled in)', { font: { bold: true, color: { argb: 'FF14532D' } } })
-para('No  —  we can quote without it; it is still needed later', { font: { bold: true, color: { argb: 'FF1E40AF' } } })
-para('N/A  —  this question does not belong on this category\u2019s sheet at all', { font: { bold: true, color: { argb: 'FF57534E' } } })
-para('?  —  unsure, or worth a conversation', { font: { bold: true, color: { argb: 'FF92400E' } } })
 para(
-  'Anything you change is colour-coded so it stands out; the Yeses you leave alone stay plain. The Notes column is free ' +
-    'text and we read it.',
+  'All the boxes start empty, because that is today\u2019s position: all 728 questions required of everything. So the job is ' +
+    'striking out, and the value in this document is entirely what you take away.',
+)
+para('Type an x in a box, or use the small dropdown arrow in the cell. Anything in the box counts as ticked; ticked boxes fill blue.')
+para(
+  'The Notes column is free text and we read it. Use it for the two things a box cannot say: that a question does not ' +
+    'belong on this category at all, and that you are not sure and want to talk about it.',
 )
 
 heading('Three things to know before you start')
 para(
-  '1. Because every cell starts at Yes, a category you have not opened looks exactly like one you read and agreed with. ' +
-    'So when you finish a category, tick it off on the "Level names" sheet — seventeen ticks, and it is the only way we can ' +
-    'tell a considered Yes from one nobody has looked at.',
+  '1. An empty box means "needed to quote" AND "not looked at yet" — the same mark for both. So when you finish a ' +
+    'category, tick it off on the "Level names" sheet. Seventeen ticks, and it is the only thing that tells us a category ' +
+    'was read and agreed with rather than never opened.',
 )
 para(
   '2. The 17 commercial questions are on their own sheet. TOE agreement, client contact list, floor plans, deposit, FSC, ' +
@@ -241,12 +252,14 @@ para(
 
 heading('What happens next')
 para(
-  'Your ticks are seeded straight back into the tool, keyed on the Key column. The Spec Builder then shows, for any item, ' +
-    'what is still outstanding before it can be quoted — instead of the flat confirmed / TBC / missing count it shows today.',
+  'Every box you leave empty becomes a question the tool insists on before that item can be quoted; every box you tick ' +
+    'drops out of the quote gate and is asked later instead. Keyed on the Key column, so re-ordering or filtering the ' +
+    'sheet does not matter. The Spec Builder then shows, for any item, what is still outstanding before it can be quoted — ' +
+    'instead of the flat confirmed / TBC / missing count it shows today.',
 )
 
 heading('Progress')
-para('How many cells you have changed away from Yes. Categories ticked off are counted from the "Level names" sheet.')
+para('How many boxes you have ticked — questions we can quote without. Categories finished are counted from the "Level names" sheet.')
 const progressHeader = intro.addRow(['', 'Sheet', 'Rows', 'Simple', 'Complex', 'Hero'])
 const progressHeaderRow = progressHeader.number
 ;['', 'Sheet', 'Rows', 'Simple', 'Complex', 'Hero'].forEach((_, i) => {
@@ -287,13 +300,13 @@ shared.getRow(1).height = 24
 shared.mergeCells('A2:I2')
 shared.getCell('A2').value =
   'These 17 questions are word-for-word identical on all 17 cheat sheets, so they are asked once here rather than 17 times ' +
-  'on the Checklist sheet. Every cell starts at Yes — change the ones we can quote WITHOUT. If one of them does vary by ' +
+  'on the Checklist sheet. Tick a box where we can quote that level WITHOUT this answer. If one of them does vary by ' +
   'category, say which in its Notes and we will split it back out.'
 shared.getCell('A2').style = noteStyle
 shared.getRow(2).height = 32
 
 shared.addRow([])
-shared.addRow(['Key', 'Section', 'Question', 'Guidance on the sheet', 'BWS field', 'Simple', 'Complex', 'Hero', 'Notes'])
+shared.addRow(['Key', 'Section', 'Question', 'Guidance on the sheet', 'BWS field', ...TICK_HEADERS, 'Notes'])
 headerRow(shared, 4)
 
 sharedReference.forEach((r, i) => {
@@ -301,12 +314,12 @@ sharedReference.forEach((r, i) => {
     `ALL:${r.sort}`,
     r.section,
     r.prompt,
-    r.help ?? '',
+    r.help ?? null,
     bwsFieldLabel(r.jsonId),
-    '',
-    '',
-    '',
-    '',
+    null,
+    null,
+    null,
+    null,
   ])
   row.getCell(1).font = { name: 'Calibri', size: 9, color: { argb: MUTED } }
   row.getCell(2).font = { name: 'Calibri', size: 10, color: { argb: MUTED } }
@@ -355,26 +368,14 @@ checklist.getCell('A1').style = titleStyle
 checklist.getRow(1).height = 24
 checklist.mergeCells('A2:K2')
 checklist.getCell('A2').value =
-  'Every cell starts at Yes — change the ones we can quote WITHOUT. Filter Category to one category and work down it. ' +
-  'Yes = cannot quote without it · No = can quote without it · N/A = does not apply to this category · ? = unsure. ' +
-  'Tick the category off on the Level names sheet when you have been through it.'
+  'THREE BOXES PER QUESTION — one per level. Tick a box where we can quote that level WITHOUT this answer. Leave it empty ' +
+  'where we cannot. Type an x, or use the cell\u2019s dropdown. Filter Category to one category and work down it, and tick ' +
+  'the category off on the Level names sheet when you have finished it.'
 checklist.getCell('A2').style = noteStyle
 checklist.getRow(2).height = 28
 
 checklist.addRow([])
-checklist.addRow([
-  'Key',
-  'Category',
-  'Family',
-  'Section',
-  'Question',
-  'Guidance on the sheet',
-  'BWS field',
-  'Simple',
-  'Complex',
-  'Hero',
-  'Notes',
-])
+checklist.addRow(['Key', 'Category', 'Family', 'Section', 'Question', 'Guidance on the sheet', 'BWS field', ...TICK_HEADERS, 'Notes'])
 headerRow(checklist, 4)
 
 let band = 0
@@ -388,12 +389,12 @@ for (const cat of categories) {
       cat.family,
       r.section,
       r.prompt,
-      r.help ?? '',
+      r.help ?? null,
       bwsFieldLabel(r.jsonId),
-      '',
-      '',
-      '',
-      '',
+      null,
+      null,
+      null,
+      null,
     ])
     row.getCell(1).font = { name: 'Calibri', size: 9, color: { argb: MUTED } }
     row.getCell(2).font = { name: 'Calibri', size: 11, bold: true, color: { argb: INK } }
@@ -476,7 +477,7 @@ levels.addRow(['Category', 'Family', 'Been through it?', 'Level 1', 'Level 2', '
 headerRow(levels, 4)
 
 categories.forEach((cat, i) => {
-  const row = levels.addRow([cat.name, cat.family, '', 'Simple', 'Complex', 'Hero', BOILERPLATE_VARIANTS[cat.slug] ?? '', ''])
+  const row = levels.addRow([cat.name, cat.family, null, 'Simple', 'Complex', 'Hero', BOILERPLATE_VARIANTS[cat.slug] ?? null, null])
   row.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: INK } }
   row.getCell(2).font = { name: 'Calibri', size: 10, color: { argb: MUTED } }
   for (const c of [3, 4, 5, 6]) {
@@ -571,14 +572,14 @@ const progressRows = [
   { label: 'Every category', sheet: 'Every category', first: 5, last: sharedLast, cols: ['F', 'G', 'H'] },
   { label: 'Checklist', sheet: 'Checklist', first: 5, last: checklistLast, cols: ['H', 'I', 'J'] },
 ]
-// COUNTIF "<>Yes" rather than COUNTA: with every cell pre-filled, a count of
-// non-empty cells is always the row count and says nothing. What is worth
-// showing is how far the default has been departed from.
+// COUNTA counts the ticked boxes, whatever character was used to tick them.
+// An empty box is the starting state, so what is worth showing is how many
+// have been struck out.
 for (const p of progressRows) {
   const total = p.last - p.first + 1
   const row = intro.addRow(['', p.label, total])
   p.cols.forEach((col, i) => {
-    row.getCell(4 + i).value = { formula: `COUNTIF('${p.sheet}'!${col}${p.first}:${col}${p.last},"<>${DEFAULT_ANSWER}")` }
+    row.getCell(4 + i).value = { formula: `COUNTA('${p.sheet}'!${col}${p.first}:${col}${p.last})` }
   })
   row.getCell(2).font = { name: 'Calibri', size: 11, color: { argb: INK } }
   for (let c = 3; c <= 6; c += 1) {
@@ -614,6 +615,6 @@ console.log(`categories      ${categories.length}`)
 console.log(`questions       ${requirements.length} total`)
 console.log(`  hoisted       ${sharedReference.length} commercial questions, identical in all 17 categories`)
 console.log(`  on Checklist  ${itemRows.length} item-level rows`)
-console.log(`cells           ${(sharedReference.length + itemRows.length) * TICK_COLUMNS.length}, every one pre-filled "${DEFAULT_ANSWER}"`)
-console.log(`                the job is striking out what we can quote WITHOUT`)
+console.log(`boxes           ${(sharedReference.length + itemRows.length) * TICK_COLUMNS.length}, all empty`)
+console.log(`                tick a box where we can quote that level WITHOUT the answer`)
 console.log(`\nwrote ${outPath}`)
