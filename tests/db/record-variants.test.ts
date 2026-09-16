@@ -138,14 +138,28 @@ describeIfDb("a split bill line in the export scope", () => {
   });
 
   it("puts the bill line back once every variant is retired", async () => {
-    await client.query(`update spec_records set status = 'retired' where id = any($1::uuid[])`, [[variantA, variantB]]);
+    // RETIRED THE WAY THE REAL PATHS DO IT. `spec_records_retired_has_actor`
+    // (0017) refuses a retired row with no actor, and a fixture that flipped
+    // only `status` was refused by it — correctly. Every retiring path in
+    // src/lib sets all three columns together.
+    await client.query(
+      `update spec_records set status = 'retired', retired_at = now(), retired_by = 'qa', updated_by = 'qa'
+        where id = any($1::uuid[])`,
+      [[variantA, variantB]],
+    );
     // NOT "has ever been split": the line is still 45 off on the bill, and a
     // file that omitted it would wipe every BWS field it holds.
     expect(await recordIds()).toEqual([parentId]);
   });
 
   it("drops it again as soon as one variant comes back", async () => {
-    await client.query(`update spec_records set status = 'active' where id = $1`, [variantB]);
+    // A restore clears the retirement rather than leaving it standing beside
+    // an active row: the constraint permits that, a reader would not.
+    await client.query(
+      `update spec_records set status = 'active', retired_at = null, retired_by = null, updated_by = 'qa'
+        where id = $1`,
+      [variantB],
+    );
     expect(await recordIds()).toEqual([variantB]);
   });
 
