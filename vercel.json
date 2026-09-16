@@ -1,6 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["lhr1"],
+  "regions": [
+    "lhr1"
+  ],
   "functions": {
     "src/app/api/queues/[topic]/route.ts": {
       "maxDuration": 300,
@@ -14,5 +16,15 @@
         }
       ]
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/graph-renew",
+      "schedule": "0 */12 * * *"
+    },
+    {
+      "path": "/api/cron/graph-delta",
+      "schedule": "*/15 * * * *"
+    }
+  ]
 }

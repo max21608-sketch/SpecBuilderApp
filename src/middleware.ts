@@ -62,9 +62,24 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 //                       authenticate with the queue's own signed protocol.
 //                       Adding them here would break every background job.
 //   api/cron/*        - same, but authenticated with CRON_SECRET.
+//   api/graph/notifications
+//                     - Microsoft Graph's change notifications. Graph cannot
+//                       carry a session cookie. EXACTLY this path, not a
+//                       prefix, so a future api/graph/* admin route stays
+//                       protected by default.
+//
+//                       What replaces the session: a `clientState` secret
+//                       compared in constant time against a hash in the
+//                       database, a subscription id that has to match a row we
+//                       created, and then nothing else from the body being
+//                       believed — the message id is validated by shape and
+//                       used to FETCH the mail from Graph, so a forged
+//                       notification can at worst ask us to re-read an id that
+//                       does not exist. The route answers 404 entirely when
+//                       MAIL_INGESTION_MODE is not 'enabled'.
 // Anything added to this list is a deliberate decision to expose a route.
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|login|api/auth/login|api/queues|api/cron).*)",
+    "/((?!_next/static|_next/image|favicon.ico|login|api/auth/login|api/queues|api/cron|api/graph/notifications).*)",
   ],
 };

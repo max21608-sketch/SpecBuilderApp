@@ -44,6 +44,15 @@ export const maxDuration = 300;
 const queueHandler = handleCallback<ExtractionQueueMessage>(
   async (message, metadata) => {
     try {
+      // Fetching a message from the app mailbox. A short, cheap job that costs
+      // nothing if it runs twice, and which may END in a paid read — but only
+      // by dispatching a `document-intake` message like every other document.
+      if (message.kind === "mail-ingest") {
+        const { ingestGraphMessage } = await import("@/lib/mail-ingest");
+        await ingestGraphMessage(message);
+        return;
+      }
+
       if (message.kind !== "document-intake") throw new Error("Unknown extraction queue message");
 
       const outcome = await runDocumentExtraction({
@@ -85,5 +94,16 @@ async function recordTerminalFailure(
 ): Promise<void> {
   const error = cause instanceof Error ? cause.message : String(cause);
   const detail = `${error} (gave up after ${metadata.deliveryCount} attempts)`;
+
+  // A mail fetch has no extraction run to fail: the terminal state goes on the
+  // message row, where the inbox screen renders it with a Retry. Recording it
+  // matters — a message that silently never arrived is the failure mode this
+  // whole path exists to avoid.
+  if (message.kind === "mail-ingest") {
+    const { recordIngestFailure } = await import("@/lib/mail-ingest");
+    await recordIngestFailure(message.mailbox, message.graphMessageId, detail, message.requestedBy);
+    return;
+  }
+
   await recordExtractionFailure(message.extractionId, message.attemptId, detail, message.requestedBy);
 }

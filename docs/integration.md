@@ -9,8 +9,18 @@ move, delete, or mark anything as read. Reading a mailbox is not writing to it,
 and inbound access does not enable outbound: this app has no send path at all,
 and chase emails are drafts a human sends from their own Outlook.
 
-**Planned for M5. Nothing is built yet** — this document is the boundary
-agreed in advance, not a description of running code.
+**Built 2026-09-16, and DISABLED.** The subscription lifecycle, the webhook,
+the delta poll and the ingestion worker all exist. `MAIL_INGESTION_MODE` is
+`disabled` and no mailbox, tenant or secret is set on any deployment, so none
+of it runs.
+
+**It has never talked to Microsoft Graph.** Everything past the token exchange
+is written against Microsoft's documentation. What IS verified is its own
+guards — the webhook's authentication, the message-id validation, the paging
+link's origin check and every disabled path have tests. What is NOT verified is
+the subscription lifecycle, the delta semantics and the message shape Graph
+actually sends. The first real message is the test that matters, and the
+checklist at the end of this document is what to walk when the mailbox exists.
 
 It is **disabled by default** and stays disabled until the credentials, scope,
 behaviour and rollback have been explicitly approved. Enablement is deployment
@@ -160,3 +170,38 @@ Capsule stores its data is Max's to confirm with Capsule.
 Delete `CAPSULE_API_TOKEN` and redeploy. The search goes unavailable with its
 message; every existing contact keeps its cached name, email and organisation,
 and every chase still works.
+
+## How it actually runs
+
+| Piece | Where | What it does |
+|---|---|---|
+| Subscription | `src/lib/graph-subscriptions.ts` | Created on `users/<mailbox>/mailFolders/inbox/messages`, `changeType: created`, lifetime 4000 minutes |
+| Renewal | `/api/cron/graph-renew`, every 12 h | Renews with a day in hand. Recreates when Graph has forgotten it |
+| Webhook | `/api/graph/notifications` | Validates and enqueues. Never fetches inside the request: Graph's handshake budget is 10 s and it drops a slow subscriber |
+| Delta poll | `/api/cron/graph-delta`, every 15 min | Walks what actually changed. This is the GUARANTEE; the webhook is only the speed |
+| Ingestion | `src/lib/mail-ingest.ts` | Fetches the message and its MIME, routes it, and assigns it only when routing is confident |
+
+**Why both a webhook and a poll.** Graph drops notifications, a deploy can be
+mid-flight, and a subscription can lapse — and every one of those fails
+silently: mail stops arriving and the person waiting for a specification finds
+out days later. The delta query asks what changed since the last token, so a
+message that never produced a notification is still ingested within the
+quarter-hour.
+
+**If a cron stops.** Renewal stopping means the subscription expires within
+about 66 hours and notifications stop; the delta poll keeps ingesting until it
+too stops. Both stopping means mail accumulates unread in the mailbox and
+arrives whenever the poll resumes, from the stored delta token — nothing is
+lost, it is only late. Neither failure pages anybody, which is why the Inbox
+screen shows the subscription's state.
+
+**The first run starts from NOW**, not from the mailbox's history: turning
+ingestion on must not read and bill for every message the inbox has ever held.
+
+## Blob retention — undecided
+
+Ingested MIME is written to `mailbox/<slug>/<yyyy>/<mm>/<id>.eml` and copied
+under a project's prefix on assignment. **Nothing deletes either**, and NDA-
+covered client correspondence accumulating indefinitely is a decision nobody
+has taken. Recorded here as open; `docs/stack.md` already says the same about
+uploads.

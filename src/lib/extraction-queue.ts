@@ -24,12 +24,26 @@ export const EXTRACTION_QUEUE_TOPIC = "document-extraction";
 //
 // M1's BOQ import is a deterministic XLSX read and does not come through here
 // at all.
-export type ExtractionQueueMessage = {
-  kind: "document-intake";
-  extractionId: string;
-  attemptId: string;
-  requestedBy: string;
-};
+export type ExtractionQueueMessage =
+  | {
+      kind: "document-intake";
+      extractionId: string;
+      attemptId: string;
+      requestedBy: string;
+    }
+  // Fetching one message from the app mailbox: a short, cheap, retry-safe job,
+  // not a model call. It shares this topic rather than taking a second one
+  // because a new topic has NO CONSUMER until its vercel.json entry deploys,
+  // and the retry settings that suit a five-minute extraction suit a
+  // thirty-second fetch well enough. The paid read it may lead to goes through
+  // the `document-intake` path like every other document.
+  | {
+      kind: "mail-ingest";
+      mailbox: string;
+      graphMessageId: string;
+      source: "notification" | "delta" | "retry";
+      requestedBy: string;
+    };
 
 /**
  * Stable per (run, attempt) -- NEVER Date.now(). A retried publish of the same
@@ -38,6 +52,16 @@ export type ExtractionQueueMessage = {
  */
 export function extractionIdempotencyKey(runId: string, attemptId: string): string {
   return `spec-document:${runId}:${attemptId}`;
+}
+
+/**
+ * Stable per (mailbox, message). A notification and a delta poll naming the
+ * same mail must be one job, not two — and even if both get through, the
+ * unique index on `email_messages (mailbox, graph_message_id)` is the second
+ * line.
+ */
+export function mailIngestIdempotencyKey(mailbox: string, graphMessageId: string): string {
+  return `mail-ingest:${mailbox}:${graphMessageId}`;
 }
 
 export async function enqueueExtractionJob(

@@ -1382,11 +1382,19 @@ logic. The post-order/production flow.
 **Email intake (2026-09-16).** An email is a `document_kind`, staged, reviewed
 and confirmed like any other specification document, writing
 `spec_answers.source_kind = 'email'` under an `email_confirm` change that
-carries the message as evidence. The Microsoft Graph half is NOT built: there
-is no app mailbox, no subscription and no delta poll, so the only way in today
-is uploading a saved `.eml` against a project. `docs/integration.md` still
-describes the Graph boundary as planned, and `MAIL_INGESTION_MODE` still
-governs nothing.
+carries the message as evidence. Verified end to end by uploading a saved
+`.eml`, including one real model call.
+
+**Microsoft Graph ingestion is BUILT AND DISABLED, and has never talked to
+Graph.** The subscription lifecycle, the webhook, the delta poll and the
+ingestion worker exist; `MAIL_INGESTION_MODE` is `disabled` and no mailbox,
+tenant or secret is set anywhere, so none of it runs. Its own guards are
+tested — webhook authentication, message-id validation, the paging-link origin
+check, every disabled path. The subscription lifecycle, the delta semantics and
+the message shape Graph really sends are NOT. Turning it on is five environment
+variables and a redeploy, and the first real message is the test that matters:
+`docs/integration.md` carries the checklist, including the access-policy check
+that must pass in BOTH directions.
 
 **Chase emails are back (2026-09-16), with a to-quote tier.** The screen is
 restored with entry points on the projects list and the project overview, the
