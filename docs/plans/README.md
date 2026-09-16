@@ -21,6 +21,23 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## Observations 2026-09-16
+
+1. **The export gets a check sheet, and the export route gets a shared scope
+   loader.** M8 step 4 says the export must be judged flawless line by line
+   against the pack; that sentence had no artefact. See
+   `export-verification.md` for the procedure, the verdict vocabulary and the
+   known limits. The reason the two routes share `loadExportScope` is that a
+   record the check sheet never asked about must not be a record the export
+   shipped — otherwise a signed-off sheet proves nothing.
+2. **KNOWN GAP (observed 2026-09-16): `entity_type` is written two ways.** The
+   sandbox's polymorphic tables — `attachments`, `status_history`, `messages` —
+   hold both `spec_record` and `spec_records`, and both `intake_run` and
+   `intake_runs`. Anything that filters on one spelling silently misses rows
+   written under the other. Nothing was changed for it: the writing values are
+   spread across several call sites and a rename without a migration would
+   strand the existing rows. Not yet triaged.
+
 ## Decisions taken 2026-09-12
 
 Record the reasoning, not just the outcome — the reason is what tells a future

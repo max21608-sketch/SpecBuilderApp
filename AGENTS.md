@@ -190,6 +190,41 @@ W x H, W x D or Dia x H, four or more has no convention, and a line mixing
 prefixed with bare parts would let the positional half inherit the explicit
 half's credibility.
 
+### The export and its check sheet load ONE scope
+
+`src/lib/export-scope.ts`, `src/lib/export-check-sheet.ts`,
+`src/app/api/projects/[id]/export/check-sheet/route.ts`,
+`docs/plans/export-verification.md`
+
+"Judged flawless by a human, read line by line against the pack" had no
+artefact behind it. The check sheet is one line per record × field, each naming
+the document and page its value came from, with **Pack says / Verdict / Note**
+left empty for the reviewer. An empty Verdict column is the point: a sheet that
+arrived pre-answered would be the app agreeing with itself.
+
+Three things about it are load-bearing:
+
+- **It is never filtered, for the reason the export is not.** A sheet covering
+  a subset gets signed off in exactly the same words as one covering the file.
+  "Just the populated cells" is the tempting version and it removes the only
+  lines that can find a value the pack states and the export lost — a blank
+  cell is the failure most worth catching. The sole omission is the 27 job
+  columns that are blank BY DESIGN because they hold BWS-owned vocabularies,
+  and they go so that 27 unanswerable questions per record do not teach a
+  reviewer to tick without reading.
+- **Both files load `loadExportScope`.** A record the check sheet never asked
+  about must not be a record the export shipped, or a signed-off sheet is
+  worthless. One loader is what makes that true rather than intended.
+- **Provenance comes from the composer, not from beside it.**
+  `composeRowCells` returns each cell with where it came from and `composeRow`
+  is that list mapped to strings — one set of precedence rules, two views. A
+  second copy is how a check sheet starts vouching for a value the file does
+  not hold, which is the `composeDimensionCell` rule again.
+
+A filled sheet holds real values off real drawings and **never enters this
+repo**. What comes back is the finding — a code fix, an alias seeded from
+verified wording, or a dated line in `docs/plans/README.md`.
+
 ### The spec record and its client ref
 
 The client ref is the key the client, the BOQ, the FF&E schedule and the emails
@@ -605,6 +640,7 @@ in the UK.
 | Incident triage, recovery, rollback | `docs/recovery.md` |
 | External integrations: scope, setup, activation | `docs/integration.md` |
 | The BWS field grid: blocks, order, and how each field is written | `docs/bws-spec-grid.md` |
+| Accepting the export against the pack: the check sheet and its verdicts | `docs/plans/export-verification.md` |
 | Releases, dated decisions, what is still open | `docs/plans/README.md` |
 | Migrations, seeds, backups, restores | `db/README.md` |
 | Chassis provenance and how to start another app | `docs/kit/` |
@@ -784,6 +820,17 @@ result:
   scope. It is not a numbered migration on purpose — rebuilding
   `composeDimensionCell` in SQL is the second composer the dimension design
   exists to prevent.
+
+**Built 2026-09-16, the export check sheet.** Step 4 of M8 — the export judged
+flawless line by line — had a person, a screen and a memory of what the
+drawings said, and no artefact. `/api/projects/[id]/export/check-sheet` now
+emits one line per record × field with the document and page each value came
+from and three empty columns for the reviewer; the procedure and the verdict
+vocabulary are in `docs/plans/export-verification.md`. The export route was
+rewired onto the same `loadExportScope` so the two files cannot describe
+different sets of records. **Nobody has filled one in** — its column choices
+are a guess at what makes the reading possible, and the first real pass tests
+the sheet as much as the export.
 
 **Outstanding — judgement, not code.**
 

@@ -119,6 +119,12 @@ export default function SpecTable({
             <a href={`${exportHref}&format=csv`} className="text-sm text-neutral-600 underline hover:text-neutral-900">
               .csv
             </a>
+            <a
+              href={`/api/projects/${projectId}/export/check-sheet?runId=${runId}`}
+              className="text-sm text-neutral-600 underline hover:text-neutral-900"
+            >
+              Check sheet
+            </a>
           </div>
         )}
       </div>
@@ -126,7 +132,9 @@ export default function SpecTable({
       {records.length > 0 && (
         <p className="mt-1 text-xs text-neutral-500">
           The export is always every record in scope — a BWS import replaces the fields it is given, so a partial file
-          would erase what it left out. It carries no job number: it is a file to read, not to import.
+          would erase what it left out. It carries no job number: it is a file to read, not to import. The check sheet is
+          the same data one line per field, naming the document and page each value came from, for reading against the
+          pack.
         </p>
       )}
 

@@ -264,7 +264,32 @@ export function composeDimensions(attributes: ExportAttribute[]): string {
 }
 
 /**
- * One record to one row of 109 cells.
+ * Where a cell's value came from.
+ *
+ * The export itself does not carry this — a BWS import wants 109 cells, not a
+ * provenance column. The CHECK SHEET does: "W1900 x D790 x H720mm" is only
+ * re-checkable by somebody who knows which page to open, and a reviewer sent to
+ * find that out by hand will check the easy cells and skim the rest.
+ *
+ * It is produced by the composer rather than re-derived beside it, for the same
+ * reason there is one `composeDimensionCell`: a second copy of the precedence
+ * rules is how a check sheet starts vouching for a value the file does not
+ * actually hold.
+ */
+export type CellSource =
+  | { kind: "empty" }
+  /** A BWS-owned vocabulary this app does not know. Blank on purpose, not a gap. */
+  | { kind: "bws" }
+  | { kind: "project" }
+  | { kind: "record" }
+  | { kind: "attribute"; attribute: ExportAttribute }
+  | { kind: "dimensions"; attributes: ExportAttribute[] }
+  | { kind: "answer" };
+
+export type ExportCell = { value: string; source: CellSource };
+
+/**
+ * One record to one row of 109 cells, each with where it came from.
  *
  * Precedence for a spec field: an attribute the reviewer confirmed off a
  * document wins, then a confirmed cheat-sheet answer, then blank. An attribute
@@ -274,9 +299,16 @@ export function composeDimensions(attributes: ExportAttribute[]): string {
  *
  * BWS-owned vocabularies (Category, Status, Lifecycle State, KAM, Routing) stay
  * BLANK. This app does not know their allowed values, and a guessed enum is
- * either rejected on import or accepted as a wrong classification.
+ * either rejected on import or accepted as a wrong classification. They are
+ * marked `bws` rather than `empty` so a check sheet can say "blank on purpose"
+ * where it would otherwise read as 25 unanswered questions per record.
  */
-export function composeRow(scope: ExportScope, record: ExportRecord, attributes: ExportAttribute[], answers: ExportAnswer[]): string[] {
+export function composeRowCells(
+  scope: ExportScope,
+  record: ExportRecord,
+  attributes: ExportAttribute[],
+  answers: ExportAnswer[],
+): ExportCell[] {
   const mine = attributes.filter((attribute) => attribute.recordId === record.id);
   const byField = new Map<number, ExportAttribute>();
   for (const attribute of mine) {
@@ -289,34 +321,47 @@ export function composeRow(scope: ExportScope, record: ExportRecord, attributes:
     if (answer.recordId === record.id && answer.value?.trim()) answerByField.set(answer.specFieldJsonId, answer.value.trim());
   }
 
+  const dimensionAttributes = mine.filter((attribute) => attribute.attrGroup === "dimension" && attribute.dimensionSlot !== null);
   const dimensions = composeDimensions(mine);
 
-  return BWS_EXPORT_COLUMNS.map((column) => {
+  return BWS_EXPORT_COLUMNS.map((column): ExportCell => {
     // The id-less job-metadata block, by name.
     if (column.jsonId === null) {
       switch (column.name) {
         case CLIENT_COLUMN_NAME:
-          return scope.client ?? "";
+          return { value: scope.client ?? "", source: { kind: "project" } };
         case PROJECT_REF_COLUMN_NAME:
-          return scope.projectName;
+          return { value: scope.projectName, source: { kind: "project" } };
         case NAME_COLUMN_NAME:
-          return record.itemDescription;
+          return { value: record.itemDescription, source: { kind: "record" } };
         case ITEM_COUNT_COLUMN_NAME:
-          return record.qty === null ? "" : String(record.qty);
+          return { value: record.qty === null ? "" : String(record.qty), source: { kind: "record" } };
         default:
           // Every other job column is a BWS-owned vocabulary or a value only
           // BWS knows (Id, Job Number, Status, KAM, Lifecycle State). Blank is
           // the only honest answer; a guessed enum imports as a wrong
           // classification.
-          return "";
+          return { value: "", source: { kind: "bws" } };
       }
     }
-    if (column.jsonId === CLIENT_CODE_JSON_ID) return record.boqCodes.join(", ");
-    if (column.jsonId === DIMENSIONS_JSON_ID) return dimensions;
+    if (column.jsonId === CLIENT_CODE_JSON_ID) return { value: record.boqCodes.join(", "), source: { kind: "record" } };
+    if (column.jsonId === DIMENSIONS_JSON_ID) {
+      return {
+        value: dimensions,
+        source: dimensionAttributes.length ? { kind: "dimensions", attributes: dimensionAttributes } : { kind: "empty" },
+      };
+    }
     const attribute = byField.get(column.jsonId);
-    if (attribute) return renderAttributeValue(attribute);
-    return answerByField.get(column.jsonId) ?? "";
+    if (attribute) return { value: renderAttributeValue(attribute), source: { kind: "attribute", attribute } };
+    const answer = answerByField.get(column.jsonId);
+    if (answer !== undefined) return { value: answer, source: { kind: "answer" } };
+    return { value: "", source: { kind: "empty" } };
   });
+}
+
+/** The 109 cells as the file holds them. One set of precedence rules, two views. */
+export function composeRow(scope: ExportScope, record: ExportRecord, attributes: ExportAttribute[], answers: ExportAnswer[]): string[] {
+  return composeRowCells(scope, record, attributes, answers).map((cell) => cell.value);
 }
 
 export type Workbook = {
