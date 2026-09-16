@@ -225,6 +225,9 @@ export async function applyAnswerFills(
             where a.record_id = ${recordId}
               and a.revision_no = 0
               -- NEVER a person's answer, and never another DOCUMENT KIND's.
+              -- manual is a person typing; email is a person confirming a
+              -- value off a message, with that message attached as evidence --
+              -- both are decisions and neither is in reach here.
               -- document is also what confirm-spec-document.ts writes, so
               -- matching on it alone would let a shop drawing quietly beat an
               -- answer a reviewer confirmed off an FF&E schedule. Narrowed to

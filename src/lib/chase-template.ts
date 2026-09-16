@@ -265,7 +265,7 @@ export function defaultIntro(projectLabel: string, counts: { toQuote: number; la
       opening +
       `The first section below lists the ${counts.toQuote} detail${counts.toQuote === 1 ? "" : "s"} we need ` +
       `before we can put a price on these items; the second lists ${counts.later} further ` +
-      `point${counts.later === 1 ? "" : "s"} that are outstanding but not holding up the quote. ` +
+      `point${counts.later === 1 ? " that is" : "s that are"} outstanding but not holding up the quote. ` +
       `Could you confirm the first section as a priority, and the rest when you are able?`
     );
   }

@@ -12,6 +12,7 @@ import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import SpecDocumentReview, { type Registers, type SpecImport } from "@/components/imports/SpecDocumentReview";
+import { type EmailMessage } from "@/components/imports/EmailHeader";
 import DrawingsReview from "@/components/imports/DrawingsReview";
 import PreambleReview from "@/components/imports/PreambleReview";
 import Button from "@/components/ui/Button";
@@ -73,6 +74,7 @@ export default function ReviewImportPage() {
     import: Import;
     categories: Category[];
     registers: Registers | null;
+    message: EmailMessage | null;
     runs: ProjectRun[];
     reconciliation: Record<number, Reconciliation>;
   } | null>(null);
@@ -90,6 +92,7 @@ export default function ReviewImportPage() {
       import: Import;
       categories?: Category[];
       registers?: Registers;
+      message?: EmailMessage | null;
       runs?: ProjectRun[];
       reconciliation?: Record<number, Reconciliation>;
     }>(`/api/imports/${id}`);
@@ -99,6 +102,7 @@ export default function ReviewImportPage() {
       import: res.data.import,
       categories: res.data.categories ?? [],
       registers: res.data.registers ?? null,
+      message: res.data.message ?? null,
       runs: res.data.runs ?? [],
       reconciliation: res.data.reconciliation ?? {},
     });
@@ -203,10 +207,11 @@ export default function ReviewImportPage() {
     return (
       <div className="max-w-6xl mx-auto">
         <h1 className="text-xl font-semibold text-neutral-900">
-          Review document — {run.bws_project_number} {run.project_name}
+          Review {run.document_kind === "email" ? "email" : "document"} — {run.bws_project_number}{" "}
+          {run.project_name}
         </h1>
         <SpecDocumentReview
-          data={{ import: run as unknown as SpecImport, registers: data.registers }}
+          data={{ import: run as unknown as SpecImport, registers: data.registers, message: data.message }}
           reload={() => load()}
           quietReload={() => load(true)}
         />

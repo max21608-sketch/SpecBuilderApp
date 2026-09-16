@@ -55,6 +55,8 @@ A human confirms each of these, and nothing else may write it:
 - Producing the BWS CSV export.
 - Sending any chase email. Drafts only, sent by a human from their own Outlook.
   There is no send path in this app.
+- Placing an INBOUND email on a project. It is what starts the charged read,
+  and nothing is ever auto-assigned from an ambiguous routing outcome.
 - Marking a gate (TG0/TG1/TG2) satisfied for a record.
 - Accepting a VE alternative, which changes which version is live.
 - Retiring a spec, a record or a run, and editing a confirmed finish. Each
@@ -510,6 +512,65 @@ runs these same functions over attributes already on record.
 `source_id` records WHICH document a value came from, and for a composed cell
 that is the last contributing slot: a cell built from three drawings has no
 single source, and the newest is the one a reader would go and check.
+
+### An email is a specification document whose page is a sentence
+
+`src/lib/email-envelope.ts`, `src/lib/email-routing.ts`,
+`src/lib/email-registration.ts`, `src/lib/confirm-spec-document.ts`,
+`db/migrations/0021_email_intake.sql`
+
+Specification information arrives by email constantly, and until now none of it
+reached a record except by somebody reading the message and retyping the value —
+after which the record held a value and said nothing about where it came from.
+
+An email is therefore a `document_kind`, not a pipeline: it is staged as the
+same `StagedSpecDocument` proposals, reviewed on the same screen, and confirmed
+through the same route, so the review gate, the blockers, the per-proposal
+versions and the change set are inherited rather than rebuilt. 0007's rule
+holds — the kind goes under `source_kind = 'spec_document'`, never beside it.
+
+Five things are load-bearing:
+
+- **Assignment is the spend point.** An unassigned email is never read: there
+  are no registers to resolve it against. `assignMessage` is the ONLY thing that
+  puts a message on a project, because it is also what opens the attempt and
+  dispatches the charged read, and two places doing that is two places to forget
+  one half. `registration_request_id` is `email:<messageId>`, so a replay
+  returns the run it already made.
+- **Routing never breaks its own tie.** Signals run in order — a project inbox
+  in the forwarding headers, then in To/Cc, then a project number or code in the
+  subject, then the sender being a contact on exactly one project — and the
+  FIRST signal naming any project decides. Two projects at that strength is
+  `ambiguous` and is HELD for a person; a weaker signal is never allowed to
+  arbitrate, because a confident wrong answer is worse than an unplaced one.
+  Both Exchange forwarding shapes are covered: a redirect keeps the original
+  sender and stamps the loop headers, a rule-forward replaces the sender and is
+  trusted only alongside `X-MS-Exchange-Organization-AutoForwarded`.
+- **Confirmed is not a hard closure.** `proposalBlockers` already refuses a
+  proposal over a `confirmed` or `na` answer until the reviewer acknowledges it,
+  whatever the new state is — so confirmed → a different value AND confirmed →
+  TBC both require the acknowledgement, tied to the version that was shown. That
+  blocker is what makes "they confirmed it in March and changed their mind in
+  September" safe rather than silent. `changeIntent: "withdraws_to_tbc"` is the
+  one reading the wording alone cannot produce, because the value being
+  withdrawn carries no TBC token.
+- **The change carries the email.** A confirm off an email opens an
+  `email_confirm` change whose reason names the sender, the date and the
+  subject, and whose `evidence_attachment_id` is the `.eml` itself. "The client
+  says they never asked for this" is answered by opening the message. Nothing
+  renders it: an `.eml` body is untrusted HTML a stranger wrote, so both routes
+  that serve one set `content-disposition: attachment` and `nosniff`.
+- **`spec_answers.source_kind = 'email'`** has been allowed by 0002's CHECK
+  since the beginning and had never been written. It puts the answer out of
+  reach of `applyAnswerFills` and `applyAnswerRetractions`, exactly like
+  `'manual'` — a person confirming a value off a message, with the message
+  attached, is a decision and not a document's reading.
+
+`quotedText` replaces the page number: an email has no page to turn to, so the
+sentence the value was read from is what makes the proposal checkable. Quoted
+history is kept and MARKED, never stripped — a reply quotes the question it
+answers — and the prompt tells the model to record from it only where the new
+text does not restate the value.
 
 ### The record is the unit of commit, and a half-applied card is the failure
 
@@ -1306,10 +1367,19 @@ which `SX11A` is which; and one finish edit moving 3 records and 8 answers.
 
 **Explicitly excluded, so they are not built speculatively:** feeding preamble
 notes into later model calls; gap and completeness checking, and gates; a BWS *import* file carrying job numbers; PDF bills of
-quantities; images and scanned documents; splitting an oversize drawing set. M5
-inbox ingestion and M6 VE rounds. Any write to BWS. Automatic email sending.
+quantities; images and scanned documents; splitting an oversize drawing set. M6
+VE rounds. Any write to BWS. Automatic email sending.
 SharePoint writes. BWS Messenger and Teams ingestion. The TOE calculator's own
 logic. The post-order/production flow.
+
+**Email intake (2026-09-16).** An email is a `document_kind`, staged, reviewed
+and confirmed like any other specification document, writing
+`spec_answers.source_kind = 'email'` under an `email_confirm` change that
+carries the message as evidence. The Microsoft Graph half is NOT built: there
+is no app mailbox, no subscription and no delta poll, so the only way in today
+is uploading a saved `.eml` against a project. `docs/integration.md` still
+describes the Graph boundary as planned, and `MAIL_INGESTION_MODE` still
+governs nothing.
 
 **Chase emails are back (2026-09-16), with a to-quote tier.** The screen is
 restored with entry points on the projects list and the project overview, the

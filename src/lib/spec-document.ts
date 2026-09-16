@@ -158,7 +158,14 @@ export function findRecordsByRef(refRaw: string | null, records: RecordEntry[]):
 
   const normalised = normaliseRef(wanted);
   if (!normalised) return [];
-  return records.filter((record) => record.refs.some((ref) => normaliseRef(ref) === normalised));
+  const byRef = records.filter((record) => record.refs.some((ref) => normaliseRef(ref) === normalised));
+  if (byRef.length > 0) return byRef;
+
+  // The app's OWN identifier, `P17726-014`. A client document never uses it,
+  // but an email does: it is what our chase tables print, so a reply quoting
+  // the question quotes the label back. Checked last, because a client ref is
+  // always the better answer where there is one.
+  return records.filter((record) => normaliseRef(record.label) === normalised);
 }
 
 // ---- state suggestion ------------------------------------------------------
@@ -324,6 +331,33 @@ export function buildTargetSnapshot(
  * `newId` is injected rather than called for, so a test gets stable ids and the
  * caller decides where randomness comes from.
  */
+/**
+ * The state a proposal is suggested at.
+ *
+ * `suggestState` reads the VALUE, which is right for every document and for
+ * almost every email. The exception is the one thing an email can do that a
+ * schedule cannot: withdraw a settled value back to undecided. "Please put the
+ * fabric back to TBC, the client is rethinking it" carries no TBC token in the
+ * value being withdrawn, so nothing in the wording alone could produce a `tbc`
+ * proposal — and silently recording it as a confirmed value would be the exact
+ * opposite of what the email asked for.
+ *
+ * Every other intent is inert here. The model reads; the code decides.
+ */
+function emailAwareState(observation: RawProposal): StateSuggestion {
+  const suggestion = suggestState(observation.valueRaw);
+  if (observation.changeIntent !== "withdraws_to_tbc") return suggestion;
+  if (suggestion.state === "tbc") return suggestion;
+  return {
+    state: "tbc",
+    // The value the email is withdrawing is kept, so the reviewer can see WHAT
+    // is going back to undecided rather than just that something is.
+    value: suggestion.value ?? observation.valueRaw ?? null,
+    reason:
+      "This email reads as withdrawing a value that was settled. Confirm it is going back to TBC rather than being recorded.",
+  };
+}
+
 export function resolveProposals(
   raw: RawProposal[],
   registers: Registers,
@@ -372,7 +406,7 @@ export function resolveProposals(
       : null;
 
     const target = record && requirement ? buildTargetSnapshot(record, requirement, registers.answers) : null;
-    const suggestion = suggestState(observation.valueRaw);
+    const suggestion = emailAwareState(observation);
 
     return {
       id: newId(),

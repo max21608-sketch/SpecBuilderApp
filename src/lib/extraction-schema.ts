@@ -120,6 +120,113 @@ export const SPEC_DOCUMENT_TOOL = {
   },
 };
 
+// ============================================================================
+// AN EMAIL
+//
+// The same OUTPUT as a specification document — a flat list of observations
+// resolving against the registers — with two fields a document does not need
+// and one it cannot use.
+//
+// `page`, `sourceSheet` and `sourceRow` are meaningless here and are asked for
+// as null. What replaces them is `quotedText`: an email has no page to turn to,
+// so the sentence the value was read from is what makes the proposal
+// re-checkable at review time.
+//
+// `changeIntent` records how the message READS. It is not an instruction: the
+// resolver still derives the proposed state from the value, exactly as it does
+// for a document. It changes exactly one case, and that case is the reason it
+// exists — an email withdrawing a settled value back to "not yet decided"
+// carries no TBC token in its value, so nothing in the wording alone could
+// produce a `tbc` proposal.
+// ============================================================================
+export const EMAIL_TOOL = {
+  name: "record_email_observations",
+  description:
+    "Record every specification observation stated in this email. One entry per attribute of one item. " +
+    "Copy the email's own wording; do not normalise, tidy, translate or interpret it.",
+  input_schema: {
+    type: "object" as const,
+    additionalProperties: false,
+    properties: {
+      proposals: {
+        type: "array",
+        maxItems: MAX_PROPOSALS,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            refRaw: {
+              type: ["string", "null"],
+              maxLength: MAX_SHORT,
+              description:
+                "The item reference exactly as the email writes it (e.g. 'S-100', 'SX11A', 'P17726-014'). Null if this observation names no item.",
+            },
+            attributeRaw: {
+              type: ["string", "null"],
+              maxLength: MAX_SHORT,
+              description:
+                "The attribute exactly as the email labels it (e.g. 'seat height', 'COM fabric'). Null if it gives no label.",
+            },
+            valueRaw: {
+              type: ["string", "null"],
+              maxLength: MAX_VALUE,
+              description:
+                "The value exactly as written, including wording like 'TBC', 'N/A' or 'to be confirmed'. Never substitute a cleaner value.",
+            },
+            quotedText: {
+              type: ["string", "null"],
+              maxLength: MAX_VALUE,
+              description:
+                "The sentence or line this observation was read from, copied verbatim from the email. This is what a reviewer checks the proposal against.",
+            },
+            changeIntent: {
+              anyOf: [
+                { type: "string", enum: ["adds", "changes", "confirms_tbc", "withdraws_to_tbc", "unclear"] },
+                { type: "null" },
+              ],
+              description:
+                "How the email reads: 'adds' states a value not given before; 'changes' says a value was previously different; 'confirms_tbc' settles something the email says was undecided; 'withdraws_to_tbc' says a settled value is now undecided again; 'unclear' if the email does not say.",
+            },
+            confidence: {
+              anyOf: [{ type: "string", enum: ["high", "medium", "low"] }, { type: "null" }],
+              description:
+                "How clearly the email states this. 'low' for anything inferred from context rather than stated.",
+            },
+            note: {
+              type: ["string", "null"],
+              maxLength: MAX_NOTE,
+              description:
+                "Anything a reviewer needs in order to judge this — an ambiguity, a conflict with another part of the thread, who is speaking.",
+            },
+            page: { type: "null", description: "Always null: an email has no pages." },
+            sourceSheet: { type: "null", description: "Always null." },
+            sourceRow: { type: "null", description: "Always null." },
+          },
+          required: [
+            "refRaw",
+            "attributeRaw",
+            "valueRaw",
+            "quotedText",
+            "changeIntent",
+            "confidence",
+            "note",
+            "page",
+            "sourceSheet",
+            "sourceRow",
+          ],
+        },
+      },
+      documentNotes: {
+        type: ["string", "null"],
+        maxLength: MAX_NOTE,
+        description:
+          "One note about the email as a whole: what it is about, and anything it plainly does not answer.",
+      },
+    },
+    required: ["proposals", "documentNotes"],
+  },
+};
+
 // The check. `.default(null)` where a missing field is genuinely acceptable;
 // the core structure stays required, because output without `proposals` is not
 // a thin result, it is a failure to answer.
@@ -135,6 +242,22 @@ export const RawProposal = z.object({
   sourceRow: z.number().int().min(1).max(1_000_000).nullable().catch(null).default(null),
   confidence: z.enum(["high", "medium", "low"]).nullable().catch(null).default(null),
   note: nullableText(MAX_NOTE),
+  // ---- email only, and OPTIONAL so staged JSON written before emails
+  // existed still validates rather than failing a review screen ----------
+  //
+  // An email has no page number, so the sentence the value came from is what
+  // makes it re-checkable: the reviewer reads "the seat height is 440mm"
+  // beside the proposal instead of opening the message and searching.
+  quotedText: nullableText(MAX_VALUE).optional(),
+  // How the email READS, not what the app should do. Code still derives the
+  // proposed state; this only changes the one case wording alone cannot
+  // express — a value being withdrawn back to undecided.
+  changeIntent: z
+    .enum(["adds", "changes", "confirms_tbc", "withdraws_to_tbc", "unclear"])
+    .nullable()
+    .catch(null)
+    .default(null)
+    .optional(),
 });
 
 export type RawProposal = z.infer<typeof RawProposal>;
@@ -522,7 +645,7 @@ export type PreambleOutput = z.infer<typeof PreambleOutput>;
 import type { DocumentKind } from "@/lib/spec-vocab";
 
 export type ExtractionToolSpec =
-  | { outputKind: "observations"; tool: typeof SPEC_DOCUMENT_TOOL; schema: typeof ExtractionOutput }
+  | { outputKind: "observations"; tool: typeof SPEC_DOCUMENT_TOOL | typeof EMAIL_TOOL; schema: typeof ExtractionOutput }
   | { outputKind: "drawing_items"; tool: typeof DRAWINGS_TOOL; schema: typeof DrawingsOutput }
   | { outputKind: "preamble_notes"; tool: typeof PREAMBLE_TOOL; schema: typeof PreambleOutput };
 
@@ -538,6 +661,7 @@ export const TOOLS: Record<DocumentKind, ExtractionToolSpec> = {
   finishes_schedule: OBSERVATIONS,
   fabric_schedule: OBSERVATIONS,
   other: OBSERVATIONS,
+  email: { outputKind: "observations", tool: EMAIL_TOOL, schema: ExtractionOutput },
   shop_drawings: { outputKind: "drawing_items", tool: DRAWINGS_TOOL, schema: DrawingsOutput },
   preamble: { outputKind: "preamble_notes", tool: PREAMBLE_TOOL, schema: PreambleOutput },
 };

@@ -32,6 +32,7 @@
     "next": "^15.1.4",
     "pdfjs-dist": "^4.10.38",
     "pg": "^8.13.1",
+    "postal-mime": "^3.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "read-excel-file": "^9.3.10",

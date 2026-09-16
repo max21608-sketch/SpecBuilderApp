@@ -4,7 +4,11 @@ import { intakeSourceKind } from "@/lib/intake-source-types";
 
 export type DocumentSource =
   | { type: "pdf"; base64: string }
-  | { type: "spreadsheet"; text: string };
+  | { type: "spreadsheet"; text: string }
+  // An email reaches the model as text: headers, then the body, with any quoted
+  // history marked. Attachments are NOT inlined — a file's kind is declared by
+  // a person, never inferred, so registering one is its own deliberate act.
+  | { type: "email"; text: string };
 
 const MAX_SPREADSHEET_CELLS = 200_000;
 const MAX_SPREADSHEET_TEXT_CHARS = 1_500_000;
@@ -72,8 +76,12 @@ export async function readSpreadsheetSheets(
 export async function prepareDocumentSource(bytes: Buffer, filename: string, contentType: string): Promise<DocumentSource> {
   const kind = intakeSourceKind(filename, contentType);
   if (kind === "pdf") return { type: "pdf", base64: bytes.toString("base64") };
+  if (kind === "eml") {
+    const { parseEnvelope, buildEmailModelText } = await import("@/lib/email-envelope");
+    return { type: "email", text: buildEmailModelText(await parseEnvelope(bytes)).text };
+  }
   if (kind === "xlsx" || kind === "csv" || kind === "tsv") {
     return { type: "spreadsheet", text: spreadsheetSheetsToText(await readSpreadsheetSheets(bytes, filename, contentType)) };
   }
-  throw new Error("Unsupported intake file. Upload a PDF, .xlsx, .csv or .tsv file.");
+  throw new Error("Unsupported intake file. Upload a PDF, .xlsx, .csv, .tsv or .eml file.");
 }

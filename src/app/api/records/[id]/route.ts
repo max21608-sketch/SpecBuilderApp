@@ -146,8 +146,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
   const parsed = Patch.safeParse(raw);
   if (!parsed.success) {
+    // A union's own message is "Invalid input" with an empty path, which tells
+    // a reader nothing. Say which of the two shapes was meant and what is
+    // wrong with it.
+    const body = raw as Record<string, unknown> | null;
+    if (body && "level" in body) {
+      return json(
+        {
+          ok: false,
+          error: `A level is one of ${ITEM_LEVELS.join(", ")}, or null to clear it.`,
+          field: "level",
+        },
+        400,
+      );
+    }
     const issue = parsed.error.issues[0];
-    return json({ ok: false, error: issue?.message ?? "That change is not valid.", field: issue?.path.join(".") }, 400);
+    return json(
+      {
+        ok: false,
+        error: issue?.message ?? "Send either a category or a level, with the version you were looking at.",
+        field: issue?.path.join("."),
+      },
+      400,
+    );
   }
 
   try {

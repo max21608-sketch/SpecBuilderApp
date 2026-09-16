@@ -16,6 +16,9 @@ type Me = {
 // is not.
 const NAV: { href: string; label: string }[] = [
   { href: "/dashboard/projects", label: "Projects" },
+  // The inbox is project-less by nature: an email that could not be placed
+  // belongs to no project screen, and is invisible unless it has its own way in.
+  { href: "/dashboard/inbox", label: "Inbox" },
 ];
 
 export default function NavShell({ children }: { children: React.ReactNode }) {

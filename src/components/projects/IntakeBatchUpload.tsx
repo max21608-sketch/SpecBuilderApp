@@ -38,6 +38,10 @@ const CHOICES: { value: string; label: string; importType: "boq" | "spec_documen
   { value: "spec_bible", label: DOCUMENT_KIND_LABELS.spec_bible, importType: "spec_document", documentKind: "spec_bible" },
   { value: "finishes_schedule", label: DOCUMENT_KIND_LABELS.finishes_schedule, importType: "spec_document", documentKind: "finishes_schedule" },
   { value: "fabric_schedule", label: DOCUMENT_KIND_LABELS.fabric_schedule, importType: "spec_document", documentKind: "fabric_schedule" },
+  // A saved .eml, dragged out of Outlook. Same pipeline as a schedule: read,
+  // staged as proposals, reviewed, confirmed — with the message kept whole as
+  // the evidence the change carries.
+  { value: "email", label: "Email (.eml saved from Outlook)", importType: "spec_document", documentKind: "email" },
   { value: "other", label: DOCUMENT_KIND_LABELS.other, importType: "spec_document", documentKind: "other" },
 ];
 
@@ -47,6 +51,7 @@ function hint(filename: string): string | null {
   if (lower.includes("preamble")) return "looks like a preamble";
   if (lower.includes("boq") || lower.includes("bill of")) return "looks like a bill of quantities";
   if (lower.includes("drawing")) return "looks like drawings";
+  if (lower.endsWith(".eml")) return "looks like a saved email";
   return null;
 }
 

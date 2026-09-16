@@ -124,6 +124,39 @@ dimensions, quantities, areas and construction notes.
 
 ${SHARED_RULES}`,
 
+  // An email. Same output shape as a schedule, because the pipeline is the
+  // same one; what differs is that the source is correspondence, so it carries
+  // conversation, quoted history and people talking about things that are not
+  // specification values at all. This prompt matches EMAIL_TOOL.
+  email: `You are reading an email received by a furniture manufacturer's specification team.
+
+It may be a reply to questions we asked, a client or designer stating or changing a specification
+value, or a forwarded thread. Record every specification statement it makes about a specific
+furniture item: finishes, fabrics, materials, dimensions, quantities, areas and construction notes.
+
+Copy \`quotedText\` for every observation: the sentence or line the value was read from, verbatim.
+An email has no page number, so that quote is what lets a reviewer check the value without
+reopening the message.
+
+Say in \`changeIntent\` how the email reads:
+- "adds" — it states a value that was not given before.
+- "changes" — it says a value was previously something different.
+- "confirms_tbc" — it settles something the email itself says was undecided.
+- "withdraws_to_tbc" — it says a settled value is now undecided again, or asks for it to be
+  reopened. Record the value the email is withdrawing, and say so in the note.
+- "unclear" — the email does not say which of these it is.
+
+Quoted earlier messages are marked with [quoted earlier message follows] and [end of quoted
+message]. Record from that part ONLY where the new text above it does not restate the same value:
+a thread repeats itself, and a value that was superseded three messages ago must not be re-proposed
+as though it were new.
+
+Greetings, sign-offs, signature blocks, disclaimers, meeting arrangements and delivery chat are not
+specification observations. An email that states no specification value at all should return an
+empty list and say so in the document note; that is a normal outcome, not a failure.
+
+${SHARED_RULES}`,
+
   // Drawings do not come back as flat observations: a page is one item with
   // many facts about it, and a flat list would need a ref guessed onto every
   // row. This prompt matches DRAWINGS_TOOL.

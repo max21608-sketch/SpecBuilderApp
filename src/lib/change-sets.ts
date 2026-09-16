@@ -58,6 +58,7 @@ export const CHANGE_SET_KINDS = [
   "finish_unlink",
   "baseline",
   "history_begins",
+  "email_confirm",
 ] as const;
 export type ChangeSetKind = (typeof CHANGE_SET_KINDS)[number];
 
@@ -90,6 +91,7 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   finish_unlink: "Finish unlinked",
   baseline: "Baseline",
   history_begins: "History begins",
+  email_confirm: "Email confirmed",
 };
 
 export type OpenChangeSet = {

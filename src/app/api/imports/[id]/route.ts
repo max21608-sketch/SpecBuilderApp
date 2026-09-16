@@ -414,9 +414,29 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // the screen never has to guess which questions a category has.
     const registers = await loadExtractionRegisters(String(run.project_id));
     const parsed = (run.parsed ?? null) as StagedSpecDocument | null;
+
+    // An email carries its own header panel: who sent it, when, and a link
+    // that opens it in Outlook. A proposal off an email has no page to turn
+    // to, so the message itself is what a reviewer checks it against.
+    const messageRows =
+      run.document_kind === "email"
+        ? await sql`
+            select em.id, em.from_addr, em.from_name, em.subject, em.received_at,
+                   em.to_addrs, em.cc_addrs, em.attachments_meta, em.has_attachments,
+                   em.routing_reason, em.chase_match, em.triage, em.version,
+                   d.subject as chase_subject, d.sent_at as chase_sent_at,
+                   d.recipient_name as chase_recipient_name,
+                   (select count(*) from email_draft_items i where i.draft_id = d.id) as chase_question_count
+            from email_messages em
+            left join email_drafts d on d.id = em.chase_draft_id
+            where em.intake_run_id = ${run.id}
+          `
+        : [];
+
     return json({
       ok: true,
       import: { ...run, parsed },
+      message: messageRows[0] ?? null,
       registers: {
         records: registers.records,
         requirements: registers.requirements,

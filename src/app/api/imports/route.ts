@@ -79,6 +79,8 @@ import { matchName, type MatchCandidate } from "@/lib/matching";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
+import { recordMessage } from "@/lib/email-ingest";
+import { assignMessage } from "@/lib/email-registration";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 
 export const maxDuration = 60;
@@ -143,11 +145,76 @@ export async function POST(request: Request): Promise<Response> {
     if (!batch[0]) return json({ ok: false, error: "No such intake batch on this project.", field: "batchId" }, 404);
   }
 
-  if (input.importType === "spec_document") return registerSpecDocument(input, user.email);
+  if (input.importType === "spec_document") {
+    // An email registers differently: it becomes an `email_messages` row
+    // first, because the message is a thing in its own right — held, routed,
+    // and openable in Outlook — and only then an intake run.
+    if (input.documentKind === "email") return registerEmail(input, user.email);
+    return registerSpecDocument(input, user.email);
+  }
   return registerBlobBoq(input, user.email);
 }
 
 type Registered = z.infer<typeof Registration>;
+
+// ---- an email ---------------------------------------------------------------
+// A saved .eml, uploaded against a project by a person. The Graph path (Phase 2)
+// reaches the same two functions with the same arguments; what differs is only
+// who decided the project.
+const MAX_EMAIL_BYTES = 30 * 1024 * 1024;
+
+async function registerEmail(input: Registered, actor: string): Promise<Response> {
+  let blob;
+  try {
+    blob = await readTrustedBlob(input.pathname, input.projectId, { maxBytes: MAX_EMAIL_BYTES });
+  } catch (cause) {
+    if (cause instanceof UntrustedBlobError) return json({ ok: false, error: cause.message }, 400);
+    throw cause;
+  }
+
+  try {
+    const recorded = await recordMessage({
+      mailbox: "upload",
+      origin: "upload",
+      bytes: blob.bytes,
+      storagePath: blob.pathname,
+      mimeSize: blob.size,
+      actor,
+      intendedProjectId: input.projectId,
+    });
+
+    // Assigning is what starts the read and spends the money, and the upload
+    // screen has already said so.
+    const assigned = await assignMessage({
+      messageId: recorded.id,
+      projectId: input.projectId,
+      kind: "manual",
+      actor,
+    });
+
+    return json(
+      {
+        ok: true,
+        importId: assigned.runId,
+        messageId: recorded.id,
+        sourcePreserved: true,
+        // Reported rather than thrown: the file is stored and the rows exist
+        // either way, and the review screen renders the failure with a Retry.
+        autoRead: assigned.dispatchError ? { dispatched: false, error: assigned.dispatchError } : { dispatched: true },
+        // What the HEADERS would have decided, so a message uploaded against
+        // the wrong project is visible rather than silent.
+        routing: {
+          status: recorded.routing.status,
+          matchesThisProject:
+            recorded.routing.status === "assigned" && recorded.routing.projectId === input.projectId,
+        },
+      },
+      201,
+    );
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
 
 // ---- specification document ------------------------------------------------
 // Register the document, then dispatch the read. No body is read HERE -- the

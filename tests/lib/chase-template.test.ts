@@ -324,10 +324,16 @@ describe("buildChaseEmail — the two tiers", () => {
 });
 
 describe("defaultIntro", () => {
+  it("keeps the singular readable when only one point is outstanding", () => {
+    // "1 further point that are outstanding" is the kind of sentence that
+    // makes a client wonder whether a person read the email before sending it.
+    expect(defaultIntro("P17231", { toQuote: 2, later: 1 })).toContain("1 further point that is outstanding");
+  });
+
   it("names both counts when the email carries both halves", () => {
     const intro = defaultIntro("P17231 Maybourne Paris", { toQuote: 4, later: 9 });
     expect(intro).toContain("4 details we need before we can put a price");
-    expect(intro).toContain("9 further points");
+    expect(intro).toContain("9 further points that are outstanding");
   });
 
   it("asks only for the quote when nothing else is outstanding", () => {

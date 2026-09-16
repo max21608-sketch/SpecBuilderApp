@@ -3,10 +3,12 @@ export const INTAKE_UPLOAD_ACCEPT = [
   ".xlsx",
   ".csv",
   ".tsv",
+  ".eml",
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/csv",
   "text/tab-separated-values",
+  "message/rfc822",
 ].join(",");
 
 // What the upload token will sign for. Note that `INTAKE_UPLOAD_ACCEPT` above
@@ -57,7 +59,7 @@ export function itemImagePath(projectId: string, recordScopedName: string): stri
   return `projects/${projectId}/item-images/${recordScopedName}.png`;
 }
 
-export type IntakeSourceKind = "pdf" | "xlsx" | "csv" | "tsv" | "unsupported";
+export type IntakeSourceKind = "pdf" | "xlsx" | "csv" | "tsv" | "eml" | "unsupported";
 
 export function intakeSourceKind(filename: string, contentType = ""): IntakeSourceKind {
   const lower = filename.toLowerCase();
@@ -66,11 +68,17 @@ export function intakeSourceKind(filename: string, contentType = ""): IntakeSour
   if (lower.endsWith(".xlsx")) return "xlsx";
   if (lower.endsWith(".csv")) return "csv";
   if (lower.endsWith(".tsv")) return "tsv";
+  // A saved email. `.msg` is deliberately NOT here: it is binary OLE, nothing
+  // in this app parses it, and a .msg reaching the model would be read as
+  // gibberish at full price. It stays accepted as EVIDENCE, which only ever
+  // downloads.
+  if (lower.endsWith(".eml")) return "eml";
   if (/\.[^/]+$/.test(lower)) return "unsupported";
   if (type === "application/pdf") return "pdf";
   if (type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return "xlsx";
   if (type === "text/csv") return "csv";
   if (type === "text/tab-separated-values") return "tsv";
+  if (type === "message/rfc822") return "eml";
   return "unsupported";
 }
 
@@ -78,5 +86,6 @@ export function defaultIntakeContentType(kind: Exclude<IntakeSourceKind, "unsupp
   if (kind === "pdf") return "application/pdf";
   if (kind === "xlsx") return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   if (kind === "csv") return "text/csv";
+  if (kind === "eml") return "message/rfc822";
   return "text/tab-separated-values";
 }

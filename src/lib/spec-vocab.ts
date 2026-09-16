@@ -81,6 +81,9 @@ export const DOCUMENT_KINDS = [
   "fabric_schedule",
   "preamble",
   "shop_drawings",
+  // An email is a specification document whose page is a sentence. Same
+  // pipeline, same review screen, same confirm boundary — see 0021.
+  "email",
   "other",
 ] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
@@ -92,6 +95,7 @@ export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
   fabric_schedule: "Fabric schedule",
   preamble: "Preamble",
   shop_drawings: "Shop drawings",
+  email: "Email",
   other: "Other specification document",
 };
 

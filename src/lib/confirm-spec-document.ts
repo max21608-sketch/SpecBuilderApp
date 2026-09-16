@@ -45,13 +45,71 @@ type LoadedRun = {
   runId: string;
   projectId: string;
   staged: StagedSpecDocument;
+  documentKind: string | null;
   actor: string;
 };
+
+/**
+ * What a confirm records, and where the answers say they came from.
+ *
+ * Taken from the RUN ROW, never from the request: the client does not choose
+ * which pipeline its confirm is treated as. An email and a schedule differ in
+ * three ways and no others — the kind of change recorded, the `source_kind`
+ * written onto each answer, and whether the change carries the source as
+ * evidence somebody can open.
+ */
+type ConfirmSource = {
+  changeKind: "spec_document_confirm" | "email_confirm";
+  answerSource: "document" | "email";
+  reason: string;
+  evidenceAttachmentId: string | null;
+};
+
+async function confirmSourceFor(txn: TxnSql, run: Omit<LoadedRun, "actor">, count: number): Promise<ConfirmSource> {
+  const answers = `${count} answer${count === 1 ? "" : "s"}`;
+
+  if (run.documentKind !== "email") {
+    return {
+      changeKind: "spec_document_confirm",
+      answerSource: "document",
+      reason: `${answers} from ${run.staged.filename ?? "a specification document"}`,
+      evidenceAttachmentId: null,
+    };
+  }
+
+  // The message itself is the evidence. "The client says they never asked for
+  // this" is answered by opening the email, so the change carries the .eml
+  // rather than a rendering of it — see db/migrations/0013.
+  const rows = await txn`
+    select em.from_name, em.from_addr, em.subject, em.received_at, em.mime_attachment_id
+    from email_messages em where em.intake_run_id = ${run.runId}
+  `;
+  const message = rows[0];
+  if (!message) {
+    // The kind says email and no message points at the run. Refuse rather than
+    // writing answers whose provenance line would be a guess.
+    throw new DomainConflictError(
+      "email_missing",
+      "This import is an email, but the message it came from is missing. Nothing was written.",
+    );
+  }
+
+  const who = [message.from_name, message.from_addr].filter(Boolean).join(" ") || "an unknown sender";
+  const when = message.received_at ? new Date(String(message.received_at)).toLocaleDateString("en-GB") : "an unknown date";
+  const subject = message.subject ? ` "${String(message.subject)}"` : "";
+
+  return {
+    changeKind: "email_confirm",
+    answerSource: "email",
+    reason: `${answers} from an email from ${who}, ${when}${subject}`.slice(0, 300),
+    evidenceAttachmentId: message.mime_attachment_id ? String(message.mime_attachment_id) : null,
+  };
+}
 
 /** The run, locked, with its staged proposals read from the LOCKED row. */
 async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | null): Promise<Omit<LoadedRun, "actor">> {
   const rows = await txn`
-    select id, project_id, status, parsed, version, source_kind
+    select id, project_id, status, parsed, version, source_kind, document_kind
     from intake_runs where id = ${runId}
     for update
   `;
@@ -74,7 +132,12 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
   if (!staged || !Array.isArray(staged.lines)) {
     throw new DomainConflictError("not_staged", "This import has nothing staged to review.");
   }
-  return { runId: String(run.id), projectId: String(run.project_id), staged };
+  return {
+    runId: String(run.id),
+    projectId: String(run.project_id),
+    staged,
+    documentKind: run.document_kind === null || run.document_kind === undefined ? null : String(run.document_kind),
+  };
 }
 
 /** Locate by id, never by position. Array index is display order, not identity. */
@@ -190,12 +253,14 @@ export async function confirmSpecDocumentRecord(
   // Opened before the first answer is written: write_audit() reads the change
   // from the transaction, so one created afterwards would leave every row it
   // covers belonging to nothing.
+  const source = await confirmSourceFor(txn, run, chosen.length);
   const changeSetId = await openChangeSet(txn, {
     projectId: run.projectId,
-    kind: "spec_document_confirm",
+    kind: source.changeKind,
     actor,
-    reason: `${chosen.length} answer${chosen.length === 1 ? "" : "s"} from ${run.staged.filename ?? "a specification document"}`,
+    reason: source.reason,
     sourceIntakeRunId: run.runId,
+    evidenceAttachmentId: source.evidenceAttachmentId,
   });
 
   const applied = new Map<string, Proposal["applied"]>();
@@ -240,7 +305,7 @@ export async function confirmSpecDocumentRecord(
         set value        = ${value},
             value_raw    = coalesce(value_raw, ${proposal.raw.valueRaw}),
             state        = ${state},
-            source_kind  = 'document',
+            source_kind  = ${source.answerSource},
             source_id    = ${run.runId},
             confirmed_by = ${confirmedBy},
             confirmed_at = ${confirmedAt},
@@ -268,7 +333,7 @@ export async function confirmSpecDocumentRecord(
            source_kind, source_id, confirmed_by, confirmed_at, created_by, updated_by)
         values
           (${recordId}, ${target.requirementId}, ${requirement.spec_field_id}, 0, ${value},
-           ${proposal.raw.valueRaw}, ${state}, 'document', ${run.runId}, ${confirmedBy}, ${confirmedAt},
+           ${proposal.raw.valueRaw}, ${state}, ${source.answerSource}, ${run.runId}, ${confirmedBy}, ${confirmedAt},
            ${actor}, ${actor})
         on conflict (record_id, requirement_id, revision_no) do nothing
         returning id, version

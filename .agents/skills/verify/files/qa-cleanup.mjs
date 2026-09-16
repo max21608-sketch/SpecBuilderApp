@@ -102,18 +102,24 @@ try {
   const recordIds = await idsOf("select id from spec_records where project_id = any($1::uuid[])");
   const intakeRunIds = await idsOf("select id from intake_runs where project_id = any($1::uuid[])");
   const draftIds = await idsOf("select id from email_drafts where project_id = any($1::uuid[])");
+  // Ingested email. Its project FK is ON DELETE SET NULL, so deleting the
+  // project would leave the message orphaned in the Inbox rather than removing
+  // it — it has to be swept explicitly, before the runs it points at.
+  const messageIds = await idsOf("select id from email_messages where project_id = any($1::uuid[])");
   // Every id this sweep is about to remove. The polymorphic tables are matched
   // on entity_id ALONE: entity_type is written both ways in this database
   // ('spec_record' and 'spec_records', 'intake_run' and 'intake_runs'), so a
   // cleanup that filtered on one spelling would silently leave the other
   // behind.
-  const everyId = [...projectIds, ...recordIds, ...intakeRunIds, ...draftIds];
+  const everyId = [...projectIds, ...recordIds, ...intakeRunIds, ...draftIds, ...messageIds];
 
   // Foreign-key-safe order, children first. Several of these would cascade from
   // `projects`, but spec_records, spec_runs and email_draft_items are RESTRICT,
   // so the delete has to walk down anyway — and a list that only deletes what
   // would not cascade is a list nobody can check against the schema.
   const steps = [
+    // Before intake_runs and email_drafts, which it references.
+    ["email_messages", "delete from email_messages where id = any($1::uuid[])", messageIds],
     ["email_draft_items", "delete from email_draft_items where draft_id = any($1::uuid[])", draftIds],
     ["email_drafts", "delete from email_drafts where project_id = any($1::uuid[])", projectIds],
     ["spec_answers", "delete from spec_answers where record_id = any($1::uuid[])", recordIds],

@@ -29,6 +29,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import { usePoll } from "@/lib/use-poll";
+import EmailHeader, { type EmailMessage } from "@/components/imports/EmailHeader";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import {
   classifyProposal,
@@ -79,7 +80,7 @@ export default function SpecDocumentReview({
   reload,
   quietReload,
 }: {
-  data: { import: SpecImport; registers: Registers };
+  data: { import: SpecImport; registers: Registers; message?: EmailMessage | null };
   reload: () => Promise<void>;
   quietReload: () => Promise<void>;
 }) {
@@ -310,16 +311,25 @@ export default function SpecDocumentReview({
   };
 
   if (proposals.length === 0) {
+    const isEmail = run.document_kind === "email";
     return (
-      <div className="mt-6 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6 text-center">
-        <p className="font-medium text-neutral-900">No proposals found</p>
-        <p className="mt-2 text-sm text-neutral-600">
-          The model read {run.filename ?? "this document"} and found nothing it could record as a specification
-          value. {run.parsed?.documentNotes ? `It noted: “${run.parsed.documentNotes}”` : ""}
-        </p>
-        <p className="mt-2 text-sm text-neutral-600">
-          That is a result, not an error — check the document is the one you meant.
-        </p>
+      <div className="mt-4">
+        {data.message && <EmailHeader message={data.message} />}
+        <div className="mt-4 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6 text-center">
+          <p className="font-medium text-neutral-900">
+            {isEmail ? "Nothing to record" : "No proposals found"}
+          </p>
+          <p className="mt-2 text-sm text-neutral-600">
+            The model read {isEmail ? "this email" : (run.filename ?? "this document")} and found nothing it could
+            record as a specification value.{" "}
+            {run.parsed?.documentNotes ? `It noted: “${run.parsed.documentNotes}”` : ""}
+          </p>
+          <p className="mt-2 text-sm text-neutral-600">
+            {isEmail
+              ? "That is a normal outcome: most email is not specification. The message is kept either way."
+              : "That is a result, not an error — check the document is the one you meant."}
+          </p>
+        </div>
       </div>
     );
   }
@@ -328,6 +338,7 @@ export default function SpecDocumentReview({
 
   return (
     <div className="mt-4">
+      {data.message && <EmailHeader message={data.message} />}
       {error && (
         <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
       )}
