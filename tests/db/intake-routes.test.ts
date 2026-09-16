@@ -108,13 +108,18 @@ describeIfDb("intake routes", () => {
     await client.end();
   });
 
-  let nextRecordNo = 100;
+  // ALLOCATED FROM THE DATABASE, like confirm-boq does, and NOT from a counter
+  // in this file. A counter was fine until something else started creating
+  // records: `ensureVariant` takes `max(record_no) + 1` for a configuration, so
+  // the moment one test split a record the next `makeRecord` collided with it on
+  // `spec_records_project_no_key`. Variants share the project's numbering —
+  // `record_no` is one per RECORD, not one per bill line.
   async function makeRecord(runId: string, code: string, description: string, withCategory = false): Promise<string> {
-    nextRecordNo += 1;
     const record = await client.query(
       `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, qty, created_by, updated_by)
-       values ($1, $2, $3, 'active', $4, $5, 4, 'qa', 'qa') returning id`,
-      [projectId, runId, nextRecordNo, withCategory ? categoryId : null, description],
+       values ($1, $2, (select coalesce(max(record_no), 0) + 1 from spec_records where project_id = $1),
+               'active', $4, $5, 4, 'qa', 'qa') returning id`,
+      [projectId, runId, null, withCategory ? categoryId : null, description],
     );
     const recordId = record.rows[0].id;
     await client.query(
@@ -1231,7 +1236,9 @@ describeIfDb("intake routes", () => {
       [parentId],
     );
     expect(again.rows[0].n).toBe(2);
-  });
+    // TWO full confirms through the real route, against a remote database. The
+    // 5s default is for tests that do one.
+  }, 40_000);
 
   it("refuses to split a record that already carries confirmed specs", async () => {
     // Those specs would stay on a record the export has stopped shipping, so a
@@ -1274,6 +1281,6 @@ describeIfDb("intake routes", () => {
     expect((await blocked.json()).error).toMatch(/already carries/i);
     const none = await client.query(`select count(*)::int as n from spec_records where parent_id = $1`, [parentId]);
     expect(none.rows[0].n).toBe(0);
-  });
+  }, 40_000);
 
 });
