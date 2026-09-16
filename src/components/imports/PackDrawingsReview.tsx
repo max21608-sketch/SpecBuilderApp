@@ -109,6 +109,42 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     };
   }
 
+  /**
+   * The swatch chip each finish row currently holds, by observation id.
+   *
+   * Same ref-not-state treatment as the item pictures above, and the same
+   * upload-at-confirm rule: a card nobody commits leaves no bytes in the
+   * store, and the `project_finishes` row a swatch attaches to does not exist
+   * until the confirm creates it.
+   */
+  const swatches = useRef<Map<string, CroppedImage | null>>(new Map());
+  const rememberSwatch = useCallback((observationId: string, image: CroppedImage | null) => {
+    swatches.current.set(observationId, image);
+  }, []);
+
+  /** The crops for the rows being confirmed, uploaded together. */
+  async function uploadSwatches(observationIds: string[], projectId: string) {
+    const out: { observationId: string; pathname: string; filename: string; width: number; height: number; size: number }[] = [];
+    for (const observationId of observationIds) {
+      const image = swatches.current.get(observationId);
+      if (!image) continue;
+      const blob = await upload(
+        `${projectUploadPrefix(projectId)}finish-swatches/${observationId}-${Date.now()}.png`,
+        image.blob,
+        { access: "private", handleUploadUrl: "/api/uploads/token", clientPayload: projectId, contentType: "image/png" },
+      );
+      out.push({
+        observationId,
+        pathname: blob.pathname,
+        filename: `${observationId}.png`,
+        width: image.width,
+        height: image.height,
+        size: image.blob.size,
+      });
+    }
+    return out;
+  }
+
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(
@@ -216,9 +252,14 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
       // Before the confirm, so a failed upload refuses the card rather than
       // committing its specs and silently losing the picture.
       let image = null;
+      let swatchList: Awaited<ReturnType<typeof uploadSwatches>> = [];
       if (action === "confirm") {
         try {
           image = await uploadImage(item.id, projectId);
+          swatchList = await uploadSwatches(
+            observations.map((observation) => observation.id),
+            projectId,
+          );
         } catch (cause) {
           setError(
             `The picture could not be stored, so nothing was confirmed: ${
@@ -234,7 +275,9 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
         body: JSON.stringify({
           action,
           itemId: item.id,
-          ...(action === "confirm" ? { itemVersion: item.version, image } : {}),
+          ...(action === "confirm"
+            ? { itemVersion: item.version, image, ...(swatchList.length > 0 ? { swatches: swatchList } : {}) }
+            : {}),
           observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
         }),
       });
@@ -496,6 +539,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
               onSaveTargets={saveTargets}
               onSetBulkUnit={setBulkUnit}
               onImage={rememberImage}
+              onSwatch={rememberSwatch}
               onReview={review}
             />
           </div>

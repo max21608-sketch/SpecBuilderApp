@@ -974,6 +974,76 @@ Four things are load-bearing:
   specification sheet still in centimetres at `W1900 x D790 x H720mm`, and
   S-100's eight bare figures, UP-101 and S-400 left unplaced with a dispute.
 
+### A guessed dimension is filled in, and the line turns yellow
+
+Asked for directly on 2026-09-16, after the first real run-through: **assign W,
+D, H and SH even when unsure, and highlight the lines so I know to confirm
+them.** An empty Dimensions question helps nobody; a wrong one a reviewer can
+see does. So `guessSlotsFromViews` never withholds a guess — `dispute` says the
+guess is WEAK, it does not suppress it, and the two paths are not presented as
+equally good:
+
+- **Strong**: the views agree, which is the page stating the same figure on two
+  or three of them. `dispute` is null.
+- **Weak**: no view labels, or the views share nothing, or the same figure reads
+  as two slots. Falls back to the three largest distinct figures as
+  W ≥ D ≥ H — an assumption that furniture is wider than deep and deeper than
+  tall, which is right for the S-100 sofa (190 / 79 / 72) and wrong for a desk
+  chair and a headboard. `dispute` always set, the panel shows the page, and
+  every guessed line is **yellow** (`bg-yellow-100/70`) — distinct from the
+  amber a blocker uses: yellow means "this is a guess, confirm it", amber means
+  "this cannot commit as it stands".
+
+Below three distinct figures it fills nothing: two figures could be W × H,
+W × D or Dia × H with nothing to choose between them, and a third slot invented
+from two numbers is not a guess a reviewer could check — it is one they would
+have to undo.
+
+**And only offer a group the row can be given.** The group dropdown listed all
+six, and on a measured row every one of them was refused: `Dimensions` by
+`dimension_needs_slot` (0011's biconditional) and every other by
+`unit_not_a_measurement`. The 400 landed in the banner at the top of the
+screen, nowhere near the row, so the dropdown appeared to do nothing —
+twenty-four times on the S-200 card. The route's rules are right; offering
+choices it must refuse was not. `dimension` is never an option there, because
+it is unwritable without a slot and the SLOT column sends both fields in one
+patch.
+
+### A swatch is cropped off the page it is printed on
+
+`src/components/imports/SwatchPicker.tsx`,
+`src/components/imports/PageCropper.tsx`, `src/lib/confirm-drawings.ts`
+
+`project_finishes` has taken a swatch since 0018 and nobody ever added one. The
+feature was not the problem; the flow was. A person had to find the finish, find
+the PDF, find the page, screenshot a chip, save a file, upload it and then TYPE
+which document and page it came from — which the swatch route requires,
+correctly, because a picture nobody can trace to a page is a picture nobody can
+check. A reviewer on a drawings card already has all of it: the page is open,
+the document and page are known, and the chips are printed in the materials
+panel.
+
+- **`PageCropper` is one implementation**, shared by the item picture and the
+  swatch. A second copy is how the two start disagreeing about what a click
+  means — the 2% minimum is the difference between "no crop" and a one-pixel
+  smear somebody has to notice and undo.
+- **A swatch belongs to the CODE, not to the item.** `project_finishes` is
+  unique on `(project_id, code_norm)` and `WD-05` is on three pages of the real
+  set, so cropping it once crops it for every item carrying the code. That is
+  the library's edit-once rule; the card says so, or somebody crops the same
+  chip five times and wonders why the fifth won.
+- **Nothing is uploaded until the card is confirmed**, like the item picture: a
+  card nobody commits leaves no bytes in the store, and the finish the swatch
+  attaches to does not exist until the confirm creates it.
+- **Keyed by OBSERVATION; the finish is resolved server-side** from that row's
+  own code. The client does not get to say which library row a picture belongs
+  to — the `blob-source.ts` discipline, applied to the choice of target as well
+  as to the pathname.
+- **Refused, never dropped.** A row whose code does not resolve to one finish
+  (a conflict with the library links nothing, by design) fails the confirm with
+  that reason. Silently discarding a crop is how somebody comes to believe it is
+  stored. **Supersede, never delete**, as the swatch route already does.
+
 ### A link goes somewhere; a button does something
 
 `src/components/ui/Button.tsx`

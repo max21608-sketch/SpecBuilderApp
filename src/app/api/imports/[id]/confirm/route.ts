@@ -60,6 +60,29 @@ const ConfirmBody = z
       .strict()
       .nullable()
       .optional(),
+    // The swatch chips the reviewer cropped off the page, one per finish row,
+    // already uploaded to the project's own blob prefix. PATHNAMES, never
+    // URLs, re-checked against this run's project inside the transaction —
+    // the `blob-source.ts` rule, in a third place.
+    //
+    // Keyed by OBSERVATION, because that is what the reviewer was looking at.
+    // The finish it lands on is resolved server-side from the row's own code:
+    // the client does not get to say which library row a picture belongs to.
+    swatches: z
+      .array(
+        z
+          .object({
+            observationId: z.string().min(1),
+            pathname: z.string().min(1).max(1024),
+            filename: z.string().max(300).nullable().optional(),
+            width: z.number().int().positive().max(20_000).nullable().optional(),
+            height: z.number().int().positive().max(20_000).nullable().optional(),
+            size: z.number().int().nonnegative().max(32 * 1024 * 1024).nullable().optional(),
+          })
+          .strict(),
+      )
+      .max(100)
+      .optional(),
     // Preamble notes.
     notes: z.array(StagedRef).min(1).max(500).optional(),
   })
@@ -132,6 +155,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             itemVersion: body.itemVersion as number,
             observations,
             image: body.image ?? null,
+            swatches: body.swatches ?? [],
             actor: user.email,
           }),
         );

@@ -75,49 +75,60 @@ describe("guessSlotsFromViews — a page with no plan", () => {
   });
 });
 
-describe("guessSlotsFromViews — where it must not guess", () => {
-  it("refuses a page that labels no view, and says to read the drawing", () => {
-    // The real S-100 sofa sheet: eight bare figures, no view anywhere. There is
-    // no convention that puts a column of eight figures in order.
-    const s100 = rows([
-      ["Dimension 1", "190"], ["Dimension 2", "72"], ["Dimension 3", "79"], ["Dimension 4", "72"],
-      ["Dimension 5", "52"], ["Dimension 6", "44"], ["Dimension 7", "10"], ["Dimension 8", "79"],
-    ]);
+// Asked for by Max on 2026-09-16: guess even when unsure, and flag it, because
+// an empty Dimensions question helps nobody and a wrong one he can see does.
+describe("guessSlotsFromViews — the weak path", () => {
+  const s100 = rows([
+    ["Dimension 1", "190"], ["Dimension 2", "72"], ["Dimension 3", "79"], ["Dimension 4", "72"],
+    ["Dimension 5", "52"], ["Dimension 6", "44"], ["Dimension 7", "10"], ["Dimension 8", "79"],
+  ]);
+
+  it("still fills all four on a page that labels no view at all", () => {
+    // The real S-100 sofa sheet: eight bare figures, no view anywhere. The
+    // three largest read as W >= D >= H, which for this sofa is right.
     const out = guessSlotsFromViews(s100);
+    expect(slotOf(out, s100, "W")).toBe("190");
+    expect(slotOf(out, s100, "D")).toBe("79");
+    expect(slotOf(out, s100, "H")).toBe("72");
+    expect(slotOf(out, s100, "SH")).toBe("44");
+  });
+
+  it("says the ordering is an assumption and not something the page states", () => {
+    expect(guessSlotsFromViews(s100).dispute).toContain("assumption about the item");
+  });
+
+  it("falls back the same way when the views share nothing", () => {
+    const out = guessSlotsFromViews(
+      rows([["FRONT", "840"], ["FRONT", "300"], ["SIDE", "790"]]),
+    );
+    expect(out.guesses).toHaveLength(3);
+    expect(out.dispute).toContain("front 840");
+  });
+
+  it("uses the plan's width where the plan and the front disagree, and says which", () => {
+    // Both readings are defensible; a plan states width and depth together, so
+    // that one wins — and the reviewer is told the front said otherwise.
+    const page = rows([
+      ["FRONT", "840"], ["FRONT", "800"], ["FRONT", "720"],
+      ["SIDE", "720"], ["SIDE", "790"],
+      ["TOP", "800"], ["TOP", "790"],
+    ]);
+    const out = guessSlotsFromViews(page);
+    expect(slotOf(out, page, "W")).toBe("800");
+    expect(out.dispute).toContain("both should be the width");
+  });
+
+  it("fills nothing below three figures, and still says why", () => {
+    // Two figures could be W x H, W x D or Dia x H with nothing to choose
+    // between them. A third slot invented from two numbers is not a guess a
+    // reviewer could check — it is one they would have to undo.
+    const out = guessSlotsFromViews(rows([["Dimension 1", "440"], ["Dimension 2", "700"]]));
     expect(out.guesses).toEqual([]);
     expect(out.dispute).toContain("labels none of its figures");
   });
 
-  it("refuses when the views share nothing, naming what is on each", () => {
-    const out = guessSlotsFromViews(rows([["FRONT", "840"], ["SIDE", "790"]]));
-    expect(out.guesses).toEqual([]);
-    expect(out.dispute).toContain("the height");
-    expect(out.dispute).toContain("front 840");
-  });
-
-  it("refuses when the plan and the front disagree about the width", () => {
-    // The plan states 800 and the front states it too, so 800 is a width — but
-    // the front also carries a LARGER 800-and-something the plan never shows.
-    // Both readings are defensible and the page is contradicting itself.
-    const out = guessSlotsFromViews(
-      rows([
-        ["FRONT", "840"], ["FRONT", "800"], ["FRONT", "720"],
-        ["SIDE", "720"], ["SIDE", "790"],
-        ["TOP", "800"], ["TOP", "790"],
-      ]),
-    );
-    expect(out.guesses).toEqual([]);
-    expect(out.dispute).toContain("Both should be the width");
-  });
-
-  it("guesses all of them or none — never three of four", () => {
-    const out = guessSlotsFromViews(rows([["FRONT", "840"], ["SIDE", "790"]]));
-    expect(out.guesses).toEqual([]);
-  });
-
-  it("stays quiet on a page with almost nothing on it", () => {
-    // Not a dispute: one unlabelled figure is not a page stating its size.
-    expect(guessSlotsFromViews(rows([["Dimension 1", "440"]]))).toEqual({ guesses: [], dispute: null });
+  it("stays silent on a single figure", () => {
+    expect(guessSlotsFromViews(rows([["Dimension 1", "440"]])).guesses).toEqual([]);
   });
 
   it("leaves the seat height out rather than inventing a proportion", () => {

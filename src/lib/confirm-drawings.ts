@@ -48,6 +48,16 @@ import type { RecordEntry } from "@/lib/spec-document";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 import { openChangeSet } from "@/lib/change-sets";
 import { isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
+
+/** A swatch chip cropped off the page, keyed by the row it was cropped for. */
+export type SwatchCrop = {
+  observationId: string;
+  pathname: string;
+  filename?: string | null;
+  width?: number | null;
+  height?: number | null;
+  size?: number | null;
+};
 import { createFinish } from "@/lib/finish-edit";
 import { snapshotRecords } from "@/lib/record-snapshot";
 
@@ -212,6 +222,7 @@ export async function confirmDrawingItem(
     itemVersion,
     observations: refs,
     image,
+    swatches = [],
     actor,
   }: {
     runId: string;
@@ -221,6 +232,8 @@ export async function confirmDrawingItem(
     observations: ObservationRef[];
     /** The crop the reviewer looked at, already uploaded. Null for none. */
     image?: ItemImage | null;
+    /** Swatch chips cropped off the page, one per finish row. */
+    swatches?: SwatchCrop[];
     actor: string;
   },
 ): Promise<DrawingsConfirmResult> {
@@ -420,6 +433,60 @@ export async function confirmDrawingItem(
   }
 
   const attributeIdsByObservation = new Map<string, string[]>();
+    // ---- the swatch chips, onto the finishes they belong to -----------------
+  //
+  // A SWATCH BELONGS TO THE CODE, NOT TO THE ITEM. `project_finishes` is
+  // unique on (project_id, code_norm) and `WD-05` is on three pages of the
+  // real set, so this writes the swatch for that finish across the project —
+  // which is the library's edit-once rule, and what the card says out loud.
+  //
+  // REFUSED, NEVER DROPPED, when the row's code did not resolve to a finish: a
+  // code in conflict with the library links nothing by design, and silently
+  // discarding a picture somebody cropped is how they come to believe it is
+  // stored. Inside the transaction, so the specs roll back with it.
+  for (const swatch of swatches) {
+    const finishId = finishIdByObservation.get(swatch.observationId);
+    if (finishId === undefined) {
+      throw new DomainConflictError(
+        "swatch_not_on_this_card",
+        "A swatch was submitted for a spec that is not on this card. Reload before confirming.",
+      );
+    }
+    if (finishId === null) {
+      throw new DomainConflictError(
+        "swatch_has_no_finish",
+        "That swatch's code does not resolve to one finish in this project's library, so there is nothing to attach it to. Settle the code on the finishes page first.",
+      );
+    }
+    let pathname: string;
+    try {
+      pathname = assertProjectScopedPathname(swatch.pathname, run.projectId);
+    } catch {
+      throw new DomainConflictError(
+        "swatch_not_this_project",
+        "That swatch is not one of this project's files.",
+        { status: 400 },
+      );
+    }
+    // Supersede, never delete: a record version may point at the old row, and
+    // a version whose picture had been deleted would be a version of a state
+    // nobody can see any more. Same rule as the swatch route's own POST.
+    await txn`
+      update attachments set superseded_at = now()
+      where entity_type = 'project_finishes' and entity_id = ${finishId} and kind = 'finish_swatch'
+        and superseded_at is null
+    `;
+    await txn`
+      insert into attachments
+        (entity_type, entity_id, kind, storage_path, filename, content_type, size,
+         image_width, image_height, uploaded_by)
+      values
+        ('project_finishes', ${finishId}, 'finish_swatch', ${pathname},
+         ${swatch.filename ?? "swatch.png"}, 'image/png', ${swatch.size ?? null},
+         ${swatch.width ?? null}, ${swatch.height ?? null}, ${actor})
+    `;
+  }
+
   /** Old row → the row that took over, linked once the new id is known. */
   const superseded: { oldId: string; observationId: string; recordId: string }[] = [];
   const now = new Date().toISOString();

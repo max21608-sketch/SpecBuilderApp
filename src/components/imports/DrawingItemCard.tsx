@@ -50,6 +50,7 @@ import { guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
+import SwatchPicker from "@/components/imports/SwatchPicker";
 import type { CroppedImage } from "@/lib/pdf-crop";
 import Button from "@/components/ui/Button";
 
@@ -134,6 +135,7 @@ export default function ItemCard({
   onSetBulkUnit,
   onReview,
   onImage,
+  onSwatch,
 }: {
   item: DrawingItem;
   importId: string;
@@ -149,6 +151,9 @@ export default function ItemCard({
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
   /** The crop this card currently holds, remembered by the screen until confirm. */
   onImage: (itemId: string, image: CroppedImage | null) => void;
+  /** The swatch chip a reviewer cropped for a finish row, by observation id.
+   *  Held by the screen and uploaded at confirm, like the item picture. */
+  onSwatch: (observationId: string, image: CroppedImage | null) => void;
 }) {
   const pending = item.observations.filter((o) => o.reviewStatus === "pending");
 
@@ -318,11 +323,12 @@ export default function ItemCard({
       {header}
 
       {/* A KEY MEASUREMENT DISPUTE, WITH THE DRAWING. The views do not agree
-          about which figure is the overall size, so nothing was placed and the
-          page goes here: a question that is unreadable as a list of figures is
-          answerable in two seconds off the drawing. NOT a blocker — the card
-          still commits, with these figures as notes, which is what they were
-          before anything tried to place them. */}
+          about which figure is the overall size, so the sizes below are the
+          weak reading — and the page goes here, because a question that is
+          unreadable as a list of figures is answerable in two seconds off the
+          drawing. NOT a blocker: the slots are filled either way, every
+          guessed line is yellow, and confirming is a decision the reviewer
+          takes with the page in front of them. */}
       {guess.dispute && (
         <div className="px-4 py-3 border-b border-amber-300 bg-amber-50">
           <p className="text-xs uppercase tracking-wide text-amber-800">Key measurement dispute</p>
@@ -330,8 +336,8 @@ export default function ItemCard({
             <p className="flex-1 min-w-[16rem] text-sm text-amber-900">
               {guess.dispute}
               <span className="block mt-1 text-xs text-amber-800">
-                Nothing has been placed in W, D, H or SH. Set them from the drawing, or leave them as notes and they
-                stay on the item with their labels and figures intact.
+                The yellow lines below carry this guess. Correct any that are wrong, or set one back to a note — it
+                stays on the item with its label and figure intact either way.
               </span>
             </p>
             <PagePreview importId={importId} page={item.page} className="w-72 max-w-full" />
@@ -489,18 +495,58 @@ export default function ItemCard({
             // columns from a row of its own.
             // ==============================================================
             const amber = rowBlockers.length > 0 || rowWarnings.length > 0;
+            // A GUESSED SLOT TURNS THE WHOLE LINE YELLOW. An amber border on
+            // the slot select alone is invisible in a table of twenty-four
+            // rows, and a reviewer scanning for what still needs checking is
+            // scanning lines, not dropdowns. Distinct from the amber a blocker
+            // uses: yellow is "this is a guess, confirm it", amber is "this
+            // cannot commit as it stands".
+            const guessed = Boolean(observation.slotSuggested && observation.dimensionSlot);
+            // What this row can be given, rather than what the vocabulary
+            // holds. `dimension` is never offered here: it is unwritable
+            // without a slot, and the slot column sends both together.
+            const groupOptions = ATTRIBUTE_GROUPS.filter((group) => {
+              if (group === observation.attrGroup) return true;
+              if (group === "dimension") return false;
+              return observation.unit === null || group === "note";
+            });
             return (
               <Fragment key={observation.id}>
-              <tr className={`border-t border-neutral-100${amber ? " bg-amber-50/40" : ""}`}>
+              <tr
+                className={`border-t border-neutral-100${
+                  amber ? " bg-amber-50/40" : guessed ? " bg-yellow-100/70" : ""
+                }`}
+              >
                 <td className="px-4 py-2 align-top">
+                  {/* ==========================================================
+                      ONLY OFFER A GROUP THIS ROW CAN ACTUALLY BE GIVEN.
+                      This listed all six, and on a measured row every one of
+                      them was refused: `Dimensions` by `dimension_needs_slot`
+                      (0011's biconditional — a dimension has a slot), and
+                      every other by `unit_not_a_measurement` (only a dimension
+                      or a note may carry a unit). The 400 then landed in the
+                      banner at the TOP of the screen, nowhere near the row, so
+                      the dropdown simply appeared to do nothing — on the
+                      twenty-four-row S-200 card, twenty-four times.
+                      The route's rules are right; offering choices it must
+                      refuse was not. A row that measures something moves
+                      between note and dimension in the SLOT column, which
+                      sends both fields in one patch.
+                      ========================================================== */}
                   <select
                     value={observation.attrGroup}
+                    disabled={groupOptions.length < 2}
                     onChange={(event) =>
                       void onSaveObservation(item, observation, { attrGroup: event.target.value as AttributeGroup })
                     }
-                    className="border border-neutral-300 rounded px-1 py-0.5 text-xs"
+                    className="border border-neutral-300 rounded px-1 py-0.5 text-xs disabled:bg-neutral-50 disabled:text-neutral-500"
+                    title={
+                      observation.unit !== null
+                        ? "This row carries a unit, so it is a dimension or a note. Choose the dimension in the next column but one, or clear the unit to file it as a finish."
+                        : undefined
+                    }
                   >
-                    {ATTRIBUTE_GROUPS.map((group) => (
+                    {groupOptions.map((group) => (
                       <option key={group} value={group}>
                         {ATTRIBUTE_GROUP_LABELS[group]}
                       </option>
@@ -546,7 +592,20 @@ export default function ItemCard({
                       <p className="mt-0.5 text-xs text-neutral-400">drawing said: {observation.valueRaw}</p>
                     )}
                   {observation.materialCodeRaw && (
-                    <p className="mt-0.5 text-xs text-neutral-500">code {observation.materialCodeRaw}</p>
+                    <>
+                      <p className="mt-0.5 text-xs text-neutral-500">code {observation.materialCodeRaw}</p>
+                      {/* A SWATCH NEEDS A CODE, because that is what
+                          `project_finishes` is keyed on. A row with no code has
+                          no finish to attach a picture to, so the control is
+                          not offered rather than offered and refused. */}
+                      <SwatchPicker
+                        importId={importId}
+                        page={item.page}
+                        code={observation.materialCodeRaw}
+                        disabled={busy}
+                        onCropped={(image) => onSwatch(observation.id, image)}
+                      />
+                    </>
                   )}
                 </td>
                 <td className="px-2 py-2 align-top">

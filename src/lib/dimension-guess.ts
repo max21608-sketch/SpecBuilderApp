@@ -36,11 +36,20 @@
 // `W840 x D790 x H720 x SH460mm` next to the page can accept or reject it in a
 // second, which is the only reason guessing is allowed here at all.
 //
-// WHERE IT CANNOT TELL, IT GUESSES NOTHING AND SAYS WHY. A page whose figures
-// share no view, or that labels no view at all, produces a DISPUTE: no slots,
-// and a message naming what a person has to go and look at. Half a guess is
-// worse than none — three slots filled and the fourth silently absent reads as
-// a complete answer.
+// WHERE IT CANNOT TELL, IT STILL GUESSES, AND SAYS SO LOUDLY. Asked for by Max
+// on 2026-09-16 after walking the real set: an empty Dimensions question is no
+// use to anybody, and a wrong one he can see is. So a page that labels no view
+// — the S-100 sofa sheet's eight bare figures — falls back to the only reading
+// left, the three largest distinct figures as W >= D >= H, and the card marks
+// the guess as weak: a KEY MEASUREMENT DISPUTE panel with the page rendered
+// beside it, and every guessed row highlighted yellow in the table.
+//
+// The two paths are not equally good and the screen must not present them as
+// though they were. A cross-view agreement is the page saying the same number
+// three times; a magnitude ordering is an assumption that furniture is wider
+// than it is deep and deeper than it is tall, which is false for a desk chair
+// and a headboard. `dispute` carries that difference, and it is always set on
+// the fallback path.
 // ============================================================================
 import type { DimensionSlot } from "@/lib/spec-vocab";
 import { parseDimensionFigure } from "@/lib/dimensions";
@@ -86,11 +95,14 @@ export type GuessedSlot = {
 };
 
 export type DimensionGuess = {
-  /** Empty whenever `dispute` is set: it is all of them or none. */
   guesses: GuessedSlot[];
   /**
-   * What a person has to decide, when the views do not settle it. Null when
-   * the guess stands, and null when there was nothing to guess about.
+   * Why this guess is WEAK, when it is. Null means the views agreed, which is
+   * the page stating the same figure on two or three of them.
+   *
+   * Never a reason to withhold the guess — the slots are filled either way and
+   * every one of them is marked suggested. It is the reason the card shows the
+   * drawing and turns the rows yellow.
    */
   dispute: string | null;
 };
@@ -138,13 +150,10 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
   // S-100 sofa sheet, and it needs a person. It is only worth SAYING so once
   // there are enough figures that the overall size is certainly among them.
   if (front.length === 0 && side.length === 0 && plan.length === 0) {
-    return byFigure.size >= 3
-      ? {
-          guesses: [],
-          dispute:
-            "The page labels none of its figures with a view, so nothing here can tell the width from the depth or the height. Read them off the drawing.",
-        }
-      : NOTHING;
+    return fromMagnitudes(
+      byFigure,
+      "The page labels none of its figures with a view, so this is the three largest read as width, then depth, then height. That ordering is an assumption about the item, not something the page says — check all four against the drawing.",
+    );
   }
 
   const largest = (figures: number[]) => (figures.length === 0 ? null : Math.max(...figures));
@@ -171,30 +180,28 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
       depth === null ? "the depth" : null,
       height === null ? "the height" : null,
     ].filter((part): part is string => part !== null);
-    return {
-      guesses: [],
-      dispute: `The views do not agree on ${missing.join(" or ")}: ${describe(front, side, plan)}. An overall dimension is drawn on every view that shows it, and these do not repeat, so somebody has to read the size off the page.`,
-    };
+    return fromMagnitudes(
+      byFigure,
+      `The views do not agree on ${missing.join(" or ")}: ${describe(front, side, plan)}. An overall dimension is drawn on every view that shows it, and these do not repeat — so this is the three largest figures read as width, then depth, then height. Check all of them against the drawing.`,
+    );
   }
 
   // A figure cannot be two slots. This fires on a genuinely square item and on
   // a page that has been read wrongly, and neither is ours to decide.
   const chosen = [width, depth, height];
   if (new Set(chosen).size !== chosen.length) {
-    return {
-      guesses: [],
-      dispute: `The same figure reads as more than one dimension here (width ${width}, depth ${depth}, height ${height}). Check the page and set them by hand.`,
-    };
+    return fromMagnitudes(
+      byFigure,
+      `The views make the same figure read as more than one dimension (width ${width}, depth ${depth}, height ${height}), so this is the three largest instead. Check them against the drawing.`,
+    );
   }
 
   // Where the plan and the front elevation disagree about the width, that is
   // the page contradicting itself and it is worth naming rather than resolving.
-  if (widthFromPlan !== null && widthFromFront !== null && widthFromPlan !== widthFromFront) {
-    return {
-      guesses: [],
-      dispute: `The plan's largest figure is ${widthFromPlan} and the front elevation's is ${widthFromFront}. Both should be the width. Read it off the page.`,
-    };
-  }
+  const widthDisagrees =
+    widthFromPlan !== null && widthFromFront !== null && widthFromPlan !== widthFromFront
+      ? `The plan's largest figure is ${widthFromPlan} and the front elevation's is ${widthFromFront}, and both should be the width. The plan's is used here because a plan states width and depth together. Check it against the drawing.`
+      : null;
 
   // A seat height is the largest remaining figure that both elevations state
   // and that sits in the right proportion to the overall height. Optional: no
@@ -216,7 +223,56 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
       pick(height, "H", `drawn on the ${families(height).join(" and ")} — ${describeSlotRule("H")}`),
       seat === undefined ? null : pick(seat, "SH", `both elevations state it, at ${Math.round((seat / height) * 100)}% of the height`),
     ].filter((entry): entry is GuessedSlot => entry !== null),
-    dispute: null,
+    dispute: widthDisagrees,
+  };
+}
+
+/**
+ * The only reading left when the views do not settle it: the three largest
+ * distinct figures as W >= D >= H, and a seat height from what is left.
+ *
+ * THIS IS THE WEAK PATH AND ITS CALLER ALWAYS PASSES A REASON. It assumes
+ * furniture is wider than it is deep and deeper than it is tall, which holds
+ * for the S-100 sofa (190 / 79 / 72) and fails for a desk chair and a
+ * headboard. It is here because an empty Dimensions question helps nobody and a
+ * wrong one a reviewer can SEE does: every row it fills is marked suggested,
+ * the card highlights them, and the page is rendered beside the reason.
+ *
+ * Below three distinct figures it fills nothing. Two figures could be W x H,
+ * W x D or Dia x H with nothing to choose between them, and inventing a third
+ * slot from two numbers is not a guess a reviewer could check — it is one they
+ * would have to undo.
+ */
+function fromMagnitudes(
+  byFigure: Map<number, { families: Set<ViewFamily>; rows: MeasuredRow[] }>,
+  dispute: string,
+): DimensionGuess {
+  const descending = [...byFigure.keys()].sort((a, b) => b - a);
+  if (descending.length < 3) return { guesses: [], dispute };
+  const [width, depth, height] = descending as [number, number, number];
+
+  // The remaining figure closest to 60% of the height — where a seat sits on
+  // every one of these items. Still only a candidate inside the same
+  // proportion window the cross-view path uses.
+  const seat = descending
+    .slice(3)
+    .filter((figure) => figure / height >= SEAT_MIN && figure / height <= SEAT_MAX)
+    .sort((a, b) => Math.abs(a - height * 0.6) - Math.abs(b - height * 0.6))[0];
+
+  const pick = (figure: number, slot: DimensionSlot, why: string): GuessedSlot | null => {
+    const row = byFigure.get(figure)?.rows[0];
+    return row ? { observationId: row.id, slot, why } : null;
+  };
+  return {
+    guesses: [
+      pick(width, "W", "the largest figure on the page — no view says so"),
+      pick(depth, "D", "the second largest — no view says so"),
+      pick(height, "H", "the third largest — no view says so"),
+      seat === undefined
+        ? null
+        : pick(seat, "SH", `nearest a seat height at ${Math.round((seat / height) * 100)}% of the guessed height`),
+    ].filter((entry): entry is GuessedSlot => entry !== null),
+    dispute,
   };
 }
 
