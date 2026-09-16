@@ -118,8 +118,8 @@ describeIfDb("intake routes", () => {
     const record = await client.query(
       `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, qty, created_by, updated_by)
        values ($1, $2, (select coalesce(max(record_no), 0) + 1 from spec_records where project_id = $1),
-               'active', $4, $5, 4, 'qa', 'qa') returning id`,
-      [projectId, runId, null, withCategory ? categoryId : null, description],
+               'active', $3, $4, 4, 'qa', 'qa') returning id`,
+      [projectId, runId, withCategory ? categoryId : null, description],
     );
     const recordId = record.rows[0].id;
     await client.query(
