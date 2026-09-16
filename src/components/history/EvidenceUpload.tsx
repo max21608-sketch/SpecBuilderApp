@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { projectUploadPrefix } from "@/lib/blob-source";
+import Button from "@/components/ui/Button";
 
 export type UploadedEvidence = { pathname: string; filename: string; contentType: string; size: number };
 
@@ -62,16 +63,16 @@ export default function EvidenceUpload({
       {file ? (
         <p className="text-neutral-700">
           Attached: {file.filename}{" "}
-          <button
-            type="button"
+          <Button
+            size="xs"
+            variant="quiet"
             onClick={() => {
               setFile(null);
               onUploaded?.(null);
             }}
-            className="underline text-neutral-500 hover:text-neutral-900"
           >
-            remove
-          </button>
+            Remove
+          </Button>
         </p>
       ) : (
         <label className="text-neutral-600">

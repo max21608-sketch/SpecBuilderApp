@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import EvidenceUpload, { type UploadedEvidence } from "@/components/history/EvidenceUpload";
+import Button from "@/components/ui/Button";
 
 type OpenChange = {
   id: string;
@@ -117,9 +118,10 @@ export default function OpenChangeBar({ projectId, onChanged }: { projectId: str
   if (!starting) {
     return (
       <div className="mt-3 text-sm">
-        <button type="button" onClick={() => setStarting(true)} className="text-neutral-600 hover:text-neutral-900 underline">
-          Start a change
-        </button>
+        {/* An ACTION, and a consequential one: every edit made on this
+            project afterwards attaches to it. It was underlined 14px grey text,
+            fainter than the link beside it to a spreadsheet. */}
+        <Button onClick={() => setStarting(true)}>Start a change</Button>
         <span className="ml-2 text-xs text-neutral-500">
           Say why once — an email, a call — and everything you edit is recorded against it.
         </span>

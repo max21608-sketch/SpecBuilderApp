@@ -7,6 +7,23 @@
 // pixels rather than a description. They can switch to another reported view,
 // drag their own box, or keep none at all.
 //
+// WHEN NOTHING WAS REPORTED, THE PAGE ITSELF IS PROPOSED.
+//
+// A real drawing set gets this wrong often: the eleven-page Panther set came
+// back with no view regions at all, the model saying it could not fix exact
+// crop boxes. The pages are almost entirely picture — a reviewer drags a box
+// over nearly the whole sheet — so "no picture" was the one answer that was
+// certainly wrong, and it was the answer forty cards defaulted to.
+//
+// So a card with no reported view proposes the WHOLE PAGE. That is not a guess
+// about what the item looks like: the page IS the drawing of the item, it is
+// labelled as the whole page in words, it renders in front of the reviewer
+// before anything is stored, and "Drag a box" and "No picture" are both one
+// click. It also does not contradict the card's rule that nothing is
+// pre-selected where the answer is unknown — that rule is about spec VALUES,
+// which get exported and quoted against. A picture is an aid to recognising
+// the item, and the reviewer is looking at it.
+//
 // It renders on mount and re-renders whenever the chosen region changes, and it
 // hands the encoded PNG up through `onCropped` so the card can upload it as
 // part of confirming. Nothing is uploaded until then: a card that is never
@@ -14,6 +31,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cropPdfRegion, type CropBox, type CroppedImage } from "@/lib/pdf-crop";
 import type { ItemView } from "@/lib/drawing-document";
+import Button from "@/components/ui/Button";
 
 /**
  * Two views are the same view when they describe the same region.
@@ -26,6 +44,11 @@ import type { ItemView } from "@/lib/drawing-document";
 function sameView(a: ItemView | null, b: ItemView | null): boolean {
   if (!a || !b) return a === b;
   return a.viewType === b.viewType && a.page === b.page && a.bbox.every((n, i) => n === b.bbox[i]);
+}
+
+/** The whole page, as a view. `other` because that is honestly what it is. */
+function wholePage(page: number | null): ItemView {
+  return { viewType: "other", page: page ?? 1, bbox: [0, 0, 1, 1] };
 }
 
 const VIEW_LABELS: Record<string, string> = {
@@ -55,7 +78,10 @@ export default function ItemImagePicker({
   onCropped: (image: CroppedImage | null) => void;
 }) {
   const sourceUrl = `/api/imports/${importId}/source`;
-  const [chosen, setChosen] = useState<ItemView | null>(proposal ?? null);
+  // A reported view is always preferred to the page. The fallback only stands
+  // in where the model gave us nothing to prefer.
+  const fallback = !proposal && views.length === 0 ? wholePage(itemPage) : null;
+  const [chosen, setChosen] = useState<ItemView | null>(proposal ?? fallback);
   const [preview, setPreview] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,21 +175,27 @@ export default function ItemImagePicker({
         <div className="min-w-[12rem] flex-1">
           {chosen ? (
             <p className="text-sm text-neutral-700">
-              {VIEW_LABELS[chosen.viewType] ?? "View"}
+              {/* Named for what it is. A whole-page crop that called itself a
+                  "View" would look like something the drawing had pointed at. */}
+              {sameView(chosen, fallback) ? "The whole page" : (VIEW_LABELS[chosen.viewType] ?? "View")}
               {chosen.page && <span className="text-neutral-500"> · page {chosen.page}</span>}
+              {sameView(chosen, fallback) && (
+                <span className="block text-xs text-neutral-500">
+                  The drawing reported no separate picture, so the page itself is proposed. Drag a box to crop it
+                  closer.
+                </span>
+              )}
             </p>
           ) : (
-            <p className="text-sm text-neutral-600">
-              {views.length > 0
-                ? "No picture will be saved for this item."
-                : "The drawing offered no picture of this item. Drag a box if you want one."}
-            </p>
+            <p className="text-sm text-neutral-600">No picture will be saved for this item.</p>
           )}
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {/* Every OTHER view the model reported, so switching is one click
-                rather than a drag. The proposal is just the first of these. */}
-            {views
+                rather than a drag. The proposal is just the first of these.
+                The whole page joins the list where it is the fallback, so
+                "No picture" is not a one-way door. */}
+            {[...views, ...(fallback ? [fallback] : [])]
               .filter((view) => !sameView(view, chosen))
               .map((view, index) => (
                 <button
@@ -172,7 +204,7 @@ export default function ItemImagePicker({
                   onClick={() => setChosen(view)}
                   className="text-xs px-2 py-0.5 rounded border border-neutral-300 text-neutral-700 hover:bg-neutral-50"
                 >
-                  Use {(VIEW_LABELS[view.viewType] ?? "view").toLowerCase()}
+                  {sameView(view, fallback) ? "Use the whole page" : `Use ${(VIEW_LABELS[view.viewType] ?? "view").toLowerCase()}`}
                 </button>
               ))}
             <button
@@ -180,7 +212,7 @@ export default function ItemImagePicker({
               onClick={() => void startCropping()}
               className="text-xs px-2 py-0.5 rounded border border-neutral-300 text-neutral-700 hover:bg-neutral-50"
             >
-              {views.length > 0 ? "Drag a box instead" : "Drag a box"}
+              {chosen ? "Drag a box instead" : "Drag a box"}
             </button>
             {chosen && (
               <button
@@ -255,9 +287,9 @@ function PageCropper({
     <div className="mt-3">
       <p className="text-xs text-neutral-500">
         Drag over the picture you want. Release to use it.
-        <button type="button" onClick={onCancel} className="ml-2 underline hover:text-neutral-900">
+        <Button size="xs" variant="quiet" className="ml-2" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </p>
       <div
         ref={boxRef}

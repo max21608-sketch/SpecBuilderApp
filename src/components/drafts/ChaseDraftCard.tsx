@@ -15,6 +15,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import Link from "next/link";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import { TIER_LABELS } from "@/lib/tgq";
+import Button from "@/components/ui/Button";
 
 export type DraftItem = {
   recordId: string;
@@ -236,9 +237,9 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                 {editable && (
                   <>
                     {" — "}
-                    <button type="button" onClick={() => setAddingEmail(true)} className="underline">
-                      add one now
-                    </button>{" "}
+                    <Button size="xs" variant="quiet" onClick={() => setAddingEmail(true)}>
+                      Add one now
+                    </Button>{" "}
                     <span className="text-neutral-500">(also saves to the contact if it is blank)</span>
                   </>
                 )}
@@ -347,14 +348,9 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                     </span>
                   )}
                   {editable && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void removeQuestion(item)}
-                      className="text-xs text-neutral-600 underline hover:text-neutral-900 disabled:opacity-50"
-                    >
+                    <Button size="xs" variant="quiet" disabled={busy} onClick={() => void removeQuestion(item)}>
                       Remove
-                    </button>
+                    </Button>
                   )}
                 </td>
               </tr>

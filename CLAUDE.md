@@ -841,6 +841,87 @@ registered. Reload first and report afterwards (`reloadThen` on both drawings
 screens). The reload itself is still required: a refused request means the
 screen is out of date.
 
+### A link goes somewhere; a button does something
+
+`src/components/ui/Button.tsx`
+
+Underlined text is navigation — a project, a record, the source PDF a value came
+from. Anything that CHANGES something is a button, whatever element carries it.
+It had drifted: *Start a change*, which opens the trail every later edit on the
+project attaches to, was grey underlined 14px text — fainter on the page than
+the link beside it to a spreadsheet. Consequence is not emphasis, and a person
+cannot tell an action from a link when both render identically.
+
+`buttonClass` exists for the cases that must stay an `<a href>` — a download is
+fetched by the browser — so they can look like the actions they are without
+pretending to be a `<button>`. Four variants and no more: `primary` (one per
+group), `secondary`, `danger` (destroys or overrides something a document said),
+`quiet` (a per-row action in a dense table, bordered on hover, because forty
+outlined buttons in a column is its own kind of unreadable).
+
+**A panel that spans a table row is its own `<tr>`.** The drawings card's
+replace-acknowledgement and blocker panels were extra `<td colSpan={7}>` cells
+inside the SAME `<tr>` as the seven data cells, which makes that row 21 column
+slots wide: the browser found room for the panels BESIDE the data and squeezed
+the acknowledgement — the control that decides whether a confirmed spec is
+destroyed — into a 100px ribbon of wrapped monospace. `divide-y` moved off the
+tbody and onto the data row at the same time, or a divider draws between a value
+and its own panel.
+
+### A drawing shouts; the screen need not, and the file must not
+
+`src/lib/shout.ts`, `src/components/records/SpecValue.tsx`
+
+A specification sheet prints its general conditions in capitals and
+`mergeNoteBlocks` puts a page of them in one row — the Panther bench's is about
+1,800 characters. Rendered verbatim in a bare span its line breaks collapsed and
+the row stood taller than the rest of the screen put together, with the
+checklist and the history below it.
+
+So a long value is CLAMPED and a shouted one is read back in sentence case.
+Three things are load-bearing:
+
+- **It is display only.** `softenShout` is never stored, exported, compared or
+  sent to BWS. `record_attributes.value` keeps what the page said, the review
+  screen's editable box keeps what the page said, and any screen that softens
+  offers **As printed** beside it. Wiring this into `composeRowCells` or the
+  check sheet would make the file disagree with the page it is checked against.
+- **Only a SENTENCE is softened** — no lower-case letter in it, six words,
+  thirty letters, and it ends in a full stop. Capitals are how a drawing writes
+  a value, a name, a code or a list: `WOOD`, `TO BID`, `REFER TO JACQUES GRANGE
+  DRAWINGS`, `FINISH SAMPLE, FABRIC CUTTING, STRIKE OFF`. That last one is long
+  enough to pass a length test and is still a column of values, which is why the
+  full stop carries the rule. `KEEP_AS_PRINTED` is an explicit list, not a rule
+  about length: `TBC` and `ALL` are both three capitals and nothing cleverer
+  than a list tells them apart. It cannot tell a proper noun from a common one,
+  which is the known cost and the reason for the toggle.
+- **The clamp cuts the STRING, not the CSS.** `line-clamp-4` needs
+  `display: -webkit-box`, `whitespace-pre-line` needs a block box to honour the
+  newlines, and the `block` utility written beside it wins — so the clamp
+  computed onto a `display: block` element and did nothing at all, rendering
+  full height and looking exactly like the bug it was fixing. Measured in the
+  browser: 320px with the CSS clamp, 100px with `clampText`.
+
+### A page that reported no picture proposes the page itself
+
+`src/components/imports/ItemImagePicker.tsx`
+
+The eleven-page Panther set came back with no view regions at all, the model
+saying it could not fix exact crop boxes from what it had read. Those pages are
+almost entirely picture — a reviewer drags a box over nearly the whole sheet —
+so "no picture" was the one answer that was certainly wrong, and it was the
+answer every card defaulted to.
+
+A card with no reported view therefore proposes the WHOLE PAGE. That is not a
+guess about what the item looks like: the page IS the drawing of it, the card
+says "The whole page" in words, the crop renders in front of the reviewer before
+anything is stored, and *Drag a box* and *No picture* are each one click — with
+the whole page offered back afterwards, so *No picture* is not a one-way door.
+It does not contradict the card's rule that nothing is pre-selected where the
+answer is unknown: that rule is about spec VALUES, which get exported and quoted
+against. A picture is an aid to recognising an item, and the reviewer is looking
+straight at it.
+
 ## Load-bearing files
 
 Read these before changing the behaviour they govern, and do not duplicate

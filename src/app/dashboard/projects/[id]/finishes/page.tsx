@@ -19,6 +19,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import { FINISH_KINDS, FINISH_KIND_LABELS, type FinishKind } from "@/lib/finishes";
 import FinishSwatch from "@/components/finishes/FinishSwatch";
+import Button from "@/components/ui/Button";
 
 type UsedOn = { recordId: string; label: string; itemDescription: string; runName: string; attributeLabel: string };
 type Finish = {
@@ -222,23 +223,19 @@ export default function FinishesPage() {
                     >
                       {finish.state === "confirmed" ? "Confirmed" : "TBC"}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setExpanded(expanded === finish.id ? null : finish.id)}
-                      className="text-xs text-neutral-500 underline hover:text-neutral-900"
-                    >
+                    <Button size="xs" variant="quiet" onClick={() => setExpanded(expanded === finish.id ? null : finish.id)}>
                       used on {finish.used_on.length} item{finish.used_on.length === 1 ? "" : "s"}
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      size="xs"
+                      className="ml-auto"
                       onClick={() => {
                         setEditing(editing === finish.id ? null : finish.id);
                         setDraft(draftOf(finish));
                       }}
-                      className="ml-auto text-xs text-neutral-500 underline hover:text-neutral-900"
                     >
-                      {editing === finish.id ? "cancel" : "edit"}
-                    </button>
+                      {editing === finish.id ? "Cancel" : "Edit"}
+                    </Button>
                   </div>
                   <p className="mt-0.5 text-sm text-neutral-700">
                     {finish.description ?? <span className="text-neutral-400">Nothing recorded yet</span>}

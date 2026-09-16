@@ -42,6 +42,7 @@ import {
   type AnswerState,
 } from "@/lib/spec-vocab";
 import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
+import Button from "@/components/ui/Button";
 
 type Contact = {
   id: string;
@@ -487,30 +488,22 @@ function DraftsView() {
                 {group.contact.designerCode ? ` · ${group.contact.designerCode}` : ""}
               </span>
               <span className="ml-auto flex gap-2">
-                <button
-                  type="button"
+                <Button
+                  size="xs"
+                  variant="quiet"
                   onClick={() => {
                     toggleMany(group.questions, false);
                     toggleMany(toQuote, true);
                   }}
-                  className="text-xs underline text-neutral-600 hover:text-neutral-900"
                 >
                   Needed to quote only
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleMany(spec, true)}
-                  className="text-xs underline text-neutral-600 hover:text-neutral-900"
-                >
+                </Button>
+                <Button size="xs" variant="quiet" onClick={() => toggleMany(spec, true)}>
                   All spec fields
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleMany(group.questions, false)}
-                  className="text-xs underline text-neutral-600 hover:text-neutral-900"
-                >
+                </Button>
+                <Button size="xs" variant="quiet" onClick={() => toggleMany(group.questions, false)}>
                   Clear
-                </button>
+                </Button>
               </span>
             </div>
 

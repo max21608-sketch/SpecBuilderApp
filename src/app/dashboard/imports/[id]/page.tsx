@@ -14,6 +14,7 @@ import Spinner from "@/components/ui/Spinner";
 import SpecDocumentReview, { type Registers, type SpecImport } from "@/components/imports/SpecDocumentReview";
 import DrawingsReview from "@/components/imports/DrawingsReview";
 import PreambleReview from "@/components/imports/PreambleReview";
+import Button from "@/components/ui/Button";
 
 type Line = {
   replaces?: { recordId: string; recordVersion: number } | null;
@@ -277,14 +278,13 @@ export default function ReviewImportPage() {
               {sheet.metadata?.revision && <> · revision {sheet.metadata.revision}</>}
               {sheet.metadata?.date && <> · dated {sheet.metadata.date}</>}
             </p>
-            <button
-              type="button"
+            <Button
+              size="xs"
               disabled={run.status !== "parsed"}
               onClick={() => void setSheet(sheetIndex, { ignored: !sheet.ignored })}
-              className="text-xs text-neutral-600 underline hover:text-neutral-900 disabled:opacity-50"
             >
               {sheet.ignored ? "Include this sheet" : "Drop this sheet"}
-            </button>
+            </Button>
           </div>
 
           {sheet.ignoredReason && <p className="mt-1 text-xs text-neutral-500">{sheet.ignoredReason}</p>}
@@ -478,14 +478,14 @@ export default function ReviewImportPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <button
-                          type="button"
+                        <Button
+                          size="xs"
+                          variant="quiet"
                           disabled={run.status !== "parsed"}
                           onClick={() => setLine(sheetIndex, line.index, { ignored: !line.ignored })}
-                          className="text-xs text-neutral-600 underline hover:text-neutral-900 disabled:opacity-50"
                         >
                           {line.ignored ? "Restore" : "Ignore"}
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}

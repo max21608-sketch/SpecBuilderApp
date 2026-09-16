@@ -32,9 +32,11 @@ import {
 } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { questionTierOrNull, TIER_LABELS, NO_LEVEL_EXPLANATION } from "@/lib/tgq";
+import SpecValue from "@/components/records/SpecValue";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
+import Button from "@/components/ui/Button";
 
 type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
@@ -394,7 +396,11 @@ export default function RecordPage() {
                       <span className="text-amber-800">TBC</span>
                     ) : (
                       <>
-                        {attribute.value}
+                        {/* A note is routinely a page of general conditions in
+                            one row: clamped, and read back out of the
+                            drawing's capitals. Both are display only — see
+                            src/lib/shout.ts. */}
+                        {attribute.value && <SpecValue text={attribute.value} />}
                         {attribute.unit && <span className="text-neutral-500">{attribute.unit}</span>}
                         {attribute.state === "tbc" && <span className="ml-1 text-amber-800">TBC</span>}
                       </>
@@ -519,14 +525,13 @@ export default function RecordPage() {
                     // current — so the button is not offered at all.
                     <span className="text-xs text-neutral-500">replaced by a later drawing</span>
                   ) : (
-                    <button
-                      type="button"
+                    <Button
+                      size="xs"
                       disabled={retireBusy}
                       onClick={() => void restore(attribute)}
-                      className="text-xs text-neutral-500 underline hover:text-neutral-900 disabled:opacity-50"
                     >
-                      put back
-                    </button>
+                      Put back
+                    </Button>
                   )}
                 </li>
               ))}

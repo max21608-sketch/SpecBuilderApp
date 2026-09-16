@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
+import Button, { buttonClass } from "@/components/ui/Button";
 import {
   SPECS_AGREED_LABEL,
   URGENCY_LABELS,
@@ -130,45 +131,31 @@ export default function SpecTable({
           {retiredCount > 0 && (
             <>
               {" · "}
-              <button
-                type="button"
-                onClick={() => setShowRetired((value) => !value)}
-                className="underline hover:text-neutral-900"
-              >
+              <Button size="xs" variant="quiet" onClick={() => setShowRetired((value) => !value)}>
                 {showRetired ? `hide the ${retiredCount} retired` : `${retiredCount} retired — show`}
-              </button>
+              </Button>
             </>
           )}
         </p>
         {records.length > 0 && (
           <div className="flex items-center gap-2">
-            <a
-              href={exportHref}
-              className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700"
-            >
+            {/* Anchors, because the browser has to fetch the file — but they
+                produce a document, so they look like the actions they are. */}
+            <a href={exportHref} className={buttonClass("primary")}>
               Export this run (.xlsx)
             </a>
-            <a href={`${exportHref}&format=csv`} className="text-sm text-neutral-600 underline hover:text-neutral-900">
+            <a href={`${exportHref}&format=csv`} className={buttonClass("secondary")}>
               .csv
             </a>
             <a
               href={`/api/projects/${projectId}/export/check-sheet?runId=${runId}`}
-              className="text-sm text-neutral-600 underline hover:text-neutral-900"
+              className={buttonClass("secondary")}
             >
               Check sheet
             </a>
           </div>
         )}
       </div>
-
-      {records.length > 0 && (
-        <p className="mt-1 text-xs text-neutral-500">
-          The export is always every record in scope — a BWS import replaces the fields it is given, so a partial file
-          would erase what it left out. It carries no job number: it is a file to read, not to import. The check sheet is
-          the same data one line per field, naming the document and page each value came from, for reading against the
-          pack.
-        </p>
-      )}
 
       {records.length === 0 ? (
         <p className="mt-4 text-sm text-neutral-600">
@@ -317,6 +304,15 @@ export default function SpecTable({
               </tbody>
             </table>
           </div>
+          {/* THE STANDING EXPLANATION GOES LAST. It is a permanent caveat about
+              a file, not news about this run, and at the top it pushed the
+              records themselves below the fold on every visit. */}
+          <p className="mt-2 text-xs text-neutral-500">
+            The export is always every record in scope — a BWS import replaces the fields it is given, so a partial file
+            would erase what it left out. It carries no job number: it is a file to read, not to import. The check sheet
+            is the same data one line per field, naming the document and page each value came from, for reading against
+            the pack.
+          </p>
         </>
       )}
     </>

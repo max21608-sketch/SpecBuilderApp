@@ -12,6 +12,7 @@ import Spinner from "@/components/ui/Spinner";
 import DiffTable from "@/components/history/DiffTable";
 import type { ProjectChange } from "@/lib/change-history";
 import type { ProjectComparison, RecordComparison } from "@/lib/baselines";
+import Button from "@/components/ui/Button";
 
 type Payload = { changes: ProjectChange[] };
 
@@ -142,19 +143,13 @@ export default function ProjectHistory({ projectId, runId }: { projectId: string
             >
               {busy ? "Saving…" : "Save this point"}
             </button>
-            <button type="button" onClick={() => setNamingPoint(false)} className="text-neutral-500 hover:text-neutral-900">
+            <Button variant="quiet" onClick={() => setNamingPoint(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setNamingPoint(true)}
-          className="text-sm text-neutral-600 hover:text-neutral-900 underline"
-        >
-          Name this point
-        </button>
+        <Button onClick={() => setNamingPoint(true)}>Name this point</Button>
       )}
 
       {changes.length > 1 && (

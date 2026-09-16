@@ -33,7 +33,7 @@
 // button that ignores the whole page. It is never dropped: dismissing it is a
 // reviewer's decision, taken once instead of once per row.
 // ============================================================================
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
@@ -49,6 +49,7 @@ import { unitSourceOf } from "@/lib/drawing-document";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import type { CroppedImage } from "@/lib/pdf-crop";
+import Button from "@/components/ui/Button";
 
 export type RunResolution =
   | { runId: string; runName: string; status: "matched"; record: { id: string; label: string; itemDescription: string } }
@@ -259,13 +260,9 @@ export default function ItemCard({
             onSet={(unit) => void onSetBulkUnit("item", unit, item.id)}
           />
         )}
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          className="text-xs text-neutral-500 underline hover:text-neutral-900"
-        >
+        <Button size="xs" variant="quiet" onClick={() => setOpen((value) => !value)}>
           {open ? "Collapse" : "Expand"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -428,18 +425,34 @@ export default function ItemCard({
             <th className="px-4 py-2" />
           </tr>
         </thead>
-        <tbody className="divide-y divide-neutral-100">
+        {/* NO `divide-y` HERE. A row carrying an occupant or a blocker is
+            THREE table rows (see below), and a divider drawn between tbody
+            children would put a line between a value and its own amber panel —
+            reading as though the panel belonged to the row underneath. The
+            separator goes on the data row instead. */}
+        <tbody>
           {pending.map((observation) => {
             const draft = drafts[observation.id] ?? {};
             const value = draft.value !== undefined ? draft.value : observation.value;
             const rowBlockers = blockerFor(observation.id);
             const rowOccupants = resolution?.occupants?.[observation.id] ?? [];
             const rowWarnings = warningFor(observation.id);
+            // ==============================================================
+            // A PANEL THAT SPANS THE ROW IS ITS OWN <tr>.
+            //
+            // The two panels below used to be extra `<td colSpan={7}>` cells
+            // inside the SAME `<tr>` as the seven data cells, which makes that
+            // row 21 column slots wide. The browser then has to find room for
+            // the panels BESIDE the data, and squeezed the replace
+            // acknowledgement — the one thing on the card that decides whether
+            // a confirmed spec is destroyed — into a ribbon of wrapped
+            // monospace about 100px across. A cell can only span the table's
+            // columns from a row of its own.
+            // ==============================================================
+            const amber = rowBlockers.length > 0 || rowWarnings.length > 0;
             return (
-              <tr
-                key={observation.id}
-                className={rowBlockers.length || rowWarnings.length ? "bg-amber-50/40" : undefined}
-              >
+              <Fragment key={observation.id}>
+              <tr className={`border-t border-neutral-100${amber ? " bg-amber-50/40" : ""}`}>
                 <td className="px-4 py-2 align-top">
                   <select
                     value={observation.attrGroup}
@@ -621,7 +634,9 @@ export default function ItemCard({
                     Ignore
                   </button>
                 </td>
-                {rowOccupants.length > 0 && (
+              </tr>
+              {rowOccupants.length > 0 && (
+                <tr className={amber ? "bg-amber-50/40" : undefined}>
                   <td colSpan={7} className="px-4 pb-2">
                     {/* A REVISED DRAWING. The clash is the point of the card,
                         not a fault in it — but only once the reviewer has seen
@@ -686,8 +701,10 @@ export default function ItemCard({
                       })}
                     </div>
                   </td>
-                )}
-                {(rowBlockers.length > 0 || rowWarnings.length > 0) && (
+                </tr>
+              )}
+              {amber && (
+                <tr className="bg-amber-50/40">
                   <td colSpan={7} className="px-4 pb-2 text-xs text-amber-900">
                     {rowBlockers.map((blocker) => blocker.message).join(" ")}
                     {/* Said out loud, because an amber row that still commits
@@ -698,8 +715,9 @@ export default function ItemCard({
                       </span>
                     )}
                   </td>
-                )}
-              </tr>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>

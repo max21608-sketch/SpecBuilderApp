@@ -38,6 +38,7 @@ import {
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import { ATTRIBUTE_UNITS, ATTRIBUTE_UNIT_LABELS } from "@/lib/spec-vocab";
 import { intakeStatusLabel } from "@/lib/intake-status";
+import Button from "@/components/ui/Button";
 
 type Project = {
   id: string;
@@ -553,7 +554,13 @@ function ProjectOverview() {
       {runs.map((run) =>
         tab === run.id ? (
           <section key={run.id} className="mt-4">
-            <p className="text-xs text-neutral-500">
+            <SpecTable projectId={project.id} runId={run.id} />
+
+            {/* WHERE THIS RUN CAME FROM, AT THE BOTTOM. It is provenance —
+                read once when somebody asks which revision they are looking
+                at, and never while working down the records. Above the table
+                it cost four lines of the screen on every visit. */}
+            <p className="mt-4 text-xs text-neutral-500">
               {run.source_sheet && <>from sheet “{run.source_sheet}”</>}
               {run.boq_revision && <> · revision {run.boq_revision}</>}
               {run.boq_date && <> · dated {run.boq_date}</>}
@@ -563,7 +570,6 @@ function ProjectOverview() {
                 The bill said: {run.header_notes.join(" · ")}
               </p>
             )}
-            <SpecTable projectId={project.id} runId={run.id} />
 
             {/* Retiring a run takes a whole sub-quote out of the tabs and out
                 of the export. Every record on it goes with it, and both can be
@@ -604,16 +610,17 @@ function ProjectOverview() {
                 </div>
               </div>
             ) : (
-              <button
-                type="button"
+              <Button
+                size="xs"
+                variant="danger"
+                className="mt-3"
                 onClick={() => {
                   setRetiringRun(run.id);
                   setRetireRunReason("");
                 }}
-                className="mt-3 text-xs text-neutral-500 underline hover:text-red-700"
               >
                 Retire this run
-              </button>
+              </Button>
             )}
           </section>
         ) : null,
