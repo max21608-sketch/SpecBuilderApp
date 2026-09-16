@@ -141,6 +141,13 @@ For each item, record:
   YC04158 - 01"), and the client's own finish code ("CH-01.1", "WD-01", "MT-01") where one is shown;
 - anything else stated about the item, including annotations in other languages, as a note.
 
+A DIMENSION PRINTED AS ONE LINE. Some specification sheets give the overall size as a single line
+rather than as separate labelled figures — "80 x 70 x 90 cm", "W1520 TBC x D560 x H1005 mm",
+"Dia.460 x H450mm". Copy that line verbatim into \`dimensionsCombinedRaw\` and do NOT split it into
+separate figures yourself: which number is the width and which the depth is carried by the ORDER it
+is printed in, and that is a reading a person confirms afterwards. Report a line there OR its
+figures in \`dimensions\`, never both.
+
 UNITS. Put the figure in \`valueRaw\` and the unit, if the page prints one, in \`unitRaw\` — separately,
 never combined into the value. A shop drawing usually prints NO unit and mixes millimetres and
 centimetres between pages, so \`unitRaw\` is null on most of them; a specification sheet often does

@@ -554,6 +554,45 @@ alongside the Panther pack. The blocks and formatting rules are in
     seeded field stays available everywhere — a field that cannot be selected is
     a spec value that cannot be recorded, and nothing anywhere would say so.
 
+## Decisions taken 2026-09-16 (an overall dimension printed as one line)
+
+74. **A combined line is reported verbatim and split in code, not by the
+    model.** The Panther pack carries two specification-sheet templates: one
+    labels its figures, the other prints `80 x 70 x 90 cm` and nothing else.
+    Both arrive in the same delivery, so the second is not malformed input.
+    `dimensionsCombinedRaw` asks for the line as printed and forbids the model
+    splitting it, because which number is the width is carried by ORDER — a
+    reading, not a fact on the page, and this app's rule about what an order
+    means does not belong in a prompt where nothing can test it.
+75. **Three bare figures are read as W x D x H; everything else gets no slot.**
+    This is the ONLY inference in the dimension model that the page does not
+    state, so its boundaries are the decision. Two bare figures could be W x H,
+    W x D or Dia x H — a 60/40 guess there writes a height into the depth and
+    nothing questions it. Four or more has no convention. A line MIXING a
+    prefixed part with bare ones resolves only the prefixed, because mixing an
+    explicit reading with a positional one is how the positional half inherits
+    the explicit half's credibility. The three-bare case is inferred rather than
+    refused only because the card badges it amber AND shows the composed cell
+    beside it: a transposed order is obvious there in a second, where refusing
+    would mean hand-assigning three slots per item across a pack — the volume at
+    which a question stops being read (the same reasoning as `0008`'s project
+    default unit).
+76. **`suggestUnit` now counts only values that are one figure.** It stripped
+    every non-digit, so `80 x 70 x 90` read as 807090 — one value, far over the
+    300 threshold, enough to carry a whole page's vote to millimetres and record
+    an 80cm armchair as 8 metres. Nothing could reach it while dimensions
+    arrived only as separate figures; decision 74 made it reachable, so it was
+    fixed in the same change rather than left one feature away. It shares
+    `parseDimensionFigure` with the composer, so the magnitude vote and the
+    conversion can never disagree about what counts as a number.
+77. **A combined part's TBC does not go through `suggestAttributeState`.** That
+    function refuses to choose when a value both states something and says TBC —
+    right for `Dark tinted wood TBC`, where nobody can tell whether the wood is
+    settled. A dimension has no such ambiguity: `W1520 TBC` is a figure of 1520
+    the client has not signed off, and it is Matthew's own worked example.
+    Routing it through the general rule produced a `no_state` blocker on a value
+    the parser had already read correctly.
+
 ## Still open
 
 Observed 2026-09-12. These are the brief's own gaps; none is a decision taken.

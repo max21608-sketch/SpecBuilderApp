@@ -28,6 +28,7 @@ import {
   type PackCard,
   type SpecFieldEntry,
 } from "@/lib/drawing-document";
+import type { AttributeUnit } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
 import type { RawDrawingItem } from "@/lib/extraction-schema";
 
@@ -69,6 +70,7 @@ const rawItem = (overrides: Partial<RawDrawingItem> = {}): RawDrawingItem => ({
   page: 1,
   dimensions: [],
   materials: [],
+  dimensionsCombinedRaw: [],
   notesRaw: [],
   confidence: "high",
   ...overrides,
@@ -439,6 +441,48 @@ describe("implausibleDimension", () => {
   });
 });
 
+describe("stageDrawings, a dimension printed as one line", () => {
+  // The Panther pack carries TWO specification-sheet templates: one labels its
+  // figures, the other prints "80 x 70 x 90 cm" and nothing else. Both arrive
+  // in the same delivery.
+  const staged = (lines: string[], projectDefault: AttributeUnit | null = null) =>
+    stageDrawings([rawItem({ dimensionsCombinedRaw: lines })], FIELDS, null, null, projectDefault).items[0]!;
+
+  it("stages three bare figures as W, D and H, badged as assumed", () => {
+    const dims = staged(["80 x 70 x 90 cm"]).observations.filter((o) => o.attrGroup === "dimension");
+    expect(dims.map((o) => [o.dimensionSlot, o.value, o.unit, o.slotSuggested])).toEqual([
+      ["W", "80", "cm", true],
+      ["D", "70", "cm", true],
+      ["H", "90", "cm", true],
+    ]);
+  });
+
+  it("does not call a printed prefix a guess, and keeps its TBC", () => {
+    const dims = staged(["W1520 TBC x D560 x H1005 mm"]).observations.filter((o) => o.attrGroup === "dimension");
+    expect(dims.map((o) => [o.dimensionSlot, o.slotSuggested, o.state])).toEqual([
+      ["W", false, "tbc"],
+      ["D", false, "confirmed"],
+      ["H", false, "confirmed"],
+    ]);
+  });
+
+  it("keeps a part it will not place as a note rather than dropping it", () => {
+    const item = staged(["80 x 90"]);
+    expect(item.observations.filter((o) => o.attrGroup === "dimension")).toHaveLength(0);
+    expect(item.observations.filter((o) => o.attrGroup === "note").map((o) => o.value)).toEqual(["80", "90"]);
+  });
+
+  it("lets the line's own figures vote on the unit without being read as one number", () => {
+    // "80 x 70 x 90" stripped of non-digits is 807090 — one value, far over the
+    // threshold, enough to carry the page to millimetres and record an 80cm
+    // armchair as 8 metres.
+    expect(suggestUnit(["80 x 70 x 90"])).toEqual({ status: "none" });
+    const dims = staged(["80 x 70 x 90"]).observations.filter((o) => o.attrGroup === "dimension");
+    expect(dims.every((o) => o.unit === "cm")).toBe(true);
+    expect(dims.every((o) => unitSourceOf(o) === "figures")).toBe(true);
+  });
+});
+
 describe("stageDrawings units", () => {
   it("reads the unit a specification sheet prints, and strips it off the value", () => {
     // The shape of a Panther SPEC-346 sheet: figures with their unit printed.
@@ -450,7 +494,8 @@ describe("stageDrawings units", () => {
         { labelRaw: "DEPTH", valueRaw: "120mm" },
       ],
       materials: [],
-      notesRaw: [],
+      dimensionsCombinedRaw: [],
+  notesRaw: [],
     });
     const staged = stageDrawings([sheet], FIELDS, null, null);
     const dimensions = staged.items[0]!.observations.filter((o) => o.attrGroup === "dimension");

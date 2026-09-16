@@ -158,7 +158,8 @@ describeIfDb("intake routes", () => {
     page: 1,
     dimensions: [{ labelRaw: "Width", valueRaw: "190" }],
     materials: [{ labelRaw: "FABRIC", valueRaw: "__QA Yarn Tessarae", materialCodeRaw: "__QA CH-01" }],
-    notesRaw: [],
+    dimensionsCombinedRaw: [],
+  notesRaw: [],
     confidence: "high" as const,
   });
 

@@ -286,6 +286,15 @@ export const DRAWINGS_TOOL = {
                 required: ["labelRaw", "valueRaw", "materialCodeRaw"],
               },
             },
+            dimensionsCombinedRaw: {
+              type: "array",
+              maxItems: MAX_PER_ITEM,
+              description:
+                "Any overall dimension printed as ONE line rather than as separate labelled figures, copied verbatim and NOT split " +
+                "('80 x 70 x 90 cm', 'W1520 TBC x D560 x H1005 mm', 'Dia.460 x H450mm'). " +
+                "Report a line here OR its figures in `dimensions`, never both.",
+              items: { type: "string", maxLength: MAX_VALUE },
+            },
             notesRaw: {
               type: "array",
               maxItems: MAX_PER_ITEM,
@@ -335,7 +344,7 @@ export const DRAWINGS_TOOL = {
               },
             },
           },
-          required: ["itemCodeRaw", "itemNameRaw", "page", "dimensions", "materials", "notesRaw", "confidence"],
+          required: ["itemCodeRaw", "itemNameRaw", "page", "dimensions", "dimensionsCombinedRaw", "materials", "notesRaw", "confidence"],
         },
       },
       documentNotes: {
@@ -393,6 +402,10 @@ export const RawDrawingItem = z.object({
   // nothing anywhere would say so. A schema failure is terminal and reported.
   dimensions: z.array(RawDrawingDimension).max(MAX_PER_ITEM).default([]),
   materials: z.array(RawDrawingMaterial).max(MAX_PER_ITEM).default([]),
+  // Same `.default([])` discipline as the arrays above, and for the same
+  // reason: an over-long combined list must fail the extraction loudly rather
+  // than stage a page as having no overall dimension at all.
+  dimensionsCombinedRaw: z.array(z.string().max(MAX_VALUE)).max(MAX_PER_ITEM).default([]),
   notesRaw: z.array(z.string().max(MAX_VALUE)).max(MAX_PER_ITEM).default([]),
   confidence: z.enum(["high", "medium", "low"]).nullable().catch(null).default(null),
   // `.catch([])` HERE, unlike the observation arrays above, and the difference

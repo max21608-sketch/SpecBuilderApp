@@ -23,7 +23,13 @@
 // long-form on the export's second sheet with its original value, its original
 // unit and its source page. That is what makes a converted figure re-checkable
 // against the page it came from, and it is why suppression here loses nothing.
-import { DIMENSION_SLOT_LABELS, type AttributeState, type AttributeUnit, type DimensionSlot } from "@/lib/spec-vocab";
+import {
+  DIMENSION_SLOT_LABELS,
+  normaliseDimensionSlot,
+  type AttributeState,
+  type AttributeUnit,
+  type DimensionSlot,
+} from "@/lib/spec-vocab";
 
 /** Multipliers to millimetres. `normaliseUnit` guarantees the key exists. */
 const TO_MM: Record<AttributeUnit, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
@@ -75,6 +81,82 @@ export function parseDimensionFigure(value: string | null): DimensionFigure {
   if (!/^[0-9]+(?:[.,][0-9]+)?$/.test(stripped)) return { figure: null, tbcInline };
   const figure = Number(stripped.replace(",", "."));
   return { figure: Number.isFinite(figure) && figure > 0 ? figure : null, tbcInline };
+}
+
+export type CombinedPart = {
+  slot: DimensionSlot | null;
+  value: string;
+  tbc: boolean;
+  /** True only where the slot came from printed ORDER rather than a prefix. */
+  slotSuggested: boolean;
+};
+
+export type CombinedDimensions = { parts: CombinedPart[]; unitRaw: string | null };
+
+/**
+ * Reads an overall dimension printed as ONE line: "80 x 70 x 90 cm".
+ *
+ * The Panther pack carries two specification-sheet templates. One prints a
+ * labelled table (`WIDTH 1900 MM`); the other prints this, with no labels at
+ * all, in centimetres. Both arrive in the same delivery, so the second cannot
+ * be treated as malformed.
+ *
+ * HOW FAR THE INFERENCE GOES, AND WHY IT STOPS THERE. A prefix on a part
+ * (`W1520`, `Dia.460`, `SH420`) is the page stating which dimension it is, and
+ * is taken exactly. Three bare parts are read as W x D x H in printed order,
+ * flagged `slotSuggested` so the screen badges them. Everything else gets NO
+ * slot:
+ *
+ *   - TWO bare parts could be W x H, W x D or Dia x H. A 60/40 guess here
+ *     writes a height into the depth, and nothing downstream questions it.
+ *   - FOUR or more has no convention at all.
+ *   - A line MIXING prefixed and bare parts resolves only the prefixed ones.
+ *     Mixing an explicit reading with a positional one is how the positional
+ *     half silently inherits the explicit half's credibility.
+ *
+ * Three-bare is inferred rather than refused because the reviewer sees the
+ * composed cell on the card and a transposed order is obvious there in a
+ * second — where refusing would mean hand-assigning three slots per item
+ * across a pack, which is the volume that makes a question stop being read.
+ */
+export function parseCombinedDimensions(raw: string): CombinedDimensions {
+  const text = (raw ?? "").trim();
+  if (text === "") return { parts: [], unitRaw: null };
+
+  const segments = text.split(/\s*[x×]\s*/i).filter((segment) => segment.trim() !== "");
+  if (segments.length === 0) return { parts: [], unitRaw: null };
+
+  // A unit on the LAST segment belongs to the whole line: "80 x 70 x 90 cm"
+  // is three centimetre figures, not two unitless ones and a third in cm.
+  let unitRaw: string | null = null;
+  const parts: CombinedPart[] = segments.map((segment, index) => {
+    let body = segment.trim();
+    if (index === segments.length - 1) {
+      const trailing = /^(.*?)[\s]*([a-zA-Z"']+\.?)$/.exec(body);
+      // Only strip a trailing word that is NOT itself part of a slot prefix:
+      // "H450mm" must lose "mm", "Dia.460" must not lose "Dia.".
+      if (trailing && trailing[1] && /[0-9]$/.test(trailing[1].trim())) {
+        unitRaw = trailing[2] ?? null;
+        body = trailing[1].trim();
+      }
+    }
+    const prefix = /^([A-Za-z.]+?)\s*([0-9].*)$/.exec(body);
+    const slot = prefix ? normaliseDimensionSlot(prefix[1] ?? "") : null;
+    const value = prefix && slot ? (prefix[2] ?? body) : body;
+    const figure = parseDimensionFigure(value);
+    return { slot, value: value.trim(), tbc: figure.tbcInline, slotSuggested: false };
+  });
+
+  const anyPrefixed = parts.some((part) => part.slot !== null);
+  if (!anyPrefixed && parts.length === 3) {
+    const positional: DimensionSlot[] = ["W", "D", "H"];
+    parts.forEach((part, index) => {
+      part.slot = positional[index] ?? null;
+      part.slotSuggested = true;
+    });
+  }
+
+  return { parts, unitRaw };
 }
 
 export type DimensionRow = {

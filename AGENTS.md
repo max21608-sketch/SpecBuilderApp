@@ -178,6 +178,17 @@ page that says 190.
 named on the cell — cross-row, so no check constraint can hold it and a trigger
 would fire mid-fan-out naming a row the reviewer never saw.
 
+An overall dimension printed as ONE line (`80 x 70 x 90 cm`) is read by
+`parseCombinedDimensions`, and how far it infers is the load-bearing part. A
+printed prefix is the page speaking and is taken exactly. **Three bare figures
+are read as W x D x H in printed order** — the only inference here the page does
+not state — flagged `slotSuggested` so the card badges it amber beside the
+composed cell, which is what makes a transposed order obvious in a second.
+Everything else gets NO slot and becomes a note: two bare figures could be
+W x H, W x D or Dia x H, four or more has no convention, and a line mixing
+prefixed with bare parts would let the positional half inherit the explicit
+half's credibility.
+
 ### The spec record and its client ref
 
 The client ref is the key the client, the BOQ, the FF&E schedule and the emails
@@ -663,6 +674,18 @@ which is why `record_attributes_unit_is_dimension` was replaced. Blocks and
 formatting rules: `docs/bws-spec-grid.md`. Pushed to staging; **not yet
 exercised in the app by anyone**.
 
+**Built 2026-09-16, the overall dimension printed as one line.** The Panther
+pack carries two specification-sheet templates and the second prints
+`80 x 70 x 90 cm` with no labels at all, so it cannot be treated as malformed.
+`dimensionsCombinedRaw` asks for the line verbatim and
+`parseCombinedDimensions` reads it: a printed prefix (`W1520`, `Dia.460`) is
+taken exactly, three bare figures are read as W x D x H **in printed order and
+badged as assumed**, and anything else gets no slot and becomes a note. The
+same change made `suggestUnit` count only values that are one figure — it
+stripped every non-digit, so `80 x 70 x 90` read as 807090, one value far over
+the threshold, enough to carry the page's vote to millimetres and record an
+80cm armchair as 8 metres.
+
 **Built 2026-09-15, the first run-through's findings.** Max walked the app end
 to end and four things were wrong, all of them flow rather than data:
 
@@ -715,11 +738,13 @@ result:
   `failed`. The client uploads and registers sequentially, which staggers
   dispatch by upload time — incidental, not a control. Watch the first real
   Panther delivery; a per-batch cap is the fix if it bites.
-- **The drawings review screen's slot picker is unproven.** `93176dd` added it,
-  and its options and defaults were checked in the browser, but driving a
-  selection through to a save was not. Promoting an unlabelled shop-drawing
-  figure to a width is the common case on the Panther set and step 2 of M8
-  depends on it.
+- **A combined line's W x D x H order is assumed, and a human has never checked
+  one.** `parseCombinedDimensions` reads "80 x 70 x 90 cm" positionally — the
+  only inference in the dimension model that the page does not state. It is
+  badged amber on the card and the composed cell is shown beside it, which is
+  the whole safeguard. Two bare figures, four or more, and a line mixing
+  prefixed with bare parts all get no slot instead. Nothing has been through a
+  real S-203 sheet yet.
 - **No real drawing set has been through the model.** The prompts and schemas
   are written against the AP364 seating drawings but only synthetic fixtures
   have exercised them. One real extraction, compared against its pages by eye —

@@ -2,7 +2,13 @@
 // pinned. The fixtures reproduce the SHAPE of the Panther specification sheets
 // with invented figures; no client document content is in this repo.
 import { describe, it, expect } from "vitest";
-import { composeDimensionCell, parseDimensionFigure, toMillimetres, type DimensionRow } from "@/lib/dimensions";
+import {
+  composeDimensionCell,
+  parseCombinedDimensions,
+  parseDimensionFigure,
+  toMillimetres,
+  type DimensionRow,
+} from "@/lib/dimensions";
 import { normaliseDimensionSlot } from "@/lib/spec-vocab";
 import type { AttributeUnit } from "@/lib/spec-vocab";
 import type { DimensionSlot } from "@/lib/spec-vocab";
@@ -71,6 +77,61 @@ describe("parseDimensionFigure", () => {
     expect(parseDimensionFigure("190 x 79")).toEqual({ figure: null, tbcInline: false });
     expect(parseDimensionFigure("approx 720-740")).toEqual({ figure: null, tbcInline: false });
     expect(parseDimensionFigure(null)).toEqual({ figure: null, tbcInline: false });
+  });
+});
+
+describe("parseCombinedDimensions", () => {
+  it("reads three bare figures as W x D x H in printed order, and says it assumed", () => {
+    // The Panther S-203 template: no labels, centimetres, order carries the
+    // meaning. The badge is what makes the assumption checkable.
+    const parsed = parseCombinedDimensions("80 x 70 x 90 cm");
+    expect(parsed.unitRaw).toBe("cm");
+    expect(parsed.parts.map((p) => [p.slot, p.value, p.slotSuggested])).toEqual([
+      ["W", "80", true],
+      ["D", "70", true],
+      ["H", "90", true],
+    ]);
+  });
+
+  it("takes a printed prefix exactly, and does not call it a guess", () => {
+    const parsed = parseCombinedDimensions("W1520 TBC x D560 x H1005 mm");
+    expect(parsed.unitRaw).toBe("mm");
+    expect(parsed.parts.map((p) => [p.slot, p.value, p.tbc, p.slotSuggested])).toEqual([
+      ["W", "1520 TBC", true, false],
+      ["D", "560", false, false],
+      ["H", "1005", false, false],
+    ]);
+  });
+
+  it("keeps Dia. as a slot rather than mistaking it for a unit", () => {
+    const parsed = parseCombinedDimensions("Dia.460 x H450mm");
+    expect(parsed.unitRaw).toBe("mm");
+    expect(parsed.parts.map((p) => [p.slot, p.value])).toEqual([
+      ["DIA", "460"],
+      ["H", "450"],
+    ]);
+  });
+
+  it("refuses two bare figures, which could be W x H, W x D or Dia x H", () => {
+    const parsed = parseCombinedDimensions("80 x 90");
+    expect(parsed.parts.map((p) => p.slot)).toEqual([null, null]);
+  });
+
+  it("refuses four or more bare figures, which have no convention at all", () => {
+    const parsed = parseCombinedDimensions("80 x 70 x 90 x 60");
+    expect(parsed.parts.map((p) => p.slot)).toEqual([null, null, null, null]);
+  });
+
+  it("resolves only the prefixed parts of a mixed line", () => {
+    // Mixing an explicit reading with a positional one is how the positional
+    // half inherits the explicit half's credibility.
+    const parsed = parseCombinedDimensions("W1520 x 560 x H1005");
+    expect(parsed.parts.map((p) => p.slot)).toEqual(["W", null, "H"]);
+    expect(parsed.parts.every((p) => !p.slotSuggested)).toBe(true);
+  });
+
+  it("returns nothing for an empty line", () => {
+    expect(parseCombinedDimensions("")).toEqual({ parts: [], unitRaw: null });
   });
 });
 

@@ -45,6 +45,7 @@ import {
   type AttributeUnit,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
+import { parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
 import type { RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
 
 // ---- the staged shape ------------------------------------------------------
@@ -218,6 +219,13 @@ export type UnitSuggestion = { status: "confident"; unit: AttributeUnit } | { st
  * desk chair). A page carrying both sits in neither range, and gets nothing:
  * a wrong unit reads as a real measurement and nothing downstream questions it,
  * whereas a blank one stops the card.
+ *
+ * IT COUNTS ONLY VALUES THAT ARE ONE FIGURE, through the same parser the
+ * composer uses. Stripping every non-digit instead read "80 x 70 x 90" as
+ * 807090 — one value, far over the threshold, enough to carry the whole page's
+ * vote to millimetres and record an 80cm armchair as 8 metres. Nothing was
+ * reachable that way until a combined line could be staged; it is now, and a
+ * silent 10x is not a thing to leave one feature away.
  */
 export function suggestUnit(values: (string | null)[]): UnitSuggestion {
   const numbers = values.map(figureOf).filter((n): n is number => n !== null);
@@ -246,10 +254,7 @@ export type UnitSource = (typeof UNIT_SOURCES)[number];
 
 /** The numeric part of a drawn figure, or null if there isn't one. */
 function figureOf(raw: string | null): number | null {
-  const digits = String(raw ?? "").replace(/[^0-9.]/g, "");
-  if (digits === "") return null;
-  const n = Number(digits);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return parseDimensionFigure(raw).figure;
 }
 
 export type SplitFigure = { value: string | null; unit: AttributeUnit | null };
@@ -963,7 +968,25 @@ export function stageDrawings(
         printedUnit: normaliseUnit(dimension.unitRaw) ?? split.unit,
       };
     });
-    const unitGuess = suggestUnit(dimensions.map((dimension) => dimension.valueRaw));
+    // A specification sheet that gives the overall size as ONE line is read
+    // here, and joins the same list. Its parts vote on the unit alongside the
+    // separate figures, because they are figures off the same page.
+    const combined = (item.dimensionsCombinedRaw ?? []).flatMap((line) => {
+      const parsed = parseCombinedDimensions(line);
+      const printedUnit = normaliseUnit(parsed.unitRaw);
+      return parsed.parts.map((part) => ({
+        labelRaw: part.slot ? DIMENSION_SLOT_LABELS[part.slot] : null,
+        valueRaw: part.value,
+        printedUnit,
+        slot: part.slot,
+        slotSuggested: part.slotSuggested,
+        tbc: part.tbc,
+      }));
+    });
+    const unitGuess = suggestUnit([
+      ...dimensions.map((dimension) => dimension.valueRaw),
+      ...combined.map((part) => part.valueRaw),
+    ]);
     const views = usableViews(item.viewRegions, item.page);
     const taken = new Set<string>();
     const observations: DrawingObservation[] = [];
@@ -1015,6 +1038,53 @@ export function stageDrawings(
         specFieldId: null,
         state: state.state,
         stateReason: state.reason,
+        reviewStatus: "pending",
+        reviewedAt: null,
+        reviewedBy: null,
+        applied: null,
+      });
+    }
+
+    // The combined line's parts. A part whose slot came from printed ORDER
+    // carries `slotSuggested`, so the screen badges it amber and the reviewer
+    // checks the composed cell rather than taking W x D x H on trust. A part
+    // the parser would not place becomes a note, exactly like an unlabelled
+    // figure off a shop drawing.
+    for (const part of combined) {
+      // NOT through `suggestAttributeState`, and the difference matters. That
+      // function refuses to choose when a value both states something and says
+      // TBC — right for "Dark tinted wood TBC", where nobody can tell whether
+      // the wood is settled. A dimension has no such ambiguity: "1520 TBC" is a
+      // figure of 1520 that the client has not signed off, which is Matthew's
+      // own worked example. `parseCombinedDimensions` already read it, so the
+      // answer is known rather than guessed at.
+      const hasFigure = parseDimensionFigure(part.valueRaw).figure !== null;
+      const state: AttributeState | null = part.tbc || !hasFigure ? "tbc" : "confirmed";
+      const resolved = resolveDimensionUnit({
+        printed: part.printedUnit,
+        pageGuess: unitGuess,
+        projectDefault: projectDefaultUnit,
+      });
+      dimensionNo += 1;
+      observations.push({
+        id: nextId(),
+        version: 1,
+        attrGroup: part.slot ? "dimension" : "note",
+        dimensionSlot: part.slot,
+        slotSuggested: part.slotSuggested,
+        labelRaw: part.labelRaw ?? `Dimension ${dimensionNo}`,
+        valueRaw: part.valueRaw,
+        materialCodeRaw: null,
+        // The value keeps the TBC the page printed beside the figure.
+        // composeDimensionCell reads it back out of the string, so the cell
+        // says "W1520 TBC" without a second place recording the same fact.
+        value: part.valueRaw,
+        unit: resolved.unit,
+        unitSuggested: resolved.source === "figures" || resolved.source === "project_default",
+        ...(resolved.source ? { unitSource: resolved.source } : {}),
+        specFieldId: null,
+        state,
+        stateReason: null,
         reviewStatus: "pending",
         reviewedAt: null,
         reviewedBy: null,
