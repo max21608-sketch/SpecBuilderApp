@@ -1072,10 +1072,25 @@ column appends the letter (`Armchair (A)`), which is THIS REPO'S JUDGEMENT like
 the rest of the job columns: two variants otherwise show BWS two identical jobs
 against one client code. Confirm it against a real BWS import.
 
-**STILL TO BUILD:** the spec table and the record screen. A variant does not
-appear as a row anybody can open yet, `unallocatedQty` is written and unused, and
-nothing on the record screen shows an item's configurations or says that the
-bill's 45 is unapportioned. The intake half is complete; the reading half is not.
+**The screens read it from both ends.** A configuration is sorted under its bill
+line by `/api/records` — ordered on the PARENT'S `record_no`, because a variant
+is allocated the next free number in the project and would otherwise land pages
+away from what it belongs to (ordering on the parent id puts the groups in uuid
+order, which is no order at all). It is indented there and named `S-201 A`, its
+client ref read through the parent. The bill line says in words that its
+configurations are what the export carries, or it reads as an item nobody has
+specced. The record screen shows the family in whichever direction the record
+sits in it: a bill line lists its configurations with what each has captured, a
+configuration names the bill line it came from and links back.
+
+**The unapportioned quantity is stated, never divided**, on both screens. The
+bill says 45 and never says how many are fabric A.
+
+**STILL OUTSTANDING:** nothing lets a person SET a configuration's quantity — the
+gap is reported and there is no field to close it. And a record that already
+carries confirmed specs cannot be split at all (`ensureVariant`'s guard), so the
+thirteen records in the sandbox that hold specs would need those moved onto a
+configuration first, which is a path that does not exist.
 
 ### A drawing dimensions everything, and four of them matter
 

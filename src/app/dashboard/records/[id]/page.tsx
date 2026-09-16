@@ -33,6 +33,7 @@ import {
 import { composeDimensionCell } from "@/lib/dimensions";
 import { questionTierOrNull, TIER_LABELS, NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
+import { unallocatedQty, variantName } from "@/lib/record-variants";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
@@ -52,6 +53,14 @@ type SpecRecord = {
   bws_project_number: string; project_name: string; project_id: string;
   run_id: string; run_name: string;
   category_name: string | null; category_family: string | null;
+  /** A fabric split (0024). Both null on an ordinary record. */
+  parent_id: string | null; variant_label: string | null;
+};
+
+/** This record's bill line and every live configuration under it, parent first. */
+type FamilyMember = {
+  id: string; record_no: number; variant_label: string | null; qty: number | null;
+  item_description: string; attribute_count: string; refs: string | null;
 };
 
 type Attribute = {
@@ -80,6 +89,7 @@ type Payload = {
   retiredAttributes: RetiredAttribute[];
   answers: Answer[];
   categories: Category[];
+  family: FamilyMember[];
 };
 
 const STATE_CLASS: Record<AnswerState, string> = {
@@ -275,6 +285,19 @@ export default function RecordPage() {
 
   const { record, refs, answers, attributes, categories } = data;
 
+  // ---- the fabric split, from whichever end this record is ------------------
+  //
+  // `family` comes back parent-first, so the head of it is the bill line
+  // whether this record IS that line or hangs off it. The client ref is read
+  // from the parent because a configuration deliberately carries none of its
+  // own — see `ensureVariant`.
+  const family = data.family ?? [];
+  const billLine = family.find((member) => member.variant_label === null) ?? null;
+  const variants = family.filter((member) => member.variant_label !== null);
+  const parentRefs = billLine?.refs ?? refs.map((ref) => ref.ref_value).join(", ");
+  const billQty = billLine?.qty ?? null;
+  const unallocated = unallocatedQty(billQty, variants.map((member) => member.qty));
+
   // One implementation of the tier, shared with the drafts screen, the export
   // counts and the email. A record with no level gets null here and no badge —
   // the app does not decide what kind of item this is.
@@ -319,7 +342,16 @@ export default function RecordPage() {
       </Link>
 
       <h1 className="mt-2 text-xl font-semibold text-neutral-900">
-        {record.bws_project_number}-{String(record.record_no).padStart(3, "0")} · {record.item_description}
+        {record.bws_project_number}-{String(record.record_no).padStart(3, "0")}
+        {/* THE NAME A PERSON USES. A configuration's own record number is the
+            next free one in the project and says nothing about what it belongs
+            to; `S-201 A` is how it gets said out loud. */}
+        {record.variant_label && (
+          <span className="ml-2 rounded border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-sm font-medium text-neutral-700">
+            {variantName(parentRefs, record.variant_label, "")}
+          </span>
+        )}{" "}
+        · {record.item_description}
       </h1>
       <p className="mt-1 text-sm text-neutral-600">
         {refs.length > 0 ? refs.map((ref) => ref.ref_value).join(", ") : "No client ref"}
@@ -328,6 +360,66 @@ export default function RecordPage() {
         {record.qty !== null && <> · qty {record.qty}</>}
         {record.source_line_no && <> · BOQ row {record.source_line_no}</>}
       </p>
+
+      {/* ======================================================================
+          THE FAMILY, IN WHICHEVER DIRECTION THIS RECORD SITS IN IT.
+          A bill line drawn in two fabrics is a HEADING: its configurations are
+          what the export ships, so the row has to say so or it reads as an item
+          nobody has specced. A configuration has to name the bill line it came
+          from, because its record number does not.
+          ====================================================================== */}
+      {(variants.length > 0 || record.parent_id) && (
+        <div className="mt-3 rounded-lg border border-neutral-200 bg-white px-4 py-3">
+          {record.parent_id ? (
+            <p className="text-sm text-neutral-700">
+              Configuration {record.variant_label} of{" "}
+              <Link href={`/dashboard/records/${record.parent_id}`} className="underline hover:text-neutral-900">
+                {parentRefs || "the bill line"}
+              </Link>
+              , which the bill lists once
+              {billQty !== null && <> at {billQty} off</>}. This configuration is what BWS receives.
+            </p>
+          ) : (
+            <p className="text-sm text-neutral-700">
+              The bill lists this once{record.qty !== null && <> at {record.qty} off</>}, and the drawings show it in{" "}
+              {variants.length} configurations. <strong className="font-medium">They are what the export carries</strong>
+              , not this line.
+            </p>
+          )}
+          <ul className="mt-2 divide-y divide-neutral-100 border-t border-neutral-100">
+            {variants.map((member) => (
+              <li key={member.id} className="flex flex-wrap items-baseline gap-x-3 py-1.5 text-sm">
+                <span className="w-24 shrink-0 font-medium text-neutral-900">
+                  {variantName(parentRefs, member.variant_label, `#${member.record_no}`)}
+                </span>
+                <span className="flex-1 min-w-[8rem] text-neutral-600">
+                  {Number(member.attribute_count) > 0
+                    ? `${member.attribute_count} specs captured`
+                    : "nothing captured yet"}
+                </span>
+                <span className="text-neutral-700 tabular-nums">
+                  {member.qty === null ? <span className="text-amber-800">qty not set</span> : `qty ${member.qty}`}
+                </span>
+                {member.id === record.id ? (
+                  <span className="text-xs text-neutral-400">you are here</span>
+                ) : (
+                  <Link href={`/dashboard/records/${member.id}`} className="text-xs underline hover:text-neutral-900">
+                    open
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+          {/* The bill's quantity is not apportioned by anything: splitting it
+              has a price attached. So the gap is stated, never divided. */}
+          {unallocated !== null && unallocated !== 0 && (
+            <p className="mt-2 text-xs text-amber-800">
+              {unallocated} of the bill&rsquo;s {billQty} is not allocated to a configuration. Set a quantity on each
+              before anybody quotes it.
+            </p>
+          )}
+        </div>
+      )}
 
       {error && <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
 

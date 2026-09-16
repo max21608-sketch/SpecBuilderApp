@@ -21,6 +21,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import Button, { buttonClass } from "@/components/ui/Button";
+import { unallocatedQty } from "@/lib/record-variants";
 import {
   SPECS_AGREED_LABEL,
   URGENCY_LABELS,
@@ -37,6 +38,15 @@ export type SpecRecord = {
   status: string; retired_at: string | null; retired_by: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
   refs: string | null; run_id: string; run_name: string; attribute_count: string;
+  /** A fabric split (0024): the bill line this configuration belongs to. */
+  parent_id: string | null;
+  variant_label: string | null;
+  /** A configuration carries no client ref of its own — it shows its parent's. */
+  parent_refs: string | null;
+  /** Live configurations under this record. More than none makes it a HEADING. */
+  variant_count: string;
+  /** What its configurations have taken of the bill's quantity. */
+  variant_qty: string;
   category_name: string | null; category_family: string | null; requirements_authored: boolean;
   spec_total: string; spec_settled: string; spec_tbc: string; spec_missing: string;
   ready_total: string; ready_settled: string; ready_tbc: string; ready_missing: string;
@@ -229,8 +239,30 @@ export default function SpecTable({
                         />
                         {record.record_no}
                       </td>
+                      {/* ==================================================
+                          A CONFIGURATION IS SHOWN UNDER ITS BILL LINE.
+                          It is sorted there by the query, indented here, and
+                          named the way a person says it: S-201 A. Its own
+                          `record_no` is just the next free number in the
+                          project, so on its own it reads as an unrelated line.
+                          ================================================== */}
                       <td className={`px-3 py-2 font-medium ${record.status === "retired" ? "text-neutral-400 line-through" : "text-neutral-900"}`}>
-                        {record.refs ?? "—"}
+                        {record.variant_label ? (
+                          <span className="pl-4 text-neutral-900">
+                            <span className="text-neutral-400">└ </span>
+                            {record.parent_refs ?? record.refs ?? "—"} {record.variant_label}
+                          </span>
+                        ) : (
+                          (record.refs ?? "—")
+                        )}
+                        {/* A HEADING, not an item. Its configurations are what
+                            the export ships — and a row that stayed silent
+                            would read as an item nobody had specced. */}
+                        {n(record.variant_count) > 0 && (
+                          <span className="block text-xs font-normal text-neutral-500">
+                            {n(record.variant_count)} configurations — they are what the export carries, not this line
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <Link
@@ -244,7 +276,21 @@ export default function SpecTable({
                         )}
                       </td>
                       <td className="px-3 py-2 text-neutral-700">{record.area ?? "—"}</td>
-                      <td className="px-3 py-2 text-neutral-700 tabular-nums">{record.qty ?? "—"}</td>
+                      <td className="px-3 py-2 text-neutral-700 tabular-nums">
+                        {record.qty ?? "—"}
+                        {/* THE BILL'S QUANTITY IS NOT APPORTIONED BY ANYTHING.
+                            The bill says 45 of S-201 and never says how many
+                            are fabric A. Splitting it has a price attached, so
+                            the table says how much is unaccounted for rather
+                            than dividing it. */}
+                        {n(record.variant_count) > 0 &&
+                          record.qty !== null &&
+                          unallocatedQty(record.qty, [n(record.variant_qty)]) !== 0 && (
+                            <span className="block text-xs text-amber-800" title="Set a quantity on each configuration.">
+                              {unallocatedQty(record.qty, [n(record.variant_qty)])} not allocated
+                            </span>
+                          )}
+                      </td>
                       <td className="px-3 py-2 tabular-nums">
                         {attributes > 0 ? (
                           <span className="text-neutral-900">{attributes}</span>

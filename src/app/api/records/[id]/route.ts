@@ -25,6 +25,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const rows = await sql`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
            r.boq_category, r.status, r.version, r.source_line_no, r.category_id, r.level,
+           r.parent_id, r.variant_label,
            p.bws_project_number, p.name as project_name, p.id as project_id,
            run.id as run_id, run.name as run_name,
            c.name as category_name, c.family as category_family, c.requirements_authored
@@ -99,7 +100,38 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     select id, slug, family, name, requirements_authored from item_categories order by family, sort_order
   `;
 
-  return json({ ok: true, record, refs, attributes, retiredAttributes: retired, answers, categories });
+  // ---- the fabric split, in both directions -------------------------------
+  //
+  // A bill line needs its configurations listed, because they are what the
+  // export ships and this row is a heading. A configuration needs its bill
+  // line named, because its own record number is just the next free one in the
+  // project and says nothing about what it belongs to.
+  //
+  // One query serves both: every live record in this record's family. Ordered
+  // with the parent first so a screen can take it off the front.
+  const familyId = record.parent_id ? String(record.parent_id) : String(record.id);
+  const family = await sql`
+    select r.id, r.record_no, r.variant_label, r.qty, r.status, r.item_description,
+           (select count(*) from record_attributes ra where ra.record_id = r.id and ra.status = 'active')
+             as attribute_count,
+           (select string_agg(x.ref_value, ', ' order by x.ref_value)
+              from spec_record_refs x where x.record_id = r.id) as refs
+      from spec_records r
+     where (r.id = ${familyId} or r.parent_id = ${familyId})
+       and r.status = 'active'
+     order by r.parent_id nulls first, r.variant_label
+  `;
+
+  return json({
+    ok: true,
+    record,
+    refs,
+    attributes,
+    retiredAttributes: retired,
+    answers,
+    categories,
+    family,
+  });
 }
 
 /**

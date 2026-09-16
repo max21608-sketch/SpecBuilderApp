@@ -61,6 +61,22 @@ export async function GET(request: Request): Promise<Response> {
       r.retired_at,
       r.retired_by,
       r.run_id,
+      r.parent_id,
+      r.variant_label,
+      -- A CONFIGURATION SHOWS ITS PARENT'S CLIENT REF. S-201 A carries no
+      -- boq_code of its own, deliberately (copying it would make every drawing
+      -- card for that code ambiguous), so the ref it is KNOWN by has to be
+      -- fetched through the parent -- the same read-through the export does.
+      (select string_agg(x.ref_value, ', ' order by x.ref_value)
+         from spec_record_refs x where x.record_id = r.parent_id) as parent_refs,
+      -- How many live configurations this record has. A bill line with one or
+      -- more is a HEADING: its configurations are what the export ships, and a
+      -- row that did not say so would look like an item nobody had specced.
+      (select count(*) from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count,
+      -- What is left of the bill's quantity once the configurations have taken
+      -- theirs. Null when the bill said nothing.
+      (select coalesce(sum(v.qty), 0) from spec_records v
+        where v.parent_id = r.id and v.status = 'active') as variant_qty,
       run.name as run_name,
       -- How much a document has actually said about this item. The intake
       -- stage's own progress measure: the cheat-sheet counts beside it measure
@@ -88,7 +104,15 @@ export async function GET(request: Request): Promise<Response> {
       and (${includeRetired}::boolean or r.status = 'active')
       and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
     group by r.id, c.name, c.family, c.requirements_authored, run.name, run.sort_order
-    order by run.sort_order, r.record_no
+    -- CONFIGURATIONS SORT WITH THEIR PARENT, not by their own record number: a
+    -- variant is allocated the next number in the project, so S-201 A could be
+    -- #33 and land pages away from the bill line it belongs to. Ordering on the
+    -- PARENT'S record_no keeps the table in bill order; ordering on the parent
+    -- id would put the groups in uuid order, which is no order at all.
+    order by run.sort_order,
+             coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no),
+             r.parent_id nulls first,
+             r.variant_label
   `;
 
   // How many the table is NOT showing, so "38 records" cannot quietly mean
