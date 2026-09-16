@@ -894,8 +894,13 @@ The spec table's Waiting column and the derivation behind it in
   `tools/tgq-interview.mjs` asks each once, per **level** (simple / complex /
   hero, the system Matthew described and BWS's boilerplates already name), and
   `tools/tgq-answers.mjs` expands the answer back over every category that asks
-  it. `tools/tgq-checklist.mjs` is the same decision as a workbook, for reading
-  rather than talking. Four things they settle and one they do not: an answer
+  it. `tools/tgq-checklist.mjs` is the same decision as a workbook, and is the
+  route in use: **every cell is pre-filled `Yes`**, so the job is striking out
+  what we can quote WITHOUT — which states today's position rather than
+  inventing one, since all 728 questions are required of everything now. Its
+  cost is that a blank no longer proves nobody looked, which the per-category
+  **"Been through it?"** tick recovers at 17 clicks rather than 1,368. Four
+  things they settle and one they do not: an answer
   is inferred from nothing — unreached is `-` and unsure is `?`, both reported
   rather than defaulted to "No"; an exception is only recorded where Matthew
   named a category, and one naming a category that does not ask the question is

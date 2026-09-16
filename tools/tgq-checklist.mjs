@@ -54,6 +54,18 @@ const TICK_BG = 'FFFFFDF5'
 const ANSWERS = ['Yes', 'No', 'N/A', '?']
 const TICK_COLUMNS = ['Simple', 'Complex', 'Hero']
 
+// Every tick starts at Yes, so the job is striking out what we can quote
+// WITHOUT rather than ticking 1,368 cells to say what we need. That is how the
+// matrix stands today -- all 728 questions required of everything -- so the
+// pre-fill states the current position rather than inventing one, and the
+// value is in what Matthew takes away.
+//
+// The cost is that a blank cell no longer proves nobody looked: a category he
+// never opened reads exactly like one he read and agreed with. The
+// "Been through it?" tick on the Level names sheet is what recovers that, at
+// seventeen clicks rather than 1,368.
+const DEFAULT_ANSWER = 'Yes'
+
 const titleStyle = { font: { name: 'Calibri', size: 16, bold: true, color: { argb: INK } } }
 const noteStyle = { font: { name: 'Calibri', size: 11, color: { argb: MUTED } }, alignment: { wrapText: true, vertical: 'top' } }
 
@@ -81,6 +93,7 @@ function bwsFieldLabel(jsonId) {
 function decorateTicks(sheet, rowNumber, firstCol, lastCol) {
   for (let c = firstCol; c <= lastCol; c += 1) {
     const cell = sheet.getRow(rowNumber).getCell(c)
+    cell.value = DEFAULT_ANSWER
     cell.alignment = { horizontal: 'center', vertical: 'middle' }
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TICK_BG } }
     cell.border = { left: { style: 'hair', color: { argb: RULE } }, right: { style: 'hair', color: { argb: RULE } } }
@@ -102,10 +115,15 @@ function addAnswerDropdown(sheet, range) {
     showErrorMessage: true,
     errorStyle: 'warning',
     errorTitle: 'Not one of the four',
-    error: 'Use Yes, No, N/A or ? — or leave it blank if you have not decided yet.',
+    error: 'Use Yes, No, N/A or ? — every cell starts at Yes, so change the ones we can quote without.',
   })
 }
 
+// The colour marks what Matthew CHANGED. Painting the default green would
+// make a 1,368-cell wall of green in which the handful of real decisions are
+// invisible -- the opposite of what the sheet is for -- so Yes is left plain
+// and every departure from it is picked out.
+//
 // cellIs/equal rather than containsText: Excel's containsText compiles to
 // SEARCH(), where "?" is a single-character WILDCARD -- the "?" rule would
 // then paint every answered cell amber.
@@ -120,10 +138,9 @@ function tickConditionalFormatting(sheet, range) {
   sheet.addConditionalFormatting({
     ref: range,
     rules: [
-      rule('Yes', 'FFD8F0DC', 'FF14532D', 1),
-      rule('N/A', 'FFEDEDED', 'FF6B7280', 2),
+      rule('No', 'FFE3EDF7', 'FF1E40AF', 1),
+      rule('N/A', 'FFE7E5E4', 'FF57534E', 2),
       rule('?', 'FFFDF0CE', 'FF92400E', 3),
-      rule('No', 'FFFFFFFF', 'FF9CA3AF', 4),
     ],
   })
 }
@@ -183,22 +200,35 @@ para(
 )
 
 heading('How to fill it in')
-para('Work on the "Checklist" sheet. Filter the Category column to one category and work down it. Four answers:')
-para('Yes  —  we cannot quote this level without it', { font: { bold: true, color: { argb: 'FF14532D' } } })
-para('No  —  we can quote without it; it is still needed later', { font: { bold: true, color: { argb: 'FF6B7280' } } })
-para('N/A  —  this question does not belong on this category’s sheet at all', { font: { bold: true, color: { argb: 'FF6B7280' } } })
-para('?  —  unsure, or worth a conversation', { font: { bold: true, color: { argb: 'FF92400E' } } })
-para('Blank means not looked at yet, which is why blank and "No" are different. The Notes column is free text and we read it.')
-
-heading('Two things to know before you start')
 para(
-  '1. The 17 commercial questions are on their own sheet. TOE agreement, client contact list, floor plans, deposit, FSC, ' +
+  'Every cell already says Yes. That is today\u2019s position — all 728 questions required of everything — so the job is not ' +
+    'ticking what we need, it is striking out what we can quote WITHOUT. The value in this document is what you take away.',
+  { font: { bold: true } },
+)
+para('Work on the "Checklist" sheet. Filter the Category column to one category and work down it. Four answers:')
+para('Yes  —  we cannot quote this level without it  (already filled in)', { font: { bold: true, color: { argb: 'FF14532D' } } })
+para('No  —  we can quote without it; it is still needed later', { font: { bold: true, color: { argb: 'FF1E40AF' } } })
+para('N/A  —  this question does not belong on this category\u2019s sheet at all', { font: { bold: true, color: { argb: 'FF57534E' } } })
+para('?  —  unsure, or worth a conversation', { font: { bold: true, color: { argb: 'FF92400E' } } })
+para(
+  'Anything you change is colour-coded so it stands out; the Yeses you leave alone stay plain. The Notes column is free ' +
+    'text and we read it.',
+)
+
+heading('Three things to know before you start')
+para(
+  '1. Because every cell starts at Yes, a category you have not opened looks exactly like one you read and agreed with. ' +
+    'So when you finish a category, tick it off on the "Level names" sheet — seventeen ticks, and it is the only way we can ' +
+    'tell a considered Yes from one nobody has looked at.',
+)
+para(
+  '2. The 17 commercial questions are on their own sheet. TOE agreement, client contact list, floor plans, deposit, FSC, ' +
     'prototype, access check and the rest are word-for-word identical on all 17 cheat sheets, so asking you seventeen times ' +
     'would be ceremony. They are on "Every category", answered once, and they still get the three level ticks. If any of them ' +
     'genuinely does vary by category, say so in its Notes and we will split it back out.',
 )
 para(
-  '2. Which BWS column an answer lands in is our guess, not yours. The "BWS field" column shows where each answer would be ' +
+  '3. Which BWS column an answer lands in is our guess, not yours. The "BWS field" column shows where each answer would be ' +
     'written at export. It is shown for context only — you are not being asked to check it here. That is the separate ' +
     'four-question note.',
 )
@@ -216,6 +246,7 @@ para(
 )
 
 heading('Progress')
+para('How many cells you have changed away from Yes. Categories ticked off are counted from the "Level names" sheet.')
 const progressHeader = intro.addRow(['', 'Sheet', 'Rows', 'Simple', 'Complex', 'Hero'])
 const progressHeaderRow = progressHeader.number
 ;['', 'Sheet', 'Rows', 'Simple', 'Complex', 'Hero'].forEach((_, i) => {
@@ -256,7 +287,8 @@ shared.getRow(1).height = 24
 shared.mergeCells('A2:I2')
 shared.getCell('A2').value =
   'These 17 questions are word-for-word identical on all 17 cheat sheets, so they are asked once here rather than 17 times ' +
-  'on the Checklist sheet. If one of them does vary by category, say which in its Notes and we will split it back out.'
+  'on the Checklist sheet. Every cell starts at Yes — change the ones we can quote WITHOUT. If one of them does vary by ' +
+  'category, say which in its Notes and we will split it back out.'
 shared.getCell('A2').style = noteStyle
 shared.getRow(2).height = 32
 
@@ -323,8 +355,9 @@ checklist.getCell('A1').style = titleStyle
 checklist.getRow(1).height = 24
 checklist.mergeCells('A2:K2')
 checklist.getCell('A2').value =
-  'Filter Category to one category and work down it. Yes = cannot quote without it · No = can quote without it · ' +
-  'N/A = does not apply to this category · ? = unsure. Blank means not looked at yet.'
+  'Every cell starts at Yes — change the ones we can quote WITHOUT. Filter Category to one category and work down it. ' +
+  'Yes = cannot quote without it · No = can quote without it · N/A = does not apply to this category · ? = unsure. ' +
+  'Tick the category off on the Level names sheet when you have been through it.'
 checklist.getCell('A2').style = noteStyle
 checklist.getRow(2).height = 28
 
@@ -417,6 +450,7 @@ const levels = workbook.addWorksheet('Level names', { views: [{ state: 'frozen',
 levels.columns = [
   { key: 'category', width: 32 },
   { key: 'family', width: 12 },
+  { key: 'reviewed', width: 16 },
   { key: 'l1', width: 20 },
   { key: 'l2', width: 24 },
   { key: 'l3', width: 20 },
@@ -427,31 +461,62 @@ levels.columns = [
 levels.getCell('A1').value = 'Level names — what are the three called, per category?'
 levels.getCell('A1').style = titleStyle
 levels.getRow(1).height = 24
-levels.mergeCells('A2:G2')
+levels.mergeCells('A2:H2')
 levels.getCell('A2').value =
-  'Pre-filled with Simple / Complex / Hero. Overwrite them with what you actually call these. The right-hand column shows ' +
-  'the variants BWS itself already has for that category, read-only, on 2026-09-14 — shown as evidence of the existing ' +
-  'vocabulary, not as an answer. Where a category has only two real levels, delete the third name and we will drop the column.'
+  'Two jobs here. TICK OFF each category on the Checklist sheet as you finish it — every answer starts at Yes, so this tick ' +
+  'is the only thing that distinguishes a category you read and agreed with from one nobody has opened. And correct the ' +
+  'level names: they are pre-filled with Simple / Complex / Hero, and the right-hand column shows the variants BWS itself ' +
+  'already has for that category, captured read-only on 2026-09-14 — evidence of the existing vocabulary, not an answer. ' +
+  'Where a category has only two real levels, delete the third name and we will drop the column.'
 levels.getCell('A2').style = noteStyle
-levels.getRow(2).height = 40
+levels.getRow(2).height = 56
 
 levels.addRow([])
-levels.addRow(['Category', 'Family', 'Level 1', 'Level 2', 'Level 3', 'What BWS calls them today', 'Notes'])
+levels.addRow(['Category', 'Family', 'Been through it?', 'Level 1', 'Level 2', 'Level 3', 'What BWS calls them today', 'Notes'])
 headerRow(levels, 4)
 
 categories.forEach((cat, i) => {
-  const row = levels.addRow([cat.name, cat.family, 'Simple', 'Complex', 'Hero', BOILERPLATE_VARIANTS[cat.slug] ?? '', ''])
+  const row = levels.addRow([cat.name, cat.family, '', 'Simple', 'Complex', 'Hero', BOILERPLATE_VARIANTS[cat.slug] ?? '', ''])
   row.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: INK } }
   row.getCell(2).font = { name: 'Calibri', size: 10, color: { argb: MUTED } }
-  for (const c of [3, 4, 5]) {
+  for (const c of [3, 4, 5, 6]) {
     row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TICK_BG } }
     row.getCell(c).alignment = { horizontal: 'center' }
   }
-  row.getCell(6).font = { name: 'Calibri', size: 9, color: { argb: MUTED } }
-  for (const c of [1, 6, 7]) row.getCell(c).alignment = { wrapText: true, vertical: 'top' }
+  row.getCell(7).font = { name: 'Calibri', size: 9, color: { argb: MUTED } }
+  for (const c of [1, 7, 8]) row.getCell(c).alignment = { wrapText: true, vertical: 'top' }
   if (i % 2 === 1) {
-    for (const c of [1, 2, 6, 7]) row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BAND_BG } }
+    for (const c of [1, 2, 7, 8]) row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BAND_BG } }
   }
+})
+
+const levelsLast = levels.rowCount
+// Left BLANK, never pre-filled: this tick is the one thing in the workbook
+// that says a human looked, so it is the one thing a default would destroy.
+addValidation(levels, `C5:C${levelsLast}`, {
+  type: 'list',
+  allowBlank: true,
+  formulae: ['"Done,Part way,Not yet"'],
+  showErrorMessage: false,
+})
+levels.addConditionalFormatting({
+  ref: `C5:C${levelsLast}`,
+  rules: [
+    {
+      type: 'cellIs',
+      operator: 'equal',
+      formulae: ['"Done"'],
+      priority: 1,
+      style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFD8F0DC' } }, font: { color: { argb: 'FF14532D' }, bold: true } },
+    },
+    {
+      type: 'cellIs',
+      operator: 'equal',
+      formulae: ['"Part way"'],
+      priority: 2,
+      style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFFDF0CE' } }, font: { color: { argb: 'FF92400E' }, bold: true } },
+    },
+  ],
 })
 
 // ==========================================================================
@@ -506,13 +571,14 @@ const progressRows = [
   { label: 'Every category', sheet: 'Every category', first: 5, last: sharedLast, cols: ['F', 'G', 'H'] },
   { label: 'Checklist', sheet: 'Checklist', first: 5, last: checklistLast, cols: ['H', 'I', 'J'] },
 ]
+// COUNTIF "<>Yes" rather than COUNTA: with every cell pre-filled, a count of
+// non-empty cells is always the row count and says nothing. What is worth
+// showing is how far the default has been departed from.
 for (const p of progressRows) {
   const total = p.last - p.first + 1
   const row = intro.addRow(['', p.label, total])
   p.cols.forEach((col, i) => {
-    row.getCell(4 + i).value = {
-      formula: `COUNTA('${p.sheet}'!${col}${p.first}:${col}${p.last})`,
-    }
+    row.getCell(4 + i).value = { formula: `COUNTIF('${p.sheet}'!${col}${p.first}:${col}${p.last},"<>${DEFAULT_ANSWER}")` }
   })
   row.getCell(2).font = { name: 'Calibri', size: 11, color: { argb: INK } }
   for (let c = 3; c <= 6; c += 1) {
@@ -520,8 +586,17 @@ for (const p of progressRows) {
     row.getCell(c).font = { name: 'Calibri', size: 11, color: { argb: MUTED } }
   }
 }
+
+const reviewedRow = intro.addRow(['', 'Categories ticked off', categories.length])
+reviewedRow.getCell(4).value = { formula: `COUNTIF('Level names'!C5:C${levelsLast},"Done")` }
+reviewedRow.getCell(2).font = { name: 'Calibri', size: 11, color: { argb: INK } }
+for (let c = 3; c <= 6; c += 1) {
+  reviewedRow.getCell(c).alignment = { horizontal: 'center' }
+  reviewedRow.getCell(c).font = { name: 'Calibri', size: 11, color: { argb: MUTED } }
+}
+
 intro.addRow([])
-const progressNote = intro.addRow(['', 'Answered counts refresh when the file is opened in Excel.'])
+const progressNote = intro.addRow(['', 'Counts refresh when the file is opened in Excel.'])
 progressNote.getCell(2).style = noteStyle
 
 // ==========================================================================
@@ -539,5 +614,6 @@ console.log(`categories      ${categories.length}`)
 console.log(`questions       ${requirements.length} total`)
 console.log(`  hoisted       ${sharedReference.length} commercial questions, identical in all 17 categories`)
 console.log(`  on Checklist  ${itemRows.length} item-level rows`)
-console.log(`tick decisions  ${(sharedReference.length + itemRows.length) * TICK_COLUMNS.length}`)
+console.log(`cells           ${(sharedReference.length + itemRows.length) * TICK_COLUMNS.length}, every one pre-filled "${DEFAULT_ANSWER}"`)
+console.log(`                the job is striking out what we can quote WITHOUT`)
 console.log(`\nwrote ${outPath}`)

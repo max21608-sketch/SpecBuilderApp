@@ -3,15 +3,16 @@
 **Raised 2026-09-16 by Max, after the review with Matthew.**
 
 Two routes to the same answer, both generated from the seed files. **The
-interview is the one to use.** The workbook is kept because it is the same
-decision written down, and some people would rather read than talk.
+workbook is the one to use** (Max, 2026-09-16). The interview is kept because
+it is the same decision spoken rather than typed.
 
 | | Built by | Asks | Costs Matthew |
 |---|---|---|---|
-| **Interview pack** | `tools/tgq-interview.mjs` | 62 questions, spoken | 5 chats, 20–30 min each |
-| Workbook | `tools/tgq-checklist.mjs` | 1,368 cells, typed | a long afternoon |
+| **Workbook** | `tools/tgq-checklist.mjs` | 1,368 cells, **all pre-filled Yes** | strike out what we can quote without |
+| Interview pack | `tools/tgq-interview.mjs` | 62 questions, spoken | 5 chats, 20–30 min each |
 
-Answers come back through `tools/tgq-answers.mjs` either way.
+Interview answers come back through `tools/tgq-answers.mjs`; the workbook comes
+back as the workbook.
 
 ## What TGQ is
 
@@ -42,7 +43,47 @@ the 45 boilerplate product codes captured on 2026-09-14 come in `, Simple` /
 across cabinetry. Both routes show a category's existing BWS variants and let
 Matthew rename the levels to whatever the business actually says.
 
-## Why the interview is 62 questions and not 728
+## The workbook
+
+`node tools/tgq-checklist.mjs` writes `out/TGQ-checklist-<date>.xlsx`: five
+sheets, dropdowns of Yes / No / N/A / ?, one long filterable Checklist sheet
+plus the commercial block hoisted onto its own.
+
+### Every cell starts at Yes
+
+**The job is striking out what we can quote WITHOUT, not ticking 1,368 cells to
+say what we need.** That pre-fill is not an invented position: all 728
+questions are required of everything today, so Yes everywhere *is* the current
+state, and the value in the returned file is entirely in what Matthew takes
+away.
+
+Two consequences follow, and both are built in rather than left to be noticed:
+
+- **Colour marks the departures, not the default.** A green wall of 1,368 Yeses
+  would hide the handful of real decisions in it, so Yes is left plain and
+  No / N/A / ? are picked out. The progress table counts cells changed *away*
+  from Yes — `COUNTIF "<>Yes"`, because with everything pre-filled a count of
+  non-empty cells is always the row count and says nothing.
+- **A blank cell no longer proves nobody looked.** This is the real cost of the
+  pre-fill: a category Matthew never opened is indistinguishable from one he
+  read and agreed with, and the second is a decision while the first is a
+  silence. The **"Been through it?"** column on the Level names sheet recovers
+  it — Done / Part way / Not yet, seventeen ticks rather than 1,368, left blank
+  and never pre-filled, because it is the one cell in the workbook whose whole
+  job is to say a human looked.
+
+### The hoist
+
+The commercial 17 are byte-identical everywhere — asserted by
+`assertSharedBlockIdentical`, not assumed — so they are asked once instead of
+seventeen times. 2,184 cells become 1,368.
+
+**N/A earns its place in both routes.** Several questions sit on sheets they do
+not belong on — the Consoles sheet asks for `Stitching spec` and `Stud spec`,
+the Dining tables sheet asks whether the item is fully outdoor. Saying N/A
+prunes the matrix at the same sitting, by the only person who can.
+
+## Why the interview asks 62 questions and not 728
 
 **The 17 cheat sheets repeat each other.** 728 requirement rows are only **62
 distinct questions**: "Stitching spec" is on fifteen sheets, "Dimensions" on
@@ -57,7 +98,7 @@ is recorded as an exception row against that category.
 The workbook cannot do this, which is why it is the slower route: it asks per
 category because a spreadsheet cell has to belong to a row.
 
-## The pack
+## The interview pack, if he would rather talk
 
 `node tools/tgq-interview.mjs` writes six files to `out/tgq-interview/`:
 
@@ -123,22 +164,6 @@ It refuses, rather than guesses, on three things:
   the exact question list it was built from.
 - **An exception naming a category that does not ask that question.**
 - **A value that is not one of the five.** Blank is not "No".
-
-## The workbook, if he would rather read
-
-`node tools/tgq-checklist.mjs` writes `out/TGQ-checklist-<date>.xlsx`: five
-sheets, dropdowns of Yes / No / N/A / ?, conditional formatting, one long
-filterable Checklist sheet plus the commercial block hoisted onto its own.
-
-The hoist is the same observation the interview is built on, applied once: the
-commercial 17 are byte-identical everywhere — asserted by
-`assertSharedBlockIdentical`, not assumed — so they are asked once instead of
-seventeen times. 2,184 ticks become 1,368.
-
-**N/A earns its place in both routes.** Several questions sit on sheets they do
-not belong on — the Consoles sheet asks for `Stitching spec` and `Stud spec`,
-the Dining tables sheet asks whether the item is fully outdoor. Saying N/A
-prunes the matrix at the same sitting, by the only person who can.
 
 ## What comes back, and what happens to it
 
