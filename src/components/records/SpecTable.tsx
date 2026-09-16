@@ -39,6 +39,12 @@ export type SpecRecord = {
   category_name: string | null; category_family: string | null; requirements_authored: boolean;
   spec_total: string; spec_settled: string; spec_tbc: string; spec_missing: string;
   ready_total: string; ready_settled: string; ready_tbc: string; ready_missing: string;
+  level: string | null;
+  /** Derived per read, never stored: see /api/records. */
+  waiting: number;
+  /** null where the record has no level — not the same as "nothing is blocking". */
+  to_quote_outstanding: number | null;
+  to_quote_waiting: number;
 };
 
 const DOTS: Record<RecordUrgency, string> = {
@@ -198,6 +204,7 @@ export default function SpecTable({
                   <th className="text-left font-medium px-3 py-2">Qty</th>
                   <th className="text-left font-medium px-3 py-2">Specs captured</th>
                   <th className="text-left font-medium px-3 py-2">Category</th>
+                  <th className="text-left font-medium px-3 py-2">Needed to quote</th>
                   <th className="text-left font-medium px-3 py-2">Spec fields</th>
                   <th className="text-left font-medium px-3 py-2">Readiness</th>
                 </tr>
@@ -209,7 +216,10 @@ export default function SpecTable({
                   const anyMissing = n(record.spec_missing) + n(record.ready_missing) > 0;
                   const urgency = recordUrgency({
                     outstanding,
-                    allChased: false,
+                    // Everything outstanding on this record has been asked and
+                    // nobody has replied yet. That is a different state from
+                    // "nobody has done anything", and the dot says so.
+                    allChased: outstanding > 0 && record.waiting >= outstanding,
                     specsAgreedBy: programme?.specsAgreedBy ?? null,
                     today,
                   });
@@ -259,6 +269,30 @@ export default function SpecTable({
                         {record.category_name ?? <span className="text-neutral-400">no checklist yet</span>}
                         {record.category_name && !record.requirements_authored && (
                           <span className="ml-1 text-xs text-amber-800">(not yet defined)</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {record.to_quote_outstanding === null ? (
+                          <Link
+                            href={`/dashboard/records/${record.id}`}
+                            className="text-amber-800 underline hover:text-amber-900"
+                            title="No level set, so nothing on this record can be sorted into what blocks a quote."
+                          >
+                            Set level
+                          </Link>
+                        ) : record.to_quote_outstanding > 0 ? (
+                          <span className="text-red-700 font-medium">
+                            {record.to_quote_outstanding}
+                            {record.to_quote_waiting > 0 && (
+                              <span className="ml-1 text-xs text-blue-700 font-normal">
+                                ({record.to_quote_waiting} asked)
+                              </span>
+                            )}
+                          </span>
+                        ) : record.category_name ? (
+                          <span className="text-green-700">Can quote</span>
+                        ) : (
+                          <span className="text-neutral-400">—</span>
                         )}
                       </td>
                       <td className="px-3 py-2">

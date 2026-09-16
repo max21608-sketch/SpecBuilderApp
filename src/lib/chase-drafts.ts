@@ -19,7 +19,8 @@
 // ============================================================================
 import { sql } from "@/lib/db";
 import type { Row } from "@/lib/db";
-import { type AnswerState, isSettled } from "@/lib/spec-vocab";
+import { type AnswerState, type ItemLevel, isSettled, normaliseItemLevel } from "@/lib/spec-vocab";
+import { questionTierOrNull, type QuestionTier } from "@/lib/tgq";
 import type { ChaseGroup } from "@/lib/chase-template";
 
 /**
@@ -44,6 +45,15 @@ export type OutstandingQuestion = {
   refs: string;
   categoryId: string | null;
   categoryName: string | null;
+  /** simple | complex | hero, or null where nobody has decided. */
+  level: ItemLevel | null;
+  /** The levels at which this question must be answered before a quote. */
+  tgqLevels: string[];
+  /**
+   * Whether this question holds up a quote — null when the record has no
+   * level, which is a blocker rather than a default (see tgq.ts).
+   */
+  tier: QuestionTier | null;
   requirementId: string;
   requirementKind: "spec_field" | "readiness";
   prompt: string;
@@ -226,10 +236,33 @@ export type CoveredQuestion = {
   prompt: string;
   fieldLabel: string | null;
   currentValueText: string | null;
+  /**
+   * Which half of the email this question was in. Stored as its own column,
+   * deliberately outside `context`: see db/migrations/0020_draft_item_tier.sql.
+   */
+  tier: QuestionTier;
+  /** The order the email printed, kept so an edit re-renders the same email. */
+  recordNo: number;
+  requirementSort: number;
 };
 
+/**
+ * A live question as a coverage row.
+ *
+ * Throws on a level-less record rather than inventing a tier. `groupByContact`
+ * has already blocked those, and the generate route validates again, so
+ * reaching here without a tier is a bug rather than a user error.
+ */
 export function coveredFromQuestion(question: OutstandingQuestion): CoveredQuestion {
+  if (question.tier === null) {
+    throw new Error(
+      `${question.recordLabel} has no level, so no question on it can be sorted into what blocks a quote. It should have been blocked before this point.`,
+    );
+  }
   return {
+    tier: question.tier,
+    recordNo: question.recordNo,
+    requirementSort: question.sortOrder,
     recordId: question.recordId,
     requirementId: question.requirementId,
     answerId: question.answerId,
@@ -250,7 +283,14 @@ export function coveredFromQuestion(question: OutstandingQuestion): CoveredQuest
  */
 export function groupsFromCovered(items: CoveredQuestion[]): ChaseGroup[] {
   const byRecord = new Map<string, ChaseGroup>();
-  for (const item of items) {
+  // Record order, then the cheat sheet's own question order. Stored on the row
+  // so an edit rebuilds the same email: sorting by rendered label here made the
+  // table re-order itself alphabetically after every edit, which reads to the
+  // recipient as the email having changed.
+  const ordered = [...items].sort(
+    (a, b) => a.recordNo - b.recordNo || a.requirementSort - b.requirementSort,
+  );
+  for (const item of ordered) {
     const c = item.context;
     const question = {
       recordId: item.recordId,
@@ -264,19 +304,24 @@ export function groupsFromCovered(items: CoveredQuestion[]): ChaseGroup[] {
       fieldLabel: c.fieldLabel,
       state: c.state,
       currentValue: c.currentValue,
+      tier: item.tier,
     };
-    const group = byRecord.get(item.recordId);
+    // One group per record PER TIER: the email prints everything that blocks a
+    // quote first, so a record with questions in both halves appears in both.
+    const key = `${item.tier}:${item.recordId}`;
+    const group = byRecord.get(key);
     if (group) {
       group.questions.push(question);
       continue;
     }
-    byRecord.set(item.recordId, {
+    byRecord.set(key, {
       recordId: item.recordId,
       recordLabel: c.recordLabel,
       refs: c.refs,
       itemDescription: c.itemDescription,
       area: c.area,
       categoryName: c.categoryName,
+      tier: item.tier,
       questions: [question],
     });
   }
@@ -292,7 +337,7 @@ export type BlockedRecord = {
   itemDescription: string;
   designer: string | null;
   questionCount: number;
-  reason: "no designer on the record" | "no contact for this designer";
+  reason: "no designer on the record" | "no contact for this designer" | "no level on the record";
 };
 
 export type ContactGroup = {
@@ -317,24 +362,36 @@ export function groupByContact(
   const groups = new Map<string, ContactGroup>();
   const blockedByRecord = new Map<string, BlockedRecord>();
 
+  const block = (question: OutstandingQuestion, reason: BlockedRecord["reason"]) => {
+    const existing = blockedByRecord.get(question.recordId);
+    if (existing) {
+      existing.questionCount += 1;
+      return;
+    }
+    blockedByRecord.set(question.recordId, {
+      recordId: question.recordId,
+      recordLabel: question.recordLabel,
+      itemDescription: question.itemDescription,
+      designer: question.designer,
+      questionCount: 1,
+      reason,
+    });
+  };
+
   for (const question of questions) {
     const key = designerKey(question.designer);
     const contact = key ? byCode.get(key) : undefined;
 
     if (!contact) {
-      const existing = blockedByRecord.get(question.recordId);
-      if (existing) {
-        existing.questionCount += 1;
-        continue;
-      }
-      blockedByRecord.set(question.recordId, {
-        recordId: question.recordId,
-        recordLabel: question.recordLabel,
-        itemDescription: question.itemDescription,
-        designer: question.designer,
-        questionCount: 1,
-        reason: key ? "no contact for this designer" : "no designer on the record",
-      });
+      block(question, key ? "no contact for this designer" : "no designer on the record");
+      continue;
+    }
+
+    // A record with no level has no tier, so the email could not say which
+    // half of it blocks the quote. That is the whole point of the message, so
+    // the record is blocked with the reason rather than chased without it.
+    if (question.level === null) {
+      block(question, "no level on the record");
       continue;
     }
 
@@ -374,6 +431,7 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
       r.item_description,
       r.area,
       r.designer,
+      r.level,
       p.bws_project_number,
       coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
                   from spec_record_refs x where x.record_id = r.id), '') as refs,
@@ -383,6 +441,7 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
       q.kind          as requirement_kind,
       q.prompt,
       q.sort_order,
+      q.tgq_levels,
       f.name          as field_label,
       a.id            as answer_id,
       a.version       as answer_version,
@@ -390,12 +449,14 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
       a.value         as current_value
     from spec_records r
     join projects p on p.id = r.project_id
+    join spec_runs run on run.id = r.run_id
     join item_categories c on c.id = r.category_id
     join requirements q on q.category_id = r.category_id
     left join spec_fields f on f.id = q.spec_field_id
     left join spec_answers a on a.record_id = r.id and a.requirement_id = q.id and a.revision_no = 0
     where r.project_id = ${projectId}
       and r.status = 'active'
+      and run.status = 'active'
       and coalesce(a.state, 'missing') in ('missing', 'tbc')
     order by r.record_no, q.sort_order
   `;
@@ -404,6 +465,8 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
 
 function toOutstandingQuestion(row: Row): OutstandingQuestion {
   const recordNo = Number(row.record_no);
+  const level = normaliseItemLevel(row.level);
+  const tgqLevels = Array.isArray(row.tgq_levels) ? row.tgq_levels.map(String) : [];
   return {
     recordId: String(row.record_id),
     recordNo,
@@ -416,6 +479,9 @@ function toOutstandingQuestion(row: Row): OutstandingQuestion {
     refs: String(row.refs ?? ""),
     categoryId: row.category_id === null || row.category_id === undefined ? null : String(row.category_id),
     categoryName: row.category_name === null || row.category_name === undefined ? null : String(row.category_name),
+    level,
+    tgqLevels,
+    tier: questionTierOrNull({ tgqLevels }, level),
     requirementId: String(row.requirement_id),
     requirementKind: String(row.requirement_kind) === "readiness" ? "readiness" : "spec_field",
     prompt: String(row.prompt ?? ""),
@@ -459,6 +525,7 @@ export async function loadQuestionsByKey(
       r.item_description,
       r.area,
       r.designer,
+      r.level,
       p.bws_project_number,
       coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
                   from spec_record_refs x where x.record_id = r.id), '') as refs,
@@ -468,6 +535,7 @@ export async function loadQuestionsByKey(
       q.kind          as requirement_kind,
       q.prompt,
       q.sort_order,
+      q.tgq_levels,
       f.name          as field_label,
       a.id            as answer_id,
       a.version       as answer_version,
@@ -514,10 +582,16 @@ export async function loadUncategorisedRecords(projectId: string): Promise<
 }
 
 /**
- * Coverage rows from every sent, tracking-eligible draft on the project.
+ * Coverage rows from every sent draft on the project.
  *
  * Voided and superseded drafts are excluded: a voided send is explicitly no
  * longer claimed to have happened, and a superseded one was never sent at all.
+ *
+ * `tracking_eligible` used to be a third condition. Nothing ever wrote it
+ * false: the case it was for -- recording a send whose coverage was already
+ * stale -- is refused outright by the send gate, so the column described a
+ * path that does not exist. Dropped from the predicate here; the column goes
+ * in a later migration, once the screen has been accepted.
  */
 export async function loadSentCoverage(projectId: string): Promise<
   (CoverageSnapshot & { draftId: string; sentAt: string | null; contactName: string })[]
@@ -531,7 +605,6 @@ export async function loadSentCoverage(projectId: string): Promise<
     join project_contacts c on c.id = d.contact_id
     where d.project_id = ${projectId}
       and d.status = 'sent'
-      and d.tracking_eligible
     order by d.sent_at desc
   `;
   return rows.map((row) => ({

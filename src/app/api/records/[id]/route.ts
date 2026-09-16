@@ -9,7 +9,13 @@ import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
-import { setRecordCategory } from "@/lib/record-category";
+import {
+  setRecordCategory,
+  setRecordLevel,
+  type SetCategoryResult,
+  type SetLevelResult,
+} from "@/lib/record-category";
+import { ITEM_LEVELS } from "@/lib/spec-vocab";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +24,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const rows = await sql`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
-           r.boq_category, r.status, r.version, r.source_line_no, r.category_id,
+           r.boq_category, r.status, r.version, r.source_line_no, r.category_id, r.level,
            p.bws_project_number, p.name as project_name, p.id as project_id,
            run.id as run_id, run.name as run_name,
            c.name as category_name, c.family as category_family, c.requirements_authored
@@ -79,6 +85,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // which is NOT the same as having none outstanding, and the screen says so.
   const answers = await sql`
     select q.id as requirement_id, q.kind, q.prompt, q.help_text, q.section, q.sort_order,
+           q.tgq_levels,
            f.name as field_name, f.json_id, f.field_category,
            a.id as answer_id, a.value, a.state, a.version, a.confirmed_by, a.confirmed_at
     from requirements q
@@ -95,21 +102,36 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   return json({ ok: true, record, refs, attributes, retiredAttributes: retired, answers, categories });
 }
 
-const Patch = z
-  .object({
-    categoryId: z.string().uuid(),
-    version: z.number().int().nonnegative(),
-  })
-  .strict();
+/**
+ * Exactly one of `categoryId` or `level` per request.
+ *
+ * A union rather than two optional fields: each is its own decision, recorded
+ * under its own change-set kind, and a body carrying both would have to pick
+ * one kind for two changes. `level` accepts null — "I do not know yet" is a
+ * real answer and must be reversible.
+ */
+const Patch = z.union([
+  z.object({ categoryId: z.string().uuid(), version: z.number().int().nonnegative() }).strict(),
+  z
+    .object({
+      level: z.enum(ITEM_LEVELS).nullable(),
+      version: z.number().int().nonnegative(),
+    })
+    .strict(),
+]);
 
 /**
- * Sets the record's category, and creates the answer rows that go with it.
+ * Sets the record's category (and creates the answer rows that go with it), or
+ * its item level.
  *
- * This exists because intake no longer blocks on a category: without it, a
- * record imported without one could never acquire one. Creating the answers in
- * the same transaction matters — a category with no answers scores 0/0 and
- * reads as complete, the same class of error as an empty programme rendering
- * as a healthy one.
+ * The category exists because intake no longer blocks on one: without it, a
+ * record imported without a category could never acquire one. Creating the
+ * answers in the same transaction matters — a category with no answers scores
+ * 0/0 and reads as complete, the same class of error as an empty programme
+ * rendering as a healthy one.
+ *
+ * The LEVEL decides which of those questions hold up a quote (0019). Nothing
+ * infers it, so until a person sets one the record has no tier at all.
  */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -129,13 +151,21 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   try {
-    const result = await withTransaction((txn) =>
-      setRecordCategory(txn, {
-        recordId: id,
-        categoryId: parsed.data.categoryId,
-        expectedVersion: parsed.data.version,
-        actor: user.email,
-      }),
+    const body = parsed.data;
+    const result = await withTransaction<SetCategoryResult | SetLevelResult>((txn) =>
+      "categoryId" in body
+        ? setRecordCategory(txn, {
+            recordId: id,
+            categoryId: body.categoryId,
+            expectedVersion: body.version,
+            actor: user.email,
+          })
+        : setRecordLevel(txn, {
+            recordId: id,
+            level: body.level,
+            expectedVersion: body.version,
+            actor: user.email,
+          }),
     );
     return json({ ok: true, ...result });
   } catch (cause) {

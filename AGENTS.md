@@ -131,7 +131,7 @@ reasoning.
 |---|---|
 | `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox |
 | `spec_runs` | A sub-quote, normally one BOQ tab. Name (editable), `source_sheet`, `boq_revision`/`boq_date` (**text**), `header_notes`. Retired, never deleted; two runs may share a name |
-| `spec_records` | One per BOQ line. `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
+| `spec_records` | One per BOQ line. `level` (`simple`/`complex`/`hero`, nullable, a person's decision beside the category — nothing infers it). `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
 | `record_attributes` | What a document SAID about an item: group, label, value, `unit` (dimensions only), the client's own `material_code`, `spec_field_id`, `state` (`confirmed`/`tbc`), source run and page. Multi-valued, requirement-free |
 | `project_notes` | The preamble, per requirement. NOT the chassis `notes` table, which is append-only by trigger and would make a mis-extracted note permanent |
 | `intake_batches` | One delivery of documents. **No status column** — a batch's state is derived from its runs |
@@ -139,8 +139,9 @@ reasoning.
 | `spec_fields` | The BWS register: 56 fields, `json_id` as the key, `column_letter` positional and never joined on. **Owned externally** — see the `external-vocabulary-sync` skill |
 | `item_categories` | The 17 cheat sheets, plus `requirements_authored` |
 | `item_category_aliases` | The words a BOQ actually uses ("Sofa" → Armchairs/Benches/Stools/Sofas) |
-| `requirements` | The cheat sheet as a checklist: `kind` (`spec_field`/`readiness`), `prompt`, `section`, `required_at_gate` (**null everywhere** until gates are authored) |
+| `requirements` | The cheat sheet as a checklist: `kind` (`spec_field`/`readiness`), `prompt`, `section`, `required_at_gate` (**null everywhere** until TG0/TG1/TG2 are authored), `tgq_levels` (0019: the levels at which the question blocks a QUOTE; all three on every row until Matthew's workbook is re-seeded) |
 | `spec_answers` | Per record × requirement × `revision_no`: value, `value_raw`, state, source, confirmed_by/at |
+| `email_drafts` / `email_draft_items` | A chase and the questions it asked, each with the context snapshot it froze and its `tier` (0020) |
 | `intake_runs` | Staging for any document intake. Generic, not BOQ-shaped. `batch_id` groups a pack; `document_kind` selects the prompt, the tool AND the staged shape |
 | `change_sets` | One entry in the trail (0012): who, when, why, the kind, and a link to the document or the uploaded email that caused it. Append-only; `closed_at` is the only column that may be set later |
 | `record_snapshots` | A VERSION of one record (0012): `snapshot_no` per record, the export's own atoms, and the composed cells as they were that day |
@@ -281,8 +282,7 @@ Recording a send must NOT write to `spec_answers`. The obvious design is a
 extraction snapshot taken against that answer for a reason unrelated to the
 answer — and writes a communication event into a business record. "Waiting for
 a reply" is therefore DERIVED: a question is waiting when it is still
-outstanding and some sent, tracking-eligible `email_draft_items` row still
-matches it.
+outstanding and some sent `email_draft_items` row still matches it.
 
 Two consequences that look like omissions and are not:
 
@@ -300,6 +300,56 @@ Only `intro_text` and `closing_text` are author-edited, as plain text; the
 question table is generated from the coverage rows. That is what makes the body
 and the coverage provably the same set — the guarantee the gate rests on. Do
 not add a whole-body HTML editor.
+
+`tracking_eligible` was a third condition on the Waiting query and **nothing
+ever wrote it false**: the case it described — recording a send whose coverage
+was already stale — is refused outright by the gate. The predicate is gone; the
+column goes in a destructive migration once the screen has been accepted.
+
+### A quote is blocked by SOME of the questions, and the email says which
+
+`db/migrations/0019_item_level_and_tgq_levels.sql`, `src/lib/tgq.ts`,
+`src/lib/chase-template.ts`, `docs/plans/tgq-for-matthew.md`
+
+TGQ is the pre-sale gate — enough information to put a price on the item.
+Reporting confirmed / TBC / missing across all 728 cheat-sheet questions says
+how full the form is, not whether a quotation can go out, and only the second
+question is worth anything at tender stage.
+
+Three things carry it, and each is a trap rather than a preference:
+
+- **`requirements.tgq_levels text[]`, not `required_at_gate`.** Matthew answers
+  per question AND per level, so "needed for a hero sofa, not a simple one" is
+  the normal case and a single-valued column cannot hold it. `required_at_gate`
+  stays null and reserved for TG0/TG1/TG2. The seed writes all three levels on
+  all 728 rows — today's position, everything required of everything — so
+  applying the workbook only ever REMOVES entries, and it is a re-seed with no
+  code change. An empty array is a question that never blocks a quote.
+- **A level is REQUIRED before anything is tiered.** `questionTier` does not
+  accept a null level, and `questionTierOrNull` returns null rather than
+  picking a reading: "needed at any level" makes a level-less record look
+  urgent and "needed at none" makes it look quotable, and both are the app
+  answering a question only a person can. A record with no level is a BLOCKER
+  on the drafts screen — with an inline level picker, because 59 records must
+  not mean 59 visits — reads "Set level" in the spec table, and is refused by
+  the generate route with that reason named.
+- **The tier is a COLUMN on `email_draft_items`, never part of
+  `context_snapshot`.** The snapshot is compared with `canonicalJson` to decide
+  whether a sent draft still describes reality, so a field added to it makes
+  every existing row stale at once. Worse, a tier is a reading of the gate
+  model: applying the workbook re-tiers hundreds of questions in one re-seed,
+  which inside the snapshot would 409 every unsent draft and empty Waiting for
+  a reason unrelated to any answer — the `chased_at` trap again. A question
+  moving between the halves is an amber advisory on the card, not a conflict.
+
+The email prints TIER FIRST: a red-bordered banner "Needed before we can quote",
+then the records under it, then a grey "Also outstanding". The banner is a
+one-cell table, because Word's renderer drops borders declared on a `<p>` and
+that banner carries the whole point of the message. `questionTier` is the single
+implementation, called by the drafts inventory, the generate and edit routes,
+the record screen, the spec table and the template — the server reads the tier
+off the live row and a request that tries to SET one is a 400, because the tier
+decides what the email claims is blocking, and the client does not get to say.
 
 ### TOE dates are calendar days, and must never become a `Date`
 
@@ -1114,11 +1164,11 @@ inbox ingestion and M6 VE rounds. Any write to BWS. Automatic email sending.
 SharePoint writes. BWS Messenger and Teams ingestion. The TOE calculator's own
 logic. The post-order/production flow.
 
-**Chase emails are hidden, not deleted.** `src/app/dashboard/drafts/page.tsx`
-redirects and says how to bring it back; the routes, `chase-drafts.ts`,
-`chase-template.ts`, `eml.ts` and their suites are untouched and still green.
-The spec table's Waiting column and the derivation behind it in
-`src/app/api/records/route.ts` were removed with it.
+**Chase emails are back (2026-09-16), with a to-quote tier.** The screen is
+restored with entry points on the projects list and the project overview, the
+Waiting column and its derivation are back in `src/app/api/records/route.ts`
+and `SpecTable`, and a **Needed to quote** column sits beside them. `GET
+/api/drafts` now checks the session like every other draft route.
 
 **Decisions awaiting the user:**
 

@@ -26,14 +26,19 @@ import {
   type AttributeState,
   type AttributeUnit,
   type DimensionSlot,
+  ITEM_LEVELS,
+  ITEM_LEVEL_LABELS,
+  normaliseItemLevel,
 } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
+import { questionTierOrNull, TIER_LABELS, NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
 
 type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
+  tgq_levels: string[] | null;
   field_name: string | null; json_id: number | null; field_category: string | null;
   answer_id: string | null; value: string | null; state: AnswerState; version: number;
   confirmed_by: string | null; confirmed_at: string | null;
@@ -41,7 +46,7 @@ type Answer = {
 type SpecRecord = {
   id: string; record_no: number; item_description: string; product_reference: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
-  source_line_no: number | null; version: number; category_id: string | null;
+  source_line_no: number | null; version: number; category_id: string | null; level: string | null;
   bws_project_number: string; project_name: string; project_id: string;
   run_id: string; run_name: string;
   category_name: string | null; category_family: string | null;
@@ -88,6 +93,7 @@ export default function RecordPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savingCategory, setSavingCategory] = useState(false);
+  const [savingLevel, setSavingLevel] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
   // Optimistic: the image is requested, and the 404 for a record that has none
   // turns it off. Asking first would be a second round trip on every record to
@@ -175,6 +181,23 @@ export default function RecordPage() {
     }
   }
 
+  async function setLevel(next: string) {
+    if (!data) return;
+    setSavingLevel(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/records/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ level: next === "" ? null : next, version: data.record.version }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+    } finally {
+      // Always reset: an HTML error page must not leave the select disabled.
+      setSavingLevel(false);
+    }
+  }
+
   async function setCategory(categoryId: string) {
     if (!data || !categoryId) return;
     setSavingCategory(true);
@@ -249,6 +272,13 @@ export default function RecordPage() {
   if (!data) return <Spinner label="Loading record" />;
 
   const { record, refs, answers, attributes, categories } = data;
+
+  // One implementation of the tier, shared with the drafts screen, the export
+  // counts and the email. A record with no level gets null here and no badge —
+  // the app does not decide what kind of item this is.
+  const recordLevel = normaliseItemLevel(record.level);
+  const tierOf = (answer: Answer) =>
+    questionTierOrNull({ tgqLevels: answer.tgq_levels ?? [] }, recordLevel);
   // Older responses have no `retiredAttributes`; a screen that assumed the key
   // exists would crash on the first record loaded from a cached payload.
   const retiredAttributes = data.retiredAttributes ?? [];
@@ -525,10 +555,32 @@ export default function RecordPage() {
             ))}
           </select>
         </label>
+        {/* The LEVEL decides which of those questions hold up a quote. Nothing
+            infers it from a BOQ line, so until somebody chooses, no question on
+            this record carries a tier and a chase for it is blocked. */}
+        <label className="text-sm text-neutral-600">
+          Level
+          <select
+            value={record.level ?? ""}
+            disabled={savingLevel}
+            onChange={(event) => void setLevel(event.target.value)}
+            className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
+          >
+            <option value="">— not set —</option>
+            {ITEM_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {ITEM_LEVEL_LABELS[level]}
+              </option>
+            ))}
+          </select>
+        </label>
         {!record.category_id && (
           <span className="text-xs text-neutral-500">
             No checklist yet — choosing a category adds its questions. This is a later stage than intake.
           </span>
+        )}
+        {record.category_id && !record.level && (
+          <span className="text-xs text-amber-800">{NO_LEVEL_EXPLANATION}</span>
         )}
       </div>
 
@@ -557,6 +609,11 @@ export default function RecordPage() {
                       </p>
                     )}
                     {answer.help_text && <p className="text-xs text-neutral-400 mt-0.5">{answer.help_text}</p>}
+                    {tierOf(answer) === "to_quote" && (
+                      <p className="mt-1 inline-block text-xs px-2 py-0.5 rounded border text-red-700 border-red-300 bg-red-50">
+                        {TIER_LABELS.to_quote}
+                      </p>
+                    )}
                   </div>
                   <span className={`shrink-0 text-xs px-2 py-0.5 rounded border ${STATE_CLASS[answer.state]}`}>
                     {ANSWER_STATE_LABELS[answer.state]}

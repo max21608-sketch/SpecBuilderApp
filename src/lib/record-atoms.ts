@@ -70,6 +70,8 @@ export type RecordAtoms = {
   status: string;
   categoryId: string | null;
   categoryName: string | null;
+  /** simple | complex | hero, or null where nobody has decided (0019). */
+  level: string | null;
   productReference: string | null;
   designer: string | null;
   boqCategory: string | null;
@@ -84,12 +86,13 @@ export type RecordAtoms = {
 /**
  * 1 — the original shape.
  * 2 — each attribute carries the finish its code resolves to (0018).
+ * 3 — the record carries the item level a TGQ tier is read against (0019).
  *
  * Bumped whenever a field is added, and every addition since 1 is optional on
  * read, so an older version still parses rather than reading as "everything
  * was deleted that day".
  */
-export const RECORD_ATOMS_SCHEMA_VERSION = 2;
+export const RECORD_ATOMS_SCHEMA_VERSION = 3;
 
 function text(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
@@ -190,7 +193,7 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
 
   const recordRows = await exec`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
-           r.boq_category, r.status, r.category_id, r.run_id, r.parent_id, r.split_reason,
+           r.boq_category, r.status, r.category_id, r.level, r.run_id, r.parent_id, r.split_reason,
            p.bws_project_number, p.name as project_name, p.client,
            run.name as run_name,
            c.name as category_name,
@@ -229,6 +232,7 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
       status: String(row.status),
       categoryId: text(row.category_id),
       categoryName: text(row.category_name),
+      level: text(row.level),
       productReference: text(row.product_reference),
       designer: text(row.designer),
       boqCategory: text(row.boq_category),

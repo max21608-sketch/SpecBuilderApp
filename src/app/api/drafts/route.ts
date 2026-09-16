@@ -18,6 +18,7 @@
 //     The client cannot distinguish "the record was retired" from "somebody
 //     answered it" by comparing versions, and those want different words.
 import { sql, json } from "@/lib/db";
+import { getSessionUser } from "@/lib/session";
 import {
   coverageStaleReasons,
   designerKey,
@@ -31,10 +32,18 @@ import {
   type ContextSnapshot,
   type ProjectContact,
 } from "@/lib/chase-drafts";
+import { isQuestionTier } from "@/lib/tgq";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
+  // Every other route under /api/drafts checks this. This one did not, which
+  // left the whole inventory of a project's outstanding questions readable by
+  // anything that got past the middleware — the middleware is the first line,
+  // never the only one.
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
+
   const projectId = new URL(request.url).searchParams.get("projectId");
   if (!projectId) return json({ ok: false, error: "projectId is required." }, 400);
 
@@ -75,6 +84,19 @@ export async function GET(request: Request): Promise<Response> {
     ...new Set(blocked.map((row) => designerKey(row.designer)).filter((code): code is string => Boolean(code))),
   ].sort();
 
+  // Records with a category and no level. `groupByContact` already blocks the
+  // ones carrying questions; this list also catches a record whose questions
+  // are all answered, so the level can be set before the next document lands.
+  const levelless = await sql`
+    select r.id, r.record_no, r.item_description, r.version, p.bws_project_number
+    from spec_records r
+    join projects p on p.id = r.project_id
+    join spec_runs run on run.id = r.run_id
+    where r.project_id = ${projectId} and r.status = 'active' and run.status = 'active'
+      and r.category_id is not null and r.level is null
+    order by r.record_no
+  `;
+
   // A category nobody has authored requirements for scores 0/0 and renders
   // green. Surface it next to the real blockers.
   const unauthored = await sql`
@@ -92,7 +114,7 @@ export async function GET(request: Request): Promise<Response> {
            d.recipient_name, d.recipient_email, d.cc_email, d.project_label,
            d.contact_id, d.contact_version, d.generated_at, d.version,
            d.manually_edited_at, d.manually_edited_by,
-           d.sent_at, d.sent_by, d.voided_at, d.voided_by, d.void_reason, d.tracking_eligible,
+           d.sent_at, d.sent_by, d.voided_at, d.voided_by, d.void_reason,
            c.name as contact_name, c.email as contact_email
     from email_drafts d
     join project_contacts c on c.id = d.contact_id
@@ -105,7 +127,7 @@ export async function GET(request: Request): Promise<Response> {
     ? await sql`
         select i.draft_id, i.record_id, i.requirement_id, i.revision_no, i.answer_id,
                i.snapshot_answer_version, i.record_version, i.context_snapshot,
-               i.prompt_text, i.field_label, i.current_value_text, i.sort_order
+               i.prompt_text, i.field_label, i.current_value_text, i.sort_order, i.tier
         from email_draft_items i
         where i.draft_id = any(${draftRows.map((d) => String(d.id))}::uuid[])
         order by i.sort_order
@@ -152,6 +174,12 @@ export async function GET(request: Request): Promise<Response> {
           ? null
           : String(row.current_value_text),
       liveState: live?.state ?? null,
+      tier: isQuestionTier(row.tier) ? row.tier : null,
+      // Advisory, never a stale reason: a question moving between the two
+      // halves is a gate revision, not a change to any answer, and making it
+      // stale would 409 every draft the moment the TGQ workbook is applied.
+      tierChanged: isQuestionTier(row.tier) && live?.tier != null && live.tier !== row.tier,
+      liveTier: live?.tier ?? null,
       staleReasons,
     });
     itemsByDraft.set(String(row.draft_id), list);
@@ -193,10 +221,19 @@ export async function GET(request: Request): Promise<Response> {
       suggestedCodes,
       uncategorised,
       unauthored,
+      levelless: levelless.map((row) => ({
+        recordId: String(row.id),
+        recordLabel: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+        itemDescription: String(row.item_description ?? ""),
+        version: Number(row.version),
+      })),
       totals: {
         outstanding: outstanding.length,
         specField: specFieldOutstanding.length,
         readiness: readinessOutstanding.length,
+        toQuote: outstanding.filter((q) => q.tier === "to_quote").length,
+        later: outstanding.filter((q) => q.tier === "later").length,
+        noLevel: outstanding.filter((q) => q.tier === null).length,
         waiting: waiting.size,
         blockedRecords: blocked.length + uncategorised.length + unauthored.length,
       },

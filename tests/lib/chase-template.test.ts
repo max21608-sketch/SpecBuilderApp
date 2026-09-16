@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildChaseEmail,
   buildChaseSubject,
+  defaultIntro,
   escapeHtml,
   londonGreeting,
   type ChaseGroup,
@@ -25,6 +26,7 @@ function question(overrides: Partial<ChaseGroup["questions"][number]> = {}) {
     fieldLabel: "Dimensions",
     state: "missing" as const,
     currentValue: null,
+    tier: "to_quote" as const,
     ...overrides,
   };
 }
@@ -37,6 +39,7 @@ function group(overrides: Partial<ChaseGroup> = {}): ChaseGroup {
     itemDescription: "Armchair",
     area: "Signature Suite",
     categoryName: "Armchairs, Benches, Stools, Sofas",
+    tier: "to_quote" as const,
     questions: [question()],
     ...overrides,
   };
@@ -88,14 +91,56 @@ describe("buildChaseSubject", () => {
       ],
     });
     expect(subject).toBe(
-      "P17231 Maybourne Paris — outstanding specification information (3 questions across 2 items)",
+      "P17231 Maybourne Paris — outstanding specification information (3 needed to quote across 2 items)",
     );
   });
 
-  it("singularises one question and one item", () => {
+  it("singularises one item", () => {
     expect(buildChaseSubject({ projectLabel: "P17231", groups: [group()] })).toContain(
-      "(1 question across 1 item)",
+      "(1 needed to quote across 1 item)",
     );
+  });
+
+  // The subject is what decides whether the message is opened today or on
+  // Friday, so what is BLOCKING goes in it, not just a total.
+  it("reports the two tiers separately when both are present", () => {
+    const subject = buildChaseSubject({
+      projectLabel: "P17231",
+      groups: [
+        group({ questions: [question(), question({ requirementId: "q2" })] }),
+        group({
+          recordId: "r2",
+          recordLabel: "P17231-008",
+          tier: "later",
+          questions: [question({ recordId: "r2", tier: "later" })],
+        }),
+      ],
+    });
+    expect(subject).toBe(
+      "P17231 — outstanding specification information (2 needed to quote, 1 further question, across 2 items)",
+    );
+  });
+
+  it("says so plainly when nothing is holding up the quote", () => {
+    const subject = buildChaseSubject({
+      projectLabel: "P17231",
+      groups: [group({ tier: "later", questions: [question({ tier: "later" })] })],
+    });
+    expect(subject).toBe(
+      "P17231 — outstanding specification information (1 question across 1 item — none holding up the quote)",
+    );
+  });
+
+  // A record with questions in both halves is two groups and one item.
+  it("counts a record appearing in both sections once", () => {
+    const subject = buildChaseSubject({
+      projectLabel: "P17231",
+      groups: [
+        group({ questions: [question()] }),
+        group({ tier: "later", questions: [question({ requirementId: "q2", tier: "later" })] }),
+      ],
+    });
+    expect(subject).toContain("across 1 item");
   });
 
   // A draft downloaded from staging must be obviously not the real thing, at
@@ -119,7 +164,8 @@ describe("buildChaseEmail", () => {
         group({ recordId: "r2", recordLabel: "P17231-008", refs: "SX12", itemDescription: "Sofa" }),
       ],
     });
-    expect(body.match(/<table/g)).toHaveLength(2);
+    // Two record tables plus the one-cell banner above them.
+    expect(body.match(/<table/g)).toHaveLength(3);
     expect(body).toContain("P17231-007 · SX11A · Armchair");
     expect(body).toContain("P17231-008 · SX12 · Sofa");
   });
@@ -168,8 +214,10 @@ describe("buildChaseEmail", () => {
     expect(body).not.toContain("class=");
     const cells = body.match(/<t[dh] /g) ?? [];
     expect(cells.length).toBeGreaterThan(0);
+    // A border ON THE CELL, whichever border it is — the banner's is thicker
+    // and red, and a table border would not render at all.
     for (const match of body.match(/<t[dh] [^>]*>/g) ?? []) {
-      expect(match).toContain("border:1px solid #999999");
+      expect(match).toMatch(/style="[^"]*border:\d+px solid/);
     }
   });
 
@@ -222,5 +270,74 @@ describe("buildChaseEmail", () => {
 
   it("is deterministic — the same input twice gives byte-identical output", () => {
     expect(buildChaseEmail(base)).toEqual(buildChaseEmail(base));
+  });
+});
+
+describe("buildChaseEmail — the two tiers", () => {
+  const blocking = group({
+    questions: [question({ prompt: "Dimensions?", tier: "to_quote" })],
+  });
+  const later = group({
+    recordId: "r2",
+    recordLabel: "P17231-008",
+    tier: "later",
+    questions: [question({ recordId: "r2", prompt: "Stitching spec?", tier: "later" })],
+  });
+
+  it("prints everything blocking the quote before everything else", () => {
+    const { body } = buildChaseEmail({ ...base, groups: [later, blocking] });
+    const blockingAt = body.indexOf("Needed before we can quote");
+    const laterAt = body.indexOf("Also outstanding");
+    expect(blockingAt).toBeGreaterThan(-1);
+    expect(laterAt).toBeGreaterThan(-1);
+    // Given to the builder in the wrong order, and still printed in the right
+    // one: the section order is the template's, not the caller's.
+    expect(blockingAt).toBeLessThan(laterAt);
+    expect(body.indexOf("Dimensions?")).toBeLessThan(body.indexOf("Stitching spec?"));
+  });
+
+  it("counts the questions in each banner", () => {
+    const { body } = buildChaseEmail({
+      ...base,
+      groups: [group({ questions: [question(), question({ requirementId: "q2" })] }), later],
+    });
+    expect(body).toContain("Needed before we can quote — 2 questions");
+    expect(body).toContain("Also outstanding — not holding up the quote — 1 question");
+  });
+
+  it("omits a section with nothing in it rather than printing an empty heading", () => {
+    const { body } = buildChaseEmail({ ...base, groups: [blocking] });
+    expect(body).toContain("Needed before we can quote");
+    expect(body).not.toContain("Also outstanding");
+  });
+
+  // Word's renderer drops borders and backgrounds on a <p> and keeps them on a
+  // <td>. The banner carries the whole point of the message, so it is the last
+  // thing that may degrade to plain text.
+  it("draws each banner as a one-cell table, not a bordered paragraph", () => {
+    const { body } = buildChaseEmail({ ...base, groups: [blocking, later] });
+    const banner = body.slice(body.indexOf("<table"), body.indexOf("Needed before we can quote"));
+    expect(banner).toContain("border:2px solid #b91c1c");
+    expect(banner).toContain("<td");
+    expect(body).not.toMatch(/<p[^>]*border:[^>]*>[^<]*Needed before we can quote/);
+  });
+});
+
+describe("defaultIntro", () => {
+  it("names both counts when the email carries both halves", () => {
+    const intro = defaultIntro("P17231 Maybourne Paris", { toQuote: 4, later: 9 });
+    expect(intro).toContain("4 details we need before we can put a price");
+    expect(intro).toContain("9 further points");
+  });
+
+  it("asks only for the quote when nothing else is outstanding", () => {
+    const intro = defaultIntro("P17231", { toQuote: 1, later: 0 });
+    expect(intro).toContain("1 detail below before we can put a price");
+    expect(intro).not.toContain("further");
+  });
+
+  it("says nothing is holding up the quote when nothing is", () => {
+    const intro = defaultIntro("P17231", { toQuote: 0, later: 3 });
+    expect(intro).toContain("Nothing below is holding up the quote");
   });
 });

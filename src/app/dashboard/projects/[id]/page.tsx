@@ -749,7 +749,15 @@ function ProjectOverview() {
         </div>
       </form>
 
-      <h2 className="mt-8 font-medium text-neutral-900">Contacts</h2>
+      <div className="mt-8 flex flex-wrap items-baseline gap-3">
+        <h2 className="font-medium text-neutral-900">Contacts</h2>
+        <Link
+          href={`/dashboard/drafts?projectId=${project.id}`}
+          className="text-sm text-neutral-600 underline hover:text-neutral-900"
+        >
+          Chase what is missing
+        </Link>
+      </div>
       <p className="mt-1 text-xs text-neutral-500">
         Who to ask about this project. The designer code matches the BOQ&rsquo;s own wording and is what ties a
         record&rsquo;s questions to a person.

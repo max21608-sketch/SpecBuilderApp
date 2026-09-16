@@ -32,6 +32,9 @@ function question(overrides: Partial<OutstandingQuestion> = {}): OutstandingQues
     refs: "SX11A",
     categoryId: "cat-1",
     categoryName: "Armchairs, Benches, Stools, Sofas",
+    level: "complex",
+    tgqLevels: ["simple", "complex", "hero"],
+    tier: "to_quote",
     requirementId: "req-1",
     requirementKind: "spec_field",
     prompt: "Seat height (SH)?",
@@ -297,5 +300,72 @@ describe("canonicalJson", () => {
   it("treats null and missing consistently", () => {
     expect(canonicalJson({ a: null })).toBe('{"a":null}');
     expect(canonicalJson({ a: undefined })).toBe("{}");
+  });
+});
+
+describe("groupByContact — the item level", () => {
+  const contact: ProjectContact = {
+    id: "c1",
+    name: "Tristan Auer",
+    email: "t@example.test",
+    organisation: null,
+    role: "designer",
+    designerCode: "LCS",
+    version: 1,
+  };
+
+  // A record with no level has no tier, so an email about it could not say
+  // which half it belonged in — which is the whole point of the message.
+  it("blocks a record with no level, even when there is somebody to ask", () => {
+    const { groups, blocked } = groupByContact([question({ level: null, tier: null })], [contact]);
+    expect(groups).toEqual([]);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]?.reason).toBe("no level on the record");
+  });
+
+  it("counts every blocked question but reports the record once", () => {
+    const { blocked } = groupByContact(
+      [
+        question({ level: null, tier: null }),
+        question({ level: null, tier: null, requirementId: "req-2" }),
+      ],
+      [contact],
+    );
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]?.questionCount).toBe(2);
+  });
+
+  it("reports the missing contact first when both are missing", () => {
+    // Nobody to ask is the more basic problem: setting a level on a record
+    // nobody can be asked about changes nothing.
+    const { blocked } = groupByContact([question({ level: null, tier: null, designer: null })], [contact]);
+    expect(blocked[0]?.reason).toBe("no designer on the record");
+  });
+
+  it("groups a record that has a level, as before", () => {
+    const { groups, blocked } = groupByContact([question()], [contact]);
+    expect(blocked).toEqual([]);
+    expect(groups).toHaveLength(1);
+  });
+});
+
+describe("coverageStaleReasons — the tier", () => {
+  // The tier lives in its own column precisely so this is true: applying the
+  // TGQ workbook re-tiers hundreds of questions at once, and if that read as
+  // staleness every draft would 409 and Waiting would empty, for a reason that
+  // has nothing to do with any answer.
+  it("does not fire when a question changes which half of the email it is in", () => {
+    const live = question({ tier: "later", tgqLevels: [] });
+    const coverage: CoverageSnapshot = {
+      recordId: live.recordId,
+      requirementId: live.requirementId,
+      revisionNo: 0,
+      answerId: live.answerId,
+      snapshotAnswerVersion: live.answerVersion,
+      recordVersion: live.recordVersion,
+      // Snapshotted while the question still counted as blocking.
+      context: contextSnapshot(question({ tier: "to_quote" })),
+    };
+    expect(coverageStaleReasons(coverage, live)).toEqual([]);
   });
 });

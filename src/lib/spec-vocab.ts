@@ -118,6 +118,45 @@ export const RECORD_STATUSES = ["draft", "active", "retired"] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];
 
 /**
+ * How much has to be known before an item of this kind can be PRICED.
+ *
+ * Matthew's vocabulary, and BWS's own: the 45 boilerplate product codes come
+ * in `, Simple` / `, with Metalwork` pairs across upholstery and `Hero`
+ * variants across cabinetry. A simple sofa and a hero sofa need different
+ * amounts of the cheat sheet answered before a quote is possible, which is
+ * what `requirements.tgq_levels` records per question.
+ *
+ * Matches `spec_records_level_check` in 0019. The storage keys stay these
+ * three whatever a category calls them on screen -- "with Metalwork" is a
+ * rename of `complex` for upholstery, not a fourth level.
+ */
+export const ITEM_LEVELS = ["simple", "complex", "hero"] as const;
+export type ItemLevel = (typeof ITEM_LEVELS)[number];
+
+export const ITEM_LEVEL_LABELS: Record<ItemLevel, string> = {
+  simple: "Simple",
+  complex: "Complex",
+  hero: "Hero",
+};
+
+export function isItemLevel(value: unknown): value is ItemLevel {
+  return typeof value === "string" && (ITEM_LEVELS as readonly string[]).includes(value);
+}
+
+/**
+ * Null for anything that is not one of the three, INCLUDING a near miss.
+ *
+ * A level decides whether a question blocks a quote, so a fuzzy read of
+ * "Hero-ish" or "with Metalwork" would put the gate on a guess. The caller
+ * asks a person instead.
+ */
+export function normaliseItemLevel(raw: unknown): ItemLevel | null {
+  if (typeof raw !== "string") return null;
+  const folded = raw.trim().toLowerCase();
+  return isItemLevel(folded) ? folded : null;
+}
+
+/**
  * Who a chase email can be addressed to. `designer` rows additionally carry a
  * `designer_code` that joins to `spec_records.designer`.
  */

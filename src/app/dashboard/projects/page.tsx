@@ -155,6 +155,14 @@ export default function ProjectsPage() {
               >
                 Spec table
               </Link>
+              {/* Asking for what is missing is the stage after intake, and it
+                  is where a KAM spends their week. It gets its own way in. */}
+              <Link
+                href={`/dashboard/drafts?projectId=${project.id}`}
+                className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
+              >
+                Chase
+              </Link>
             </li>
           ))}
         </ul>

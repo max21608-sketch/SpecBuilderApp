@@ -6,6 +6,7 @@
 // counted separately -- a record whose BWS fields are all confirmed but whose
 // deposit is unresolved is not ready, and one number would hide that.
 import { sql, json } from "@/lib/db";
+import { loadOutstanding, loadSentCoverage, questionKey, waitingByQuestion } from "@/lib/chase-drafts";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,7 @@ export async function GET(request: Request): Promise<Response> {
       r.area,
       r.boq_category,
       r.status,
+      r.level,
       r.retired_at,
       r.retired_by,
       r.run_id,
@@ -99,10 +101,50 @@ export async function GET(request: Request): Promise<Response> {
       and r.status = 'retired'
   `;
 
+  // ---- what is awaiting a reply, and what is blocking a quote -------------
+  //
+  // Both DERIVED, never stored. Recording a chase must not write to
+  // spec_answers: that bumps the version M2's extraction snapshots are taken
+  // against, for a reason that has nothing to do with the answer. And a tier is
+  // a reading of the gate model, which a re-seed revises wholesale.
+  //
+  // "Waiting" is a third thing, distinct from settled and from nobody-looked:
+  // it is the difference between work that needs doing and work that needs
+  // following up. "Needed to quote" is a fourth: work that is stopping a
+  // quotation going out today.
+  const [outstanding, coverage] = await Promise.all([
+    loadOutstanding(projectId),
+    loadSentCoverage(projectId),
+  ]);
+  const waiting = waitingByQuestion(outstanding, coverage);
+
+  const perRecord = new Map<string, { waiting: number; toQuote: number; toQuoteWaiting: number }>();
+  for (const question of outstanding) {
+    const entry = perRecord.get(question.recordId) ?? { waiting: 0, toQuote: 0, toQuoteWaiting: 0 };
+    const isWaiting = waiting.has(questionKey(question.recordId, question.requirementId, 0));
+    if (isWaiting) entry.waiting += 1;
+    if (question.tier === "to_quote") {
+      entry.toQuote += 1;
+      if (isWaiting) entry.toQuoteWaiting += 1;
+    }
+    perRecord.set(question.recordId, entry);
+  }
+
   return json({
     ok: true,
     programme,
-    records: rows,
+    records: rows.map((row) => {
+      const counts = perRecord.get(String(row.id));
+      return {
+        ...row,
+        waiting: counts?.waiting ?? 0,
+        // null, not 0, where the record has no level: "nothing is blocking the
+        // quote" and "nobody has said what kind of item this is" are different
+        // answers and the table prints them differently.
+        to_quote_outstanding: row.level === null || row.level === undefined ? null : (counts?.toQuote ?? 0),
+        to_quote_waiting: counts?.toQuoteWaiting ?? 0,
+      };
+    }),
     retiredCount: Number(retiredRows[0]?.n ?? 0),
     includeRetired,
   });

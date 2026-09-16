@@ -8,11 +8,13 @@
 // it is what makes "the email says exactly what the app thinks it asked" a
 // structural fact rather than a hope, and the send gate depends on it.
 //
-// Downloading the .eml records nothing. "I've sent this" is a separate,
+// Downloading the .eml records nothing. "Confirm sent" is a separate,
 // explicit act, and it is refused if anything the email described has changed.
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
+import Link from "next/link";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
+import { TIER_LABELS } from "@/lib/tgq";
 
 export type DraftItem = {
   recordId: string;
@@ -24,6 +26,14 @@ export type DraftItem = {
   currentValueText: string | null;
   liveState: string | null;
   staleReasons: string[];
+  /** Which half of the email this question printed under. */
+  tier: "to_quote" | "later" | null;
+  /**
+   * The question has moved between the two halves since the email was written.
+   * ADVISORY, never a blocker: the tier is a reading of the gate model, not a
+   * claim about an answer, so a TGQ re-seed must not invalidate every draft.
+   */
+  tierChanged: boolean;
 };
 
 export type Draft = {
@@ -49,7 +59,6 @@ export type Draft = {
   voided_at: string | null;
   voided_by: string | null;
   void_reason: string | null;
-  tracking_eligible: boolean;
   items: DraftItem[];
   staleCount: number;
 };
@@ -100,6 +109,15 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
   const sent = draft.status === "sent";
   const voided = draft.status === "voided";
   const editable = draft.status === "draft";
+
+  // Coverage rows in stored order, with a marker on the first row of each half.
+  // The email prints the same two sections; the card showing one flat list is
+  // how a reviewer stops being able to tell which questions block the quote.
+  const rows = draft.items.map((item, index) => ({
+    item,
+    startsTier:
+      item.tier && item.tier !== (draft.items[index - 1]?.tier ?? null) ? item.tier : null,
+  }));
   const noRecipient = !draft.recipient_email;
 
   async function post(path: string, payload: unknown): Promise<boolean> {
@@ -292,10 +310,26 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
-            {draft.items.map((item) => (
-              <tr key={`${item.recordId}:${item.requirementId}`} className={item.staleReasons.length ? "bg-amber-50" : undefined}>
+            {rows.map(({ item, startsTier }) => (
+              <Fragment key={`${item.recordId}:${item.requirementId}`}>
+              {startsTier && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className={`px-3 py-1 text-xs font-medium ${
+                      startsTier === "to_quote" ? "text-red-800 bg-red-50" : "text-neutral-600 bg-neutral-50"
+                    }`}
+                  >
+                    {TIER_LABELS[startsTier]}
+                  </td>
+                </tr>
+              )}
+              <tr className={item.staleReasons.length ? "bg-amber-50" : undefined}>
                 <td className="px-3 py-1.5 text-neutral-500 tabular-nums whitespace-nowrap">
-                  {item.recordLabel} {item.refs && <span className="text-neutral-900">{item.refs}</span>}
+                  <Link href={`/dashboard/records/${item.recordId}`} className="hover:underline">
+                    {item.recordLabel}
+                  </Link>{" "}
+                  {item.refs && <span className="text-neutral-900">{item.refs}</span>}
                 </td>
                 <td className="px-3 py-1.5">{item.prompt}</td>
                 <td className="px-3 py-1.5 text-neutral-600">{item.fieldLabel?.trim() ?? "—"}</td>
@@ -304,6 +338,12 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                   {item.staleReasons.length > 0 && (
                     <span className="text-xs text-amber-800 mr-2">
                       {item.staleReasons.map((reason) => STALE_TEXT[reason] ?? reason).join(", ")}
+                    </span>
+                  )}
+                  {item.tierChanged && item.staleReasons.length === 0 && (
+                    <span className="text-xs text-amber-700 mr-2">
+                      {item.tier === "to_quote" ? "no longer blocking the quote" : "now needed to quote"} —
+                      regenerate to re-order
                     </span>
                   )}
                   {editable && (
@@ -318,6 +358,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                   )}
                 </td>
               </tr>
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -364,7 +405,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
               onClick={() => setDownloadedVersion(draft.version)}
               className="px-2 py-1 rounded text-xs border border-neutral-300 hover:bg-neutral-100 text-neutral-700"
             >
-              Download .eml for Outlook
+              Open in Outlook (.eml)
             </a>
           </span>
         </div>
@@ -399,7 +440,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
         {editable && !confirming && (
           <span className="ml-auto flex items-center gap-2">
             {downloadedVersion !== draft.version && (
-              <span className="text-xs text-neutral-500">Download the .eml before confirming.</span>
+              <span className="text-xs text-neutral-500">Open it in Outlook before confirming.</span>
             )}
             <button
               type="button"

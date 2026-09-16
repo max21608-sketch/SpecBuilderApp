@@ -96,6 +96,9 @@ const AtomSchema = z.object({
   status: z.string(),
   categoryId: z.string().nullable(),
   categoryName: z.string().nullable(),
+  // Added at schema 3. Optional on read, defaulted null, so a version written
+  // before 0019 parses as "nobody had said" rather than failing the screen.
+  level: z.string().nullable().optional().default(null),
   productReference: z.string().nullable(),
   designer: z.string().nullable(),
   boqCategory: z.string().nullable(),
@@ -165,6 +168,7 @@ const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; read: (at
   { field: "designer", label: "Designer", read: (a) => a.designer },
   { field: "boqCategory", label: "BOQ category", read: (a) => a.boqCategory },
   { field: "categoryName", label: "Category", read: (a) => a.categoryName },
+  { field: "level", label: "Level", read: (a) => a.level },
   { field: "status", label: "Status", read: (a) => a.status },
   { field: "runName", label: "Run", read: (a) => a.runName },
   { field: "splitReason", label: "Split reason", read: (a) => a.splitReason },

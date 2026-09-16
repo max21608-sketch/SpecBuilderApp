@@ -82,8 +82,11 @@ describeIfDb("chase drafts", () => {
     runId = run.rows[0].id;
 
     const record = await client.query(
-      `insert into spec_records (project_id, run_id, record_no, status, category_id, item_description, designer, created_by, updated_by)
-       values ($1, $2, 9001, 'active', $3, '__QA Armchair', 'qalcs', 'qa', 'qa') returning id`,
+      // A LEVEL is required before anything on a record can be tiered, and a
+      // record without one is a blocker rather than a chase. Every fixture here
+      // is a complex item; the level-less case has its own test below.
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, level, item_description, designer, created_by, updated_by)
+       values ($1, $2, 9001, 'active', $3, 'complex', '__QA Armchair', 'qalcs', 'qa', 'qa') returning id`,
       [projectId, runId, categoryId],
     );
     recordId = record.rows[0].id;
@@ -457,4 +460,126 @@ describeIfDb("chase drafts", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  // ---- the to-quote tier -------------------------------------------------
+
+  /**
+   * Back to "nobody has answered anything".
+   *
+   * The tests above deliberately answer questions to prove the send gate
+   * notices, so by this point the fixture is partly settled and nothing would
+   * be outstanding to chase.
+   */
+  async function resetAnswers() {
+    await client.query(
+      `update spec_answers set state = 'missing', value = null, confirmed_by = null,
+              confirmed_at = null, updated_by = 'qa'
+       where record_id = $1`,
+      [recordId],
+    );
+    await client.query(`delete from email_drafts where project_id = $1`, [projectId]);
+  }
+
+  it("stores the tier the server read, and refuses one the client tried to set", async () => {
+    // The tier decides what the email CLAIMS is blocking a quote. A client
+    // that could set it could make the message say anything.
+    await resetAnswers();
+    const { POST } = await import("@/app/api/drafts/generate/route");
+    const existing = await currentDrafts("draft");
+    const res = await POST(
+      post({
+        projectId,
+        selections: [
+          {
+            contactId,
+            questions: allQuestions().map((q) => ({ ...q, tier: "later" })),
+          },
+        ],
+        expectedCurrentDrafts: existing.map((d) => ({ id: d.id, version: Number(d.version) })),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await currentDrafts("draft")).toHaveLength(existing.length);
+
+    // And the honest request records the tier read off the live row. Every
+    // seeded requirement is needed at all three levels today.
+    const ok = await generate();
+    expect(ok.status).toBe(201);
+    const draft = (await currentDrafts("draft"))[0];
+    const items = await client.query(
+      `select tier, record_no, requirement_sort from email_draft_items where draft_id = $1`,
+      [draft.id],
+    );
+    expect(items.rows.every((row: { tier: string }) => row.tier === "to_quote")).toBe(true);
+    expect(items.rows.every((row: { record_no: number }) => Number(row.record_no) === 9001)).toBe(true);
+
+    await client.query(`delete from email_drafts where project_id = $1`, [projectId]);
+  });
+
+  it("puts a question its level does not need into the second half of the email", async () => {
+    // Strike the first question off every level but hero, then ask it of a
+    // complex item: outstanding, but not holding up the quote.
+    await resetAnswers();
+    await client.query(`update requirements set tgq_levels = array['hero'] where id = $1`, [String(requirementIds[0])]);
+    try {
+      const res = await generate();
+      expect(res.status).toBe(201);
+      const draft = (await currentDrafts("draft"))[0];
+      const items = await client.query(
+        `select requirement_id, tier from email_draft_items where draft_id = $1`,
+        [draft.id],
+      );
+      const byRequirement = new Map<string, string>(
+        items.rows.map((row: { requirement_id: string; tier: string }) => [row.requirement_id, row.tier]),
+      );
+      expect(byRequirement.get(String(requirementIds[0]))).toBe("later");
+      expect(byRequirement.get(String(requirementIds[1]))).toBe("to_quote");
+
+      const body = String(draft.body);
+      expect(body).toContain("Needed before we can quote");
+      expect(body).toContain("Also outstanding");
+      // The blocking half prints first whatever order the rows arrived in.
+      expect(body.indexOf("Needed before we can quote")).toBeLessThan(body.indexOf("Also outstanding"));
+    } finally {
+      await client.query(
+        `update requirements set tgq_levels = array['simple','complex','hero'] where id = $1`,
+        [String(requirementIds[0])],
+      );
+      await client.query(`delete from email_drafts where project_id = $1`, [projectId]);
+    }
+  });
+
+  it("refuses to chase a record with no level, and writes nothing", async () => {
+    // No level, no tier: the email could not say which half the question was
+    // in, which is the whole point of the message.
+    await resetAnswers();
+    await client.query(`update spec_records set level = null where id = $1`, [recordId]);
+    try {
+      const res = await generate();
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe("questions_ineligible");
+      expect(String(JSON.stringify(body.diff))).toContain("no item level");
+      // Each refusal names the record, so the screen does not render blank
+      // bullets that read as the app having no idea why it said no.
+      expect(body.diff[0].recordLabel).toContain("9001");
+      expect(await currentDrafts()).toHaveLength(0);
+    } finally {
+      await client.query(`update spec_records set level = 'complex' where id = $1`, [recordId]);
+    }
+  });
+
+  it("refuses the whole inventory read without a session", async () => {
+    vi.doMock("@/lib/session", () => ({ getSessionUser: async () => null }));
+    vi.resetModules();
+    try {
+      const { GET } = await import("@/app/api/drafts/route");
+      const res = await GET(new Request(`http://localhost/api/drafts?projectId=${projectId}`));
+      expect(res.status).toBe(401);
+    } finally {
+      vi.doUnmock("@/lib/session");
+      vi.resetModules();
+    }
+  });
+
 });

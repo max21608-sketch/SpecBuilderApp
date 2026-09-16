@@ -21,6 +21,7 @@ const base = (): RecordAtoms => ({
   status: "active",
   categoryId: "cat-1",
   categoryName: "Sofas",
+  level: "hero",
   productReference: null,
   designer: "LCS",
   boqCategory: "Seating",
@@ -191,5 +192,30 @@ describe("diffSnapshots over a whole project's worth of records", () => {
     expect(diff.core).toEqual([{ field: "status", label: "Status", was: "active", now: "retired" }]);
     expect(diff.attributes).toEqual([]);
     expect(diff.answers).toEqual([]);
+  });
+});
+
+describe("diffSnapshots — item level", () => {
+  it("reports a level being decided for the first time", () => {
+    const before = base();
+    before.level = null;
+    const diff = diffSnapshots(before, base());
+    expect(diff.core).toContainEqual({ field: "level", label: "Level", was: null, now: "hero" });
+  });
+
+  it("reads a snapshot written before levels existed, rather than failing the screen", () => {
+    // A v2 snapshot has no `level` key at all. It must parse as "nobody had
+    // said", not throw — the history screen is the one place that must still
+    // render for a record whose versions predate the column.
+    const old = { ...base(), schemaVersion: 2 } as Record<string, unknown>;
+    delete old.level;
+    const parsed = parseAtoms(old);
+    expect(parsed.level).toBeNull();
+    expect(diffSnapshots(parsed, base()).core).toContainEqual({
+      field: "level",
+      label: "Level",
+      was: null,
+      now: "hero",
+    });
   });
 });

@@ -968,6 +968,95 @@ describeIfDb("intake routes", () => {
     expect((await res.json()).code).toBe("category_has_answers");
   });
 
+  // ---- the item level ------------------------------------------------------
+
+  it("sets an item level, records it as its own change, and shows it in the diff", async () => {
+    const recordId = await makeRecord(mainRunId, "__QAX180", "__QA Hero item", true);
+    const { PATCH } = await import("@/app/api/records/[id]/route");
+
+    // Set one, then change it. The first version has no predecessor to diff
+    // against; the second is what proves a level change is legible afterwards.
+    const v1 = (await client.query(`select version from spec_records where id = $1`, [recordId])).rows[0].version;
+    expect((await PATCH(patch({ level: "simple", version: v1 }), params(recordId))).status).toBe(200);
+    const v2 = (await client.query(`select version from spec_records where id = $1`, [recordId])).rows[0].version;
+    expect((await PATCH(patch({ level: "hero", version: v2 }), params(recordId))).status).toBe(200);
+
+    const stored = await client.query(`select level from spec_records where id = $1`, [recordId]);
+    expect(stored.rows[0].level).toBe("hero");
+
+    // Its own kind, not `category_set`: CHANGE_SET_KIND_LABELS is what the
+    // history screen prints, and a level filed under "Category set" is a lie
+    // by label.
+    const changes = await client.query(
+      `select cs.kind from change_sets cs
+       join record_snapshots s on s.change_set_id = cs.id
+       where s.record_id = $1 order by s.snapshot_no desc limit 1`,
+      [recordId],
+    );
+    expect(changes.rows[0].kind).toBe("level_set");
+
+    const { GET } = await import("@/app/api/records/[id]/history/route");
+    const history = await GET(new Request("http://localhost/test"), params(recordId));
+    const body = await history.json();
+    const latest = body.versions[0];
+    expect(latest.kind).toBe("level_set");
+    expect(latest.diff.core).toContainEqual({ field: "level", label: "Level", was: "simple", now: "hero" });
+  });
+
+  it("records nothing when the level is set to what it already was", async () => {
+    const recordId = await makeRecord(mainRunId, "__QAX181", "__QA Simple item", true);
+    const { PATCH } = await import("@/app/api/records/[id]/route");
+
+    const v1 = (await client.query(`select version from spec_records where id = $1`, [recordId])).rows[0].version;
+    expect((await PATCH(patch({ level: "simple", version: v1 }), params(recordId))).status).toBe(200);
+    const v2 = (await client.query(`select version from spec_records where id = $1`, [recordId])).rows[0].version;
+
+    // A history entry saying "set the level to what it already was" is noise
+    // in the one screen that has to stay readable.
+    const before = await client.query(
+      `select count(*)::int n from record_snapshots where record_id = $1`, [recordId],
+    );
+    expect((await PATCH(patch({ level: "simple", version: v2 }), params(recordId))).status).toBe(200);
+    const after = await client.query(
+      `select count(*)::int n from record_snapshots where record_id = $1`, [recordId],
+    );
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+  });
+
+  it("refuses a level outside the vocabulary, and a stale version", async () => {
+    const recordId = await makeRecord(mainRunId, "__QAX182", "__QA Bad level", true);
+    const { PATCH } = await import("@/app/api/records/[id]/route");
+    const version = (await client.query(`select version from spec_records where id = $1`, [recordId])).rows[0].version;
+
+    expect((await PATCH(patch({ level: "gold", version }), params(recordId))).status).toBe(400);
+    // "With Metalwork" is Matthew's display name for a level, not a fourth one.
+    expect((await PATCH(patch({ level: "with Metalwork", version }), params(recordId))).status).toBe(400);
+    expect((await PATCH(patch({ level: "hero", version: version + 5 }), params(recordId))).status).toBe(409);
+
+    const stored = await client.query(`select level from spec_records where id = $1`, [recordId]);
+    expect(stored.rows[0].level).toBeNull();
+  });
+
+  it("reports a level-less record as unable to say what blocks its quote", async () => {
+    const recordId = await makeRecord(mainRunId, "__QAX183", "__QA No level", true);
+    const { GET } = await import("@/app/api/records/route");
+    const res = await GET(new Request(`http://localhost/test?projectId=${projectId}`));
+    const body = await res.json();
+    const row = body.records.find((r: { id: string }) => r.id === recordId);
+
+    // null, not 0: "nothing is blocking the quote" and "nobody has said what
+    // kind of item this is" are different answers.
+    expect(row.to_quote_outstanding).toBeNull();
+
+    const { PATCH } = await import("@/app/api/records/[id]/route");
+    const version = (await client.query(`select version from spec_records where id = $1`, [recordId])).rows[0].version;
+    await PATCH(patch({ level: "simple", version }), params(recordId));
+
+    const after = await (await GET(new Request(`http://localhost/test?projectId=${projectId}`))).json();
+    const updated = after.records.find((r: { id: string }) => r.id === recordId);
+    expect(typeof updated.to_quote_outstanding).toBe("number");
+  });
+
   // ---- export --------------------------------------------------------------
 
   const exportRoute = async (query: string) => {

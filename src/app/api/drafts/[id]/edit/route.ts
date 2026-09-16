@@ -38,6 +38,7 @@ import {
 } from "@/lib/chase-drafts";
 import { TEMPLATE_VERSION, buildChaseEmail } from "@/lib/chase-template";
 import { ANSWER_STATE_LABELS } from "@/lib/spec-vocab";
+import { isQuestionTier } from "@/lib/tgq";
 
 export const maxDuration = 60;
 
@@ -110,7 +111,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // Existing coverage, so retained questions keep their ORIGINAL snapshot.
       const existingRows = await sql`
         select record_id, requirement_id, revision_no, answer_id, snapshot_answer_version,
-               record_version, context_snapshot, prompt_text, field_label, current_value_text
+               record_version, context_snapshot, prompt_text, field_label, current_value_text,
+               tier, record_no, requirement_sort
         from email_draft_items where draft_id = ${id}
       `;
       const existing = new Map<string, CoveredQuestion>();
@@ -131,6 +133,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             row.current_value_text === null || row.current_value_text === undefined
               ? null
               : String(row.current_value_text),
+          // An edit is not a refresh: a retained question keeps the snapshot
+          // the email was written against. The TIER is the exception, because
+          // it is presentation rather than a claim about an answer, and the
+          // body is being re-rendered anyway — a question that has since become
+          // blocking should print under the heading that says so.
+          tier: isQuestionTier(row.tier) ? row.tier : "later",
+          recordNo: row.record_no === null || row.record_no === undefined ? 0 : Number(row.record_no),
+          requirementSort:
+            row.requirement_sort === null || row.requirement_sort === undefined
+              ? 0
+              : Number(row.requirement_sort),
         });
       }
 
@@ -170,7 +183,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             });
             continue;
           }
-          covered.push(prior);
+          covered.push(
+            liveQuestion?.tier
+              ? {
+                  ...prior,
+                  tier: liveQuestion.tier,
+                  recordNo: liveQuestion.recordNo,
+                  requirementSort: liveQuestion.sortOrder,
+                }
+              : prior,
+          );
           continue;
         }
 
@@ -195,6 +217,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           });
           continue;
         }
+        if (liveQuestion.tier === null) {
+          ineligibleAdded.push({
+            recordLabel: liveQuestion.recordLabel,
+            prompt: liveQuestion.prompt,
+            reason: "that record has no item level, so the email cannot say whether it blocks the quote",
+          });
+          continue;
+        }
         covered.push(coveredFromQuestion(liveQuestion));
       }
 
@@ -214,10 +244,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         );
       }
 
-      covered.sort(
-        (a, b) =>
-          a.context.recordLabel.localeCompare(b.context.recordLabel) || a.prompt.localeCompare(b.prompt),
-      );
+      // Record order then the cheat sheet's question order — the same order
+      // generation used. Sorting on the rendered label and prompt re-ordered
+      // the table alphabetically on every edit, which reads to the recipient as
+      // the email having been rewritten.
+      covered.sort((a, b) => a.recordNo - b.recordNo || a.requirementSort - b.requirementSort);
 
       const { subject, body } = buildChaseEmail({
         projectLabel: String(draft.project_label),
@@ -240,12 +271,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           insert into email_draft_items
             (draft_id, record_id, requirement_id, revision_no, answer_id, snapshot_answer_version,
              record_version, context_snapshot, prompt_text, field_label, current_value_text,
-             sort_order, created_by)
+             sort_order, tier, record_no, requirement_sort, created_by)
           values
             (${id}, ${item.recordId}, ${item.requirementId}, 0, ${item.answerId}, ${item.answerVersion},
              ${item.recordVersion}, ${JSON.stringify(item.context)}::jsonb, ${item.prompt},
              ${item.fieldLabel}, ${item.currentValueText ?? ANSWER_STATE_LABELS[item.context.state]},
-             ${sortOrder}, ${user.email})
+             ${sortOrder}, ${item.tier}, ${item.recordNo}, ${item.requirementSort}, ${user.email})
           returning id
         `;
         if (!inserted[0]) throw new Error("a coverage row failed to insert");

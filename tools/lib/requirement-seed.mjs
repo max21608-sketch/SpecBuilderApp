@@ -60,7 +60,7 @@ export function readCategories() {
 
 export function readRequirements() {
   const re =
-    /\(\(select id from item_categories where slug = '([^']+)'\), '(spec_field|readiness)', (?:NULL|\(select id from spec_fields where json_id = (\d+)\)), ('(?:[^']|'')*'), ('(?:[^']|'')*'|NULL), ('(?:[^']|'')*'), (\d+), 'seed', 'seed'\)/g
+    /\(\(select id from item_categories where slug = '([^']+)'\), '(spec_field|readiness)', (?:NULL|\(select id from spec_fields where json_id = (\d+)\)), ('(?:[^']|'')*'), ('(?:[^']|'')*'|NULL), ('(?:[^']|'')*'), (\d+), '\{([a-z,]*)\}', 'seed', 'seed'\)/g
   const rows = []
   const sql = read('db/seed/0003_requirements.sql')
   let m
@@ -73,6 +73,10 @@ export function readRequirements() {
       help: unquote(m[5]),
       section: unquote(m[6]),
       sort: Number(m[7]),
+      // The levels at which this question must be answered to quote. The
+      // workbook's answers land here, so a tool that re-issues the pack can
+      // show what has already been struck out.
+      tgqLevels: m[8] === '' ? [] : m[8].split(','),
     })
   }
   if (rows.length !== 728) throw new Error(`expected 728 requirements, parsed ${rows.length} -- the seed's row shape changed`)

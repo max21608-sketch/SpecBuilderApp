@@ -14,6 +14,7 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { type ItemLevel } from "@/lib/spec-vocab";
 
 export type SetCategoryResult = { recordId: string; categoryId: string; answersCreated: number; version: number };
 
@@ -103,4 +104,61 @@ export async function setRecordCategory(
     answersCreated: created.length,
     version: Number(updated[0].version),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The item's level.
+//
+// Same shape as the category above and for the same reasons, with one
+// difference: changing a level is NOT refused once answers exist. A level does
+// not decide WHICH questions a record is asked -- the category does that -- only
+// which of them hold up a quote. Re-deciding it re-sorts the screen and the next
+// chase email; it orphans nothing, so refusing the change would protect nothing.
+// ---------------------------------------------------------------------------
+export type SetLevelResult = { recordId: string; level: ItemLevel | null; version: number };
+
+export async function setRecordLevel(
+  txn: TxnSql,
+  {
+    recordId,
+    level,
+    expectedVersion,
+    actor,
+  }: { recordId: string; level: ItemLevel | null; expectedVersion: number; actor: string },
+): Promise<SetLevelResult> {
+  const rows = await txn`
+    select id, project_id, level, version from spec_records where id = ${recordId} for update
+  `;
+  const record = rows[0];
+  if (!record) throw new DomainConflictError("not_found", "No such record.", { status: 404 });
+  if (Number(record.version) !== expectedVersion) {
+    throw new DomainConflictError(
+      "record_version_stale",
+      "Someone else changed this record while you had it open. Reload before saving.",
+    );
+  }
+
+  const current = record.level ? (String(record.level) as ItemLevel) : null;
+  if (current === level) {
+    return { recordId, level, version: Number(record.version) };
+  }
+
+  const { changeSetId } = await changeSetForEdit(txn, {
+    projectId: String(record.project_id),
+    actor,
+    kind: "level_set",
+  });
+
+  const updated = await txn`
+    update spec_records set level = ${level}, updated_by = ${actor}
+    where id = ${recordId} and version = ${expectedVersion}
+    returning version
+  `;
+  if (!updated[0]) {
+    throw new DomainConflictError("record_version_stale", "This record changed as you saved. Reload and try again.");
+  }
+
+  await snapshotRecords(txn, [recordId], changeSetId);
+
+  return { recordId, level, version: Number(updated[0].version) };
 }

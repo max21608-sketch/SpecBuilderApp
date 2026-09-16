@@ -34,12 +34,20 @@ import {
   questionKey,
   type OutstandingQuestion,
 } from "@/lib/chase-drafts";
-import { TEMPLATE_VERSION, buildChaseEmail, defaultClosing, defaultIntro } from "@/lib/chase-template";
+import { TEMPLATE_VERSION, buildChaseEmail, defaultClosing, defaultIntro, tierCounts } from "@/lib/chase-template";
 import { ANSWER_STATE_LABELS } from "@/lib/spec-vocab";
 
 export const maxDuration = 60;
 
-const QuestionRef = z.object({ recordId: z.string().uuid(), requirementId: z.string().uuid() });
+/**
+ * `.strict()` so a body carrying a `tier` is a 400 rather than being ignored.
+ *
+ * The tier decides what the email CLAIMS is blocking a quote, and the client
+ * does not get to say. The server reads it off the live locked row, which is
+ * conventions §9 — a gate is enforced on the server, not by which boxes the
+ * screen ticked.
+ */
+const QuestionRef = z.object({ recordId: z.string().uuid(), requirementId: z.string().uuid() }).strict();
 
 const GenerateInput = z.object({
   projectId: z.string().uuid(),
@@ -171,22 +179,46 @@ export async function POST(request: Request): Promise<Response> {
       const allQuestions = input.selections.flatMap((s) => s.questions);
       const live = await loadQuestionsByKey(allQuestions, sql);
 
-      const ineligible: { recordId: string; requirementId: string; reason: string }[] = [];
+      // Each refusal names the record and the question where they are known.
+      // Without them the screen rendered a list of blank bullets, which reads
+      // as the app having no idea why it said no.
+      const ineligible: {
+        recordId: string;
+        requirementId: string;
+        recordLabel: string | null;
+        prompt: string | null;
+        reason: string;
+      }[] = [];
       for (const q of allQuestions) {
         const key = questionKey(q.recordId, q.requirementId, 0);
         const question = live.get(key);
         if (!question) {
-          ineligible.push({ ...q, reason: "that question no longer exists on this record" });
+          ineligible.push({
+            ...q,
+            recordLabel: null,
+            prompt: null,
+            reason: "that question no longer exists on this record",
+          });
           continue;
         }
+        const named = { ...q, recordLabel: question.recordLabel, prompt: question.prompt };
         if (question.recordStatus !== "active") {
-          ineligible.push({ ...q, reason: `${question.recordLabel} is ${question.recordStatus}` });
+          ineligible.push({ ...named, reason: `is ${question.recordStatus}` });
+          continue;
+        }
+        // No level, no tier, so the email could not say which half of it holds
+        // up the quote. Blocked on screen too, with a level picker beside it.
+        if (question.tier === null) {
+          ineligible.push({
+            ...named,
+            reason: "has no item level set, so nothing on it can be sorted into what blocks a quote",
+          });
           continue;
         }
         if (question.state !== "missing" && question.state !== "tbc") {
           ineligible.push({
-            ...q,
-            reason: `${question.recordLabel} — "${question.prompt}" is now ${ANSWER_STATE_LABELS[question.state]}`,
+            ...named,
+            reason: `is now ${ANSWER_STATE_LABELS[question.state]}`,
           });
         }
       }
@@ -230,7 +262,7 @@ export async function POST(request: Request): Promise<Response> {
 
         const covered = questions.map(coveredFromQuestion);
         const groups = groupsFromCovered(covered);
-        const intro = defaultIntro(projectLabel, questions.length);
+        const intro = defaultIntro(projectLabel, tierCounts(groups));
         const closing = defaultClosing();
         const { subject, body } = buildChaseEmail({
           projectLabel,
@@ -267,13 +299,13 @@ export async function POST(request: Request): Promise<Response> {
             insert into email_draft_items
               (draft_id, record_id, requirement_id, revision_no, answer_id, snapshot_answer_version,
                record_version, context_snapshot, prompt_text, field_label, current_value_text,
-               sort_order, created_by)
+               sort_order, tier, record_no, requirement_sort, created_by)
             values
               (${draftId}, ${item.recordId}, ${item.requirementId}, 0,
                ${item.answerId}, ${item.answerVersion}, ${item.recordVersion},
                ${JSON.stringify(item.context)}::jsonb, ${item.prompt},
                ${item.fieldLabel}, ${item.currentValueText ?? ANSWER_STATE_LABELS[item.context.state]},
-               ${sortOrder}, ${user.email})
+               ${sortOrder}, ${item.tier}, ${item.recordNo}, ${item.requirementSort}, ${user.email})
             returning id
           `;
           if (!inserted[0]) throw new Error("a coverage row failed to insert");
