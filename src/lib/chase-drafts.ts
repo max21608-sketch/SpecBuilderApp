@@ -73,6 +73,10 @@ export type ProjectContact = {
   role: "designer" | "client" | "internal";
   designerCode: string | null;
   version: number;
+  /** The modelled Capsule party, where this contact has been linked to one. */
+  capsulePartyId?: number | null;
+  capsulePartyType?: string | null;
+  capsuleSyncedAt?: string | null;
 };
 
 /**

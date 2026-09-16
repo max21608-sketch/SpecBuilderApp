@@ -96,7 +96,12 @@ Each of these is a trap, not a preference.
   no `Job Number`, which this app has never known.
 - **VE rounds preserve the original.** Original spec, VE alternative, client
   accept/reject with date; the accepted version becomes live.
-- **Suppliers by modelled Capsule ID**, never free-text name. **STILL UNMET,
+- **Suppliers and people by modelled Capsule ID**, never free-text name. MET
+  for contacts (`project_contacts.capsule_party_id`, 0022 — the link is
+  optional and an unlinked contact is flagged, because a person Capsule has
+  never heard of must still be chaseable). STILL UNMET for suppliers:
+  `project_finishes.supplier_raw` is free text. Capsule is READ-ONLY here — one
+  GET helper, no write verb, asserted by a test. **STILL UNMET,
   and knowingly:** `project_finishes.supplier_raw` is free text, because there
   is no supplier register in this app and no Capsule data in this repo. The
   `_raw` suffix is the marker that it is what a document said rather than
@@ -142,6 +147,7 @@ reasoning.
 |---|---|
 | `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox |
 | `spec_runs` | A sub-quote, normally one BOQ tab. Name (editable), `source_sheet`, `boq_revision`/`boq_date` (**text**), `header_notes`. Retired, never deleted; two runs may share a name |
+| `project_contacts` | Who to ask. `designer_code` joins `spec_records.designer`; `capsule_party_id` is the modelled person (0022), optional and flagged when absent |
 | `spec_records` | One per BOQ line. `level` (`simple`/`complex`/`hero`, nullable, a person's decision beside the category — nothing infers it). `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
 | `record_attributes` | What a document SAID about an item: group, label, value, `unit` (dimensions only), the client's own `material_code`, `spec_field_id`, `state` (`confirmed`/`tbc`), source run and page. Multi-valued, requirement-free |
 | `project_notes` | The preamble, per requirement. NOT the chassis `notes` table, which is append-only by trigger and would make a mis-extracted note permanent |
@@ -1081,7 +1087,8 @@ scrypt hashes and a `jose` JWT in the `sb_session` cookie; Vercel Blob, private,
 client-direct upload; Vitest.
 
 **Active integrations:** Anthropic (M2 extraction) — a key is set in Vercel
-staging and one verified call has been billed. Microsoft Graph read-only mailbox
+staging and verified calls have been billed, including one against an email.
+Capsule CRM (contacts) — read-only, built 2026-09-16, no token set yet. Microsoft Graph read-only mailbox
 ingestion (M5) is planned and disabled. The region pinning is deliberate: this
 app handles NDA-covered client specification material, so keep any new service
 in the UK.

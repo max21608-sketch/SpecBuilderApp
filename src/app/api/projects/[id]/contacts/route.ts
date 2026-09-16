@@ -12,6 +12,7 @@ import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { CONTACT_ROLES } from "@/lib/spec-vocab";
+import { CapsuleNotConfiguredError, CapsuleUpstreamError, getParty } from "@/lib/capsule";
 
 // Matches the check constraint in 0005. A display name with a comma is fine
 // (eml.ts quotes it); a CR/LF or a second mailbox is not.
@@ -32,7 +33,46 @@ const ContactInput = z.object({
   // constraint requires it already normalised, so normalise here rather than
   // handing the user a constraint violation.
   designerCode: z.string().trim().max(40).nullable().optional(),
+  // The Capsule party this person IS. Optional: a designer Capsule has never
+  // heard of still has to be chaseable today, and a tool that refuses to record
+  // them just moves the record into somebody's head. Unlinked contacts are
+  // flagged on screen instead.
+  capsulePartyId: z.number().int().positive().nullable().optional(),
 });
+
+/**
+ * The party, re-read from Capsule rather than taken from the request.
+ *
+ * A client could otherwise claim any id and any name for it, and the link is
+ * the thing that makes the contact trustworthy. Returns null when no id was
+ * given; throws (and the caller 503s) when Capsule cannot answer, so a contact
+ * is never recorded as linked to something nobody checked.
+ */
+async function resolveParty(capsulePartyId: number | null | undefined, email: string | null) {
+  if (capsulePartyId === null || capsulePartyId === undefined) return null;
+  const party = await getParty(capsulePartyId);
+  if (!party) {
+    return { error: "That Capsule contact no longer exists. Search again." };
+  }
+  // The address has to be one Capsule holds for them, or the link says this is
+  // that person while the email goes somewhere else.
+  if (email && party.emails.length > 0 && !party.emails.includes(email.toLowerCase())) {
+    return {
+      error: `Capsule does not list ${email} for ${party.name}. Choose one of their addresses, or leave it blank.`,
+    };
+  }
+  return { party };
+}
+
+function capsuleErrorResponse(cause: unknown): Response | null {
+  if (cause instanceof CapsuleNotConfiguredError) {
+    return json({ ok: false, code: "capsule_not_configured", error: cause.message }, 503);
+  }
+  if (cause instanceof CapsuleUpstreamError) {
+    return json({ ok: false, code: "capsule_upstream", error: cause.message }, 502);
+  }
+  return null;
+}
 
 function blankToNull(value: string | null | undefined): string | null {
   const trimmed = (value ?? "").trim();
@@ -44,7 +84,8 @@ export const dynamic = "force-dynamic";
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
   const rows = await sql`
-    select id, name, email, organisation, role, designer_code, version
+    select id, name, email, organisation, role, designer_code, version,
+           capsule_party_id, capsule_party_type, capsule_synced_at
     from project_contacts
     where project_id = ${id}
     order by role, name
@@ -93,12 +134,33 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
   }
 
+  const email = blankToNull(parsed.data.email);
+
+  // Resolved BEFORE the insert: a contact is never recorded as linked to a
+  // party nobody read. Capsule unreachable means nothing is written.
+  let linked = null;
+  try {
+    const resolved = await resolveParty(parsed.data.capsulePartyId, email);
+    if (resolved && "error" in resolved) return json({ ok: false, error: resolved.error }, 400);
+    linked = resolved?.party ?? null;
+  } catch (cause) {
+    const response = capsuleErrorResponse(cause);
+    if (response) return response;
+    throw cause;
+  }
+
   const rows = await sql`
-    insert into project_contacts (project_id, name, email, organisation, role, designer_code, created_by, updated_by)
-    values (${id}, ${parsed.data.name}, ${blankToNull(parsed.data.email)},
-            ${blankToNull(parsed.data.organisation)}, ${parsed.data.role}, ${designerCode},
+    insert into project_contacts
+      (project_id, name, email, organisation, role, designer_code,
+       capsule_party_id, capsule_party_type, capsule_synced_at, created_by, updated_by)
+    values (${id}, ${linked ? linked.name : parsed.data.name}, ${email},
+            ${linked?.organisation?.name ?? blankToNull(parsed.data.organisation)},
+            ${parsed.data.role}, ${designerCode},
+            ${linked ? linked.id : null}, ${linked ? linked.type : null},
+            ${linked ? new Date().toISOString() : null},
             ${user.email}, ${user.email})
-    returning id, name, email, organisation, role, designer_code, version
+    returning id, name, email, organisation, role, designer_code, version,
+              capsule_party_id, capsule_party_type, capsule_synced_at
   `;
   return json({ ok: true, contact: rows[0] }, 201);
 }

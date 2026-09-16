@@ -52,6 +52,9 @@ type Contact = {
   role: "designer" | "client" | "internal";
   designerCode: string | null;
   version: number;
+  capsulePartyId?: number | null;
+  capsulePartyType?: string | null;
+  capsuleSyncedAt?: string | null;
 };
 
 type Question = {

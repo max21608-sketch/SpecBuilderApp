@@ -216,7 +216,18 @@ function ProjectOverview() {
 
   const loadContacts = useCallback(async () => {
     const res = await apiFetch<{
-      contacts: { id: string; name: string; email: string | null; organisation: string | null; role: Contact["role"]; designer_code: string | null; version: number }[];
+      contacts: {
+        id: string;
+        name: string;
+        email: string | null;
+        organisation: string | null;
+        role: Contact["role"];
+        designer_code: string | null;
+        version: number;
+        capsule_party_id: number | string | null;
+        capsule_party_type: string | null;
+        capsule_synced_at: string | null;
+      }[];
     }>(`/api/projects/${encodeURIComponent(projectId)}/contacts`);
     if (!res.ok) {
       setError(res.error);
@@ -231,6 +242,11 @@ function ProjectOverview() {
         role: row.role,
         designerCode: row.designer_code,
         version: row.version,
+        // Carried through, not dropped: without these every contact renders
+        // as "Not linked" however well linked it is.
+        capsulePartyId: row.capsule_party_id === null ? null : Number(row.capsule_party_id),
+        capsulePartyType: row.capsule_party_type,
+        capsuleSyncedAt: row.capsule_synced_at,
       })),
     );
   }, [projectId]);

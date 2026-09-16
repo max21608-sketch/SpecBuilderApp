@@ -99,7 +99,8 @@ export async function PATCH(
         designer_code = ${next.designerCode},
         updated_by = ${user.email}
     where id = ${contactId} and project_id = ${id} and version = ${parsed.data.version}
-    returning id, name, email, organisation, role, designer_code, version
+    returning id, name, email, organisation, role, designer_code, version,
+              capsule_party_id, capsule_party_type, capsule_synced_at
   `;
 
   if (!rows[0]) {

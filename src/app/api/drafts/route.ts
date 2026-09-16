@@ -55,7 +55,8 @@ export async function GET(request: Request): Promise<Response> {
   if (!project) return json({ ok: false, error: "No such project." }, 404);
 
   const contactRows = await sql`
-    select id, name, email, organisation, role, designer_code, version
+    select id, name, email, organisation, role, designer_code, version,
+           capsule_party_id, capsule_party_type, capsule_synced_at
     from project_contacts where project_id = ${projectId} order by role, name
   `;
   const contacts: ProjectContact[] = contactRows.map((row) => ({
@@ -66,6 +67,12 @@ export async function GET(request: Request): Promise<Response> {
     role: String(row.role) as ProjectContact["role"],
     designerCode: row.designer_code === null || row.designer_code === undefined ? null : String(row.designer_code),
     version: Number(row.version),
+    capsulePartyId:
+      row.capsule_party_id === null || row.capsule_party_id === undefined ? null : Number(row.capsule_party_id),
+    capsulePartyType:
+      row.capsule_party_type === null || row.capsule_party_type === undefined ? null : String(row.capsule_party_type),
+    capsuleSyncedAt:
+      row.capsule_synced_at === null || row.capsule_synced_at === undefined ? null : String(row.capsule_synced_at),
   }));
 
   const [outstanding, uncategorised, sentCoverage] = await Promise.all([

@@ -93,3 +93,70 @@ client secret's expiry.
 To turn it off: `MAIL_INGESTION_MODE=disabled`, redeploy. To turn it off
 *now*: delete `GRAPH_CLIENT_SECRET`. To turn it off permanently: remove the
 Entra application's permission grant, which cannot be undone by a deploy.
+
+---
+
+# Capsule CRM — contacts (read-only)
+
+This integration **searches and reads** parties in Capsule so a project contact
+can be a modelled person rather than a name somebody typed. It never creates,
+updates or deletes anything in Capsule, and it never will: company systems are
+read-only for this app.
+
+**Built 2026-09-16, disabled by default.** With no `CAPSULE_API_TOKEN` the
+search says so and the manual contact form keeps working.
+
+## The boundary, and how it is held
+
+`src/lib/capsule.ts` has exactly ONE HTTP helper and it hard-codes
+`method: "GET"`. There is no post, patch or delete helper and none may be
+added. `tests/lib/capsule.test.ts` asserts the module's export surface, so a
+write verb fails a test rather than a code review — "we only ever call GET" is
+a habit that erodes, and an absent function is a fact that does not.
+
+Nothing about Capsule is a runtime dependency of chasing anybody. A contact's
+name, email and organisation are cached on `project_contacts`; a Capsule outage
+stops somebody LINKING a contact and never stops them sending an email.
+
+## The link is optional, and flagged
+
+A contact with no Capsule party is recorded and badged **Not linked**. A
+designer whose practice Capsule has never heard of still has to be chaseable
+today, and a tool that refuses to record them only moves the record into
+somebody's head. The badge is what keeps the gap visible.
+
+## Setup
+
+1. Create a Capsule API token for a user with **read access only**, if the plan
+   allows a restricted user. Otherwise note in `docs/plans/README.md` that the
+   token is broader than the code, and that the code is the narrower boundary.
+2. Set `CAPSULE_API_TOKEN` in the deployment's environment.
+3. Trigger a fresh build. A variable change does not alter a running deployment.
+
+| Variable | Purpose |
+|---|---|
+| `CAPSULE_API_TOKEN` | Bearer token for `https://api.capsulecrm.com/api/v2`. Absent means the search is unavailable and says so |
+
+## Verification
+
+- [ ] With no token: the contacts panel's search answers 503 with the reason,
+      and a contact added by hand still saves.
+- [ ] With a token: a search returns parties; choosing one fills the form; the
+      saved contact is badged **Capsule**.
+- [ ] The server re-reads the party on save — a request naming a party id it
+      has not read is not trusted.
+- [ ] An email not listed in Capsule for that party is REPORTED on refresh and
+      left alone, never cleared.
+- [ ] `grep -n "method:" src/lib/capsule.ts` shows one line, and it is `"GET"`.
+
+## Data residency
+
+Capsule is the company's own CRM, not a service this app introduces, so the
+region-pinning rule (`docs/stack.md`) does not decide anything here. Where
+Capsule stores its data is Max's to confirm with Capsule.
+
+## Rollback
+
+Delete `CAPSULE_API_TOKEN` and redeploy. The search goes unavailable with its
+message; every existing contact keeps its cached name, email and organisation,
+and every chase still works.
