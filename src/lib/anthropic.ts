@@ -248,6 +248,7 @@ export type ExtractionFailure = {
     | "no_api_key"
     | "too_large"
     | "transport"
+    | "overloaded"
     | "rate_limited"
     | "server_error"
     | "auth"
@@ -432,7 +433,70 @@ function classifyTransportFailure(cause: unknown, elapsedMs: number): Extraction
     }
   }
 
+  // ==========================================================================
+  // A STREAMED ERROR CARRIES NO STATUS, SO READ THE PAYLOAD.
+  //
+  // The mapping above works on `cause.status`, which an `APIError` from a
+  // non-streaming call has. A STREAM fails differently: Anthropic sends an SSE
+  // `error` event, the SDK rejects `finalMessage()` with an Error whose message
+  // is the raw event, and there is no `.status` anywhere on it. So a real 529
+  // fell through to the branch below and was reported to a reviewer as "The
+  // model could not be reached: {…}" — which reads like this app's network or
+  // this app's fault, when it is Anthropic at capacity and it will very likely
+  // succeed on the next delivery.
+  //
+  // Seen on the AP364b drawing set on 2026-09-16:
+  //   {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+  //
+  // Every mapped type keeps the retryability the status-based branch gives it,
+  // so this only changes what a person is TOLD, never what the queue does.
+  // ==========================================================================
+  const streamed = streamedErrorType(message);
+  if (streamed === "overloaded_error") {
+    return {
+      ok: false,
+      retryable: true,
+      code: "overloaded",
+      error: "The model is overloaded right now. Nothing is wrong with the document — it will be retried.",
+      elapsedMs,
+    };
+  }
+  if (streamed === "rate_limit_error") {
+    return { ok: false, retryable: true, code: "rate_limited", error: "The model is rate limited. It will be retried.", elapsedMs };
+  }
+  if (streamed === "api_error" || streamed === "timeout_error") {
+    return { ok: false, retryable: true, code: "server_error", error: "The model service failed mid-response. It will be retried.", elapsedMs };
+  }
+  if (streamed === "authentication_error" || streamed === "permission_error") {
+    return { ok: false, retryable: false, code: "auth", error: "The model rejected this deployment's credentials.", elapsedMs };
+  }
+  if (streamed === "invalid_request_error" || streamed === "not_found_error") {
+    return { ok: false, retryable: false, code: "invalid_request", error: "The request was refused as invalid.", elapsedMs };
+  }
+
   // A socket, a DNS failure, an abort. Retryable: none of them says anything
   // about the document.
   return { ok: false, retryable: true, code: "transport", error: `The model could not be reached: ${message}`, elapsedMs };
+}
+
+/**
+ * The Anthropic error type inside a streamed `error` event, or null.
+ *
+ * The message is not always pure JSON — the SDK may prefix or wrap it — so the
+ * object is located inside the string rather than the whole string being
+ * parsed. Returns null on anything it cannot read, which lands on the generic
+ * transport branch: an unrecognised failure must never be dressed up as a
+ * recognised one.
+ */
+export function streamedErrorType(message: string): string | null {
+  const start = message.indexOf("{");
+  const end = message.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    const parsed = JSON.parse(message.slice(start, end + 1)) as { error?: { type?: unknown } } | null;
+    const type = parsed?.error?.type;
+    return typeof type === "string" ? type : null;
+  } catch {
+    return null;
+  }
 }
