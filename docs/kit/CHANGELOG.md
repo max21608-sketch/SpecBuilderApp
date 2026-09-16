@@ -229,3 +229,29 @@ policy, and no monitoring or alerting.
   the rule rather than the rule. Where one staged row legitimately targets
   several canonical rows, the staged row is the boundary. Both shapes are now
   described, rather than the old wording being generalised in place.
+
+## 2026-09-16 — the `verify` skill gets the scripts it was describing
+
+The skill told you to seed prefixed test data, write down the IDs, and "delete
+in foreign-key-safe order, children first". Working that order out by hand at
+the end of a verification run — tired, with a half-broken sandbox — is how a
+sweep either misses rows or hits a `restrict` and gets abandoned half-done. The
+order is knowledge, and knowledge belongs in a file that runs.
+
+- **`files/qa-cleanup.mjs`.** Dry run by default, `--apply` writes, prints the
+  resolved host, refuses production without `--yes-production`. Exercised
+  against a real sandbox fixture on 2026-09-16: seven tables, split records
+  before their parents, and a re-run finding nothing.
+- **`files/playwright-session.mjs`.** The logged-in page, the clipboard grant,
+  the dev-mode 404 retry, cookie-sharing downloads and a console/network
+  failure collector. Playwright stays out of `package.json`.
+
+Two things the writing of it found, both worth porting:
+
+- **`attachments`, `status_history` and `messages` carry `entity_type` in two
+  spellings** in this app's sandbox — `spec_record` and `spec_records`,
+  `intake_run` and `intake_runs`. Anything polymorphic that filters on one
+  spelling silently misses the other. The cleanup script matches on
+  `entity_id` alone for exactly this reason.
+- **A QA script must live in the repo root, not the scratchpad**, or `pg` does
+  not resolve. Upstream's wording implies otherwise.
