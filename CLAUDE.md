@@ -886,6 +886,18 @@ The spec table's Waiting column and the derivation behind it in
   `requirements.required_at_gate` is null on all 728 rows and there is no
   `gates` table, so the completion view reports confirmed / TBC / missing and
   nothing per-gate.
+- **TGQ is out with Matthew** (2026-09-16). `tools/tgq-checklist.mjs` builds a
+  workbook from the seed files asking, per category and per **level** — simple
+  / complex / hero, the three-level system Matthew described and BWS's
+  boilerplates already name — which questions gate a QUOTE. Read
+  `docs/plans/tgq-checklist-for-matthew.md` before acting on the answers. Two
+  things it settles and one it does not: the 17 "Project / commercial"
+  questions are byte-identical in all 17 categories and are therefore asked
+  once, asserted by the generator rather than assumed; **N/A** prunes a
+  question off a category's sheet at the same time; and **an item's level is
+  recorded nowhere**, so a TGQ rule has nothing to read until somebody sets a
+  level on a record the way they set a category. Applying the answers is a
+  re-seed plus a migration, not application logic.
 - **Who owns the requirement matrix is undecided** — it currently relies on
   KAM / sales-support knowledge.
 - **The question-to-BWS-field mapping is this repo's judgement, not Matthew's.**

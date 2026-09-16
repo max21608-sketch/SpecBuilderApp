@@ -48,3 +48,7 @@ db/backups/
 
 # Reference material: real client documents, read-only, never committed.
 /docs/docs for building/
+
+# Generated working documents (tools/tgq-checklist.mjs). The generator is the
+# artefact worth keeping; a filled-in copy comes back by email, not by git.
+/out/
