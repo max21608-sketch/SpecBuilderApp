@@ -154,6 +154,14 @@ point of sale to TG1."*
 | **Example** | `Stained oak, 10% sheen, to match BW Sample #00000` *(invented)* |
 | **Cost** | A finish description without its sample number cannot be matched on the bench. |
 
+| | |
+|---|---|
+| **Rule id** | `FMT-GEN-03` |
+| **Rule** | An unsettled value carries `TBC` **once**. Where the document's own wording already says it, nothing is appended, and the wording is never edited to make room. |
+| **Shape** | `<value> TBC`, or `<value as written>` when that value already says TBC |
+| **Example** | `Brass TBC`; and `TBC - Example Fabric AB01234 - 01` *(invented)* left exactly as printed |
+| **Cost** | Appending regardless produced `TBC - … - 01 TBC` and `TBC TBC` on the real pack. That reads as a rendering fault in the one file a human signs off, and a reviewer who finds one in a cell they can check stops trusting the cells they cannot. Stripping the word instead would edit the client's wording; emitting only the marker would lose the candidate the page named. |
+
 ## What the grid does not show
 
 Twenty-two of the 56 seeded spec fields are absent from Matthew's grid: Routing,

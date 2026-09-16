@@ -186,6 +186,42 @@ describe("composeRow", () => {
     expect(renderAttributeValue({ value: "Brass", unit: null, state: "tbc" })).toBe("Brass TBC");
   });
 
+  it("marks TBC once, whether or not the document already said it", () => {
+    // The shape this exists for: the page states nothing about being settled,
+    // so the state is the only thing carrying it.
+    expect(renderAttributeValue({ value: "sofa feet dark-tinted wood as per approved sample", unit: null, state: "tbc" })).toBe(
+      "sofa feet dark-tinted wood as per approved sample TBC",
+    );
+
+    // The shape that produced "... YC04158 - 01 TBC" on the real pack: the
+    // designer has named a candidate AND said it is not settled. The value is
+    // kept exactly as the page wrote it, dash and all, and gains nothing.
+    expect(renderAttributeValue({ value: "TBC - Example Collective Fabric AB01234 - 01", unit: null, state: "tbc" })).toBe(
+      "TBC - Example Collective Fabric AB01234 - 01",
+    );
+    // And the whole-value case, which exported as "TBC TBC".
+    expect(renderAttributeValue({ value: "TBC", unit: null, state: "tbc" })).toBe("TBC");
+
+    // Anywhere in the value, however the page punctuated or cased it: the
+    // question is whether a reader of this cell already sees the marker.
+    expect(renderAttributeValue({ value: "Fabric A, or Fabric B tbc - client to choose", unit: null, state: "tbc" })).toBe(
+      "Fabric A, or Fabric B tbc - client to choose",
+    );
+    expect(renderAttributeValue({ value: "Finish T.B.C.", unit: null, state: "tbc" })).toBe("Finish T.B.C.");
+
+    // Word-bounded: a code that merely contains the letters is a code. Losing
+    // the marker here is the failure that matters -- a cell nobody has decided
+    // reading as a decided one.
+    expect(renderAttributeValue({ value: "Lacquer AB-TBC1", unit: null, state: "tbc" })).toBe("Lacquer AB-TBC1 TBC");
+    expect(renderAttributeValue({ value: "Ottbcloth weave", unit: null, state: "tbc" })).toBe("Ottbcloth weave TBC");
+
+    // A confirmed value is never marked, even when the wording mentions it --
+    // the state is the reviewer's decision and the text is the page's.
+    expect(renderAttributeValue({ value: "Brass, TBC sample approved 14 Sep", unit: null, state: "confirmed" })).toBe(
+      "Brass, TBC sample approved 14 Sep",
+    );
+  });
+
   it("falls back to a confirmed cheat-sheet answer where no attribute claims the field", () => {
     const answers = [{ recordId: "rec-1", specFieldJsonId: 4, value: "Oiled oak" }];
     const row = composeRow(scope({ answers }), record(), [], answers);

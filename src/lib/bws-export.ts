@@ -217,11 +217,51 @@ export type ExportScope = {
 };
 
 /**
+ * A whole-word TBC anywhere in a value, however the page punctuated it.
+ *
+ * Word-bounded on purpose: a product code ending `-TBC1` is a code, and a cell
+ * that treated it as the client's "not decided" marker would silently stop
+ * marking a genuinely unsettled value.
+ */
+const MENTIONS_TBC = /(?:^|[^A-Za-z0-9])T\.?B\.?C\.?(?:$|[^A-Za-z0-9])/i;
+
+/**
  * How a TBC observation reads in a BWS cell.
  *
  * `TBC` must survive the export as itself. A blank cell says "nobody has looked
  * at this"; TBC says "somebody asked and the client has not decided", and those
  * two produce different actions on the shop floor.
+ *
+ * THE MARKER IS ADDED ONCE, NOT ADDED AGAIN.
+ *
+ * This appended " TBC" unconditionally, and the Panther pack writes the word
+ * itself: a COM 1 field reading `TBC – Yarn Collective Tessarae YC04158 - 01`
+ * exported as that plus ` TBC`, and an attribute whose whole value is `TBC`
+ * exported as `TBC TBC`. Both read as a rendering fault in the one file M8 is
+ * judged on, and a reviewer who finds a fault like that in a cell they can
+ * check stops trusting the cells they cannot.
+ *
+ * The two tempting fixes are the actual trap, and neither is taken here:
+ *
+ *   * Stripping the word out of the value EDITS THE CLIENT'S WORDING. The
+ *     value is what a document said, kept verbatim so it can be re-checked
+ *     against its page. `TBC – Yarn Collective…` is the designer naming a
+ *     fabric they have not confirmed, and the dash, the order and the wording
+ *     are theirs.
+ *   * Emitting only the state's marker and dropping the rest LOSES THE
+ *     STATEMENT — the reader would see `TBC` where the page named a candidate
+ *     fabric.
+ *
+ * So the value is never touched, and the marker is appended only when the cell
+ * would otherwise not carry one. The test is "does a reader of this cell
+ * already see TBC", which is why it matches ANYWHERE in the value rather than
+ * only at an end. `parseDimensionFigure` in `@/lib/dimensions` deliberately
+ * asks a NARROWER question — leading or trailing only — because there the
+ * position decides whether the string is a figure at all; nothing is parsed
+ * here.
+ *
+ * A `tbc` attribute with no value at all is still `TBC`: that is the state
+ * saying a question was asked, with nothing yet to say about the answer.
  */
 export function renderAttributeValue(attribute: {
   value: string | null;
@@ -230,8 +270,9 @@ export function renderAttributeValue(attribute: {
 }): string {
   const value = attribute.value?.trim() ?? "";
   const withUnit = value && attribute.unit ? `${value}${attribute.unit}` : value;
-  if (attribute.state === "tbc") return withUnit ? `${withUnit} TBC` : "TBC";
-  return withUnit;
+  if (attribute.state !== "tbc") return withUnit;
+  if (!withUnit) return "TBC";
+  return MENTIONS_TBC.test(withUnit) ? withUnit : `${withUnit} TBC`;
 }
 
 /**
