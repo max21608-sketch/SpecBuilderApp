@@ -45,9 +45,11 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
-import { unitSourceOf } from "@/lib/drawing-document";
+import { measuredRows, unitSourceOf } from "@/lib/drawing-document";
+import { guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
+import PagePreview from "@/components/imports/PagePreview";
 import type { CroppedImage } from "@/lib/pdf-crop";
 import Button from "@/components/ui/Button";
 
@@ -296,9 +298,46 @@ export default function ItemCard({
     );
   }
 
+  // COMPUTED, NEVER STORED — the `proposalBlockers()` rule. `applyViewGuesses`
+  // has already set the slots this returns, so recomputing gives the same
+  // answer and yields the two things the staged rows cannot carry: the REASON
+  // to print beside each amber select, and the dispute on a page whose views do
+  // not settle it. Storing either would freeze a reading that changes the
+  // moment somebody edits a figure.
+  const guess = guessSlotsFromViews(
+    measuredRows(item).map((observation) => ({
+      id: observation.id,
+      labelRaw: observation.labelRaw,
+      value: observation.value ?? observation.valueRaw,
+    })),
+  );
+  const guessWhy = new Map(guess.guesses.map((entry) => [entry.observationId, entry.why]));
+
   return (
     <div className="border border-neutral-200 rounded-lg bg-white">
       {header}
+
+      {/* A KEY MEASUREMENT DISPUTE, WITH THE DRAWING. The views do not agree
+          about which figure is the overall size, so nothing was placed and the
+          page goes here: a question that is unreadable as a list of figures is
+          answerable in two seconds off the drawing. NOT a blocker — the card
+          still commits, with these figures as notes, which is what they were
+          before anything tried to place them. */}
+      {guess.dispute && (
+        <div className="px-4 py-3 border-b border-amber-300 bg-amber-50">
+          <p className="text-xs uppercase tracking-wide text-amber-800">Key measurement dispute</p>
+          <div className="mt-1 flex flex-wrap gap-4">
+            <p className="flex-1 min-w-[16rem] text-sm text-amber-900">
+              {guess.dispute}
+              <span className="block mt-1 text-xs text-amber-800">
+                Nothing has been placed in W, D, H or SH. Set them from the drawing, or leave them as notes and they
+                stay on the item with their labels and figures intact.
+              </span>
+            </p>
+            <PagePreview importId={importId} page={item.page} className="w-72 max-w-full" />
+          </div>
+        </div>
+      )}
 
       {dimensionCell.text && (
         <div className="px-4 py-2 border-b border-neutral-100 bg-neutral-50">
@@ -590,7 +629,13 @@ export default function ItemCard({
                         ))}
                       </select>
                       {observation.slotSuggested && observation.dimensionSlot ? (
-                        <span className="text-[11px] text-amber-700">order assumed W × D × H</span>
+                        <span className="text-[11px] text-amber-700">
+                          {/* A view guess and a positional read are both
+                              suggestions and must not claim the same reason:
+                              one is "this figure is drawn on three views", the
+                              other is "these three were printed in order". */}
+                          {guessWhy.get(observation.id) ?? "order assumed W × D × H"}
+                        </span>
                       ) : null}
                     </div>
                   ) : (

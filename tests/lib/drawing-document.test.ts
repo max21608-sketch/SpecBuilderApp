@@ -29,6 +29,9 @@ import {
   type PackCard,
   type SpecFieldEntry,
   type OccupiedSlot,
+  type DrawingObservation,
+  type StagedDrawings,
+  type UnitSource,
 } from "@/lib/drawing-document";
 import type { AttributeUnit } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
@@ -474,6 +477,125 @@ describe("assertStagedDrawings", () => {
     expect(hasPendingObservations(doc)).toBe(true);
     doc.items[0]!.observations[0]!.reviewStatus = "applied";
     expect(hasPendingObservations(doc)).toBe(false);
+  });
+
+  // ==========================================================================
+  // THE VIEW GUESS, ON READ. The real AP364 set labels its figures FRONT /
+  // SIDE / BACK / TOP / SIDE SECTION, which places nothing, so every one of
+  // those pages arrived with an empty Dimensions question. See
+  // src/lib/dimension-guess.ts for why the repetition across views is
+  // evidence. Applied on READ, never written back, exactly like the slot
+  // upgrade — which is what gives the pack already in the sandbox this
+  // without a second model call.
+  // ==========================================================================
+  const viewPage = (
+    figures: [string, string][],
+    unit: AttributeUnit,
+    unitSource: UnitSource,
+  ): StagedDrawings => ({
+    schemaVersion: 1 as const,
+    kind: "shop_drawings" as const,
+    filename: "set.pdf",
+    documentNotes: null,
+    items: [
+      {
+        id: "item-1",
+        version: 1,
+        page: 3,
+        itemCodeRaw: "S-200",
+        itemNameRaw: "ARMCHAIR",
+        confidence: "high" as const,
+        targets: null,
+        observations: figures.map(([labelRaw, value], index): DrawingObservation => ({
+          id: `obs-${index}`,
+          version: 1,
+          attrGroup: "note" as const,
+          labelRaw,
+          value,
+          valueRaw: value,
+          unit,
+          unitSuggested: unitSource === "figures",
+          unitSource,
+          materialCodeRaw: null,
+          specFieldId: null,
+          dimensionSlot: null,
+          state: "confirmed" as const,
+          stateReason: null,
+          reviewStatus: "pending" as const,
+          reviewedAt: null,
+          reviewedBy: null,
+          applied: null,
+        })),
+      },
+    ],
+  });
+
+  const S200: [string, string][] = [
+    ["FRONT", "110"], ["FRONT", "460"], ["FRONT", "720"], ["FRONT", "5"], ["FRONT", "840"],
+    ["SIDE", "650"], ["SIDE", "790"],
+    ["BACK", "840"],
+    ["TOP", "790"], ["TOP", "840"],
+    ["SIDE SECTION", "720"], ["SIDE SECTION", "460"],
+  ];
+
+  const slots = (doc: ReturnType<typeof assertStagedDrawings>) =>
+    Object.fromEntries(
+      doc.items[0]!.observations
+        .filter((observation) => observation.dimensionSlot)
+        .map((observation) => [observation.dimensionSlot, `${observation.value}${observation.unit}`]),
+    );
+
+  it("places the overall size on a page that labels its figures by view", () => {
+    const doc = assertStagedDrawings(viewPage(S200, "mm", "figures"));
+    expect(slots(doc)).toEqual({ W: "840mm", D: "790mm", H: "720mm", SH: "460mm" });
+  });
+
+  it("marks every one of them suggested, so the card renders them amber", () => {
+    const doc = assertStagedDrawings(viewPage(S200, "mm", "figures"));
+    const placed = doc.items[0]!.observations.filter((observation) => observation.dimensionSlot);
+    expect(placed.every((observation) => observation.slotSuggested)).toBe(true);
+  });
+
+  it("takes the unit from the OVERALL figures when the project default was standing in", () => {
+    // The trap this closes: a shop drawing's figures are mostly COMPONENTS (5,
+    // 110, 460) so `suggestUnit` abstains on the page and the project default
+    // — `cm`, because the specification SHEETS are in centimetres — stood in.
+    // An 840mm armchair then composed as `W8400mm`. The overall figures are
+    // the ones that carry the page's scale, and this is the first point at
+    // which anything knows which they are.
+    const doc = assertStagedDrawings(viewPage(S200, "cm", "project_default"));
+    expect(slots(doc)).toEqual({ W: "840mm", D: "790mm", H: "720mm", SH: "460mm" });
+  });
+
+  it("never overrides a unit the page printed", () => {
+    const doc = assertStagedDrawings(viewPage(S200, "cm", "printed"));
+    expect(slots(doc)).toEqual({ W: "840cm", D: "790cm", H: "720cm", SH: "460cm" });
+  });
+
+  it("leaves a page in centimetres in centimetres", () => {
+    // The S-100 specification sheet: 190 x 79 x 72, and all three under 300.
+    const doc = assertStagedDrawings(
+      viewPage(
+        [
+          ["front elevation width", "190"], ["front elevation height", "72"],
+          ["side elevation width", "79"], ["side elevation height", "72"],
+        ],
+        "cm",
+        "project_default",
+      ),
+    );
+    expect(slots(doc)).toEqual({ W: "190cm", D: "79cm", H: "72cm" });
+  });
+
+  it("leaves an item alone once anything on it carries a slot", () => {
+    // A label the vocabulary recognised, a combined line that was read, or a
+    // person's own choice. Filling the gaps around a decision would be a guess
+    // wearing somebody else's authority.
+    const doc = viewPage(S200, "mm", "figures");
+    doc.items[0]!.observations[0]!.dimensionSlot = "W";
+    doc.items[0]!.observations[0]!.attrGroup = "dimension";
+    const out = assertStagedDrawings(doc);
+    expect(slots(out)).toEqual({ W: "110mm" });
   });
 });
 

@@ -47,6 +47,7 @@ import {
 } from "@/lib/spec-vocab";
 import { parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
 import type { RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
+import { guessSlotsFromViews } from "@/lib/dimension-guess";
 
 // ---- the staged shape ------------------------------------------------------
 
@@ -1341,7 +1342,7 @@ export function assertStagedDrawings(parsed: unknown): StagedDrawings {
   if (!doc || typeof doc !== "object" || doc.kind !== "shop_drawings" || !Array.isArray(doc.items)) {
     throw new Error("This run was not staged as shop drawings. Upload the drawings again.");
   }
-  return upgradeDimensionSlots(doc as StagedDrawings);
+  return applyViewGuesses(upgradeDimensionSlots(doc as StagedDrawings));
 }
 
 /**
@@ -1392,6 +1393,100 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
       touched = true;
     }
     return touched ? { ...item, observations } : item;
+  });
+  return touched ? { ...doc, items } : doc;
+}
+
+/** Every pending row on an item that carries a figure and a unit. */
+export function measuredRows(item: DrawingItem): DrawingObservation[] {
+  return item.observations.filter(
+    (observation) =>
+      observation.reviewStatus === "pending" &&
+      observation.unit !== null &&
+      (observation.attrGroup === "dimension" || observation.attrGroup === "note"),
+  );
+}
+
+/**
+ * Place the overall W, D, H and SH on a page that labels its figures by view.
+ *
+ * READ TIME, NEVER WRITTEN BACK, exactly like `upgradeDimensionSlots` above and
+ * for the same reasons — and with the same consequence, which is the point: the
+ * eleven-document pack already staged in the sandbox gets this with no second
+ * model call and nothing charged again.
+ *
+ * Every slot it sets is `slotSuggested: true`, so the card renders it as an
+ * amber select with the composed cell beside it. See src/lib/dimension-guess.ts
+ * for why the repetition across views is evidence and the magnitudes are not.
+ *
+ * IT NEVER SECOND-GUESSES A PLACED ROW. If any pending measured row on the item
+ * already carries a slot — the staging vocabulary recognised a label, a
+ * combined line was read, or a person chose one — the whole item is left alone.
+ * A guess that filled the gaps around somebody's decision would be a guess
+ * wearing their authority.
+ */
+function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
+  let touched = false;
+  const items = doc.items.map((item) => {
+    const measured = measuredRows(item);
+    if (measured.length === 0) return item;
+    if (measured.some((observation) => observation.dimensionSlot)) return item;
+    const { guesses } = guessSlotsFromViews(
+      measured.map((observation) => ({
+        id: observation.id,
+        labelRaw: observation.labelRaw,
+        value: observation.value ?? observation.valueRaw,
+      })),
+    );
+    if (guesses.length === 0) return item;
+    const slotOf = new Map(guesses.map((guess) => [guess.observationId, guess.slot]));
+
+    // ======================================================================
+    // AND NOW THE UNIT, FROM THE OVERALL FIGURES ONLY.
+    //
+    // `suggestUnit` abstains on a page whose figures disagree, and on a shop
+    // drawing they always disagree: S-200 prints 5, 50, 100 and 125 beside
+    // 840 and 790, because most figures on a shop drawing are COMPONENTS and
+    // components are small whatever the page is drawn in. So every one of
+    // those pages fell through to `projects.default_dimension_unit`, which is
+    // `cm` because the specification SHEETS are in centimetres — and the real
+    // AP364 set carries both conventions in one PDF.
+    //
+    // The result was an 840mm armchair recorded as 840cm, which
+    // `composeDimensionCell` renders as `W8400mm`. Nothing flagged it: a
+    // project default is not a guess the screen apologises for.
+    //
+    // The overall dimensions are the figures that carry the page's scale, and
+    // this is the first point at which anything knows which they are. So
+    // `suggestUnit` is asked again over JUST those, and it is the same rule in
+    // the same order — the page's own figures agreeing — narrowed to the
+    // figures the question is actually about. It only ever OVERRIDES the
+    // project default: a unit the page printed is never touched, and neither
+    // is one a person chose.
+    // ======================================================================
+    const placed = measured.filter((observation) => slotOf.has(observation.id));
+    const fromDefault = placed.filter((observation) => unitSourceOf(observation) === "project_default");
+    const overall = suggestUnit(placed.map((observation) => observation.value ?? observation.valueRaw));
+    const unitFix =
+      fromDefault.length === placed.length && placed.length > 0 && overall.status === "confident"
+        ? overall.unit
+        : null;
+
+    touched = true;
+    return {
+      ...item,
+      observations: item.observations.map((observation) => {
+        const slot = slotOf.get(observation.id);
+        if (!slot) return observation;
+        return {
+          ...observation,
+          attrGroup: "dimension" as AttributeGroup,
+          dimensionSlot: slot,
+          slotSuggested: true,
+          ...(unitFix ? { unit: unitFix, unitSuggested: true, unitSource: "figures" as UnitSource } : {}),
+        };
+      }),
+    };
   });
   return touched ? { ...doc, items } : doc;
 }

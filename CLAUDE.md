@@ -105,14 +105,23 @@ Each of these is a trap, not a preference.
   like it the same way or the data is silently wrong.
 - **Client ref is the pre-sale primary key** (`SX11A`, `FU-209-15`) — a modelled
   field, not free text. One client ref can split into several BWS jobs.
-- **A drawing dimension's unit is never inferred from its size.** The AP364
-  pages mix centimetres and millimetres and state neither. A wrong unit reads as
-  a real measurement and nothing downstream questions it, so the unit resolves
-  in one fixed order and stops: **printed on the page** (the Panther spec sheets
-  do print it), then **the page's own figures agreeing** (`suggestUnit`, which
-  abstains on a mixed page), then **`projects.default_dimension_unit`**, then
-  nothing — and nothing still blocks the card. A project is not more
+- **A drawing dimension's unit is never inferred from ONE figure's size.** The
+  AP364 pages mix centimetres and millimetres and state neither. A wrong unit
+  reads as a real measurement and nothing downstream questions it, so the unit
+  resolves in one fixed order and stops: **printed on the page** (the Panther
+  spec sheets do print it), then **the page's own figures agreeing**
+  (`suggestUnit`, which abstains on a mixed page), then **the OVERALL figures
+  agreeing** once `applyViewGuesses` knows which they are — which overrides a
+  project default and nothing else — then **`projects.default_dimension_unit`**,
+  then nothing, and nothing still blocks the card. A project is not more
   authoritative about a page than the page is, which is why the default is last.
+  The third step was added on 2026-09-16 and it closed a live defect: a shop
+  drawing's figures are mostly COMPONENTS (S-200 prints 5, 50, 110 and 125
+  beside 840 and 790), so `suggestUnit` abstained on every page of the real set
+  and the project default — `cm`, because the specification SHEETS are in
+  centimetres — stood in. An 840mm armchair composed as `W8400mm`, and nothing
+  flagged it, because a project default is not a guess the screen apologises
+  for. The overall figures are the ones that carry a page's scale.
 - **A dimension is one of five slots — W, D, H, SH, Dia — and nothing else.**
   `0011` makes `attr_group = 'dimension'` *mean* that. Everything else a
   document measures (`ARM HEIGHT`, `WIDTH SEAT`, an unlabelled figure off a shop
@@ -840,6 +849,63 @@ and then nothing at all — the card simply looked as though the click had not
 registered. Reload first and report afterwards (`reloadThen` on both drawings
 screens). The reload itself is still required: a refused request means the
 screen is out of date.
+
+### A page that labels its figures by VIEW can still be read
+
+`src/lib/dimension-guess.ts`, `src/lib/drawing-document.ts`
+(`applyViewGuesses`), `src/components/imports/PagePreview.tsx`
+
+The real AP364 shop-drawing set labels its figures by the view they are drawn
+on. S-200 carries twenty-four:
+
+```
+FRONT         110 100 460 125 240 420 520 720 50 5 840
+SIDE          650 790
+BACK          520 840
+TOP           540 790 840
+SIDE SECTION  540 720 300 460 650 790
+```
+
+`normaliseDimensionSlot` places none of them, correctly — "FRONT" is not a
+width — so all twenty-four staged as notes and the item's Dimensions question
+sat empty on a page that states its size four times over.
+
+**The repetition across views is the evidence, and the magnitudes are not.** An
+overall dimension is drawn on every view that shows it, which is a fact about
+orthographic projection rather than about furniture: a WIDTH appears on the
+front, the back and the plan (840), a DEPTH on the side, the section and the
+plan (790), a HEIGHT on the front and the side and never on the plan (720). A
+seat height is the largest remaining figure both elevations state, judged as a
+FRACTION of the height — an absolute range would have to know whether the page
+is in millimetres, which is the thing these pages do not say. Nothing here asks
+whether a number is about right for an armchair; that is the reasoning that
+turns an 8-metre sofa into a plausible one.
+
+Four things are load-bearing:
+
+- **It is a suggestion and it says so.** Every slot is `slotSuggested`, which
+  the card already renders amber with the composed cell beside it — the same
+  treatment `parseCombinedDimensions` gets for reading `80 x 70 x 90`
+  positionally, and the reason the inference is allowed at all. The two must not
+  claim the same reason: one is "this figure is drawn on three views", the other
+  "these three were printed in order", and the card prints whichever applies.
+- **All of them or none.** A page whose views share no figure, or that labels no
+  view, or where the plan and the front disagree about the width, gets NO slots
+  and a **key measurement dispute** — the message plus the page itself rendered
+  on the card, because a question that is unreadable as a list of figures is
+  answerable in two seconds off the drawing. Three slots filled and the fourth
+  silently absent reads as a complete answer. A dispute is not a blocker: the
+  card still commits, with the figures as notes.
+- **It never second-guesses a placed row.** If any pending measured row on the
+  item already carries a slot, the whole item is left alone. A guess that filled
+  the gaps around somebody's decision would be a guess wearing their authority.
+- **Read time, never written back**, like `upgradeDimensionSlots` and
+  `mergeNoteBlocks` — which is what gave the eleven-document pack already staged
+  in the sandbox all of this with no second model call and nothing charged
+  again. Verified against that pack: S-200 `W840 x D790 x H720 x SH460mm`,
+  S-201 `W660 x D685 x H680mm`, S-301 `W550 x D565 x H735mm`, the S-100
+  specification sheet still in centimetres at `W1900 x D790 x H720mm`, and
+  S-100's eight bare figures, UP-101 and S-400 left unplaced with a dispute.
 
 ### A link goes somewhere; a button does something
 
