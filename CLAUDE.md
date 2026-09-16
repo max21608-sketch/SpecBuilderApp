@@ -1024,22 +1024,50 @@ test — and all of it is INERT until something creates a variant.** No variant
 exists, so the `not exists` clause matches nothing and the export behaves
 exactly as before.
 
-**STILL TO BUILD, and two traps found while designing it:**
+**The letter is DERIVED, never stored and never sent by the client.**
+`variantLettersByItem` is a pure function of the staged document, so the review
+screen and the confirm route reach the same answer without either telling the
+other — the `proposalBlockers()` rule, and the reason a letter on the request
+would be a client naming the record its data belongs to. Order is PAGE order
+and it ignores review state: if dismissing page 5 turned page 6 from B into A,
+every letter anybody had written down would mean something else. It folds codes
+with `spec-document`'s `normaliseRef` — the one `findRecordsByRef` matches by,
+NOT `boq-import`'s looser one — or cards would group as one code and resolve to
+different records.
 
-- The confirm path. A code with several cards in one pack is several
-  configurations; confirming a card must find-or-create the variant under each
-  target record and write the attributes THERE. The letter must travel on the
-  confirm request (proposed from page order, the reviewer's to change), or
-  confirming twice makes two variants — `spec_records_parent_variant_key` is
-  what makes find-or-create safe.
+**`ensureVariant` is written and NOT WIRED IN.** It find-or-creates one variant
+per (parent, letter), takes the project row lock before allocating a
+`record_no` (the `boq-concurrency` defect), copies the parent's identity, leaves
+`qty` null, creates the checklist rows, refuses to un-retire a variant somebody
+retired with a reason — and carries THE GUARD: a parent that already holds
+active `record_attributes` cannot be split, because those specs would stay on a
+record the export has stopped shipping and a confirmed fabric would vanish from
+the file. Thirteen records in the sandbox already carry specs; S-200, S-201 and
+S-301 do not, which is why the case in hand is clean.
+
+**STILL TO BUILD, and four traps found while designing it:**
+
+- **A half-wired confirm is worse than none.** The first attempt created the
+  variants and still wrote the attributes to the parent — which the export then
+  stops shipping. It was backed out rather than left compiling.
 - **A variant must NOT be given the client ref.** `resolveDrawingTargets`
   matches records by ref within a run, so copying `S-201` onto its variants
   puts three records with that ref on one run and every drawing card becomes
   AMBIGUOUS — the `SX11A` case, self-inflicted. The ref stays on the parent and
   the confirm resolves parent → variant.
-- **The export's `Client Code` must then come from the PARENT's refs.** A
-  variant has none of its own, so composing that column from the record's own
-  refs would ship a blank client code for every split item.
+- **The reviewer's ticks and the write targets are different lists.**
+  `item.targets.ticked` must stay the PARENT ids — it is echoed back into the
+  staged document and compared against `resolution.suggested` on the next read,
+  so writing variant ids there makes every later confirm fail `targets_changed`.
+  The occupant acknowledgements are keyed on the record the reviewer SAW, so the
+  write loop needs both ids per iteration, not one.
+- **The GET route has to resolve to the variant too.** Re-confirming an
+  already-split card shows the parent's occupants (a heading holds none) while
+  the variant holds the real ones, so the insert collides on
+  `record_attributes`'s partial unique index instead of offering a replace.
+- **The export's `Client Code` must come from the PARENT's refs.** A variant has
+  none of its own, so composing that column from the record's own refs would
+  ship a blank client code for every split item.
 
 ### A drawing dimensions everything, and four of them matter
 

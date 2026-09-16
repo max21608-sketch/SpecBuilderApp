@@ -34,7 +34,14 @@
 // identical to a matcher that ignores runs, which is why grouping by run is the
 // whole of this function.
 // ============================================================================
-import { containsPhrase, deferredToSomebody, findRecordsByRef, type RecordEntry, TBC_TOKENS } from "@/lib/spec-document";
+import {
+  containsPhrase,
+  deferredToSomebody,
+  findRecordsByRef,
+  normaliseRef,
+  type RecordEntry,
+  TBC_TOKENS,
+} from "@/lib/spec-document";
 import { normaliseName } from "@/lib/matching";
 import {
   DIMENSION_SLOT_LABELS,
@@ -48,6 +55,7 @@ import {
 import { parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
 import type { RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
+import { nextVariantLabel } from "@/lib/record-variants";
 
 // ---- the staged shape ------------------------------------------------------
 
@@ -1588,6 +1596,62 @@ function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
     };
   });
   return touched ? { ...doc, items } : doc;
+}
+
+/**
+ * Which configuration each card is, when a code is drawn more than once.
+ *
+ * ============================================================================
+ * THE SAME CODE ON SEVERAL PAGES IS SEVERAL THINGS TO MAKE.
+ *
+ * The AP364 set draws S-201 on pages 5 and 6 with identical geometry and
+ * different fabric and timber callouts, S-200 on 3 and 4, and S-301 on four
+ * pages. The bill has ONE line each. So each page is a CONFIGURATION, and the
+ * letter is what a person calls it: S-201 A, S-201 B.
+ *
+ * DERIVED, NEVER STORED, AND NEVER SENT BY THE CLIENT. The letter is a pure
+ * function of the staged document, so the review screen and the confirm route
+ * reach the same answer without either telling the other — the same reason
+ * `proposalBlockers()` is computed in both places. A letter travelling on the
+ * request would be a client saying which record its data belongs to, which is
+ * the one thing `blob-source.ts` exists to refuse.
+ *
+ * ORDER IS PAGE ORDER, and it ignores review state. A page somebody ignored
+ * still consumes its letter: if dismissing page 5 turned page 6 from B into A,
+ * every letter anybody had written down would mean something else. Same reason
+ * `nextVariantLabel` never reuses a retired variant's letter.
+ *
+ * A code drawn ONCE gets no letter at all, and that is most of any pack — it is
+ * one item, it stays one record, and nothing about it changes.
+ * ============================================================================
+ */
+export function variantLettersByItem(items: readonly DrawingItem[]): Map<string, string | null> {
+  // THE SAME FOLD THE RESOLVER MATCHES BY — `spec-document`'s, the one
+  // `findRecordsByRef` uses, and NOT `boq-import`'s looser one. Two cards that
+  // group here as one code must resolve to the same records, or the letters
+  // would describe a grouping the confirm does not share.
+  const byCode = new Map<string, DrawingItem[]>();
+  for (const item of items) {
+    const code = normaliseRef(item.itemCodeRaw ?? "");
+    if (!code) continue;
+    byCode.set(code, [...(byCode.get(code) ?? []), item]);
+  }
+  const letters = new Map<string, string | null>();
+  for (const [, group] of byCode) {
+    if (group.length < 2) {
+      for (const item of group) letters.set(item.id, null);
+      continue;
+    }
+    // Page order, then id, so two pages reported without a page number still
+    // land in a fixed order rather than whatever the model listed.
+    const ordered = [...group].sort(
+      (a, b) => (a.page ?? Number.MAX_SAFE_INTEGER) - (b.page ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
+    );
+    ordered.forEach((item, index) => {
+      letters.set(item.id, nextVariantLabel(ordered.slice(0, index).map((earlier) => letters.get(earlier.id) ?? null)));
+    });
+  }
+  return letters;
 }
 
 export function hasPendingObservations(doc: StagedDrawings): boolean {

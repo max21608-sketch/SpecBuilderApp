@@ -22,6 +22,7 @@ import {
   unitSourceOf,
   stageDrawings,
   assertStagedDrawings,
+  variantLettersByItem,
   hasPendingObservations,
   mergeNoteBlocks,
   type DrawingItem,
@@ -1186,5 +1187,62 @@ describe("assertStagedDrawings de-duplication", () => {
     chosen.items[0]!.observations[0]!.slotSuggested = false;
     const left = assertStagedDrawings(chosen);
     expect(left.items[0]!.observations.filter((o) => o.dimensionSlot).map((o) => o.dimensionSlot)).toEqual(["H"]);
+  });
+});
+
+// ============================================================================
+// CONFIGURATIONS. The AP364 set draws S-201 on pages 5 and 6 with identical
+// geometry and different fabric callouts, S-200 on 3 and 4, S-301 on four
+// pages — one bill line each. Each page is a configuration; the letter is what
+// a person calls it.
+// ============================================================================
+describe("variantLettersByItem", () => {
+  const item = (id: string, code: string | null, page: number | null): DrawingItem => ({
+    id,
+    version: 1,
+    page,
+    itemCodeRaw: code,
+    itemNameRaw: null,
+    confidence: null,
+    targets: null,
+    observations: [],
+  });
+
+  it("gives no letter to a code drawn once — most of any pack", () => {
+    const letters = variantLettersByItem([item("i1", "S-100", 1), item("i2", "UP-101", 2)]);
+    expect(letters.get("i1")).toBeNull();
+    expect(letters.get("i2")).toBeNull();
+  });
+
+  it("letters the real S-201 pages A and B in page order", () => {
+    const letters = variantLettersByItem([item("i6", "S-201", 6), item("i5", "S-201", 5)]);
+    expect(letters.get("i5")).toBe("A");
+    expect(letters.get("i6")).toBe("B");
+  });
+
+  it("letters S-301's four pages A to D", () => {
+    const pages = [8, 9, 10, 11].map((page) => item(`i${page}`, "S-301", page));
+    const letters = variantLettersByItem(pages);
+    expect(pages.map((p) => letters.get(p.id))).toEqual(["A", "B", "C", "D"]);
+  });
+
+  it("folds codes the way the resolver matches them", () => {
+    // `findRecordsByRef` compares on spec-document's normaliser, so "S 201"
+    // and "s-201" are the same code here too — otherwise the letters would
+    // describe a grouping the confirm does not share.
+    const letters = variantLettersByItem([item("i5", "S-201", 5), item("i6", "s 201", 6)]);
+    expect(letters.get("i5")).toBe("A");
+    expect(letters.get("i6")).toBe("B");
+  });
+
+  it("keeps the order fixed when pages are missing", () => {
+    const letters = variantLettersByItem([item("zz", "S-201", null), item("aa", "S-201", null)]);
+    expect(letters.get("aa")).toBe("A");
+    expect(letters.get("zz")).toBe("B");
+  });
+
+  it("ignores a codeless page entirely", () => {
+    const letters = variantLettersByItem([item("i1", null, 1), item("i2", null, 2)]);
+    expect(letters.has("i1")).toBe(false);
   });
 });
