@@ -144,3 +144,48 @@ step and the fix is another migration.
 | Extended outage | Max de Groot | Within the hour |
 | A BWS export that may have wiped fields | Stop. Matthew Lewis, before anyone re-imports | Immediately |
 | **What to tell the user** | — | As soon as you know: (1) is it safe to keep working, (2) was anything they did lost, (3) when to check back. **Not the cause — that can wait.** |
+
+## Checking the change history is complete
+
+Since `0012` every write to spec content belongs to a CHANGE SET, and every
+change set that touched a record should hold a VERSION of it. Nothing enforces
+that with a trigger — see decision 63 — so this is the query that checks it.
+Run it against any environment; an empty result is the healthy state.
+
+```sql
+select cs.id, cs.kind, cs.actor, cs.created_at, count(*) as writes
+from change_sets cs
+join audit_log al on al.change_set_id = cs.id
+where al.table_name in ('spec_records', 'spec_answers', 'record_attributes', 'spec_record_refs')
+  and not exists (select 1 from record_snapshots s where s.change_set_id = cs.id)
+group by cs.id, cs.kind, cs.actor, cs.created_at
+order by cs.created_at;
+```
+
+A row here means a write path changed a record and recorded no version of it.
+The fix is in the code that made the write, not in the data — but the missing
+versions should then be written under the change set that made the change, so
+the trail is complete rather than quietly short. `db/backfill-finishes.ts`
+carries an example of taking them.
+
+Rows written BEFORE `0012` carry a null `change_set_id` and are not joined
+here. That is correct: history starts at `history_begins`, and
+`docs/plans/README.md` decision 58 says why it is not reconstructed.
+
+**A fix applied with `psql` belongs to no change set.** Nothing refuses it, and
+the trail will simply not explain what happened — which is worse than usual now
+that a history screen exists and people read it. Open a change set first:
+
+```sql
+begin;
+insert into change_sets (project_id, kind, reason, closed_at, actor)
+values ('<project-id>', 'manual_edit', '<why, in a sentence>', now(), 'system:psql')
+returning id;
+select set_config('app.change_set_id', '<that id>', true);
+-- ... the fix ...
+commit;
+```
+
+A version still has to be taken separately, because composing one means running
+`composeRowCells` and rebuilding that in SQL is the second composer the export
+design exists to prevent.

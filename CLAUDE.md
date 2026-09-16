@@ -30,6 +30,9 @@ one agent.
 | `npm run db:backup` · `npm run db:restore` | backups write **outside** the repo by default |
 | | every `db:*` script loads `.env.local` if present, prints the resolved host, and refuses production without `--yes-production`. Production names its own env file: `node --env-file=.env.production db/run-migrations.mjs --yes-production` |
 | `npm run db:backfill-answers` | one-off: fills checklist answers from attributes confirmed before promotion existed. Dry run unless `--apply`; safe to re-run |
+| `npm run db:backfill-snapshots` | one-off: gives every record that predates 0012 a version 1 under a `history_begins` change. Dry run unless `--apply`; safe to re-run |
+| `npm run db:backfill-finishes` | one-off: builds each project's finishes library from the codes its drawings carry, and links them. Dry run unless `--apply`; safe to re-run. Leaves a code whose items disagree blank, and names it |
+| `npm run db:qa-clean` | sweeps what a failed database-tier test run left behind. Refuses production outright |
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
 
 Tests run in three tiers — pure / db-gated / route. The database tiers skip
@@ -54,6 +57,13 @@ A human confirms each of these, and nothing else may write it:
   There is no send path in this app.
 - Marking a gate (TG0/TG1/TG2) satisfied for a record.
 - Accepting a VE alternative, which changes which version is live.
+- Retiring a spec, a record or a run, and editing a confirmed finish. Each
+  destroys or overrides something a document said or a person decided, so each
+  requires a REASON and none can happen automatically. Retiring is never
+  deleting, and every one of them is reversible.
+- Pairing a revised BOQ line with an existing record. The reviewer decides it
+  at review time and the confirm writes only what they submitted — a code that
+  is ambiguous pairs nothing.
 
 ## Hard invariants
 
@@ -84,10 +94,15 @@ Each of these is a trap, not a preference.
   no `Job Number`, which this app has never known.
 - **VE rounds preserve the original.** Original spec, VE alternative, client
   accept/reject with date; the accepted version becomes live.
-- **Suppliers by modelled Capsule ID**, never free-text name.
-- **`project_materials` is project-scoped.** The same client material code
-  (`MOR005`) means different things on different projects. Scope it or the data
-  is silently wrong.
+- **Suppliers by modelled Capsule ID**, never free-text name. **STILL UNMET,
+  and knowingly:** `project_finishes.supplier_raw` is free text, because there
+  is no supplier register in this app and no Capsule data in this repo. The
+  `_raw` suffix is the marker that it is what a document said rather than
+  something resolved.
+- **The finishes library is project-scoped.** The same client material code
+  (`MOR005`) means different things on different projects. `project_finishes`
+  (0018) is unique on `(project_id, code_norm)` for that reason; scope anything
+  like it the same way or the data is silently wrong.
 - **Client ref is the pre-sale primary key** (`SX11A`, `FU-209-15`) — a modelled
   field, not free text. One client ref can split into several BWS jobs.
 - **A drawing dimension's unit is never inferred from its size.** The AP364
@@ -127,14 +142,23 @@ reasoning.
 | `requirements` | The cheat sheet as a checklist: `kind` (`spec_field`/`readiness`), `prompt`, `section`, `required_at_gate` (**null everywhere** until gates are authored) |
 | `spec_answers` | Per record × requirement × `revision_no`: value, `value_raw`, state, source, confirmed_by/at |
 | `intake_runs` | Staging for any document intake. Generic, not BOQ-shaped. `batch_id` groups a pack; `document_kind` selects the prompt, the tool AND the staged shape |
-| audit / notes | `audit_log` + `status_history` + append-only notes, from the chassis |
+| `change_sets` | One entry in the trail (0012): who, when, why, the kind, and a link to the document or the uploaded email that caused it. Append-only; `closed_at` is the only column that may be set later |
+| `record_snapshots` | A VERSION of one record (0012): `snapshot_no` per record, the export's own atoms, and the composed cells as they were that day |
+| `baseline_members` | A named point's exact membership (0013). Materialised under the project lock, because transaction start time does not order commits |
+| `project_finishes` | The project's finishes library (0018), keyed by the client's own code. Project-scoped: `MOR005` means different things on different projects |
+| audit / notes | `audit_log` + `status_history` + append-only notes, from the chassis. `audit_log.change_set_id` (0012) says which change each row belonged to |
 
 **Not built, deliberately.** `bws_job_links` (a job number arrives as a
-`bws_job` ref until something needs dates on it); `project_materials` (the
-client's own `CH-01.1` codes are kept verbatim on the attribute until there is
-a register worth resolving them against); `gates` / `gate_status` (nothing to
-read until the assignments exist). An empty table is a promise the schema makes
-that the code has not kept.
+`bws_job` ref until something needs dates on it); `gates` / `gate_status`
+(nothing to read until the assignments exist). An empty table is a promise the
+schema makes that the code has not kept.
+
+`project_materials` WAS on this list and is now built, as `project_finishes`
+(0018). The condition `docs/stack.md` set — "resolving codes is deferred until
+extraction is producing them" — has been met since M2, and the pilot's finishes
+schedule being confirmed absent makes edit-once-and-propagate the only
+correction mechanism there is. The project-scoping invariant carries over
+unchanged.
 
 The requirement matrix is **seed data, not code.** Which fields a category
 requires, and at which gate, comes from the cheat sheets, and those will be
@@ -572,6 +596,183 @@ there are none. Where a note already carries one it stays editable, because a
 wrong `mm` on `ARM HEIGHT` must be correctable without promoting the row to a
 slot it does not belong in.
 
+### A change is a change set; a version is composed, never copied
+
+`db/migrations/0012_change_sets_and_snapshots.sql`, `src/lib/change-sets.ts`,
+`src/lib/record-atoms.ts`, `src/lib/record-snapshot.ts`,
+`src/lib/snapshot-diff.ts`
+
+A record had no history anybody could read. `audit_log` has held whole-row
+before/after since 0001 and `status_history` was written by six confirm paths,
+and **nothing ever read either**.
+
+A **change set** is who, when, why, and a link to the document or email that
+caused it. A **record snapshot** is the composed state of one record after a
+change, numbered per record — the user-facing "version". Both are side tables:
+recording that something happened still never touches the row it happened to,
+because `bump_version` would invalidate every extraction snapshot and chase
+coverage row taken against it.
+
+Five things here are load-bearing.
+
+- **The link is a GUC, not a transaction id.** `openChangeSet` inserts the row
+  and then `set_config('app.change_set_id', …, true)`; `write_audit()` reads it,
+  so every audit row that follows carries its change without a call site
+  remembering. `pg_current_xact_id()` was the obvious choice and is wrong:
+  xid8 values do not survive `db:restore` into a fresh Neon project, so the
+  join would start lying after a recovery. It only works inside
+  `withTransaction`, which is why `PATCH /api/answers/[id]` moved onto it —
+  one autocommitted statement cannot carry a GUC, and a person's edit would
+  have been the one change with no version and no why.
+- **Snapshots hold the EXPORT's own shapes.** `loadRecordAtoms` is the single
+  loader for the export, the check sheet and a version, so `composeRowCells`
+  runs over a snapshot unchanged. A history that described a record differently
+  from the file would be worse than none, because it would be believed.
+- **A diff runs over atoms, never over the stored cells.** The cells are kept
+  for one question — "what did the file say on that date" — and
+  `composeRowCells` changes, so a diff across two rule sets reports edits on
+  records nobody touched. `diffSnapshots` recomposes both ends with today's
+  rules instead. Everything is keyed by a stable id, so a value corrected in
+  place is one changed line rather than a delete beside an add.
+- **A baseline materialises its members** (`baseline_members`, 0013), written
+  under the project row lock. "The newest version as at that date" is wrong:
+  `created_at` is transaction START time, and two overlapping guarded
+  transactions can commit in the opposite order, putting a version on the wrong
+  side of a line somebody signed off.
+- **A reason is asked for only when an edit OVERRIDES a settled answer.**
+  `save()` fires on every blur, so a box beside every field asks twenty times
+  and collects twenty rows reading "update". A reviewer instead OPENS a change
+  ("Hayley's email of the 14th"), attaches the email, and every edit after that
+  attaches to it — at most one open change per actor per project, by partial
+  unique index.
+
+**Append-only means refuse the rewrite, allow the cascade.** 0013, 0014 and
+0015 each correct the same misreading: a version could not be deleted with its
+record, a change set could not be deleted with its project, and — the one that
+would have bitten a real database — a document that had caused a change could
+never be deleted at all, because the FK's own `ON DELETE SET NULL` was refused
+as a rewrite. Apply that rule to the next immutable table rather than
+rediscovering it.
+
+There is **no trigger refusing a write made outside a change set**, and that is
+deliberate: every db-tier fixture and every hand fix with `psql` writes rows
+directly, and a trigger refusing them turns a safety net into a wall across the
+maintenance path. The guarantee is the coverage assertion in
+`tests/db/change-history.test.ts`, which reads the WHOLE database: any change
+set with spec-content audit rows and no version fails it. It has already earned
+itself twice.
+
+### A spec can be retired, and a revised drawing replaces one
+
+`db/migrations/0016_attribute_supersession.sql`, `src/lib/attribute-retire.ts`,
+`src/lib/confirm-drawings.ts`, `src/lib/promote-answers.ts`
+
+`record_attributes` carried `status`, `retired_at` and `retired_by` from 0007
+and nothing ever set them, while three blocker messages told a reviewer to
+"retire the old value". A revised drawing therefore could not land: the partial
+unique indexes refused the insert and the remedy did not exist.
+
+- **Retiring recomposes the checklist.** This is the half that is easy to leave
+  out and wrong to. Confirming a drawing writes the attribute AND the answer it
+  fills; retiring only the attribute leaves the checklist reporting a confirmed
+  fabric the record holds no statement for, and **the export still ships it** —
+  a confirmed answer is exported whether or not an attribute backs it.
+  `planAnswerRetractions` puts such an answer back to `missing`. A person's own
+  answer is never touched, and the change records that it now stands on nothing.
+- **The replace acknowledgement is per (observation, RECORD).** A card fans out
+  one record per run, and the mock-up run's COM 1 may hold a different old value
+  from the main run's — keyed on the observation alone, a confirm could retire a
+  value the reviewer never saw on the VE record. The occupant's version is
+  re-checked at confirm; one that changed since is refused, not replaced.
+- **Retire before insert**, and the database decides that: both partial unique
+  indexes are `where status = 'active'`, so the reverse order cannot commit.
+- **Reversible**, per `house/data-safety.md`. A restore is refused when
+  something else now holds the slot, or when a later drawing superseded it, and
+  both refusals name what is in the way.
+
+### A revised BOQ replaces the bill and keeps the drawings
+
+`db/migrations/0017_boq_revision.sql`, `src/lib/boq-reconcile.ts`,
+`src/lib/confirm-boq.ts`, `src/lib/run-retire.ts`
+
+Confirming a revised bill used to create a SECOND run and a full second set of
+records, stranding every drawing, spec, picture and answer on the first copy.
+0007's header called retiring the old run "how it leaves the tabs", and nothing
+could retire one.
+
+A revision keeps the run's identity. A paired line writes the bill's own
+columns over the existing record and touches nothing else, so it keeps its id
+and everything hanging off it. A line with nothing to continue becomes a new
+record. A record the revision no longer lists is **retired, never deleted**: a
+record is the only place a client ref maps to a BWS job, and that job may
+already exist.
+
+- **The pairing is staged, and the confirm writes what the reviewer
+  submitted.** Pairing a revised line to a record IS matching, which
+  `house/data-safety.md` and `confirm-boq.ts` both forbid at confirm time. So
+  `reconcileSheet` runs at review time, the reviewer edits it, 0017's v3 shape
+  stores the decision, and the confirm re-checks the record is still on that
+  run, active, and at the version shown.
+- **One-to-one only.** A code on two records, or two lines carrying one code,
+  pairs NOTHING — `SX11A` again. Candidates are offered; nothing is chosen.
+- **A new line is in `carriedForward` too.** It is on the run from the moment
+  it is inserted, and a retire step that subtracted only the PAIRED records
+  inserted it and retired it in the same confirm. Caught by a db-tier test.
+- **A record that would be retired names what it carries** — "14 specs, a
+  picture" — because pairing it is usually what was meant, and a count does not
+  say that.
+- **`/api/records` filters to active**, with a toggle. It had no status
+  predicate at all, so the moment anything was retired the spec table and the
+  export described different sets — the disagreement the check sheet exists to
+  prevent. `loadExportScope` also requires the RUN to be active.
+- **Retiring a run asserts its own cascade.** `spec_records.status` does not
+  follow `spec_runs.status` and no constraint can make it, so `retireRun`
+  retires every record and then counts, before commit.
+
+### The finishes library is the truth; the attribute is the evidence
+
+`db/migrations/0018_project_finishes.sql`, `src/lib/finishes.ts`,
+`src/lib/finish-edit.ts`, `db/backfill-finishes.ts`
+
+`record_attributes.material_code` was a dead column: no index, no uniqueness,
+no edit path at any stage, no way to ask which items carry a code. Ten items
+sharing a fabric were ten unrelated strings. This is the register CLAUDE.md
+excluded as `project_materials`; the condition `docs/stack.md` set for building
+it — "until extraction is producing them" — has been met since M2, and the
+pilot's finishes schedule being **confirmed absent** makes edit-once the only
+correction mechanism there is.
+
+`project_finishes` is project-scoped, because the same client code means
+different things on different projects. The attribute keeps the drawing's exact
+words so a value stays checkable against its page; the CELL renders the library.
+
+- **`composeFinishCell` has three callers** — the export composer, the record
+  screen, and `planAnswerFills`. If the export rendered the finish and the
+  checklist kept the attribute's text, editing the library would change forty
+  export cells while every visible row said something else. Same rule as
+  `composeDimensionCell`, in a second place.
+- **The state is the weaker of the two.** A `tbc` finish can never produce a
+  confirmed answer, whatever the attribute said. The Panther sofa's drawing
+  says `TBC – Yarn Collective Tessarae`: the library knowing what the code is
+  does not make that item's fabric decided.
+- **Normalisation is case and whitespace only.** `CH-01.1` and `CH-01-1` stay
+  two finishes. A normaliser clever enough to merge them is clever enough to
+  merge two codes a client meant to keep apart, and there is no way back.
+- **`kind` is never inferred.** `classifyGroup` already guesses a group from
+  words in a label; a second guess stacked on it produces a register full of
+  confident mistakes.
+- **A CONFLICT links nothing.** Where the library has committed to a
+  description and a new drawing says something else, the attribute stays
+  unlinked and shows on the finishes page as a code needing a person. Linking
+  would make the item render the library's words while its own page said
+  otherwise.
+- **`supplier_raw` does NOT satisfy "suppliers by modelled Capsule ID".** There
+  is no supplier register in this app and no Capsule data in this repo; the
+  `_raw` suffix marks it as what a document said. That invariant remains unmet.
+- **Swatches arrive by hand.** A person uploads one and must say which document
+  and page it came from. Asking the model for swatch regions is a tool-schema
+  change, which means re-reading and re-paying for every document already read.
+
 ### The UI must survive a response that is not JSON
 
 Client code must not assume every API response is JSON. Check the status and
@@ -832,10 +1033,52 @@ different sets of records. **Nobody has filled one in** — its column choices
 are a guess at what makes the reading possible, and the first real pass tests
 the sheet as much as the export.
 
+**Built 2026-09-16, versioning, change history and the finishes library
+(`0012`–`0018`).** The first work outside M8's four steps, asked for directly:
+"you need to be able to view previous versions, there needs to be audit trails,
+and changes need to be easy to see". Six pieces, each shippable alone, and the
+load-bearing sections above carry the reasoning.
+
+- **Every change is a change set and every record has versions.** Who, when,
+  why, and the document or email that caused it. A record screen shows v1..vN
+  with a diff table; a project screen shows the whole trail and compares any
+  two points. `audit_log.change_set_id` links the forensic layer to it.
+- **Evidence.** An `.eml`, `.msg` or PDF uploaded against a change, so "the
+  client says they never asked for this" is answered by opening the email. It
+  downloads and opens in Outlook; nothing renders a message body.
+- **Named baselines**, materialising their exact membership, so "Rev A vs what
+  we hold now" is two exact sets.
+- **A spec can be retired and a revised drawing can replace one**, with the
+  checklist recomposed either way.
+- **A revised BOQ replaces the bill and keeps the drawings**, with the pairing
+  staged and one-to-one only.
+- **A finishes library**, keyed by the client's code, edit-once-and-propagate,
+  with a swatch.
+
+**Verified in the browser against the sandbox Panther and P17231 data**, not
+against fixtures: 101 records back-filled to v1; an overwrite refused without a
+reason and accepted with one; two baselines around one edit reporting 1 changed
+and 13 unchanged; retiring the real S-100 fabric pulling its COM 1 answer back
+to `missing` and putting it back refilling it; the P17231 bill reconciled
+against its own run as 57 paired, 2 ambiguous — correctly refusing to guess
+which `SX11A` is which; and one finish edit moving 3 records and 8 answers.
+**Not accepted by Max**, on any screen.
+
 **Outstanding — judgement, not code.**
 
 - **Nobody has used any of this.** The four checks pass with the database tier
   running; human acceptance is outstanding on every screen.
+- **Nothing has been through the revised-BOQ path for real.** The P17231 bill
+  was reconciled against its own run and read correctly, and then NOT
+  confirmed: doing so would have rewritten 57 records of Max's sandbox data.
+  The first real revision is the test.
+- **`status_history` is still written and still never read.** Six confirm
+  paths write it; the `spec_record` lines the BOQ and drawings confirms used to
+  add are now change sets instead, and the `intake_run` lifecycle lines stay.
+  The singular/plural `entity_type` defect is untouched and still matters
+  before anything renders that table.
+- **A swatch has never been cropped from a real page.** The upload path works
+  and requires the source to be named; nobody has used it.
 - **Nothing limits how many model calls a pack starts at once.** Registration
   dispatches a read per specification document, so an eleven-file pack is eleven
   concurrent workers and eleven concurrent model calls. There is no per-batch
@@ -865,9 +1108,7 @@ the sheet as much as the export.
   sample; seed it only from verified pilot wording.
 
 **Explicitly excluded, so they are not built speculatively:** feeding preamble
-notes into later model calls; a `project_materials` register for the client's
-`CH-01.1` codes (kept verbatim on the attribute instead); gap and completeness
-checking, and gates; a BWS *import* file carrying job numbers; PDF bills of
+notes into later model calls; gap and completeness checking, and gates; a BWS *import* file carrying job numbers; PDF bills of
 quantities; images and scanned documents; splitting an oversize drawing set. M5
 inbox ingestion and M6 VE rounds. Any write to BWS. Automatic email sending.
 SharePoint writes. BWS Messenger and Teams ingestion. The TOE calculator's own

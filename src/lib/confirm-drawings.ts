@@ -47,6 +47,8 @@ import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 import { openChangeSet } from "@/lib/change-sets";
+import { isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
+import { createFinish } from "@/lib/finish-edit";
 import { snapshotRecords } from "@/lib/record-snapshot";
 
 export type ObservationRef = { id: string; version: number };
@@ -356,6 +358,67 @@ export async function confirmDrawingItem(
     sourceIntakeRunId: runId,
   });
 
+  // ---- the project's finishes library, for the codes this card carries ----
+  //
+  // Read once, before the fan-out. A code that is already in the library links
+  // to it; a code nobody has seen creates an entry, TBC, holding what this
+  // page said. A CONFLICT — the library has committed to a description and
+  // this page says something else — LINKS NOTHING: linking would make the item
+  // render the library's words while its own page said otherwise, and there is
+  // no way to tell which is right. It stays unlinked and shows up on the
+  // finishes page as a code needing a person, which is house/conventions.md §5:
+  // anything unresolvable becomes a visible flag, never a plausible-looking
+  // wrong answer.
+  const libraryRows = await txn`
+    select id, code, code_norm, kind, description, supplier_raw, reference, colour, state
+    from project_finishes where project_id = ${run.projectId} and status = 'active'
+  `;
+  const library: Finish[] = libraryRows.map((row) => ({
+    id: String(row.id),
+    code: String(row.code),
+    codeNorm: String(row.code_norm),
+    kind: isFinishKind(row.kind) ? row.kind : null,
+    description: row.description === null || row.description === undefined ? null : String(row.description),
+    supplierRaw: row.supplier_raw === null || row.supplier_raw === undefined ? null : String(row.supplier_raw),
+    reference: row.reference === null || row.reference === undefined ? null : String(row.reference),
+    colour: row.colour === null || row.colour === undefined ? null : String(row.colour),
+    state: String(row.state) as Finish["state"],
+  }));
+
+  const finishIdByObservation = new Map<string, string | null>();
+  for (const observation of taken) {
+    const resolution = resolveFinishCode(observation.materialCodeRaw, observation.value, library);
+    if (resolution.status === "matched") {
+      finishIdByObservation.set(observation.id, resolution.finish.id);
+    } else if (resolution.status === "new") {
+      const finishId = await createFinish(txn, {
+        projectId: run.projectId,
+        fields: {
+          code: resolution.code,
+          // What THIS page said, as a starting point. `tbc` because a drawing
+          // naming a code is not somebody confirming what it is.
+          description: observation.value,
+          state: "tbc",
+        },
+        actor,
+      });
+      library.push({
+        id: finishId,
+        code: resolution.code,
+        codeNorm: resolution.codeNorm,
+        kind: null,
+        description: observation.value,
+        supplierRaw: null,
+        reference: null,
+        colour: null,
+        state: "tbc",
+      });
+      finishIdByObservation.set(observation.id, finishId);
+    } else {
+      finishIdByObservation.set(observation.id, null);
+    }
+  }
+
   const attributeIdsByObservation = new Map<string, string[]>();
   /** Old row → the row that took over, linked once the new id is known. */
   const superseded: { oldId: string; observationId: string; recordId: string }[] = [];
@@ -425,7 +488,7 @@ export async function confirmDrawingItem(
 
       const inserted = await txn`
         insert into record_attributes
-          (record_id, attr_group, dimension_slot, label, value, unit, material_code, spec_field_id, state,
+          (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
            source_run_id, source_page, sort_order, created_by, updated_by)
         values
           (${recordId}, ${observation.attrGroup},
@@ -437,7 +500,9 @@ export async function confirmDrawingItem(
            ${observation.attrGroup === "dimension" ? (observation.dimensionSlot ?? null) : null},
            ${observation.labelRaw ?? observation.attrGroup},
            ${observation.value},
-           ${observation.unit}, ${observation.materialCodeRaw}, ${observation.specFieldId},
+           ${observation.unit}, ${observation.materialCodeRaw},
+           ${finishIdByObservation.get(observation.id) ?? null},
+           ${observation.specFieldId},
            ${observation.state}, ${runId}, ${item.page}, ${sortOrder}, ${actor}, ${actor})
         returning id
       `;

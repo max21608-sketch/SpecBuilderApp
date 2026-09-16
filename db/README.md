@@ -167,3 +167,30 @@ than a paragraph.
 (3) is enforced — `.gitignore` covers `db/backups/`, and `db/backup.mjs`
 defaults outside the repository and outside iCloud. The others are written
 down so nobody mistakes this section for a safety net.
+
+## One-off backfills
+
+Each is dry-run by default, prints the resolved host before acting, refuses
+production without `--yes-production`, and is safe to re-run. None is a
+numbered migration, for the reason `db/backfill-answers.ts` gives at length:
+what they compute is `composeRowCells` and `composeDimensionCell`, and
+rebuilding those in SQL is the second composer the export design exists to
+prevent.
+
+| Script | What it does |
+|---|---|
+| `npm run db:backfill-answers` | Fills checklist answers from attributes confirmed before promotion existed |
+| `npm run db:backfill-snapshots` | Gives every record that predates `0012` a version 1, under a `history_begins` change. It does NOT reconstruct the past from `audit_log` — see decision 58 |
+| `npm run db:backfill-finishes` | Builds each project's finishes library from the codes its drawings carry, links every attribute, and takes a version of each record it changed. A code whose items disagree is left blank and NAMED, never guessed |
+
+## Sweeping after a failed test run
+
+`npm run db:qa-clean` removes every `__QA` project a database-tier run left
+behind, in foreign-key-safe order. A suite that fails partway leaves its
+project in place, and the NEXT run then fails on the unique project number
+rather than on whatever was actually wrong — which is how a real failure gets
+mistaken for a flake.
+
+It leaves `audit_log` alone, by design. `change_sets` and `record_snapshots` go
+with the project by cascade (`0013`, `0014`), which is why the project is
+deleted last.

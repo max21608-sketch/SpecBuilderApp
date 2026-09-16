@@ -804,3 +804,87 @@ Observed 2026-09-15, from Matthew's spec grid. See `docs/bws-spec-grid.md`.
 - Exactly one agent pushes the branch.
 - `CLAUDE.md` / `AGENTS.md` belong to exactly one agent, or they diverge.
 - Two agents works. Three does not, and would likely be slower than two.
+
+---
+
+## 2026-09-16 — versioning, change history and the finishes library
+
+Migrations `0012`–`0018`. The reasoning lives in CLAUDE.md's load-bearing
+sections; these are the decisions that could reasonably have gone the other
+way, and why they did not.
+
+56. **A change set is linked by a GUC, not by a transaction id.**
+    `pg_current_xact_id()` is available and stable inside `withTransaction`,
+    and it is still wrong: xid8 values do not survive `db:restore` into a fresh
+    Neon project, so the join would silently start matching the wrong rows
+    after a recovery. `write_audit()` already read one GUC; it now reads two.
+57. **`PATCH /api/answers/[id]` moved onto `withTransaction`.** Its single
+    version-predicated UPDATE was correct on the HTTP driver, and
+    `db-transaction.ts` named it as the example of something that did not need
+    a second driver. That stopped being true when every write joined a change
+    set: one autocommitted statement cannot carry the GUC, and a person's edit
+    would have been the only change with no version and no why. Both texts
+    were updated rather than left contradicting the code.
+58. **Snapshots, not a replay of `audit_log`.** A record's state spans four
+    tables and `row_id` is text with no `record_id`, so replaying means
+    inferring an order across tables the log does not record. A reconstructed
+    history that is subtly wrong is worse than one that starts today — which
+    is what `db/backfill-snapshots.ts` writes, under a change called
+    `history_begins` whose reason says exactly that.
+59. **A diff runs over atoms; the stored cells are never diffed.** The cells
+    answer "what did the file say that day". `composeRowCells` changes — open
+    item 18 is a live example — so a diff across two rule sets would report
+    edits on records nobody touched.
+60. **A baseline materialises its members.** `created_at` is transaction START
+    time, so two overlapping guarded transactions can commit in the opposite
+    order to their timestamps. "Newest version as at that date" would put a
+    version on the wrong side of a line somebody had signed off.
+61. **A reason is required only when an edit overrides a settled answer.**
+    `save()` fires on every blur; a box beside every field asks twenty times
+    for twenty answers and collects twenty rows reading "update". A reviewer
+    opens ONE change with the email attached, and every edit joins it.
+62. **Append-only means refuse the rewrite, allow the cascade.** Three
+    migrations in a row (`0013`, `0014`, `0015`) corrected the same misreading.
+    The third would have bitten a real database: a document that had caused a
+    change could never be deleted, because the FK's own `ON DELETE SET NULL`
+    was refused as a rewrite.
+63. **No trigger refuses a write made outside a change set.** It was planned
+    for `0013` and dropped: every db-tier fixture and every `psql` fix writes
+    rows directly, and refusing them turns a safety net into a wall across the
+    maintenance path. The whole-database coverage assertion in
+    `tests/db/change-history.test.ts` is the guarantee instead, and it has
+    already caught two real gaps.
+64. **Retiring a spec recomposes the checklist.** Leaving the answer behind
+    means the export goes on shipping a value the record holds no statement
+    for — a confirmed answer is exported whether or not an attribute backs it.
+65. **The replace acknowledgement is per (observation, record).** A card fans
+    out one record per run; keyed on the observation alone, a confirm could
+    retire a value the reviewer never saw on another run's record.
+66. **A revised BOQ's pairing is staged, never re-matched at confirm.** Same
+    rule as every other confirm, applied to the one kind of matching that had
+    not existed before. One-to-one only: `SX11A` pairs nothing.
+67. **A record retired by a revision is named, not counted.** "Carries 14
+    specs and a picture" is what tells a reviewer that pairing it was probably
+    what they meant.
+68. **`project_materials` is built, as `project_finishes`.** The condition
+    `docs/stack.md` set for it was "until extraction is producing them", and it
+    has been since M2. The pilot's finishes schedule being confirmed absent
+    (open item 5) makes edit-once the only correction mechanism available.
+69. **The library is the truth and the attribute is the evidence.** The
+    attribute keeps the drawing's exact words; the cell renders the library,
+    through `composeFinishCell`, which the export, the record screen and
+    `planAnswerFills` all call. Two of them rendering differently is how a
+    screen starts promising what the file does not deliver.
+70. **A finish's state is the weaker of the two.** The Panther fabric's drawing
+    says `TBC – Yarn Collective Tessarae`: the library knowing what the code is
+    does not make that item's fabric decided.
+71. **A conflicting code links nothing.** Where the library has committed and a
+    new drawing disagrees, the attribute stays unlinked and is named on the
+    finishes page. Linking would render the library's words on an item whose
+    page said otherwise.
+72. **`supplier_raw` does not satisfy the Capsule-ID invariant, and says so.**
+    No supplier register exists in this app and no Capsule data is in this
+    repo. Recorded as unmet rather than quietly considered done.
+73. **Swatches arrive by hand, and must name their source.** Asking the model
+    for swatch regions is a tool-schema change, which re-reads and re-pays for
+    every document already read.
