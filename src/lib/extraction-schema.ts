@@ -460,7 +460,7 @@ export const DRAWINGS_TOOL = {
                     maxItems: 4,
                     items: { type: "number", minimum: 0, maximum: 1 },
                     description:
-                      "Where it sits on that page as [x0, y0, x1, y1], each a FRACTION of the page from 0 to 1, origin top-left. Enclose the picture and nothing else — no caption, no dimension lines, no border.",
+                      "Where it sits on that page as [x0, y0, x1, y1], each a FRACTION of the page from 0 to 1, origin top-left. Approximate is fine and far better than omitting the region: enclose the picture as tightly as you reasonably can, leaving out its caption, the dimension lines and any surrounding border.",
                   },
                 },
                 required: ["viewType", "page", "bbox"],

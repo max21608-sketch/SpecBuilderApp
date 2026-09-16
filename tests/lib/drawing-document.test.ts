@@ -1019,6 +1019,14 @@ describe("usableViews", () => {
   });
 });
 
+// Asked on 2026-09-16: "just pick up the 3D view when available, and a front
+// view if not." That order is what VIEW_PREFERENCE already encodes and what
+// the two cases below have always asserted — the real set simply arrived with
+// an EMPTY viewRegions array, the model saying it could not fix exact crop
+// boxes, so there was nothing to prefer and the whole page stood in. The fix
+// for that is in the prompt (src/lib/anthropic.ts): an approximate box beats
+// omitting the region. Documents already read keep their old output and need
+// re-reading to gain one.
 describe("pickItemView", () => {
   it("prefers a photograph or a render — on a spec sheet that IS the 3D view", () => {
     const views = usableViews(

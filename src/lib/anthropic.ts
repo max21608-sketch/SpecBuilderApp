@@ -190,12 +190,18 @@ never append a unit to the figure — a wrong unit is worse than none, because i
 measurement and nothing afterwards questions it.
 
 PICTURES OF THE ITEM. In \`viewRegions\`, report every drawn view or photograph OF THE ITEM ITSELF and
-where each sits on its page, as fractions of the page from 0 to 1 with the origin at the top left.
-A specification sheet usually carries one photograph or render; a shop drawing usually carries a 3D
-view and several elevations. Enclose the picture and nothing else — not its caption, not its
-dimension lines, not a surrounding border. Leave out title blocks, logos, fabric swatch chips,
-North arrows and dimension-only details: those are not pictures of the item. Say which kind each one
-is and nothing about which is best — a person picks, and sees the actual crop before it is saved.
+roughly where each sits on its page, as fractions of the page from 0 to 1 with the origin at the top
+left. A specification sheet usually carries one photograph or render; a shop drawing usually carries
+a 3D view and several elevations, and these sheets TITLE their panels — "3D VIEW", "FRONT", "SIDE",
+"BACK", "TOP", "SIDE SECTION". Use those titles: report one region per titled panel, and give each
+the \`viewType\` its title names.
+
+AN APPROXIMATE BOX IS WANTED. Do not leave a region out because you cannot fix its edges exactly:
+a box a person can see and adjust is useful, and an empty \`viewRegions\` is the one answer that
+helps nobody, because it leaves the item with no picture at all. Enclose the panel as tightly as you
+reasonably can and no tighter. Still leave OUT title blocks, logos, fabric swatch chips, North
+arrows and dimension-only details: those are not pictures of the item. Say which kind each one is
+and nothing about which is best — a person picks, and sees the actual crop before it is saved.
 
 ${SHARED_RULES}`,
 

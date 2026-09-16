@@ -974,6 +974,31 @@ Four things are load-bearing:
   specification sheet still in centimetres at `W1900 x D790 x H720mm`, and
   S-100's eight bare figures, UP-101 and S-400 left unplaced with a dispute.
 
+### An empty viewRegions is why the whole page stood in
+
+`src/lib/anthropic.ts`, `src/lib/extraction-schema.ts`,
+`src/lib/drawing-document.ts` (`pickItemView`)
+
+`VIEW_PREFERENCE` has always ranked photo → render → **3d** → front → side →
+back → plan, and two tests have always asserted it, so "the 3D view when there
+is one, the front view otherwise" was never the missing part. The real AP364
+set arrived with `viewRegions: []` on every item — the model said so in its own
+document note: it could not fix exact crop boxes from what it had read. With
+nothing to prefer, the whole-page fallback stood in on a page whose 3D panel is
+titled `3D VIEW` in the corner.
+
+The cause was the instruction, which read as a demand for precision — "enclose
+the picture and nothing else". It now says an APPROXIMATE box is wanted, that
+omitting a region is the one answer that helps nobody, and that these sheets
+TITLE their panels (`3D VIEW`, `FRONT`, `SIDE`, `BACK`, `TOP`, `SIDE SECTION`)
+so there is one region per titled panel with the `viewType` its title names.
+
+**Nothing is retro-active, and that is the cost.** A prompt is read at call
+time, so a document already read keeps the output it has: the pilot pack gains
+real crops only by being read again, which is eleven billed model calls, or by
+somebody dragging a box. The tool SHAPE is unchanged — only two descriptions —
+so this forces no re-read of anything.
+
 ### A guessed dimension is filled in, and the line turns yellow
 
 Asked for directly on 2026-09-16, after the first real run-through: **assign W,
