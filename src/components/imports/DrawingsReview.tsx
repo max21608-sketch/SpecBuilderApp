@@ -33,6 +33,7 @@ import Disclosure, { DisclosureList } from "@/components/ui/Disclosure";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
+  configurationGroup,
   BulkUnit,
   type ItemResolution,
   type RecordChoice,
@@ -460,9 +461,21 @@ export default function DrawingsReview({ importId }: { importId: string }) {
       )}
 
       <div className="mt-4 space-y-4">
-        {pendingItems.map((item) => (
-          <ItemCard
-            key={item.id}
+        {pendingItems.map((item, index) => {
+          const group = configurationGroup(pendingItems, byItem, item, index);
+          return (
+            <div key={item.id}>
+              {/* ONE HEADING PER CODE THAT IS DRAWN MORE THAN ONCE. The cards
+                  already sit together (they are in page order), but adjacency
+                  is not a statement — a reviewer looking at four S-301 cards
+                  needs to be told they are four configurations of one bill
+                  line and not four items. Printed once, above the first. */}
+              {group && (
+                <p className="mb-1 text-sm font-medium text-neutral-800">
+                  {group.code} — one bill line, drawn as configurations {group.letters.join(", ")}
+                </p>
+              )}
+              <ItemCard
             item={item}
             importId={importId}
             resolution={byItem.get(item.id)}
@@ -475,10 +488,12 @@ export default function DrawingsReview({ importId }: { importId: string }) {
             onSaveTargets={saveTargets}
             onSetBulkUnit={setBulkUnit}
             onImage={rememberImage}
-              onSwatch={rememberSwatch}
-            onReview={review}
-          />
-        ))}
+                  onSwatch={rememberSwatch}
+                onReview={review}
+              />
+            </div>
+          );
+        })}
       </div>
 
       <CollapsedList

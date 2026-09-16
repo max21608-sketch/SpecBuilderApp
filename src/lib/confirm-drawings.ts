@@ -35,8 +35,10 @@ import {
   assertStagedDrawings,
   drawingItemBlockers,
   hasPendingObservations,
+  occupancyThrough,
   resolveDrawingTargets,
   targetRecordIds,
+  variantLettersByItem,
   type DrawingItem,
   type DrawingObservation,
   type OccupiedSlots,
@@ -59,6 +61,7 @@ export type SwatchCrop = {
   size?: number | null;
 };
 import { createFinish } from "@/lib/finish-edit";
+import { ensureVariant } from "@/lib/variant-create";
 import { snapshotRecords } from "@/lib/record-snapshot";
 
 export type ObservationRef = { id: string; version: number };
@@ -280,17 +283,49 @@ export async function confirmDrawingItem(
     throw new DomainConflictError("nothing_to_apply", "There is nothing pending on this item.", { status: 400 });
   }
 
+  // ==========================================================================
+  // A CODE DRAWN MORE THAN ONCE WRITES TO A CONFIGURATION, NOT THE BILL LINE.
+  //
+  // S-201 is drawn on pages 5 and 6 with identical geometry and different
+  // fabrics, against ONE bill line. Both pages used to resolve to that one
+  // record, so confirming the second offered to RETIRE the first's fabric: the
+  // app insisting one of two true statements had to be wrong.
+  //
+  // The letter is derived HERE from the staged document, by the same pure
+  // function the review screen uses, and is never taken from the request — a
+  // client naming the record its data belongs to is what `blob-source.ts`
+  // exists to refuse.
+  //
+  // TWO LISTS COME OUT OF THIS AND THEY ARE NOT INTERCHANGEABLE.
+  //   `ordered`  the records the reviewer TICKED — the bill's own. Echoed back
+  //              into the staged item and compared against the live resolution
+  //              on the next read, so writing variant ids here would make
+  //              every later confirm fail `targets_changed`.
+  //   `writeIds` where the specs actually land.
+  // A code drawn ONCE has the two identical, which is most of any pack.
+  // ==========================================================================
+  const variantLabel = variantLettersByItem(run.staged.items).get(item.id) ?? null;
+  const ordered = [...targets].sort();
+  const variantOf = new Map<string, string>();
+  if (variantLabel) {
+    for (const parentId of ordered) {
+      const variant = await ensureVariant(txn, { parentId, variantLabel, actor });
+      variantOf.set(parentId, variant.recordId);
+    }
+  }
+  const writeIds = ordered.map((parentId) => variantOf.get(parentId) ?? parentId);
+
   // Blockers are recomputed here, never trusted from the screen. `occupied` is
   // read live so a slot filled by another card a second ago is caught.
   // Both halves, for the reason loadOccupiedSlots gives: a BWS field and a
   // dimension slot are two uniqueness rules, and reading one would let the
   // other collide at insert.
-  const occupied: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
-  if (targets.length > 0) {
+  const byWriteTarget: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
+  if (writeIds.length > 0) {
     const occupiedRows = await txn`
       select id, record_id, spec_field_id, dimension_slot, version, label, value, unit, source_page
       from record_attributes
-      where record_id = any(${targets}::uuid[])
+      where record_id = any(${writeIds}::uuid[])
         and status = 'active'
         and (spec_field_id is not null or dimension_slot is not null)
     `;
@@ -306,17 +341,20 @@ export async function confirmDrawingItem(
         sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
       };
       if (row.spec_field_id) {
-        const map = occupied.fields.get(recordId) ?? new Map<string, OccupiedSlot>();
+        const map = byWriteTarget.fields.get(recordId) ?? new Map<string, OccupiedSlot>();
         map.set(String(row.spec_field_id), occupant);
-        occupied.fields.set(recordId, map);
+        byWriteTarget.fields.set(recordId, map);
       }
       if (isDimensionSlot(row.dimension_slot)) {
-        const map = occupied.dimensions.get(recordId) ?? new Map<DimensionSlot, OccupiedSlot>();
+        const map = byWriteTarget.dimensions.get(recordId) ?? new Map<DimensionSlot, OccupiedSlot>();
         map.set(row.dimension_slot, occupant);
-        occupied.dimensions.set(recordId, map);
+        byWriteTarget.dimensions.set(recordId, map);
       }
     }
   }
+  // Keyed back onto what the reviewer ticked, so the blockers and the replace
+  // acknowledgements both speak about the records named on the card.
+  const occupied = occupancyThrough(byWriteTarget, variantOf);
   const blockers = drawingItemBlockers(item, resolution, occupied);
   if (blockers.length > 0) {
     throw new DomainConflictError("blocked", blockers[0]?.message ?? "This item cannot be confirmed yet.", {
@@ -325,15 +363,17 @@ export async function confirmDrawingItem(
   }
 
   // Locked in a deterministic order. Two item cards fanning out to overlapping
-  // records would otherwise be able to deadlock against each other.
-  const ordered = [...targets].sort();
+  // records would otherwise be able to deadlock against each other. The records
+  // LOCKED are the ones being written, which for a configuration is the variant
+  // rather than the bill line.
+  const lockOrder = [...writeIds].sort();
   const locked = await txn`
     select id, project_id, status from spec_records
-    where id = any(${ordered}::uuid[])
+    where id = any(${lockOrder}::uuid[])
     order by id
     for update
   `;
-  if (locked.length !== ordered.length) {
+  if (locked.length !== lockOrder.length) {
     throw new DomainConflictError("record_missing", "One of the target records no longer exists. Reload.");
   }
   for (const row of locked) {
@@ -492,7 +532,11 @@ export async function confirmDrawingItem(
   const now = new Date().toISOString();
   let answersFilled = 0;
 
-  for (const recordId of ordered) {
+  // BOTH IDS PER ITERATION. `recordId` is where the spec lands; `tickedId` is
+  // the record the reviewer saw named on the card, which is what their replace
+  // acknowledgements are keyed on. For a code drawn once the two are the same.
+  for (const [index, recordId] of writeIds.entries()) {
+    const tickedId = ordered[index]!;
     // One image row per target record, the same fan-out the attributes get, and
     // correct for the same reason: it is ONE drawing of one item, and the runs
     // quoting it are quoting that item.
@@ -533,7 +577,7 @@ export async function confirmDrawingItem(
       // insert-then-retire cannot. Re-checked against the version the reviewer
       // saw — an occupant that changed since is refused rather than replaced,
       // because the value they agreed to drop is not the value that is there.
-      const replacement = acknowledgedReplacements(observation).get(recordId);
+      const replacement = acknowledgedReplacements(observation).get(tickedId);
       if (replacement) {
         const supersededRows = await txn`
           update record_attributes
@@ -622,7 +666,9 @@ export async function confirmDrawingItem(
   // One version per target record, taken AFTER the answers were promoted: a
   // version showing the new attribute but not the checklist answer it filled
   // would be a version of a state the record was never in.
-  await snapshotRecords(txn, ordered, changeSetId);
+  // The records that CHANGED, which for a configuration is the variant. A
+  // version of the bill line would describe a heading nothing was written to.
+  await snapshotRecords(txn, writeIds, changeSetId);
 
   const items = run.staged.items.map((row) =>
     row.id !== itemId

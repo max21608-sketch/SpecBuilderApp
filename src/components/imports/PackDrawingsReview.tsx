@@ -25,6 +25,7 @@ import { intakeStatusLabel, isIntakeRunWorking } from "@/lib/intake-status";
 import Spinner from "@/components/ui/Spinner";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
+  configurationGroup,
   BulkUnit,
   type ItemResolution,
   type RecordChoice,
@@ -523,8 +524,22 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
 
       {/* ---- the cards, one per item, whichever file it came from ---- */}
       <div className="mt-4 space-y-4">
-        {cards.map(({ run, item }) => (
+        {cards.map(({ run, item }, index) => {
+          const group = configurationGroup(
+            cards.map((card) => card.item),
+            new Map(cards.map((card) => [card.item.id, card.run.items.find((entry) => entry.id === card.item.id)])),
+            item,
+            index,
+          );
+          return (
           <div key={item.id}>
+            {/* Above the filename, because the grouping is about the ITEM and
+                the file is only where this page of it came from. */}
+            {group && (
+              <p className="mb-1 text-sm font-medium text-neutral-800">
+                {group.code} — one bill line, drawn as configurations {group.letters.join(", ")}
+              </p>
+            )}
             <p className="mb-1 text-xs text-neutral-500">{run.filename ?? "Unnamed file"}</p>
             <ItemCard
               item={item}
@@ -543,7 +558,8 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
               onReview={review}
             />
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {cards.length === 0 && runs.some((run) => run.staged) && (

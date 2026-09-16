@@ -194,12 +194,22 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
   const recordRows = await exec`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
            r.boq_category, r.status, r.category_id, r.level, r.run_id, r.parent_id, r.split_reason,
+           r.variant_label,
            p.bws_project_number, p.name as project_name, p.client,
            run.name as run_name,
            c.name as category_name,
+           -- A VARIANT READS ITS PARENT'S CODES. S-201 A deliberately carries
+           -- no boq_code ref of its own: copying the client ref onto two
+           -- variants would put three records with that ref on one run and
+           -- every drawing card for it would resolve as ambiguous. The ref is
+           -- still the client's key for the thing, so the export's Client Code
+           -- has to find it -- without this, every split item shipped a blank
+           -- one. Only boq_code is redirected; a bws_job ref belongs to the
+           -- variant that earned it.
            coalesce((select array_agg(x.ref_value order by x.ref_value)
                        from spec_record_refs x
-                      where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as boq_codes
+                      where x.record_id = coalesce(r.parent_id, r.id)
+                        and x.ref_system = 'boq_code'), '{}') as boq_codes
     from spec_records r
     join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id
@@ -226,6 +236,7 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
         area: text(row.area),
         runName: String(row.run_name),
         boqCodes: (row.boq_codes as string[] | null)?.map(String) ?? [],
+        variantLabel: text(row.variant_label),
       },
       runId: String(row.run_id),
       runName: String(row.run_name),

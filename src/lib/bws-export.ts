@@ -193,6 +193,8 @@ export type ExportRecord = {
   recordNo: number;
   label: string;
   itemDescription: string;
+  /** `A` on a fabric split, null otherwise. See the Name column below. */
+  variantLabel?: string | null;
   qty: number | null;
   area: string | null;
   runName: string;
@@ -404,7 +406,16 @@ export function composeRowCells(
         case PROJECT_REF_COLUMN_NAME:
           return { value: scope.projectName, source: { kind: "project" } };
         case NAME_COLUMN_NAME:
-          return { value: record.itemDescription, source: { kind: "record" } };
+          // THIS REPO'S JUDGEMENT, like the rest of the job columns. Two
+          // variants of one bill line share the client's description exactly,
+          // so a file carrying both would show BWS two identical `Armchair`
+          // jobs against the same client code. The letter is appended to tell
+          // them apart; confirm it against a real BWS import before anybody
+          // relies on the file.
+          return {
+            value: record.variantLabel ? `${record.itemDescription} (${record.variantLabel})` : record.itemDescription,
+            source: { kind: "record" },
+          };
         case ITEM_COUNT_COLUMN_NAME:
           return { value: record.qty === null ? "" : String(record.qty), source: { kind: "record" } };
         default:

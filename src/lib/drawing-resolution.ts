@@ -21,8 +21,10 @@ import {
   assertStagedDrawings,
   drawingItemBlockers,
   drawingItemWarnings,
+  occupancyThrough,
   resolveDrawingTargets,
   targetRecordIds,
+  variantLettersByItem,
   type DrawingBlocker,
   type DrawingResolution,
   type DrawingWarning,
@@ -40,6 +42,18 @@ export type ResolvedItem = {
   warnings: DrawingWarning[];
   /** Per pending observation: what it would displace, on which record. */
   occupants: Record<string, { recordId: string; occupant: OccupiedSlot }[]>;
+  /**
+   * Which configuration of its code this card is, when the code is drawn more
+   * than once. Null for a code drawn once, which is most of any pack.
+   */
+  variantLabel: string | null;
+  /**
+   * Per ticked record: the variant the specs will land on, for the ones that
+   * exist already. A letter with no entry here is a variant the confirm will
+   * CREATE, which is why the card says "will be created" rather than showing a
+   * record number it cannot yet name.
+   */
+  writesTo: Record<string, string>;
 };
 
 /**
@@ -98,11 +112,30 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
 
 /** The registers a drawings screen needs, read once for any number of runs. */
 export async function loadDrawingContext(projectId: string) {
-  const [registers, occupied] = await Promise.all([
+  const [registers, occupied, variants] = await Promise.all([
     loadExtractionRegisters(projectId),
     loadOccupiedSlots(projectId),
+    loadVariants(projectId),
   ]);
-  return { records: registers.records, occupied };
+  return { records: registers.records, occupied, variants };
+}
+
+/**
+ * The live variants of this project's records, by parent and letter.
+ *
+ * Read so the screen can show the occupancy of the record a card will actually
+ * write to. `resolveDrawingTargets` matches by ref and a variant deliberately
+ * carries none, so variants never appear as targets of their own — they are
+ * only ever reached through their parent.
+ */
+async function loadVariants(projectId: string): Promise<Map<string, string>> {
+  const rows = await sql`
+    select id, parent_id, variant_label from spec_records
+     where project_id = ${projectId} and parent_id is not null and status = 'active'
+  `;
+  const out = new Map<string, string>();
+  for (const row of rows) out.set(`${String(row.parent_id)}|${String(row.variant_label)}`, String(row.id));
+  return out;
 }
 
 /**
@@ -141,16 +174,34 @@ export function resolveStagedRun(
   staged: StagedDrawings,
   context: Awaited<ReturnType<typeof loadDrawingContext>>,
 ): ResolvedItem[] {
+  const letters = variantLettersByItem(staged.items);
   return staged.items.map((item) => {
     const resolution = resolveDrawingTargets(item.itemCodeRaw, context.records);
     const targets = targetRecordIds(item, resolution);
+    const variantLabel = letters.get(item.id) ?? null;
+
+    // The records this card will WRITE to, where they exist. Only ever used to
+    // read occupancy from the right place: `occupancyThrough` keys it back onto
+    // the record the reviewer ticked, so blockers and "tick to replace" go on
+    // naming what is on the card. See its header for why that matters.
+    const writesTo = new Map<string, string>();
+    if (variantLabel) {
+      for (const parentId of targets) {
+        const variantId = context.variants.get(`${parentId}|${variantLabel}`);
+        if (variantId) writesTo.set(parentId, variantId);
+      }
+    }
+    const occupied = occupancyThrough(context.occupied, writesTo);
+
     return {
       id: item.id,
       resolution,
       targets,
-      blockers: drawingItemBlockers(item, resolution, context.occupied),
+      blockers: drawingItemBlockers(item, resolution, occupied),
       warnings: drawingItemWarnings(item),
-      occupants: occupantsFor(item, targets, context.occupied),
+      occupants: occupantsFor(item, targets, occupied),
+      variantLabel,
+      writesTo: Object.fromEntries(writesTo),
     };
   });
 }

@@ -1625,6 +1625,46 @@ function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
  * one item, it stays one record, and nothing about it changes.
  * ============================================================================
  */
+/**
+ * The occupancy a card is really writing into, still keyed by the record the
+ * reviewer ticked.
+ *
+ * ============================================================================
+ * WHY THE KEYS MUST STAY THE PARENT'S.
+ *
+ * A card for a code drawn twice writes to a VARIANT (`S-201 A`), but the
+ * reviewer ticked a RUN and what they ticked is the bill's record. Every screen
+ * contract downstream is keyed on that: the "tick to replace" acknowledgement
+ * stored in `observation.replaces`, the run checkboxes, `item.targets.ticked`.
+ *
+ * So this re-keys rather than re-points: `fields.get(parentId)` returns the
+ * VARIANT's occupied slots. `drawingItemBlockers` and `occupantsFor` then work
+ * unchanged and keep reporting parent ids, and two things come out right for
+ * free — a variant that does not exist yet shows NO occupants (there is
+ * nothing there to replace, which is the truth), and re-confirming a page over
+ * an existing variant shows that variant's own values rather than the bill
+ * record's, which is empty because a split parent is a heading.
+ *
+ * Passing the variant ids straight through instead would make the card offer to
+ * replace a value on a record the reviewer never saw named.
+ * ============================================================================
+ */
+export function occupancyThrough(occupied: OccupiedSlots, writeTo: ReadonlyMap<string, string>): OccupiedSlots {
+  if (writeTo.size === 0) return occupied;
+  const fields = new Map(occupied.fields);
+  const dimensions = new Map(occupied.dimensions);
+  for (const [parentId, variantId] of writeTo) {
+    if (parentId === variantId) continue;
+    const field = occupied.fields.get(variantId);
+    if (field) fields.set(parentId, field);
+    else fields.delete(parentId);
+    const dimension = occupied.dimensions.get(variantId);
+    if (dimension) dimensions.set(parentId, dimension);
+    else dimensions.delete(parentId);
+  }
+  return { fields, dimensions };
+}
+
 export function variantLettersByItem(items: readonly DrawingItem[]): Map<string, string | null> {
   // THE SAME FOLD THE RESOLVER MATCHES BY — `spec-document`'s, the one
   // `findRecordsByRef` uses, and NOT `boq-import`'s looser one. Two cards that

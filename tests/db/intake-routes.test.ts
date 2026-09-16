@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
 import { stagePreamble } from "@/lib/preamble-document";
+import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -1130,4 +1131,149 @@ describeIfDb("intake routes", () => {
     expect(bytes.subarray(0, 2).toString()).toBe("PK");
     expect(bytes.length).toBeGreaterThan(1000);
   });
+
+  // ==========================================================================
+  // A CODE DRAWN TWICE IS TWO CONFIGURATIONS. Needs 0024.
+  //
+  // The AP364 set draws S-201 on pages 5 and 6: identical geometry, different
+  // fabric, ONE bill line. Both cards used to resolve to that one record, so
+  // confirming the second offered to RETIRE the first's fabric — the app
+  // insisting one of two true statements had to be wrong.
+  // ==========================================================================
+  it("confirms two pages of one code onto configurations A and B", async () => {
+    const parentId = await makeRecord(mainRunId, "__QA S-201", "__QA Armchair", true);
+    await makeAnswers(parentId);
+
+    const staged = stageDrawings(
+      [
+        {
+          ...drawingItem("__QA S-201"),
+          page: 5,
+          materials: [{ labelRaw: "FABRIC", valueRaw: "__QA Kolda", materialCodeRaw: "__QA UPH-07" }],
+        },
+        {
+          ...drawingItem("__QA S-201"),
+          page: 6,
+          materials: [{ labelRaw: "FABRIC", valueRaw: "__QA Goree", materialCodeRaw: "__QA UPH-07" }],
+        },
+      ],
+      fields,
+      "__QA two pages.pdf",
+      null,
+    );
+    const run = await client.query(
+      `insert into intake_runs (project_id, source_kind, document_kind, status, parsed, created_by, updated_by)
+       values ($1, 'spec_document', 'shop_drawings', 'parsed', $2::jsonb, 'qa', 'qa') returning id, version`,
+      [projectId, JSON.stringify(staged)],
+    );
+    const drawingsRunId = run.rows[0].id as string;
+
+    // Confirm page 5, then page 6. The letters come from page order, derived
+    // server-side — the request never names one.
+    for (const item of staged.items) {
+      const runRow = await client.query(`select version from intake_runs where id = $1`, [drawingsRunId]);
+      const res = await confirmRoute(drawingsRunId, {
+        version: Number(runRow.rows[0].version),
+        action: "confirm",
+        itemId: item.id,
+        itemVersion: item.version,
+        observations: item.observations.map((observation) => ({ id: observation.id, version: observation.version })),
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const variants = await client.query(
+      `select id, variant_label, split_reason, depth, qty, item_description
+         from spec_records where parent_id = $1 and status = 'active' order by variant_label`,
+      [parentId],
+    );
+    expect(variants.rows.map((row) => row.variant_label)).toEqual(["A", "B"]);
+    expect(variants.rows.map((row) => row.split_reason)).toEqual(["fabric", "fabric"]);
+    // The bill says 4 off and never says how many are fabric A.
+    expect(variants.rows.map((row) => row.qty)).toEqual([null, null]);
+
+    // Each fabric on its own configuration, and NEITHER on the bill line.
+    const fabricOf = async (recordId: string) => {
+      const rows = await client.query(
+        `select value from record_attributes where record_id = $1 and label = 'FABRIC' and status = 'active'`,
+        [recordId],
+      );
+      return rows.rows.map((row) => row.value);
+    };
+    expect(await fabricOf(variants.rows[0].id)).toEqual(["__QA Kolda"]);
+    expect(await fabricOf(variants.rows[1].id)).toEqual(["__QA Goree"]);
+    expect(await fabricOf(parentId)).toEqual([]);
+
+    // Nothing was retired: the second fabric is not a correction of the first.
+    const retired = await client.query(
+      `select count(*)::int as n from record_attributes
+        where record_id = any($1::uuid[]) and status = 'retired'`,
+      [[parentId, variants.rows[0].id, variants.rows[1].id]],
+    );
+    expect(retired.rows[0].n).toBe(0);
+
+    // The variants are the jobs; the bill line is a heading.
+    const scope = await loadExportScope(projectId, mainRunId);
+    if (isScopeFailure(scope)) throw new Error(scope.error);
+    const shipped = scope.scope.records.map((record) => record.id);
+    expect(shipped).toContain(variants.rows[0].id);
+    expect(shipped).toContain(variants.rows[1].id);
+    expect(shipped).not.toContain(parentId);
+
+    // A variant has no boq_code of its own, so Client Code reads the parent's.
+    const exported = scope.scope.records.find((record) => record.id === variants.rows[0].id);
+    expect(exported?.boqCodes).toEqual(["__QA S-201"]);
+    expect(exported?.variantLabel).toBe("A");
+
+    // Idempotent: confirming the same card again makes no third variant.
+    const again = await client.query(
+      `select count(*)::int as n from spec_records where parent_id = $1`,
+      [parentId],
+    );
+    expect(again.rows[0].n).toBe(2);
+  });
+
+  it("refuses to split a record that already carries confirmed specs", async () => {
+    // Those specs would stay on a record the export has stopped shipping, so a
+    // confirmed fabric would vanish from the file.
+    const parentId = await makeRecord(mainRunId, "__QA S-900", "__QA Armchair", true);
+    await makeAnswers(parentId);
+    const first = await stageDrawingRun("__QA S-900", { ...drawingItem("__QA S-900"), page: 1 });
+    const res = await confirmRoute(first.runId, {
+      version: first.version,
+      action: "confirm",
+      itemId: first.staged.items[0]!.id,
+      itemVersion: first.staged.items[0]!.version,
+      observations: first.staged.items[0]!.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    expect(res.status).toBe(200);
+
+    // Now the same code arrives on two pages, which would split it.
+    const staged = stageDrawings(
+      [
+        { ...drawingItem("__QA S-900"), page: 2 },
+        { ...drawingItem("__QA S-900"), page: 3 },
+      ],
+      fields,
+      "__QA split later.pdf",
+      null,
+    );
+    const run = await client.query(
+      `insert into intake_runs (project_id, source_kind, document_kind, status, parsed, created_by, updated_by)
+       values ($1, 'spec_document', 'shop_drawings', 'parsed', $2::jsonb, 'qa', 'qa') returning id, version`,
+      [projectId, JSON.stringify(staged)],
+    );
+    const blocked = await confirmRoute(run.rows[0].id, {
+      version: Number(run.rows[0].version),
+      action: "confirm",
+      itemId: staged.items[0]!.id,
+      itemVersion: staged.items[0]!.version,
+      observations: staged.items[0]!.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    expect(blocked.status).toBeGreaterThanOrEqual(400);
+    expect((await blocked.json()).error).toMatch(/already carries/i);
+    const none = await client.query(`select count(*)::int as n from spec_records where parent_id = $1`, [parentId]);
+    expect(none.rows[0].n).toBe(0);
+  });
+
 });
