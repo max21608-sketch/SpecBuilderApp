@@ -8,10 +8,10 @@
 | M1 — spec table and completion view | `part-2/` plan + this log | — | **Shipped to staging 2026-09-13** |
 | M2 — AI extraction of richer documents | `part-3/m4-chase-emails-and-m2-extraction.md` | M1; an Anthropic key + account owner | **Built and deployed 2026-09-13.** API verified with one approved synthetic document. A real pilot schedule has not been read, and no human has used the review screen |
 | M3 — BWS-layout export (complete dataset) | this log, 2026-09-14 | M1 | **Built 2026-09-14** as a REVIEW file (no Id, no Job Number). Not verified against a real BWS import |
-| M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **HIDDEN 2026-09-14.** Code, routes and tests intact; entry points removed |
+| M4 — draft chase emails | `part-3/m4-chase-emails-and-m2-extraction.md` | M1 | **RESTORED 2026-09-16**, with a to-quote tier. Entry points back; no human acceptance and no `.eml` opened in real Outlook |
 | M7 — the intake rebuild | this log, 2026-09-14 | M1, M2 | **Built 2026-09-14** (`0007`). Packs, runs, drawing attributes, preamble notes, export. No human acceptance; no real drawing set extracted |
 | **M8 — the Panther pass** | this log, 2026-09-15 | M7 | **In progress from 2026-09-15.** The pilot pack in, transposed not inferred, and a BWS-layout export a human calls correct. THE milestone |
-| M5 — shared-inbox ingestion | `docs/integration.md` | Entra app + scoped mailbox | Named only |
+| M5 — shared-inbox ingestion | `docs/integration.md` | Entra app + scoped mailbox | **Built 2026-09-16, DISABLED.** The pipeline is verified by uploading a saved `.eml`, including one real model call. The Graph half has never talked to Graph |
 | M6 — VE rounds, TG0 A/B/C sign-off | — | a settled gate model | Named only |
 
 M3, M5 and M6 are named so they are not built speculatively. M1 is shipped;
@@ -888,3 +888,111 @@ way, and why they did not.
 73. **Swatches arrive by hand, and must name their source.** Asking the model
     for swatch regions is a tool-schema change, which re-reads and re-pays for
     every document already read.
+
+---
+
+## 2026-09-16 — the to-quote tier, email intake, and Capsule contacts
+
+78. **A level is REQUIRED before any question is tiered.** `questionTier` does
+    not accept a null level and `questionTierOrNull` returns null rather than
+    choosing a reading: "needed at any level" makes a level-less record look
+    urgent, "needed at none" makes it look quotable, and both are the app
+    answering a question only a person can. Confirmed with Max. The cost is 59
+    level decisions on Panther, which is why the drafts screen blocks such a
+    record with an inline level picker rather than sending somebody to 59
+    record screens.
+79. **`requirements.tgq_levels text[]`, not `required_at_gate`.** Matthew
+    answers per question AND per level, so "needed for a hero sofa, not a
+    simple one" is the normal case and a single-valued column cannot hold it.
+    `required_at_gate` stays null and reserved for TG0/TG1/TG2. The seed writes
+    all three levels on all 728 rows — today's position — so applying the
+    workbook only ever REMOVES entries, and it is a re-seed with no code change.
+80. **The tier is a column on `email_draft_items`, never part of
+    `context_snapshot`.** The snapshot decides whether a sent draft still
+    describes reality, and a tier is a reading of the gate model: applying the
+    workbook re-tiers hundreds of questions at once, which inside the snapshot
+    would 409 every unsent draft and empty Waiting for a reason unrelated to any
+    answer. That is decision 15's `chased_at` trap in a new place. A question
+    changing halves is an amber advisory on the card instead.
+81. **The server reads the tier off the live row; a request carrying one is a
+    400.** The tier decides what the email CLAIMS is blocking a quote. The
+    client chooses which questions to ask, never which half they land in —
+    conventions §9, a gate is enforced on the server.
+82. **`tracking_eligible` is retired from the Waiting predicate.** Nothing ever
+    wrote it false, and the case it described — recording a send whose coverage
+    was already stale — is refused outright by the gate. The column goes in a
+    destructive migration once the screen has been accepted.
+83. **An email is a `document_kind`, not a second pipeline.** Same staged
+    proposals, same review screen, same confirm route, so the review gate, the
+    blockers, the per-proposal versions and the change set are inherited rather
+    than rebuilt. 0007's rule holds: under `source_kind = 'spec_document'`,
+    never beside it.
+84. **`email_messages` is a new table and 0001's `messages` stays unused.** Its
+    `entity_id` is NOT NULL and an email that has just arrived belongs to
+    nothing — which project it concerns is the first thing to work out and
+    sometimes cannot be. It also has no routing state, no fetch state and no
+    pointer to the stored MIME.
+85. **Assignment is the spend point.** An unassigned email is never read: there
+    are no registers to resolve it against. `assignMessage` is the only thing
+    that puts a message on a project, because it is also what dispatches the
+    charged read, and two places doing that is two places to forget one half.
+86. **Routing never breaks its own tie.** The first signal naming any project
+    decides; two at that strength is held for a person, and a weaker signal is
+    never allowed to arbitrate. A confident wrong answer writes one client's
+    fabric onto another's sofa, and the review screen that would catch it is
+    the review screen for the wrong project.
+87. **Confirmed is not a hard closure, and no new mechanism was needed.**
+    `proposalBlockers` already refuses to overwrite a settled answer without an
+    acknowledgement tied to the version shown, whatever the new state is — so
+    confirmed → a different value and confirmed → TBC both go through it.
+    `changeIntent: "withdraws_to_tbc"` exists only because the value being
+    withdrawn carries no TBC token, so the wording alone could not produce one.
+88. **An `'email'` answer is out of reach of `promote-answers`, like
+    `'manual'`.** A person confirming a value off a message, with the message
+    attached as evidence, is a decision — not a document's reading that a later
+    drawing may recompose.
+89. **Capsule is read-only by construction.** One HTTP helper, hard-coded GET,
+    no write verb, and a test asserting the module's export surface so adding
+    one fails a test rather than a code review. "We only ever call GET" is a
+    habit; an absent function is a fact.
+90. **A contact with no Capsule party is flagged, not refused.** A designer
+    whose practice Capsule has never heard of still has to be chaseable today,
+    and refusing to record them only moves the record into somebody's head.
+    Equally, Capsule is not a runtime dependency of chasing: name, email and
+    organisation stay cached, so an outage stops LINKING and never stops
+    sending.
+91. **A refresh never clears an email Capsule no longer lists.** It reports it.
+    Somebody may have corrected the address here on purpose after a bounce, and
+    silently blanking the only way to reach a designer is the worst outcome
+    available.
+92. **The Graph webhook is the one public route, and believes only an id.**
+    `clientState` compared in constant time against a stored HASH, a
+    subscription id that must match a row we created, one bad entry failing the
+    whole batch, and then the message fetched BY its id rather than described
+    by the payload. The middleware exclusion names that exact path, not a
+    prefix.
+93. **A webhook is the speed; the delta poll is the guarantee.** Graph drops
+    notifications, subscriptions expire in under three days, and both fail
+    silently — mail simply stops arriving. The quarter-hourly delta asks what
+    actually changed since the last token. Not redundant, and the cheap half.
+94. **Graph ingestion is built and has never talked to Graph, and the docs say
+    so.** Its own guards are tested; the subscription lifecycle, the delta
+    semantics and the message shape are not. Reporting it as "built" without
+    that sentence would be the dishonest version.
+
+### Still open, added 2026-09-16
+
+- **Nothing deletes ingested email.** MIME is written under `mailbox/` and
+  copied under a project prefix on assignment, and NDA-covered correspondence
+  accumulating indefinitely is a decision nobody has taken. Same gap as
+  uploads, now with a second source.
+- **Workbook N/A answers need a requirement-retire mechanism that does not
+  exist.** The seed never deletes and `spec_answers` references requirements
+  with `on delete restrict`, so "this question does not apply to this category"
+  has nowhere to go yet. Decide when the workbook returns.
+- **An item's level is set by hand, one record at a time.** The drafts screen
+  offers an inline picker on each blocked record; there is no bulk action on a
+  run. If 59 records proves tedious in practice, that is the fix.
+- **No `.eml` has been opened in real Outlook**, and that is unchanged by the
+  tier work — the red banner is a one-cell table precisely because Word's
+  renderer drops borders on a paragraph, and nobody has watched it render.
