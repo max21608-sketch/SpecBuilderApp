@@ -58,10 +58,17 @@ type Attribute = {
 
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
 
+type RetiredAttribute = Attribute & {
+  retired_at: string | null;
+  retired_by: string | null;
+  superseded_by_id: string | null;
+};
+
 type Payload = {
   record: SpecRecord;
   refs: { ref_system: string; ref_value: string }[];
   attributes: Attribute[];
+  retiredAttributes: RetiredAttribute[];
   answers: Answer[];
   categories: Category[];
 };
@@ -91,6 +98,13 @@ export default function RecordPage() {
   // Set when the server refuses an edit for want of a reason. Holds everything
   // needed to replay the same edit once the reviewer has said why.
   const [pendingReason, setPendingReason] = useState<PendingReason | null>(null);
+  // The spec a reviewer has asked to take off this item, waiting for a reason.
+  // Retiring destroys a statement a document made, so the reason is required
+  // here rather than only on an override.
+  const [retiring, setRetiring] = useState<Attribute | null>(null);
+  const [retireReason, setRetireReason] = useState("");
+  const [retireBusy, setRetireBusy] = useState(false);
+  const [showRetired, setShowRetired] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
@@ -191,10 +205,51 @@ export default function RecordPage() {
     setPendingReason(null);
   }
 
+  async function retire() {
+    if (!retiring || !retireReason.trim()) return;
+    setRetireBusy(true);
+    try {
+      const res = await apiFetch(`/api/attributes/${retiring.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "retired", version: retiring.version, reason: retireReason.trim() }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+      if (res.ok) {
+        setRetiring(null);
+        setRetireReason("");
+      }
+    } finally {
+      // Always reset: a non-JSON error must not leave the dialog stuck.
+      setRetireBusy(false);
+    }
+  }
+
+  async function restore(attribute: RetiredAttribute) {
+    setRetireBusy(true);
+    try {
+      const res = await apiFetch(`/api/attributes/${attribute.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: "active",
+          version: attribute.version,
+          reason: `Put back on the item after being retired${attribute.retired_by ? ` by ${attribute.retired_by}` : ""}.`,
+        }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+    } finally {
+      setRetireBusy(false);
+    }
+  }
+
   if (error && !data) return <p className="text-sm text-red-700">{error}</p>;
   if (!data) return <Spinner label="Loading record" />;
 
   const { record, refs, answers, attributes, categories } = data;
+  // Older responses have no `retiredAttributes`; a screen that assumed the key
+  // exists would crash on the first record loaded from a cached payload.
+  const retiredAttributes = data.retiredAttributes ?? [];
   const dimensionCell = composeDimensionCell(
     attributes
       .filter((attribute) => attribute.attr_group === "dimension" && attribute.dimension_slot)
@@ -330,11 +385,103 @@ export default function RecordPage() {
                       {attribute.source_page ? ` p${attribute.source_page}` : ""}
                     </a>
                   )}
+                  {/* Kept, never deleted — the row stays as evidence that a
+                      document said this, with who took it off and why. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRetiring(attribute);
+                      setRetireReason("");
+                    }}
+                    className="text-xs text-neutral-400 hover:text-red-700"
+                    title="Take this spec off the item"
+                  >
+                    retire
+                  </button>
                 </li>
               ))}
             </ul>
           </section>
         ))
+      )}
+
+      {retiring && (
+        <div className="mt-3 border border-red-300 bg-red-50 rounded-lg px-4 py-3">
+          <p className="text-sm font-medium text-red-900">
+            Take “{retiring.label}{retiring.value ? `: ${retiring.value}` : ""}” off this item?
+          </p>
+          <p className="mt-0.5 text-xs text-red-800">
+            It is kept as a record that the document said it, and stops counting towards the checklist and the export.
+            Any checklist answer it filled is recomposed from what is left, or put back to missing.
+          </p>
+          <input
+            value={retireReason}
+            autoFocus
+            onChange={(event) => setRetireReason(event.target.value)}
+            placeholder="Superseded by the Rev B drawing issued 14 Sep"
+            className="mt-2 w-full border border-red-300 rounded px-2 py-1 text-sm bg-white"
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void retire()}
+              disabled={!retireReason.trim() || retireBusy}
+              className="border border-red-400 bg-white rounded px-3 py-1 text-sm hover:bg-red-100 disabled:opacity-50"
+            >
+              {retireBusy ? "Retiring…" : "Retire it"}
+            </button>
+            <button type="button" onClick={() => setRetiring(null)} className="text-sm text-red-800 hover:text-red-950">
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Kept, never deleted, and never silently. A retired spec that could
+          not be seen would make "retire" a delete with extra steps. */}
+      {retiredAttributes.length > 0 && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setShowRetired((value) => !value)}
+            className="text-xs text-neutral-500 hover:text-neutral-900"
+          >
+            {showRetired ? "▾" : "▸"} {retiredAttributes.length} retired spec
+            {retiredAttributes.length === 1 ? "" : "s"}
+          </button>
+          {showRetired && (
+            <ul className="mt-1 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-neutral-50">
+              {retiredAttributes.map((attribute) => (
+                <li key={attribute.id} className="px-4 py-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+                  <span className="text-neutral-400 w-40 shrink-0 line-through">{attribute.label}</span>
+                  <span className="text-neutral-400 flex-1 min-w-[10rem] line-through">
+                    {attribute.value}
+                    {attribute.unit}
+                  </span>
+                  <span className="text-xs text-neutral-400">
+                    retired{attribute.retired_by ? ` by ${attribute.retired_by}` : ""}
+                    {attribute.retired_at ? ` on ${new Date(attribute.retired_at).toLocaleDateString()}` : ""}
+                  </span>
+                  {attribute.superseded_by_id ? (
+                    // Replaced by a later drawing. Putting it back would leave
+                    // the item holding both, with nothing to say which is
+                    // current — so the button is not offered at all.
+                    <span className="text-xs text-neutral-500">replaced by a later drawing</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={retireBusy}
+                      onClick={() => void restore(attribute)}
+                      className="text-xs text-neutral-500 underline hover:text-neutral-900 disabled:opacity-50"
+                    >
+                      put back
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {/* The checklist. A record with no category has none yet, which is not

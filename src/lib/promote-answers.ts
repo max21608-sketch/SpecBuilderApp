@@ -257,3 +257,99 @@ export async function applyAnswerFills(
   }
   return written;
 }
+
+// ---- taking a value back out -----------------------------------------------
+
+/**
+ * Which BWS fields a record's answers still claim, but its attributes no
+ * longer say anything about.
+ *
+ * ============================================================================
+ * WHY A RETIRE NEEDS THIS, AND AN IGNORE DOES NOT.
+ *
+ * `applyAnswerFills` only ever writes a value in. Nothing took one back out,
+ * and for the ignore path that is correct and deliberate: ignoring a staged
+ * observation is a decision about a PROPOSAL, and it should not reach through
+ * to an answer a confirm already wrote.
+ *
+ * Retiring an attribute is the opposite. It is a person on the record screen
+ * saying "that spec is wrong, take it off this item" — and if the answer it
+ * filled kept standing, the checklist would go on reporting a confirmed fabric
+ * that the record no longer holds a statement for. Worse, the export would
+ * still ship it, because a confirmed answer is exported whether or not an
+ * attribute backs it.
+ *
+ * So retiring recomposes, and where nothing is left to recompose FROM, the
+ * answer goes back to `missing` — which is the honest state: nobody has looked
+ * at this since the value was withdrawn.
+ *
+ * The same two protections as a fill, for the same reasons:
+ *   * a PERSON'S answer is never retracted. If somebody typed it, it is
+ *     theirs, and the change set records that it now stands on nothing.
+ *   * only an answer a SHOP-DRAWINGS run wrote is in scope, so a value
+ *     confirmed off an FF&E schedule is not withdrawn by a drawing being
+ *     retired.
+ * ============================================================================
+ */
+export function planAnswerRetractions(attributes: PromotableAttribute[]): { specFieldId: string | null; jsonId: number | null }[] {
+  const out: { specFieldId: string | null; jsonId: number | null }[] = [];
+
+  // The composed cell stands as long as ANY slot still does. Retiring the
+  // width off a record that still has a depth and a height recomposes rather
+  // than retracts — which is planAnswerFills' job, not this one's.
+  const hasDimension = attributes.some(
+    (attribute) =>
+      attribute.attrGroup === "dimension" &&
+      isDimensionSlot(attribute.dimensionSlot ?? "") &&
+      (attribute.value ?? "").trim() !== "",
+  );
+  if (!hasDimension) out.push({ specFieldId: null, jsonId: DIMENSIONS_JSON_ID });
+
+  return out;
+}
+
+/**
+ * Puts back to `missing` any answer a shop drawing wrote whose BWS field the
+ * record's attributes no longer say anything about.
+ *
+ * Takes the fields that ARE still claimed, so one statement can clear
+ * everything else this code owns. That is narrower than it looks: the
+ * predicate still requires the answer to have been written by a shop-drawings
+ * run, so a person's answer and an FF&E schedule's answer are both out of
+ * reach.
+ */
+export async function applyAnswerRetractions(
+  txn: TxnSql,
+  recordId: string,
+  actor: string,
+  fills: AnswerFill[],
+): Promise<number> {
+  const claimedFieldIds = fills.map((fill) => fill.specFieldId).filter((id): id is string => id !== null);
+  const claimedJsonIds = fills.map((fill) => fill.jsonId).filter((id): id is number => id !== null);
+
+  const rows = await txn`
+    update spec_answers a
+    set value = null, value_raw = null, state = 'missing',
+        confirmed_by = null, confirmed_at = null,
+        source_kind = 'document', source_id = a.source_id, updated_by = ${actor}
+    where a.record_id = ${recordId}
+      and a.revision_no = 0
+      and a.state <> 'missing'
+      -- Written by a SHOP DRAWING, and by nothing else. A person's answer and
+      -- an FF&E schedule's answer are both outside this.
+      and a.source_kind = 'document'
+      and exists (
+        select 1 from intake_runs ir
+        where ir.id = a.source_id and ir.document_kind = 'shop_drawings'
+      )
+      -- And whose field no attribute still speaks to.
+      and a.spec_field_id is not null
+      and not exists (
+        select 1 from spec_fields f
+        where f.id = a.spec_field_id
+          and (f.id = any(${claimedFieldIds}::uuid[]) or f.json_id = any(${claimedJsonIds}::int[]))
+      )
+    returning a.id
+  `;
+  return rows.length;
+}

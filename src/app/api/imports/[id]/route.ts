@@ -146,6 +146,23 @@ const DrawingPatch = z
         specFieldId: z.string().uuid().nullable().optional(),
         state: z.enum(ATTRIBUTE_STATES).nullable().optional(),
         label: z.string().max(300).optional(),
+        // Which occupied slot, on which record, this observation replaces.
+        // Per (observation, RECORD): a card fans out one record per run, and
+        // the mock-up run's COM 1 may hold a different old value from the main
+        // run's — so an acknowledgement keyed on the observation alone would
+        // let a confirm retire a value the reviewer never saw.
+        replaces: z
+          .array(
+            z
+              .object({
+                recordId: z.string().uuid(),
+                attributeId: z.string().uuid(),
+                attributeVersion: z.number().int().nonnegative(),
+              })
+              .strict(),
+          )
+          .max(50)
+          .optional(),
       })
       .strict(),
   })
@@ -231,6 +248,7 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
           ...(changes.specFieldId !== undefined ? { specFieldId: changes.specFieldId } : {}),
           ...(changes.state !== undefined ? { state: changes.state, stateReason: null } : {}),
           ...(changes.label !== undefined ? { labelRaw: changes.label } : {}),
+          ...(changes.replaces !== undefined ? { replaces: changes.replaces } : {}),
         };
         // Refused by the database; caught here so the reviewer gets a
         // sentence instead of a 500. A NOTE may carry a unit — 0011 widened

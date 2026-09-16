@@ -54,11 +54,23 @@ export type RunResolution =
   | { runId: string; runName: string; status: "matched"; record: { id: string; label: string; itemDescription: string } }
   | { runId: string; runName: string; status: "ambiguous"; candidates: { id: string; label: string; itemDescription: string }[] };
 
+export type Occupant = {
+  attributeId: string;
+  attributeVersion: number;
+  label: string;
+  value: string | null;
+  unit: string | null;
+  sourceFilename: string | null;
+  sourcePage: number | null;
+};
+
 export type ItemResolution = {
   id: string;
   resolution: { runs: RunResolution[]; suggested: string[] };
   targets: string[];
-  blockers: { code: string; message: string; observationId?: string; runId?: string }[];
+  blockers: { code: string; message: string; observationId?: string; runId?: string; recordId?: string }[];
+  /** Per observation: the rows it would displace, one per target record. */
+  occupants?: Record<string, { recordId: string; occupant: Occupant }[]>;
   // NOT blockers. These never disable Confirm and the confirm route never sees
   // them -- see drawingItemWarnings() for why they are a separate type.
   warnings?: { code: string; message: string; observationId: string }[];
@@ -421,6 +433,7 @@ export default function ItemCard({
             const draft = drafts[observation.id] ?? {};
             const value = draft.value !== undefined ? draft.value : observation.value;
             const rowBlockers = blockerFor(observation.id);
+            const rowOccupants = resolution?.occupants?.[observation.id] ?? [];
             const rowWarnings = warningFor(observation.id);
             return (
               <tr
@@ -608,6 +621,72 @@ export default function ItemCard({
                     Ignore
                   </button>
                 </td>
+                {rowOccupants.length > 0 && (
+                  <td colSpan={7} className="px-4 pb-2">
+                    {/* A REVISED DRAWING. The clash is the point of the card,
+                        not a fault in it — but only once the reviewer has seen
+                        what they are dropping. One tick per RECORD, because a
+                        card fans out one record per run and the mock-up run's
+                        value is not the main run's. */}
+                    <div className="border border-amber-300 bg-amber-50 rounded px-2 py-1.5 text-xs">
+                      <p className="text-amber-900">
+                        {rowOccupants.length === 1
+                          ? "This item already holds a value here."
+                          : `${rowOccupants.length} of these records already hold a value here.`}{" "}
+                        Tick to replace it — the old one is kept, marked retired, and linked to this as its
+                        replacement.
+                      </p>
+                      {rowOccupants.map(({ recordId, occupant }) => {
+                        const acknowledged = (observation.replaces ?? []).some(
+                          (entry) => entry.recordId === recordId && entry.attributeId === occupant.attributeId,
+                        );
+                        const runName =
+                          resolution?.resolution.runs.find(
+                            (run) => run.status === "matched" && run.record.id === recordId,
+                          )?.runName ?? "this run";
+                        return (
+                          <label key={recordId} className="mt-1 flex items-start gap-2 text-amber-900">
+                            <input
+                              type="checkbox"
+                              checked={acknowledged}
+                              disabled={busy}
+                              onChange={(event) => {
+                                const others = (observation.replaces ?? []).filter((entry) => entry.recordId !== recordId);
+                                const next = event.target.checked
+                                  ? [
+                                      ...others,
+                                      {
+                                        recordId,
+                                        attributeId: occupant.attributeId,
+                                        attributeVersion: occupant.attributeVersion,
+                                      },
+                                    ]
+                                  : others;
+                                void onSaveObservation(item, observation, { replaces: next });
+                              }}
+                              className="mt-0.5"
+                            />
+                            <span>
+                              <span className="font-medium">{runName}</span>: replace{" "}
+                              <span className="font-mono">
+                                {occupant.label}
+                                {occupant.value ? `: ${occupant.value}` : ""}
+                                {occupant.unit ?? ""}
+                              </span>
+                              {occupant.sourceFilename && (
+                                <span className="text-amber-800">
+                                  {" "}
+                                  (from {occupant.sourceFilename}
+                                  {occupant.sourcePage ? ` p${occupant.sourcePage}` : ""})
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </td>
+                )}
                 {(rowBlockers.length > 0 || rowWarnings.length > 0) && (
                   <td colSpan={7} className="px-4 pb-2 text-xs text-amber-900">
                     {rowBlockers.map((blocker) => blocker.message).join(" ")}

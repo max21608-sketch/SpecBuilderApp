@@ -28,8 +28,14 @@
 // column.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { applyAnswerFills, planAnswerFills, type PromotableAttribute } from "@/lib/promote-answers";
 import {
+  applyAnswerFills,
+  applyAnswerRetractions,
+  planAnswerFills,
+  type PromotableAttribute,
+} from "@/lib/promote-answers";
+import {
+  acknowledgedReplacements,
   assertStagedDrawings,
   drawingItemBlockers,
   hasPendingObservations,
@@ -38,6 +44,7 @@ import {
   type DrawingItem,
   type DrawingObservation,
   type OccupiedSlots,
+  type OccupiedSlot,
   type StagedDrawings,
 } from "@/lib/drawing-document";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
@@ -55,6 +62,8 @@ export type DrawingsConfirmResult = {
   records: number;
   /** Checklist answers filled from the attributes this confirm wrote. */
   answersFilled: number;
+  /** Rows a revised drawing retired and took the place of. */
+  replaced?: number;
   remainingPending: number;
   status: string;
 };
@@ -268,22 +277,32 @@ export async function confirmDrawingItem(
   const occupied: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
   if (targets.length > 0) {
     const occupiedRows = await txn`
-      select record_id, spec_field_id, dimension_slot from record_attributes
+      select id, record_id, spec_field_id, dimension_slot, version, label, value, unit, source_page
+      from record_attributes
       where record_id = any(${targets}::uuid[])
         and status = 'active'
         and (spec_field_id is not null or dimension_slot is not null)
     `;
     for (const row of occupiedRows) {
       const recordId = String(row.record_id);
+      const occupant: OccupiedSlot = {
+        attributeId: String(row.id),
+        attributeVersion: Number(row.version),
+        label: String(row.label),
+        value: row.value === null || row.value === undefined ? null : String(row.value),
+        unit: row.unit === null || row.unit === undefined ? null : String(row.unit),
+        sourceFilename: null,
+        sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
+      };
       if (row.spec_field_id) {
-        const set = occupied.fields.get(recordId) ?? new Set<string>();
-        set.add(String(row.spec_field_id));
-        occupied.fields.set(recordId, set);
+        const map = occupied.fields.get(recordId) ?? new Map<string, OccupiedSlot>();
+        map.set(String(row.spec_field_id), occupant);
+        occupied.fields.set(recordId, map);
       }
       if (isDimensionSlot(row.dimension_slot)) {
-        const set = occupied.dimensions.get(recordId) ?? new Set<DimensionSlot>();
-        set.add(row.dimension_slot);
-        occupied.dimensions.set(recordId, set);
+        const map = occupied.dimensions.get(recordId) ?? new Map<DimensionSlot, OccupiedSlot>();
+        map.set(row.dimension_slot, occupant);
+        occupied.dimensions.set(recordId, map);
       }
     }
   }
@@ -342,6 +361,8 @@ export async function confirmDrawingItem(
   });
 
   const attributeIdsByObservation = new Map<string, string[]>();
+  /** Old row → the row that took over, linked once the new id is known. */
+  const superseded: { oldId: string; observationId: string; recordId: string }[] = [];
   const now = new Date().toISOString();
   let answersFilled = 0;
 
@@ -378,6 +399,34 @@ export async function confirmDrawingItem(
 
     for (const observation of taken) {
       sortOrder += 1;
+
+      // ---- a revised drawing replaces what is in the slot ------------------
+      // Retired BEFORE the insert, and that order is decided by the database
+      // rather than by preference: both partial unique indexes are
+      // `where status = 'active'`, so retire-then-insert commits and
+      // insert-then-retire cannot. Re-checked against the version the reviewer
+      // saw — an occupant that changed since is refused rather than replaced,
+      // because the value they agreed to drop is not the value that is there.
+      const replacement = acknowledgedReplacements(observation).get(recordId);
+      if (replacement) {
+        const supersededRows = await txn`
+          update record_attributes
+          set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+          where id = ${replacement.attributeId}
+            and record_id = ${recordId}
+            and version = ${replacement.attributeVersion}
+            and status = 'active'
+          returning id
+        `;
+        if (!supersededRows[0]) {
+          throw new DomainConflictError(
+            "occupant_changed",
+            "The spec this page would replace has changed since you looked at it. Nothing was written — reload and check what is there now.",
+          );
+        }
+        superseded.push({ oldId: replacement.attributeId, observationId: observation.id, recordId });
+      }
+
       const inserted = await txn`
         insert into record_attributes
           (record_id, attr_group, dimension_slot, label, value, unit, material_code, spec_field_id, state,
@@ -398,6 +447,17 @@ export async function confirmDrawingItem(
       `;
       const attributeId = String(inserted[0]?.id ?? "");
       if (!attributeId) throw new Error(`observation ${observation.id} was not inserted`);
+
+      // Which row took over, so "why did the width change on the 14th" is
+      // answered by following a link rather than by guessing which of two
+      // retired rows came next.
+      if (replacement) {
+        await txn`
+          update record_attributes set superseded_by_id = ${attributeId}, updated_by = ${actor}
+          where id = ${replacement.attributeId}
+        `;
+      }
+
       const list = attributeIdsByObservation.get(observation.id) ?? [];
       list.push(attributeId);
       attributeIdsByObservation.set(observation.id, list);
@@ -429,7 +489,13 @@ export async function confirmDrawingItem(
     // fill and that is not a failure -- the attributes are the record of what
     // the document said either way, and setting a category later creates the
     // answer rows. It just does not back-fill them; see the gap in CLAUDE.md.
-    const filled = await applyAnswerFills(txn, recordId, runId, actor, planAnswerFills(promotable));
+    const fills = planAnswerFills(promotable);
+    const filled = await applyAnswerFills(txn, recordId, runId, actor, fills);
+    // Retractions too, because a REPLACEMENT can orphan an answer: the row it
+    // retired may have carried a BWS field the new row does not. Without this
+    // the checklist would go on reporting a confirmed value the record holds
+    // no statement for, and the export would still ship it.
+    await applyAnswerRetractions(txn, recordId, actor, fills);
     answersFilled += filled;
 
   }
@@ -474,6 +540,7 @@ export async function confirmDrawingItem(
     ignored: 0,
     restored: 0,
     records: ordered.length,
+    replaced: superseded.length,
     answersFilled,
     remainingPending: countPending(items),
     status,

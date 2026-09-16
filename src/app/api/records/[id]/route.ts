@@ -53,6 +53,25 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     order by a.attr_group, a.sort_order, a.created_at
   `;
 
+  // Retired specs, separately. They are kept as evidence that a document said
+  // something, and every dismissal in this app is reversible — so they have to
+  // be visible somewhere, or "retire" is a delete with extra steps.
+  const retired = await sql`
+    select a.id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code, a.state,
+           a.sort_order, a.version, a.source_page, a.source_run_id, a.retired_at, a.retired_by,
+           a.superseded_by_id,
+           f.name as field_name, f.json_id,
+           src.filename as source_filename
+    from record_attributes a
+    left join spec_fields f on f.id = a.spec_field_id
+    left join (
+      select r.id, r.document_kind, at.filename
+      from intake_runs r left join attachments at on at.id = r.attachment_id
+    ) src on src.id = a.source_run_id
+    where a.record_id = ${id} and a.status = 'retired'
+    order by a.retired_at desc nulls last
+  `;
+
   // LEFT JOIN from requirements: a question with no answer row must still be
   // asked, as `missing`. An uncategorised record has no questions at all —
   // which is NOT the same as having none outstanding, and the screen says so.
@@ -71,7 +90,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     select id, slug, family, name, requirements_authored from item_categories order by family, sort_order
   `;
 
-  return json({ ok: true, record, refs, attributes, answers, categories });
+  return json({ ok: true, record, refs, attributes, retiredAttributes: retired, answers, categories });
 }
 
 const Patch = z

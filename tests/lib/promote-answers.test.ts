@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planAnswerFills, DIMENSIONS_JSON_ID, type PromotableAttribute } from "@/lib/promote-answers";
+import { planAnswerFills, planAnswerRetractions, DIMENSIONS_JSON_ID, type PromotableAttribute } from "@/lib/promote-answers";
 
 const attribute = (over: Partial<PromotableAttribute>): PromotableAttribute => ({
   attrGroup: "dimension",
@@ -121,5 +121,37 @@ describe("planAnswerFills", () => {
     ]);
     expect(fills[0]?.state).toBe("tbc");
     expect(fills[0]?.value).toContain("Yarn Collective");
+  });
+});
+
+// ---- taking a value back out -----------------------------------------------
+
+describe("planAnswerRetractions", () => {
+  const dimension = (slot: string, value: string | null): PromotableAttribute => ({
+    attrGroup: "dimension",
+    dimensionSlot: slot,
+    specFieldId: null,
+    value,
+    unit: "mm",
+    state: "confirmed",
+    sortOrder: 1,
+    sourceRunId: "run-1",
+  });
+
+  it("retracts the dimensions cell when the last slot is gone", () => {
+    // Retiring the only width leaves nothing to compose, and an answer that
+    // stood would go on being exported with no attribute behind it.
+    expect(planAnswerRetractions([])).toEqual([{ specFieldId: null, jsonId: 3 }]);
+  });
+
+  it("does NOT retract while any slot survives", () => {
+    // Retiring the width off a record that still has a depth is a
+    // recomposition, which is planAnswerFills' job.
+    expect(planAnswerRetractions([dimension("D", "790")])).toEqual([]);
+  });
+
+  it("treats a slot with no value as nothing to compose from", () => {
+    expect(planAnswerRetractions([dimension("W", null)])).toEqual([{ specFieldId: null, jsonId: 3 }]);
+    expect(planAnswerRetractions([dimension("W", "  ")])).toEqual([{ specFieldId: null, jsonId: 3 }]);
   });
 });

@@ -27,6 +27,7 @@ import {
   type DrawingResolution,
   type DrawingWarning,
   type OccupiedSlots,
+  type OccupiedSlot,
   type StagedDrawings,
 } from "@/lib/drawing-document";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
@@ -37,6 +38,8 @@ export type ResolvedItem = {
   targets: string[];
   blockers: DrawingBlocker[];
   warnings: DrawingWarning[];
+  /** Per pending observation: what it would displace, on which record. */
+  occupants: Record<string, { recordId: string; occupant: OccupiedSlot }[]>;
 };
 
 /**
@@ -53,26 +56,41 @@ export type ResolvedItem = {
  */
 export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlots> {
   const rows = await sql`
-    select a.record_id, a.spec_field_id, a.dimension_slot
+    select a.id, a.record_id, a.spec_field_id, a.dimension_slot, a.version, a.label, a.value, a.unit,
+           a.source_page, at.filename as source_filename
     from record_attributes a
     join spec_records r on r.id = a.record_id
+    left join intake_runs ir on ir.id = a.source_run_id
+    left join attachments at on at.id = ir.attachment_id
     where r.project_id = ${projectId}
       and a.status = 'active'
       and (a.spec_field_id is not null or a.dimension_slot is not null)
   `;
-  const fields = new Map<string, Set<string>>();
-  const dimensions = new Map<string, Set<DimensionSlot>>();
+  // The occupant itself, not just that there is one: a reviewer looking at a
+  // revised drawing has to be told WHAT it would replace and off which page,
+  // or "tick to replace" is a tick in the dark.
+  const fields = new Map<string, Map<string, OccupiedSlot>>();
+  const dimensions = new Map<string, Map<DimensionSlot, OccupiedSlot>>();
   for (const row of rows) {
     const recordId = String(row.record_id);
+    const occupant: OccupiedSlot = {
+      attributeId: String(row.id),
+      attributeVersion: Number(row.version),
+      label: String(row.label),
+      value: row.value === null || row.value === undefined ? null : String(row.value),
+      unit: row.unit === null || row.unit === undefined ? null : String(row.unit),
+      sourceFilename: row.source_filename === null || row.source_filename === undefined ? null : String(row.source_filename),
+      sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
+    };
     if (row.spec_field_id) {
-      const set = fields.get(recordId) ?? new Set<string>();
-      set.add(String(row.spec_field_id));
-      fields.set(recordId, set);
+      const map = fields.get(recordId) ?? new Map<string, OccupiedSlot>();
+      map.set(String(row.spec_field_id), occupant);
+      fields.set(recordId, map);
     }
     if (isDimensionSlot(row.dimension_slot)) {
-      const set = dimensions.get(recordId) ?? new Set<DimensionSlot>();
-      set.add(row.dimension_slot);
-      dimensions.set(recordId, set);
+      const map = dimensions.get(recordId) ?? new Map<DimensionSlot, OccupiedSlot>();
+      map.set(row.dimension_slot, occupant);
+      dimensions.set(recordId, map);
     }
   }
   return { fields, dimensions };
@@ -87,6 +105,37 @@ export async function loadDrawingContext(projectId: string) {
   return { records: registers.records, occupied };
 }
 
+/**
+ * What each pending observation would DISPLACE, per target record.
+ *
+ * Sent to the screen so "tick to replace" can say what it is replacing and off
+ * which page. A tick with nothing named beside it is a tick in the dark, and
+ * this is the one action in the drawings review that destroys a statement a
+ * document made.
+ */
+export function occupantsFor(
+  item: StagedDrawings["items"][number],
+  targets: string[],
+  occupied: Awaited<ReturnType<typeof loadDrawingContext>>["occupied"],
+): Record<string, { recordId: string; occupant: OccupiedSlot }[]> {
+  const out: Record<string, { recordId: string; occupant: OccupiedSlot }[]> = {};
+  for (const observation of item.observations) {
+    if (observation.reviewStatus !== "pending") continue;
+    const found: { recordId: string; occupant: OccupiedSlot }[] = [];
+    for (const recordId of targets) {
+      const occupant =
+        observation.attrGroup === "dimension" && observation.dimensionSlot
+          ? occupied.dimensions.get(recordId)?.get(observation.dimensionSlot)
+          : observation.specFieldId
+            ? occupied.fields.get(recordId)?.get(observation.specFieldId)
+            : undefined;
+      if (occupant) found.push({ recordId, occupant });
+    }
+    if (found.length > 0) out[observation.id] = found;
+  }
+  return out;
+}
+
 /** Every item of one staged run, resolved against the context. */
 export function resolveStagedRun(
   staged: StagedDrawings,
@@ -94,12 +143,14 @@ export function resolveStagedRun(
 ): ResolvedItem[] {
   return staged.items.map((item) => {
     const resolution = resolveDrawingTargets(item.itemCodeRaw, context.records);
+    const targets = targetRecordIds(item, resolution);
     return {
       id: item.id,
       resolution,
-      targets: targetRecordIds(item, resolution),
+      targets,
       blockers: drawingItemBlockers(item, resolution, context.occupied),
       warnings: drawingItemWarnings(item),
+      occupants: occupantsFor(item, targets, context.occupied),
     };
   });
 }

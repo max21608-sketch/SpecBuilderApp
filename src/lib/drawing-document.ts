@@ -95,6 +95,28 @@ export type DrawingObservation = {
   reviewStatus: "pending" | "ignored" | "applied";
   reviewedAt: string | null;
   reviewedBy: string | null;
+  /**
+   * The rows this observation REPLACES, one per target record.
+   *
+   * A revised drawing gives a slot a record already holds. That is not an
+   * error and it is not something to resolve automatically: the reviewer is
+   * shown what is there, on which run, and ticks it — and the confirm then
+   * retires that row and inserts the new one in its place.
+   *
+   * PER (observation, RECORD), and that is the load-bearing part. A card fans
+   * out to one record per run, and the mock-up run's COM 1 may hold a
+   * different old value from the main run's. An acknowledgement keyed on the
+   * observation alone would let the confirm retire a value the reviewer never
+   * saw on the VE record.
+   *
+   * `attributeVersion` is what the reviewer was looking at. If the occupant
+   * has changed since, the confirm refuses rather than replacing something
+   * else.
+   *
+   * OPTIONAL, like `unitSource` and `dimensionSlot`, so runs staged before
+   * this existed keep reading.
+   */
+  replaces?: { recordId: string; attributeId: string; attributeVersion: number }[];
   /** One attribute row per target record, once applied. */
   applied: { attributeIds: string[] } | null;
 };
@@ -499,9 +521,9 @@ export type DrawingBlocker =
   | { code: "unit_missing"; message: string; observationId: string }
   | { code: "no_state"; message: string; observationId: string }
   | { code: "empty_value"; message: string; observationId: string }
-  | { code: "slot_taken"; message: string; observationId: string }
+  | { code: "slot_taken"; message: string; observationId: string; recordId?: string }
   | { code: "dimension_slot_missing"; message: string; observationId: string }
-  | { code: "dimension_slot_taken"; message: string; observationId: string }
+  | { code: "dimension_slot_taken"; message: string; observationId: string; recordId?: string }
   | { code: "dia_conflict"; message: string; observationId: string };
 
 /**
@@ -512,10 +534,36 @@ export type DrawingBlocker =
  * slots. They are separate maps because they are separate uniqueness rules in
  * 0007 and 0011, and a field and a dimension never contend for the same space.
  */
-export type OccupiedSlots = {
-  fields: Map<string, Set<string>>;
-  dimensions: Map<string, Set<DimensionSlot>>;
+/** What a target record already holds, by the two uniqueness rules. */
+export type OccupiedSlot = {
+  attributeId: string;
+  attributeVersion: number;
+  label: string;
+  value: string | null;
+  unit: string | null;
+  sourceFilename: string | null;
+  sourcePage: number | null;
 };
+
+export type OccupiedSlots = {
+  fields: Map<string, Map<string, OccupiedSlot>>;
+  dimensions: Map<string, Map<DimensionSlot, OccupiedSlot>>;
+};
+
+/**
+ * Which occupants an observation is acknowledged to replace, as a lookup.
+ *
+ * Keyed by record, because the acknowledgement is per (observation, record):
+ * ticking "replace the width on MAIN RUN" says nothing about the width on the
+ * VE run, and must not.
+ */
+export function acknowledgedReplacements(observation: DrawingObservation): Map<string, { attributeId: string; attributeVersion: number }> {
+  const out = new Map<string, { attributeId: string; attributeVersion: number }>();
+  for (const entry of observation.replaces ?? []) {
+    out.set(entry.recordId, { attributeId: entry.attributeId, attributeVersion: entry.attributeVersion });
+  }
+  return out;
+}
 
 /**
  * Computed on every read, never stored.
@@ -595,12 +643,20 @@ export function drawingItemBlockers(
         });
       } else {
         const slot = observation.dimensionSlot;
-        const clash = targets.find((recordId) => occupied.dimensions.get(recordId)?.has(slot));
+        const acknowledged = acknowledgedReplacements(observation);
+        // A clash the reviewer has TICKED for that record is a replacement,
+        // not a blocker. One they have not seen still is.
+        const clash = targets.find((recordId) => {
+          const occupant = occupied.dimensions.get(recordId)?.get(slot);
+          if (!occupant) return false;
+          return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
+        });
         if (clash) {
           blockers.push({
             code: "dimension_slot_taken",
             observationId: observation.id,
-            message: `One of these records already has a ${DIMENSION_SLOT_LABELS[slot].toLowerCase()} from another page. Retire that one, or make this a note.`,
+            recordId: clash,
+            message: `One of these records already has a ${DIMENSION_SLOT_LABELS[slot].toLowerCase()} from another page. Tick it to replace it, or make this a note.`,
           });
         }
       }
@@ -608,12 +664,18 @@ export function drawingItemBlockers(
     if (observation.specFieldId && observation.attrGroup !== "dimension") {
       // Pre-checked so an occupied slot is a sentence the reviewer can act on,
       // rather than a unique-violation 500 from the database.
-      const clash = targets.find((recordId) => occupiedFields.get(recordId)?.has(observation.specFieldId ?? ""));
+      const acknowledged = acknowledgedReplacements(observation);
+      const clash = targets.find((recordId) => {
+        const occupant = occupiedFields.get(recordId)?.get(observation.specFieldId ?? "");
+        if (!occupant) return false;
+        return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
+      });
       if (clash) {
         blockers.push({
           code: "slot_taken",
           observationId: observation.id,
-          message: "That BWS field already has a value on one of these records. Choose another field or retire the old value.",
+          recordId: clash,
+          message: "That BWS field already has a value on one of these records. Tick it to replace it, choose another field, or make this a note.",
         });
       }
     }

@@ -28,6 +28,7 @@ import {
   type OccupiedSlots,
   type PackCard,
   type SpecFieldEntry,
+  type OccupiedSlot,
 } from "@/lib/drawing-document";
 import type { AttributeUnit } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
@@ -402,10 +403,53 @@ describe("drawingItemBlockers", () => {
     expect(blockers.some((b) => b.code === "no_state")).toBe(true);
   });
 
+  const occupant = (overrides: Partial<OccupiedSlot> = {}): OccupiedSlot => ({
+    attributeId: "attr-old",
+    attributeVersion: 1,
+    label: "FABRIC",
+    value: "Yarn Tessarae YC04158 - 01",
+    unit: null,
+    sourceFilename: "S-100.pdf",
+    sourcePage: 1,
+    ...overrides,
+  });
+
   it("blocks a BWS field that already has a value on a target record", () => {
     const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Tessarae", materialCodeRaw: null }] }));
-    const occupied = { fields: new Map([["rec-1", new Set(["f-com1"])]]), dimensions: new Map() };
+    const occupied = { fields: new Map([["rec-1", new Map([["f-com1", occupant()]])]]), dimensions: new Map() };
     const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), occupied);
+    expect(blockers.some((b) => b.code === "slot_taken")).toBe(true);
+  });
+
+  it("stops blocking once the reviewer has ticked the row it would replace", () => {
+    // A revised drawing for one item. The clash is the point of the card, not
+    // a fault in it — but only for the record the reviewer actually ticked.
+    const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Tessarae", materialCodeRaw: null }] }));
+    const occupied = { fields: new Map([["rec-1", new Map([["f-com1", occupant()]])]]), dimensions: new Map() };
+    const acknowledged = {
+      ...item,
+      observations: item.observations.map((observation) => ({
+        ...observation,
+        replaces: [{ recordId: "rec-1", attributeId: "attr-old", attributeVersion: 1 }],
+      })),
+    };
+    const blockers = drawingItemBlockers(acknowledged, resolveDrawingTargets("X-100", [record()]), occupied);
+    expect(blockers.some((b) => b.code === "slot_taken")).toBe(false);
+  });
+
+  it("still blocks when the acknowledgement names a DIFFERENT row than the one in the slot", () => {
+    // The occupant changed after the card was drawn. Replacing it now would
+    // retire a value the reviewer never saw.
+    const item = staged(rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Yarn Tessarae", materialCodeRaw: null }] }));
+    const occupied = { fields: new Map([["rec-1", new Map([["f-com1", occupant({ attributeId: "attr-newer" })]])]]), dimensions: new Map() };
+    const acknowledged = {
+      ...item,
+      observations: item.observations.map((observation) => ({
+        ...observation,
+        replaces: [{ recordId: "rec-1", attributeId: "attr-old", attributeVersion: 1 }],
+      })),
+    };
+    const blockers = drawingItemBlockers(acknowledged, resolveDrawingTargets("X-100", [record()]), occupied);
     expect(blockers.some((b) => b.code === "slot_taken")).toBe(true);
   });
 
