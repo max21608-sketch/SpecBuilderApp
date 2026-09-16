@@ -168,3 +168,27 @@ describe("parseAtoms", () => {
     expect(() => parseAtoms(broken)).toThrow();
   });
 });
+
+// ---- what a comparison must never do --------------------------------------
+
+describe("diffSnapshots over a whole project's worth of records", () => {
+  it("reports a version pair that holds the same thing as no change at all", () => {
+    // Two versions with different numbers can still hold identical state: a
+    // change that touched a record without altering anything the diff reports.
+    // compareChangeSets reads `isEmpty` to call that "unchanged", because
+    // saying "changed" sends somebody looking for a difference that is not
+    // there.
+    const a = base();
+    const b = base();
+    expect(diffSnapshots(a, b).isEmpty).toBe(true);
+  });
+
+  it("does not treat a retired record as an edit to its fields", () => {
+    const after = base();
+    after.status = "retired";
+    const diff = diffSnapshots(base(), after);
+    expect(diff.core).toEqual([{ field: "status", label: "Status", was: "active", now: "retired" }]);
+    expect(diff.attributes).toEqual([]);
+    expect(diff.answers).toEqual([]);
+  });
+});

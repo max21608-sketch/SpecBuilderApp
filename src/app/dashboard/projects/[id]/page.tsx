@@ -26,6 +26,8 @@ import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact } from "@/components/projects/ContactsPanel";
 import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
 import SpecTable from "@/components/records/SpecTable";
+import ProjectHistory from "@/components/history/ProjectHistory";
+import OpenChangeBar from "@/components/history/OpenChangeBar";
 import {
   SPECS_AGREED_LABEL,
   daysUntilSpecsAgreed,
@@ -481,7 +483,26 @@ function ProjectOverview() {
             <span className="ml-1 text-xs text-neutral-400">{run.record_count}</span>
           </button>
         ))}
+        {/* Last, and project-wide: a change usually belongs to one run, but a
+            baseline and a comparison never do. */}
+        <button
+          type="button"
+          onClick={() => setTab("history")}
+          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
+            tab === "history"
+              ? "border-neutral-900 text-neutral-900 font-medium"
+              : "border-transparent text-neutral-500 hover:text-neutral-800"
+          }`}
+        >
+          History
+        </button>
       </nav>
+
+      {/* On every tab, because a person starts a change and then goes looking
+          for the item it applies to. */}
+      <OpenChangeBar projectId={project.id} />
+
+      {tab === "history" && <ProjectHistory projectId={project.id} />}
 
       {runs.map((run) =>
         tab === run.id ? (
