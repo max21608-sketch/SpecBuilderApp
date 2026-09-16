@@ -24,6 +24,26 @@ the resolved host before acting, and refuses production without
 database you believe you are pointed at. It cannot verify that. The printed
 host is what catches a mismatch, so read it.
 
+**Which env file a script reads.** The `npm run db:*` scripts load
+`.env.local` if it is there (`--env-file-if-exists`), so the everyday local
+case is just `npm run db:migrate`. Two properties make that safe rather than
+convenient:
+
+- **An exported variable still wins.** Node does not let an env file overwrite
+  something already in the environment, so `.env.local` cannot quietly pull a
+  deliberately-set target back to sandbox.
+- **Nothing about the guards moved.** The host is still printed,
+  `DATABASE_ENVIRONMENT` is still required, and production is still refused
+  without `--yes-production`. The env file was never the safety mechanism; the
+  script is.
+
+**Production is the explicit form**, and naming its env file is the point —
+that is the line that says which database this is about to touch:
+
+```bash
+node --env-file=.env.production db/run-migrations.mjs --yes-production
+```
+
 ## Setup
 
 1. The Neon project and its `sandbox` branch already exist (see above). For a
@@ -40,7 +60,7 @@ host is what catches a mismatch, so read it.
 wraps itself in `begin; … commit;` so it is atomic on its own.
 
 ```bash
-node --env-file=.env.local db/run-migrations.mjs
+npm run db:migrate
 ```
 
 The runner records each applied file in `schema_migrations`, so it is
@@ -55,7 +75,7 @@ company read as post-mortems.
 ## Seed data
 
 ```bash
-node --env-file=.env.local db/run-seed.mjs
+npm run db:seed
 ```
 
 Seeds are reference data, never transactional data.
@@ -70,16 +90,10 @@ manual edits to the same records.
 ## One-off maintenance passes
 
 ```bash
-npx tsx --env-file=.env.local db/backfill-answers.ts             # dry run
-npx tsx --env-file=.env.local db/backfill-answers.ts --apply
-npx tsx --env-file=.env.local db/backfill-answers.ts --project=<uuid>
+npm run db:backfill-answers                          # dry run
+npm run db:backfill-answers -- --apply
+npm run db:backfill-answers -- --project=<uuid>
 ```
-
-The env file is named on every invocation, exactly like the scripts above it.
-`npm run db:backfill-answers` is the discoverable name and fails without
-`DATABASE_URL` — `npm run` cannot pass `--env-file` through to the runtime, and
-baking one in would make the target database implicit, which is the thing this
-whole section is arranged to prevent.
 
 Fills checklist answers from `record_attributes` that were confirmed before
 `confirm-drawings` started carrying them through. Ran on sandbox 2026-09-15:
@@ -105,7 +119,7 @@ Three things about it are deliberate:
 ## Backups
 
 ```bash
-node --env-file=.env.local db/backup.mjs
+npm run db:backup
 ```
 
 Writes a timestamped dump to `~/bw-backups/<app>/` — deliberately **outside**
@@ -124,6 +138,11 @@ has tables**. A restore belongs in an empty database (a fresh branch or
 project) which the app is then repointed at — never on top of a live one. That
 refusal is deliberate: it makes "restore over the live database" something you
 cannot do by accident.
+
+Restore is the one script whose env file is always named explicitly: the
+target is a *different*, empty database, which is the whole point. `npm run
+db:restore` would pick up `.env.local` and then refuse on the table check,
+which is the right outcome but not a useful one.
 
 An untested restore path is not a backup, which is why this is a script rather
 than a paragraph.

@@ -10,13 +10,13 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "db:migrate": "node db/run-migrations.mjs",
-    "db:seed": "node db/run-seed.mjs",
-    "db:backup": "node db/backup.mjs",
-    "db:restore": "node db/restore.mjs",
+    "db:migrate": "node --env-file-if-exists=.env.local db/run-migrations.mjs",
+    "db:seed": "node --env-file-if-exists=.env.local db/run-seed.mjs",
+    "db:backup": "node --env-file-if-exists=.env.local db/backup.mjs",
+    "db:restore": "node --env-file-if-exists=.env.local db/restore.mjs",
     "hash-password": "node tools/hash-password.mjs",
     "create-user": "node tools/create-user.mjs",
-    "db:backfill-answers": "tsx db/backfill-answers.ts"
+    "db:backfill-answers": "tsx --env-file-if-exists=.env.local db/backfill-answers.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

@@ -2,15 +2,18 @@
 // A ONE-OFF pass: fill checklist answers from attributes that were confirmed
 // before anything carried them through.
 //
-//   npx tsx --env-file=.env.local db/backfill-answers.ts            dry run
-//   npx tsx --env-file=.env.local db/backfill-answers.ts --apply    writes
-//   npx tsx --env-file=.env.local db/backfill-answers.ts --project=<uuid>
+//   npm run db:backfill-answers                       dry run
+//   npm run db:backfill-answers -- --apply            writes
+//   npm run db:backfill-answers -- --project=<uuid>
 //
-// The env file is named on every invocation, like every other db/ script and
-// for the same reason: it is the line that says WHICH DATABASE this is about
-// to touch, and making it implicit is how a maintenance pass finds production
-// by accident. `npm run db:backfill-answers` is a name, not a shortcut past
-// that -- it fails without DATABASE_URL, deliberately.
+// Like every db/ script it loads `.env.local` when present, prints the
+// resolved host before acting, and refuses production without
+// --yes-production. The env file is not the safety mechanism -- the checks
+// below are -- and an exported DATABASE_URL still wins over the file, so this
+// cannot pull a deliberately-set target back to sandbox. Production names its
+// own file:
+//
+//   node --env-file=.env.production ... --yes-production
 //
 // ============================================================================
 // WHY THIS EXISTS AND WHY IT IS NOT A MIGRATION.
@@ -45,8 +48,8 @@ if (!databaseUrl) {
   // The exact command, not a shape to work out. Whoever hits this line has
   // just typed something that did not work.
   console.error("DATABASE_URL is not set. Run with:");
-  console.error("  npx tsx --env-file=.env.local db/backfill-answers.ts");
-  console.error("Add --apply to write; without it this is a dry run.");
+  console.error("  npm run db:backfill-answers            (reads .env.local)");
+  console.error("Add -- --apply to write; without it this is a dry run.");
   process.exit(1);
 }
 const environment = process.env.DATABASE_ENVIRONMENT ?? "";
