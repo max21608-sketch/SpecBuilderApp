@@ -1386,7 +1386,7 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
     // block: a pack staged before this existed holds fifteen REMARKS rows, and
     // a reviewer would face them a page at a time. Ids are stable, so the
     // screen and the confirm route agree about what the card holds.
-    const observations = mergeNoteBlocks(slotted);
+    const observations = dedupeMeasured(mergeNoteBlocks(slotted));
     // Identity, not length: a lone `SUPPLIER: TO BID` is rewritten in place to
     // a Supplier row, and a length check would throw that away.
     if (observations.length !== slotted.length || observations.some((row, index) => row !== slotted[index])) {
@@ -1395,6 +1395,57 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
     return touched ? { ...item, observations } : item;
   });
   return touched ? { ...doc, items } : doc;
+}
+
+/**
+ * The positional label staging gives a figure the page did not label.
+ *
+ * Generated, not read off the drawing, which is why two rows carrying it are
+ * indistinguishable and may be de-duplicated against each other while
+ * `FRONT` and `SIDE` may not.
+ */
+const POSITIONAL_LABEL = /^dimension \d+$/i;
+
+/**
+ * One row per measurement the page actually makes.
+ *
+ * A drawing dimensions the SAME figure on every view that shows it, and often
+ * twice on one view — S-201's front elevation prints 5, 5, 27, 27, 42, 42
+ * because the chair is symmetrical, and the card came back with forty-three
+ * measured rows for one armchair. Forty-three rows is forty-three states to
+ * choose and forty-three Ignores, which is the `mergeNoteBlocks` problem again
+ * in the dimension column.
+ *
+ * So a figure repeated ON THE SAME VIEW collapses to one row. ACROSS views it
+ * does NOT: `FRONT 640` and `BACK 640` are two statements, and their agreement
+ * is the whole evidence `guessSlotsFromViews` reads the overall size from —
+ * de-duplicating those would break the guess in order to tidy the table.
+ *
+ * Keyed on the view label, the figure and the unit, and it keeps the FIRST row
+ * of each group, so the same staged JSON reduces to the same ids on every read
+ * — the discipline `mergeNoteBlocks` and `upgradeDimensionSlots` both follow,
+ * and what lets the screen, the autosave and the confirm route agree. An
+ * unlabelled figure is keyed WITHOUT its label, because `Dimension 37` and
+ * `Dimension 42` are positions this app invented, not names the page gave.
+ *
+ * Only PENDING rows. An applied row is history and a reviewer's own edit is
+ * theirs; nothing here removes either.
+ */
+function dedupeMeasured(observations: DrawingObservation[]): DrawingObservation[] {
+  const seen = new Set<string>();
+  return observations.filter((observation) => {
+    if (observation.reviewStatus !== "pending") return true;
+    if (observation.unit === null) return true;
+    if (observation.attrGroup !== "dimension" && observation.attrGroup !== "note") return true;
+    const figure = parseDimensionFigure(observation.value ?? observation.valueRaw).figure;
+    if (figure === null) return true;
+    const label = (observation.labelRaw ?? "").trim();
+    const view = POSITIONAL_LABEL.test(label) ? "" : label.toLowerCase();
+    const key = `${view}|${figure}|${observation.unit}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Every pending row on an item that carries a figure and a unit. */
@@ -1430,13 +1481,34 @@ function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
   const items = doc.items.map((item) => {
     const measured = measuredRows(item);
     if (measured.length === 0) return item;
-    if (measured.some((observation) => observation.dimensionSlot)) return item;
+    // ======================================================================
+    // A PERSON'S SLOT IS UNTOUCHABLE. A PERSISTED GUESS IS NOT.
+    //
+    // This used to skip the item whenever ANY measured row carried a slot,
+    // which was wrong for a reason that only shows up in use: the guess is
+    // computed on read and never written back, but a PATCH writes the staged
+    // doc as the server read it — so the first autosave on any row of the item
+    // persists the guess. `S-201` was found holding W/H/D at
+    // `slotSuggested: true`, saved by an unrelated edit, and from then on the
+    // item was skipped: a corrected rule could never reach it, and the seat
+    // height this pass added never appeared.
+    //
+    // `slotSuggested` is exactly the marker that tells them apart — the PATCH
+    // route sets it FALSE whenever a person chooses a slot. So a decision is
+    // left alone and a guess is re-made, which is what makes the guess
+    // improvable instead of sticky.
+    // ======================================================================
+    if (measured.some((observation) => observation.dimensionSlot && !observation.slotSuggested)) return item;
     const { guesses } = guessSlotsFromViews(
       measured.map((observation) => ({
         id: observation.id,
         labelRaw: observation.labelRaw,
         value: observation.value ?? observation.valueRaw,
       })),
+      // What the PAGE called it. An armchair with no seat height is a missing
+      // measurement, and the record's category is a later decision an
+      // uncategorised record has not made.
+      item.itemNameRaw,
     );
     if (guesses.length === 0) return item;
     const slotOf = new Map(guesses.map((guess) => [guess.observationId, guess.slot]));
@@ -1464,26 +1536,53 @@ function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
     // project default: a unit the page printed is never touched, and neither
     // is one a person chose.
     // ======================================================================
+    // WHICH ROWS MAY BE CORRECTED, AND FROM WHAT.
+    //
+    // Only a WEAK unit is replaced: `project_default` (the project answering a
+    // question about a page) and `figures` (suggestUnit over the whole page,
+    // where the components outvote the overall size). A unit the page PRINTED,
+    // and one a person chose, are never touched — the resolution order in
+    // CLAUDE.md, unchanged.
+    //
+    // It used to require EVERY placed row to be defaulted, and S-201 showed
+    // why that is wrong: an earlier pass had already corrected its W, D and H
+    // to mm, so when the seat height joined them still carrying the project's
+    // `cm`, the all-or-nothing test refused and the cell composed
+    // `SH4450mm` — a 4.5-metre seat height, which is the exact failure the
+    // unit rule exists to prevent, reappearing through a half-corrected row
+    // set. A row set must end up in ONE unit.
     const placed = measured.filter((observation) => slotOf.has(observation.id));
-    const fromDefault = placed.filter((observation) => unitSourceOf(observation) === "project_default");
+    const weak = (observation: DrawingObservation) => {
+      const source = unitSourceOf(observation);
+      return source === "project_default" || source === "figures";
+    };
+    // A printed unit anywhere in the set settles it: the page beats any
+    // inference from magnitudes, which is the order the rule already states.
+    const printed = placed.find((observation) => unitSourceOf(observation) === "printed")?.unit ?? null;
     const overall = suggestUnit(placed.map((observation) => observation.value ?? observation.valueRaw));
-    const unitFix =
-      fromDefault.length === placed.length && placed.length > 0 && overall.status === "confident"
-        ? overall.unit
-        : null;
+    const unitFix = printed ?? (placed.length > 0 && overall.status === "confident" ? overall.unit : null);
 
     touched = true;
     return {
       ...item,
       observations: item.observations.map((observation) => {
         const slot = slotOf.get(observation.id);
-        if (!slot) return observation;
+        if (!slot) {
+          // A slot this guess no longer makes, left behind by an earlier one
+          // that an autosave persisted. Cleared, or the row would keep a
+          // reading nothing now stands behind.
+          return observation.dimensionSlot && observation.slotSuggested
+            ? { ...observation, attrGroup: "note" as AttributeGroup, dimensionSlot: null, slotSuggested: false }
+            : observation;
+        }
         return {
           ...observation,
           attrGroup: "dimension" as AttributeGroup,
           dimensionSlot: slot,
           slotSuggested: true,
-          ...(unitFix ? { unit: unitFix, unitSuggested: true, unitSource: "figures" as UnitSource } : {}),
+          ...(unitFix && weak(observation)
+            ? { unit: unitFix, unitSuggested: true, unitSource: "figures" as UnitSource }
+            : {}),
         };
       }),
     };

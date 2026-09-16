@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessSlotsFromViews, viewFamily, type MeasuredRow } from "@/lib/dimension-guess";
+import { guessSlotsFromViews, hasASeat, viewFamily, type MeasuredRow } from "@/lib/dimension-guess";
 
 /** The rows as the real pack stages them: the view label, and a bare figure. */
 const rows = (pairs: [string | null, string][]): MeasuredRow[] =>
@@ -137,5 +137,73 @@ describe("guessSlotsFromViews — the weak path", () => {
       rows([["FRONT", "660"], ["FRONT", "680"], ["FRONT", "620"], ["SIDE", "680"], ["SIDE", "620"], ["SIDE", "685"]]),
     );
     expect(out.guesses.some((g) => g.slot === "SH")).toBe(false);
+  });
+});
+
+// Asked for on 2026-09-16 looking at the real S-201: an armchair with no seat
+// height. Its 465 is on the front elevation ALONE, and the original rule only
+// accepted a figure both elevations stated — so it came back silent on an item
+// that certainly has a seat.
+describe("the seat height, and items that must have one", () => {
+  it("knows from the page's own name for the item", () => {
+    expect(hasASeat("ARMCHAIR")).toBe(true);
+    expect(hasASeat("SOFA, 2 seater")).toBe(true);
+    expect(hasASeat("Bed bench")).toBe(true);
+    expect(hasASeat("Desk chair")).toBe(true);
+    expect(hasASeat("MUR 1 HEADBOARD")).toBe(false);
+    expect(hasASeat("Ottoman")).toBe(true);
+    expect(hasASeat(null)).toBe(false);
+  });
+
+  it("prefers a figure both elevations state", () => {
+    // S-200's 460 is on the front AND the section: strong evidence.
+    const page = rows([
+      ["FRONT", "840"], ["FRONT", "720"], ["FRONT", "460"], ["FRONT", "420"],
+      ["SIDE", "790"], ["SIDE SECTION", "720"], ["SIDE SECTION", "460"],
+      ["TOP", "840"], ["TOP", "790"],
+    ]);
+    const out = guessSlotsFromViews(page, "ARMCHAIR");
+    expect(slotOf(out, page, "SH")).toBe("460");
+    expect(out.guesses.find((g) => g.slot === "SH")?.why).toContain("both elevations");
+    expect(out.dispute).toBeNull();
+  });
+
+  it("takes a one-view figure rather than going silent, and says it did", () => {
+    // S-201's real figures: front and side share nothing in the seat window.
+    const page = rows([
+      ["FRONT", "660"], ["FRONT", "680"], ["FRONT", "570"], ["FRONT", "465"],
+      ["SIDE", "685"], ["SIDE", "680"], ["SIDE", "445"],
+    ]);
+    const out = guessSlotsFromViews(page, "ARMCHAIR");
+    expect(slotOf(out, page, "SH")).toBe("445");
+    expect(out.guesses.find((g) => g.slot === "SH")?.why).toContain("only one view");
+    expect(out.dispute).toContain("one view only");
+  });
+
+  it("names the item when a seat height cannot be found at all", () => {
+    const out = guessSlotsFromViews(
+      rows([["FRONT", "660"], ["FRONT", "680"], ["SIDE", "680"], ["SIDE", "685"]]),
+      "ARMCHAIR",
+    );
+    expect(out.guesses.some((g) => g.slot === "SH")).toBe(false);
+    expect(out.dispute).toContain("ARMCHAIR");
+  });
+
+  it("says nothing about a seat on something that has none", () => {
+    const out = guessSlotsFromViews(
+      rows([["FRONT", "2000"], ["FRONT", "1500"], ["SIDE", "1500"], ["SIDE", "180"]]),
+      "MUR 1 HEADBOARD",
+    );
+    expect(out.dispute).toBeNull();
+  });
+
+  it("chooses the candidate nearest a real seat height, not the first reported", () => {
+    // 300 and 470 are both in the window; 470 is nearer 60% of 700.
+    const page = rows([
+      ["FRONT", "900"], ["FRONT", "700"], ["FRONT", "300"], ["FRONT", "470"],
+      ["SIDE", "700"], ["SIDE", "800"],
+    ]);
+    const out = guessSlotsFromViews(page, "Armchair");
+    expect(slotOf(out, page, "SH")).toBe("470");
   });
 });

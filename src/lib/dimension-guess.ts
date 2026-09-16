@@ -114,6 +114,75 @@ const NOTHING: DimensionGuess = { guesses: [], dispute: null };
  *  the unit is exactly what these pages do not state. */
 const SEAT_MIN = 0.45;
 const SEAT_MAX = 0.78;
+/** Where a seat actually sits, used to choose between candidates. */
+const SEAT_TYPICAL = 0.6;
+
+/**
+ * Items that HAVE a seat, by the drawing's own name for them.
+ *
+ * Read off `itemNameRaw` — what the page called it — and not off the record's
+ * category, which is a decision somebody makes later and which an
+ * uncategorised record does not have at all. An armchair with no seat height
+ * is a missing measurement, not a design choice, and a card that stays silent
+ * about it makes a reviewer prove a negative.
+ */
+const SEATING_WORDS = [
+  "chair",
+  "armchair",
+  "sofa",
+  "settee",
+  "bench",
+  "stool",
+  "ottoman",
+  "pouf",
+  "pouffe",
+  "banquette",
+  "seat",
+  "seating",
+  "footstool",
+  "daybed",
+];
+
+/** Does the page's own name for this item say it has a seat? */
+export function hasASeat(itemName: string | null): boolean {
+  const name = (itemName ?? "").toLowerCase();
+  return name !== "" && SEATING_WORDS.some((word) => name.includes(word));
+}
+
+/**
+ * The seat height, from the best evidence available.
+ *
+ * TWO TIERS, because they are not equally good and S-201 proved it. A figure
+ * BOTH elevations state is strong — S-200's 460 is on the front and the
+ * section. A figure only ONE view states is weak, and the original rule threw
+ * those away: S-201 prints 465 on the front elevation alone, its front and
+ * side share nothing in the seat window, and the card came back with no seat
+ * height at all on an armchair. Asked for on 2026-09-16: assign it and flag
+ * it, do not go quiet.
+ *
+ * Among candidates, the one nearest 60% of the overall height, then the larger
+ * — never the first found, which would make the answer depend on the order the
+ * model happened to report its figures in.
+ */
+function seatHeight(
+  shared: number[],
+  all: number[],
+  height: number,
+  used: number[],
+): { figure: number; shared: boolean } | null {
+  const inWindow = (figures: number[]) =>
+    figures
+      .filter((figure) => !used.includes(figure))
+      .filter((figure) => figure / height >= SEAT_MIN && figure / height <= SEAT_MAX)
+      .sort(
+        (a, b) =>
+          Math.abs(a - height * SEAT_TYPICAL) - Math.abs(b - height * SEAT_TYPICAL) || b - a,
+      );
+  const strong = inWindow(shared)[0];
+  if (strong !== undefined) return { figure: strong, shared: true };
+  const weak = inWindow(all)[0];
+  return weak === undefined ? null : { figure: weak, shared: false };
+}
 
 /**
  * Read the overall dimensions off a page that labels its figures by view.
@@ -122,7 +191,7 @@ const SEAT_MAX = 0.78;
  * every MEASURED row on one item — a figure with a number — and it returns at
  * most one row per slot.
  */
-export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
+export function guessSlotsFromViews(rows: MeasuredRow[], itemName: string | null = null): DimensionGuess {
   // One entry per distinct figure: which families draw it, and the first row
   // on each family that does. The FIRST is deliberate — a figure drawn twice on
   // one view is one measurement reported twice, and either row is the same
@@ -153,6 +222,7 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
     return fromMagnitudes(
       byFigure,
       "The page labels none of its figures with a view, so this is the three largest read as width, then depth, then height. That ordering is an assumption about the item, not something the page says — check all four against the drawing.",
+      itemName,
     );
   }
 
@@ -183,6 +253,7 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
     return fromMagnitudes(
       byFigure,
       `The views do not agree on ${missing.join(" or ")}: ${describe(front, side, plan)}. An overall dimension is drawn on every view that shows it, and these do not repeat — so this is the three largest figures read as width, then depth, then height. Check all of them against the drawing.`,
+      itemName,
     );
   }
 
@@ -193,6 +264,7 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
     return fromMagnitudes(
       byFigure,
       `The views make the same figure read as more than one dimension (width ${width}, depth ${depth}, height ${height}), so this is the three largest instead. Check them against the drawing.`,
+      itemName,
     );
   }
 
@@ -203,12 +275,7 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
       ? `The plan's largest figure is ${widthFromPlan} and the front elevation's is ${widthFromFront}, and both should be the width. The plan's is used here because a plan states width and depth together. Check it against the drawing.`
       : null;
 
-  // A seat height is the largest remaining figure that both elevations state
-  // and that sits in the right proportion to the overall height. Optional: no
-  // candidate means the page did not state one twice, not that there isn't one.
-  const seat = heightCandidates
-    .filter((figure) => figure !== height && figure / height >= SEAT_MIN && figure / height <= SEAT_MAX)
-    .sort((a, b) => b - a)[0];
+  const seat = seatHeight(heightCandidates, [...byFigure.keys()], height, [width, depth, height]);
 
   const pick = (figure: number, slot: DimensionSlot, why: string): GuessedSlot | null => {
     const row = byFigure.get(figure)?.rows[0];
@@ -221,10 +288,39 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
       pick(width, "W", `drawn on the ${families(width).join(" and ")} — ${describeSlotRule("W")}`),
       pick(depth, "D", `drawn on the ${families(depth).join(" and ")} — ${describeSlotRule("D")}`),
       pick(height, "H", `drawn on the ${families(height).join(" and ")} — ${describeSlotRule("H")}`),
-      seat === undefined ? null : pick(seat, "SH", `both elevations state it, at ${Math.round((seat / height) * 100)}% of the height`),
+      seat === null
+        ? null
+        : pick(
+            seat.figure,
+            "SH",
+            seat.shared
+              ? `both elevations state it, at ${Math.round((seat.figure / height) * 100)}% of the height`
+              : `only one view states it, at ${Math.round((seat.figure / height) * 100)}% of the height — a seat height is a guess here`,
+          ),
     ].filter((entry): entry is GuessedSlot => entry !== null),
-    dispute: widthDisagrees,
+    dispute: seatNote(widthDisagrees, seat, itemName),
   };
+}
+
+/**
+ * Say so when a seat height is weak or missing on something that has a seat.
+ *
+ * An armchair whose card shows no seat height reads as an armchair that does
+ * not need one. The page's own name for the item is the test — see `hasASeat`.
+ */
+function seatNote(
+  existing: string | null,
+  seat: { figure: number; shared: boolean } | null,
+  itemName: string | null,
+): string | null {
+  if (!hasASeat(itemName)) return existing;
+  const added =
+    seat === null
+      ? `No figure on this page sits where a seat height would, and the drawing calls this a ${itemName}. Read the seat height off the page and set it.`
+      : seat.shared
+        ? null
+        : `The seat height is taken from one view only, because the elevations do not state the same figure twice. Check it against the drawing.`;
+  return [existing, added].filter(Boolean).join(" ") || null;
 }
 
 /**
@@ -246,18 +342,15 @@ export function guessSlotsFromViews(rows: MeasuredRow[]): DimensionGuess {
 function fromMagnitudes(
   byFigure: Map<number, { families: Set<ViewFamily>; rows: MeasuredRow[] }>,
   dispute: string,
+  itemName: string | null = null,
 ): DimensionGuess {
   const descending = [...byFigure.keys()].sort((a, b) => b - a);
   if (descending.length < 3) return { guesses: [], dispute };
   const [width, depth, height] = descending as [number, number, number];
 
-  // The remaining figure closest to 60% of the height — where a seat sits on
-  // every one of these items. Still only a candidate inside the same
-  // proportion window the cross-view path uses.
-  const seat = descending
-    .slice(3)
-    .filter((figure) => figure / height >= SEAT_MIN && figure / height <= SEAT_MAX)
-    .sort((a, b) => Math.abs(a - height * 0.6) - Math.abs(b - height * 0.6))[0];
+  // No view said anything here, so there is no strong tier: every candidate is
+  // a one-view figure. Same window and same nearest-to-60% choice.
+  const seat = seatHeight([], descending, height, [width, depth, height]);
 
   const pick = (figure: number, slot: DimensionSlot, why: string): GuessedSlot | null => {
     const row = byFigure.get(figure)?.rows[0];
@@ -268,11 +361,15 @@ function fromMagnitudes(
       pick(width, "W", "the largest figure on the page — no view says so"),
       pick(depth, "D", "the second largest — no view says so"),
       pick(height, "H", "the third largest — no view says so"),
-      seat === undefined
+      seat === null
         ? null
-        : pick(seat, "SH", `nearest a seat height at ${Math.round((seat / height) * 100)}% of the guessed height`),
+        : pick(
+            seat.figure,
+            "SH",
+            `nearest a seat height at ${Math.round((seat.figure / height) * 100)}% of the guessed height`,
+          ),
     ].filter((entry): entry is GuessedSlot => entry !== null),
-    dispute,
+    dispute: seatNote(dispute, seat, itemName),
   };
 }
 

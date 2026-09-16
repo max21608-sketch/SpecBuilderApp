@@ -974,6 +974,64 @@ Four things are load-bearing:
   specification sheet still in centimetres at `W1900 x D790 x H720mm`, and
   S-100's eight bare figures, UP-101 and S-400 left unplaced with a dispute.
 
+### A drawing dimensions everything, and four of them matter
+
+`src/lib/drawing-document.ts` (`dedupeMeasured`, `applyViewGuesses`),
+`src/lib/dimension-guess.ts` (`seatHeight`, `hasASeat`)
+
+The real S-201 armchair card carried **forty-three** measured rows. Three
+things were wrong with that, all found by walking it.
+
+- **A figure repeated on ONE view is one measurement.** That front elevation
+  prints 5, 5, 27, 27, 42, 42 because the chair is symmetrical. `dedupeMeasured`
+  collapses those (43 → 36, S-100 8 → 6, S-400 25 → 21). **Across** views it
+  does NOT: `FRONT 640` and `BACK 640` are two statements and their agreement
+  is the whole evidence `guessSlotsFromViews` reads the overall size from —
+  de-duplicating those would tidy the table by breaking the guess. Keyed on the
+  view label, the figure and the unit, keeping the FIRST row, so ids are stable
+  across reads. An unlabelled figure is keyed WITHOUT its label: `Dimension 37`
+  and `Dimension 42` are positions this app invented, not names the page gave.
+- **The five slots go first and the rest fold away.** Four of thirty-six rows
+  compose BWS field 3; the others are arm heights, gaps and radii, kept on the
+  item and used by nothing today. Inline they bury the four that matter. They
+  are FOLDED, never dropped — what the document said is the point of
+  `record_attributes`, and a figure nobody can see is one nobody can correct —
+  with the count on the toggle so the card never implies the page says less
+  than it does.
+- **A seat height has two tiers, and silence is not an option.** A figure BOTH
+  elevations state is strong (S-200's 460). One view alone is weak, and the
+  first rule threw those away: S-201 prints 465 on the front only, its
+  elevations share nothing in the seat window, and an ARMCHAIR came back with
+  no seat height. Now the weak tier is taken and flagged, the candidate nearest
+  60% of the height wins (never the first reported, or the answer would depend
+  on the order the model listed its figures), and `hasASeat` — read off the
+  page's own `itemNameRaw`, not the record's category, which an uncategorised
+  record has not got — makes an armchair with no seat height say so.
+
+**And a persisted guess must stay re-guessable.** `applyViewGuesses` skipped any
+item where a measured row already carried a slot. The guess is computed on read
+and never written back — but a PATCH writes the staged doc as the server read
+it, so the first autosave on any row persists it. S-201 was found holding W/H/D
+at `slotSuggested: true`, saved by an unrelated edit, and from then on the item
+was skipped: the corrected seat-height rule could never reach it. `slotSuggested`
+is the marker that tells a guess from a decision — the PATCH route sets it false
+when a person chooses — so a decision is untouchable and a guess is re-made.
+
+**The unit fix is per ROW SET, not all-or-nothing.** It required every placed
+row to be carrying the project default. S-201 showed why that fails: an earlier
+pass had corrected its W, D and H to mm, so when the seat height joined them
+still holding the project's `cm` the test refused and the cell composed
+`SH4450mm` — a 4.5-metre seat height, the exact failure the unit rule exists to
+prevent, reappearing through a half-corrected set. A printed unit anywhere in
+the set now settles it, otherwise the overall figures do, and only a WEAK unit
+(`project_default` or `figures`) is ever replaced.
+
+Verified against the real pack: S-100 `W1900 x D790 x H720 x SH440mm`, S-200
+`W840 x D790 x H720 x SH460mm`, S-201 `W660 x D685 x H680 x SH445mm`, S-301
+`W550 x D565 x H735 x SH430mm`, S-400 `W570 x D493 x H473 x SH358mm`, the
+UP-101 headboard correctly given no seat height, and S-101's `SH TBC` left as
+the page states it.
+
 ### An empty viewRegions is why the whole page stood in
 
 `src/lib/anthropic.ts`, `src/lib/extraction-schema.ts`,

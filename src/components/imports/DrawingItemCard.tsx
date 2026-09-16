@@ -157,6 +157,29 @@ export default function ItemCard({
 }) {
   const pending = item.observations.filter((o) => o.reviewStatus === "pending");
 
+  // ==========================================================================
+  // THE FIVE SLOTS FIRST; THE REST OF THE MEASUREMENTS FOLDED AWAY.
+  //
+  // A drawing dimensions everything it draws. S-201 carries thirty-six
+  // measurements after de-duplication and FOUR of them compose BWS field 3;
+  // the other thirty-two are arm heights, gaps, radii and stitch spacings that
+  // are kept on the item and used by nothing today. Leaving them inline buries
+  // the four that matter, which is the `mergeNoteBlocks` problem in the
+  // dimension column.
+  //
+  // They are FOLDED, never dropped: "what the document said" is the whole
+  // point of `record_attributes`, and a figure nobody can see is a figure
+  // nobody can correct. The count is on the toggle so the card never implies
+  // there is less on the page than there is.
+  // ==========================================================================
+  const [showOtherDimensions, setShowOtherDimensions] = useState(false);
+  const keyRows = pending.filter((o) => o.dimensionSlot);
+  const otherDimensionRows = pending.filter((o) => !o.dimensionSlot && o.unit !== null);
+  const otherIds = new Set(otherDimensionRows.map((o) => o.id));
+  const restRows = pending.filter((o) => !o.dimensionSlot && o.unit === null);
+  const orderedRows = [...keyRows, ...restRows, ...otherDimensionRows];
+  const firstOtherId = otherDimensionRows[0]?.id;
+
   // A page whose code could not be read opens CLOSED.
   //
   // It cannot commit — no code means no resolved runs means the no_targets
@@ -476,7 +499,7 @@ export default function ItemCard({
             reading as though the panel belonged to the row underneath. The
             separator goes on the data row instead. */}
         <tbody>
-          {pending.map((observation) => {
+          {orderedRows.map((observation) => {
             const draft = drafts[observation.id] ?? {};
             const value = draft.value !== undefined ? draft.value : observation.value;
             const rowBlockers = blockerFor(observation.id);
@@ -510,8 +533,30 @@ export default function ItemCard({
               if (group === "dimension") return false;
               return observation.unit === null || group === "note";
             });
+            const isOther = otherIds.has(observation.id);
             return (
               <Fragment key={observation.id}>
+              {observation.id === firstOtherId && (
+                <tr className="border-t border-neutral-200 bg-neutral-50">
+                  <td colSpan={7} className="px-4 py-2">
+                    <Button
+                      size="xs"
+                      variant="quiet"
+                      onClick={() => setShowOtherDimensions((value) => !value)}
+                    >
+                      {showOtherDimensions
+                        ? `Hide the other ${otherDimensionRows.length} dimensions`
+                        : `Other dimensions (${otherDimensionRows.length}) — show`}
+                    </Button>
+                    <span className="ml-2 text-xs text-neutral-500">
+                      Everything else this page measures. Kept on the item with its label, figure and unit; not part of
+                      the BWS dimension cell.
+                    </span>
+                  </td>
+                </tr>
+              )}
+              {(!isOther || showOtherDimensions) && (
+              <>
               <tr
                 className={`border-t border-neutral-100${
                   amber ? " bg-amber-50/40" : guessed ? " bg-yellow-100/70" : ""
@@ -820,6 +865,8 @@ export default function ItemCard({
                     )}
                   </td>
                 </tr>
+              )}
+              </>
               )}
               </Fragment>
             );

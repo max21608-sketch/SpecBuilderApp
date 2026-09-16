@@ -1090,3 +1090,101 @@ describe("stageDrawings pictures", () => {
     expect(item.imageProposal).toBeUndefined();
   });
 });
+
+// ============================================================================
+// DE-DUPLICATION. A drawing dimensions the same figure on every view that
+// shows it, and often twice on one view — the real S-201 front elevation
+// prints 5, 5, 27, 27, 42, 42 because the chair is symmetrical, and the card
+// arrived with forty-three measured rows for one armchair.
+// ============================================================================
+describe("assertStagedDrawings de-duplication", () => {
+  const page = (figures: [string, string][]) => ({
+    schemaVersion: 1 as const,
+    kind: "shop_drawings" as const,
+    filename: "set.pdf",
+    documentNotes: null,
+    items: [
+      {
+        id: "item-1",
+        version: 1,
+        page: 5,
+        itemCodeRaw: "S-201",
+        itemNameRaw: "ARMCHAIR",
+        confidence: "high" as const,
+        targets: null,
+        observations: figures.map(([labelRaw, value], index): DrawingObservation => ({
+          id: `obs-${index}`,
+          version: 1,
+          attrGroup: "note" as const,
+          labelRaw,
+          value,
+          valueRaw: value,
+          unit: "mm" as AttributeUnit,
+          unitSuggested: true,
+          unitSource: "figures" as UnitSource,
+          materialCodeRaw: null,
+          specFieldId: null,
+          dimensionSlot: null,
+          state: "confirmed" as const,
+          stateReason: null,
+          reviewStatus: "pending" as const,
+          reviewedAt: null,
+          reviewedBy: null,
+          applied: null,
+        })),
+      },
+    ],
+  });
+
+  const values = (doc: StagedDrawings) =>
+    doc.items[0]!.observations.map((o) => `${o.labelRaw}:${o.value}`);
+
+  it("collapses a figure repeated on the SAME view", () => {
+    const out = assertStagedDrawings(page([["FRONT", "42"], ["FRONT", "42"], ["FRONT", "27"]]));
+    expect(values(out)).toEqual(["FRONT:42", "FRONT:27"]);
+  });
+
+  it("keeps a figure repeated ACROSS views — that agreement IS the evidence", () => {
+    // De-duplicating these would tidy the table by breaking the guess that
+    // reads the overall size from exactly this repetition.
+    const out = assertStagedDrawings(page([["FRONT", "640"], ["BACK", "640"], ["TOP", "640"]]));
+    expect(values(out)).toEqual(["FRONT:640", "BACK:640", "TOP:640"]);
+  });
+
+  it("collapses unlabelled figures by figure alone", () => {
+    // `Dimension 37` and `Dimension 42` are positions this app invented, not
+    // names the page gave, so two rows carrying them are indistinguishable.
+    const out = assertStagedDrawings(page([["Dimension 37", "556"], ["Dimension 42", "556"]]));
+    expect(values(out)).toEqual(["Dimension 37:556"]);
+  });
+
+  it("keeps the FIRST of each group, so ids are stable across reads", () => {
+    const doc = page([["FRONT", "42"], ["FRONT", "42"]]);
+    const once = assertStagedDrawings(doc);
+    const twice = assertStagedDrawings(doc);
+    expect(once.items[0]!.observations[0]!.id).toBe("obs-0");
+    expect(twice.items[0]!.observations.map((o) => o.id)).toEqual(
+      once.items[0]!.observations.map((o) => o.id),
+    );
+  });
+
+  it("re-guesses over a slot an autosave persisted, but never over a person's", () => {
+    // The guess is computed on read and never written back — but a PATCH
+    // writes the doc as the server read it, so the first autosave on any row
+    // persists it. Keyed on `slotSuggested`, which the PATCH route sets false
+    // when a person chooses.
+    const persisted = page([["FRONT", "840"], ["FRONT", "720"], ["SIDE", "720"], ["SIDE", "790"]]);
+    persisted.items[0]!.observations[0]!.dimensionSlot = "W";
+    persisted.items[0]!.observations[0]!.attrGroup = "dimension";
+    persisted.items[0]!.observations[0]!.slotSuggested = true;
+    const reguessed = assertStagedDrawings(persisted);
+    expect(reguessed.items[0]!.observations.filter((o) => o.dimensionSlot)).toHaveLength(3);
+
+    const chosen = page([["FRONT", "840"], ["FRONT", "720"], ["SIDE", "720"], ["SIDE", "790"]]);
+    chosen.items[0]!.observations[0]!.dimensionSlot = "H";
+    chosen.items[0]!.observations[0]!.attrGroup = "dimension";
+    chosen.items[0]!.observations[0]!.slotSuggested = false;
+    const left = assertStagedDrawings(chosen);
+    expect(left.items[0]!.observations.filter((o) => o.dimensionSlot).map((o) => o.dimensionSlot)).toEqual(["H"]);
+  });
+});
