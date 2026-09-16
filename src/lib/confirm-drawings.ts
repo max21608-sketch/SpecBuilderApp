@@ -28,12 +28,8 @@
 // column.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import {
-  applyAnswerFills,
-  applyAnswerRetractions,
-  planAnswerFills,
-  type PromotableAttribute,
-} from "@/lib/promote-answers";
+import { applyAnswerFills, applyAnswerRetractions, planAnswerFills } from "@/lib/promote-answers";
+import { loadPromotable } from "@/lib/attribute-retire";
 import {
   acknowledgedReplacements,
   assertStagedDrawings,
@@ -469,26 +465,17 @@ export async function confirmDrawingItem(
     // only the height still has to recompose the whole dimensions cell over
     // the width and depth an earlier document confirmed -- otherwise the
     // answer says H720 and the record says W1900 x D790 x H720.
-    const attributeRows = await txn`
-      select attr_group, dimension_slot, spec_field_id, value, unit, state, sort_order, source_run_id
-      from record_attributes
-      where record_id = ${recordId} and status = 'active'
-      order by sort_order
-    `;
-    const promotable: PromotableAttribute[] = attributeRows.map((row) => ({
-      attrGroup: String(row.attr_group),
-      dimensionSlot: row.dimension_slot ? String(row.dimension_slot) : null,
-      specFieldId: row.spec_field_id ? String(row.spec_field_id) : null,
-      value: row.value === null ? null : String(row.value),
-      unit: row.unit === null ? null : String(row.unit),
-      state: String(row.state) as PromotableAttribute["state"],
-      sortOrder: Number(row.sort_order),
-      sourceRunId: row.source_run_id ? String(row.source_run_id) : null,
-    }));
-    // An uncategorised record has no questions yet, so there is nothing to
-    // fill and that is not a failure -- the attributes are the record of what
-    // the document said either way, and setting a category later creates the
-    // answer rows. It just does not back-fill them; see the gap in CLAUDE.md.
+    // Re-read from the table rather than from `taken`, because the answer has
+    // to reflect EVERY attribute the record now carries. A card supplying only
+    // the height still has to recompose the whole dimensions cell over the
+    // width and depth an earlier document confirmed -- otherwise the answer
+    // says H720 and the record says W1900 x D790 x H720.
+    //
+    // Through loadPromotable, which also resolves each attribute's linked
+    // FINISH: the export renders a linked attribute as the library says it is,
+    // and an answer written from the attribute's own text would disagree with
+    // the file the moment somebody edited the library.
+    const promotable = await loadPromotable(txn, recordId);
     const fills = planAnswerFills(promotable);
     const filled = await applyAnswerFills(txn, recordId, runId, actor, fills);
     // Retractions too, because a REPLACEMENT can orphan an answer: the row it

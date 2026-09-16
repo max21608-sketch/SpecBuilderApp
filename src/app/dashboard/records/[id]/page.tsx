@@ -49,6 +49,8 @@ type SpecRecord = {
 
 type Attribute = {
   id: string; attr_group: AttributeGroup; label: string; value: string | null; unit: string | null;
+  finish_id: string | null; finish_code: string | null; finish_description: string | null;
+  finish_state: string | null;
   dimension_slot: DimensionSlot | null;
   material_code: string | null; state: AttributeState; sort_order: number; version: number;
   source_page: number | null; source_run_id: string | null; created_by: string | null;
@@ -367,8 +369,27 @@ export default function RecordPage() {
                         {attribute.state === "tbc" && <span className="ml-1 text-amber-800">TBC</span>}
                       </>
                     )}
-                    {attribute.material_code && (
-                      <span className="ml-2 text-xs text-neutral-500">code {attribute.material_code}</span>
+                    {/* A LINKED finish is a link to the library, because the
+                        library is what the export renders and what a
+                        correction has to be made in. An unlinked code is still
+                        just what the page said. */}
+                    {attribute.finish_id ? (
+                      <Link
+                        href={`/dashboard/projects/${record.project_id}/finishes`}
+                        className="ml-2 text-xs text-neutral-500 underline hover:text-neutral-900"
+                        title={
+                          attribute.finish_description
+                            ? `The library says: ${attribute.finish_description}`
+                            : "In the finishes library, with nothing recorded about it yet"
+                        }
+                      >
+                        {attribute.finish_code ?? attribute.material_code}
+                        {attribute.finish_state === "tbc" && <span className="text-amber-800"> TBC</span>}
+                      </Link>
+                    ) : (
+                      attribute.material_code && (
+                        <span className="ml-2 text-xs text-neutral-500">code {attribute.material_code}</span>
+                      )
                     )}
                   </span>
                   {attribute.field_name && (

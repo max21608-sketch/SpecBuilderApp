@@ -42,9 +42,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     select a.id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code, a.state, a.status,
            a.sort_order, a.version, a.source_page, a.source_run_id, a.created_at, a.created_by,
            f.name as field_name, f.json_id, f.field_category,
+           a.finish_id, fin.code as finish_code, fin.description as finish_description, fin.state as finish_state,
            src.filename as source_filename, src.document_kind as source_document_kind
     from record_attributes a
     left join spec_fields f on f.id = a.spec_field_id
+    left join project_finishes fin on fin.id = a.finish_id
     left join (
       select r.id, r.document_kind, at.filename
       from intake_runs r left join attachments at on at.id = r.attachment_id

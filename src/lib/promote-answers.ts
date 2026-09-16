@@ -41,6 +41,7 @@
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import type { TxnSql } from "@/lib/db-transaction";
 import { isDimensionSlot, type AttributeState, type AttributeUnit, type DimensionSlot } from "@/lib/spec-vocab";
+import { combineFinishState, composeFinishCell, type Finish } from "@/lib/finishes";
 
 /** The BWS register key for the dimensions field. Resolved by `json_id`, never
  *  by column letter, which is positional and shifts when BWS inserts one. */
@@ -56,6 +57,19 @@ export type PromotableAttribute = {
   sortOrder: number;
   /** The intake run that recorded it, so an answer says which document said so. */
   sourceRunId: string | null;
+  /**
+   * The library entry this attribute's code is linked to.
+   *
+   * RULE 5, and it is the same trap as rules 1 and 3. The export renders a
+   * linked attribute as the LIBRARY says it is; if the answer kept the
+   * attribute's own text, editing a finish would change the export cell while
+   * the checklist a person can see went on saying the old thing. One composer,
+   * `composeFinishCell`, called here and there.
+   *
+   * It also carries the state: a `tbc` finish can never produce a confirmed
+   * answer, whatever the attribute said.
+   */
+  finish?: Finish | null;
 };
 
 export type AnswerFill = {
@@ -143,14 +157,21 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
   for (const attribute of attributes) {
     if (attribute.attrGroup === "dimension") continue;
     if (!attribute.specFieldId || clashed.has(attribute.specFieldId)) continue;
-    const value = (attribute.value ?? "").trim();
+    const raw = (attribute.value ?? "").trim();
+    const finish = attribute.finish ?? null;
+    // A LINKED ATTRIBUTE ANSWERS AS THE LIBRARY SAYS IT IS. The export renders
+    // it that way too, through the same function — the two must not be able to
+    // disagree. `value_raw` keeps what this page said, which is what makes the
+    // answer checkable against its drawing.
+    const value = finish ? composeFinishCell(finish) : raw;
     if (value === "") continue;
+    const state = combineFinishState(attribute.state, finish);
     fills.push({
       specFieldId: attribute.specFieldId,
       jsonId: null,
       value,
-      state: attribute.state === "confirmed" ? "confirmed" : "tbc",
-      valueRaw: value,
+      state: state === "confirmed" ? "confirmed" : "tbc",
+      valueRaw: raw || value,
       sourceRunId: attribute.sourceRunId,
     });
   }

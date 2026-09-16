@@ -33,6 +33,7 @@ import {
   type AnswerState,
   type RequirementKind,
 } from "@/lib/spec-vocab";
+import { isFinishKind } from "@/lib/finishes";
 import type { ExportAnswer, ExportAttribute, ExportRecord, ExportScope } from "@/lib/bws-export";
 
 /** Both drivers satisfy this: `sql` from db.ts and `TxnSql` from db-transaction.ts. */
@@ -80,7 +81,15 @@ export type RecordAtoms = {
   itemImage: { attachmentId: string; storagePath: string } | null;
 };
 
-export const RECORD_ATOMS_SCHEMA_VERSION = 1;
+/**
+ * 1 — the original shape.
+ * 2 — each attribute carries the finish its code resolves to (0018).
+ *
+ * Bumped whenever a field is added, and every addition since 1 is optional on
+ * read, so an older version still parses rather than reading as "everything
+ * was deleted that day".
+ */
+export const RECORD_ATOMS_SCHEMA_VERSION = 2;
 
 function text(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
@@ -101,6 +110,23 @@ export function toExportAttribute(row: Row): ExportAttribute {
     unit: text(row.unit) as AttributeUnit | null,
     dimensionSlot: isDimensionSlot(row.dimension_slot) ? row.dimension_slot : null,
     materialCode: text(row.material_code),
+    // The library entry, when this attribute is linked to one. Loaded with the
+    // attribute rather than resolved later, so a snapshot holds what the
+    // finish said ON THE DAY — which is how a version can show "CH-01.1 went
+    // from TBC to Yarn Tessarae" rather than silently re-rendering history.
+    finish: row.finish_id
+      ? {
+          id: String(row.finish_id),
+          code: String(row.finish_code),
+          codeNorm: String(row.finish_code_norm),
+          kind: isFinishKind(row.finish_kind) ? row.finish_kind : null,
+          description: text(row.finish_description),
+          supplierRaw: text(row.finish_supplier_raw),
+          reference: text(row.finish_reference),
+          colour: text(row.finish_colour),
+          state: String(row.finish_state) as AttributeState,
+        }
+      : null,
     specFieldJsonId: num(row.json_id),
     state: String(row.state) as AttributeState,
     sortOrder: Number(row.sort_order),
@@ -229,9 +255,13 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
 
   const attributeRows = await exec`
     select a.id, a.record_id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code,
-           a.state, a.sort_order, a.source_page, f.json_id, at.filename as source_filename
+           a.state, a.sort_order, a.source_page, f.json_id, at.filename as source_filename,
+           a.finish_id, fin.code as finish_code, fin.code_norm as finish_code_norm, fin.kind as finish_kind,
+           fin.description as finish_description, fin.supplier_raw as finish_supplier_raw,
+           fin.reference as finish_reference, fin.colour as finish_colour, fin.state as finish_state
     from record_attributes a
     left join spec_fields f on f.id = a.spec_field_id
+    left join project_finishes fin on fin.id = a.finish_id
     left join intake_runs ir on ir.id = a.source_run_id
     left join attachments at on at.id = ir.attachment_id
     where a.record_id = any(${found}::uuid[]) and a.status = 'active'

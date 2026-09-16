@@ -30,6 +30,7 @@ const record = (overrides: Partial<ExportRecord> = {}): ExportRecord => ({
 
 const attribute = (overrides: Partial<ExportAttribute> = {}): ExportAttribute => ({
   id: "attr-1",
+  finish: null,
   recordId: "rec-1",
   attrGroup: "material",
   label: "SOFA",

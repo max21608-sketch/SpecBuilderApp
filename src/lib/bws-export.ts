@@ -36,6 +36,7 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
+import { combineFinishState, composeFinishCell, type Finish } from "@/lib/finishes";
 
 export type BwsColumn = { name: string; jsonId: number | null };
 
@@ -209,6 +210,17 @@ export type ExportAttribute = {
   /** One of the five, on a dimension and nowhere else — 0011 enforces the pairing. */
   dimensionSlot: DimensionSlot | null;
   materialCode: string | null;
+  /**
+   * The library entry this attribute's code resolves to, when it is linked.
+   *
+   * THE LIBRARY IS THE TRUTH AND THE ATTRIBUTE IS THE EVIDENCE: `value` stays
+   * exactly what the drawing said about this item, so it can be re-checked
+   * against its page, and the CELL renders the finish's current definition.
+   * Correcting CH-01.1 once therefore corrects every item carrying it — which
+   * is the only correction mechanism there is, the pilot's finishes schedule
+   * being confirmed absent.
+   */
+  finish: Finish | null;
   specFieldJsonId: number | null;
   state: AttributeState;
   sortOrder: number;
@@ -279,10 +291,16 @@ export function renderAttributeValue(attribute: {
   value: string | null;
   unit: AttributeUnit | null;
   state: AttributeState;
+  finish?: Finish | null;
 }): string {
-  const value = attribute.value?.trim() ?? "";
+  // A LINKED FINISH RENDERS AS THE LIBRARY SAYS IT IS, not as this page wrote
+  // it. One composer, called here, by the record screen and by
+  // promote-answers — see src/lib/finishes.ts for why all three must agree.
+  const finish = attribute.finish ?? null;
+  const value = finish ? composeFinishCell(finish) : (attribute.value?.trim() ?? "");
+  const state = finish ? combineFinishState(attribute.state, finish) : attribute.state;
   const withUnit = value && attribute.unit ? `${value}${attribute.unit}` : value;
-  if (attribute.state !== "tbc") return withUnit;
+  if (state !== "tbc") return withUnit;
   if (!withUnit) return "TBC";
   return MENTIONS_TBC.test(withUnit) ? withUnit : `${withUnit} TBC`;
 }

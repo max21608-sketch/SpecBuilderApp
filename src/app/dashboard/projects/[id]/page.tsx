@@ -536,6 +536,20 @@ function ProjectOverview() {
 
       {tab === "history" && <ProjectHistory projectId={project.id} />}
 
+      {tab === "overview" && (
+        <p className="mt-3 text-sm">
+          <Link
+            href={`/dashboard/projects/${project.id}/finishes`}
+            className="text-neutral-600 underline hover:text-neutral-900"
+          >
+            Finishes library
+          </Link>
+          <span className="ml-2 text-xs text-neutral-500">
+            Every finish code this project&rsquo;s documents carry, and the items that use it.
+          </span>
+        </p>
+      )}
+
       {runs.map((run) =>
         tab === run.id ? (
           <section key={run.id} className="mt-4">

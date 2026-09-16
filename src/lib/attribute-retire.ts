@@ -29,6 +29,7 @@
 // look at rather than for this code to decide.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
+import { isFinishKind } from "@/lib/finishes";
 import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import {
@@ -50,10 +51,14 @@ export type RetireAttributeResult = {
 /** Every active attribute on a record, in the shape the promotion functions take. */
 export async function loadPromotable(txn: TxnSql, recordId: string): Promise<PromotableAttribute[]> {
   const rows = await txn`
-    select attr_group, dimension_slot, spec_field_id, value, unit, state, sort_order, source_run_id
-    from record_attributes
-    where record_id = ${recordId} and status = 'active'
-    order by sort_order
+    select a.attr_group, a.dimension_slot, a.spec_field_id, a.value, a.unit, a.state, a.sort_order, a.source_run_id,
+           a.finish_id, f.code as finish_code, f.code_norm as finish_code_norm, f.kind as finish_kind,
+           f.description as finish_description, f.supplier_raw as finish_supplier_raw,
+           f.reference as finish_reference, f.colour as finish_colour, f.state as finish_state
+    from record_attributes a
+    left join project_finishes f on f.id = a.finish_id
+    where a.record_id = ${recordId} and a.status = 'active'
+    order by a.sort_order
   `;
   return rows.map((row) => ({
     attrGroup: String(row.attr_group),
@@ -64,6 +69,19 @@ export async function loadPromotable(txn: TxnSql, recordId: string): Promise<Pro
     state: String(row.state) as PromotableAttribute["state"],
     sortOrder: Number(row.sort_order),
     sourceRunId: row.source_run_id ? String(row.source_run_id) : null,
+    finish: row.finish_id
+      ? {
+          id: String(row.finish_id),
+          code: String(row.finish_code),
+          codeNorm: String(row.finish_code_norm),
+          kind: isFinishKind(row.finish_kind) ? row.finish_kind : null,
+          description: row.finish_description === null || row.finish_description === undefined ? null : String(row.finish_description),
+          supplierRaw: row.finish_supplier_raw === null || row.finish_supplier_raw === undefined ? null : String(row.finish_supplier_raw),
+          reference: row.finish_reference === null || row.finish_reference === undefined ? null : String(row.finish_reference),
+          colour: row.finish_colour === null || row.finish_colour === undefined ? null : String(row.finish_colour),
+          state: String(row.finish_state) as PromotableAttribute["state"],
+        }
+      : null,
   }));
 }
 

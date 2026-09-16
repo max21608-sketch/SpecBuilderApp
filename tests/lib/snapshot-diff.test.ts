@@ -37,6 +37,7 @@ const base = (): RecordAtoms => ({
       unit: "mm",
       dimensionSlot: "W",
       materialCode: null,
+      finish: null,
       specFieldJsonId: null,
       state: "confirmed",
       sortOrder: 1,

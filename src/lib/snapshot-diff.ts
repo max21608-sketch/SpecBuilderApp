@@ -26,6 +26,7 @@
 // ============================================================================
 import { z } from "zod";
 import { composeRowCells, BWS_EXPORT_COLUMNS } from "@/lib/bws-export";
+import { composeFinishCell } from "@/lib/finishes";
 import { exportAnswers, scopeForAtoms, RECORD_ATOMS_SCHEMA_VERSION, type RecordAtoms } from "@/lib/record-atoms";
 
 // ---- validating a stored snapshot -----------------------------------------
@@ -39,6 +40,23 @@ const AtomAttribute = z.object({
   unit: z.string().nullable(),
   dimensionSlot: z.string().nullable(),
   materialCode: z.string().nullable(),
+  // Added at schema version 2. `.nullish()` with a default rather than
+  // required, so a version written before the finishes library existed still
+  // reads — the same discipline as `dimensionSlot` on a staged observation.
+  finish: z
+    .object({
+      id: z.string(),
+      code: z.string(),
+      codeNorm: z.string(),
+      kind: z.string().nullable(),
+      description: z.string().nullable(),
+      supplierRaw: z.string().nullable(),
+      reference: z.string().nullable(),
+      colour: z.string().nullable(),
+      state: z.string(),
+    })
+    .nullish()
+    .transform((value) => value ?? null),
   specFieldJsonId: z.number().nullable(),
   state: z.string(),
   sortOrder: z.number(),
@@ -162,6 +180,10 @@ function attributeFields(attribute: RecordAtoms["attributes"][number]): { field:
     { field: "dimensionSlot", label: "Slot", value: attribute.dimensionSlot },
     { field: "state", label: "State", value: attribute.state },
     { field: "materialCode", label: "Finish code", value: attribute.materialCode },
+    // What the LIBRARY said this code meant at the time. Without it, editing a
+    // finish would change every linked item's export cell and show as no
+    // change at all on any of their versions.
+    { field: "finish", label: "Finish", value: attribute.finish ? composeFinishCell(attribute.finish) : null },
     { field: "specFieldJsonId", label: "BWS field", value: attribute.specFieldJsonId },
     { field: "source", label: "Source", value: attribute.sourceFilename },
   ];
