@@ -974,6 +974,73 @@ Four things are load-bearing:
   specification sheet still in centimetres at `W1900 x D790 x H720mm`, and
   S-100's eight bare figures, UP-101 and S-400 left unplaced with a dispute.
 
+### One bill line, two things to make
+
+`db/migrations/0024_record_variants.sql`, `src/lib/record-variants.ts`,
+`src/lib/export-scope.ts`
+
+The AP364 set draws S-201 twice, S-200 twice and S-301 **four times** —
+identical geometry, different fabric and timber callouts, one bill line at 45
+off. Both cards resolved to the same record, so `duplicateTargets` read them as
+two documents fighting over one row and confirming the second offered to RETIRE
+the first's fabric. The second fabric is not a correction of the first; they are
+both true, and they are two different chairs to build.
+
+0002 anticipated this and stopped one step short: `parent_id`, `depth` (capped
+at 1) and `split_reason in ('fabric','configuration')` have existed since the
+foundation, with the comment that "one ref legitimately becomes several jobs (a
+fabric split, a configuration split)". **Nothing has ever written any of the
+three** — a column is the same promise an empty table makes. What was missing
+was a NAME: a split with only its own `record_no` reads as an unrelated line,
+and what a person says out loud is "S-201 A".
+
+Settled with Max on 2026-09-16, and each half is a trap:
+
+- **The variants export; the parent does not.** A bill line with a live variant
+  is a heading and its variants are the jobs. Three rows for one line, in a
+  file that replaces rather than merges, reads as three items to make — the
+  same class of error as a filtered export. The predicate is a correlated
+  `not exists` on an ACTIVE variant, never a stored "has been split" flag:
+  retire both variants and the parent is an item again, still 45 off on the
+  bill, and a file that omitted it would wipe every BWS field it holds.
+- **No quantity is apportioned.** The bill says 45 and never says how many are
+  fabric A. Variants are created with `qty = null` and the screens say the 45
+  is unallocated. `unallocatedQty` does NOT clamp a negative: variants adding
+  up to more than the bill line is a real mistake, and hiding it behind a
+  `Math.max` is how it reaches a quotation.
+- **The client ref is unchanged.** `S-201` stays the ref, because a ref is the
+  client's key and the letter is ours. One ref, several BWS jobs — what the
+  pre-sale key model has always said.
+- **A letter is never reused**, including a retired variant's: somebody quoted
+  "S-201 C" in an email and it has to keep meaning that. Past Z,
+  `nextVariantLabel` returns null rather than inventing `AA`.
+- **`parent_id` is now `on delete cascade`.** It was `restrict` since 0002,
+  which would have refused a project delete the moment anything was split —
+  the lesson 0013, 0014 and 0015 each learned separately, found across a
+  maintenance path for the third time.
+
+**BUILT SO FAR: the migration, the library, the export rule and its db-tier
+test — and all of it is INERT until something creates a variant.** No variant
+exists, so the `not exists` clause matches nothing and the export behaves
+exactly as before.
+
+**STILL TO BUILD, and two traps found while designing it:**
+
+- The confirm path. A code with several cards in one pack is several
+  configurations; confirming a card must find-or-create the variant under each
+  target record and write the attributes THERE. The letter must travel on the
+  confirm request (proposed from page order, the reviewer's to change), or
+  confirming twice makes two variants — `spec_records_parent_variant_key` is
+  what makes find-or-create safe.
+- **A variant must NOT be given the client ref.** `resolveDrawingTargets`
+  matches records by ref within a run, so copying `S-201` onto its variants
+  puts three records with that ref on one run and every drawing card becomes
+  AMBIGUOUS — the `SX11A` case, self-inflicted. The ref stays on the parent and
+  the confirm resolves parent → variant.
+- **The export's `Client Code` must then come from the PARENT's refs.** A
+  variant has none of its own, so composing that column from the record's own
+  refs would ship a blank client code for every split item.
+
 ### A drawing dimensions everything, and four of them matter
 
 `src/lib/drawing-document.ts` (`dedupeMeasured`, `applyViewGuesses`),

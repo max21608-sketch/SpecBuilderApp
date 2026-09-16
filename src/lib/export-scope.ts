@@ -58,6 +58,22 @@ export async function loadExportScope(projectId: string, runId: string | null): 
   // A RETIRED RUN is out of scope even when its records were somehow left
   // active: the run is the tab a person retired, and an export that still
   // carried it would re-import work the project has moved on from.
+  //
+  // ---- AND A BILL LINE THAT HAS BEEN SPLIT IS A HEADING ---------------------
+  //
+  // S-201 is one bill line, 45 off, drawn in two fabrics. 0024 makes those two
+  // child records — S-201 A and S-201 B — and THEY are the jobs. The parent
+  // stops being exported, because a BWS import replaces rather than merges and
+  // three rows for one bill line reads as three items to make.
+  //
+  // `status = 'active'` on the variant is the whole subtlety, and it is why
+  // this is a correlated EXISTS rather than a column on the parent. Retire both
+  // variants and the parent is an item again: it is still a line on the bill,
+  // and a file that omitted it would wipe every BWS field it holds. A stored
+  // "has been split" flag would be wrong the moment somebody retired one.
+  //
+  // The variants themselves need no clause: they are active records on the
+  // same run and arrive through the ordinary predicate.
   const idRows = await sql`
     select r.id
     from spec_records r
@@ -66,6 +82,10 @@ export async function loadExportScope(projectId: string, runId: string | null): 
       and r.status = 'active'
       and run.status = 'active'
       and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
+      and not exists (
+        select 1 from spec_records v
+        where v.parent_id = r.id and v.status = 'active'
+      )
     order by r.record_no
   `;
   const recordIds = idRows.map((row) => String(row.id));
