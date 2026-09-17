@@ -34,14 +34,8 @@
 // identical to a matcher that ignores runs, which is why grouping by run is the
 // whole of this function.
 // ============================================================================
-import {
-  containsPhrase,
-  deferredToSomebody,
-  findRecordsByRef,
-  normaliseRef,
-  type RecordEntry,
-  TBC_TOKENS,
-} from "@/lib/spec-document";
+import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
+import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
 import {
   DIMENSION_SLOT_LABELS,

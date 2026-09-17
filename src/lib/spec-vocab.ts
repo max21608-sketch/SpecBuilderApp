@@ -423,3 +423,66 @@ export function isAnswerState(value: unknown): value is AnswerState {
 export function isSettled(state: AnswerState): boolean {
   return state === "confirmed" || state === "na";
 }
+
+// ---- deferral wording -------------------------------------------------------
+//
+// Moved here from spec-document.ts so `spec-dimensions.ts` can read it without
+// importing the module that imports IT. A cycle between the two would work
+// today — the tokens are a top-level const read inside a function — and would
+// break the first time either module read the other at import time.
+//
+// ONE list, shared by the spec-document, drawings and email readings. A second
+// copy is how two pipelines start disagreeing about whether "PENDING" is a
+// specification.
+
+// Wording that means "not decided yet". Deliberately tight: each of these is a
+// phrase that carries no specification content at all.
+//
+// `pending` and `to bid` were added from the Panther specification sheets,
+// which write "TIMBER  PENDING" and "SUPPLIER  TO BID" where the AP364 drawings
+// write "TBC". Same meaning, and the export must carry all three through as TBC
+// rather than as a stated value — a blank supplier reads as "no supplier", and
+// a supplier of "TO BID" reads as a company.
+export const TBC_TOKENS = [
+  "tbc",
+  "t b c",
+  "to be confirmed",
+  "to be advised",
+  "tba",
+  "to follow",
+  "to be issued",
+  "pending",
+  "to bid",
+];
+
+/**
+ * Whether a normalised string contains a token as whole words.
+ *
+ * `normaliseName` has already lowercased, turned punctuation into spaces and
+ * collapsed runs of whitespace, so padding both sides and testing for the
+ * padded token is enough — and it works for the multi-word tokens ("to be
+ * confirmed") that a word-set intersection would not.
+ */
+export function containsPhrase(normalised: string, token: string): boolean {
+  return ` ${normalised} `.includes(` ${token} `);
+}
+
+const DEFERRED_TO_SOMEBODY = /\bto confirm$/;
+
+/**
+ * "Argenta to confirm", "designer to confirm" — somebody else will decide.
+ *
+ * NOT added to TBC_TOKENS, because the phrase names WHO, and that is content
+ * worth keeping rather than collapsing to "TBC". It is also not a settled
+ * value. So it takes the third outcome this module already has: no state, the
+ * wording preserved, and a reviewer told what they are being asked. A rule that
+ * guessed either way would be wrong on one of the two readings every time.
+ *
+ * Anchored at the end so "confirmed by the client on 4 June" — a settled fact
+ * written in the past tense — does not match.
+ */
+
+/** Shared with `suggestAttributeState`, so the two pipelines read it alike. */
+export function deferredToSomebody(normalised: string): boolean {
+  return DEFERRED_TO_SOMEBODY.test(normalised);
+}

@@ -40,7 +40,14 @@ import {
 } from "@/lib/spec-document";
 import { commitGroups, groupIntoSpecRows, type SpecRow } from "@/lib/spec-review-rows";
 import type { ChangeDescription } from "@/lib/spec-change";
-import { ANSWER_STATES, ANSWER_STATE_LABELS, DOCUMENT_KIND_LABELS, type AnswerState, type DocumentKind } from "@/lib/spec-vocab";
+import {
+  ANSWER_STATES,
+  ANSWER_STATE_LABELS,
+  ATTRIBUTE_UNITS,
+  DOCUMENT_KIND_LABELS,
+  type AnswerState,
+  type DocumentKind,
+} from "@/lib/spec-vocab";
 
 export type SpecImport = {
   id: string;
@@ -459,23 +466,35 @@ export default function SpecDocumentReview({
         </p>
       )}
 
-      {rows.some((row) => row.unplacedCount > 0) && (
-        <div className="mt-4 border border-amber-200 bg-amber-50 rounded-lg px-4 py-3">
-          <p className="text-sm text-amber-900">
-            {rows.filter((row) => row.unplacedCount > 0).length} of these did not find an item on this project.
-          </p>
-          <p className="mt-1 text-sm text-amber-800">
+      {rows.length > 0 && (
+        // Offered whenever anything is still pending, not only when something
+        // failed to place. A matching rule corrected AFTER a document was read
+        // reaches it only through here — the dimension reading landed after
+        // this email was read, and every row had already resolved to a record,
+        // so a control that only appeared for unplaced rows would have left the
+        // fix reachable solely by paying for a second read.
+        <div
+          className={`mt-4 rounded-lg px-4 py-3 border ${
+            rows.some((row) => row.unplacedCount > 0) ? "border-amber-200 bg-amber-50" : "border-neutral-200 bg-white"
+          }`}
+        >
+          {rows.some((row) => row.unplacedCount > 0) && (
+            <p className="text-sm text-amber-900">
+              {rows.filter((row) => row.unplacedCount > 0).length} of these did not find an item on this project.
+            </p>
+          )}
+          <p className="mt-1 text-sm text-neutral-700">
             {/* Says plainly that it is free. Every other button on this screen
                 that touches extraction spends money, so one that does not has
                 to say so or nobody will press it. */}
-            If the bill of quantities has been confirmed or revised since this was read, match it again — this re-reads
-            nothing and costs nothing.
+            If the bill has changed since this was read, or the app has learnt to read something it could not before,
+            match it again — this re-reads nothing and costs nothing.
           </p>
           <button
             type="button"
             disabled={busy !== null}
             onClick={() => void rematch()}
-            className="mt-2 text-sm px-3 py-1.5 rounded border border-amber-300 bg-white hover:bg-amber-100 disabled:opacity-50"
+            className="mt-2 text-sm px-3 py-1.5 rounded border border-neutral-300 bg-white hover:bg-neutral-100 disabled:opacity-50"
           >
             {busy === "rematch" ? "Matching…" : "Match against the bill again"}
           </button>
@@ -919,6 +938,14 @@ function SpecRowView({
           >
             {row.attributeRaw ?? "Unlabelled"}
           </button>
+          {row.slots.length > 0 && (
+            // A dimension does not answer a question — it fills a slot, and
+            // all five compose into one BWS cell. Saying which slots makes an
+            // "Overall" line that placed W, D and H legible at a glance.
+            <span className="ml-2 text-xs px-1.5 py-0.5 rounded border border-sky-300 bg-sky-50 text-sky-800">
+              {row.slots.join(" · ")}
+            </span>
+          )}
           {row.configurationLabel && (
             // A READING of the wording, never a target. 0024's configurations
             // are real records and this email names one; nothing resolves it,
@@ -949,7 +976,7 @@ function SpecRowView({
               {row.placedCount} {row.placedCount === 1 ? "run" : "runs"}
               <span className="text-neutral-500">
                 {" "}
-                · {row.runs.filter((r) => r.recordId).map((r) => r.runName ?? "—").join(", ")}
+                · {row.distinctRuns.map((r) => r.runName ?? "—").join(", ")}
               </span>
             </span>
           )}
@@ -1011,6 +1038,27 @@ function SpecRowView({
                       {proposal.runName ?? "No run"}
                       {proposal.target ? ` · ${proposal.target.recordLabel}` : ""}
                     </p>
+                    {proposal.finish ? (
+                      <FinishRow
+                        proposal={proposal}
+                        all={all}
+                        busy={busy}
+                        onChange={onChange}
+                        onIgnore={async () => {
+                          await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
+                        }}
+                      />
+                    ) : proposal.dimension ? (
+                      <DimensionRow
+                        proposal={proposal}
+                        all={all}
+                        busy={busy}
+                        onChange={onChange}
+                        onIgnore={async () => {
+                          await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
+                        }}
+                      />
+                    ) : (
                     <ul>
                     <ProposalRow
                       proposal={proposal}
@@ -1027,6 +1075,7 @@ function SpecRowView({
                       }}
                     />
                     </ul>
+                    )}
                   </div>
                 );
               })}
@@ -1035,5 +1084,209 @@ function SpecRowView({
         </tr>
       )}
     </>
+  );
+}
+
+// ---- one dimension, on one record ------------------------------------------
+//
+// A dimension is not an answer and this is not ProposalRow. It has no question
+// to choose and no state to pick: it fills one of five SLOTS, and all five
+// compose into BWS field 3 by `composeDimensionCell` at confirm time. What a
+// reviewer can do to it is exactly three things — supply a unit the email did
+// not state, agree to replace what the slot already holds, or ignore it.
+//
+// THE UNIT IS THE ONE THAT MATTERS. Nothing in the dimension model ever infers
+// a unit from a figure's size, because a wrong unit reads as a real
+// measurement and nothing downstream questions it. So a missing unit is amber
+// and asked for — and it is NOT a blocker: `composeDimensionCell` renders an
+// underived figure verbatim in a bracket saying why, which is a truthful cell
+// and better than a card that cannot commit.
+function DimensionRow({
+  proposal,
+  all,
+  busy,
+  onChange,
+  onIgnore,
+}: {
+  proposal: Proposal;
+  all: Proposal[];
+  busy: string | null;
+  onChange: (proposal: Proposal, changes: Record<string, unknown>) => void;
+  onIgnore: () => Promise<void>;
+}) {
+  const dimension = proposal.dimension;
+  if (!dimension) return null;
+  const blockers = proposalBlockers(proposal, all);
+  const replace = blockers.find((blocker) => blocker.code === "replace");
+
+  return (
+    <div className="px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs px-1.5 py-0.5 rounded border border-sky-300 bg-sky-50 text-sky-800 font-medium">
+          {dimension.slot}
+        </span>
+        <span className="text-neutral-900">
+          {dimension.tbc ? "TBC" : (dimension.figure ?? "—")}
+          {dimension.unit ?? ""}
+        </span>
+        {dimension.slotSuggested && (
+          // The same yellow a guessed slot gets everywhere else: this one came
+          // from printed ORDER, not from a prefix the document stated.
+          <span className="text-xs px-1.5 py-0.5 rounded border border-yellow-300 bg-yellow-100/70 text-yellow-900">
+            read from the printed order — check it
+          </span>
+        )}
+        {dimension.unitSource === "reviewer" && <span className="text-xs text-neutral-500">unit set by hand</span>}
+
+        <label className="ml-auto flex items-center gap-1 text-xs text-neutral-600">
+          <span className={dimension.unit ? "" : "text-amber-800"}>Unit</span>
+          <select
+            value={dimension.unit ?? ""}
+            disabled={busy !== null}
+            onChange={(event) =>
+              onChange(proposal, { dimensionUnit: event.target.value === "" ? null : event.target.value })
+            }
+            className={`border rounded px-1.5 py-1 text-sm ${dimension.unit ? "border-neutral-300" : "border-amber-400 bg-amber-50"}`}
+          >
+            <option value="">not stated</option>
+            {ATTRIBUTE_UNITS.map((unit) => (
+              <option key={unit} value={unit}>
+                {unit}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => void onIgnore()}
+          className="text-sm px-2 py-1 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
+        >
+          Ignore
+        </button>
+      </div>
+
+      {dimension.qualifier && (
+        // Kept, and said out loud: "445" on its own does not say what it
+        // measures. This is recorded as a note beside the figure at confirm.
+        <p className="mt-1 text-xs text-neutral-600">
+          Kept as a note: <span className="text-neutral-800">{dimension.qualifier}</span>
+        </p>
+      )}
+
+      {!dimension.unit && !dimension.tbc && (
+        <p className="mt-1 text-xs text-amber-800">
+          The email does not state a unit. Set one, or the cell will show the figure as written and say it could not be
+          converted.
+        </p>
+      )}
+
+      {replace && (
+        <label className="mt-2 flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1.5">
+          <input
+            type="checkbox"
+            checked={proposal.overwriteAcknowledged}
+            disabled={busy !== null}
+            onChange={(event) => onChange(proposal, { overwriteAcknowledged: event.target.checked })}
+            className="mt-0.5"
+          />
+          <span>{replace.message}</span>
+        </label>
+      )}
+
+      {blockers
+        .filter((blocker) => blocker.code !== "replace")
+        .map((blocker) => (
+          <p key={blocker.code} className="mt-1 text-sm text-amber-800">
+            {blocker.message}
+          </p>
+        ))}
+    </div>
+  );
+}
+
+// ---- one finish, on one record ---------------------------------------------
+//
+// A fabric, timber, metal or piece of hardware. Like a dimension it writes an
+// ATTRIBUTE rather than an answer, because it carries a BWS FIELD — COM 1, COM
+// 2, Main timber finish — and which slot it takes depends on what the record
+// already holds. That is why an alias vocabulary was the wrong fix for these:
+// an alias would have to name one slot up front, and the next item contradicts
+// it.
+//
+// `readFinish` only fires on the document's own CODE, so the reviewer is never
+// shown a build instruction that has been read as a fabric. The code is shown
+// because it is the thing to check against the page, and it is what links the
+// row to the project's finishes library.
+function FinishRow({
+  proposal,
+  all,
+  busy,
+  onChange,
+  onIgnore,
+}: {
+  proposal: Proposal;
+  all: Proposal[];
+  busy: string | null;
+  onChange: (proposal: Proposal, changes: Record<string, unknown>) => void;
+  onIgnore: () => Promise<void>;
+}) {
+  const finish = proposal.finish;
+  if (!finish) return null;
+  const blockers = proposalBlockers(proposal, all);
+  const replace = blockers.find((blocker) => blocker.code === "replace");
+
+  return (
+    <div className="px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs px-1.5 py-0.5 rounded border border-violet-300 bg-violet-50 text-violet-800 font-medium">
+          {finish.specFieldName ?? "no BWS field"}
+        </span>
+        {finish.codeRaw && <span className="text-sm font-mono text-neutral-800">{finish.codeRaw}</span>}
+        <span className="text-neutral-800">{finish.tbc ? "TBC" : (finish.value ?? "—")}</span>
+        {finish.reason && <span className="text-xs text-neutral-500">{finish.reason}</span>}
+
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => void onIgnore()}
+          className="ml-auto text-sm px-2 py-1 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
+        >
+          Ignore
+        </button>
+      </div>
+
+      {!finish.specFieldId && (
+        // Kept, not refused: 0007 makes the column nullable precisely so an
+        // observation with no BWS home is still worth recording against the
+        // item. It simply will not reach the export's own cell.
+        <p className="mt-1 text-xs text-amber-800">
+          Every {finish.group === "material" ? "COM" : "finish"} slot on this item is already filled, so this will be
+          recorded against the item but will not reach a BWS column.
+        </p>
+      )}
+
+      {replace && (
+        <label className="mt-2 flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1.5">
+          <input
+            type="checkbox"
+            checked={proposal.overwriteAcknowledged}
+            disabled={busy !== null}
+            onChange={(event) => onChange(proposal, { overwriteAcknowledged: event.target.checked })}
+            className="mt-0.5"
+          />
+          <span>{replace.message}</span>
+        </label>
+      )}
+
+      {blockers
+        .filter((blocker) => blocker.code !== "replace")
+        .map((blocker) => (
+          <p key={blocker.code} className="mt-1 text-sm text-amber-800">
+            {blocker.message}
+          </p>
+        ))}
+    </div>
   );
 }

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyProposal,
   detectConfiguration,
+  rematchProposals,
   findRecordsByRef,
   groupByRecord,
   normaliseRef,
@@ -15,6 +16,7 @@ import {
   suggestState,
   type AnswerEntry,
   type Proposal,
+  type StagedSpecDocument,
   type RecordEntry,
   type Registers,
   type RequirementEntry,
@@ -429,5 +431,269 @@ describe("detectConfiguration", () => {
     expect(detectConfiguration("Grade A fabric")).toBeNull();
     expect(detectConfiguration("Seat height")).toBeNull();
     expect(detectConfiguration(null)).toBeNull();
+  });
+});
+
+describe("resolveProposals — dimensions", () => {
+  const runs = [
+    record({ id: "mur", runId: "run-mur", runName: "MUR" }),
+    record({ id: "main", runId: "run-main", runName: "MAIN RUN" }),
+  ];
+
+  it("turns an overall line into one proposal per slot, per run", () => {
+    // Three slots on two runs is six writes, and the screen still shows ONE
+    // row because they share the observation's ordinal.
+    const proposals = resolve(
+      [observation({ attributeRaw: "Overall", valueRaw: "W660 x D685 x H680mm" })],
+      registers({ records: runs }),
+    );
+    expect(proposals).toHaveLength(6);
+    expect(new Set(proposals.map((p) => p.sourceOrdinal))).toEqual(new Set([0]));
+    expect(new Set(proposals.map((p) => p.dimension?.slot))).toEqual(new Set(["W", "D", "H"]));
+    for (const proposal of proposals) {
+      // A dimension reaches its field by SLOT, never by matching a question.
+      expect(proposal.requirementId).toBeNull();
+      expect(proposal.target).toBeNull();
+      expect(proposal.dimension?.unit).toBe("mm");
+      expect(classifyProposal(proposal)).toBe("pending");
+    }
+  });
+
+  it("is committable with a record alone, having no question to match", () => {
+    const [proposal] = resolve(
+      [observation({ attributeRaw: "Seat height", valueRaw: "445mm" })],
+      registers({ records: [record()] }),
+    );
+    expect(proposal?.dimension?.slot).toBe("SH");
+    expect(proposalBlockers(proposal as Proposal, [proposal as Proposal])).toEqual([]);
+  });
+
+  it("leaves a non-dimension observation on the ordinary path", () => {
+    // "Arm height" is a note, not a slot — CLAUDE.md names it as the case a
+    // substring rule would destroy.
+    const [proposal] = resolve([observation({ attributeRaw: "Arm height", valueRaw: "520mm from FFL" })]);
+    expect(proposal?.dimension ?? null).toBeNull();
+  });
+
+  it("refuses to retire what a slot already holds until somebody says so", () => {
+    const regs = registers({
+      records: [record()],
+      attributes: [
+        { id: "attr-1", recordId: "rec-1", attrGroup: "dimension", slot: "SH", specFieldId: null, label: "SEAT HEIGHT", value: "440", unit: "mm", state: "confirmed", version: 2 },
+      ],
+    });
+    const [proposal] = resolve([observation({ attributeRaw: "Seat height", valueRaw: "445mm" })], regs);
+    expect(proposal?.attributeTarget?.attributeId).toBe("attr-1");
+
+    const blockers = proposalBlockers(proposal as Proposal, [proposal as Proposal]);
+    expect(blockers.map((blocker) => blocker.code)).toContain("replace");
+    expect(blockers[0]?.message).toContain("440mm");
+
+    // Acknowledged, and it clears — the version it was tied to is re-checked
+    // by the confirm, not here.
+    const acknowledged = { ...(proposal as Proposal), overwriteAcknowledged: true };
+    expect(proposalBlockers(acknowledged, [acknowledged])).toEqual([]);
+  });
+
+  it("refuses a diameter beside a width", () => {
+    const regs = registers({ records: [record()] });
+    const proposals = [
+      ...resolve([observation({ attributeRaw: "Diameter", valueRaw: "460mm" })], regs),
+      ...resolve([observation({ attributeRaw: "Width", valueRaw: "660mm" })], regs),
+    ];
+    const codes = proposalBlockers(proposals[0] as Proposal, proposals).map((blocker) => blocker.code);
+    expect(codes).toContain("dia_conflict");
+  });
+
+  it("catches one slot stated twice", () => {
+    const regs = registers({ records: [record()] });
+    const proposals = [
+      ...resolve([observation({ attributeRaw: "Seat height", valueRaw: "445mm" })], regs),
+      ...resolve([observation({ attributeRaw: "SH", valueRaw: "450mm" })], regs),
+    ];
+    const codes = proposalBlockers(proposals[0] as Proposal, proposals).map((blocker) => blocker.code);
+    expect(codes).toContain("duplicate_target");
+  });
+});
+
+describe("rematchProposals", () => {
+  const staged = (lines: Proposal[]): StagedSpecDocument => ({
+    schemaVersion: 1,
+    lines,
+    documentNotes: null,
+    filename: null,
+  });
+
+  it("re-resolves an observation that never placed, without a model call", () => {
+    const before = resolveProposals([observation()], { records: [], requirements: [], answers: [] }, ids);
+    expect(before[0]?.recordId).toBeNull();
+
+    const result = rematchProposals(staged(before), registers(), ids);
+    expect(result.rematched).toBe(1);
+    expect(result.lines[0]?.recordId).toBe("rec-1");
+  });
+
+  it("does NOT fan an already-fanned observation out again", () => {
+    // The trap this function exists around: re-resolving each PROPOSAL would
+    // turn three runs into nine, then twenty-seven.
+    const regs = registers({
+      records: [
+        record({ id: "mur", runId: "run-mur", runName: "MUR" }),
+        record({ id: "main", runId: "run-main", runName: "MAIN RUN" }),
+        record({ id: "ve", runId: "run-ve", runName: "VE" }),
+      ],
+    });
+    const fanned = resolve([observation()], regs);
+    expect(fanned).toHaveLength(3);
+
+    const result = rematchProposals(staged(fanned), regs, ids);
+    expect(result.lines).toHaveLength(3);
+    // Nothing moved, so it is a genuine no-op: same ids, same versions.
+    expect(result.rematched).toBe(0);
+    expect(result.lines.map((line) => line.id)).toEqual(fanned.map((line) => line.id));
+  });
+
+  it("never touches an observation a person has already acted on", () => {
+    const before = resolveProposals([observation()], { records: [], requirements: [], answers: [] }, ids);
+    const edited = before.map((line) => ({ ...line, version: 2 }));
+    expect(rematchProposals(staged(edited), registers(), ids).rematched).toBe(0);
+
+    const ignored = before.map((line) => ({ ...line, reviewStatus: "ignored" as const }));
+    expect(rematchProposals(staged(ignored), registers(), ids).rematched).toBe(0);
+  });
+
+  it("picks up a rule change that affects an already-resolved observation", () => {
+    // The dimension reading landed after this email was read. The row had
+    // already resolved to a record, so a guard of "only what never placed"
+    // would have left it behind and the only fix would be a billed re-read.
+    const regs = registers({ records: [record()] });
+    const asAnswer: Proposal[] = [
+      {
+        ...(resolve([observation({ attributeRaw: "Seat height", valueRaw: "445mm" })], {
+          ...regs,
+          // Resolved as if the dimension reading did not exist.
+        })[0] as Proposal),
+        dimension: null,
+        requirementId: "req-leg",
+      },
+    ];
+    const result = rematchProposals(staged(asAnswer), regs, ids);
+    expect(result.rematched).toBe(1);
+    expect(result.lines[0]?.dimension?.slot).toBe("SH");
+  });
+});
+
+describe("resolveProposals — finishes", () => {
+  const regs = () =>
+    registers({
+      records: [record()],
+      specFields: [
+        { id: "f-com1", jsonId: 1, name: "COM 1" },
+        { id: "f-com2", jsonId: 2, name: "COM 2" },
+        { id: "f-com3", jsonId: 14, name: "COM 3" },
+      ],
+    });
+
+  it("gives two fabrics in one document two different COM slots", () => {
+    // Found against the real pilot email, which states three: all three took
+    // COM 1, and the confirm would have refused the second on 0007's index.
+    const proposals = resolveProposals(
+      [
+        observation({ attributeRaw: "Outside back", valueRaw: "UPH-07" }),
+        observation({ attributeRaw: "Fabric (A configuration)", valueRaw: "CLO003 A (Tibor Blob)" }),
+      ],
+      regs(),
+      ids,
+    );
+    expect(proposals.map((p) => p.finish?.specFieldName)).toEqual(["COM 1", "COM 2"]);
+    expect(proposalBlockers(proposals[0] as Proposal, proposals)).toEqual([]);
+  });
+
+  it("does not hand out a slot the record already holds", () => {
+    const withHeld = registers({
+      records: [record()],
+      specFields: [
+        { id: "f-com1", jsonId: 1, name: "COM 1" },
+        { id: "f-com2", jsonId: 2, name: "COM 2" },
+      ],
+      attributes: [
+        {
+          id: "attr-1", recordId: "rec-1", attrGroup: "material", slot: null, specFieldId: "f-com1",
+          label: "SEAT", value: "UPH-01", unit: null, state: "confirmed", version: 1,
+        },
+      ],
+    });
+    const [proposal] = resolveProposals([observation({ attributeRaw: "Outside back", valueRaw: "UPH-07" })], withHeld, ids);
+    expect(proposal?.finish?.specFieldName).toBe("COM 2");
+    // Nothing to replace: it took a free slot rather than the occupied one.
+    expect(proposal?.attributeTarget).toBeNull();
+  });
+
+  it("leaves prose alone, so a build instruction never lands in COM 1", () => {
+    const [proposal] = resolveProposals(
+      [observation({ attributeRaw: "Seat upholstery build", valueRaw: "loose cushions, feather wrap" })],
+      regs(),
+      ids,
+    );
+    expect(proposal?.finish ?? null).toBeNull();
+  });
+});
+
+describe("rematchProposals — sharing the BWS slots", () => {
+  it("does not hand every re-matched fabric the same COM slot", () => {
+    // `rematchProposals` re-resolves ONE observation at a time, so a fresh
+    // `taken` map per call gave all three of the pilot email's fabrics COM 1.
+    // Found by running the real email through, not by a fixture.
+    const regs = registers({
+      records: [record()],
+      specFields: [
+        { id: "f-com1", jsonId: 1, name: "COM 1" },
+        { id: "f-com2", jsonId: 2, name: "COM 2" },
+        { id: "f-com3", jsonId: 14, name: "COM 3" },
+      ],
+    });
+    // Staged as plain answer proposals, as they were before finishes existed.
+    const before = resolveProposals(
+      [
+        observation({ attributeRaw: "Outside back", valueRaw: "UPH-07" }),
+        observation({ attributeRaw: "Fabric (A configuration)", valueRaw: "CLO003 A" }),
+        observation({ attributeRaw: "Fabric (B configuration)", valueRaw: "CLO004 B" }),
+      ],
+      { records: regs.records, requirements: [], answers: [] },
+      ids,
+    ).map((line) => ({ ...line, finish: null }));
+
+    const result = rematchProposals(
+      { schemaVersion: 1, lines: before, documentNotes: null, filename: null },
+      regs,
+      ids,
+    );
+    expect(result.rematched).toBe(3);
+    expect(result.lines.map((line) => line.finish?.specFieldName)).toEqual(["COM 1", "COM 2", "COM 3"]);
+  });
+
+  it("sees a finish re-reading as a change, rather than calling it a no-op", () => {
+    // `targetKey` left the BWS field out, so an observation that used to be a
+    // checklist answer and now reads as a fabric keyed identically both ways —
+    // and re-matching silently handed back the originals.
+    const regs = registers({
+      records: [record()],
+      specFields: [{ id: "f-com1", jsonId: 1, name: "COM 1" }],
+    });
+    // Staged the way it was BEFORE finishes existed: an answer-shaped row.
+    const before = resolveProposals(
+      [observation({ attributeRaw: "Outside back", valueRaw: "UPH-07" })],
+      { records: regs.records, requirements: [], answers: [] },
+      ids,
+    ).map((line) => ({ ...line, finish: null }));
+    expect(before[0]?.finish).toBeNull();
+
+    const result = rematchProposals(
+      { schemaVersion: 1, lines: before, documentNotes: null, filename: null },
+      regs,
+      ids,
+    );
+    expect(result.rematched).toBe(1);
+    expect(result.lines[0]?.finish?.specFieldName).toBe("COM 1");
   });
 });

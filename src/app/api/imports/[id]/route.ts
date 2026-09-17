@@ -732,6 +732,11 @@ const ProposalPatch = z
         // rebuilds the snapshot, and clears what the old target justified.
         recordId: z.string().uuid().nullable().optional(),
         requirementId: z.string().uuid().nullable().optional(),
+        // A DIMENSION's unit, which the email often does not state. There is
+        // deliberately no magnitude fallback anywhere in the dimension model,
+        // so where the wording carries no unit a person supplies one or the
+        // cell renders the figure verbatim saying why.
+        dimensionUnit: z.enum(ATTRIBUTE_UNITS).nullable().optional(),
       })
       .strict(),
   })
@@ -847,6 +852,21 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
         // suggested.
         if (changes.proposedState) next.stateReason = null;
       }
+      // Setting the unit is a PERSON deciding, so it is recorded as such:
+      // `unitSource` stops being "stated" and the screen stops calling it the
+      // email's own. Refused on a row that is not a dimension rather than
+      // silently ignored, or a client could believe it had set one.
+      if ("dimensionUnit" in changes) {
+        if (!proposal.dimension) {
+          throw new DomainConflictError("not_a_dimension", "That row is not a dimension.", { status: 400 });
+        }
+        next.dimension = {
+          ...proposal.dimension,
+          unit: changes.dimensionUnit ?? null,
+          unitSource: changes.dimensionUnit ? "reviewer" : null,
+        };
+      }
+
       if ("overwriteAcknowledged" in changes && !retargeting) {
         next.overwriteAcknowledged = Boolean(changes.overwriteAcknowledged);
       }

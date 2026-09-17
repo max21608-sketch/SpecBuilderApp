@@ -118,3 +118,39 @@ describe("describeChange", () => {
     expect(describeChange(proposal("tbc", null, "tbc", "TBC")).kind).toBe("repeats");
   });
 });
+
+describe("describeChange — finishes", () => {
+  function finishProposal(specFieldName: string, value: string, held: string | null, tbc = false): Proposal {
+    return {
+      ...proposal("missing", null, "confirmed", value),
+      target: null,
+      finish: { group: "material", specFieldId: "f1", specFieldName, codeRaw: value.split(" ")[0] ?? null, value, tbc, reason: null },
+      attributeTarget: held
+        ? { attributeId: "a1", attributeVersion: 1, label: specFieldName, value: held, unit: null }
+        : null,
+    } as Proposal;
+  }
+
+  it("names the BWS field the finish lands in", () => {
+    const change = describeChange(finishProposal("COM 1", "UPH-07", null));
+    expect(change.kind).toBe("provides");
+    expect(change.label).toBe("Provides COM 1");
+  });
+
+  it("reports a different fabric over a held one as a change, showing what it was", () => {
+    const change = describeChange(finishProposal("COM 1", "UPH-09", "UPH-07"));
+    expect(change.kind).toBe("changes");
+    expect(change.was).toBe("UPH-07");
+    expect(change.notable).toBe(true);
+  });
+
+  it("does not report a change when the email restates the same code", () => {
+    expect(describeChange(finishProposal("COM 1", "UPH-07", " uph-07 ")).kind).toBe("repeats");
+  });
+
+  it("names an undecided fabric without pretending it is a value", () => {
+    const change = describeChange(finishProposal("COM 3", "TBC", null, true));
+    expect(change.kind).toBe("provides");
+    expect(change.label).toBe("Records COM 3 as TBC");
+  });
+});

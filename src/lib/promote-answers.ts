@@ -247,11 +247,27 @@ export async function applyAnswerFills(
               -- code may recompose as later slots arrive.
               and (
                 a.state = 'missing'
-                or (a.source_kind = 'document'
-                    and exists (
-                      select 1 from intake_runs ir
-                      where ir.id = a.source_id and ir.document_kind = 'shop_drawings'
-                    ))
+                -- ---- ANY document-composed cell, not only a drawing's ------
+                --
+                -- This branch is the COMPOSED DIMENSIONS CELL and nothing else
+                -- (jsonId is set instead of specFieldId for it alone). A
+                -- composed cell is a PROJECTION of the record's dimension
+                -- attributes, never an answer anybody authored, so it must
+                -- always equal their composition — letting it go stale is the
+                -- exact disagreement this file exists to prevent.
+                --
+                -- Narrowed against the case the drawings-only clause below
+                -- guards: that one is about a shop drawing beating a value a
+                -- reviewer CONFIRMED off a schedule, which is a decision. This
+                -- cell is not. An email giving W, D and H and a second email
+                -- giving SH must recompose to W x D x H x SH; before this, the
+                -- second email wrote its attribute and could not reach the
+                -- cell, so the record held four slots and its answer showed
+                -- three.
+                --
+                -- manual and email stay out of reach, so a person's own
+                -- checklist answer is still never overwritten.
+                or a.source_kind = 'document'
                 -- ---- AND AN ANSWER A HAND-TYPED SPEC COMPOSED (0028) -------
                 --
                 -- document with a NULL source is a precise discriminator and

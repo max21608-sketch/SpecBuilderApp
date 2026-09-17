@@ -1030,6 +1030,91 @@ configurations A and B of `S-201`, which has none, and what should happen then �
 flag it, offer to create them, or something else — is Max's decision and has not
 been taken.
 
+### A spec reaches its BWS field by slot or by field, never by matching a question
+
+`src/lib/spec-dimensions.ts`, `src/lib/spec-finishes.ts`,
+`src/lib/spec-document.ts` (`resolveProposals`, `seedTakenFields`),
+`src/lib/confirm-spec-document.ts`, `src/lib/promote-answers.ts`
+
+Once the run fan-out landed, the item resolved and the QUESTION did not: all
+seven of the pilot email's values read *Question not matched*, because
+`requirement_aliases` is empty and "Seat height" scores nothing against a
+category that asks "Dimensions". The obvious fix was to seed the aliases. It is
+the wrong fix, and finding out why is the whole of this section.
+
+**"Seat height" and "Overall" are the SAME question.** There is one Dimensions
+question and all five slots compose into it, so aliasing both onto it puts two
+proposals on one answer and hits `duplicate_target` — the screen refuses them,
+correctly. **A finish is worse**: COM 1 / COM 2 / Main timber finish is decided
+by what the record already holds, so an alias would have to name one slot up
+front and the next item contradicts it.
+
+So an email's dimension or finish becomes a `record_attributes` row, exactly
+like a drawing's, and the checklist answer follows from `promote-answers.ts`.
+That is not a workaround — it is the architecture already in the building:
+`record_attributes` is what a DOCUMENT said, an email is a document, and
+`composeDimensionCell` stays the single composer. Writing the answer directly
+would leave a Dimensions cell no attribute backs, and the next drawing confirm
+recomposes from the attributes alone and silently wipes what the email gave.
+
+Nine things are load-bearing:
+
+- **An email writes prose; `parseDimensionFigure` is strict.** "445mm (measured
+  to top of cushion, compressed)" is not one bare figure, so `readDimension`
+  splits the leading figure, the unit and the QUALIFIER — and the qualifier is
+  kept as a note attribute, because "445" alone does not say what it measures.
+- **The unit comes from the wording or from nowhere.** There is no magnitude
+  fallback anywhere in the dimension model and there is none here. A missing
+  unit is amber and asked for on screen, and it is NOT a blocker:
+  `composeDimensionCell` renders an underived figure verbatim in a bracket
+  saying why, which is a truthful cell.
+- **ONE PART PER PROPOSAL.** "Overall — W660 x D685 x H680mm" is three slots
+  and therefore three proposals, sharing a `sourceOrdinal` so the screen shows
+  one row. Two slots behind one version would mean two writes behind one
+  acknowledgement.
+- **A finish fires only on the document's own CODE.** `classifyCallout` reads
+  words too, which is right for a drawing's short caption and wrong for prose:
+  "seat upholstery build — loose or fixed?" would read as a fabric on one word
+  and land a build instruction in COM 1. `readFinish` refuses anything with no
+  `UPH-07`-shaped code, the one exception being a material label whose value is
+  TBC, which carries no substance to misread.
+- **The BWS slots are claimed across a WHOLE document, and `taken` is
+  therefore a parameter.** `rematchProposals` re-resolves one observation at a
+  time, so a fresh map per call gave all three of the pilot email's fabrics
+  COM 1 — which the confirm would then refuse on 0007's unique index. Seeded
+  once by the caller, from the record's existing attributes AND from every
+  proposal the pass is not re-resolving.
+- **`targetKey` names all four coordinates** — record, question, dimension
+  slot, BWS field. It left the field out, so an observation that used to be a
+  checklist answer and now reads as a fabric keyed identically both ways, and
+  re-matching silently handed back the originals. Four of the pilot email's
+  five finishes refused to re-match, and nothing said so.
+- **Retire before insert, version-checked.** Both partial unique indexes are
+  `where status = 'active'`, so the database decides that order. The occupant's
+  version is re-checked at confirm and one that moved since is REFUSED, because
+  the value a reviewer agreed to drop is not the value that is there.
+- **A COMPOSED cell may be recomposed by any document.**
+  `applyAnswerFills`' guard let only a shop-drawings run rewrite a cell, so an
+  email giving W/D/H and a second email giving SH left the record holding four
+  slots and its answer showing three. The `jsonId` branch IS the composed
+  dimensions cell and nothing else, and a composed cell is a PROJECTION of the
+  attributes rather than an answer anybody authored — so it must always equal
+  their composition. `manual` and `email` stay out of reach, so a person's own
+  checklist answer is still never overwritten.
+- **Not everything is a slot, and that is correct.** `ARM HEIGHT` is named in
+  the dimension invariant as the case a substring rule destroys; it has no
+  slot, no finish code and no checklist question, so it stays unplaced. That is
+  a true statement about the requirement matrix, not a failure to read.
+
+**Import cycles were the cost.** `spec-dimensions` and `spec-finishes` need
+`TBC_TOKENS`, `containsPhrase`, `deferredToSomebody` (now in `spec-vocab`) and
+`classifyCallout` (in `drawing-document`), while `drawing-document` needed
+`findRecordsByRef`, `normaliseRef` and `RecordEntry` from `spec-document`. Those
+three moved to the leaf `src/lib/record-refs.ts` and everything is re-exported
+from its old home, so no caller changed. A cycle between two of these works
+right up until one is read at import time by the other, and then fails
+somewhere unrelated.
+
 ### The record is the unit of commit, and a half-applied card is the failure
 
 `src/lib/confirm-spec-document.ts`, `src/app/api/imports/[id]/confirm/route.ts`
@@ -2380,6 +2465,26 @@ rows read *Question not matched* and a person picks from the dropdown; that is
 with a fabric stated for a configuration that does not exist** is undecided —
 see the load-bearing section.
 
+**Built 2026-09-17, an email's specs reach their BWS fields.** Max asked for
+dimensions first, then the rest. Both are done and the load-bearing section
+above carries the reasoning. Against the REAL pilot email, all seven values now
+place: `Overall` to W/D/H, `Seat height` to SH, `Timber (legs and front rail)`
+to Main timber finish, and the three fabrics to COM 1, COM 2 and COM 3 — with
+no document re-read and nothing charged again.
+
+`Arm height` stays unplaced, correctly: it is not one of the five slots, it
+carries no finish code, and the requirement matrix has no question for it.
+
+**Verified by 8 database-tier tests against the sandbox** — three slots writing
+three attributes and ONE composed answer; a second email supplying SH
+recomposing the whole cell; the qualifier kept as a note; a replacement refused
+without an acknowledgement and writing nothing; the old row retired and the cell
+recomposed with one; a stale occupant refused; a TBC recorded as a state; and a
+finish landing on COM 1 and filling that checklist answer. Two defects were
+found by running the real email rather than a fixture, and both are tested:
+every re-matched fabric taking COM 1, and a finish re-reading looking like a
+no-op. **Not accepted by Max.**
+
 **Outstanding — judgement, not code.**
 
 - **Nobody has used any of this.** The four checks pass with the database tier
@@ -2431,8 +2536,10 @@ see the load-bearing section.
   project name, `Client` the client, `Name` the item description, `Item Count`
   the quantity, `Client Code` the BOQ refs. Confirm them against a real BWS
   import before anybody relies on the file.
-- `requirement_aliases` is empty and attribute matching measured 1/7 on the M2
-  sample; seed it only from verified pilot wording.
+- `requirement_aliases` is STILL empty, and is now needed for less: a
+  dimension reaches its field by slot and a finish by its BWS field, so the
+  aliases are only wanted for observations that are neither — the checklist
+  questions proper. Seed it only from verified pilot wording.
 - **The level guess rules are this repo's judgement too**, and for a harder
   reason than the job columns: nothing written down defines simple / complex /
   hero. `src/lib/level-guess.ts` encodes the BWS boilerplate split and Max's

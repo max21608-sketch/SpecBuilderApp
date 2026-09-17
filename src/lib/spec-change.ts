@@ -67,6 +67,45 @@ function sameValue(a: string | null, b: string | null): boolean {
 }
 
 export function describeChange(proposal: Proposal): ChangeDescription {
+  // A DIMENSION is compared against the attribute it would replace, not
+  // against a checklist answer: the answer is composed from every slot the
+  // record holds, so "what this says" is about this slot alone.
+  if (proposal.dimension) {
+    const slot = proposal.dimension.slot;
+    const held = proposal.attributeTarget;
+    if (!proposal.recordId) {
+      return { kind: "unplaced", label: "Item not found", was: null, notable: true };
+    }
+    if (proposal.dimension.tbc) {
+      return held
+        ? { kind: "withdraws", label: `${slot} back to TBC`, was: [held.value, held.unit].filter(Boolean).join(""), notable: true }
+        : { kind: "provides", label: `Records ${slot} as TBC`, was: null, notable: false };
+    }
+    if (!held) {
+      return { kind: "provides", label: `Provides ${slot}`, was: null, notable: false };
+    }
+    const heldText = [held.value, held.unit].filter(Boolean).join("");
+    const newText = [proposal.dimension.figure, proposal.dimension.unit].filter(Boolean).join("");
+    return sameValue(heldText, newText)
+      ? { kind: "repeats", label: `Repeats ${slot}`, was: null, notable: false }
+      : { kind: "changes", label: `Changes ${slot}`, was: heldText, notable: true };
+  }
+
+  if (proposal.finish) {
+    const what = proposal.finish.specFieldName ?? "finish";
+    if (!proposal.recordId) return { kind: "unplaced", label: "Item not found", was: null, notable: true };
+    const held = proposal.attributeTarget;
+    if (proposal.finish.tbc) {
+      return held
+        ? { kind: "withdraws", label: `${what} back to TBC`, was: held.value, notable: true }
+        : { kind: "provides", label: `Records ${what} as TBC`, was: null, notable: false };
+    }
+    if (!held) return { kind: "provides", label: `Provides ${what}`, was: null, notable: false };
+    return sameValue(held.value, proposal.finish.value)
+      ? { kind: "repeats", label: `Repeats ${what}`, was: null, notable: false }
+      : { kind: "changes", label: `Changes ${what}`, was: held.value, notable: true };
+  }
+
   const target = proposal.target;
   if (!target) {
     // TWO DIFFERENT STATES, and collapsing them was a row that contradicted

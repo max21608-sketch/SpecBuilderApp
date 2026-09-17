@@ -24,6 +24,8 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { applyAnswerFills, applyAnswerRetractions, planAnswerFills } from "@/lib/promote-answers";
+import { loadPromotable } from "@/lib/attribute-retire";
 import {
   hasPendingProposals,
   proposalBlockers,
@@ -265,7 +267,111 @@ export async function confirmSpecDocumentRecord(
 
   const applied = new Map<string, Proposal["applied"]>();
 
+  // ---- dimensions ---------------------------------------------------------
+  //
+  // A DIMENSION writes a `record_attributes` row, not an answer, and the
+  // checklist answer follows from `promote-answers.ts` over every slot the
+  // record holds. That is the drawings path exactly, and it has to be: writing
+  // the answer directly would leave the record holding a Dimensions cell no
+  // attribute backs, and the next drawing confirm recomposes from the
+  // attributes alone and would silently wipe what this email contributed.
+  const attributeWrites = chosen.filter((proposal) => proposal.dimension || proposal.finish);
+  if (attributeWrites.length > 0) {
+    // Newest last, so `sort_order` reads in the order the reviewer saw.
+    let sortOrder = Number(
+      (await txn`select coalesce(max(sort_order), 0) as n from record_attributes where record_id = ${recordId}`)[0]?.n ?? 0,
+    );
+
+    for (const proposal of attributeWrites) {
+      const dimension = proposal.dimension ?? null;
+      const finish = proposal.finish ?? null;
+      sortOrder += 1;
+
+      // RETIRE BEFORE INSERT, and the database decides that order rather than
+      // preference: 0016's partial unique index is `where status = 'active'`,
+      // so insert-then-retire cannot commit. Re-checked against the version
+      // the reviewer saw — an occupant that moved since is refused, because
+      // the value they agreed to drop is not the value that is there.
+      if (proposal.attributeTarget) {
+        const retired = await txn`
+          update record_attributes
+          set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+          where id = ${proposal.attributeTarget.attributeId}
+            and record_id = ${recordId}
+            and version = ${proposal.attributeTarget.attributeVersion}
+            and status = 'active'
+          returning id
+        `;
+        if (!retired[0]) {
+          throw new DomainConflictError(
+            "occupant_changed",
+            `The ${dimension?.slot ?? finish?.specFieldName ?? "spec"} this would replace has changed since you looked at it. Nothing was written — reload and check what is there now.`,
+          );
+        }
+      }
+
+      const fallbackLabel = dimension ? dimension.slot : (finish?.group ?? "spec");
+      const label = (proposal.raw.attributeRaw ?? fallbackLabel).trim() || fallbackLabel;
+      const tbc = dimension ? dimension.tbc : (finish?.tbc ?? false);
+      // 0011's biconditional makes the pairing unrepresentable otherwise: a
+      // dimension with no slot and a note carrying one are both refused at
+      // insert. Only a dimension carries a slot; only a finish carries a field.
+      const inserted = await txn`
+        insert into record_attributes
+          (record_id, attr_group, dimension_slot, spec_field_id, material_code, label, value, unit, state,
+           source_run_id, sort_order, created_by, updated_by)
+        values
+          (${recordId}, ${dimension ? "dimension" : (finish?.group ?? "other")},
+           ${dimension ? dimension.slot : null},
+           ${dimension ? null : (finish?.specFieldId ?? null)},
+           ${dimension ? null : (finish?.codeRaw ?? null)},
+           ${label},
+           ${dimension ? (dimension.tbc ? (proposal.raw.valueRaw ?? "TBC") : dimension.figure) : (finish?.value ?? null)},
+           ${dimension ? dimension.unit : null},
+           ${tbc ? "tbc" : "confirmed"},
+           ${run.runId}, ${sortOrder}, ${actor}, ${actor})
+        returning id
+      `;
+      const attributeId = String(inserted[0]?.id ?? "");
+      if (!attributeId) throw new Error(`dimension ${proposal.id} was not inserted`);
+
+      // The wording the figure was read from. "445mm (measured to top of
+      // cushion, compressed)" — the figure is the derived reading and this is
+      // what it actually measures, which is specification content and must not
+      // be dropped. Kept as a NOTE, per CLAUDE.md's rule that everything a
+      // document measures which is not one of the five slots stays a note.
+      if (dimension?.qualifier) {
+        sortOrder += 1;
+        await txn`
+          insert into record_attributes
+            (record_id, attr_group, label, value, state, source_run_id, sort_order, created_by, updated_by)
+          values
+            (${recordId}, 'note', ${label}, ${proposal.raw.valueRaw ?? dimension.qualifier},
+             'confirmed', ${run.runId}, ${sortOrder}, ${actor}, ${actor})
+        `;
+      }
+
+      applied.set(proposal.id, {
+        answerId: null,
+        answerVersion: null,
+        attributeId,
+        value: dimension ? dimension.figure : (finish?.value ?? null),
+        state: tbc ? "tbc" : "confirmed",
+      });
+    }
+
+    // Recompose the WHOLE record, not just the slots this document supplied:
+    // a message giving only the seat height still has to recompose the cell
+    // over the width and depth an earlier drawing confirmed, or the answer
+    // says SH445mm and the record says W660 x D685 x H680 x SH445mm.
+    const promotable = await loadPromotable(txn, recordId);
+    const fills = planAnswerFills(promotable);
+    await applyAnswerFills(txn, recordId, run.runId, actor, fills);
+    await applyAnswerRetractions(txn, recordId, actor, fills);
+  }
+
   for (const proposal of chosen) {
+    if (proposal.dimension || proposal.finish) continue;
     const target = proposal.target;
     if (!target) throw new DomainConflictError("blocked", "That row has no target.");
 

@@ -32,6 +32,8 @@ export type SpecRowRun = {
   /** The record this member writes to, once it has one. */
   recordId: string | null;
   recordLabel: string | null;
+  /** The slot, when this member is a dimension. */
+  dimension: { slot: string; figure: string | null; unit: string | null } | null;
   change: ChangeDescription;
   blockers: Blocker[];
 };
@@ -45,7 +47,18 @@ export type SpecRow = {
   note: string | null;
   /** The configuration the wording names, if any. A reading, never a target. */
   configurationLabel: string | null;
+  /** One entry per MEMBER — a dimension has one per (run × slot). */
   runs: SpecRowRun[];
+  /**
+   * The distinct runs this row writes to.
+   *
+   * NOT `runs.length`: an "Overall" line is three slots on each of three runs,
+   * which is nine members and three runs. Counting members would have told a
+   * reviewer the email applied to nine runs of a project that has three.
+   */
+  distinctRuns: { runId: string | null; runName: string | null }[];
+  /** The dimension slots this row writes, in stated order. Empty if none. */
+  slots: string[];
   /** The verb the row leads with: the most consequential of its members'. */
   summary: ChangeDescription;
   /**
@@ -101,13 +114,29 @@ export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[]): SpecR
       runId: member.runId ?? null,
       runName: member.runName ?? null,
       recordId: member.recordId,
-      recordLabel: member.target?.recordLabel ?? null,
+      recordLabel: member.target?.recordLabel ?? member.recordLabel ?? null,
+      dimension: member.dimension
+        ? { slot: member.dimension.slot, figure: member.dimension.figure, unit: member.dimension.unit }
+        : null,
       change: describeChange(member),
       blockers: proposalBlockers(member, all),
     }));
     // Run name, so the column reads in the same order on every row. A member
     // with no run sorts last: it is the one still asking a question.
     runs.sort((a, b) => (a.runName ?? "￿").localeCompare(b.runName ?? "￿"));
+
+    const seenRuns = new Map<string, { runId: string | null; runName: string | null }>();
+    for (const member of members) {
+      const key = member.runId ?? "__none";
+      if (!seenRuns.has(key)) seenRuns.set(key, { runId: member.runId ?? null, runName: member.runName ?? null });
+    }
+    // The BWS destinations this row writes: dimension slots, or the field a
+    // finish takes. Both say the same useful thing — where the value lands.
+    const slots: string[] = [];
+    for (const member of members) {
+      const label = member.dimension?.slot ?? member.finish?.specFieldName ?? null;
+      if (label && !slots.includes(label)) slots.push(label);
+    }
 
     const kinds = new Set(runs.map((run) => run.change.kind));
     const summary =
@@ -123,10 +152,17 @@ export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[]): SpecR
       note: first.raw.note,
       configurationLabel: first.configurationLabel ?? null,
       runs,
+      distinctRuns: [...seenRuns.values()],
+      slots,
       summary,
       varies: kinds.size > 1,
-      placedCount: runs.filter((run) => run.recordId).length,
-      unplacedCount: runs.filter((run) => !run.recordId).length,
+      // Counted over distinct RUNS, for the reason above.
+      placedCount: [...seenRuns.values()].filter((run) =>
+        members.some((member) => (member.runId ?? null) === run.runId && member.recordId),
+      ).length,
+      unplacedCount: [...seenRuns.values()].filter((run) =>
+        members.some((member) => (member.runId ?? null) === run.runId && !member.recordId),
+      ).length,
       blockers: runs.flatMap((run) => run.blockers),
     });
   }
@@ -147,15 +183,14 @@ export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[]): SpecR
 export function commitGroups(proposals: Proposal[]): { recordId: string; recordLabel: string; proposals: Proposal[] }[] {
   const groups = new Map<string, { recordId: string; recordLabel: string; proposals: Proposal[] }>();
   for (const proposal of proposals) {
-    if (proposal.reviewStatus !== "pending" || !proposal.recordId || !proposal.target) continue;
+    if (proposal.reviewStatus !== "pending" || !proposal.recordId) continue;
+    // A dimension proposal carries no target — it writes an attribute, not an
+    // answer — so its label comes off the proposal itself.
+    const label = proposal.target?.recordLabel ?? proposal.recordLabel ?? null;
+    if (!label) continue;
     const existing = groups.get(proposal.recordId);
     if (existing) existing.proposals.push(proposal);
-    else
-      groups.set(proposal.recordId, {
-        recordId: proposal.recordId,
-        recordLabel: proposal.target.recordLabel,
-        proposals: [proposal],
-      });
+    else groups.set(proposal.recordId, { recordId: proposal.recordId, recordLabel: label, proposals: [proposal] });
   }
   return [...groups.values()].sort((a, b) => a.recordLabel.localeCompare(b.recordLabel));
 }

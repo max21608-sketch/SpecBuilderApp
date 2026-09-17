@@ -9,8 +9,16 @@
 // mid-run, and the register could change underneath the resolution — half the
 // proposals matched against one set of records and half against another.
 import { sql } from "@/lib/db";
-import type { AnswerState } from "@/lib/spec-vocab";
-import type { AnswerEntry, RecordEntry, Registers, RequirementEntry } from "@/lib/spec-document";
+import {
+  isDimensionSlot,
+  normaliseUnit,
+  type AnswerState,
+  type AttributeGroup,
+  type AttributeState,
+  type DimensionSlot,
+} from "@/lib/spec-vocab";
+import type { SpecFieldEntry } from "@/lib/drawing-document";
+import type { AnswerEntry, AttributeEntry, RecordEntry, Registers, RequirementEntry } from "@/lib/spec-document";
 // The same label the chase emails use. Two spellings of one record number would
 // make a proposal and a chase about the same item look like different items.
 import { recordLabel } from "@/lib/chase-drafts";
@@ -116,5 +124,40 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
     value: row.value === null || row.value === undefined ? null : String(row.value),
   }));
 
-  return { records, requirements, answers };
+  // The ACTIVE dimension attributes, so a dimension proposal can see the slot
+  // it would replace. Active only: 0016's partial unique index is
+  // `where status = 'active'`, so a retired row is not in the way and offering
+  // it as something to replace would be offering to retire it twice.
+  const attributeRows = records.length
+    ? await sql`
+        select a.id, a.record_id, a.attr_group, a.dimension_slot, a.spec_field_id,
+               a.label, a.value, a.unit, a.state, a.version
+        from record_attributes a
+        join spec_records r on r.id = a.record_id
+        where r.project_id = ${projectId} and a.status = 'active'
+      `
+    : [];
+
+  const attributes: AttributeEntry[] = attributeRows.map((row) => ({
+      id: String(row.id),
+      recordId: String(row.record_id),
+      attrGroup: String(row.attr_group) as AttributeGroup,
+      slot: isDimensionSlot(row.dimension_slot) ? (String(row.dimension_slot) as DimensionSlot) : null,
+      specFieldId: row.spec_field_id ? String(row.spec_field_id) : null,
+      label: String(row.label),
+      value: row.value === null || row.value === undefined ? null : String(row.value),
+      unit: normaliseUnit(row.unit),
+      state: String(row.state) as AttributeState,
+      version: Number(row.version),
+  }));
+
+  // The BWS register, for placing a finish in the first free slot of its kind.
+  const fieldRows = await sql`select id, json_id, name from spec_fields order by json_id`;
+  const specFields: SpecFieldEntry[] = fieldRows.map((row) => ({
+    id: String(row.id),
+    jsonId: Number(row.json_id),
+    name: String(row.name),
+  }));
+
+  return { records, requirements, answers, attributes, specFields };
 }

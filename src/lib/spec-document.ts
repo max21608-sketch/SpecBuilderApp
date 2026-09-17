@@ -29,42 +29,34 @@
 //    and the screen would disagree about whether a card can commit.
 // ============================================================================
 import { matchName, normaliseName, type MatchCandidate } from "@/lib/matching";
-import type { AnswerState } from "@/lib/spec-vocab";
+import {
+  containsPhrase,
+  deferredToSomebody,
+  TBC_TOKENS,
+  type AnswerState,
+  type AttributeGroup,
+  type AttributeState,
+  type AttributeUnit,
+  type DimensionSlot,
+} from "@/lib/spec-vocab";
+// Re-exported so every existing caller (drawing-document, the tests) is
+// untouched by the move that broke the spec-dimensions import cycle.
+export { TBC_TOKENS, containsPhrase };
 import type { RawProposal } from "@/lib/extraction-schema";
+import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
+// Re-exported so every existing caller is untouched by the move that broke the
+// drawing-document import cycle.
+export { findRecordsByRef, normaliseRef };
+export { deferredToSomebody };
+export type { RecordEntry };
+import { readDimension, type DimensionReading } from "@/lib/spec-dimensions";
+import { readFinish, type FinishReading } from "@/lib/spec-finishes";
+import { suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
 
 export const PROPOSAL_SCHEMA_VERSION = 1;
 
 // ---- the registers ---------------------------------------------------------
 
-export type RecordEntry = {
-  id: string;
-  recordNo: number;
-  label: string; // 'P17231-014'
-  itemDescription: string;
-  categoryId: string | null;
-  categoryName: string | null;
-  refs: string[];
-  /**
-   * The `boq_code` refs alone. A drawing's item code is a BOQ code, and
-   * matching it against every ref system would let a COS code or a job number
-   * that happens to read the same claim the drawing.
-   */
-  boqCodes: string[];
-  /** Which run (BOQ tab) this record belongs to. Drawings fan out across runs. */
-  runId: string;
-  runName: string;
-  /**
-   * The bill line a CONFIGURATION hangs off, and its letter (0024).
-   *
-   * Both null on an ordinary record. A configuration carries no client ref of
-   * its own, so `findRecordsByRef` never returns one — it is only ever reached
-   * through its parent, which is why the resolver has to look for it by
-   * `parentId` rather than by matching.
-   */
-  parentId: string | null;
-  variantLabel: string | null;
-  version: number;
-};
 
 export type RequirementEntry = {
   id: string;
@@ -85,10 +77,37 @@ export type AnswerEntry = {
   value: string | null;
 };
 
+/**
+ * An ACTIVE dimension attribute already on a record.
+ *
+ * Loaded so a dimension proposal can see what it would replace. 0016's partial
+ * unique index is `where status = 'active'`, so an insert over an occupied slot
+ * cannot commit until the old row is retired — and retiring something a
+ * document said is a decision, never an automatic consequence.
+ */
+export type AttributeEntry = {
+  id: string;
+  recordId: string;
+  attrGroup: AttributeGroup;
+  /** Dimensions only. */
+  slot: DimensionSlot | null;
+  /** Non-dimensions only: which BWS field this row already occupies. */
+  specFieldId: string | null;
+  label: string;
+  value: string | null;
+  unit: AttributeUnit | null;
+  state: AttributeState;
+  version: number;
+};
+
 export type Registers = {
   records: RecordEntry[];
   requirements: RequirementEntry[];
   answers: AnswerEntry[];
+  /** Optional: only the attribute path reads it, and older callers pass none. */
+  attributes?: AttributeEntry[];
+  /** The 56 BWS spec fields, for placing a finish. Optional for the same reason. */
+  specFields?: SpecFieldEntry[];
 };
 
 // ---- the staged shape ------------------------------------------------------
@@ -145,6 +164,63 @@ export type Proposal = {
    * names no configuration, which is almost every observation.
    */
   configurationLabel?: string | null;
+  /**
+   * The dimension this proposal writes, when the observation states one.
+   *
+   * A dimension does NOT reach its field through a requirement: it carries a
+   * SLOT, and all five slots compose into BWS field 3 by `composeDimensionCell`.
+   * So a dimension proposal has `requirementId: null` and `target: null` by
+   * construction, and the confirm writes a `record_attributes` row and lets
+   * `promote-answers.ts` fill the checklist — the same path a drawing takes.
+   *
+   * ONE PART PER PROPOSAL. "Overall — W660 x D685 x H680mm" is three slots and
+   * therefore three proposals, sharing a `sourceOrdinal` so the screen still
+   * shows one row. Two slots in one proposal would mean two writes behind one
+   * version and one acknowledgement.
+   */
+  dimension?: {
+    slot: DimensionSlot;
+    figure: string | null;
+    unit: AttributeUnit | null;
+    unitSource: "stated" | "reviewer" | null;
+    slotSuggested: boolean;
+    qualifier: string | null;
+    tbc: boolean;
+  } | null;
+  /**
+   * What an email says a FINISH is — a fabric, timber, metal or hardware.
+   *
+   * Like a dimension, it writes an ATTRIBUTE rather than an answer: a finish
+   * carries a BWS FIELD (COM 1, Main timber finish), and which slot it takes
+   * depends on what the record already holds — so it cannot be reached by
+   * matching a question, and an alias naming one slot up front would be a
+   * mapping nobody has agreed. `readFinish` only fires on the document's own
+   * code, so prose cannot land a build instruction in COM 1.
+   */
+  finish?: {
+    group: AttributeGroup;
+    specFieldId: string | null;
+    specFieldName: string | null;
+    codeRaw: string | null;
+    value: string | null;
+    tbc: boolean;
+    reason: string | null;
+  } | null;
+  /**
+   * The ACTIVE attribute a dimension or finish would replace, as it was when
+   * resolved.
+   * Null where the slot is free. Its version is re-checked at confirm, so a
+   * value that moved since is refused rather than quietly retired.
+   */
+  /** The record's label, for a dimension proposal, which carries no target. */
+  recordLabel?: string | null;
+  attributeTarget?: {
+    attributeId: string;
+    attributeVersion: number;
+    label: string;
+    value: string | null;
+    unit: AttributeUnit | null;
+  } | null;
   version: number;
   raw: RawProposal;
   recordCandidates: Candidate[];
@@ -160,7 +236,21 @@ export type Proposal = {
   reviewStatus: "pending" | "ignored" | "applied";
   reviewedAt: string | null;
   reviewedBy: string | null;
-  applied: { answerId: string; answerVersion: number; value: string | null; state: AnswerState } | null;
+  /**
+   * What the confirm actually wrote. A dimension writes an ATTRIBUTE, not an
+   * answer — the checklist answer it contributes to is composed from every
+   * slot the record holds and belongs to no single proposal — so the answer
+   * fields are null on one and `attributeId` carries the row instead.
+   */
+  applied:
+    | {
+        answerId: string | null;
+        answerVersion: number | null;
+        attributeId?: string | null;
+        value: string | null;
+        state: AnswerState;
+      }
+    | null;
 };
 
 export type StagedSpecDocument = {
@@ -170,92 +260,11 @@ export type StagedSpecDocument = {
   filename: string | null;
 };
 
-// ---- refs ------------------------------------------------------------------
-
-/**
- * The fallback pass for a ref the document writes differently: `FU-209-15` vs
- * `FU 209 15`. Aggressive on purpose — a collision it creates produces AMBIGUITY
- * (two candidates, no choice made), never a wrong pick, so the cost of being
- * too loose here is a question, and the cost of being too strict is a miss.
- */
-export function normaliseRef(raw: string): string {
-  return raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
-/**
- * Records whose refs match. Exact first, then normalised, and ALWAYS a list.
- * Two records legitimately carry the same ref; returning both is the point.
- */
-export function findRecordsByRef(refRaw: string | null, records: RecordEntry[]): RecordEntry[] {
-  if (!refRaw || !refRaw.trim()) return [];
-  const wanted = refRaw.trim();
-  const exact = records.filter((record) => record.refs.some((ref) => ref.trim() === wanted));
-  if (exact.length > 0) return exact;
-
-  const normalised = normaliseRef(wanted);
-  if (!normalised) return [];
-  const byRef = records.filter((record) => record.refs.some((ref) => normaliseRef(ref) === normalised));
-  if (byRef.length > 0) return byRef;
-
-  // The app's OWN identifier, `P17726-014`. A client document never uses it,
-  // but an email does: it is what our chase tables print, so a reply quoting
-  // the question quotes the label back. Checked last, because a client ref is
-  // always the better answer where there is one.
-  return records.filter((record) => normaliseRef(record.label) === normalised);
-}
 
 // ---- state suggestion ------------------------------------------------------
 
-// Wording that means "not decided yet". Deliberately tight: each of these is a
-// phrase that carries no specification content at all.
-//
-// `pending` and `to bid` were added from the Panther specification sheets,
-// which write "TIMBER  PENDING" and "SUPPLIER  TO BID" where the AP364 drawings
-// write "TBC". Same meaning, and the export must carry all three through as TBC
-// rather than as a stated value — a blank supplier reads as "no supplier", and
-// a supplier of "TO BID" reads as a company.
-export const TBC_TOKENS = [
-  "tbc",
-  "t b c",
-  "to be confirmed",
-  "to be advised",
-  "tba",
-  "to follow",
-  "to be issued",
-  "pending",
-  "to bid",
-];
 
-/**
- * "Argenta to confirm", "designer to confirm" — somebody else will decide.
- *
- * NOT added to TBC_TOKENS, because the phrase names WHO, and that is content
- * worth keeping rather than collapsing to "TBC". It is also not a settled
- * value. So it takes the third outcome this module already has: no state, the
- * wording preserved, and a reviewer told what they are being asked. A rule that
- * guessed either way would be wrong on one of the two readings every time.
- *
- * Anchored at the end so "confirmed by the client on 4 June" — a settled fact
- * written in the past tense — does not match.
- */
-const DEFERRED_TO_SOMEBODY = /\bto confirm$/;
 
-/** Shared with `suggestAttributeState`, so the two pipelines read it alike. */
-export function deferredToSomebody(normalised: string): boolean {
-  return DEFERRED_TO_SOMEBODY.test(normalised);
-}
-
-/**
- * Whether a normalised string contains a token as whole words.
- *
- * `normaliseName` has already lowercased, turned punctuation into spaces and
- * collapsed runs of whitespace, so padding both sides and testing for the
- * padded token is enough — and it works for the multi-word tokens ("to be
- * confirmed") that a word-set intersection would not.
- */
-export function containsPhrase(normalised: string, token: string): boolean {
-  return ` ${normalised} `.includes(` ${token} `);
-}
 
 // Wording that means "this question does not apply". Tighter still. "None" is
 // NOT here: "None" for a piping fabric is a real answer, and reading it as
@@ -428,10 +437,32 @@ function groupRecordsByRun(matched: RecordEntry[]): { runId: string; runName: st
   return [...byRun.values()].sort((a, b) => a.runName.localeCompare(b.runName));
 }
 
+/**
+ * Which BWS field slots are spoken for on each record — the ones it already
+ * holds, plus the ones earlier observations in this same document claimed.
+ *
+ * SHARED ACROSS A WHOLE DOCUMENT, which is why it is a parameter rather than a
+ * local. `rematchProposals` re-resolves one observation at a time, so a fresh
+ * map per call gave every fabric COM 1: the real pilot email states three and
+ * all three claimed the same slot, which the confirm would then have refused on
+ * 0007's unique index. Seeded once by the caller, passed in, mutated in order.
+ */
+export function seedTakenFields(registers: Registers): Map<string, Set<string>> {
+  const taken = new Map<string, Set<string>>();
+  for (const attribute of registers.attributes ?? []) {
+    if (!attribute.specFieldId) continue;
+    const set = taken.get(attribute.recordId) ?? new Set<string>();
+    set.add(attribute.specFieldId);
+    taken.set(attribute.recordId, set);
+  }
+  return taken;
+}
+
 export function resolveProposals(
   raw: RawProposal[],
   registers: Registers,
   newId: () => string,
+  taken: Map<string, Set<string>> = seedTakenFields(registers),
 ): Proposal[] {
   return raw.flatMap((observation, index) => {
     const matchedRecords = findRecordsByRef(observation.refRaw, registers.records);
@@ -458,7 +489,7 @@ export function resolveProposals(
       return [buildProposal(observation, index, null, [], registers, newId, null)];
     }
 
-    return runs.map((run) => {
+    return runs.flatMap((run) => {
       const candidates: Candidate[] = run.records.map((record) => ({
         id: record.id,
         label: `${record.label} · ${record.refs.join(", ")} · ${record.itemDescription}`,
@@ -468,9 +499,182 @@ export function resolveProposals(
       // attribute against, so picking it would only produce a second
       // unanswerable question.
       const record = run.records.length === 1 ? run.records[0] ?? null : null;
-      return buildProposal(observation, index, record, candidates, registers, newId, run);
+
+      // A DIMENSION does not go through requirement matching at all. It
+      // carries a slot, and one observation can state three of them.
+      const reading = readDimension(observation.attributeRaw, observation.valueRaw);
+      if (reading && record) {
+        return reading.parts.map((part) =>
+          buildDimensionProposal(observation, index, record, candidates, newId, run, reading, part, registers),
+        );
+      }
+
+      // A FINISH does not either. It carries a BWS field, and which slot it
+      // takes depends on what the record already holds.
+      const finish = record ? readFinish(observation.attributeRaw, observation.valueRaw) : null;
+      if (finish && record) {
+        return [buildFinishProposal(observation, index, record, candidates, newId, run, finish, registers, taken)];
+      }
+
+      return [buildProposal(observation, index, record, candidates, registers, newId, run)];
     });
   });
+}
+
+/**
+ * One slot of one observation, aimed at one record.
+ *
+ * It carries no requirement and no target by construction: those describe a
+ * checklist answer, and this writes an attribute. The checklist answer follows
+ * at confirm time, composed from every slot the record holds.
+ */
+function buildDimensionProposal(
+  observation: RawProposal,
+  index: number,
+  record: RecordEntry,
+  recordCandidates: Candidate[],
+  newId: () => string,
+  run: { runId: string; runName: string } | null,
+  reading: DimensionReading,
+  part: DimensionReading["parts"][number],
+  registers: Registers,
+): Proposal {
+  const occupied =
+    (registers.attributes ?? []).find(
+      (attribute) => attribute.recordId === record.id && attribute.slot === part.slot,
+    ) ?? null;
+
+  return {
+    id: newId(),
+    sourceOrdinal: index,
+    runId: run ? run.runId : null,
+    runName: run ? run.runName : null,
+    configurationLabel: detectConfiguration(observation.attributeRaw),
+    dimension: {
+      slot: part.slot,
+      figure: part.figure,
+      unit: reading.unit,
+      unitSource: reading.unitSource,
+      slotSuggested: part.slotSuggested,
+      qualifier: reading.qualifier,
+      tbc: reading.tbc,
+    },
+    attributeTarget: occupied
+      ? {
+          attributeId: occupied.id,
+          attributeVersion: occupied.version,
+          label: occupied.label,
+          value: occupied.value,
+          unit: occupied.unit,
+        }
+      : null,
+    recordLabel: record.label,
+    version: 1,
+    raw: observation,
+    recordCandidates,
+    requirementCandidates: [],
+    recordId: record.id,
+    requirementId: null,
+    target: null,
+    // The figure is what gets written; the wording it came from stays on the
+    // proposal so the reviewer reads what "445" actually measures.
+    proposedValue: part.figure,
+    proposedState: reading.tbc ? "tbc" : "confirmed",
+    stateReason: null,
+    overwriteAcknowledged: false,
+    reviewStatus: "pending" as const,
+    reviewedAt: null,
+    reviewedBy: null,
+    applied: null,
+  };
+}
+
+/**
+ * One finish, aimed at one record, carrying the BWS field it will occupy.
+ *
+ * The field is claimed here and recorded in `taken`, so the next fabric in the
+ * same email gets COM 2 rather than colliding on COM 1 at confirm time. Where
+ * every slot of its kind is full `suggestSpecField` returns null, and the row
+ * is still recorded — an observation with no BWS home is worth keeping against
+ * the item, which is what 0007 says the column is nullable for.
+ */
+function buildFinishProposal(
+  observation: RawProposal,
+  index: number,
+  record: RecordEntry,
+  recordCandidates: Candidate[],
+  newId: () => string,
+  run: { runId: string; runName: string } | null,
+  finish: FinishReading,
+  registers: Registers,
+  taken: Map<string, Set<string>>,
+): Proposal {
+  const claimed = taken.get(record.id) ?? new Set<string>();
+  const specFieldId = suggestSpecField(
+    {
+      attrGroup: finish.group,
+      labelRaw: observation.attributeRaw,
+      valueRaw: observation.valueRaw,
+      materialCodeRaw: finish.codeRaw,
+    },
+    registers.specFields ?? [],
+    claimed,
+  );
+  if (specFieldId) {
+    claimed.add(specFieldId);
+    taken.set(record.id, claimed);
+  }
+
+  const occupied =
+    specFieldId
+      ? (registers.attributes ?? []).find(
+          (attribute) => attribute.recordId === record.id && attribute.specFieldId === specFieldId,
+        ) ?? null
+      : null;
+
+  const specFieldName = (registers.specFields ?? []).find((field) => field.id === specFieldId)?.name ?? null;
+
+  return {
+    id: newId(),
+    sourceOrdinal: index,
+    runId: run ? run.runId : null,
+    runName: run ? run.runName : null,
+    configurationLabel: detectConfiguration(observation.attributeRaw),
+    finish: {
+      group: finish.group,
+      specFieldId,
+      specFieldName,
+      codeRaw: finish.codeRaw,
+      value: observation.valueRaw,
+      tbc: finish.tbc,
+      reason: finish.reason,
+    },
+    attributeTarget: occupied
+      ? {
+          attributeId: occupied.id,
+          attributeVersion: occupied.version,
+          label: occupied.label,
+          value: occupied.value,
+          unit: occupied.unit,
+        }
+      : null,
+    recordLabel: record.label,
+    version: 1,
+    raw: observation,
+    recordCandidates,
+    requirementCandidates: [],
+    recordId: record.id,
+    requirementId: null,
+    target: null,
+    proposedValue: observation.valueRaw,
+    proposedState: finish.tbc ? "tbc" : "confirmed",
+    stateReason: null,
+    overwriteAcknowledged: false,
+    reviewStatus: "pending" as const,
+    reviewedAt: null,
+    reviewedBy: null,
+    applied: null,
+  };
 }
 
 function buildProposal(
@@ -575,29 +779,100 @@ export function rematchProposals(
   registers: Registers,
   newId: () => string,
 ): { lines: Proposal[]; rematched: number; added: number } {
+  // PER OBSERVATION, never per proposal. One observation is already several
+  // proposals once it has fanned out across runs, and re-resolving each of
+  // those would fan each one out again — three runs becoming nine, then
+  // twenty-seven. `sourceOrdinal` is what a fan-out shares, so it is the unit
+  // that can be re-resolved without multiplying.
+  const groups = new Map<number, Proposal[]>();
+  const order: number[] = [];
+  for (const line of staged.lines) {
+    const existing = groups.get(line.sourceOrdinal);
+    if (existing) existing.push(line);
+    else {
+      groups.set(line.sourceOrdinal, [line]);
+      order.push(line.sourceOrdinal);
+    }
+  }
+
+  // One accumulator for the whole document. Seeded from the record's existing
+  // attributes AND from every proposal this pass will NOT re-resolve, so a
+  // frozen row's COM 1 is not handed out again to a row that is re-resolving.
+  const taken = seedTakenFields(registers);
+  for (const line of staged.lines) {
+    const frozen = line.reviewStatus !== "pending" || line.version !== 1;
+    if (!frozen || !line.recordId || !line.finish?.specFieldId) continue;
+    const set = taken.get(line.recordId) ?? new Set<string>();
+    set.add(line.finish.specFieldId);
+    taken.set(line.recordId, set);
+  }
+
   let rematched = 0;
   let added = 0;
+  const lines: Proposal[] = [];
 
-  const lines = staged.lines.flatMap((proposal): Proposal[] => {
-    const untouched = proposal.reviewStatus === "pending" && proposal.version === 1 && !proposal.recordId;
-    if (!untouched) return [proposal];
+  for (const ordinal of order) {
+    const group = groups.get(ordinal) ?? [];
+    const first = group[0];
+    if (!first) continue;
 
-    const resolved = resolveProposals([proposal.raw], registers, newId);
-    // Still nothing to say. Hand back the ORIGINAL, so ids and versions hold.
-    if (resolved.length === 1 && !resolved[0]?.recordId) return [proposal];
+    // A DECISION is never second-guessed. One reviewed, edited, ignored or
+    // applied member freezes the whole observation: re-resolving the rest
+    // would leave a row half decided by a person and half by a rule.
+    const untouched = group.every((line) => line.reviewStatus === "pending" && line.version === 1);
+    if (!untouched) {
+      lines.push(...group);
+      continue;
+    }
+
+    const resolved = resolveProposals([first.raw], registers, newId, taken).map((next) => ({
+      ...next,
+      sourceOrdinal: ordinal,
+    }));
+
+    // Nothing moved: hand back the ORIGINALS, so ids and versions hold and
+    // running this twice is a genuine no-op.
+    if (signature(resolved) === signature(group)) {
+      lines.push(...group);
+      continue;
+    }
 
     rematched += 1;
-    added += resolved.length - 1;
-    return resolved.map((next, index) => ({
-      ...next,
-      // The first member keeps the original's identity: the row the reviewer
-      // is looking at stays the row they were looking at.
-      id: index === 0 ? proposal.id : next.id,
-      sourceOrdinal: proposal.sourceOrdinal,
-    }));
-  });
+    added += resolved.length - group.length;
+    // Keep an id wherever the same target survives, so a row the reviewer is
+    // looking at stays the row they were looking at.
+    const byTarget = new Map(group.map((line) => [targetKey(line), line.id]));
+    lines.push(
+      ...resolved.map((next, index) => ({
+        ...next,
+        id: byTarget.get(targetKey(next)) ?? (index === 0 && group.length === 1 ? first.id : next.id),
+      })),
+    );
+  }
 
   return { lines, rematched, added };
+}
+
+/**
+ * What a proposal is aimed at: record, question, dimension slot, BWS field.
+ *
+ * ALL FOUR, or a re-match cannot see its own effect. Without the finish field
+ * an observation that used to be a checklist answer and now reads as a fabric
+ * keyed the same both ways — recordId with two nulls — so `rematchProposals`
+ * concluded nothing had moved and handed back the originals. Found against the
+ * real pilot email: four of its five finishes silently refused to re-match.
+ */
+function targetKey(proposal: Proposal): string {
+  return [
+    proposal.recordId ?? "-",
+    proposal.requirementId ?? "-",
+    proposal.dimension?.slot ?? "-",
+    proposal.finish ? (proposal.finish.specFieldId ?? "field?") : "-",
+  ].join("|");
+}
+
+function signature(proposals: Proposal[]): string {
+  return [...proposals.map(targetKey)].sort().join(",");
 }
 
 function promptFor(registers: Registers, requirementId: string): string {
@@ -618,6 +893,90 @@ export type Blocker = { code: string; message: string };
 export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[] {
   const blockers: Blocker[] = [];
   if (proposal.reviewStatus !== "pending") return blockers;
+
+  // A DIMENSION writes an attribute, not an answer, so none of the answer
+  // rules below apply to it: it has no requirement, no target snapshot and no
+  // state to choose. Its own three rules are the slot being free, the slot
+  // being claimed once, and `Dia.` not sitting beside a `W` or `D`.
+  if (proposal.dimension || proposal.finish) {
+    if (!proposal.recordId) {
+      blockers.push({ code: "unassigned", message: "Choose which record this belongs to." });
+      return blockers;
+    }
+
+    // A FINISH claims a BWS field. Two in one document claiming one field is
+    // the same clash a dimension slot has, and the confirm would refuse the
+    // second on 0007's unique index anyway — named here so a reviewer reads it
+    // beside the row rather than as a failure at the end.
+    if (proposal.finish) {
+      const field = proposal.finish.specFieldId;
+      if (field) {
+        const clash = all.some(
+          (other) =>
+            other.id !== proposal.id &&
+            other.reviewStatus === "pending" &&
+            other.recordId === proposal.recordId &&
+            other.finish?.specFieldId === field,
+        );
+        if (clash) {
+          blockers.push({
+            code: "duplicate_target",
+            message: `This document fills ${proposal.finish.specFieldName ?? "the same BWS field"} for this item more than once. Ignore the ones that are wrong.`,
+          });
+        }
+      }
+      if (proposal.attributeTarget && !proposal.overwriteAcknowledged) {
+        blockers.push({
+          code: "replace",
+          message: `This item already records ${proposal.finish.specFieldName ?? "this field"} as “${proposal.attributeTarget.value ?? "—"}”. Confirm you mean to replace it.`,
+        });
+      }
+      return blockers;
+    }
+
+    // Past the finish branch, so this is a dimension.
+    const dimension = proposal.dimension;
+    if (!dimension) return blockers;
+
+    const siblings = all.filter(
+      (other) =>
+        other.id !== proposal.id &&
+        other.reviewStatus === "pending" &&
+        other.recordId === proposal.recordId &&
+        other.dimension,
+    );
+
+    if (siblings.some((other) => other.dimension?.slot === dimension.slot)) {
+      blockers.push({
+        code: "duplicate_target",
+        message: `This document states ${dimension.slot} for this item more than once. Ignore the ones that are wrong.`,
+      });
+    }
+
+    // Cross-row, which is why no check constraint can hold it: a round item is
+    // a diameter OR a width and depth, never both, and a trigger would fire
+    // mid-fan-out naming a row the reviewer never saw.
+    const slots = new Set<string>([dimension.slot, ...siblings.map((other) => other.dimension?.slot ?? "")]);
+    if (slots.has("DIA") && (slots.has("W") || slots.has("D"))) {
+      blockers.push({
+        code: "dia_conflict",
+        message: "This states a diameter as well as a width or depth. A round item has one or the other.",
+      });
+    }
+
+    // Retiring what a document said is a decision. 0016's partial unique index
+    // is `where status = 'active'`, so the insert cannot commit until the old
+    // row is retired — and that must never happen because nobody looked.
+    if (proposal.attributeTarget && !proposal.overwriteAcknowledged) {
+      const held = [proposal.attributeTarget.value, proposal.attributeTarget.unit].filter(Boolean).join("");
+      blockers.push({
+        code: "replace",
+        message: `This item already records ${dimension.slot} as “${held || "—"}”. Confirm you mean to replace it.`,
+      });
+    }
+
+    return blockers;
+  }
 
   if (!proposal.recordId || !proposal.requirementId || !proposal.target) {
     // Name the half that is missing. Once the run fan-out resolves the item,
@@ -690,6 +1049,9 @@ export function classifyProposal(proposal: Proposal): ProposalSection {
   if (proposal.reviewStatus === "applied") return "applied";
   if (proposal.reviewStatus === "ignored") return "ignored";
   if (proposal.reviewStatus === "pending") {
+    // A dimension is committable with a record alone: it has no question to
+    // match, by construction.
+    if (proposal.dimension || proposal.finish) return proposal.recordId ? "pending" : "unassigned";
     if (proposal.recordId && proposal.requirementId) return "pending";
     if (proposal.recordCandidates.length > 1 || proposal.requirementCandidates.length > 1) return "ambiguous";
     return "unassigned";
