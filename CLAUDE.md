@@ -37,6 +37,7 @@ one agent.
 | `npm run qa:levels -- --project=<ref>` | makes up a level for every line item and a designer contact behind them, so the chase screen can be walked before anybody has decided either. Levels go through `setRecordLevel`; the designer code is a plain update, because nothing in the app edits what a BOQ said. Same guards, and `--clear --apply` puts it back |
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
 | `npm run dump:drawings -- --run=<id>` | read only: what a staged drawing run reduces to through the REAL read-time pipeline — measured rows, placed slots, folded rows, unit provenance, the composed BWS cell. Run it before and after a change to that pipeline; the diff is the change |
+| `npm run vocab:gap` | read only: every label the staged documents carry, which route places it (slot / BWS field / question), what is left, and — the point — what a looser rule would have wrongly written instead. Run it before seeding `requirement_aliases`, and read the NEAR MISSES before adding one |
 
 Tests run in FOUR tiers — pure / component / db-gated / route. The database
 tiers skip without `DATABASE_URL`, which is the correct state for pure-library
@@ -2536,10 +2537,21 @@ no-op. **Not accepted by Max.**
   project name, `Client` the client, `Name` the item description, `Item Count`
   the quantity, `Client Code` the BOQ refs. Confirm them against a real BWS
   import before anybody relies on the file.
-- `requirement_aliases` is STILL empty, and is now needed for less: a
-  dimension reaches its field by slot and a finish by its BWS field, so the
-  aliases are only wanted for observations that are neither — the checklist
-  questions proper. Seed it only from verified pilot wording.
+- **`requirement_aliases` is still empty, and MEASURING IT SAYS TO LEAVE IT
+  THAT WAY** (2026-09-17, `npm run vocab:gap`). Across all 19 staged documents
+  — 1,428 observations, 128 distinct labels — 103 labels are unplaced, and
+  every one is a dimension or finish the drawings path already classifies, a
+  document's own metadata (title block, scale, vendor, date) or a supplier
+  quotation's commercial columns. None of them answers a cheat-sheet question.
+  36 have SOME overlap with a question and **not one of the 36 is correct**:
+  `WIDTH SEAT` → "Seat upholstery build", `plan view depth` → "COM Payment
+  Plan", `Delivery cost` → "Delivery direct to the client from PT or BG?". The
+  control settles it — a document using BWS's OWN field name reaches the right
+  question **221/221**. The matcher is not the limit; the pilot documents
+  simply do not answer these questions, because a stitching spec or an
+  interliner is settled by a designer's reply and no reply has been through the
+  app yet. Seed this from a real chase reply, not from the drawings, and run
+  `vocab:gap` first.
 - **The level guess rules are this repo's judgement too**, and for a harder
   reason than the job columns: nothing written down defines simple / complex /
   hero. `src/lib/level-guess.ts` encodes the BWS boilerplate split and Max's

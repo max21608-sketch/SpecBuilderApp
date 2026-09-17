@@ -65,7 +65,11 @@ describeIfDb("an email's dimensions", () => {
 
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90007', '__QA Dimension project', 'qa', 'qa') returning id`,
+       -- NOT P90007: boq-concurrency.test.ts already owns it, and two files
+       -- inserting the same bws_project_number race in a parallel run. The
+       -- loser dies in beforeAll, its afterAll then throws on an empty id, and
+       -- the project it did create is left behind to fail the NEXT run too.
+       values ('__QA P90013', '__QA Dimension project', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 
