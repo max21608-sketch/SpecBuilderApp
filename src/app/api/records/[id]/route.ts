@@ -90,7 +90,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // which is NOT the same as having none outstanding, and the screen says so.
   const answers = await sql`
     select q.id as requirement_id, q.kind, q.prompt, q.help_text, q.section, q.sort_order,
-           q.tgq_levels,
+           q.tgq_levels, q.local_key,
            f.name as field_name, f.json_id, f.field_category,
            a.id as answer_id, a.value, a.qualifier, a.state, a.version, a.confirmed_by, a.confirmed_at
     from requirements q
@@ -109,6 +109,35 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // field nobody can select is a spec value nobody can record.
   const specFields = await sql`
     select id, name, json_id from spec_fields order by sort_order
+  `;
+
+  // ---- the palettes a question may offer ----------------------------------
+  //
+  // The link is the GATE OVERLAY: Matthew's matrix is what says "Stitching
+  // spec is one of these three", so the palette a question offers is looked up
+  // by the BWS field it points at, or by its local key. A palette owned by BWS
+  // comes back with no options, deliberately, and the screen says so in words
+  // rather than showing an empty dropdown.
+  const palettes = await sql`
+    select p.key, p.name, p.owner, p.allows_free_text, p.source_note, p.synced_at,
+           coalesce(
+             (select json_agg(json_build_object(
+                       'value', o.value, 'label', o.label,
+                       'sortOrder', o.sort_order, 'isDefault', o.is_default)
+                      order by o.sort_order)
+                from spec_palette_options o where o.palette_key = p.key and o.active),
+             '[]'::json) as options
+      from spec_palettes p
+     order by p.key
+  `;
+
+  // Which palette each question is answered from, if any. Keyed the two ways a
+  // gate row can be addressed.
+  const paletteByQuestion = await sql`
+    select f.json_id, g.local_key, g.palette_key
+      from spec_field_gates g
+      left join spec_fields f on f.id = g.spec_field_id
+     where g.palette_key is not null
   `;
 
   // ---- the gates -----------------------------------------------------------
@@ -159,6 +188,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     answers,
     categories,
     specFields,
+    palettes,
+    paletteByQuestion,
     family,
     gates,
   });

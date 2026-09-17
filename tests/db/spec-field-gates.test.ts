@@ -119,10 +119,40 @@ describeIfDb("the seeded gate overlay", () => {
       "bws_stud",
       "bws_timber_finish",
     ]);
-    // Nothing in the schema holds their options. When that changes, this test
-    // is the reminder that FMT-GEN-01 was satisfied until then.
+
+    // 0030 gave them a register to live in and they are STILL empty, which is
+    // the whole point: a row with no options and a null `synced_at` says "this
+    // vocabulary exists, BWS owns it, we have never had it" — a question
+    // somebody can answer. Five invented finish lists is the one kind of wrong
+    // answer nothing downstream would question (FMT-GEN-01).
+    const owned = await q(`
+      select p.key, p.synced_at, count(o.id)::int as options
+        from spec_palettes p left join spec_palette_options o on o.palette_key = p.key
+       where p.owner = 'bws' group by p.key, p.synced_at order by p.key`);
+    expect(owned.map((r) => r.key)).toEqual([
+      "bws_back_cushion",
+      "bws_metal_finish",
+      "bws_seat_build",
+      "bws_stud",
+      "bws_timber_finish",
+    ]);
+    for (const row of owned) {
+      expect(row.options).toBe(0);
+      expect(row.synced_at).toBeNull();
+    }
+
+    // Every palette the matrix names has a row, so a gate can never point at a
+    // key nothing holds.
+    const dangling = await q(`
+      select distinct g.palette_key from spec_field_gates g
+       where g.palette_key is not null
+         and not exists (select 1 from spec_palettes p where p.key = g.palette_key)`);
+    expect(dangling).toEqual([]);
+
+    // And still no BW standard finish register: that one is blocked on
+    // Matthew's list and must not be guessed either.
     const tables = await q(
-      "select table_name from information_schema.tables where table_name in ('spec_palettes','bw_standard_finishes')",
+      "select table_name from information_schema.tables where table_name = 'bw_standard_finishes'",
     );
     expect(tables).toEqual([]);
   });
@@ -132,8 +162,12 @@ describeIfDb("the seeded gate overlay", () => {
     // cheat sheets is worded identically. 0007 adds six new questions and
     // reuses two existing ones; a paraphrase would make it 70 and silently
     // break the TGQ interview's hoist.
+    // 62 from the cheat sheets, +6 from db/seed/0007 (BWS fields no sheet
+    // asked for), +6 from db/seed/0009 (Matthew's rows with no BWS field at
+    // all). This number moves only when a seed adds a question, and it should
+    // fail when one is paraphrased instead of reused.
     const [{ n }] = await q("select count(distinct prompt)::int n from requirements");
-    expect(n).toBe(68);
+    expect(n).toBe(74);
     const perField = await q(`
       select f.json_id, count(distinct r.prompt)::int n
         from requirements r join spec_fields f on f.id = r.spec_field_id

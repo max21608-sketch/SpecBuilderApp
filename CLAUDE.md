@@ -624,6 +624,55 @@ neither stores the result. Two consequences worth stating:
   so a record they never saw is distinguishable from one they deliberately
   dropped.
 
+### A palette this app does not hold is a row with no options
+
+`db/migrations/0030_spec_palettes.sql`, `db/seed/0008_spec_palettes.sql`,
+`db/seed/0009_requirements_local_keys.sql`, `src/lib/palettes.ts`,
+`src/components/records/AnswerValue.tsx`
+
+Eleven of Matthew's 35 fields carry a palette, and answering a spec question
+had always been a bare `<input placeholder="Value">` — so "Indoor | Outdoor |
+Humid indoor" was typed eleven ways and nothing could tell `Outdoor` from
+`External`.
+
+- **`pick_lists` stays dead.** It has existed since 0001 with no seed, query or
+  UI, and its shape carries no spec-field link, no free-text flag, no default
+  and no sync provenance. Reviving the wrong shape to save one `create table`
+  is how a schema ends up with two overlapping registers.
+- **Six palettes are ours and FIVE ARE NOT.** Timber finish, metal finish, seat
+  build, back cushion and stud all say "From the BWS … palette" and **this app
+  holds none of them**. They are seeded as rows with **zero options** and a null
+  `synced_at`, the field stays free text, and the screen says so in a sentence.
+  That row is the honest representation — "this vocabulary exists, BWS owns it,
+  we have never had it" is a question somebody can answer, where five invented
+  finish lists is the one kind of wrong answer nothing downstream questions.
+  A db-tier test asserts they are still empty.
+- **`normalisePaletteValue` returns null rather than the nearest option.** The
+  exact step, separate from the fuzzy one (house §6). It folds case,
+  whitespace and the degree sign, and **does not fold a dash into a space** —
+  the `normaliseFinishCode` rule: a normaliser clever enough to merge two
+  spellings is clever enough to merge two things somebody kept apart.
+- **Every offered list carries "Other…"**, even where Matthew's is closed. A
+  list with no way out makes somebody pick the nearest wrong option, which is
+  §5's plausible-looking wrong answer wearing a dropdown. A value already off
+  the palette stays editable as itself and is flagged, never snapped on.
+- **A default preselects a control and writes no answer.** His sheet says
+  Assembly guide is "No (default)"; `missing` means nobody has looked, and a
+  gate passed by a default is a gate passed by nobody. The select does not even
+  show it preselected — a select already reading "No" fires no change event
+  when somebody chooses No, so the one action recording their agreement would
+  do nothing, which is the level picker's trap. It is a hint beside the control.
+- **`requirements.local_key` is where the six id-less questions live.**
+  `kind = 'readiness'` has meant "must be known, BWS has no column" since 0002,
+  so Headboard fitted, Fitted banquette and the four conditionals they reveal
+  are readiness rows tied to their gate row by key. That buys answers, states,
+  versions, change sets and chase coverage for nothing. Before it, a fitted
+  headboard could never satisfy TG0 — there was nowhere to say it was fitted.
+- **The product code carries NO palette key.** His "Palette Options" cell there
+  describes where the value comes from — "derived automatically: if MF1 or MF2
+  is populated" — not a list the app offers. Caught by the assertion that every
+  gate's palette key resolves to a palette.
+
 ### A spec value has a second line, and the file gets one line
 
 `db/migrations/0029_spec_qualifier.sql`, `src/lib/bws-export.ts`

@@ -41,7 +41,14 @@ from (values
   -- ---- TGQ, pre-filled by the document scan ------------------------------
   (1::integer, 'TGQ'::text, 'auto'::text, 'Product code'::text, null::integer, 'product_code'::text, null::text,
    array['S','A','DC','BS','B','D','O','BH','BQ']::text[], 'All categories'::text, 'palette'::text,
-   'boilerplate'::text, $q$Selected from boilerplate list (BW-Sofa,Simple / BW-Sofa,w-Metalwork / etc.)$q$::text,
+   -- NO palette_key. His "Palette Options / Constraints" cell here describes
+   -- where the value COMES FROM, not a list the app offers: his own note says
+   -- "Boilerplate derived automatically: if MF1 or MF2 is populated ->
+   -- with-Metalwork variant". It is derived from the metal finish fields
+   -- against the BWS product-code register, which is a different thing from a
+   -- spec_palettes list and lives in its own table. `palette_raw` keeps his
+   -- wording either way.
+   null::text, $q$Selected from boilerplate list (BW-Sofa,Simple / BW-Sofa,w-Metalwork / etc.)$q$::text,
    null::text, null::text,
    $q$Boilerplate derived automatically: if MF1 or MF2 is populated -> with-Metalwork variant; otherwise Simple$q$::text),
 

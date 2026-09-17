@@ -147,21 +147,48 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
     slotsByRecord.set(key, list);
   }
 
-  // Two of Matthew's ten id-less rows already have a home, and reporting them
-  // unanswerable would be a lie: the item name IS the bill's own words, and
-  // the designer reference IS the `designer` column. The other eight have
-  // nowhere to go yet and say exactly that.
+  // ---- Matthew's ten rows with no BWS field --------------------------------
+  //
+  // Three already have a home on `spec_records` and reporting them
+  // unanswerable would be a lie: the item name IS the bill's own words, the
+  // designer reference IS the `designer` column, and `spec_description` is
+  // 0028's free-text field, which is what his "Spec notes" row describes.
   const localRows = await exec`
-    select id, item_description, designer from spec_records where id = any(${recordIds}::uuid[])
+    select id, item_description, designer, spec_description
+      from spec_records where id = any(${recordIds}::uuid[])
   `;
   const localsByRecord = new Map<string, GateLocalInput>();
+  const stated = (raw: unknown) => {
+    const value = String(raw ?? "").trim();
+    return { state: (value ? "confirmed" : "missing") as AnswerState, value: value || null };
+  };
   for (const row of localRows) {
-    const description = String(row.item_description ?? "").trim();
-    const designer = String(row.designer ?? "").trim();
     localsByRecord.set(String(row.id), {
-      item_name: { state: description ? "confirmed" : "missing", value: description || null },
-      designer_reference: { state: designer ? "confirmed" : "missing", value: designer || null },
+      item_name: stated(row.item_description),
+      designer_reference: stated(row.designer),
+      spec_notes: stated(row.spec_description),
     });
+  }
+
+  // And six are real questions with no BWS column, which 0030's
+  // `requirements.local_key` ties to a readiness requirement — so they carry a
+  // proper answer with a STATE, which is what makes a conditional evaluable at
+  // all. Before this, "Headboard fitted" was unanswerable, so a fitted
+  // headboard could never satisfy TG0: there was nowhere to say it was fitted.
+  const localAnswerRows = await exec`
+    select a.record_id, q.local_key, a.state, a.value
+      from spec_answers a
+      join requirements q on q.id = a.requirement_id
+     where a.record_id = any(${recordIds}::uuid[]) and a.revision_no = 0 and q.local_key is not null
+  `;
+  for (const row of localAnswerRows) {
+    const key = String(row.record_id);
+    const locals = localsByRecord.get(key) ?? {};
+    locals[String(row.local_key)] = {
+      state: String(row.state) as AnswerState,
+      value: (row.value ?? null) as string | null,
+    };
+    localsByRecord.set(key, locals);
   }
 
   return { fieldsByCategory, askedByCategory, answersByRecord, slotsByRecord, localsByRecord };

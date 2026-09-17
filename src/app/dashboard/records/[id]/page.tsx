@@ -41,6 +41,8 @@ import Button from "@/components/ui/Button";
 import GatePanel from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
+import AnswerValue from "@/components/records/AnswerValue";
+import type { Palette } from "@/lib/palettes";
 import type { Gate, GateStatus } from "@/lib/gates";
 
 type Answer = {
@@ -48,6 +50,8 @@ type Answer = {
   tgq_levels: string[] | null;
   field_name: string | null; json_id: number | null; field_category: string | null;
   answer_id: string | null; value: string | null; qualifier: string | null; state: AnswerState; version: number;
+  /** Ties a readiness question to a row of Matthew's matrix that has no BWS field. */
+  local_key: string | null;
   confirmed_by: string | null; confirmed_at: string | null;
 };
 type SpecRecord = {
@@ -101,6 +105,10 @@ type Payload = {
   answers: Answer[];
   categories: Category[];
   specFields: { id: string; name: string; json_id: number }[];
+  /** Every palette, options included. A BWS-owned one arrives with none. */
+  palettes: (Omit<Palette, "options"> & { allows_free_text: boolean; source_note: string | null; synced_at: string | null; options: Palette["options"] })[];
+  /** Which palette a question offers, by BWS field id or by local key. */
+  paletteByQuestion: { json_id: number | null; local_key: string | null; palette_key: string }[];
   family: FamilyMember[];
   /** Null where this record's category is not on Matthew's matrix. */
   gates: Record<Gate, GateStatus> | null;
@@ -341,6 +349,33 @@ export default function RecordPage() {
     map.set(key, [...(map.get(key) ?? []), answer]);
     return map;
   }, new Map());
+
+  // ---- which palette a question offers -------------------------------------
+  //
+  // The link is Matthew's matrix, which is what says "Stitching spec is one of
+  // these three" — so it is looked up by the BWS field the question points at,
+  // or by the local key on the six questions that have no BWS field at all.
+  const palettesByKey = new Map((data.palettes ?? []).map((row) => [row.key, {
+    key: row.key,
+    name: row.name,
+    owner: row.owner,
+    allowsFreeText: Boolean(row.allows_free_text),
+    sourceNote: row.source_note,
+    syncedAt: row.synced_at,
+    options: row.options ?? [],
+  } satisfies Palette]));
+  const paletteKeyByField = new Map<number, string>();
+  const paletteKeyByLocal = new Map<string, string>();
+  for (const row of data.paletteByQuestion ?? []) {
+    if (row.json_id !== null && row.json_id !== undefined) paletteKeyByField.set(Number(row.json_id), row.palette_key);
+    if (row.local_key) paletteKeyByLocal.set(row.local_key, row.palette_key);
+  }
+  const paletteFor = (answer: Answer): Palette | null => {
+    const key =
+      (answer.local_key ? paletteKeyByLocal.get(answer.local_key) : undefined) ??
+      (answer.json_id !== null ? paletteKeyByField.get(answer.json_id) : undefined);
+    return key ? (palettesByKey.get(key) ?? null) : null;
+  };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -782,22 +817,17 @@ export default function RecordPage() {
                   </span>
                 </div>
                 <div className="mt-2 flex items-center gap-2">
-                  <input
-                    /* Re-keyed on every reload, so the box always shows what
-                       the SERVER holds. Uncontrolled inputs keep whatever was
-                       typed across a re-render, so a refused edit used to
-                       leave the rejected text sitting on screen looking
-                       saved — which is the worst of both readings. */
-                    key={`${answer.answer_id}:${answer.version}:${historyKey}`}
-                    defaultValue={answer.value ?? ""}
-                    placeholder="Value"
+                  {/* A DROPDOWN ONLY WHERE THIS APP HOLDS THE LIST. Five of
+                      Matthew's eleven palettes are BWS-owned and we have none
+                      of them; those stay free text and say so, because an
+                      empty select reads as broken. The control is re-keyed on
+                      every reload so it always shows what the SERVER holds. */}
+                  <AnswerValue
+                    palette={paletteFor(answer)}
+                    value={answer.value}
                     disabled={savingId === answer.answer_id}
-                    onBlur={(e) => {
-                      const next = e.target.value.trim();
-                      if (next === (answer.value ?? "")) return;
-                      void save(answer, next, next ? "confirmed" : "missing");
-                    }}
-                    className="flex-1 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
+                    inputKey={`${answer.answer_id}:${answer.version}:${historyKey}`}
+                    onCommit={(next) => void save(answer, next, next ? "confirmed" : "missing")}
                   />
                   <select
                     value={answer.state}
