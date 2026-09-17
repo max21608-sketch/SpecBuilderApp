@@ -39,6 +39,8 @@ import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPro
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
 import Button from "@/components/ui/Button";
 import GatePanel from "@/components/records/GatePanel";
+import RecordDetails from "@/components/records/RecordDetails";
+import AddSpec from "@/components/records/AddSpec";
 import type { Gate, GateStatus } from "@/lib/gates";
 
 type Answer = {
@@ -54,6 +56,9 @@ type SpecRecord = {
   source_line_no: number | null; version: number; category_id: string | null; level: string | null;
   /** A level this app guessed. Advisory until somebody accepts it. */
   level_suggested: string | null; level_suggested_reason: string | null;
+  /** 0028's two free-text columns. `spec_description` is quote-facing;
+   *  `internal_notes` never leaves this app. */
+  spec_description: string | null; internal_notes: string | null;
   bws_project_number: string; project_name: string; project_id: string;
   run_id: string; run_name: string;
   category_name: string | null; category_family: string | null;
@@ -93,6 +98,7 @@ type Payload = {
   retiredAttributes: RetiredAttribute[];
   answers: Answer[];
   categories: Category[];
+  specFields: { id: string; name: string; json_id: number }[];
   family: FamilyMember[];
   /** Null where this record's category is not on Matthew's matrix. */
   gates: Record<Gate, GateStatus> | null;
@@ -459,7 +465,19 @@ export default function RecordPage() {
       )}
 
       {/* What the documents actually said. */}
-      <h2 className="mt-6 text-sm font-semibold text-neutral-500 uppercase tracking-wide">Specs captured</h2>
+      {/* THE BILL'S OWN WORDS, AND THE TWO FREE-TEXT COLUMNS (0028). The
+          description was not editable at all until now, so a typo in a bill
+          line was permanent, and there was nowhere to write down what the
+          structured fields cannot hold — which is what Matthew asked for. */}
+      <RecordDetails recordId={record.id} record={record} onSaved={load} />
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">Specs captured</h2>
+        {/* The counterpart to confirming a drawing card. `record_attributes` is
+            requirement-free on purpose; this is the only way to record a
+            statement no document made. */}
+        <AddSpec recordId={record.id} specFields={data.specFields ?? []} onAdded={load} />
+      </div>
 
       {/* What BWS field 3 will receive, composed by the same function the
           export calls. The rows below keep each figure's ORIGINAL value and

@@ -178,6 +178,7 @@ reasoning.
 | `project_finishes` | The project's finishes library (0018), keyed by the client's own code. Project-scoped: `MOR005` means different things on different projects |
 | `spec_matrix_categories` / `spec_matrix_category_map` | Matthew's nine seating categories (0026) and which of our seventeen cheat sheets each one is. Many-to-many both ways; an unmapped sheet gets no gate view, which is a real answer |
 | `spec_field_gates` | His decision matrix as a seeded overlay (0026): gate, capture, BWS field or `local_key`, `dimension_slot`, `applies_to`, palette, conditional. `matrix_row` is his own `#`, so a re-issued workbook diffs |
+| `spec_records.spec_description` / `.internal_notes` | 0028's two free-text columns. The first is quote-facing prose; the second never leaves this app. Neither reaches the 109-column grid |
 | audit / notes | `audit_log` + `status_history` + append-only notes, from the chassis. `audit_log.change_set_id` (0012) says which change each row belonged to |
 
 **Not built, deliberately.** `bws_job_links` (a job number arrives as a
@@ -622,6 +623,52 @@ neither stores the result. Two consequences worth stating:
   (`targets_changed`). The reviewer's ticked and unticked lists are both stored,
   so a record they never saw is distinguishable from one they deliberately
   dropped.
+
+### A person can add a record, a spec and a note, and none of it has a page
+
+`db/migrations/0028_manual_capture.sql`, `src/lib/manual-capture.ts`,
+`src/app/api/attributes/route.ts`, `src/app/api/projects/[id]/runs/route.ts`
+
+Matthew's workflow of 2026-09-17 — "specs checked and added to manually and
+developed with Q&A with client through your app tools" — needed three verbs the
+app did not have. `find src/app/api -name route.ts` had **no POST** for records,
+runs, attributes or answers: a record could only be created by confirming a
+bill, a spec value only by confirming a document, and a bill line's own words
+could not be corrected at all.
+
+- **A typed value carries NO source run and NO page**, and that is the honest
+  shape rather than a gap: a spec somebody typed IS a spec with no page to turn
+  to. Every screen that prints provenance already handles the blank, and
+  inventing a source would be worse than it.
+- **`applyAnswerFills` had to learn one more predicate.** Its rule is "only an
+  answer still `missing`, or one a SHOP-DRAWINGS run wrote". A hand-typed
+  attribute wrote the answer once and could then never update it — the first
+  typed dimension composed `W1900mm` and the next two could not reach the cell,
+  so the record showed W, D and H while its Dimensions answer said `W1900mm`.
+  `document` with a **null** `source_id` is the discriminator, and a precise
+  one: every document path writes a run id, so nothing else can be there.
+  `manual` and `email` stay out of reach, so a person's own checklist answer is
+  still never overwritten.
+- **Two free-text columns, not one.** `spec_description` is quote-facing and
+  becomes the prose at the top of the quote's Specification block;
+  `internal_notes` never leaves this app except as the quote CSV's own
+  `Internal notes` column. The real quote example carries both, and one of its
+  internal notes is a previous price — exactly what must not reach a client.
+  Neither enters the 109-column grid: his matrix says Spec notes has no BWS
+  mapping. Whether he meant one field or two is Still open.
+- **The details panel saves as ONE act, not on blur.** Found in the browser:
+  typing the quote description, tabbing to Internal notes and typing there LOST
+  the second box, because the first blur saved, the screen reloaded and the
+  reload re-keyed every input to what the server held. It was also four change
+  sets and four versions for one correction. The checklist answers still save
+  on blur and should — each of those is its own decision.
+- **`label` is baseline-only.** 0012: "a baseline is named, and nothing else
+  is". Descriptive text on any other change set goes in `reason`, or the insert
+  is refused by a constraint whose message names nothing useful.
+- **A change set cannot be deleted, only cascaded.** 0014 refuses the direct
+  delete outright, so a test teardown that tries one throws and leaves its
+  fixture behind. Delete the project; the changes go with it. Same for
+  `record_snapshots` and its record.
 
 ### An attribute carries through to the checklist automatically
 

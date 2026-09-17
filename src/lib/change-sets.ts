@@ -59,6 +59,11 @@ export const CHANGE_SET_KINDS = [
   "baseline",
   "history_begins",
   "email_confirm",
+  // 0028: creating something is not an edit of something that existed, and
+  // the history screen has to be able to say "this item was added by hand".
+  "run_create",
+  "record_create",
+  "attribute_create",
 ] as const;
 export type ChangeSetKind = (typeof CHANGE_SET_KINDS)[number];
 
@@ -92,6 +97,9 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   baseline: "Baseline",
   history_begins: "History begins",
   email_confirm: "Email confirmed",
+  run_create: "Run added by hand",
+  record_create: "Item added by hand",
+  attribute_create: "Spec added by hand",
 };
 
 export type OpenChangeSet = {

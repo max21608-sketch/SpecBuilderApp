@@ -29,6 +29,7 @@ import SpecTable from "@/components/records/SpecTable";
 import ProjectHistory from "@/components/history/ProjectHistory";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
 import FinishesLibrary from "@/components/finishes/FinishesLibrary";
+import AddRun from "@/components/projects/AddRun";
 import {
   SPECS_AGREED_LABEL,
   daysUntilSpecsAgreed,
@@ -629,6 +630,16 @@ function ProjectOverview() {
         >
           Finishes
         </button>
+        {/* A RUN WITH NO BILL BEHIND IT (0028). Matthew: "a large number of
+            new projects ... coming into the TG0 stage" — and until now a
+            project could only be started by uploading a BOQ spreadsheet. */}
+        <AddRun
+          projectId={project.id}
+          onAdded={async (runId) => {
+            await load();
+            setTab(runId);
+          }}
+        />
         {/* THERE IS NO HISTORY TAB. Versions, baselines and the change trail
             are on the Overview itself (2026-09-17): a version is the answer to
             "what did this project look like on the 14th", which is a question

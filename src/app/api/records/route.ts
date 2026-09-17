@@ -6,6 +6,11 @@
 // counted separately -- a record whose BWS fields are all confirmed but whose
 // deposit is unresolved is not ready, and one number would hide that.
 import { sql, json } from "@/lib/db";
+import { z } from "zod";
+import { getSessionUser } from "@/lib/session";
+import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
+import { createRecord } from "@/lib/manual-capture";
+import { REF_SYSTEMS } from "@/lib/spec-vocab";
 import { loadOutstanding, loadSentCoverage, questionKey, waitingByQuestion } from "@/lib/chase-drafts";
 import { gateSummary, gatesForRecord, loadGateContext } from "@/lib/gate-load";
 
@@ -177,9 +182,17 @@ export async function GET(request: Request): Promise<Response> {
     perRecord.set(question.recordId, entry);
   }
 
+  // The add-an-item form offers a category, because setting one is what
+  // creates the checklist rows: an item added without one shows no questions,
+  // which reads as an item with nothing outstanding.
+  const categories = await sql`
+    select id, slug, family, name from item_categories order by family, sort_order
+  `;
+
   return json({
     ok: true,
     programme,
+    categories,
     records: rows.map((row) => {
       const counts = perRecord.get(String(row.id));
       return {
@@ -201,4 +214,54 @@ export async function GET(request: Request): Promise<Response> {
     retiredCount: Number(retiredRows[0]?.n ?? 0),
     includeRetired,
   });
+}
+
+/**
+ * One item, typed by a person.
+ *
+ * Until 0028 a record could only exist by confirming a bill of quantities, so
+ * a project whose documents are drawings and emails could not be started at
+ * all. The run is required and must be live: a record on a retired run is out
+ * of export scope the moment it is written, which reads as the save failing.
+ *
+ * A level is GUESSED from the description, by the same function intake uses,
+ * and stored as a suggestion. 0019's rule does not bend for the way the item
+ * arrived: only a person's decision reaches the gate.
+ */
+const NewRecord = z
+  .object({
+    projectId: z.string().uuid(),
+    runId: z.string().uuid(),
+    itemDescription: z.string().min(1).max(2000),
+    clientRef: z.string().max(200).nullable().optional(),
+    refSystem: z.enum(REF_SYSTEMS).optional(),
+    area: z.string().max(300).nullable().optional(),
+    qty: z.number().int().nonnegative().nullable().optional(),
+    designer: z.string().max(200).nullable().optional(),
+    categoryId: z.string().uuid().nullable().optional(),
+  })
+  .strict();
+
+export async function POST(request: Request): Promise<Response> {
+  const user = await getSessionUser();
+  if (!user) return json({ ok: false, error: "auth required" }, 401);
+
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return json({ ok: false, error: "invalid JSON" }, 400);
+  }
+  const parsed = NewRecord.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return json({ ok: false, error: issue?.message ?? "That is not an item.", field: issue?.path.join(".") }, 400);
+  }
+
+  try {
+    const result = await withTransaction((txn) => createRecord(txn, { ...parsed.data, actor: user.email }));
+    return json({ ok: true, ...result }, 201);
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
 }

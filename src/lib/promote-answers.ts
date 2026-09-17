@@ -240,6 +240,23 @@ export async function applyAnswerFills(
                       select 1 from intake_runs ir
                       where ir.id = a.source_id and ir.document_kind = 'shop_drawings'
                     ))
+                -- ---- AND AN ANSWER A HAND-TYPED SPEC COMPOSED (0028) -------
+                --
+                -- document with a NULL source is a precise discriminator and
+                -- not a loose one: every document path writes a run id, so the
+                -- only way to be here is createAttribute, where the attribute
+                -- names no document because a person typed it.
+                --
+                -- Without this clause the FIRST typed dimension wrote W1900mm
+                -- and the next two could never reach the cell -- the record
+                -- showed W, D and H while its Dimensions answer said W1900mm,
+                -- which is the exact disagreement this file exists to prevent,
+                -- arriving from the one direction it did not cover. Caught by
+                -- tests/db/manual-capture.test.ts.
+                --
+                -- manual and email stay out of reach, so a person's own
+                -- checklist answer is still never overwritten by anything.
+                or (a.source_kind = 'document' and a.source_id is null)
               )
               and a.requirement_id in (
                 select q.id from requirements q
@@ -269,6 +286,23 @@ export async function applyAnswerFills(
                       select 1 from intake_runs ir
                       where ir.id = a.source_id and ir.document_kind = 'shop_drawings'
                     ))
+                -- ---- AND AN ANSWER A HAND-TYPED SPEC COMPOSED (0028) -------
+                --
+                -- document with a NULL source is a precise discriminator and
+                -- not a loose one: every document path writes a run id, so the
+                -- only way to be here is createAttribute, where the attribute
+                -- names no document because a person typed it.
+                --
+                -- Without this clause the FIRST typed dimension wrote W1900mm
+                -- and the next two could never reach the cell -- the record
+                -- showed W, D and H while its Dimensions answer said W1900mm,
+                -- which is the exact disagreement this file exists to prevent,
+                -- arriving from the one direction it did not cover. Caught by
+                -- tests/db/manual-capture.test.ts.
+                --
+                -- manual and email stay out of reach, so a person's own
+                -- checklist answer is still never overwritten by anything.
+                or (a.source_kind = 'document' and a.source_id is null)
               )
               and a.requirement_id in (
                 select q.id from requirements q

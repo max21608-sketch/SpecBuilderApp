@@ -16,6 +16,7 @@ import {
   type SetLevelResult,
 } from "@/lib/record-category";
 import { ITEM_LEVELS } from "@/lib/spec-vocab";
+import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
 import { gatesForRecord, loadGateContext } from "@/lib/gate-load";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const rows = await sql`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
+           r.spec_description, r.internal_notes,
            r.boq_category, r.status, r.version, r.source_line_no, r.category_id, r.level,
            r.level_suggested, r.level_suggested_reason,
            r.parent_id, r.variant_label,
@@ -102,6 +104,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     select id, slug, family, name, requirements_authored from item_categories order by family, sort_order
   `;
 
+  // The whole register, for the add-a-spec form. All 56, not the 36 in
+  // Matthew's grid: the grid is a screen layout and never a filter, and a
+  // field nobody can select is a spec value nobody can record.
+  const specFields = await sql`
+    select id, name, json_id from spec_fields order by sort_order
+  `;
+
   // ---- the gates -----------------------------------------------------------
   //
   // Matthew's decision matrix of 2026-09-17, as a seeded overlay (0026). NULL
@@ -149,6 +158,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     retiredAttributes: retired,
     answers,
     categories,
+    specFields,
     family,
     gates,
   });
@@ -167,6 +177,28 @@ const Patch = z.union([
   z
     .object({
       level: z.enum(ITEM_LEVELS).nullable(),
+      version: z.number().int().nonnegative(),
+    })
+    .strict(),
+  // THE THIRD SHAPE, from 0028: the bill's own words, and the two free-text
+  // columns. A typo in an item description used to be permanent, and there was
+  // nowhere at all to write down what the structured fields cannot hold.
+  //
+  // Several fields at once, unlike the two above, because they are one act --
+  // somebody correcting a row -- rather than two decisions. `changed` comes
+  // back so the screen can say what moved, and a no-op records nothing.
+  z
+    .object({
+      details: z
+        .object({
+          itemDescription: z.string().min(1).max(2000).optional(),
+          area: z.string().max(300).nullable().optional(),
+          qty: z.number().int().nonnegative().nullable().optional(),
+          designer: z.string().max(200).nullable().optional(),
+          specDescription: z.string().max(20000).nullable().optional(),
+          internalNotes: z.string().max(20000).nullable().optional(),
+        })
+        .strict(),
       version: z.number().int().nonnegative(),
     })
     .strict(),
@@ -225,8 +257,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   try {
     const body = parsed.data;
-    const result = await withTransaction<SetCategoryResult | SetLevelResult>((txn) =>
-      "categoryId" in body
+    const result = await withTransaction<SetCategoryResult | SetLevelResult | EditRecordDetailsResult>((txn) =>
+      "details" in body
+        ? editRecordDetails(txn, {
+            recordId: id,
+            patch: body.details,
+            expectedVersion: body.version,
+            actor: user.email,
+          })
+        : "categoryId" in body
         ? setRecordCategory(txn, {
             recordId: id,
             categoryId: body.categoryId,

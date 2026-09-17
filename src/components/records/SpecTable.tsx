@@ -23,6 +23,7 @@ import Spinner from "@/components/ui/Spinner";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { unallocatedQty } from "@/lib/record-variants";
 import { NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
+import AddItem from "@/components/records/AddItem";
 import {
   SPECS_AGREED_LABEL,
   URGENCY_LABELS,
@@ -105,13 +106,17 @@ export default function SpecTable({
   // the file.
   const [showRetired, setShowRetired] = useState(false);
   const [acceptingLevels, setAcceptingLevels] = useState(false);
+  const [categories, setCategories] = useState<{ id: string; family: string; name: string }[]>([]);
 
   const load = useCallback(async () => {
     const query = new URLSearchParams({ projectId, runId });
     if (showRetired) query.set("includeRetired", "1");
-    const res = await apiFetch<{ records: SpecRecord[]; programme: ProgrammeDates; retiredCount: number }>(
-      `/api/records?${query.toString()}`,
-    );
+    const res = await apiFetch<{
+      records: SpecRecord[];
+      programme: ProgrammeDates;
+      retiredCount: number;
+      categories: { id: string; family: string; name: string }[];
+    }>(`/api/records?${query.toString()}`);
     if (!res.ok) {
       setError(res.error);
       return;
@@ -120,6 +125,7 @@ export default function SpecTable({
     setRecords(res.data.records);
     setProgramme(res.data.programme);
     setRetiredCount(Number(res.data.retiredCount ?? 0));
+    setCategories(res.data.categories ?? []);
   }, [projectId, runId, showRetired]);
 
   useEffect(() => {
@@ -183,6 +189,13 @@ export default function SpecTable({
             </>
           )}
         </p>
+        <div className="flex items-center gap-2">
+          {/* ADDING AN ITEM BY HAND is offered even on an empty run — that is
+              the case it exists for. Until 0028 a record could only be created
+              by confirming a bill, so a project whose documents are drawings
+              and emails could not be started at all. */}
+          <AddItem projectId={projectId} runId={runId} categories={categories} onAdded={load} />
+        </div>
         {records.length > 0 && (
           <div className="flex items-center gap-2">
             {/* Anchors, because the browser has to fetch the file — but they
@@ -228,7 +241,7 @@ export default function SpecTable({
 
       {records.length === 0 ? (
         <p className="mt-4 text-sm text-neutral-600">
-          No records here yet. Import a bill of quantities to create them.
+          No records here yet. Import a bill of quantities, or add an item by hand.
         </p>
       ) : (
         <>
