@@ -255,3 +255,32 @@ Two things the writing of it found, both worth porting:
   `entity_id` alone for exactly this reason.
 - **A QA script must live in the repo root, not the scratchpad**, or `pg` does
   not resolve. Upstream's wording implies otherwise.
+
+## 2026-09-17 — the `verify` skill learns the drawings review
+
+A fourth thing the four checks could not see. The screen where a pack becomes
+records had **no automated coverage of any kind** — 952 lines of card, two
+review screens, nothing — and four separate defects were reported from it in
+two days, each one right in `intake_runs.parsed` and wrong in front of the
+reviewer. `npm test` was green through all of them.
+
+Two additions, both ported to `.agents/`:
+
+- **`verify` gains a drawings-review section** pointing at
+  `docs/plans/intake-review-verification.md` (a twelve-point per-card checklist
+  and a verdict vocabulary, the drawings counterpart of
+  `export-verification.md`). Two rules in it generalise: dump the staged run
+  through the app's OWN read-time pipeline before and after a change so the diff
+  is the change, and never exercise a confirm on a real project — copy it,
+  because a confirm creates records and there is no undo for somebody's sandbox.
+- **A component test tier** (jsdom + React Testing Library), scoped by PATH in
+  `vitest.config.ts` rather than by a per-file `@vitest-environment` docblock. A
+  docblock is one line a new test file can forget, and forgetting it fails with
+  "document is not defined" rather than anything useful. Worth porting to any
+  app in this kit with a review screen: the first eleven tests written against
+  the existing card found a defect nobody had reported yet.
+
+Also worth porting, found the same way: a read-only `tools/dump-*.ts` that
+prints what a staged document reduces to, calling the app's own functions and
+reimplementing none of them. "Verified against the real pack" was prose in
+CLAUDE.md, and prose cannot be re-run.

@@ -66,7 +66,16 @@ export type ItemResolution = {
   id: string;
   resolution: { runs: RunResolution[]; suggested: string[] };
   targets: string[];
-  /** Which configuration of its code this card is, or null for a code drawn once. */
+  /**
+   * Which configuration of its code this card is, or null for a code drawn
+   * once.
+   *
+   * NEVER RENDERED BY THIS CARD, which only ever draws a code that appears on
+   * ONE page. A lettered item is grouped into a `ConfigurationCard` before it
+   * reaches here (`src/lib/configuration-cards.ts`), and that card is where the
+   * chips, the shared geometry and the per-configuration sections live. Kept on
+   * the type because the same resolution payload feeds both.
+   */
   variantLabel?: string | null;
   /** Per ticked record, the variant that already exists to receive these specs. */
   writesTo?: Record<string, string>;
@@ -274,28 +283,6 @@ export default function ItemCard({
           )}
           {item.confidence === "low" && <span className="ml-2 text-amber-700">code was hard to read</span>}
         </p>
-        {/* ====================================================================
-            WHICH CONFIGURATION THIS IS.
-            The same code drawn on several pages is several things to make, not
-            several readings of one thing — identical geometry, different fabric
-            and timber. So the card says which one it is in the words a person
-            uses for it, and says whether the record exists yet: a letter with
-            no record behind it is one this confirm will create.
-            ==================================================================== */}
-        {resolution?.variantLabel && (
-          <p className="mt-0.5 text-xs">
-            <span className="inline-flex items-center rounded border border-neutral-300 bg-neutral-50 px-1.5 py-0.5 font-medium text-neutral-700">
-              {item.itemCodeRaw ? `${item.itemCodeRaw} ${resolution.variantLabel}` : `Configuration ${resolution.variantLabel}`}
-            </span>
-            <span className="ml-2 text-neutral-500">
-              This code is drawn on more than one page. Its specs go on configuration {resolution.variantLabel} of the
-              bill line
-              {Object.keys(resolution.writesTo ?? {}).length === 0
-                ? ", which confirming will create."
-                : ", which already exists."}
-            </span>
-          </p>
-        )}
       </div>
       <div className="flex items-center gap-3">
         {/* Offered whenever the card holds a MEASUREMENT, not only once one has

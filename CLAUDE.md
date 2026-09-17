@@ -34,10 +34,15 @@ one agent.
 | `npm run db:backfill-finishes` | one-off: builds each project's finishes library from the codes its drawings carry, and links them. Dry run unless `--apply`; safe to re-run. Leaves a code whose items disagree blank, and names it |
 | `npm run db:qa-clean` | sweeps what a failed database-tier test run left behind. Refuses production outright |
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
+| `npm run dump:drawings -- --run=<id>` | read only: what a staged drawing run reduces to through the REAL read-time pipeline — measured rows, placed slots, folded rows, unit provenance, the composed BWS cell. Run it before and after a change to that pipeline; the diff is the change |
 
-Tests run in three tiers — pure / db-gated / route. The database tiers skip
-without `DATABASE_URL`, which is the correct state for pure-library work.
-Database scripts print the resolved host before acting; read that line.
+Tests run in FOUR tiers — pure / component / db-gated / route. The database
+tiers skip without `DATABASE_URL`, which is the correct state for pure-library
+work; the component tier (`tests/components/`, jsdom + React Testing Library)
+runs always and is scoped by PATH in `vitest.config.ts`, never by a per-file
+`@vitest-environment` docblock — a docblock is one line a new test file can
+forget, and forgetting it fails with "document is not defined". Database scripts
+print the resolved host before acting; read that line.
 
 ## Hard approval gates
 
@@ -1420,6 +1425,7 @@ in the UK.
 | External integrations: scope, setup, activation | `docs/integration.md` |
 | The BWS field grid: blocks, order, and how each field is written | `docs/bws-spec-grid.md` |
 | Accepting the export against the pack: the check sheet and its verdicts | `docs/plans/export-verification.md` |
+| Accepting the DRAWINGS REVIEW against the pack: the per-card checklist | `docs/plans/intake-review-verification.md` |
 | Releases, dated decisions, what is still open | `docs/plans/README.md` |
 | Migrations, seeds, backups, restores | `db/README.md` |
 | Chassis provenance and how to start another app | `docs/kit/` |
@@ -1672,12 +1678,14 @@ which `SX11A` is which; and one finish edit moving 3 records and 8 answers.
   the whole safeguard. Two bare figures, four or more, and a line mixing
   prefixed with bare parts all get no slot instead. Nothing has been through a
   real S-203 sheet yet.
-- **No real drawing set has been through the model.** The prompts and schemas
-  are written against the AP364 seating drawings but only synthetic fixtures
-  have exercised them. One real extraction, compared against its pages by eye —
-  expected vs extracted, misses, wrong values, wrong units — is what decides
-  whether intake is usable. This is step 2 of M8, and the AP364 drawings it was
-  written against are the pilot pack itself.
+- **The real drawing set HAS now been through the model, and the review screen
+  has been driven against it** (2026-09-17) — eleven pages, six cards, every
+  page placing four slots in a known unit, one card confirmed onto
+  configurations A and B across three runs on a `__QA` copy. What has NOT
+  happened is the reading that decides whether intake is usable: a person
+  comparing each card to its page, expected vs extracted, misses, wrong values,
+  wrong units. `docs/plans/intake-review-verification.md` is the sheet for it
+  and **nobody has filled one in**. This is step 2 of M8.
 - **The export's job columns are this repo's judgement**: `Project Ref` is the
   project name, `Client` the client, `Name` the item description, `Item Count`
   the quantity, `Client Code` the BOQ refs. Confirm them against a real BWS

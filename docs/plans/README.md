@@ -996,3 +996,133 @@ way, and why they did not.
 - **No `.eml` has been opened in real Outlook**, and that is unchanged by the
   tier work — the red banner is a one-cell table precisely because Word's
   renderer drops borders on a paragraph, and nobody has watched it render.
+
+## 2026-09-17 — the intake review: one card per code, and a tier that can see it
+
+Max walked the drawings review on the sandbox Panther pack and reported three
+things: some cards still arriving in the old shape, configurations presented as
+separate cards, and — the one that matters most — "we keep coming back to this".
+
+95. **A figure is a measurement whether or not it has a unit.** Four separate
+    places each decided "is this a measured row" for themselves and all four
+    demanded a unit: the view guess, the de-duplicator, the card's fold and the
+    bulk-unit PATCH. `suggestUnit` abstains on a page whose figures disagree
+    about magnitude, which a shop drawing always does — S-201 prints 5, 27 and
+    42 beside 640 and 680, because most figures on a shop drawing are
+    COMPONENTS — so on a project with NO `default_dimension_unit`, the normal
+    state of a new project, every figure staged unitless and `unit: null` was
+    self-sealing: nothing guessed, nothing de-duplicated, nothing folded, and
+    not one control on the card could supply the unit that would have unlocked
+    all of it. `isMeasuredRow` is now the single definition and asks only
+    whether the value is a figure.
+96. **The unit is the NEXT question, and the overall figures answer it.** The
+    resolution order in CLAUDE.md always said "the OVERALL figures agreeing,
+    once `applyViewGuesses` knows which they are", and that step could only ever
+    REPLACE a weak unit, never supply one — so it could not reach the rows that
+    needed it. It supplies one now. Where the placed figures do not share a
+    scale the slots are still placed and the unit stays blank and amber, which
+    is the honest answer and the existing treatment.
+97. **Two views agreeing that a figure is REAL is not evidence that it is
+    OVERALL.** S-201's plan and side elevation share exactly one figure, a 42mm
+    reveal, so "a depth appears on the side, the section and the plan" returned
+    42 as the depth of a 680mm chair — and because 42 and 680 cannot be in one
+    unit, the placed set then failed `suggestUnit`, every row came back unitless
+    and the card carried four `unit_missing` blockers and could not commit at
+    all. A confirmed candidate must now share a scale with the height
+    (`sharesAScale`, one boundary, one rule, the same test `suggestUnit`
+    applies to the page). It says nothing about whether a number is about right
+    for an armchair, which is the reasoning that turns an 8-metre sofa into a
+    plausible one.
+98. **One card per CODE.** A code drawn on several pages is one item in several
+    configurations. One chip per configuration coloured by LETTER (A is always
+    sky, so a chip finds its own section), the geometry once, each
+    configuration's finishes below it in its own band, one Confirm.
+99. **What is shared on screen is still written per page.** An edit to the
+    shared geometry reaches the MATCHING row on every configuration's page, each
+    with its own version, in one batched save. That is the data model:
+    `record_attributes` holds what a PAGE said, so B's width comes from page 6
+    and carries page 6 as its source. Writing A's row to B would fabricate a
+    source page or lie about one — and copying rows at confirm time instead
+    would make B's atomicity depend on A's state.
+100. **One Confirm, N atomic confirms.** The confirm route is untouched: one
+     request still names ONE staged item and its whole pending set. A refusal on
+     B leaves A applied, which is the correct state, and the banner names what
+     was written, what was refused and what was not attempted. The button is
+     enabled only when EVERY configuration can commit — one that skipped a
+     blocked configuration would read as done.
+101. **Pages that disagree about the size are never averaged.** Compared on SLOT
+     signatures, not on every measured row: two pages of one chair routinely
+     differ by a radius, and failing the card over a 5mm reveal would put four
+     tables back on screen. A difference is an amber notice naming each letter's
+     figure; each configuration keeps its own; it is not a blocker, because it is
+     either a configuration split or a misread and both are a person's call.
+102. **A corrected figure keeps the slot it was corrected in.** The view guess
+     is recomputed on every read while its slots are still suggested, which is
+     what makes a guess improvable rather than sticky — but the guess reads the
+     FIGURES, so correcting one changes its own input. Correcting S-201's width
+     from 640 to 660 handed 640 straight back on the next read, because 640 was
+     still printed on the back elevation. The correction survived in the row and
+     vanished from the slot, which is the worst shape a correction can take: it
+     looks applied and is not. A value landing on a row that already carries a
+     slot now clears `slotSuggested`.
+103. **A component tier, because the screen was the part nothing could see.**
+     The pure tier covers the functions the card calls and the route tier covers
+     what the confirm writes; between them sat 952 lines of rendering with no
+     coverage of any kind, and every defect above lived in that gap. jsdom and
+     React Testing Library, scoped by PATH rather than a per-file docblock. The
+     first eleven tests found a twelfth defect nobody had reported: with nothing
+     placed, every measured row is an "other dimension" and the fold hid the
+     entire page.
+104. **`tools/dump-drawing-run.ts`, read only.** "Verified against the real
+     pack" was prose in CLAUDE.md — S-200 `W840 x D790 x H720 x SH460mm` and so
+     on, written down by hand after somebody read eleven cards. A sentence
+     cannot be re-run and goes stale exactly when it is worth something. The
+     tool calls `assertStagedDrawings` and prints what it returns, reimplementing
+     nothing. Run before and after: the diff is the change.
+105. **`groupItemsByCode` is the one grouping.** `configurationGroup` compared
+     `itemCodeRaw` RAW while `variantLettersByItem` folded it with
+     `normaliseRef`, so `S-201` and `s 201` were lettered A and B and then
+     printed under two separate headings. Grouping never crosses runs: letters
+     are per staged run, so a code drawn once in each of two files is letter A
+     in both and writes to the same variant.
+
+### Verified 2026-09-17
+
+Against the sandbox Panther pack and a `__QA` copy of it, in the browser:
+
+- Eleven pages render as six cards; S-301's four pages are one card with four
+  colour-banded configurations, S-201's and S-200's two each.
+- All eleven pages now place four slots in a known unit. The run that was
+  already reading correctly is unchanged figure for figure — S-200
+  `W840 x D790 x H720 x SH460mm`, S-301 `W550 x D565 x H735 x SH430mm`.
+- One shared width edit wrote 660 to both S-201 pages, the composed cell went to
+  the verified `W660 x D685 x H680 x SH445mm`, the corrected row lost its yellow
+  and the other three kept theirs.
+- Confirming that card created configurations A and B on all three runs, 40
+  specs each; the three bill lines dropped out of `loadExportScope` and the six
+  variants appeared in it.
+- A configuration with no matching record disables the Confirm and names itself
+  and its reason in the footer.
+
+### Still open, added 2026-09-17
+
+- **Nobody has filled in an intake review sheet.**
+  `docs/plans/intake-review-verification.md` exists and its twelve checks are a
+  guess at what makes the reading possible. The first real pass tests the sheet
+  as much as the screen.
+- **A configuration card's per-page confirm is not offered.** One Confirm rules
+  on the whole item, so a blocked configuration holds up a ready one. Deliberate
+  — a confirm-all that skipped the blocked one would read as done — but if it
+  becomes a nuisance in use, a Confirm inside each section is a small addition.
+- **`ensureVariant` hard-codes `split_reason = 'fabric'`.** A `disagree` result
+  from `compareGeometry` is exactly a configuration split. Deriving the reason
+  from the same pure function both sides call is the principled extension; not
+  needed for one box.
+- **A code drawn once in each of two files of a pack gets no letter**, because
+  letters are per staged run and the confirm derives them the same way. The
+  pack's `duplicateTargets` banner reports the pair. Whether those should be
+  configurations is a real question nobody has answered.
+- **The S-201 width is still read as 640 from the plan on one extraction and 660
+  on another.** Both are model reads of the same PDF. The card badges it and
+  shows the page, which is the safeguard; it is not a code defect and it is why
+  the yellow exists.

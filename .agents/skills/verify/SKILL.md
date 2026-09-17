@@ -64,6 +64,29 @@ repo dependency, and neither belongs in one.
 - The staging banner and `[STAGING]` title are present on non-production.
 - `/api/auth/me` reports the environment you think you are in.
 
+## The drawings review has its own procedure
+
+`docs/plans/intake-review-verification.md` — the twelve-point card checklist and
+its verdict vocabulary. Read it before driving a pack, because this is the
+screen where the app's defects have actually lived: four separate times the rows
+were right in `intake_runs.parsed` and wrong in front of the reviewer, which is
+exactly the class of failure the four checks cannot see.
+
+Two things from it that apply to any drawings work:
+
+- **Dump the run first.** `npm run dump:drawings -- --run=<id>` prints what the
+  staged JSON reduces to through the REAL read-time pipeline: measured rows,
+  placed slots, folded rows, unit provenance, and the composed BWS cell. Run it
+  before and after a change and the diff IS the change. Do not re-derive any of
+  that by reading the JSON yourself — a second implementation agrees with itself
+  rather than with the app.
+- **Never confirm on a real project.** A confirm creates records and variants
+  and there is no undo for somebody's sandbox. Copy the project (`__QA ` prefix)
+  and confirm on the copy. Copied records need `status = 'active'` set
+  explicitly, and `/api/imports/<id>/source` 404s on a copy because the PDF
+  stays under the original project's blob prefix — so no page previews and no
+  crops there, by design.
+
 ## Test data & cleanup
 
 - Seed rows directly with `pg` (write a `.mjs` file **in the repo root** and
