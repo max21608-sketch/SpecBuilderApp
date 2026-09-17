@@ -242,6 +242,29 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
         const next = {
           ...observation,
           version: observation.version + 1,
+          // ====================================================================
+          // CORRECTING A GUESSED FIGURE IS A DECISION ABOUT THAT ROW.
+          //
+          // `applyViewGuesses` re-guesses an item on every read as long as
+          // every placed row is still `slotSuggested` -- which is what makes a
+          // guess improvable rather than sticky. But the guess reads the
+          // FIGURES, so correcting one changes its own input: a reviewer who
+          // fixed a width from 640 to 660 was handed 640 straight back on the
+          // next read, because 640 was still printed on the back elevation and
+          // the rule picked it again. Their correction survived in the row and
+          // vanished from the slot.
+          //
+          // The card presents that row as "Width (guessed)". Typing a figure
+          // into it accepts the slot and fixes the number, which is exactly
+          // what `slotSuggested: false` means everywhere else -- and it stops
+          // the re-guess touching the rest of the item, so the three slots
+          // around the corrected one are not re-derived around a figure that
+          // is now somebody's decision.
+          //
+          // Only where the row already HAS a slot. Editing a note's figure
+          // says nothing about which of the five it might be.
+          // ====================================================================
+          ...(changes.value !== undefined && observation.dimensionSlot ? { slotSuggested: false } : {}),
           ...(changes.value !== undefined ? { value: typed?.value ?? changes.value } : {}),
           // An explicit `unit` in the same request still wins — the select is
           // the reviewer being deliberate about the unit, the text box is not.

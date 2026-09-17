@@ -457,6 +457,71 @@ describeIfDb("intake routes", () => {
     expect(material.version).toBe(1);
   });
 
+  it("keeps a corrected figure in its slot instead of re-guessing it away", async () => {
+    // ========================================================================
+    // FOUND BY DRIVING THE REAL PACK, 2026-09-17.
+    //
+    // The view guess is recomputed on every read as long as every placed row
+    // is still suggested, which is what makes a guess improvable rather than
+    // sticky. But the guess reads the FIGURES, so correcting one changes its
+    // own input: a reviewer who fixed the width from 640 to 660 got 640 back
+    // on the next read, because 640 was still printed on the back elevation
+    // and the rule picked it again. The correction survived in the row and
+    // vanished from the slot.
+    // ========================================================================
+    const code = "__QAX160";
+    await makeRecord(mainRunId, code, "__QA Armchair");
+    const { runId } = await stageDrawingRun(code, {
+      ...drawingItem(code),
+      dimensions: [
+        { labelRaw: "FRONT", valueRaw: "640" },
+        { labelRaw: "FRONT", valueRaw: "680" },
+        { labelRaw: "BACK", valueRaw: "640" },
+        { labelRaw: "SIDE", valueRaw: "680" },
+        { labelRaw: "SIDE", valueRaw: "685" },
+        { labelRaw: "TOP", valueRaw: "640" },
+        { labelRaw: "TOP", valueRaw: "685" },
+      ],
+      materials: [],
+    });
+
+    const { GET, PATCH } = await import("@/app/api/imports/[id]/route");
+    const before = await (await GET(new Request("http://x"), params(runId))).json();
+    const width = before.import.parsed.items[0].observations.find(
+      (o: { dimensionSlot: string | null }) => o.dimensionSlot === "W",
+    );
+    expect(width.value).toBe("640");
+    expect(width.slotSuggested).toBe(true);
+
+    const patched = await PATCH(
+      patch({
+        itemId: before.import.parsed.items[0].id,
+        observationId: width.id,
+        expectedVersion: width.version,
+        changes: { value: "660" },
+      }),
+      params(runId),
+    );
+    expect(patched.status).toBe(200);
+
+    const after = await (await GET(new Request("http://x"), params(runId))).json();
+    const slots = after.import.parsed.items[0].observations.filter(
+      (o: { dimensionSlot: string | null }) => o.dimensionSlot,
+    );
+    const widthAfter = slots.find((o: { dimensionSlot: string }) => o.dimensionSlot === "W");
+    // The corrected figure keeps the slot it was corrected in...
+    expect(widthAfter.id).toBe(width.id);
+    expect(widthAfter.value).toBe("660");
+    // ...and it is a decision now, so nothing re-guesses it.
+    expect(widthAfter.slotSuggested).toBe(false);
+    // And the slots around it are left exactly where they were, rather than
+    // re-derived around a figure that is now somebody's decision. They are
+    // still GUESSES -- nobody has ruled on them -- so they stay yellow.
+    const others = slots.filter((o: { dimensionSlot: string }) => o.dimensionSlot !== "W");
+    expect(others.map((o: { dimensionSlot: string }) => o.dimensionSlot).sort()).toEqual(["D", "H"]);
+    expect(others.every((o: { slotSuggested: boolean }) => o.slotSuggested === true)).toBe(true);
+  });
+
   it("leaves reviewed observations alone when setting units in bulk", async () => {
     // An applied observation is history and an ignored one was a decision.
     const code = "__QAX121";
