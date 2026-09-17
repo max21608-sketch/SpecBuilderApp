@@ -1402,6 +1402,44 @@ panel.
   that reason. Silently discarding a crop is how somebody comes to believe it is
   stored. **Supersede, never delete**, as the swatch route already does.
 
+### One crop at a time, and never one nobody asked for
+
+`src/lib/pdf-crop.ts`, `src/components/imports/ItemImagePicker.tsx`,
+`src/components/imports/PagePreview.tsx`
+
+Rasterising an A3 drawing is the most expensive thing the review screen does,
+and three things were making it happen far more often than anybody asked:
+
+- **The callback was in the effect's dependencies.** A card passes
+  `onCropped={(image) => onImage(item.id, image)}` — a new function on every
+  render — so every re-render of the card started a fresh crop. Measured on the
+  real pack: **33 rasterisations for 12 picture panels.** `onCropped` now lives
+  in a ref, so a crop depends on WHAT is being cropped and never on the
+  identity of the function that receives it. A caller passing a lambda is
+  ordinary React; the guarantee belongs in the component.
+- **Nothing cancelled a superseded render.** `cropPdfRegion` takes a `signal`
+  and cancels the pdfjs render task; the picker aborts the previous crop and
+  its own on unmount, and treats a cancellation as "superseded" rather than
+  showing *Could not render*. `tests/components/item-image-picker.test.tsx`
+  holds all of it.
+- **They all ran at once.** Crops are now serialised through one queue, so the
+  first picture appears in a second instead of all of them appearing
+  eventually, and two renders of the same page can never overlap — which is
+  the one thing pdfjs asks a caller not to do.
+
+And the document is fetched **in one request**: pdfjs's default keeps a
+background download open and issues 64KB range requests on top, each going
+through this app's route to a blob store in another region — 123 requests for
+one visit, against a browser limit of six connections that the screen's own API
+calls also need. `disableRange` and `disableStream` make it 1.
+
+**A hidden tab renders nothing, and that is not a bug.** pdfjs drives canvas
+rendering from `requestAnimationFrame`, which a background tab does not fire,
+so every crop sits unfinished until the tab is looked at. Anybody verifying
+this screen in a headless or hidden browser pane will see "Rendering…" for ever
+and should not go hunting for a deadlock — check `document.visibilityState`
+first.
+
 ### A fabric is a fabric, whatever the drawing calls the part
 
 `src/lib/drawing-document.ts` (`classifyCallout`, `upgradeCalloutGuesses`),

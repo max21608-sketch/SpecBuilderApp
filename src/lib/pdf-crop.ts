@@ -94,6 +94,23 @@ export async function openPdf(url: string): Promise<LoadedDocument> {
       // Same-origin and cookie-authenticated: the route resolves the file from
       // the run's own attachment row, so nothing here names a blob.
       withCredentials: true,
+      // ====================================================================
+      // ONE REQUEST FOR THE FILE, NOT A HUNDRED.
+      //
+      // By default pdfjs keeps a background download of the whole file open
+      // AND issues 64KB range requests for whatever a page needs. Every one of
+      // those goes through this app's own route to a blob store in another
+      // region: the real 5MB drawing set was measured at 123 requests for one
+      // visit to the review screen, against a browser limit of six connections
+      // to this origin that the screen's own API calls are also using.
+      //
+      // A drawing set is a few megabytes and EVERY page of it is about to be
+      // cropped for a card, so there is nothing to save by fetching it
+      // piecemeal. One GET, held in the cache above, and every crop after that
+      // is local — measured at 1 request for the same visit.
+      // ====================================================================
+      disableRange: true,
+      disableStream: true,
     }).promise;
   })();
   documents.set(url, loading);
@@ -109,18 +126,68 @@ export function forgetPdf(url: string): void {
 }
 
 /**
+ * ONE CROP AT A TIME, ACROSS THE WHOLE SCREEN.
+ *
+ * A pack screen mounts a picture panel per card and a page preview per
+ * disputed item, and every one of them asks for a crop the moment it appears:
+ * eleven cards meant two dozen simultaneous requests for the same document.
+ * Each one rasterises an A3 drawing into a 1280px canvas and pulls the ranges
+ * of the PDF it needs, so they compete for one worker, for the browser's six
+ * connections to this origin, and for the main thread that has to composite
+ * the result — and the panels sat on "Rendering…" for minutes, sometimes for
+ * ever.
+ *
+ * Serialising costs nothing in total work: the same crops are made, in the
+ * order they were asked for, and the first one now appears in a second instead
+ * of all of them appearing eventually. It also bounds memory, which two dozen
+ * simultaneous canvases did not.
+ *
+ * A cancelled crop still has to leave the queue, which is why the chain is
+ * advanced in a `finally` and never by the caller.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+function enqueue<T>(work: () => Promise<T>): Promise<T> {
+  const result = queue.then(work, work);
+  // The chain must not inherit a rejection: one page that cannot be rasterised
+  // would otherwise take every later crop down with it.
+  queue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+/**
  * Render one region of one page to a PNG.
  *
  * `bbox` is in page fractions with the origin top-left, which is what the model
  * reports and what a drag on a rendered page produces. PDF user space has its
  * origin bottom-left, but `getViewport` already returns a top-left device space,
  * so the two agree and no flip is needed.
+ *
+ * Pass a `signal` to abandon a crop that is no longer wanted: it cancels the
+ * render rather than leaving it running, and rejects with pdfjs's
+ * RenderingCancelledException. Anything driving this from an effect should
+ * pass one.
  */
-export async function cropPdfRegion(
+export function cropPdfRegion(
   url: string,
   pageNumber: number,
   bbox: CropBox,
+  options: { signal?: AbortSignal } = {},
 ): Promise<CroppedImage> {
+  return enqueue(() => renderCrop(url, pageNumber, bbox, options));
+}
+
+async function renderCrop(
+  url: string,
+  pageNumber: number,
+  bbox: CropBox,
+  options: { signal?: AbortSignal },
+): Promise<CroppedImage> {
+  // Already superseded while it waited its turn: do not rasterise it at all.
+  if (options.signal?.aborted) throw new DOMException("The crop was superseded.", "AbortError");
   const doc = await openPdf(url);
   const page = await doc.getPage(Math.min(Math.max(1, pageNumber), doc.numPages));
 
@@ -152,7 +219,29 @@ export async function cropPdfRegion(
   // Shift the page so the region's top-left sits at the canvas origin.
   context.translate(-x0 * base.width * scale, -y0 * base.height * scale);
 
-  await page.render({ canvasContext: context, viewport, background: "rgba(0,0,0,0)" }).promise;
+  // ============================================================================
+  // A SUPERSEDED RENDER IS CANCELLED, NOT ABANDONED.
+  //
+  // Rasterising an A3 drawing is the most expensive thing this screen does, and
+  // a card can ask for a new crop before the last one has finished — the
+  // reviewer switches view, or the component re-runs its effect. Without a
+  // cancel, the abandoned task keeps rasterising: eleven cards restarting
+  // turned into thirty-three renders of the same pack, every one of them
+  // holding a 1280px canvas and competing for the same worker, and the picture
+  // panels sat on "Rendering…" long after the page had settled.
+  //
+  // `task.cancel()` rejects the promise with a RenderingCancelledException,
+  // which the caller is expected to treat as "superseded" rather than as a
+  // failure to report.
+  // ============================================================================
+  const task = page.render({ canvasContext: context, viewport, background: "rgba(0,0,0,0)" });
+  const cancel = () => task.cancel();
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    await task.promise;
+  } finally {
+    options.signal?.removeEventListener("abort", cancel);
+  }
 
   const finished = downscale(canvas, MAX_IMAGE_PX);
   const blob = await toPngBlob(finished);

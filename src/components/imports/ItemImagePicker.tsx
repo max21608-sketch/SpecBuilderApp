@@ -88,6 +88,26 @@ export default function ItemImagePicker({
   const [dragging, setDragging] = useState(false);
   const [pageImage, setPageImage] = useState<string | null>(null);
   const objectUrls = useRef<string[]>([]);
+  // ==========================================================================
+  // THE CALLBACK CANNOT BE ALLOWED TO RE-RASTERISE THE PAGE.
+  //
+  // `onCropped` arrives as an inline arrow from the card — `(image) =>
+  // onImage(item.id, image)` — so it is a new function on every parent render.
+  // With it in the effect's dependencies, every re-render of the card started
+  // a fresh crop of an A3 drawing: eleven cards produced thirty-three renders
+  // of the same pack, each one superseding a render nothing had cancelled, and
+  // the picture panels stayed on "Rendering…" while they fought over the
+  // worker. Max saw it as a panel that never resolved, and occasionally as
+  // "Could not render" with an error out of pdfjs's own internals.
+  //
+  // Held in a ref instead: the crop depends on WHAT IS BEING CROPPED, never on
+  // the identity of the function that receives it. A caller passing a lambda
+  // is normal React and must not be able to cause this.
+  // ==========================================================================
+  const report = useRef(onCropped);
+  report.current = onCropped;
+  /** The crop currently in flight, so a newer one can cancel it. */
+  const inFlight = useRef<AbortController | null>(null);
 
   // Revoked on unmount. A pack of forty cards each holding an un-revoked object
   // URL is forty crops pinned in memory for the life of the page.
@@ -106,37 +126,57 @@ export default function ItemImagePicker({
 
   const render = useCallback(
     async (view: ItemView | null) => {
+      // Whatever was being rasterised is no longer what is wanted.
+      inFlight.current?.abort();
       if (!view) {
         setPreview(null);
-        onCropped(null);
+        report.current(null);
         return;
       }
+      const controller = new AbortController();
+      inFlight.current = controller;
       setRendering(true);
       setError(null);
       try {
-        const image = await cropPdfRegion(sourceUrl, view.page ?? itemPage ?? 1, view.bbox);
+        const image = await cropPdfRegion(sourceUrl, view.page ?? itemPage ?? 1, view.bbox, {
+          signal: controller.signal,
+        });
         setPreview(track(image.blob));
-        onCropped(image);
+        report.current(image);
       } catch (cause) {
+        // A CANCELLED CROP IS NOT A FAILURE. It means this component asked for
+        // a different one, and the newer call owns the panel now — reporting
+        // it would flash "Could not render" over a picture that is about to
+        // arrive, and would tell the card it has no image when it is about to
+        // have one.
+        if (controller.signal.aborted) return;
         // Never fatal to the card. A drawing this cannot rasterise is a card
         // that confirms its specs with no picture, which is the behaviour that
         // existed before pictures did.
         setError(cause instanceof Error ? cause.message : "That page could not be read.");
         setPreview(null);
-        onCropped(null);
+        report.current(null);
       } finally {
-        // Always resets, so a failure cannot leave the card spinning.
-        setRendering(false);
+        // Always resets, so a failure cannot leave the card spinning — but only
+        // for the crop that is still the current one.
+        if (inFlight.current === controller) {
+          inFlight.current = null;
+          setRendering(false);
+        }
       }
     },
-    [sourceUrl, itemPage, onCropped, track],
+    [sourceUrl, itemPage, track],
   );
 
   useEffect(() => {
     void render(chosen);
-    // `render` is stable per source; re-running on every parent render would
-    // re-rasterise the page on every keystroke elsewhere on the card.
+    // `render` depends only on the source, the page and the crop box, so this
+    // runs when the chosen VIEW changes and at no other time. It said as much
+    // before and was not true: `onCropped` was in its dependencies.
   }, [chosen, render]);
+
+  // A card scrolled away, or a screen left, must not go on rasterising.
+  useEffect(() => () => inFlight.current?.abort(), []);
 
   /** The whole page, rendered once, only when somebody wants to drag a box. */
   const startCropping = useCallback(async () => {

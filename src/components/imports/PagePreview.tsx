@@ -29,18 +29,27 @@ export default function PagePreview({
 
   useEffect(() => {
     let live = true;
+    // Cancelled on unmount rather than merely ignored: rasterising an A3 page
+    // is the most expensive thing on this screen, and a panel nobody is
+    // looking at must not go on competing for the worker with the ones they
+    // are. See the note in src/lib/pdf-crop.ts.
+    const controller = new AbortController();
     void (async () => {
       try {
-        const image = await cropPdfRegion(`/api/imports/${importId}/source`, page ?? 1, [0, 0, 1, 1]);
+        const image = await cropPdfRegion(`/api/imports/${importId}/source`, page ?? 1, [0, 0, 1, 1], {
+          signal: controller.signal,
+        });
         if (!live) return;
         objectUrl.current = URL.createObjectURL(image.blob);
         setUrl(objectUrl.current);
       } catch {
-        if (live) setFailed(true);
+        // A cancelled crop is not a failure: this panel is going away.
+        if (live && !controller.signal.aborted) setFailed(true);
       }
     })();
     return () => {
       live = false;
+      controller.abort();
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     };
   }, [importId, page]);
