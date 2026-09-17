@@ -31,7 +31,7 @@ import { snapshotRecords } from "@/lib/record-snapshot";
 import type { AnswerState } from "@/lib/spec-vocab";
 
 export type EditAnswerResult = {
-  answer: { id: string; value: string | null; state: string; version: number };
+  answer: { id: string; value: string | null; qualifier: string | null; state: string; version: number };
   changeSetId: string;
   attachedToOpenChange: boolean;
   snapshotNo: number | null;
@@ -42,6 +42,7 @@ export async function editAnswer(
   {
     answerId,
     value,
+    qualifier,
     state,
     expectedVersion,
     reason,
@@ -50,6 +51,8 @@ export async function editAnswer(
   }: {
     answerId: string;
     value: string | null;
+    /** Where on the item it goes (0029). Undefined leaves what is there. */
+    qualifier?: string | null;
     state: AnswerState;
     expectedVersion: number;
     reason?: string | null;
@@ -58,7 +61,7 @@ export async function editAnswer(
   },
 ): Promise<EditAnswerResult> {
   const rows = await txn`
-    select a.id, a.record_id, a.value, a.state, a.version, r.project_id, q.prompt
+    select a.id, a.record_id, a.value, a.qualifier, a.state, a.version, r.project_id, q.prompt
     from spec_answers a
     join spec_records r on r.id = a.record_id
     join requirements q on q.id = a.requirement_id
@@ -76,8 +79,14 @@ export async function editAnswer(
     );
   }
 
+  const nextQualifier =
+    qualifier === undefined ? (existing.qualifier === null || existing.qualifier === undefined ? null : String(existing.qualifier)) : (qualifier?.trim() || null);
+
   const settled = String(existing.state) === "confirmed";
-  const changing = String(existing.value ?? "") !== String(value ?? "") || String(existing.state) !== state;
+  const changing =
+    String(existing.value ?? "") !== String(value ?? "") ||
+    String(existing.qualifier ?? "") !== String(nextQualifier ?? "") ||
+    String(existing.state) !== state;
   const overriding = settled && changing;
 
   const { changeSetId, attached } = await changeSetForEdit(txn, {
@@ -101,6 +110,7 @@ export async function editAnswer(
   const updated = await txn`
     update spec_answers
     set value        = ${value},
+        qualifier    = ${nextQualifier},
         state        = ${state},
         confirmed_by = ${state === "confirmed" ? actor : null},
         confirmed_at = ${state === "confirmed" ? new Date().toISOString() : null},
@@ -114,7 +124,7 @@ export async function editAnswer(
         source_id    = null,
         updated_by   = ${actor}
     where id = ${answerId} and version = ${expectedVersion}
-    returning id, value, state, version
+    returning id, value, qualifier, state, version
   `;
   const answer = updated[0];
   if (!answer) {
@@ -130,6 +140,7 @@ export async function editAnswer(
     answer: {
       id: String(answer.id),
       value: answer.value === null || answer.value === undefined ? null : String(answer.value),
+      qualifier: answer.qualifier === null || answer.qualifier === undefined ? null : String(answer.qualifier),
       state: String(answer.state),
       version: Number(answer.version),
     },

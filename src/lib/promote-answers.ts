@@ -52,6 +52,8 @@ export type PromotableAttribute = {
   dimensionSlot: string | null;
   specFieldId: string | null;
   value: string | null;
+  /** Where on the item it goes (0029). Carried to the answer with the value. */
+  qualifier?: string | null;
   unit: string | null;
   state: AttributeState;
   sortOrder: number;
@@ -79,6 +81,14 @@ export type AnswerFill = {
   jsonId: number | null;
   value: string;
   state: "confirmed" | "tbc";
+  /**
+   * The placement, kept APART from the value all the way to the answer.
+   *
+   * Null for the composed dimensions cell: four slots off three pages could
+   * carry four placements and picking one would invent a fact. The export's
+   * dimensions cell carries none for the same reason.
+   */
+  qualifier: string | null;
   /** What the document actually said, kept beside the tidied value. */
   valueRaw: string;
   /**
@@ -130,6 +140,7 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
         specFieldId: null,
         jsonId: DIMENSIONS_JSON_ID,
         value: cell.text,
+        qualifier: null,
         state: allConfirmed && hasFigure && cell.problems.length === 0 ? "confirmed" : "tbc",
         valueRaw: rows
           .map((row) => `${row.slot} ${row.value ?? "—"}${row.unit ? ` ${row.unit}` : ""}`)
@@ -170,6 +181,7 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
       specFieldId: attribute.specFieldId,
       jsonId: null,
       value,
+      qualifier: attribute.qualifier?.trim() || null,
       state: state === "confirmed" ? "confirmed" : "tbc",
       valueRaw: raw || value,
       sourceRunId: attribute.sourceRunId,
@@ -219,7 +231,7 @@ export async function applyAnswerFills(
       fill.jsonId !== null
         ? await txn`
             update spec_answers a
-            set value = ${fill.value}, value_raw = ${fill.valueRaw}, state = ${fill.state},
+            set value = ${fill.value}, qualifier = ${fill.qualifier}, value_raw = ${fill.valueRaw}, state = ${fill.state},
                 confirmed_by = ${confirming ? actor : null}, confirmed_at = ${confirmedAt},
                 source_kind = 'document', source_id = ${sourceRunId}, updated_by = ${actor}
             where a.record_id = ${recordId}
@@ -268,7 +280,7 @@ export async function applyAnswerFills(
           `
         : await txn`
             update spec_answers a
-            set value = ${fill.value}, value_raw = ${fill.valueRaw}, state = ${fill.state},
+            set value = ${fill.value}, qualifier = ${fill.qualifier}, value_raw = ${fill.valueRaw}, state = ${fill.state},
                 confirmed_by = ${confirming ? actor : null}, confirmed_at = ${confirmedAt},
                 source_kind = 'document', source_id = ${sourceRunId}, updated_by = ${actor}
             where a.record_id = ${recordId}

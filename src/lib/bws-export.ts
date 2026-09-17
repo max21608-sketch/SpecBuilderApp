@@ -209,6 +209,8 @@ export type ExportAttribute = {
   label: string;
   value: string | null;
   unit: AttributeUnit | null;
+  /** Where on the item it goes: "Main body & self pipe". The second line of this statement (0029). */
+  qualifier: string | null;
   /** One of the five, on a dimension and nowhere else — 0011 enforces the pairing. */
   dimensionSlot: DimensionSlot | null;
   materialCode: string | null;
@@ -231,7 +233,13 @@ export type ExportAttribute = {
 };
 
 /** A confirmed cheat-sheet answer that maps to a BWS field. */
-export type ExportAnswer = { recordId: string; specFieldJsonId: number; value: string | null };
+export type ExportAnswer = {
+  recordId: string;
+  specFieldJsonId: number;
+  value: string | null;
+  /** The placement promoted with the value (0029). Null for a composed cell. */
+  qualifier: string | null;
+};
 
 export type ExportScope = {
   projectName: string;
@@ -249,6 +257,44 @@ export type ExportScope = {
  * that treated it as the client's "not decided" marker would silently stop
  * marking a genuinely unsettled value.
  */
+/**
+ * How a spec value's QUALIFIER — its placement on the item — reaches the file.
+ *
+ * Matthew, 2026-09-17: "the top line as the spec and the return line as the
+ * qualifier ... I don't think BWS currently captures that on the export /
+ * import but i can get Tim to build the import to suit."
+ *
+ * Until that importer exists and somebody has SEEN its shape, the qualifier
+ * goes inline after a hyphen, which is exactly what his own quote sheet writes
+ * ("...30% sheen - Recessed plinth"). Emitting a newline into a BWS cell on the
+ * strength of a sentence in an email would be guessing at a file format, in the
+ * one file where a wrong guess overwrites rather than fails.
+ *
+ * A CONSTANT, not an environment variable and not an in-app toggle: house
+ * conventions §8 puts integration enablement in deployment configuration, and
+ * this is a change to the most dangerous file in the product. Flipping it is a
+ * deliberate commit, and `tests/lib/bws-export.test.ts` asserts no cell
+ * contains a newline, so the flip means watching that test fail on purpose and
+ * running a fresh check sheet.
+ *
+ * His file mixes an ASCII hyphen and an en dash. We emit one, always, and
+ * parse neither.
+ */
+export const EXPORT_QUALIFIER_MODE: "inline" | "second_line" = "inline";
+
+/** The one separator. */
+const QUALIFIER_SEPARATOR = " - ";
+
+/** A value and its placement, joined the way this export writes them. */
+export function joinQualifier(value: string, qualifier: string | null): string {
+  const placement = qualifier?.trim();
+  if (!placement) return value;
+  if (!value) return placement;
+  return EXPORT_QUALIFIER_MODE === "inline"
+    ? `${value}${QUALIFIER_SEPARATOR}${placement}`
+    : `${value}\n${placement}`;
+}
+
 const MENTIONS_TBC = /(?:^|[^A-Za-z0-9])T\.?B\.?C\.?(?:$|[^A-Za-z0-9])/i;
 
 /**
@@ -294,6 +340,7 @@ export function renderAttributeValue(attribute: {
   unit: AttributeUnit | null;
   state: AttributeState;
   finish?: Finish | null;
+  qualifier?: string | null;
 }): string {
   // A LINKED FINISH RENDERS AS THE LIBRARY SAYS IT IS, not as this page wrote
   // it. One composer, called here, by the record screen and by
@@ -302,9 +349,26 @@ export function renderAttributeValue(attribute: {
   const value = finish ? composeFinishCell(finish) : (attribute.value?.trim() ?? "");
   const state = finish ? combineFinishState(attribute.state, finish) : attribute.state;
   const withUnit = value && attribute.unit ? `${value}${attribute.unit}` : value;
-  if (state !== "tbc") return withUnit;
-  if (!withUnit) return "TBC";
-  return MENTIONS_TBC.test(withUnit) ? withUnit : `${withUnit} TBC`;
+  // THE QUALIFIER GOES ON LAST, AFTER the TBC marker. A placement is not part
+  // of the statement MENTIONS_TBC is asking about — "Main body and self pipe"
+  // can never carry the client's not-decided marker — so folding it in first
+  // would let a placement suppress a TBC that belongs on the value.
+  const marked =
+    state !== "tbc" ? withUnit : !withUnit ? "TBC" : MENTIONS_TBC.test(withUnit) ? withUnit : `${withUnit} TBC`;
+  return joinQualifier(marked, attribute.qualifier ?? null);
+}
+
+/**
+ * The same rendering for a CHECKLIST answer.
+ *
+ * `composeRowCells` used to put `answer.value.trim()` straight into the cell, a
+ * bare string with no composer behind it. The moment an answer could carry a
+ * qualifier that became a way for a placement typed on the record screen to
+ * vanish from the file while the screen went on showing it — the
+ * `composeDimensionCell` rule, in a third place. One function, so it cannot.
+ */
+export function renderAnswerValue(answer: { value: string | null; qualifier?: string | null }): string {
+  return joinQualifier(answer.value?.trim() ?? "", answer.qualifier ?? null);
 }
 
 /**
@@ -359,7 +423,16 @@ export type CellSource =
   | { kind: "dimensions"; attributes: ExportAttribute[] }
   | { kind: "answer" };
 
-export type ExportCell = { value: string; source: CellSource };
+export type ExportCell = {
+  value: string;
+  source: CellSource;
+  /**
+   * The placement half, apart from the value, so the CHECK SHEET can show a
+   * reviewer which is which. The export itself only ever sees `value`, which
+   * already has the qualifier joined in by `joinQualifier`.
+   */
+  qualifier: string | null;
+};
 
 /**
  * One record to one row of 109 cells, each with where it came from.
@@ -389,9 +462,9 @@ export function composeRowCells(
       byField.set(attribute.specFieldJsonId, attribute);
     }
   }
-  const answerByField = new Map<number, string>();
+  const answerByField = new Map<number, ExportAnswer>();
   for (const answer of answers) {
-    if (answer.recordId === record.id && answer.value?.trim()) answerByField.set(answer.specFieldJsonId, answer.value.trim());
+    if (answer.recordId === record.id && answer.value?.trim()) answerByField.set(answer.specFieldJsonId, answer);
   }
 
   const dimensionAttributes = mine.filter((attribute) => attribute.attrGroup === "dimension" && attribute.dimensionSlot !== null);
@@ -402,9 +475,9 @@ export function composeRowCells(
     if (column.jsonId === null) {
       switch (column.name) {
         case CLIENT_COLUMN_NAME:
-          return { value: scope.client ?? "", source: { kind: "project" } };
+          return { value: scope.client ?? "", source: { kind: "project" }, qualifier: null };
         case PROJECT_REF_COLUMN_NAME:
-          return { value: scope.projectName, source: { kind: "project" } };
+          return { value: scope.projectName, source: { kind: "project" }, qualifier: null };
         case NAME_COLUMN_NAME:
           // THIS REPO'S JUDGEMENT, like the rest of the job columns. Two
           // variants of one bill line share the client's description exactly,
@@ -415,29 +488,42 @@ export function composeRowCells(
           return {
             value: record.variantLabel ? `${record.itemDescription} (${record.variantLabel})` : record.itemDescription,
             source: { kind: "record" },
+            qualifier: null,
           };
         case ITEM_COUNT_COLUMN_NAME:
-          return { value: record.qty === null ? "" : String(record.qty), source: { kind: "record" } };
+          return { value: record.qty === null ? "" : String(record.qty), source: { kind: "record" }, qualifier: null };
         default:
           // Every other job column is a BWS-owned vocabulary or a value only
           // BWS knows (Id, Job Number, Status, KAM, Lifecycle State). Blank is
           // the only honest answer; a guessed enum imports as a wrong
           // classification.
-          return { value: "", source: { kind: "bws" } };
+          return { value: "", source: { kind: "bws" }, qualifier: null };
       }
     }
-    if (column.jsonId === CLIENT_CODE_JSON_ID) return { value: record.boqCodes.join(", "), source: { kind: "record" } };
+    if (column.jsonId === CLIENT_CODE_JSON_ID)
+      return { value: record.boqCodes.join(", "), source: { kind: "record" }, qualifier: null };
     if (column.jsonId === DIMENSIONS_JSON_ID) {
       return {
         value: dimensions,
         source: dimensionAttributes.length ? { kind: "dimensions", attributes: dimensionAttributes } : { kind: "empty" },
+        // A COMPOSED CELL HAS NO SINGLE PLACEMENT. Four slots off three pages
+        // could carry four; picking one would be the app inventing a fact.
+        qualifier: null,
       };
     }
     const attribute = byField.get(column.jsonId);
-    if (attribute) return { value: renderAttributeValue(attribute), source: { kind: "attribute", attribute } };
+    if (attribute) {
+      return {
+        value: renderAttributeValue(attribute),
+        source: { kind: "attribute", attribute },
+        qualifier: attribute.qualifier ?? null,
+      };
+    }
     const answer = answerByField.get(column.jsonId);
-    if (answer !== undefined) return { value: answer, source: { kind: "answer" } };
-    return { value: "", source: { kind: "empty" } };
+    if (answer !== undefined) {
+      return { value: renderAnswerValue(answer), source: { kind: "answer" }, qualifier: answer.qualifier ?? null };
+    }
+    return { value: "", source: { kind: "empty" }, qualifier: null };
   });
 }
 

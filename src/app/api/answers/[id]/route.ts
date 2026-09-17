@@ -30,7 +30,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
 
-  let body: { value?: unknown; state?: unknown; version?: unknown; reason?: unknown; evidence?: unknown };
+  let body: {
+    value?: unknown;
+    qualifier?: unknown;
+    state?: unknown;
+    version?: unknown;
+    reason?: unknown;
+    evidence?: unknown;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -46,6 +53,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const raw = typeof body.value === "string" ? body.value.trim() : "";
   const value = raw === "" ? null : raw;
+  // Absent leaves the placement alone; an empty string clears it. A screen that
+  // sends only the value must not silently drop a qualifier somebody typed.
+  const qualifier =
+    body.qualifier === undefined
+      ? undefined
+      : typeof body.qualifier === "string" && body.qualifier.trim()
+        ? body.qualifier.trim()
+        : null;
   const reason = typeof body.reason === "string" ? body.reason.trim() || null : null;
 
   // The email that asked for the change, already uploaded to this project's
@@ -74,6 +89,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       editAnswer(txn, {
         answerId: id,
         value,
+        qualifier,
         state,
         expectedVersion: version,
         reason,

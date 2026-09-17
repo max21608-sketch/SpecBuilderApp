@@ -51,7 +51,7 @@ export type RetireAttributeResult = {
 /** Every active attribute on a record, in the shape the promotion functions take. */
 export async function loadPromotable(txn: TxnSql, recordId: string): Promise<PromotableAttribute[]> {
   const rows = await txn`
-    select a.attr_group, a.dimension_slot, a.spec_field_id, a.value, a.unit, a.state, a.sort_order, a.source_run_id,
+    select a.attr_group, a.dimension_slot, a.spec_field_id, a.value, a.qualifier, a.unit, a.state, a.sort_order, a.source_run_id,
            a.finish_id, f.code as finish_code, f.code_norm as finish_code_norm, f.kind as finish_kind,
            f.description as finish_description, f.supplier_raw as finish_supplier_raw,
            f.reference as finish_reference, f.colour as finish_colour, f.state as finish_state
@@ -65,6 +65,7 @@ export async function loadPromotable(txn: TxnSql, recordId: string): Promise<Pro
     dimensionSlot: row.dimension_slot ? String(row.dimension_slot) : null,
     specFieldId: row.spec_field_id ? String(row.spec_field_id) : null,
     value: row.value === null || row.value === undefined ? null : String(row.value),
+    qualifier: row.qualifier === null || row.qualifier === undefined ? null : String(row.qualifier),
     unit: row.unit === null || row.unit === undefined ? null : String(row.unit),
     state: String(row.state) as PromotableAttribute["state"],
     sortOrder: Number(row.sort_order),

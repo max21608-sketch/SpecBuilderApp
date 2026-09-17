@@ -37,6 +37,7 @@ export default function AddSpec({
     attrGroup: "note" as (typeof ATTRIBUTE_GROUPS)[number],
     label: "",
     value: "",
+    qualifier: "",
     unit: "",
     dimensionSlot: "",
     specFieldId: "",
@@ -58,6 +59,7 @@ export default function AddSpec({
           attrGroup: form.attrGroup,
           label: form.label.trim(),
           value: form.value.trim() || null,
+          qualifier: form.qualifier.trim() || null,
           unit: isDimension && form.unit ? form.unit : null,
           dimensionSlot: isDimension && form.dimensionSlot ? form.dimensionSlot : null,
           specFieldId: !isDimension && form.specFieldId ? form.specFieldId : null,
@@ -69,7 +71,7 @@ export default function AddSpec({
         setError(result.error);
         return;
       }
-      setForm({ ...form, label: "", value: "", materialCode: "", dimensionSlot: "" });
+      setForm({ ...form, label: "", value: "", qualifier: "", materialCode: "", dimensionSlot: "" });
       setOpen(false);
       await onAdded();
     } finally {
@@ -123,6 +125,22 @@ export default function AddSpec({
             className="mt-1 block w-72 border border-neutral-300 rounded px-2 py-1 text-sm"
           />
         </label>
+
+        {/* THE RETURN LINE. Matthew: "the top line as the spec and the return
+            line as the qualifier" — COM 1 is the fabric, and "Main body & self
+            pipe" is where it goes. Not offered on a dimension: a figure has a
+            slot, not a placement. */}
+        {!isDimension && (
+          <label className="text-xs text-neutral-600">
+            Where on the item
+            <input
+              value={form.qualifier}
+              onChange={(e) => setForm({ ...form, qualifier: e.target.value })}
+              placeholder="Main body &amp; self pipe"
+              className="mt-1 block w-52 border border-neutral-300 rounded px-2 py-1 text-sm"
+            />
+          </label>
+        )}
 
         {isDimension ? (
           <>

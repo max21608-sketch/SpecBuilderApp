@@ -47,7 +47,7 @@ type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
   tgq_levels: string[] | null;
   field_name: string | null; json_id: number | null; field_category: string | null;
-  answer_id: string | null; value: string | null; state: AnswerState; version: number;
+  answer_id: string | null; value: string | null; qualifier: string | null; state: AnswerState; version: number;
   confirmed_by: string | null; confirmed_at: string | null;
 };
 type SpecRecord = {
@@ -74,6 +74,8 @@ type FamilyMember = {
 
 type Attribute = {
   id: string; attr_group: AttributeGroup; label: string; value: string | null; unit: string | null;
+  /** Where on the item it goes (0029): "Main body & self pipe". */
+  qualifier: string | null;
   finish_id: string | null; finish_code: string | null; finish_description: string | null;
   finish_state: string | null;
   dimension_slot: DimensionSlot | null;
@@ -520,6 +522,14 @@ export default function RecordPage() {
                         {attribute.unit && <span className="text-neutral-500">{attribute.unit}</span>}
                         {attribute.state === "tbc" && <span className="ml-1 text-amber-800">TBC</span>}
                       </>
+                    )}
+                    {/* THE RETURN LINE (0029). Shown on its own line and in
+                        its own colour, because the whole point of holding it
+                        apart is that a reader can tell the spec from where it
+                        goes — which the exported cell, joined with a hyphen,
+                        cannot. */}
+                    {attribute.qualifier && (
+                      <span className="block text-xs text-neutral-500">{attribute.qualifier}</span>
                     )}
                     {/* A LINKED finish is a link to the library, because the
                         library is what the export renders and what a

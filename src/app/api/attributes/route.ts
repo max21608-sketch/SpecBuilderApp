@@ -29,6 +29,7 @@ const Body = z
     attrGroup: z.enum(ATTRIBUTE_GROUPS),
     label: z.string().min(1).max(300),
     value: z.string().max(20000).nullable(),
+    qualifier: z.string().max(2000).nullable().optional(),
     unit: z.enum(ATTRIBUTE_UNITS).nullable().optional(),
     dimensionSlot: z.enum(DIMENSION_SLOTS).nullable().optional(),
     specFieldId: z.string().uuid().nullable().optional(),

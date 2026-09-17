@@ -29,6 +29,7 @@ const attribute = (overrides: Partial<ExportAttribute> = {}): ExportAttribute =>
   label: "WIDTH",
   value: "1900",
   unit: "mm",
+  qualifier: null,
   dimensionSlot: "W",
   materialCode: null,
   specFieldJsonId: 3,
@@ -62,6 +63,13 @@ const JOB_COLUMNS_BWS_OWNS = BWS_EXPORT_COLUMNS.slice(0, 31)
 
 const column = (rows: string[][], name: string) => rows.filter((row) => row[5] === name);
 const cell = (rows: string[][], name: string) => column(rows, name)[0];
+
+/** A row's cells BY HEADER NAME. Positional slices break every time a column is
+ *  added — which 0029 did — and the break reads as a composer bug rather than
+ *  as a test that hard-coded an index. */
+const at = (row: string[] | undefined, ...names: string[]) =>
+  names.map((name) => row?.[CHECK_SHEET_HEADER.indexOf(name)] ?? "");
+const REVIEWER_COLUMNS = ["Pack says", "Verdict", "Note"];
 
 describe("columnLetter", () => {
   it("is the spreadsheet letter for a position, not a stored value", () => {
@@ -114,25 +122,31 @@ describe("composeCheckSheet", () => {
       }),
     );
     const dimensions = cell(sheet.rows, "Dimensions");
-    expect(dimensions?.[7]).toBe("W1900 x SH440mm");
-    expect(dimensions?.[8]).toBe("Document");
-    // Both, because the reviewer sent to one page cannot check the figure on
-    // the other.
-    expect(dimensions?.[9]).toBe("S-100.pdf, S-101.pdf");
-    expect(dimensions?.[10]).toBe("1, 2");
+    // Both documents, because the reviewer sent to one page cannot check the
+    // figure on the other. And NO qualifier: a cell composed from several
+    // pages has no single placement, and picking one would invent a fact.
+    expect(at(dimensions, "Exported value", "Qualifier", "Came from", "Source document", "Page")).toEqual([
+      "W1900 x SH440mm", "", "Document", "S-100.pdf, S-101.pdf", "1, 2",
+    ]);
   });
 
   it("says where a non-dimension value came from", () => {
     const sheet = composeCheckSheet(
       scope({
         attributes: [attribute({ attrGroup: "material", label: "SOFA", value: "Yarn YC04158", unit: null, dimensionSlot: null, specFieldJsonId: 1 })],
-        answers: [{ recordId: "rec-1", specFieldJsonId: 4, value: "Walnut, satin lacquer" }],
+        answers: [{ recordId: "rec-1", specFieldJsonId: 4, value: "Walnut, satin lacquer", qualifier: null }],
       }),
     );
-    expect(cell(sheet.rows, "COM 1")?.slice(7, 11)).toEqual(["Yarn YC04158", "Document", "S-100.pdf", "2"]);
+    expect(at(cell(sheet.rows, "COM 1"), "Exported value", "Came from", "Source document", "Page")).toEqual([
+      "Yarn YC04158", "Document", "S-100.pdf", "2",
+    ]);
     // An answer is somebody filling in a checklist: there is no page to open.
-    expect(cell(sheet.rows, "Main timber finish")?.slice(7, 11)).toEqual(["Walnut, satin lacquer", "Checklist", "", ""]);
-    expect(cell(sheet.rows, "Client Code")?.slice(7, 11)).toEqual(["X-100", "BOQ line", "", ""]);
+    expect(at(cell(sheet.rows, "Main timber finish"), "Exported value", "Came from", "Source document", "Page")).toEqual(
+      ["Walnut, satin lacquer", "Checklist", "", ""],
+    );
+    expect(at(cell(sheet.rows, "Client Code"), "Exported value", "Came from", "Source document", "Page")).toEqual([
+      "X-100", "BOQ line", "", "",
+    ]);
   });
 
   it("carries TBC through as itself", () => {
@@ -143,13 +157,13 @@ describe("composeCheckSheet", () => {
     );
     // Blank says nobody looked; TBC says the client has not decided. A check
     // sheet that flattened them would have a reviewer chase a settled question.
-    expect(cell(sheet.rows, "COM 1")?.[7]).toBe("TBC");
+    expect(at(cell(sheet.rows, "COM 1"), "Exported value")).toEqual(["TBC"]);
   });
 
   it("leaves the reviewer's three columns empty", () => {
     const sheet = composeCheckSheet(scope({ attributes: [attribute()] }));
     // A check that arrives pre-answered is the app agreeing with itself.
-    for (const row of sheet.rows) expect(row.slice(11)).toEqual(["", "", ""]);
+    for (const row of sheet.rows) expect(at(row, ...REVIEWER_COLUMNS)).toEqual(["", "", ""]);
   });
 
   it("stays in the export's own column order, by record", () => {

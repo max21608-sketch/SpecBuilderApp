@@ -49,6 +49,8 @@ export type SnapshotAnswer = {
   specFieldJsonId: number | null;
   specFieldName: string | null;
   value: string | null;
+  /** Where on the item it goes (0029). Null for a composed cell. */
+  qualifier: string | null;
   state: AnswerState;
   sourceKind: string;
   sourceId: string | null;
@@ -92,7 +94,7 @@ export type RecordAtoms = {
  * read, so an older version still parses rather than reading as "everything
  * was deleted that day".
  */
-export const RECORD_ATOMS_SCHEMA_VERSION = 3;
+export const RECORD_ATOMS_SCHEMA_VERSION = 4;
 
 function text(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
@@ -111,6 +113,7 @@ export function toExportAttribute(row: Row): ExportAttribute {
     label: String(row.label),
     value: text(row.value),
     unit: text(row.unit) as AttributeUnit | null,
+    qualifier: text(row.qualifier),
     dimensionSlot: isDimensionSlot(row.dimension_slot) ? row.dimension_slot : null,
     materialCode: text(row.material_code),
     // The library entry, when this attribute is linked to one. Loaded with the
@@ -148,6 +151,7 @@ export function toSnapshotAnswer(row: Row): SnapshotAnswer {
     specFieldJsonId: num(row.json_id),
     specFieldName: text(row.field_name)?.trim() ?? null,
     value: text(row.value),
+    qualifier: text(row.qualifier),
     state: String(row.state) as AnswerState,
     sourceKind: String(row.source_kind),
     sourceId: text(row.source_id),
@@ -166,6 +170,7 @@ export function exportAnswers(atoms: RecordAtoms): ExportAnswer[] {
       recordId: atoms.record.id,
       specFieldJsonId: answer.specFieldJsonId as number,
       value: answer.value,
+      qualifier: answer.qualifier,
     }));
 }
 
@@ -287,7 +292,7 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
   }
 
   const answerRows = await exec`
-    select a.id, a.record_id, a.requirement_id, a.value, a.state, a.source_kind, a.source_id,
+    select a.id, a.record_id, a.requirement_id, a.value, a.qualifier, a.state, a.source_kind, a.source_id,
            q.prompt, q.section, q.kind, f.json_id, f.name as field_name
     from spec_answers a
     join requirements q on q.id = a.requirement_id

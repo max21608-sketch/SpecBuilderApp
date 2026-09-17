@@ -156,6 +156,14 @@ point of sale to TG1."*
 
 | | |
 |---|---|
+| **Rule id** | `FMT-GEN-04` |
+| **Rule** | A spec value's **placement** is held apart from the value and joined on at the end. Until BWS can take a second line, it is written inline after a hyphen. |
+| **Shape** | `<value> - <placement>` |
+| **Example** | `FB-001; 12m of Example Mills Sample Weave - Main body and self pipe` *(invented)* |
+| **Cost** | Matthew: "the top line as the spec and the return line as the qualifier ... I don't think BWS currently captures that on the export / import but i can get Tim to build the import to suit." Folding the placement into `value` at capture time is the `TBC TBC` bug in a new place — a composer that has to parse a string back apart cannot stay idempotent. Emitting a newline before that importer exists is guessing at a file format in the file that overwrites rather than fails. `EXPORT_QUALIFIER_MODE` is the one switch, a TypeScript constant so flipping it is a deliberate commit, and a test asserts no cell carries a newline. The placement goes on **after** the TBC marker, so it can never suppress one. |
+
+| | |
+|---|---|
 | **Rule id** | `FMT-GEN-03` |
 | **Rule** | An unsettled value carries `TBC` **once**. Where the document's own wording already says it, nothing is appended, and the wording is never edited to make room. |
 | **Shape** | `<value> TBC`, or `<value as written>` when that value already says TBC |

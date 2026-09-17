@@ -204,6 +204,8 @@ export type CreateAttributeInput = {
   attrGroup: string;
   label: string;
   value: string | null;
+  /** Where on the item it goes: "Main body & self pipe" (0029). */
+  qualifier?: string | null;
   unit?: string | null;
   dimensionSlot?: string | null;
   specFieldId?: string | null;
@@ -324,10 +326,11 @@ export async function createAttribute(txn: TxnSql, input: CreateAttributeInput):
   `;
   const inserted = await txn`
     insert into record_attributes
-      (record_id, attr_group, label, value, unit, dimension_slot, material_code, spec_field_id,
+      (record_id, attr_group, label, value, qualifier, unit, dimension_slot, material_code, spec_field_id,
        state, source_run_id, source_page, sort_order, status, created_by, updated_by)
     values
-      (${input.recordId}, ${input.attrGroup}, ${label}, ${value}, ${unit}, ${slot},
+      (${input.recordId}, ${input.attrGroup}, ${label}, ${value}, ${input.qualifier?.trim() || null},
+       ${unit}, ${slot},
        ${input.materialCode?.trim() || null}, ${input.specFieldId ?? null}, ${input.state},
        null, null, ${Number(order[0]?.last ?? 0) + 1}, 'active', ${input.actor}, ${input.actor})
     returning id

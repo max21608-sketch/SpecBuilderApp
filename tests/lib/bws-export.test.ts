@@ -6,7 +6,9 @@ import {
   BWS_EXPORT_COLUMNS,
   SPEC_FIELD_COLUMNS,
   composeRow,
+  composeRowCells,
   composeWorkbook,
+  EXPORT_QUALIFIER_MODE,
   composeDimensions,
   renderAttributeValue,
   toCsv,
@@ -36,6 +38,7 @@ const attribute = (overrides: Partial<ExportAttribute> = {}): ExportAttribute =>
   label: "SOFA",
   value: "Yarn Tessarae YC04158 - 01",
   unit: null,
+  qualifier: null,
   dimensionSlot: null,
   materialCode: null,
   specFieldJsonId: 1,
@@ -225,7 +228,7 @@ describe("composeRow", () => {
   });
 
   it("falls back to a confirmed cheat-sheet answer where no attribute claims the field", () => {
-    const answers = [{ recordId: "rec-1", specFieldJsonId: 4, value: "Oiled oak" }];
+    const answers = [{ recordId: "rec-1", specFieldJsonId: 4, value: "Oiled oak", qualifier: null }];
     const row = composeRow(scope({ answers }), record(), [], answers);
     expect(row[indexOfField(4)]).toBe("Oiled oak");
   });
@@ -234,7 +237,7 @@ describe("composeRow", () => {
     // An attribute is a statement from a client document that can be re-checked
     // against a page; an answer is somebody filling in a checklist.
     const attributes = [attribute({ specFieldJsonId: 4, value: "Dark tinted wood", attrGroup: "finish" })];
-    const answers = [{ recordId: "rec-1", specFieldJsonId: 4, value: "Oiled oak" }];
+    const answers = [{ recordId: "rec-1", specFieldJsonId: 4, value: "Oiled oak", qualifier: null }];
     const row = composeRow(scope({ attributes, answers }), record(), attributes, answers);
     expect(row[indexOfField(4)]).toBe("Dark tinted wood");
   });
@@ -307,5 +310,65 @@ describe("exportFilename", () => {
   it("allowlists the characters that reach a Content-Disposition header", () => {
     expect(exportFilename("P17231", 'Main "run"\r\n/etc', "xlsx")).toBe("P17231 - Main runetc - BWS spec fields.xlsx");
     expect(exportFilename("P17231", null, "csv")).toBe("P17231 - BWS spec fields.csv");
+  });
+});
+
+describe("the qualifier — the return line", () => {
+  it("joins onto the value on ONE line, which is what BWS can receive today", () => {
+    const row = composeRow(
+      scope({}),
+      record(),
+      [attribute({ specFieldJsonId: 1, value: "Yarn Tessarae YC04158", qualifier: "Main body & self pipe" })],
+      [],
+    );
+    expect(row[indexOfField(1)]).toBe("Yarn Tessarae YC04158 - Main body & self pipe");
+  });
+
+  it("goes on AFTER the TBC marker, so a placement cannot suppress one", () => {
+    const row = composeRow(
+      scope({}),
+      record(),
+      [attribute({ specFieldJsonId: 1, value: "Yarn Tessarae", state: "tbc", qualifier: "Outside back" })],
+      [],
+    );
+    expect(row[indexOfField(1)]).toBe("Yarn Tessarae TBC - Outside back");
+  });
+
+  it("renders on an ANSWER too, or a placement typed on the record screen vanishes from the file", () => {
+    const answers = [{ recordId: "rec-1", specFieldJsonId: 4, value: "Oiled oak", qualifier: "Recessed plinth" }];
+    const row = composeRow(scope({ answers }), record(), [], answers);
+    expect(row[indexOfField(4)]).toBe("Oiled oak - Recessed plinth");
+  });
+
+  it("is absent from the composed DIMENSIONS cell, which has no single placement", () => {
+    const cells = composeRowCells(
+      scope({}),
+      record(),
+      [
+        attribute({ attrGroup: "dimension", dimensionSlot: "W", value: "1900", unit: "mm", specFieldJsonId: null, qualifier: "Overall" }),
+      ],
+      [],
+    );
+    const dimensions = cells[indexOfField(3)];
+    expect(dimensions?.qualifier).toBeNull();
+  });
+
+  it("NO EXPORTED CELL CONTAINS A NEWLINE while the mode is inline", () => {
+    // The guard on EXPORT_QUALIFIER_MODE. Matthew can get Tim to build the BWS
+    // importer to take a second line; until that exists and somebody has seen
+    // its shape, writing one into the most dangerous file in the product is
+    // guessing at a file format. Flipping the constant means watching this
+    // fail on purpose and running a fresh check sheet.
+    expect(EXPORT_QUALIFIER_MODE).toBe("inline");
+    const row = composeRow(
+      scope({}),
+      record(),
+      [
+        attribute({ specFieldJsonId: 1, value: "Yarn Tessarae", qualifier: "Main body & self pipe" }),
+        attribute({ id: "attr-2", specFieldJsonId: 4, value: "Oiled oak", qualifier: "Recessed plinth" }),
+      ],
+      [],
+    );
+    for (const cell of row) expect(cell).not.toMatch(/[\r\n]/);
   });
 });

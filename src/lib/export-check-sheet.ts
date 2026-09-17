@@ -63,6 +63,12 @@ export const CHECK_SHEET_HEADER = [
   "BWS field",
   "Field id",
   "Exported value",
+  // THE PLACEMENT HALF, SHOWN APART FROM THE VALUE (0029). The exported cell
+  // joins them — "Yarn Tessarae YC04158 - Main body and self pipe" — and a
+  // reviewer checking it against a page has to be able to tell which half the
+  // document actually said. It is a COPY of what is already inside Exported
+  // value, not an extra field to sign off.
+  "Qualifier",
   "Came from",
   "Source document",
   "Page",
@@ -139,6 +145,7 @@ export function composeCheckSheet(scope: ExportScope): CheckSheet {
         column.name.trim(),
         column.jsonId === null ? "" : String(column.jsonId),
         cell.value,
+        cell.qualifier ?? "",
         cameFrom(cell.source),
         documents,
         pages,

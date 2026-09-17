@@ -50,7 +50,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // and `source_page` are what make a value re-checkable: a value whose source
   // cannot be named is a value nobody can question.
   const attributes = await sql`
-    select a.id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code, a.state, a.status,
+    select a.id, a.attr_group, a.label, a.value, a.qualifier, a.unit, a.dimension_slot, a.material_code, a.state, a.status,
            a.sort_order, a.version, a.source_page, a.source_run_id, a.created_at, a.created_by,
            f.name as field_name, f.json_id, f.field_category,
            a.finish_id, fin.code as finish_code, fin.description as finish_description, fin.state as finish_state,
@@ -92,7 +92,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     select q.id as requirement_id, q.kind, q.prompt, q.help_text, q.section, q.sort_order,
            q.tgq_levels,
            f.name as field_name, f.json_id, f.field_category,
-           a.id as answer_id, a.value, a.state, a.version, a.confirmed_by, a.confirmed_at
+           a.id as answer_id, a.value, a.qualifier, a.state, a.version, a.confirmed_by, a.confirmed_at
     from requirements q
     left join spec_fields f on f.id = q.spec_field_id
     left join spec_answers a on a.requirement_id = q.id and a.record_id = ${id} and a.revision_no = 0

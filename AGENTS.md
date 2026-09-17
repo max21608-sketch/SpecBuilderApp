@@ -624,6 +624,53 @@ neither stores the result. Two consequences worth stating:
   so a record they never saw is distinguishable from one they deliberately
   dropped.
 
+### A spec value has a second line, and the file gets one line
+
+`db/migrations/0029_spec_qualifier.sql`, `src/lib/bws-export.ts`
+(`EXPORT_QUALIFIER_MODE`, `joinQualifier`, `renderAnswerValue`),
+`src/lib/promote-answers.ts`, `src/lib/export-check-sheet.ts`
+
+Matthew, 2026-09-17: "the spec fields are structured with the top line as the
+spec and the return line as the qualifier. So COM 1 might be 14m of T&G Pink
+velvet, then the returned line will be the placement 'Main & Self Pipe'." His
+matrix says it eight times — rows 15-22 are all "<field> + location".
+
+- **A column, not a row.** `record_attributes_field_slot_key` already says one
+  BWS field, one value per record. A qualifier is not a second statement; it is
+  the second line of the same one, and a satellite row re-opens "which line
+  wins" — the question that index closed.
+- **Never folded into `value`.** That is the `TBC TBC` bug in a new place:
+  `renderAttributeValue` is shaped the way it is because a marker composed into
+  a string that may already hold it is not idempotent. Holding the placement
+  apart means the composer always composes from atoms and never parses back.
+- **The export writes ONE LINE, today.** `EXPORT_QUALIFIER_MODE` is `inline`
+  and emits `<value> - <placement>`, which is the shape Matthew's own quote
+  sheet already uses. A TypeScript constant, not an env var and not a toggle:
+  a newline inside a BWS cell is a file-format change to the file that
+  overwrites rather than fails, so flipping it is a deliberate commit — and a
+  test asserts no exported cell contains a newline, so the flip means watching
+  that test fail on purpose and running a fresh check sheet. His own file mixes
+  a hyphen and an en dash; we emit one and parse neither.
+- **It goes on AFTER the TBC marker.** A placement can never carry the client's
+  not-decided marker, so folding it in first would let "Main body and self
+  pipe" suppress a TBC that belongs on the value.
+- **`renderAnswerValue` exists so an answer cannot be the exception.**
+  `composeRowCells` used to put `answer.value.trim()` straight into the cell — a
+  bare string with no composer behind it — which the moment an answer could
+  carry a placement became a way for one typed on the record screen to vanish
+  from the file while the screen went on showing it.
+- **The composed DIMENSIONS cell carries none.** Four slots off three pages
+  could carry four placements; picking one would invent a fact.
+- **The check sheet shows it apart from the value**, because the exported cell
+  joins them and a reviewer checking against a page has to be able to tell
+  which half the document said.
+- **Extraction is not retro-active and was not changed.** The tool schema has no
+  placement field; adding one means re-reading and re-paying for every document
+  already read. The `fabric_schedule` prompt already folds a position into the
+  value, so today's placements are in prose — the hand-typed field is the
+  recovery path, and a read-time splitter on " - " would halve a finish
+  description that legitimately contains one.
+
 ### A person can add a record, a spec and a note, and none of it has a page
 
 `db/migrations/0028_manual_capture.sql`, `src/lib/manual-capture.ts`,
