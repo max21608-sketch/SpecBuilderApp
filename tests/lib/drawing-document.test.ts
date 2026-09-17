@@ -54,6 +54,8 @@ function record(overrides: Partial<RecordEntry> = {}): RecordEntry {
     boqCodes: ["X-100"],
     runId: "run-main",
     runName: "Main run",
+    parentId: null,
+    variantLabel: null,
     version: 1,
     ...overrides,
   };

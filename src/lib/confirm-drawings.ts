@@ -125,6 +125,7 @@ async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[
   const rows = await txn`
     select r.id, r.record_no, r.item_description, r.category_id, r.version,
            r.run_id, run.name as run_name, p.bws_project_number,
+           r.parent_id, r.variant_label,
            coalesce((select array_agg(x.ref_value order by x.ref_value)
                        from spec_record_refs x where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as boq_codes
     from spec_records r
@@ -142,6 +143,8 @@ async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[
     categoryName: null,
     refs: (row.boq_codes as string[] | null)?.map(String) ?? [],
     boqCodes: (row.boq_codes as string[] | null)?.map(String) ?? [],
+    parentId: row.parent_id ? String(row.parent_id) : null,
+    variantLabel: row.variant_label ? String(row.variant_label) : null,
     runId: String(row.run_id),
     runName: String(row.run_name),
     version: Number(row.version),

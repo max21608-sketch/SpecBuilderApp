@@ -53,6 +53,16 @@ export type RecordEntry = {
   /** Which run (BOQ tab) this record belongs to. Drawings fan out across runs. */
   runId: string;
   runName: string;
+  /**
+   * The bill line a CONFIGURATION hangs off, and its letter (0024).
+   *
+   * Both null on an ordinary record. A configuration carries no client ref of
+   * its own, so `findRecordsByRef` never returns one — it is only ever reached
+   * through its parent, which is why the resolver has to look for it by
+   * `parentId` rather than by matching.
+   */
+  parentId: string | null;
+  variantLabel: string | null;
   version: number;
 };
 
@@ -108,7 +118,33 @@ export type TargetSnapshot = {
 
 export type Proposal = {
   id: string;
+  /**
+   * Which observation in the document this came from.
+   *
+   * NO LONGER UNIQUE, and that is the point: one observation about `S-201`
+   * fans out to one proposal per RUN, and they all carry the ordinal of the
+   * observation they share. It is the key the review screen groups a row by,
+   * so the reviewer sees "seat height" once with the runs beside it rather
+   * than three times.
+   */
   sourceOrdinal: number;
+  /**
+   * The run this fan-out member writes to, for display. Null on a proposal
+   * that resolved to no run at all.
+   *
+   * OPTIONAL on the stored shape: staged JSON written before the fan-out
+   * existed has neither field, and a review screen that threw on it would make
+   * every already-read document unreviewable.
+   */
+  runId?: string | null;
+  runName?: string | null;
+  /**
+   * The configuration letter the observation's own label names — the `A` in
+   * "Fabric (A configuration)". Read from the wording, so it is a SUGGESTION
+   * and the screen badges it; nothing is written from it. Null when the label
+   * names no configuration, which is almost every observation.
+   */
+  configurationLabel?: string | null;
   version: number;
   raw: RawProposal;
   recordCandidates: Candidate[];
@@ -358,22 +394,95 @@ function emailAwareState(observation: RawProposal): StateSuggestion {
   };
 }
 
+/**
+ * The configuration letter an attribute label names, or null.
+ *
+ * "Fabric (A configuration)", "Fabric - configuration B", "COM 1 (config C)".
+ * Deliberately narrow: the letter must be a single character sitting beside
+ * the WORD, so "Fabric A" alone matches nothing — plenty of specifications
+ * name a fabric "A" meaning a grade, and reading that as a configuration would
+ * send the value to a record the email never mentioned.
+ *
+ * This is a reading of wording, so nothing is written from it. It exists to
+ * let the screen SAY that a value is about one configuration of a split item,
+ * which is the difference between a reviewer noticing and not.
+ */
+export function detectConfiguration(attributeRaw: string | null): string | null {
+  if (!attributeRaw) return null;
+  const match = /\b(?:config|configuration|variant|option)\b\W{0,3}([A-Z])\b/i.exec(attributeRaw)
+    ?? /\b([A-Z])\W{0,3}\b(?:config|configuration|variant|option)\b/i.exec(attributeRaw);
+  return match?.[1]?.toUpperCase() ?? null;
+}
+
+/**
+ * Matched records grouped by the run they are on, in the order the runs were
+ * loaded. The whole of the fan-out rule lives in this shape.
+ */
+function groupRecordsByRun(matched: RecordEntry[]): { runId: string; runName: string; records: RecordEntry[] }[] {
+  const byRun = new Map<string, { runId: string; runName: string; records: RecordEntry[] }>();
+  for (const record of matched) {
+    const existing = byRun.get(record.runId);
+    if (existing) existing.records.push(record);
+    else byRun.set(record.runId, { runId: record.runId, runName: record.runName, records: [record] });
+  }
+  return [...byRun.values()].sort((a, b) => a.runName.localeCompare(b.runName));
+}
+
 export function resolveProposals(
   raw: RawProposal[],
   registers: Registers,
   newId: () => string,
 ): Proposal[] {
-  return raw.map((observation, index) => {
+  return raw.flatMap((observation, index) => {
     const matchedRecords = findRecordsByRef(observation.refRaw, registers.records);
-    const recordCandidates: Candidate[] = matchedRecords.map((record) => ({
-      id: record.id,
-      label: `${record.label} · ${record.refs.join(", ")} · ${record.itemDescription}`,
-    }));
 
-    // Exactly one record, and it has a category. Anything else stays unchosen:
-    // a record with no category has no checklist to match an attribute against,
-    // so picking it would only produce a second unanswerable question.
-    const record = matchedRecords.length === 1 ? matchedRecords[0] ?? null : null;
+    // ------------------------------------------------------------------
+    // THE FAN-OUT. `S-201` is on the mock-up run, the main run and the VE
+    // run, with different quantities, and there is ONE email about it. A
+    // matcher that counts matches without looking at which run they are on
+    // sees three and gives up — which is what this did, and why a reviewer
+    // was asked to place seven values by hand against three identical
+    // candidates.
+    //
+    // So: one record per run is a FAN-OUT, one proposal each, and unticking
+    // a run is how a spec that genuinely differs there (a VE run's fabric)
+    // is excluded. TWO records in ONE run is the `SX11A` case and stays
+    // AMBIGUOUS — two lines of one bill carrying one code are two different
+    // items and choosing between them is a person's decision.
+    //
+    // This is `resolveDrawingTargets`' rule, which has been right since 0007.
+    // The two pipelines matching a code differently was the defect.
+    // ------------------------------------------------------------------
+    const runs = groupRecordsByRun(matchedRecords);
+    if (runs.length === 0) {
+      return [buildProposal(observation, index, null, [], registers, newId, null)];
+    }
+
+    return runs.map((run) => {
+      const candidates: Candidate[] = run.records.map((record) => ({
+        id: record.id,
+        label: `${record.label} · ${record.refs.join(", ")} · ${record.itemDescription}`,
+      }));
+      // One record on this run, and it has a category. Anything else stays
+      // unchosen: a record with no category has no checklist to match an
+      // attribute against, so picking it would only produce a second
+      // unanswerable question.
+      const record = run.records.length === 1 ? run.records[0] ?? null : null;
+      return buildProposal(observation, index, record, candidates, registers, newId, run);
+    });
+  });
+}
+
+function buildProposal(
+  observation: RawProposal,
+  index: number,
+  record: RecordEntry | null,
+  recordCandidates: Candidate[],
+  registers: Registers,
+  newId: () => string,
+  run: { runId: string; runName: string } | null,
+): Proposal {
+  {
     const recordId = record && record.categoryId ? record.id : null;
 
     let requirementCandidatesOut: Candidate[] = [];
@@ -411,6 +520,9 @@ export function resolveProposals(
     return {
       id: newId(),
       sourceOrdinal: index,
+      runId: run ? run.runId : null,
+      runName: run ? run.runName : null,
+      configurationLabel: detectConfiguration(observation.attributeRaw),
       version: 1,
       raw: observation,
       recordCandidates,
@@ -427,7 +539,65 @@ export function resolveProposals(
       reviewedBy: null,
       applied: null,
     };
+  }
+}
+
+/**
+ * Resolving an ALREADY-STAGED document again, against today's registers and
+ * today's rules. No model call, nothing charged.
+ *
+ * A spec document resolves in the WORKER, not at read time, because a proposal
+ * needs a target SNAPSHOT the confirm can check for edits underneath the
+ * reviewer — so unlike `upgradeCalloutGuesses` and `applyViewGuesses`, a
+ * corrected rule is NOT retro-active here and an already-read document keeps
+ * the resolution it was given. That is the right default and a bad dead end:
+ * the fan-out above would otherwise reach the Panther email only by re-reading
+ * it, which is a billed call to fix an app defect.
+ *
+ * Every proposal carries its own `raw` observation, so the whole input is
+ * already on record and re-resolving is free. Two other cases it serves, both
+ * ordinary orders of work rather than errors: an email read before its BOQ was
+ * confirmed, and a bill revised after the email was read.
+ *
+ * WHAT IT REFUSES TO TOUCH is the load-bearing part. Only a proposal that is
+ * still `pending`, still at `version === 1` (nobody has patched it) and still
+ * unresolved is re-resolved. A reviewer's retarget, edit, ignore or confirm is
+ * a decision, and a re-match that overwrote one would be a guess wearing their
+ * authority — the rule `upgradeCalloutGuesses` already follows.
+ *
+ * It is also ID-STABLE where nothing changes: a proposal that re-resolves to a
+ * single still-unresolved proposal is returned untouched rather than replaced
+ * with an identical copy under a new id, so running it twice is a no-op and a
+ * reviewer's open dropdown does not jump.
+ */
+export function rematchProposals(
+  staged: StagedSpecDocument,
+  registers: Registers,
+  newId: () => string,
+): { lines: Proposal[]; rematched: number; added: number } {
+  let rematched = 0;
+  let added = 0;
+
+  const lines = staged.lines.flatMap((proposal): Proposal[] => {
+    const untouched = proposal.reviewStatus === "pending" && proposal.version === 1 && !proposal.recordId;
+    if (!untouched) return [proposal];
+
+    const resolved = resolveProposals([proposal.raw], registers, newId);
+    // Still nothing to say. Hand back the ORIGINAL, so ids and versions hold.
+    if (resolved.length === 1 && !resolved[0]?.recordId) return [proposal];
+
+    rematched += 1;
+    added += resolved.length - 1;
+    return resolved.map((next, index) => ({
+      ...next,
+      // The first member keeps the original's identity: the row the reviewer
+      // is looking at stays the row they were looking at.
+      id: index === 0 ? proposal.id : next.id,
+      sourceOrdinal: proposal.sourceOrdinal,
+    }));
   });
+
+  return { lines, rematched, added };
 }
 
 function promptFor(registers: Registers, requirementId: string): string {
@@ -450,7 +620,15 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
   if (proposal.reviewStatus !== "pending") return blockers;
 
   if (!proposal.recordId || !proposal.requirementId || !proposal.target) {
-    blockers.push({ code: "unassigned", message: "Choose which record and question this belongs to." });
+    // Name the half that is missing. Once the run fan-out resolves the item,
+    // "choose which record and question" sends a reviewer looking for a record
+    // that is already chosen, and the question — the thing they actually have
+    // to pick — reads as one of two equal problems.
+    blockers.push(
+      proposal.recordId
+        ? { code: "unassigned", message: "Choose which question this answers." }
+        : { code: "unassigned", message: "Choose which record and question this belongs to." },
+    );
     return blockers;
   }
 

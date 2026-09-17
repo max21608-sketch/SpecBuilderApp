@@ -741,6 +741,86 @@ history is kept and MARKED, never stripped — a reply quotes the question it
 answers — and the prompt tells the model to record from it only where the new
 text does not restate the value.
 
+### One email, one code, three runs — and one row per spec
+
+`src/lib/spec-document.ts` (`resolveProposals`, `rematchProposals`),
+`src/lib/spec-review-rows.ts`, `src/lib/spec-change.ts`,
+`src/app/api/imports/[id]/rematch/route.ts`
+
+The first real email review was a wall: seven specification values, every one
+reading **ambiguous match** against three identical candidates, each with a
+paragraph of the model's own reasoning under it and two dropdowns to fill in by
+hand. Nothing about the email was ambiguous. `S-201` is on the mock-up run, the
+main run and the VE run, and `resolveProposals` counted three matches and gave
+up — `matchedRecords.length === 1 ? … : null`.
+
+`resolveDrawingTargets` has had the right rule since 0007 and says so in its own
+header: **one record per RUN is a fan-out; two records in ONE run is the
+`SX11A` case and stays ambiguous.** The two pipelines matching a code
+differently was the whole defect, and the fix is that rule in a second place —
+not new thinking.
+
+Six things are load-bearing:
+
+- **The fan-out is N PROPOSALS, not one proposal with N targets.** A proposal
+  carries a target SNAPSHOT the confirm checks for edits underneath the
+  reviewer, so a multi-target proposal would need N snapshots, N overwrite
+  acknowledgements and N version checks inside one row. One proposal per record
+  keeps `proposalBlockers`, the per-record confirm and the `duplicate_target`
+  clash working unchanged, and **the record stays the unit of commit**.
+- **`sourceOrdinal` is no longer unique, and that is its job.** The fan-out
+  members share the ordinal of the observation they came from, which is the key
+  `groupIntoSpecRows` groups a screen row by. Seven specs over three runs is
+  seven rows, not twenty-one.
+- **A run that collides is the only run the reviewer is asked about.** A code on
+  two lines of the VE bill leaves the main run resolved and asks about VE alone,
+  and the candidates offered are THAT RUN'S — offering the main run's record
+  there would let somebody resolve the collision onto a record another proposal
+  is already writing.
+- **Re-matching is FREE and it never overwrites a decision.** A spec document
+  resolves in the worker, not at read time, so a corrected rule is not
+  retro-active and the pilot email would otherwise need a billed re-read to fix
+  an app defect. Every staged proposal carries its own `raw`, so
+  `rematchProposals` re-resolves from what is already on record — touching only
+  what is still `pending`, still at `version === 1` and still unresolved, and
+  returning the ORIGINAL row unchanged when nothing resolves differently, so
+  running it twice is a no-op. The button says it costs nothing, because every
+  other button on that screen that touches extraction spends money.
+- **The verb comes from the RECORD, never from the wording.** `describeChange`
+  reads the target snapshot — provides / confirms / changes / repeats / puts
+  back to TBC — so an email the model read as `confirms_tbc` over a value the
+  record already holds is reported as a CHANGE, which is what is about to
+  happen. `changeIntent` is kept for the one case wording alone cannot carry, a
+  settled value being withdrawn, and that already reaches the state through
+  `emailAwareState`. The label never stands in for a blocker: `changes` still
+  requires the overwrite acknowledgement.
+- **"Item not found" and "question not matched" are different jobs.**
+  Collapsing them produced a row that contradicted itself — *3 runs* in the
+  Applies to column beside *Not yet placed*. Once the fan-out lands, the item is
+  the half that resolves and the question is the half that does not, because
+  `requirement_aliases` is empty and "Seat height" scores nothing against a
+  category that asks "Dimensions". The blocker names the half that is missing.
+
+**The row is a summary and every control is still one click inside it.** The
+question picker, the value box, the state select and the overwrite
+acknowledgement are unchanged in `ProposalRow`, per run. A table that could only
+confirm or ignore would make correcting a misread value impossible, which is the
+reviewer's whole job. Blockers render ON the row, not only on the disabled
+button at the bottom — a 400 in a banner at the top of the page is nowhere near
+the row it is about. And the per-run panel is a `<div>` holding a `<ul>`, because
+`ProposalRow` renders its own `<li>` and nesting one in another is a hydration
+error.
+
+**A configuration is DETECTED and never resolved.** `detectConfiguration` reads
+the `A` out of "Fabric (A configuration)" and the row badges it yellow. It
+refuses a bare letter — "Fabric A" is a grade far more often than one of 0024's
+configurations — and nothing is written from it, because a configuration carries
+no client ref, may not exist, and `ensureVariant` refuses a bill line that
+already holds confirmed specs. **STILL OPEN:** the pilot email states fabrics for
+configurations A and B of `S-201`, which has none, and what should happen then —
+flag it, offer to create them, or something else — is Max's decision and has not
+been taken.
+
 ### The record is the unit of commit, and a half-applied card is the failure
 
 `src/lib/confirm-spec-document.ts`, `src/app/api/imports/[id]/confirm/route.ts`
@@ -2020,6 +2100,36 @@ showing *Review complete · 240 specs applied*; the projects list, its search an
 a COMPLETED pill appearing with no button pressed; and a run's two suggested
 levels accepted in one click under one change set. **Not accepted by Max**, on
 any screen.
+
+**Built 2026-09-17, the email review is a table and the match works.** Max drove
+the first real email review and reported both halves: "I don't know why it's
+failed to match it… everything with an S-201 for this specific project, it's
+going to apply for", and "what we should essentially have is just a table
+listing each of the specs and then just list the changes". The load-bearing
+section above carries the reasoning.
+
+- **The run fan-out**, which is `resolveDrawingTargets`' rule applied to the
+  pipeline that never got it. Verified against the sandbox Panther email: seven
+  observations became 21 proposals across MUR, MAIN RUN and MAIN RUN - VE, every
+  one with its record resolved, **with no document re-read and nothing charged
+  again** — `POST /api/imports/[id]/rematch` re-resolves from the `raw` already
+  on record.
+- **One row per SPEC**, with what the email does to it, its value, and the runs
+  it writes to; the per-run controls are inside the row, unchanged. The card
+  stack and the separate amber "Not yet placed" panel are gone.
+
+**Verified in the browser against the real staged email**, not fixtures: seven
+rows fanned to three runs each, the two fabric rows badged as configurations, a
+question set on one run flipping the verb to *Provides* and raising "the runs do
+not agree", and the hydration error that first build introduced found and fixed
+in the DOM. **Not accepted by Max.**
+
+Two things it does NOT fix. The **question** match is still unseeded —
+"Seat height" scores nothing against a category asking "Dimensions", so all seven
+rows read *Question not matched* and a person picks from the dropdown; that is
+`requirement_aliases`, a seeding job from verified wording. And **what to do
+with a fabric stated for a configuration that does not exist** is undecided —
+see the load-bearing section.
 
 **Outstanding — judgement, not code.**
 

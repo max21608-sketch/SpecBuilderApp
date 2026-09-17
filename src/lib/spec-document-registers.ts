@@ -23,6 +23,7 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
            c.name as category_name,
            p.bws_project_number,
            r.run_id, run.name as run_name,
+           r.parent_id, r.variant_label,
            coalesce(
              (select array_agg(x.ref_value order by x.ref_value)
                 from spec_record_refs x where x.record_id = r.id),
@@ -52,6 +53,15 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
     boqCodes: (row.boq_codes as string[] | null)?.map(String) ?? [],
     runId: String(row.run_id),
     runName: String(row.run_name),
+    // A CONFIGURATION carries no client ref of its own (variant-create.ts keeps
+    // `S-201` on the parent, deliberately, or every card would resolve as
+    // ambiguous). So it can never be reached by `findRecordsByRef`, and without
+    // these two columns it arrived in the manual record dropdown looking
+    // exactly like its own parent — same description, no letter, distinguished
+    // only by a record number nobody reads. They are what lets a screen say
+    // "S-201 A" and what lets the resolver see that a configuration exists.
+    parentId: row.parent_id ? String(row.parent_id) : null,
+    variantLabel: row.variant_label ? String(row.variant_label) : null,
     version: Number(row.version),
   }));
 

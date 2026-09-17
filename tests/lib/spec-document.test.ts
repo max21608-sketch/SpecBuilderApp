@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyProposal,
+  detectConfiguration,
   findRecordsByRef,
   groupByRecord,
   normaliseRef,
@@ -35,6 +36,8 @@ function record(overrides: Partial<RecordEntry> = {}): RecordEntry {
     boqCodes: ["SX11A"],
     runId: "run-1",
     runName: "Main run",
+    parentId: null,
+    variantLabel: null,
     version: 3,
     ...overrides,
   };
@@ -168,7 +171,11 @@ describe("resolveProposals", () => {
     expect(proposal?.raw.valueRaw).toBe("  Antique Brass (RAL 1036)  ");
   });
 
-  it("chooses NEITHER record when one ref matches two", () => {
+  it("chooses NEITHER record when one ref matches two ON THE SAME RUN", () => {
+    // The SX11A case. Two lines of ONE bill carrying one code are two
+    // different items, and choosing between them is a person's decision. This
+    // must survive the run fan-out below, which is the whole reason the
+    // fan-out groups by run instead of counting matches.
     const regs = registers({
       records: [record({ id: "a" }), record({ id: "b", label: "P17231-015" })],
     });
@@ -176,6 +183,68 @@ describe("resolveProposals", () => {
     expect(proposal?.recordId).toBeNull();
     expect(proposal?.recordCandidates).toHaveLength(2);
     expect(classifyProposal(proposal as Proposal)).toBe("ambiguous");
+  });
+
+  it("fans one observation out to the SAME code on every run", () => {
+    // `S-201` is on the mock-up, main and VE runs with different quantities,
+    // and there is ONE email about it. Three matches is not ambiguity.
+    const regs = registers({
+      records: [
+        record({ id: "mur", runId: "run-mur", runName: "MUR" }),
+        record({ id: "main", runId: "run-main", runName: "MAIN RUN" }),
+        record({ id: "ve", runId: "run-ve", runName: "VE" }),
+      ],
+    });
+    const proposals = resolve([observation()], regs);
+
+    expect(proposals).toHaveLength(3);
+    expect(proposals.map((p) => p.recordId).sort()).toEqual(["main", "mur", "ve"]);
+    // Every one of them is committable, and every one names its run.
+    for (const proposal of proposals) {
+      expect(classifyProposal(proposal)).toBe("pending");
+      expect(proposal.target).not.toBeNull();
+      expect(proposal.requirementId).toBe("req-leg");
+    }
+    expect(proposals.map((p) => p.runName)).toEqual(["MAIN RUN", "MUR", "VE"]);
+    // They share the ordinal of the observation they came from, which is what
+    // lets the screen show one row for "seat height" with three runs beside it.
+    expect(new Set(proposals.map((p) => p.sourceOrdinal))).toEqual(new Set([0]));
+    // ...and separate ids, or an edit to one would address all three.
+    expect(new Set(proposals.map((p) => p.id)).size).toBe(3);
+  });
+
+  it("fans out the clean runs and leaves only the colliding run ambiguous", () => {
+    // Both rules at once: the main run resolves, and the run carrying the code
+    // twice is the only thing the reviewer is asked about.
+    const regs = registers({
+      records: [
+        record({ id: "main", runId: "run-main", runName: "MAIN RUN" }),
+        record({ id: "ve-a", runId: "run-ve", runName: "VE" }),
+        record({ id: "ve-b", runId: "run-ve", runName: "VE", label: "P17231-015" }),
+      ],
+    });
+    const proposals = resolve([observation()], regs);
+
+    expect(proposals).toHaveLength(2);
+    const main = proposals.find((p) => p.runId === "run-main");
+    const ve = proposals.find((p) => p.runId === "run-ve");
+
+    expect(main?.recordId).toBe("main");
+    expect(classifyProposal(main as Proposal)).toBe("pending");
+
+    expect(ve?.recordId).toBeNull();
+    expect(classifyProposal(ve as Proposal)).toBe("ambiguous");
+    // The candidates offered are that RUN'S, not the project's: offering the
+    // main run's record here would let a reviewer resolve the VE collision
+    // onto a record that is already being written by its own proposal.
+    expect(ve?.recordCandidates.map((c) => c.id).sort()).toEqual(["ve-a", "ve-b"]);
+  });
+
+  it("still produces one unassigned proposal when a ref matches nothing", () => {
+    const proposals = resolve([observation({ refRaw: "ZZ99" })]);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.runId).toBeNull();
+    expect(classifyProposal(proposals[0] as Proposal)).toBe("unassigned");
   });
 
   it("leaves a record with no category unchosen", () => {
@@ -340,5 +409,25 @@ describe("groupByRecord", () => {
     const groups = groupByRecord(proposals);
     expect(groups).toHaveLength(1);
     expect(groups[0]?.proposals).toHaveLength(1);
+  });
+});
+
+describe("detectConfiguration", () => {
+  it("reads the configuration an attribute label names", () => {
+    expect(detectConfiguration("Fabric (A configuration)")).toBe("A");
+    expect(detectConfiguration("Fabric (B configuration)")).toBe("B");
+    expect(detectConfiguration("Fabric - configuration C")).toBe("C");
+    expect(detectConfiguration("COM 1 (config D)")).toBe("D");
+    expect(detectConfiguration("fabric, variant b")).toBe("B");
+  });
+
+  it("refuses a bare letter, which is a grade far more often than a configuration", () => {
+    // "Fabric A" on a specification sheet routinely means a grade or a
+    // position, not one of 0024's configurations. Reading it as a
+    // configuration would send the value to a record the email never named.
+    expect(detectConfiguration("Fabric A")).toBeNull();
+    expect(detectConfiguration("Grade A fabric")).toBeNull();
+    expect(detectConfiguration("Seat height")).toBeNull();
+    expect(detectConfiguration(null)).toBeNull();
   });
 });
