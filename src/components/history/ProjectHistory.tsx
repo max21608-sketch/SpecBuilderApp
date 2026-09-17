@@ -26,6 +26,13 @@ function when(iso: string): string {
   });
 }
 
+/** How much of the trail is shown before somebody asks for the rest. A seeded
+ *  run writes one change per record, so the newest few are the whole of what
+ *  anybody reads and the other eighty push the comparison controls — and every
+ *  other card on the page — off the screen. The count is always stated, so a
+ *  collapsed list never implies the trail is shorter than it is. */
+const RECENT_CHANGES = 5;
+
 const CHANGE_CLASS: Record<RecordComparison["change"], string> = {
   added: "text-green-700 bg-green-50 border-green-200",
   removed: "text-red-700 bg-red-50 border-red-200",
@@ -46,6 +53,7 @@ export default function ProjectHistory({ projectId, runId }: { projectId: string
   const [baselineReason, setBaselineReason] = useState("");
   const [namingPoint, setNamingPoint] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [showAllChanges, setShowAllChanges] = useState(false);
 
   const load = useCallback(async () => {
     const query = runId ? `?runId=${runId}` : "";
@@ -108,6 +116,8 @@ export default function ProjectHistory({ projectId, runId }: { projectId: string
   const { changes } = data;
   const baselines = changes.filter((change) => change.kind === "baseline");
   const visible = comparison?.records.filter((record) => showUnchanged || record.change !== "unchanged") ?? [];
+  const visibleChanges = showAllChanges ? changes : changes.slice(0, RECENT_CHANGES);
+  const hiddenChanges = changes.length - visibleChanges.length;
 
   return (
     <div className="mt-3">
@@ -266,14 +276,17 @@ export default function ProjectHistory({ projectId, runId }: { projectId: string
         </div>
       )}
 
-      <h3 className="mt-5 text-xs font-medium text-neutral-500 uppercase tracking-wide">Everything that has happened</h3>
+      <h3 className="mt-5 text-xs font-medium text-neutral-500 uppercase tracking-wide">
+        Everything that has happened
+        {changes.length > 0 && <span className="ml-2 normal-case tracking-normal text-neutral-400">{changes.length}</span>}
+      </h3>
       {changes.length === 0 ? (
         <p className="mt-2 text-sm text-neutral-600">
           Nothing recorded yet. Changes start when a document is confirmed or somebody edits an item.
         </p>
       ) : (
         <ul className="mt-2 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
-          {changes.map((change) => (
+          {visibleChanges.map((change) => (
             <li key={change.id} className="px-4 py-2 text-sm">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="text-neutral-900">{change.label ?? change.kindLabel}</span>
@@ -310,6 +323,16 @@ export default function ProjectHistory({ projectId, runId }: { projectId: string
             </li>
           ))}
         </ul>
+      )}
+      {/* Expanding shows the rest; it never loads anything, because the whole
+          trail is already here. The count says how many are hidden, so the
+          list never reads as the whole of what has happened. */}
+      {changes.length > RECENT_CHANGES && (
+        <div className="mt-2">
+          <Button variant="quiet" onClick={() => setShowAllChanges((value) => !value)}>
+            {showAllChanges ? `Show the ${RECENT_CHANGES} most recent` : `Show all ${changes.length} — ${hiddenChanges} more`}
+          </Button>
+        </div>
       )}
     </div>
   );
