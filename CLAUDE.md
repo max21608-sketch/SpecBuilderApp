@@ -1374,6 +1374,37 @@ words so a value stays checkable against its page; the CELL renders the library.
   reason, which the Edit panel collects. Where nothing is filed the screen says
   so in words, because a dropdown with one option reads as broken.
 
+### A CHECK is re-listed in full, so copying a stale list DELETES values
+
+`db/migrations/0032_restore_email_confirm.sql`, `tests/db/vocabulary-sync.test.ts`
+
+A Postgres `check (x in (...))` cannot be extended: adding a value means
+dropping the constraint and recreating it with the whole list. The whole list
+then gets copied from whichever migration most recently re-listed it — and that
+copy is stale the moment any migration since added a value.
+
+**0028 copied 0019's list of change-set kinds and silently deleted
+`email_confirm`, which 0021 had added in between.** Every email confirm began
+failing with a constraint violation that reached the reviewer as a 500 and
+"Nothing was written", and four db-tier tests went red for a value nobody had
+typed.
+
+Two things are worth more than the fix:
+
+- **The misdiagnosis.** It was first blamed on another agent's commit, on the
+  evidence that it still failed with the TypeScript changes stashed. It failed
+  because **the constraint lives in the database**: a migration already applied
+  to the sandbox is not undone by stashing a `.ts` file. When a db-tier test
+  fails, the thing to revert is the SCHEMA, not the source — and the way to
+  check a clean baseline is `git worktree add --detach <dir> HEAD`, which leaves
+  the working tree alone.
+- **The guard.** `tests/db/vocabulary-sync.test.ts` asserts all twelve
+  controlled vocabularies in `spec-vocab.ts`, `change-sets.ts` and `finishes.ts`
+  against their own CHECK, and reports drift the other way. It fails in a second
+  on the next drop-and-recreate that loses a value, which is the only version of
+  this that scales. Read the LIVE constraint when re-listing one, never a
+  migration.
+
 ### A backtick inside a `sql` template closes it
 
 Twice on 2026-09-17, in `promote-answers.ts` and in the quote route: a SQL

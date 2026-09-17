@@ -167,7 +167,7 @@ All of it on `staging`, none of it accepted by anybody.
 | 5 | **The quote CSV** and the BWS boilerplate register. Eight of twelve columns. | `0031`, seed `0010` |
 | 7 | **Setting the finishes library out from a list** (partial — see below). | none |
 
-### Three defects the work found, none of them in the plan
+### Four defects the work found, none of them in the plan
 
 1. **A second hand-typed dimension could not update the answer the first one
    wrote.** `applyAnswerFills` only touches an answer still `missing` or one a
@@ -181,6 +181,29 @@ All of it on `staging`, none of it accepted by anybody.
    `armchairs-benches-stools-sofas` sheet maps to three of Matthew's codes and
    the first version took the first alphabetically. More than one code now
    derives nothing — which makes question 2 concrete rather than theoretical.
+4. **`0028` deleted the `email_confirm` change-set kind**, by re-listing the
+   `change_sets_kind_check` constraint from 0019's copy, which predated the
+   0021 migration that added it. Every email confirm failed with a constraint
+   violation reaching the reviewer as "Nothing was written". Restored by
+   `0032`, and `tests/db/vocabulary-sync.test.ts` now asserts all twelve
+   controlled vocabularies against their own CHECK so the next one fails in a
+   second. **It was first misattributed to another agent's commit**, because
+   the failure survived stashing the TypeScript changes — it survived because
+   the constraint is in the database, which a stash does not touch.
+
+### Two traces this work left that are not swept
+
+- **Four change sets on the sandbox `AP364c` project**, from the browser
+  walkthrough of stage 2 — `record_create`, two `manual_edit`s and an
+  `attribute_create`, actor `__qa-probe@example.test`. The records were swept,
+  which cascaded their versions away, but `change_sets` refuses a delete while
+  its project exists and the project is real. They are inert; they are also
+  why `tests/db/change-history.test.ts`'s whole-database assertion now requires
+  at least one audit row whose target still exists. `npm run db:qa-clean` did
+  not catch them because they are on a REAL project, not a `__QA` one — worth
+  knowing before the next browser walkthrough on live data.
+- **One checklist answer on the Panther armchair** was set and reverted during
+  the palette check. The revert is recorded under actor `qa-revert`.
 
 ### What is NOT built, and why
 

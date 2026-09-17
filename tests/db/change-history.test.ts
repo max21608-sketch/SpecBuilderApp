@@ -231,12 +231,36 @@ describeIfDb("0012 change sets and versions", () => {
     // only ever see fixtures. Rows written before 0012 carry a null
     // change_set_id and are not joined, so history starting today does not
     // fail this.
+    //
+    // ---- AND WHY THE ROW HAS TO STILL EXIST ------------------------------
+    //
+    // `record_snapshots` cascades away with its record — 0013's sanctioned
+    // route, "refuse the rewrite, allow the cascade". So a change set whose
+    // records have since been DELETED legitimately has no version left, while
+    // its audit rows remain, because audit_log is append-only and outlives
+    // everything. Counting those made this fail for a reason no write path
+    // could fix: the versions existed and went with the records.
+    //
+    // Found on 2026-09-17, by a browser walkthrough on a real sandbox project
+    // whose records were swept afterwards. `change_sets` refuses a delete
+    // outright while its project exists, so four of them are there for good.
+    //
+    // The property this test wants is "a LIVE write path took no version", so
+    // it now asks for at least one audit row whose target still exists. A
+    // confirm path that forgets to snapshot is caught exactly as before,
+    // because its rows are still there.
     const uncovered = await client.query(
       `select cs.id, cs.kind, cs.actor, cs.created_at, count(*)::int as writes
          from change_sets cs
          join audit_log al on al.change_set_id = cs.id
         where al.table_name = any($1::text[])
           and not exists (select 1 from record_snapshots s where s.change_set_id = cs.id)
+          and (
+            exists (select 1 from spec_records r where r.id::text = al.row_id)
+            or exists (select 1 from spec_answers a where a.id::text = al.row_id)
+            or exists (select 1 from record_attributes ra where ra.id::text = al.row_id)
+            or exists (select 1 from spec_record_refs rf where rf.id::text = al.row_id)
+          )
         group by cs.id, cs.kind, cs.actor, cs.created_at
         order by cs.created_at`,
       [SPEC_CONTENT_TABLES],
