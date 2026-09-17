@@ -493,9 +493,12 @@ try {
     );
     const assigned = rows.rows.filter((row) => row.intake_run_id);
     const sweepable = rows.rows.filter((row) => !row.intake_run_id);
+    // A message with no subject is a real message; `null` in the output reads
+    // as a bug in the sweep rather than as the message it removed.
+    const named = (row: { subject: string | null }) => row.subject || "(no subject)";
 
     for (const row of assigned) {
-      console.log(`  keeping "${row.subject}" — it owns an intake run; remove that first if you mean to.`);
+      console.log(`  keeping "${named(row)}" — it owns an intake run; remove that first if you mean to.`);
     }
     if (!apply) {
       console.log(`\nDry run. Would remove ${sweepable.length} fake message(s) and their stored files.`);
@@ -505,11 +508,11 @@ try {
     for (const row of sweepable) {
       if (row.mailbox_storage_path) {
         await del(String(row.mailbox_storage_path), { token: process.env.BLOB_READ_WRITE_TOKEN }).catch((cause) => {
-          console.log(`  (the stored file for "${row.subject}" was not removed: ${cause instanceof Error ? cause.message : cause})`);
+          console.log(`  (the stored file for "${named(row)}" was not removed: ${cause instanceof Error ? cause.message : cause})`);
         });
       }
       await client.query(`delete from email_messages where id = $1`, [row.id]);
-      console.log(`  removed "${row.subject}"`);
+      console.log(`  removed "${named(row)}"`);
     }
     console.log(`\nRemoved ${sweepable.length} message(s). ${assigned.length} left in place.`);
     process.exit(0);
