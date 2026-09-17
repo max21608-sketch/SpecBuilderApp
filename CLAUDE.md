@@ -626,6 +626,30 @@ neither stores the result. Two consequences worth stating:
   so a record they never saw is distinguishable from one they deliberately
   dropped.
 
+### The finishes library is set out from a list, not from a scan
+
+`src/lib/finish-bulk.ts`, `src/app/api/projects/[id]/finishes/bulk/route.ts`
+
+Matthew: "Project finishes I think are the way to go; set these out from the
+outset, possibly loaded by scanning the finishes schedule." The first half is
+built and the second is not, deliberately.
+
+`finishes_schedule` has been a `document_kind` with its own prompt since 0007,
+but the model's output shape (`RawProposal`) carries `attributeRaw` and
+`valueRaw` and **no field for a finish code** — so pulling codes out of it means
+parsing them from prose, which is the inference house/conventions §6 puts on
+the far side of the fuzzy/exact line. Adding a code field to the tool schema is
+the right eventual answer and **forces a re-read of every document already
+read**: eleven billed calls for the Panther pack alone. A decision with a cost,
+not an oversight.
+
+So the half that needs no inference exists: a person pastes the codes, and
+**preview always comes first** — which are new, which the project already
+holds, and which repeat inside the paste. A box that silently created thirty
+rows would be the opposite of the library's edit-once rule, where correcting
+one code corrects every item carrying it. `kind` is still never inferred, so a
+pasted code arrives filed as nothing.
+
 ### The quote file fills eight of twelve, and names the four it will not
 
 `db/migrations/0031_bws_boilerplates.sql`, `db/seed/0010_bws_boilerplates.sql`,

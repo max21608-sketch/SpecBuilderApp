@@ -154,6 +154,53 @@ Each is a stage of the plan, and each depends on an answer that has not come:
 
 ---
 
+## What got built, 2026-09-17
+
+All of it on `staging`, none of it accepted by anybody.
+
+| Stage | What | Migrations / seeds |
+|---|---|---|
+| 1 | **The gate model**, as a seeded overlay keyed on the BWS field. TGQ / TG0 / TG1 on the record screen and the spec table. | `0026`, `0027`, seeds `0005`–`0007` |
+| 2 | **Creating things by hand** — a run, an item, a spec value — plus the two free-text columns and an editable bill line. | `0028` |
+| 3 | **The qualifier**, the "return line". Stored apart, written inline into the file. | `0029` |
+| 4 | **Palettes and the conditional fields.** Six lists seeded, five recorded empty. | `0030`, seeds `0008`–`0009` |
+| 5 | **The quote CSV** and the BWS boilerplate register. Eight of twelve columns. | `0031`, seed `0010` |
+| 7 | **Setting the finishes library out from a list** (partial — see below). | none |
+
+### Three defects the work found, none of them in the plan
+
+1. **A second hand-typed dimension could not update the answer the first one
+   wrote.** `applyAnswerFills` only touches an answer still `missing` or one a
+   shop-drawings run wrote, so a record showed W, D and H while its Dimensions
+   answer said `W1900mm`. Fixed with a precise discriminator — `document` with
+   a null `source_id` is only ever a hand-typed attribute.
+2. **Saving one field of the details panel discarded text being typed in
+   another.** Blur-save plus a reload that re-keyed every input. It was also
+   four change sets for one correction. Now one Save.
+3. **A sofa was handed the armchair boilerplate.** Our
+   `armchairs-benches-stools-sofas` sheet maps to three of Matthew's codes and
+   the first version took the first alphabetically. More than one code now
+   derives nothing — which makes question 2 concrete rather than theoretical.
+
+### What is NOT built, and why
+
+- **Stage 6, the BW standard finishes register.** Blocked on Matthew's lists
+  (question 7). Five palettes are seeded with zero options and the screen says
+  so in words; nothing is invented.
+- **The costing sheet.** Blocked on his `skill.md` (question 8). The app holds
+  no price of any kind and will not generate one.
+- **Loading the finishes library BY SCANNING the schedule.** `finishes_schedule`
+  is already a document kind with its own prompt, but the model's output shape
+  (`RawProposal`) has no field for a finish code — so pulling codes out of it
+  means parsing them from prose, which is the inference
+  `house/conventions.md` §6 puts on the far side of the line. Adding a code
+  field to the tool schema is the right eventual answer and **forces a re-read
+  of every document already read** — eleven billed calls for the Panther pack
+  alone. That is a decision with a cost, not an oversight. What is built
+  instead is a paste box: a person pastes the codes, the app says which are
+  new, which it already holds and which repeat, and one confirm creates them.
+- **The gate model's TGQ half.** `tgq_levels` is untouched — see entry 2 above.
+
 ## How to check this file is still true
 
 ```bash

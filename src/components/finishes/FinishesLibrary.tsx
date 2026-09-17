@@ -32,6 +32,7 @@
 // though it were the blast radius is how somebody edits a confirmed fabric
 // believing it reaches two items when it reaches eleven.
 import { useCallback, useEffect, useMemo, useState } from "react";
+import BulkAddFinishes from "@/components/finishes/BulkAddFinishes";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -420,11 +421,15 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
         >
           Add a finish
         </button>
+        {/* AND A LIST, because "set these out from the outset" is a project's
+            codes arriving together off a schedule, not one at a time. */}
+        <BulkAddFinishes projectId={projectId} onCreated={load} />
       </div>
 
       {active.length === 0 ? (
         <p className="mt-4 text-sm text-neutral-600">
-          No finishes yet. They arrive when a drawing naming a finish code is confirmed, or you can add one above.
+          No finishes yet. They arrive when a drawing naming a finish code is confirmed — or set the library out now
+          from a list, which is the way to have the codes in place before the first drawing lands.
         </p>
       ) : shownActive.length === 0 ? (
         <p className="mt-4 text-sm text-neutral-600">
