@@ -8,6 +8,12 @@
 // ============================================================================
 // FOUR DELIBERATE BEHAVIOURS
 //
+//   * THE UNIT ON SCREEN IS THE FURNITURE LINE, collapsed, with its questions
+//     inside it and its finish options (S-301 A, B, C, D) in between. A flat
+//     list of questions is 823 rows on the pilot and nobody reads it. The
+//     grouping is `src/lib/chase-grouping.ts`; the table is
+//     `ChaseQuestionTable`.
+//
 //   * Questions are split into what BLOCKS A QUOTE and what does not, and the
 //     email prints them under those two headings. The split comes from
 //     `questionTier` and the server recomputes it — the screen's ticks decide
@@ -34,14 +40,15 @@ import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ChaseDraftCard, { type Draft } from "@/components/drafts/ChaseDraftCard";
+import ChaseQuestionTable, { type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
 import ContactsPanel from "@/components/projects/ContactsPanel";
 import {
-  ANSWER_STATE_LABELS,
   ITEM_LEVELS,
   ITEM_LEVEL_LABELS,
   type AnswerState,
+  type ItemLevel,
 } from "@/lib/spec-vocab";
-import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
+import { type QuestionTier } from "@/lib/tgq";
 import Button from "@/components/ui/Button";
 
 type Contact = {
@@ -70,6 +77,19 @@ type Question = {
   state: AnswerState;
   tier: QuestionTier | null;
   waiting: { draftId: string; sentAt: string | null; contactName: string } | null;
+  // Where the question sits in the bill, so the screen can group by furniture
+  // line. Display only: none of it decides what may be asked.
+  level: ItemLevel | null;
+  qty: number | null;
+  runId: string;
+  runName: string;
+  parentId: string | null;
+  variantLabel: string | null;
+  parentRefs: string;
+  parentQty: number | null;
+  groupNo: number;
+  groupLabel: string;
+  variantCount: number;
 };
 
 type Blocked = {
@@ -125,8 +145,6 @@ function DraftsView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [includeChased, setIncludeChased] = useState(false);
-  const [openReadiness, setOpenReadiness] = useState<Set<string>>(new Set());
   const [generating, setGenerating] = useState(false);
   const [settingLevel, setSettingLevel] = useState<string | null>(null);
   const [discard, setDiscard] = useState<{ id: string; contact_name: string; version: number }[] | null>(null);
@@ -184,19 +202,24 @@ function DraftsView() {
 
   const selectable = useMemo(() => {
     if (!data) return [];
-    return data.inventory.groups.map((group) => ({
-      contact: group.contact,
-      questions: group.questions.filter((q) => (includeChased ? true : !q.waiting)),
-    }));
-  }, [data, includeChased]);
+    // EVERY question the server offered, unfiltered. The table's filters decide
+    // what is listed; they must not decide what is asked, or a question
+    // somebody deliberately ticked disappears from the draft when they change a
+    // dropdown. Where the two disagree the table says so in words.
+    return data.inventory.groups.map((group) => ({ contact: group.contact, questions: group.questions }));
+  }, [data]);
 
-  const selectedCount = selected.size;
-  const selectedToQuote = useMemo(
+  /** One flat list, each question carrying the contact it would be asked of. */
+  const tableQuestions = useMemo<TableQuestion[]>(
     () =>
-      selectable
-        .flatMap((group) => group.questions)
-        .filter((q) => q.tier === "to_quote" && selected.has(key(q.recordId, q.requirementId))).length,
-    [selectable, selected],
+      selectable.flatMap((group) =>
+        group.questions.map((question) => ({
+          ...question,
+          contactId: group.contact.id,
+          contactName: group.contact.name,
+        })),
+      ),
+    [selectable],
   );
 
   function toggle(recordId: string, requirementId: string) {
@@ -209,7 +232,7 @@ function DraftsView() {
     });
   }
 
-  function toggleMany(questions: Question[], on: boolean) {
+  function toggleMany(questions: { recordId: string; requirementId: string }[], on: boolean) {
     setSelected((prev) => {
       const next = new Set(prev);
       for (const q of questions) {
@@ -482,93 +505,15 @@ function DraftsView() {
         </div>
       )}
 
-      {/* ---- selection ---------------------------------------------------- */}
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <h2 className="text-sm font-semibold text-neutral-800">Questions to ask</h2>
-        <label className="flex items-center gap-1.5 text-sm text-neutral-700">
-          <input type="checkbox" checked={includeChased} onChange={(e) => setIncludeChased(e.target.checked)} />
-          Include questions already awaiting a reply
-        </label>
-        <button
-          type="button"
-          onClick={() => void generate()}
-          disabled={generating || selectedCount === 0}
-          className="ml-auto text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
-        >
-          {generating
-            ? "Generating…"
-            : `Generate drafts (${selectedCount}${selectedToQuote > 0 ? `, ${selectedToQuote} to quote` : ""})`}
-        </button>
-      </div>
-
-      {selectable.length === 0 && (
-        <p className="mt-2 text-sm text-neutral-600">
-          Nothing outstanding can be matched to a contact yet.
-        </p>
-      )}
-
-      {selectable.map((group) => {
-        const spec = group.questions.filter((q) => q.requirementKind === "spec_field");
-        const readiness = group.questions.filter((q) => q.requirementKind === "readiness");
-        const toQuote = spec.filter((q) => q.tier === "to_quote");
-        const later = spec.filter((q) => q.tier !== "to_quote");
-        const readinessOpen = openReadiness.has(group.contact.id);
-        return (
-          <div key={group.contact.id} className="mt-3 border border-neutral-200 rounded-lg bg-white">
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-neutral-100">
-              <span className="text-sm font-medium text-neutral-900">{group.contact.name}</span>
-              <span className="text-xs text-neutral-500">
-                {group.contact.email ?? <span className="text-amber-700">no email on file</span>}
-                {group.contact.designerCode ? ` · ${group.contact.designerCode}` : ""}
-              </span>
-              <span className="ml-auto flex gap-2">
-                <Button
-                  size="xs"
-                  variant="quiet"
-                  onClick={() => {
-                    toggleMany(group.questions, false);
-                    toggleMany(toQuote, true);
-                  }}
-                >
-                  Needed to quote only
-                </Button>
-                <Button size="xs" variant="quiet" onClick={() => toggleMany(spec, true)}>
-                  All spec fields
-                </Button>
-                <Button size="xs" variant="quiet" onClick={() => toggleMany(group.questions, false)}>
-                  Clear
-                </Button>
-              </span>
-            </div>
-
-            <TierSection tier="to_quote" questions={toQuote} selected={selected} onToggle={toggle} />
-            <TierSection tier="later" questions={later} selected={selected} onToggle={toggle} />
-
-            {readiness.length > 0 && (
-              <div className="border-t border-neutral-100">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setOpenReadiness((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(group.contact.id)) next.delete(group.contact.id);
-                      else next.add(group.contact.id);
-                      return next;
-                    })
-                  }
-                  className="w-full text-left px-3 py-2 text-xs text-amber-900 bg-amber-50 hover:bg-amber-100"
-                >
-                  {readinessOpen ? "▾" : "▸"} {readiness.length} readiness question
-                  {readiness.length === 1 ? "" : "s"} — internal and commercial, not selected by default
-                </button>
-                {readinessOpen && (
-                  <QuestionList questions={readiness} selected={selected} onToggle={toggle} />
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {/* ---- what to ask, by furniture line ------------------------------- */}
+      <ChaseQuestionTable
+        questions={tableQuestions}
+        selected={selected}
+        onToggle={toggle}
+        onToggleMany={toggleMany}
+        generating={generating}
+        onGenerate={() => void generate()}
+      />
 
       {/* ---- drafts ------------------------------------------------------- */}
       <h2 className="mt-8 text-sm font-semibold text-neutral-800">
@@ -589,94 +534,9 @@ function DraftsView() {
   );
 }
 
-function TierSection({
-  tier,
-  questions,
-  selected,
-  onToggle,
-}: {
-  tier: QuestionTier;
-  questions: Question[];
-  selected: Set<string>;
-  onToggle: (recordId: string, requirementId: string) => void;
-}) {
-  if (questions.length === 0) return null;
-  return (
-    <div className="border-t border-neutral-100 first:border-t-0">
-      <p
-        className={`px-3 py-1 text-xs font-medium ${
-          tier === "to_quote" ? "text-red-800 bg-red-50" : "text-neutral-600 bg-neutral-50"
-        }`}
-      >
-        {TIER_LABELS[tier]} ({questions.length})
-      </p>
-      <QuestionList questions={questions} selected={selected} onToggle={onToggle} />
-    </div>
-  );
-}
-
-function QuestionList({
-  questions,
-  selected,
-  onToggle,
-}: {
-  questions: Question[];
-  selected: Set<string>;
-  onToggle: (recordId: string, requirementId: string) => void;
-}) {
-  if (questions.length === 0) {
-    return <p className="px-3 py-2 text-sm text-neutral-500">Nothing outstanding.</p>;
-  }
-  return (
-    <ul className="divide-y divide-neutral-100">
-      {questions.map((question) => {
-        const k = `${question.recordId}:${question.requirementId}`;
-        return (
-          <li key={k} className="px-3 py-1.5 flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="mt-1"
-              checked={selected.has(k)}
-              onChange={() => onToggle(question.recordId, question.requirementId)}
-            />
-            <span className="min-w-0 flex-1">
-              <span className="text-neutral-500 tabular-nums">{question.recordLabel}</span>{" "}
-              {question.refs && <span className="font-medium text-neutral-900">{question.refs}</span>}{" "}
-              <span className="text-neutral-700">{question.itemDescription}</span>
-              <span className="block text-neutral-900">{question.prompt}</span>
-              {question.fieldLabel && (
-                <span className="block text-xs text-neutral-500">BWS: {question.fieldLabel.trim()}</span>
-              )}
-            </span>
-            <span className="shrink-0 flex items-center gap-1.5">
-              <span
-                className={`text-xs px-2 py-0.5 rounded border ${
-                  question.state === "tbc"
-                    ? "text-amber-800 border-amber-300 bg-amber-50"
-                    : "text-red-700 border-red-300 bg-red-50"
-                }`}
-              >
-                {ANSWER_STATE_LABELS[question.state]}
-              </span>
-              {question.waiting && (
-                <span
-                  className="text-xs px-2 py-0.5 rounded border text-blue-800 border-blue-300 bg-blue-50"
-                  title={`Asked ${question.waiting.contactName}${question.waiting.sentAt ? ` on ${new Date(question.waiting.sentAt).toLocaleDateString()}` : ""}`}
-                >
-                  Waiting
-                </span>
-              )}
-            </span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 export default function DraftsPage() {
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="px-1">
       <h1 className="text-xl font-semibold text-neutral-900">Chase emails</h1>
       <Suspense fallback={<Spinner label="Loading" />}>
         <DraftsView />

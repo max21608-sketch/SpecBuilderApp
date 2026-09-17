@@ -380,6 +380,71 @@ the record screen, the spec table and the template — the server reads the tier
 off the live row and a request that tries to SET one is a 400, because the tier
 decides what the email claims is blocking, and the client does not get to say.
 
+### The chase screen is a list of ITEMS, not a list of questions
+
+`src/lib/chase-grouping.ts`, `src/components/drafts/ChaseQuestionTable.tsx`,
+`src/lib/chase-drafts.ts` (`loadOutstanding`)
+
+Asked for directly on 2026-09-17, on first sight of the screen with real data:
+"this is completely ridiculous, 822 to quote — we can't be showing all of
+these." One row per outstanding question is 823 rows under one contact's name,
+and every one of them repeats the item it is about, so twenty questions about
+one headboard read as twenty separate problems. A person works item by item.
+
+So the unit on screen is the FURNITURE LINE, collapsed, as a table — the code,
+what it is, how many specs are missing, how many finish options it has — and a
+line's questions exist inside it. Its FINISH OPTIONS (0024's variants:
+`S-301 A`, `B`, `C`, `D`) are a level in between, because the fabric is what
+differs between them and the fabric is what the questions are about. `Finish
+option` is the word on screen, settled with Max on the same day; `variant` and
+`configuration` remain the words in the schema and on the drawings review.
+
+Six things are load-bearing, and each is a trap rather than a preference:
+
+- **A filter narrows what is LISTED, never what is ASKED.** The selection is
+  the truth: hiding a question does not untick it, and the footer says in words
+  how many ticked questions the filters are hiding. The old screen did the
+  opposite — unticking *Include questions awaiting a reply* dropped those
+  questions from `selectable`, so a question somebody had deliberately added
+  left the draft when they changed a dropdown, silently. This is the finishes
+  library's rule in a second place.
+- **The two counts are the LINE'S OWN, whatever the filter says.** A filter
+  appends `n shown` beside them and never rewrites them, or somebody narrows
+  the screen until an item looks finished. And `n shown` appears only when the
+  list was NARROWED — a search, a state, a tier. Readiness and awaiting-a-reply
+  being hidden is the default VIEW, not a filter, and printing `n shown` on
+  every row by default teaches people to ignore the one row where it means
+  something.
+- **`optionCount` is the true number of finish options**, including any with
+  nothing outstanding — which therefore contribute no row. "2 finish options"
+  beside a single visible option is a question about the data; "1" would be a
+  claim that B does not exist. The line also says how many have nothing left.
+- **A finish option reads its parent's ref and its parent's quantity, and the
+  quantity is never apportioned.** `S-301 A` carries no client ref of its own
+  and no qty, deliberately (`variant-create.ts`), so `loadOutstanding` reads
+  both through `parent_id` — and the row says *quantity not allocated* rather
+  than dividing 45 by the number of letters.
+- **A finish option sorts with its bill line**, by `coalesce(parent.record_no,
+  r.record_no)`. It is allocated the next free number in the project, so
+  ordering on its own lands it pages from what it belongs to; ordering on
+  `parent_id` puts the groups in uuid order, which is no order at all. Same
+  rule, same reason, as `/api/records`.
+- **The level cell is a LINK to the record, in a new tab.** Setting a level is
+  a decision taken on the record, and `Button.tsx`'s rule cuts both ways: a
+  link goes somewhere. The new tab is so a half-made selection survives it. The
+  inline level PICKER stays on the blocker panel at the top, where the point is
+  to set 59 levels without 59 visits.
+
+Two things about the table itself, both found by building it. The wrapper must
+NOT be `overflow-hidden`: it makes the wrapper the sticky scroll container, and
+the column header then offsets down from the top of the table and covers a
+furniture line — a row nobody would know to look for. And a spanning panel is
+its own `<tr>`, never an extra `<td colSpan>` beside the data cells, which is
+the same rule the drawings card learned.
+
+`groupIntoLines` is pure and tested in the pure tier; the table's own behaviour
+is tested in the component tier, which runs without a database.
+
 ### TOE dates are calendar days, and must never become a `Date`
 
 `src/lib/project-programme.ts`, `src/app/api/projects/[id]/route.ts`,
@@ -1932,6 +1997,14 @@ delta semantics and the message shape Graph really sends are NOT. Turning it on 
 variables and a redeploy, and the first real message is the test that matters:
 `docs/integration.md` carries the checklist, including the access-policy check
 that must pass in BOTH directions.
+
+**The chase screen is grouped by furniture line (2026-09-17).** One row per
+BOQ item, collapsed, in a table, with its finish options nested under it and a
+search and filters above — see the load-bearing section. The screen is full
+width; every OTHER dashboard screen is still `max-w-5xl mx-auto`, which Max
+asked to change app-wide and which has NOT been done. **Verified by the four
+checks and by 20 new tests across the pure and component tiers; nobody has
+looked at it against real data.**
 
 **Chase emails are back (2026-09-16), with a to-quote tier.** The screen is
 restored with entry points on the projects list and the project overview, the

@@ -1159,3 +1159,47 @@ Against the sandbox Panther pack and a `__QA` copy of it, in the browser:
   on another.** Both are model reads of the same PDF. The card badges it and
   shows the page, which is the safeguard; it is not a code defect and it is why
   the yellow exists.
+
+## The chase screen is grouped by furniture line — 2026-09-17
+
+Max opened the chase screen with real data on it — demo correspondence and a
+contact loaded by another pass — and stopped at the header: **1,921 needed to
+quote, 823 of them selectable, in one flat list under one contact's name.**
+"This is completely ridiculous. We can't be showing all of these."
+
+Built to two mock-ups, cards and a table; the table was chosen, and the word on
+screen is **finish option** rather than configuration or variant.
+
+- **One row per BOQ item**, collapsed: code, item, record, qty, run, level,
+  who to ask, and then the numbers in their own columns — to quote, also
+  outstanding, finish options, awaiting a reply.
+- **Finish options nest under their bill line**, coloured by letter as the
+  drawings review colours them, each with its own counts in the same columns.
+  The bill line says in words that it is a heading, and its quantity is stated,
+  never divided.
+- **Search and filters**: free text over code, item, question and BWS field;
+  tier; contact; run; level, including *No level set*; answer state; and the two
+  existing toggles for readiness and awaiting-a-reply. Everything is the
+  default tier, on Max's instruction, with the control first.
+- **The screen is full width.** Asked for app-wide; done here only.
+
+What was DELIBERATELY changed while doing it: a filter no longer decides what
+gets asked. The old screen dropped awaiting-a-reply questions from `selectable`
+as well as from the list, so unticking a box silently removed a question
+somebody had chosen. The selection is now the truth and the footer names what
+the filters are hiding.
+
+**Not accepted by Max.** The four checks pass and there are 20 new tests across
+the pure and component tiers, but nobody has opened the real screen: this
+session had no signed-in browser to drive.
+
+### Still open
+
+- **Every other dashboard screen is still `max-w-5xl mx-auto`.** Max asked for
+  full width app-wide; only the chase screen has it. The record screen and the
+  drawings review were laid out against a readable measure and want looking at
+  rather than a blanket edit.
+- **Sorting a column** — click *To quote* to bring the worst-specced items up —
+  is the obvious next step and is not built.
+- **No finish option exists in the sandbox**, so the nested level has been
+  exercised by tests and by a mock-up, never against real data.

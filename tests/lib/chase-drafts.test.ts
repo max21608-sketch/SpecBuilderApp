@@ -44,6 +44,18 @@ function question(overrides: Partial<OutstandingQuestion> = {}): OutstandingQues
     answerVersion: 2,
     state: "tbc",
     currentValue: null,
+    // Where the row sits in the bill. Display grouping for the chase screen;
+    // none of it reaches a context snapshot.
+    qty: 2,
+    runId: "run-1",
+    runName: "MAIN RUN",
+    parentId: null,
+    variantLabel: null,
+    parentRefs: "",
+    parentQty: null,
+    groupNo: 7,
+    groupLabel: "P17231-007",
+    variantCount: 0,
     ...overrides,
   };
 }

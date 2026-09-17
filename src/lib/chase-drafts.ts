@@ -63,6 +63,34 @@ export type OutstandingQuestion = {
   answerVersion: number | null;
   state: AnswerState;
   currentValue: string | null;
+  // ---- where this question sits in the bill --------------------------------
+  //
+  // The chase screen groups by FURNITURE LINE, and a line's finish options
+  // (0024's variants) sit under it. All of this is display grouping: none of it
+  // reaches `contextSnapshot`, which is built field by field precisely so that
+  // adding a column here cannot make every sent draft stale.
+  /** The bill's quantity. Null on a finish option — the bill never split it. */
+  qty: number | null;
+  runId: string;
+  runName: string;
+  /** Set on a FINISH OPTION: the bill line it splits. Null on a bill line. */
+  parentId: string | null;
+  /** A, B, C … on a finish option; null on a bill line. */
+  variantLabel: string | null;
+  /** A finish option carries no client ref of its own, so it shows its parent's. */
+  parentRefs: string;
+  /** The bill line's quantity, read through the parent. */
+  parentQty: number | null;
+  /**
+   * The `record_no` this row SORTS under — its parent's where it has one. A
+   * finish option is allocated the next free number in the project, so
+   * ordering on its own would land it pages from the line it belongs to.
+   */
+  groupNo: number;
+  /** `AP364c-011` for the line this row sorts under — its parent's, or its own. */
+  groupLabel: string;
+  /** Live finish options under this record. One or more makes it a heading. */
+  variantCount: number;
 };
 
 export type ProjectContact = {
@@ -436,6 +464,20 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
       r.area,
       r.designer,
       r.level,
+      r.qty,
+      r.run_id,
+      r.parent_id,
+      r.variant_label,
+      run.name as run_name,
+      -- A FINISH OPTION SHOWS ITS PARENT'S CLIENT REF and its parent's
+      -- quantity: S-201 A carries no ref of its own (copying it would make
+      -- every drawing card for that code ambiguous) and no qty (the bill says
+      -- 45 and never says how many are fabric A).
+      coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                  from spec_record_refs x where x.record_id = r.parent_id), '') as parent_refs,
+      (select p2.qty from spec_records p2 where p2.id = r.parent_id) as parent_qty,
+      coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no) as group_no,
+      (select count(*) from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count,
       p.bws_project_number,
       coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
                   from spec_record_refs x where x.record_id = r.id), '') as refs,
@@ -462,7 +504,10 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
       and r.status = 'active'
       and run.status = 'active'
       and coalesce(a.state, 'missing') in ('missing', 'tbc')
-    order by r.record_no, q.sort_order
+    -- Bill order, with each line's finish options directly under it. Ordering
+    -- on the parent ID instead would put the groups in uuid order, which is no
+    -- order at all -- the same rule as /api/records.
+    order by group_no, r.parent_id nulls first, r.variant_label, q.sort_order
   `;
   return rows.map(toOutstandingQuestion);
 }
@@ -495,6 +540,16 @@ function toOutstandingQuestion(row: Row): OutstandingQuestion {
     answerVersion: row.answer_version === null || row.answer_version === undefined ? null : Number(row.answer_version),
     state: String(row.state) as AnswerState,
     currentValue: row.current_value === null || row.current_value === undefined ? null : String(row.current_value),
+    qty: row.qty === null || row.qty === undefined ? null : Number(row.qty),
+    runId: String(row.run_id),
+    runName: String(row.run_name ?? ""),
+    parentId: row.parent_id === null || row.parent_id === undefined ? null : String(row.parent_id),
+    variantLabel: row.variant_label === null || row.variant_label === undefined ? null : String(row.variant_label),
+    parentRefs: String(row.parent_refs ?? ""),
+    parentQty: row.parent_qty === null || row.parent_qty === undefined ? null : Number(row.parent_qty),
+    groupNo: Number(row.group_no ?? recordNo),
+    groupLabel: recordLabel(String(row.bws_project_number), Number(row.group_no ?? recordNo)),
+    variantCount: Number(row.variant_count ?? 0),
   };
 }
 
@@ -530,6 +585,20 @@ export async function loadQuestionsByKey(
       r.area,
       r.designer,
       r.level,
+      r.qty,
+      r.run_id,
+      r.parent_id,
+      r.variant_label,
+      run.name as run_name,
+      -- A FINISH OPTION SHOWS ITS PARENT'S CLIENT REF and its parent's
+      -- quantity: S-201 A carries no ref of its own (copying it would make
+      -- every drawing card for that code ambiguous) and no qty (the bill says
+      -- 45 and never says how many are fabric A).
+      coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                  from spec_record_refs x where x.record_id = r.parent_id), '') as parent_refs,
+      (select p2.qty from spec_records p2 where p2.id = r.parent_id) as parent_qty,
+      coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no) as group_no,
+      (select count(*) from spec_records v where v.parent_id = r.id and v.status = 'active') as variant_count,
       p.bws_project_number,
       coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
                   from spec_record_refs x where x.record_id = r.id), '') as refs,
@@ -547,6 +616,9 @@ export async function loadQuestionsByKey(
       a.value         as current_value
     from spec_records r
     join projects p on p.id = r.project_id
+    -- run_id is not null on spec_records: a record on no run is on no tab and
+    -- in no export scope, so this join can never drop a row.
+    join spec_runs run on run.id = r.run_id
     left join item_categories c on c.id = r.category_id
     join requirements q on q.id = any(${requirementIds}::uuid[])
     left join spec_fields f on f.id = q.spec_field_id
