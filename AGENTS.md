@@ -905,6 +905,29 @@ words so a value stays checkable against its page; the CELL renders the library.
 - **Swatches arrive by hand.** A person uploads one and must say which document
   and page it came from. Asking the model for swatch regions is a tool-schema
   change, which means re-reading and re-paying for every document already read.
+- **It is a TAB on the project, beside the runs** (2026-09-17). It was a grey
+  line on the Overview tab, so it disappeared the moment anybody clicked a run.
+  `/dashboard/projects/[id]/finishes` still exists and REDIRECTS to
+  `?tab=finishes`, because every link written before that date points at it.
+- **A filter narrows what is LISTED, never what an edit touches.** Search, kind
+  and run are client-side over the payload already loaded. The run one is the
+  trap: a finish is project-scoped, so correcting one while looking at MUR still
+  corrects it on the main run and the VE. The used-on count therefore stays the
+  TOTAL with "n on <run>" beside it, the expansion lists every use including the
+  runs the filter is hiding, and the edit panel goes on quoting the total.
+  Showing the filtered number as the blast radius is how somebody changes a
+  confirmed fabric believing it reaches one item when it reaches eleven.
+- **`editFinish` REPLACES the row; an omitted field is written as null.** So the
+  one-click kind picker on each row sends every field the finish already holds,
+  not just the kind — a partial patch there silently deletes the description,
+  supplier and reference. Anything else that patches a finish must do the same,
+  or merge `undefined` in `editFinish` deliberately.
+- **Nothing infers a `kind`, so the kind filter is empty until a person files
+  the codes.** All eleven finishes on the sandbox Panther project had none. The
+  picker is offered inline only on a TBC finish — that is the route's own rule,
+  not a new one: a confirmed finish is a decision and changing it needs a
+  reason, which the Edit panel collects. Where nothing is filed the screen says
+  so in words, because a dropdown with one option reads as broken.
 
 ### The UI must survive a response that is not JSON
 

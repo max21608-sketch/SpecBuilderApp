@@ -36,6 +36,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                       'recordId', r.id,
                       'label', p.bws_project_number || '-' || lpad(r.record_no::text, 3, '0'),
                       'itemDescription', r.item_description,
+                      'runId', run.id,
                       'runName', run.name,
                       'attributeLabel', a.label
                     ) order by r.record_no)
@@ -48,6 +49,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     from project_finishes f
     where f.project_id = ${id}
     order by f.status, f.code_norm
+  `;
+
+  // The runs the library can be filtered BY. Read from the project rather than
+  // collected from `used_on`, and in the same order as the project's own tabs,
+  // so the dropdown lists every sub-quote in the order a person reads them —
+  // including one whose items carry no finish yet, which is a real answer
+  // ("nothing on the VE run has a fabric") rather than a missing option. Two
+  // runs may legitimately share a name, which is why the filter is keyed on the
+  // id and the name is only what it prints.
+  const runs = await sql`
+    select run.id, run.name
+    from spec_runs run
+    where run.project_id = ${id} and run.status = 'active'
+    order by run.sort_order, run.created_at
   `;
 
   // Codes the drawings carry that are NOT in the library. Named rather than
@@ -71,6 +86,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     ok: true,
     project: { id, number: String(project.bws_project_number), name: String(project.name) },
     finishes,
+    runs,
     unlinked,
     kinds: FINISH_KINDS,
   });

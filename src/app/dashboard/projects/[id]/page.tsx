@@ -28,6 +28,7 @@ import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
 import SpecTable from "@/components/records/SpecTable";
 import ProjectHistory from "@/components/history/ProjectHistory";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
+import FinishesLibrary from "@/components/finishes/FinishesLibrary";
 import {
   SPECS_AGREED_LABEL,
   daysUntilSpecsAgreed,
@@ -275,7 +276,16 @@ function ProjectOverview() {
   }, [projectId, load, loadContacts, loadCodes]);
 
   useEffect(() => {
-    if (tabPreselected.current || !wantedTab || runs.length === 0) return;
+    if (tabPreselected.current || !wantedTab) return;
+    // The two project-wide tabs answer for themselves, and BEFORE the runs
+    // arrive: gating them on `runs.length` would leave the old /finishes URL
+    // landing on Overview for as long as the first request took.
+    if (wantedTab === "finishes" || wantedTab === "history") {
+      tabPreselected.current = true;
+      setTab(wantedTab);
+      return;
+    }
+    if (runs.length === 0) return;
     // A run id sends you to that exact run -- the record screen's back link
     // uses it, because a record number is project-wide and the same code sits
     // on more than one tab. "spec" just means "the spec table", so it takes
@@ -532,6 +542,22 @@ function ProjectOverview() {
             <span className="ml-1 text-xs text-neutral-400">{run.record_count}</span>
           </button>
         ))}
+        {/* PROJECT-WIDE, like History and unlike a run: the same finish code is
+            quoted on the mock-up, the main run and the VE, and correcting it
+            corrects all of them. It was a grey line on the Overview tab, which
+            meant it disappeared the moment anybody clicked a run — the tab is
+            where a person looks for it. */}
+        <button
+          type="button"
+          onClick={() => setTab("finishes")}
+          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
+            tab === "finishes"
+              ? "border-neutral-900 text-neutral-900 font-medium"
+              : "border-transparent text-neutral-500 hover:text-neutral-800"
+          }`}
+        >
+          Finishes
+        </button>
         {/* Last, and project-wide: a change usually belongs to one run, but a
             baseline and a comparison never do. */}
         <button
@@ -553,18 +579,13 @@ function ProjectOverview() {
 
       {tab === "history" && <ProjectHistory projectId={project.id} />}
 
-      {tab === "overview" && (
-        <p className="mt-3 text-sm">
-          <Link
-            href={`/dashboard/projects/${project.id}/finishes`}
-            className="text-neutral-600 underline hover:text-neutral-900"
-          >
-            Finishes library
-          </Link>
-          <span className="ml-2 text-xs text-neutral-500">
-            Every finish code this project&rsquo;s documents carry, and the items that use it.
-          </span>
-        </p>
+      {/* Mounted only when selected: it loads the whole library and every item
+          each code is on, which is not a query the Overview should be paying
+          for on every visit. */}
+      {tab === "finishes" && (
+        <section className="mt-4">
+          <FinishesLibrary projectId={project.id} />
+        </section>
       )}
 
       {runs.map((run) =>

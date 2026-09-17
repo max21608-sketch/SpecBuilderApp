@@ -503,7 +503,7 @@ export default function RecordPage() {
                         just what the page said. */}
                     {attribute.finish_id ? (
                       <Link
-                        href={`/dashboard/projects/${record.project_id}/finishes`}
+                        href={`/dashboard/projects/${record.project_id}?tab=finishes`}
                         className="ml-2 text-xs text-neutral-500 underline hover:text-neutral-900"
                         title={
                           attribute.finish_description
