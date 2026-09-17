@@ -65,7 +65,10 @@ function Card({ onImage }: { onImage: (image: unknown) => void }) {
 describe("the picture panel", () => {
   beforeEach(() => {
     crops.calls = [];
-    crops.resolve = [];
+    // `pending`, not `resolve`: the double holds the RESOLVERS so a test can
+    // decide when a crop finishes. The old name typechecked as never and left
+    // one case's held-open resolvers in place for the next.
+    crops.pending = [];
     // jsdom has no object URLs.
     URL.createObjectURL = () => "blob:test";
     URL.revokeObjectURL = () => undefined;
