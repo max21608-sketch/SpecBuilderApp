@@ -178,6 +178,8 @@ reasoning.
 | `project_finishes` | The project's finishes library (0018), keyed by the client's own code. Project-scoped: `MOR005` means different things on different projects |
 | `spec_matrix_categories` / `spec_matrix_category_map` | Matthew's nine seating categories (0026) and which of our seventeen cheat sheets each one is. Many-to-many both ways; an unmapped sheet gets no gate view, which is a real answer |
 | `spec_field_gates` | His decision matrix as a seeded overlay (0026): gate, capture, BWS field or `local_key`, `dimension_slot`, `applies_to`, palette, conditional. `matrix_row` is his own `#`, so a re-issued workbook diffs |
+| `bws_boilerplates` | The 45 BWS product codes (0031), 18 of them mapped to one of Matthew's nine seating categories as a Simple/with-Metalwork pair. BW's own codes, not client material — the `spec_fields` precedent |
+| `spec_palettes` / `spec_palette_options` | The closed lists a spec field offers (0030). Five are BWS-owned and seeded with ZERO options, which is the honest state |
 | `spec_records.spec_description` / `.internal_notes` | 0028's two free-text columns. The first is quote-facing prose; the second never leaves this app. Neither reaches the 109-column grid |
 | audit / notes | `audit_log` + `status_history` + append-only notes, from the chassis. `audit_log.change_set_id` (0012) says which change each row belonged to |
 
@@ -623,6 +625,46 @@ neither stores the result. Two consequences worth stating:
   (`targets_changed`). The reviewer's ticked and unticked lists are both stored,
   so a record they never saw is distinguishable from one they deliberately
   dropped.
+
+### The quote file fills eight of twelve, and names the four it will not
+
+`db/migrations/0031_bws_boilerplates.sql`, `db/seed/0010_bws_boilerplates.sql`,
+`src/lib/quote-lines.ts`, `src/app/api/projects/[id]/export/quote/route.ts`
+
+The second of Matthew's three outputs. It is **not** the BWS file: the
+109-column export REPLACES a job's fields on import, which is why it refuses to
+be filtered; this is a list of quotable lines with the specification written
+out for a person to price. It shares `loadExportScope` and nothing else, so a
+quote cannot cover a different set of records from the file.
+
+- **Four columns stay blank and the screen says why.** There is no pricing
+  anywhere in this app — no rate, no labour model, no material cost — and a
+  generated number would be the first figure in the product nothing downstream
+  could question. The UUID is BWS's; an item picture is a private blob BWS
+  cannot fetch.
+- **Nineteen of the real file's 57 lines cannot be generated at all** —
+  interliner, stone, mattresses, delivery. The interliner line's quantity is
+  the fabric METREAGE, and `composeFinishCell` deliberately does not hold it.
+  Said in words on the screen rather than emitted as a row somebody prices off.
+- **The Specification block uses the SAME composers as the export.**
+  `composeDimensionCell` writes the DIMS line and `renderAttributeValue` the
+  rest. A quote saying `W2860` where the BWS file said something else would be
+  found by a client rather than by us. The labels are normalised: his own file
+  writes `COM1`, `COM 1` and `COM` for one field.
+- **An AMBIGUOUS product code derives nothing.** Matthew's rule is "MF1 or MF2
+  populated → with-Metalwork, otherwise Simple", and the register is seeded
+  from the 2026-09-14 capture — 18 of the 25 ids in his real quote match it
+  exactly. But our `armchairs-benches-stools-sofas` is ONE sheet receiving
+  three of his nine codes, so taking the first handed a **sofa the armchair
+  boilerplate**. More than one code now derives nothing, the same rule as
+  `findRecordsByRef` offering candidates and picking none. A blank is a visible
+  gap; a wrong code prices the item against the wrong template.
+- **"Populated" excludes a non-answer.** A metal finish recorded as `TBC` or
+  `None` does not move an item onto the metalwork boilerplate and a different
+  price. This repo's reading, and a question for Matthew.
+- **None of the nine seating families has a Hero boilerplate**; six cabinetry
+  families do. His rule says nothing about a hero sofa because there is no hero
+  sofa code. Also a question for him.
 
 ### A palette this app does not hold is a row with no options
 
@@ -1307,6 +1349,15 @@ words so a value stays checkable against its page; the CELL renders the library.
   not a new one: a confirmed finish is a decision and changing it needs a
   reason, which the Edit panel collects. Where nothing is filed the screen says
   so in words, because a dropdown with one option reads as broken.
+
+### A backtick inside a `sql` template closes it
+
+Twice on 2026-09-17, in `promote-answers.ts` and in the quote route: a SQL
+comment written in this repo's usual prose style — naming a column in
+backticks — ends the tagged template literal, and esbuild reports a syntax
+error thirty lines away pointing at a word in the comment. The queries are
+tagged templates, so **no backtick may appear inside one**, including in a
+`--` comment. Name the column in plain words there.
 
 ### The UI must survive a response that is not JSON
 

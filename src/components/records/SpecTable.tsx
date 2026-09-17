@@ -212,6 +212,15 @@ export default function SpecTable({
             >
               Check sheet
             </a>
+            {/* THE QUOTE LINES, which are not the BWS file. Eight of Matthew's
+                twelve columns; the four this app cannot fill are named below
+                rather than left as gaps somebody prices off. */}
+            <a
+              href={`/api/projects/${projectId}/export/quote?runId=${runId}`}
+              className={buttonClass("secondary")}
+            >
+              Quote lines
+            </a>
           </div>
         )}
       </div>
@@ -453,7 +462,13 @@ export default function SpecTable({
               a file, not news about this run, and at the top it pushed the
               records themselves below the fold on every visit. */}
           <p className="mt-2 text-xs text-neutral-500">
-            The export is always every record in scope — a BWS import replaces the fields it is given, so a partial file
+            <strong>Quote lines</strong> is a different file: eight of the twelve columns Matthew&rsquo;s quote sheet
+        carries. The prices, the UUID and the image URL are blank because this app holds none of them, and the
+        interliner, stone, mattress and delivery lines are not generated — the interliner quantity is the fabric
+        metreage, which this app deliberately does not hold. A person adds those and prices the file.
+      </p>
+      <p className="mt-2 text-xs text-neutral-500">
+        The export is always every record in scope — a BWS import replaces the fields it is given, so a partial file
             would erase what it left out. It carries no job number: it is a file to read, not to import. The check sheet
             is the same data one line per field, naming the document and page each value came from, for reading against
             the pack.
