@@ -16,6 +16,7 @@ import {
   type SetLevelResult,
 } from "@/lib/record-category";
 import { ITEM_LEVELS } from "@/lib/spec-vocab";
+import { gatesForRecord, loadGateContext } from "@/lib/gate-load";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,23 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     select id, slug, family, name, requirements_authored from item_categories order by family, sort_order
   `;
 
+  // ---- the gates -----------------------------------------------------------
+  //
+  // Matthew's decision matrix of 2026-09-17, as a seeded overlay (0026). NULL
+  // where this record's category is not one of the nine seating categories it
+  // covers — the screen says so in words, because an empty gate would compute
+  // as "nothing outstanding" and report a cabinetry item TG0-ready over rules
+  // nobody has written yet.
+  //
+  // Computed on every read and stored nowhere: a stored gate status would bump
+  // the version every extraction snapshot and chase coverage row is taken
+  // against, which is the `chased_at` trap.
+  const gateContext = await loadGateContext(sql, [id]);
+  const gates = gatesForRecord(gateContext, {
+    id: String(record.id),
+    categoryId: record.category_id ? String(record.category_id) : null,
+  });
+
   // ---- the fabric split, in both directions -------------------------------
   //
   // A bill line needs its configurations listed, because they are what the
@@ -132,6 +150,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     answers,
     categories,
     family,
+    gates,
   });
 }
 

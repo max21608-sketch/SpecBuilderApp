@@ -22,6 +22,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { unallocatedQty } from "@/lib/record-variants";
+import { NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
 import {
   SPECS_AGREED_LABEL,
   URGENCY_LABELS,
@@ -59,6 +60,13 @@ export type SpecRecord = {
   /** null where the record has no level — not the same as "nothing is blocking". */
   to_quote_outstanding: number | null;
   to_quote_waiting: number;
+  /**
+   * Outstanding per gate, from Matthew's matrix (0026). NULL where this
+   * record's category is not one of the nine his matrix covers — printed as
+   * "—", never as zero, because "no rules written yet" and "nothing left to
+   * do" are different answers.
+   */
+  gates: Record<Gate, number> | null;
 };
 
 const DOTS: Record<RecordUrgency, string> = {
@@ -253,6 +261,8 @@ export default function SpecTable({
                   <th className="text-left font-medium px-3 py-2">Specs captured</th>
                   <th className="text-left font-medium px-3 py-2">Category</th>
                   <th className="text-left font-medium px-3 py-2">Needed to quote</th>
+                  <th className="text-left font-medium px-3 py-2">TG0</th>
+                  <th className="text-left font-medium px-3 py-2">TG1</th>
                   <th className="text-left font-medium px-3 py-2">Spec fields</th>
                   <th className="text-left font-medium px-3 py-2">Readiness</th>
                 </tr>
@@ -387,6 +397,23 @@ export default function SpecTable({
                           <span className="text-neutral-400">—</span>
                         )}
                       </td>
+                      {/* THE GATES. Same numbers the record screen shows,
+                          from the same `gateStatus` — a table that disagreed
+                          with the screen it links to would be worse than no
+                          column. */}
+                      {(["TG0", "TG1"] as const).map((gate) => (
+                        <td key={gate} className="px-3 py-2 tabular-nums">
+                          {record.gates === null ? (
+                            <span className="text-neutral-400" title={NO_MATRIX_CATEGORY_EXPLANATION}>
+                              —
+                            </span>
+                          ) : record.gates[gate] > 0 ? (
+                            <span className="text-red-700 font-medium">{record.gates[gate]}</span>
+                          ) : (
+                            <span className="text-green-700">✓</span>
+                          )}
+                        </td>
+                      ))}
                       <td className="px-3 py-2">
                         <Counts
                           settled={n(record.spec_settled)}

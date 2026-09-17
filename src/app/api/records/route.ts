@@ -7,6 +7,7 @@
 // deposit is unresolved is not ready, and one number would hide that.
 import { sql, json } from "@/lib/db";
 import { loadOutstanding, loadSentCoverage, questionKey, waitingByQuestion } from "@/lib/chase-drafts";
+import { gateSummary, gatesForRecord, loadGateContext } from "@/lib/gate-load";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,10 @@ export async function GET(request: Request): Promise<Response> {
       r.area,
       r.boq_category,
       r.status,
+      -- Needed to pick this record's gate rows out of the overlay. Safe to
+      -- select without adding to GROUP BY: r.id is the primary key, so every
+      -- r.* column is functionally dependent on it.
+      r.category_id,
       r.level,
       -- ADVISORY, and the screens label it as such: a suggestion never
       -- tiers a question. See db/migrations/0025_level_suggestion.sql.
@@ -146,6 +151,20 @@ export async function GET(request: Request): Promise<Response> {
   ]);
   const waiting = waitingByQuestion(outstanding, coverage);
 
+  // ---- the gates -----------------------------------------------------------
+  //
+  // Loaded in bulk and judged by the SAME `gateStatus` the record screen uses.
+  // Computing the table's numbers in SQL and the screen's in JavaScript is how
+  // a table comes to say TG0 is met over a record whose own screen lists three
+  // blockers — the `composeDimensionCell` rule, in a third place.
+  //
+  // `null` for a record whose category is not on Matthew's matrix, which the
+  // table prints as "—" rather than as zero outstanding.
+  const gateContext = await loadGateContext(
+    sql,
+    rows.map((row) => String(row.id)),
+  );
+
   const perRecord = new Map<string, { waiting: number; toQuote: number; toQuoteWaiting: number }>();
   for (const question of outstanding) {
     const entry = perRecord.get(question.recordId) ?? { waiting: 0, toQuote: 0, toQuoteWaiting: 0 };
@@ -165,6 +184,12 @@ export async function GET(request: Request): Promise<Response> {
       const counts = perRecord.get(String(row.id));
       return {
         ...row,
+        gates: gateSummary(
+          gatesForRecord(gateContext, {
+            id: String(row.id),
+            categoryId: row.category_id ? String(row.category_id) : null,
+          }),
+        ),
         waiting: counts?.waiting ?? 0,
         // null, not 0, where the record has no level: "nothing is blocking the
         // quote" and "nobody has said what kind of item this is" are different

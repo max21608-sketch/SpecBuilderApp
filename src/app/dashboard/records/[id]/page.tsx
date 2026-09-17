@@ -38,6 +38,8 @@ import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
 import Button from "@/components/ui/Button";
+import GatePanel from "@/components/records/GatePanel";
+import type { Gate, GateStatus } from "@/lib/gates";
 
 type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
@@ -92,6 +94,8 @@ type Payload = {
   answers: Answer[];
   categories: Category[];
   family: FamilyMember[];
+  /** Null where this record's category is not on Matthew's matrix. */
+  gates: Record<Gate, GateStatus> | null;
 };
 
 const STATE_CLASS: Record<AnswerState, string> = {
@@ -708,6 +712,11 @@ export default function RecordPage() {
           </span>
         )}
       </div>
+
+      {/* WHAT EACH GATE STILL WANTS, above the 43-question checklist. The
+          checklist is the full cheat sheet and always was; this is the part
+          somebody has to act on before the next milestone. */}
+      <GatePanel gates={data.gates} />
 
       {answers.length > 0 && (
         <button

@@ -176,6 +176,8 @@ reasoning.
 | `record_snapshots` | A VERSION of one record (0012): `snapshot_no` per record, the export's own atoms, and the composed cells as they were that day |
 | `baseline_members` | A named point's exact membership (0013). Materialised under the project lock, because transaction start time does not order commits |
 | `project_finishes` | The project's finishes library (0018), keyed by the client's own code. Project-scoped: `MOR005` means different things on different projects |
+| `spec_matrix_categories` / `spec_matrix_category_map` | Matthew's nine seating categories (0026) and which of our seventeen cheat sheets each one is. Many-to-many both ways; an unmapped sheet gets no gate view, which is a real answer |
+| `spec_field_gates` | His decision matrix as a seeded overlay (0026): gate, capture, BWS field or `local_key`, `dimension_slot`, `applies_to`, palette, conditional. `matrix_row` is his own `#`, so a re-issued workbook diffs |
 | audit / notes | `audit_log` + `status_history` + append-only notes, from the chassis. `audit_log.change_set_id` (0012) says which change each row belonged to |
 
 **Not built, deliberately.** `bws_job_links` (a job number arrives as a
@@ -300,6 +302,75 @@ answer, and it blocks a gate. `missing` means nobody has looked. `na` means the
 field does not apply to this category. A rule testing for a non-empty string
 treats the last three as satisfied and reports a record ready for TG1 when it
 is not.
+
+### A gate belongs to a FIELD, and the same field sits at two gates
+
+`db/migrations/0026_spec_field_gates.sql`, `db/seed/0005_spec_matrix_categories.sql`,
+`db/seed/0006_spec_field_gates.sql`, `db/seed/0007_requirements_gate_fields.sql`,
+`src/lib/gates.ts`, `src/lib/gate-load.ts`
+
+`requirements.required_at_gate` has existed since 0002 with the comment "null
+until a human authors the gate model", and **nothing ever wrote it**. Matthew
+sent the first written gate model on 2026-09-17: 35 spec fields across TGQ /
+TG0 / TG1 for nine seating categories, with palettes and two conditionals.
+
+It does not fit that column, and the reason is the whole design. **His matrix
+puts the same field at two gates** — Assembly guide (191) is TGQ *and* TG1,
+Dimensions (3) is TGQ (four slots) *and* TG1 (the whole cell re-checked). One
+text column cannot hold two, which is 0019's argument for `tgq_levels text[]`
+arriving from the other end. `required_at_gate` stays null, is never written,
+and goes in a destructive migration.
+
+So the gate is a seeded **overlay keyed on `spec_fields.json_id`**, and six
+things about it are traps rather than preferences.
+
+- **Keyed on the FIELD, not on the question.** Every BWS id in his matrix
+  matches `db/seed/0001_spec_fields.sql` exactly, so the field half needs no
+  translation. His nine CATEGORIES do not match our seventeen cheat sheets, and
+  keying on the field is what let the model be seeded and read while that
+  mapping was still being settled.
+- **The category mapping is many-to-many in both directions**, which is why it
+  is a join table and not a column. His Sofas lands on two of our sheets, and
+  our `armchairs-benches-stools-sofas` is one sheet receiving his S, A and B.
+  **Union semantics widen exactly two rows** — swivel onto benches and sofas,
+  seat height onto daybeds — and `db/seed/0005` names both in the data, not
+  just in a comment. Widening is right ("a field nobody can select is a spec
+  value nobody can record") and it is still a decision somebody has to confirm.
+- **An unmapped category gets `null`, never an empty gate.** The eight
+  cabinetry sheets are not in his matrix and the cabinetry version is still to
+  come. An empty field list computes as "nothing outstanding", and a record
+  reported TG0-ready because nobody has written its rules yet is the
+  confidently-wrong failure the model exists to prevent. `gateStatus` refuses
+  an empty list and `gatesForRecord` returns null before it gets there.
+- **Five outcomes, because three would lie.** `satisfied` / `blocking` /
+  `not_applicable` are the obvious three. `unknown` is a conditional whose
+  CONTROLLER is unanswered — we cannot tell whether the field even applies, and
+  a default must never decide it. `unanswerable` is a field the matrix wants
+  and this category's checklist cannot ask, or one of his ten id-less rows with
+  no home yet: it counts against the gate, and the fix is a seed or a
+  migration rather than a person answering. Folding `unanswerable` into
+  `blocking` puts questions on a reviewer's desk that they cannot answer;
+  folding it into `satisfied` passes a gate over fields nobody can record.
+- **A dimension is settled by the ATTRIBUTE that carries the slot**, never by
+  the composed cell. `W840 x D790 x H720mm` confirmed as a whole says nothing
+  about whether a seat height was ever measured, which is why rows 4–7 of his
+  matrix are four rows carrying one BWS id and a `dimension_slot`.
+- **One implementation, two callers**, the `questionTier` rule again. The spec
+  table's TG0/TG1 columns and the record screen's gate panel both run
+  `gateStatus` over bulk-loaded rows. Computing the table's numbers in SQL
+  would be a second gate model, and a table saying TG0 is met over a record
+  whose own screen lists three blockers is worse than no column.
+
+`applies_to` is stored expanded AND raw. "All categories" and "All UPY seating"
+expand to the same nine in a seating-only workbook and **are not the same
+statement**: when cabinetry arrives the first widens and the second must not.
+`matrix_row` carries his own `#`, so a re-issued workbook diffs.
+
+Five palettes in his matrix are BWS-owned and **this app holds none of them** —
+timber finish, metal finish, seat build, back cushion, stud. `palette_key`
+names them and `palette_raw` keeps his wording, so the gap is a recorded
+question rather than a forgotten one, and the screen says so in words instead
+of offering an empty dropdown. FMT-GEN-01 applies: never invent one.
 
 ### A chase records that a question was asked, and writes no answer
 
@@ -2052,11 +2123,17 @@ and `SpecTable`, and a **Needed to quote** column sits beside them. `GET
 
 **Decisions awaiting the user:**
 
-- **The gate model is unreconciled, and every requirement is seeded ungated.**
-  TG0/TG1/TG2 in the handover, plus a proposed pre-sale **TGQ**.
-  `requirements.required_at_gate` is null on all 728 rows and there is no
-  `gates` table, so the completion view reports confirmed / TBC / missing and
-  nothing per-gate.
+- **The gate model is SEEDED but its answers are Max standing in for Matthew.**
+  Matthew's matrix arrived 2026-09-17 and is in as `spec_field_gates` (0026).
+  Max answered the six open questions on Matthew's behalf on the same day so
+  the work could start, and **every one of them is still to be confirmed with
+  him** — read `docs/plans/matrix-assumptions.md`, which lists each assumption,
+  what it changed, and how to reverse it. The two that would cost most if wrong
+  are the category mapping (three judgement calls, two of which widen a
+  question onto items he excluded) and whether his TGQ set means only fourteen
+  fields block a quote. `required_at_gate` is still null on all 788 rows and
+  stays that way; TG2 is still unmodelled, and the cabinetry half of his matrix
+  has not been written yet.
 - **TGQ is out with Matthew** (2026-09-16), as a spoken interview. Read
   `docs/plans/tgq-for-matthew.md` before acting on the answers. The 728
   requirement rows are only **62 distinct questions** — "Stitching spec" is on

@@ -826,6 +826,94 @@ Observed 2026-09-15, from Matthew's spec grid. See `docs/bws-spec-grid.md`.
     `W TBC x D560 x H1005mm`; he has only shown the inline form `W1520 TBC`.
     Both settle in a word and neither blocks anything.
 
+## 2026-09-17 — the gate model, from Matthew's decision matrix
+
+Matthew sent `BWS_Spec_Decision_Matrix_for_Max.xlsx` and a quote-output example
+with an email naming five asks and a nudge to use the app on live projects.
+The matrix is the first written gate model this project has had: **Still open 1
+has been open since 2026-09-12** and `requirements.required_at_gate` was null on
+all 728 rows with no writer anywhere in the repo.
+
+Max answered the blocking questions on Matthew's behalf so the work could start.
+**Every one of those answers is a stand-in** —
+`docs/plans/matrix-assumptions.md` lists each, what it changed, and how to
+reverse it. Read it before treating any of this as settled.
+
+96. **A gate belongs to a FIELD, not to a question, and the same field sits at
+    two gates.** Assembly guide (191) is TGQ *and* TG1; Dimensions (3) is TGQ
+    (four slots) *and* TG1 (the whole cell re-checked). `required_at_gate` is
+    one text column and cannot hold two — which is 0019's argument for
+    `tgq_levels text[]` arriving from the other end. So the gate is a seeded
+    overlay (`0026`) keyed on `spec_fields.json_id`, `required_at_gate` stays
+    null and is never written, and it goes in a destructive migration.
+97. **Keying on the field is what unblocked it.** Every BWS id in his matrix
+    matches `db/seed/0001_spec_fields.sql` exactly, so the field half needed no
+    translation at all. His nine CATEGORIES do not match our seventeen cheat
+    sheets, and keying on the field let the model be seeded, read and rendered
+    while that mapping was still a judgement call.
+98. **The category mapping widens exactly two rows, and both are asserted.**
+    Our `armchairs-benches-stools-sofas` is one sheet receiving his S, A and B,
+    so **swivel** is now asked of benches and sofas; our `sofas-bed-daybeds`
+    receives his S and D, so **seat height** is now asked of daybeds. Union is
+    right on the repo's own rule — a field nobody can select is a spec value
+    nobody can record — and it is still a decision, so
+    `tests/db/spec-field-gates.test.ts` fails if the mapping changes.
+99. **An unmapped category gets `null`, never an empty gate.** The eight
+    cabinetry sheets are not in his matrix. An empty field list computes as
+    "nothing outstanding", and a cabinetry record reported TG0-ready because
+    nobody has written its rules is the confidently-wrong failure the model
+    exists to prevent.
+100. **Five outcomes, because three would lie.** `unknown` is a conditional
+    whose controller is unanswered; `unanswerable` is a field the matrix wants
+    and the checklist cannot ask. Both count against the gate and neither is
+    the reviewer's fault, so neither is printed red.
+101. **Sixty new checklist questions** (`db/seed/0007`), 728 → 788. Six BWS
+    fields his matrix gates were asked by no question anywhere — Assembly guide,
+    Timber Finish 2 and 3, Metal Finish 2, Back Cushion Build, Purchasing
+    Notes. Three of those were already flagged as a gap in
+    `questions-for-matthew.md` Q2; his matrix answers it. Reused prompts are
+    byte-identical, so 788 rows are still only 68 distinct questions.
+102. **`tgq_levels` was deliberately NOT re-tiered.** Read literally his TGQ
+    set would strike ~48 of the 62 distinct questions out of the to-quote tier.
+    That is what the workbook sent on 2026-09-16 was built to ask, and it has
+    not come back. Untouched until Matthew says the matrix answers it.
+103. **write_audit() needs an `id` column on every audited table**, which was
+    invisible until a table chose a natural key. 0026 gave
+    `spec_matrix_categories` a `code` primary key and the first insert failed
+    `42703: record "new" has no field "id"`. Fixed additively in `0027` rather
+    than by editing an applied migration, and by giving the tables an `id`
+    rather than by rewriting a function attached to eighteen others.
+
+### Verified 2026-09-17, in the browser against the sandbox Panther data
+
+- 35 gate rows seeded, split TGQ 14 / TG0 17 / TG1 4.
+- A real S-201 configuration reports TGQ 6 outstanding, TG0 12, TG1 3. Its W,
+  D, H and SH read Settled off the shop drawings; its timber finish reads
+  Settled as "Natural oak"; Product code and Spec notes read "Nowhere to record
+  it".
+- Configurations A and B of the same bill line report different TG0 numbers
+  (12 and 13), because B carries a fabric A does not.
+- Uncategorised records print "—" in the TG0 and TG1 columns, and a cabinetry
+  record returns null rather than a satisfied gate.
+- No console errors.
+
+### Still open, added 2026-09-17
+
+- **Nobody has confirmed any of it with Matthew.** Seven stand-in answers, in
+  `docs/plans/matrix-assumptions.md`. The two that cost most if wrong are the
+  category mapping and whether his TGQ set re-tiers the quote questions.
+- **The cabinetry matrix does not exist**, so eight of the seventeen cheat
+  sheets have no gate view. His workbook says it is "in progress".
+- **Five palettes he names are BWS-owned and this app holds none of them** —
+  timber finish, metal finish, seat build, back cushion, stud. Recorded by key,
+  rendered as free text with the gap stated in words.
+- **TG2 is still unmodelled.** His matrix stops at TG1.
+- **A default does not satisfy a gate**, which is this repo's position and not
+  his stated one. See assumption 5.
+- **Ten of his 35 rows have no BWS field and eight of them have no home in this
+  app**, so they report `unanswerable`. The free-text field and the product-code
+  derivation are the next two stages.
+
 ## Running agents in parallel
 
 - One `git worktree` per agent.
