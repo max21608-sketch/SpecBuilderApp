@@ -22,7 +22,9 @@
 // measurement and nothing downstream questions it.
 // ============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
+import { buttonClass } from "@/components/ui/Button";
 import { upload } from "@vercel/blob/client";
 import { projectUploadPrefix } from "@/lib/blob-source";
 import type { CroppedImage } from "@/lib/pdf-crop";
@@ -467,6 +469,18 @@ export default function DrawingsReview({ importId }: { importId: string }) {
   }
 
   const pendingItems = staged.items.filter((item) => item.observations.some((o) => o.reviewStatus === "pending"));
+  // What a finished review actually did, counted off the same rows the
+  // collapsed lists below count. A screen that ends in silence reads as one
+  // that did not register the last click.
+  const appliedCount = staged.items.reduce(
+    (total, item) => total + item.observations.filter((o) => o.reviewStatus === "applied").length,
+    0,
+  );
+  const ignoredCount = staged.items.reduce(
+    (total, item) => total + item.observations.filter((o) => o.reviewStatus === "ignored").length,
+    0,
+  );
+  const reviewComplete = pendingItems.length === 0;
   // Grouped into cards: one per code, one per page for a code drawn once.
   const cards = configurationCards(staged.items, byItem).filter(cardHasPending);
   // Split, because the two have different answers. A page whose CODE matched
@@ -506,6 +520,20 @@ export default function DrawingsReview({ importId }: { importId: string }) {
           Open the original drawings
         </a>
       </div>
+
+      {/* THE END OF THE JOB, SAID OUT LOUD. Every card disappears as it is
+          reviewed, so a finished document was an empty screen under a heading
+          — indistinguishable from one whose cards had failed to load. */}
+      {reviewComplete && (
+        <div className="mt-3 text-sm text-green-900 bg-green-50 border border-green-300 rounded px-3 py-2">
+          <p className="font-medium">Review complete</p>
+          <p className="mt-0.5">
+            All {staged.items.length} item{staged.items.length === 1 ? "" : "s"} in this document have been reviewed
+            {appliedCount > 0 && <> · {appliedCount} spec{appliedCount === 1 ? "" : "s"} applied</>}
+            {ignoredCount > 0 && <> · {ignoredCount} ignored</>}. Nothing here is waiting on you.
+          </p>
+        </div>
+      )}
 
       {staged.documentNotes && (
         <p className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
@@ -610,6 +638,17 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         items={staged.items}
         status="applied"
       />
+
+      {/* WHERE A REVIEWER GOES NEXT. Reviewing a drawing set is a step inside
+          a project, and the bottom of this screen was a dead end: the only way
+          back was the browser's own. It is navigation, so it is a link — but
+          one wearing `buttonClass`, because at the foot of a long page an
+          underlined phrase is not findable. */}
+      <div className="mt-8 pt-4 border-t border-neutral-200">
+        <Link href={`/dashboard/projects/${run.project_id}`} className={buttonClass("primary")}>
+          Open the project page
+        </Link>
+      </div>
     </div>
   );
 }

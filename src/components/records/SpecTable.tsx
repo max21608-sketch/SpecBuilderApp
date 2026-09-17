@@ -51,6 +51,9 @@ export type SpecRecord = {
   spec_total: string; spec_settled: string; spec_tbc: string; spec_missing: string;
   ready_total: string; ready_settled: string; ready_tbc: string; ready_missing: string;
   level: string | null;
+  /** A level this app guessed. Advisory: it tiers nothing until accepted. */
+  level_suggested: string | null;
+  level_suggested_reason: string | null;
   /** Derived per read, never stored: see /api/records. */
   waiting: number;
   /** null where the record has no level — not the same as "nothing is blocking". */
@@ -93,6 +96,7 @@ export default function SpecTable({
   // listed retired ones beside the rest would describe a different set from
   // the file.
   const [showRetired, setShowRetired] = useState(false);
+  const [acceptingLevels, setAcceptingLevels] = useState(false);
 
   const load = useCallback(async () => {
     const query = new URLSearchParams({ projectId, runId });
@@ -114,6 +118,26 @@ export default function SpecTable({
     void load();
   }, [load]);
 
+  /** Agree with every level this run's records were guessed. */
+  async function acceptLevels() {
+    setAcceptingLevels(true);
+    try {
+      const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/levels/accept`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId }),
+      });
+      // Reload first, then report: this table clears its banner on a
+      // successful load, so setting the message first would flash a refusal
+      // and then show nothing at all.
+      await load();
+      if (!res.ok) setError(res.error);
+    } finally {
+      // Always, so a non-JSON error cannot leave the button dead.
+      setAcceptingLevels(false);
+    }
+  }
+
   if (error) return <p className="text-sm text-red-700">{error}</p>;
   if (!records) return <Spinner label="Loading spec records" />;
 
@@ -123,6 +147,10 @@ export default function SpecTable({
   const overdueBy = daysLate === null ? null : -daysLate;
   const withSpecs = records.filter((record) => n(record.attribute_count) > 0).length;
   const uncategorised = records.filter((record) => !record.category_name).length;
+  // Records carrying a level this app guessed and nobody has agreed to. Until
+  // somebody does, every one of them is unquotable-by-unknown rather than
+  // unquotable-by-answer, which is not the same thing and reads the same.
+  const suggestedLevels = records.filter((record) => !record.level && record.level_suggested).length;
 
   // The export URL is a plain link, never apiFetch: the helper always reads the
   // body as text, and a workbook is bytes.
@@ -166,6 +194,29 @@ export default function SpecTable({
           </div>
         )}
       </div>
+
+      {/* ONE CLICK FOR THE RUN, because 59 records must not mean 59 visits —
+          the same reason the drafts screen carries an inline level picker. It
+          is still a person agreeing: the level of every record is on this
+          screen with what it was guessed from, and this accepts only what is
+          already suggested. */}
+      {suggestedLevels > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          <span>
+            {suggestedLevels} record{suggestedLevels === 1 ? "" : "s"} carr{suggestedLevels === 1 ? "ies" : "y"} a
+            level this app guessed from the bill and the drawings. Nothing is sorted into what blocks a quote until
+            you agree with it — each one shows its reading in the Needed to quote column.
+          </span>
+          <Button
+            size="xs"
+            variant="secondary"
+            disabled={acceptingLevels}
+            onClick={() => void acceptLevels()}
+          >
+            {acceptingLevels ? "Accepting…" : `Accept all ${suggestedLevels}`}
+          </Button>
+        </div>
+      )}
 
       {records.length === 0 ? (
         <p className="mt-4 text-sm text-neutral-600">
@@ -309,9 +360,17 @@ export default function SpecTable({
                           <Link
                             href={`/dashboard/records/${record.id}`}
                             className="text-amber-800 underline hover:text-amber-900"
-                            title="No level set, so nothing on this record can be sorted into what blocks a quote."
+                            title={
+                              record.level_suggested
+                                ? `Suggested ${record.level_suggested} — ${record.level_suggested_reason ?? "guessed"}. Nothing is sorted into what blocks a quote until somebody accepts it.`
+                                : "No level set, so nothing on this record can be sorted into what blocks a quote."
+                            }
                           >
-                            Set level
+                            {/* A SUGGESTION IS NOT A LEVEL, and the wording has
+                                to keep saying so: the number in this column is
+                                what blocks a quote, and it stays unavailable
+                                until a person agrees. */}
+                            {record.level_suggested ? `${record.level_suggested}?` : "Set level"}
                           </Link>
                         ) : record.to_quote_outstanding > 0 ? (
                           <span className="text-red-700 font-medium">

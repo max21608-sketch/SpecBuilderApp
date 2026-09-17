@@ -21,6 +21,39 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## Observations 2026-09-17 — the first run-through
+
+Max drove the app end to end and reported six things. All six are built; none
+has been accepted by him yet.
+
+1. **A fabric staged as "Other" with no BWS field.** The real S-100 caption
+   puts the PART in the label (`SOFA`) and the CLOTH in the value, and the
+   word lists held neither. The group and the field are now ONE reading
+   (`classifyCallout`), the lists carry a swatch caption's vocabulary, the
+   client's own finish code is read as evidence, and a caption naming the item
+   itself is taken as its upholstery — flagged yellow, because that step is an
+   inference. It is applied at READ time, so the packs already read in the
+   sandbox gained it with no second model call and nothing charged again.
+2. **A finished review now says so**, on both drawings screens, and offers the
+   way back to the project from the bottom of the page.
+3. **The projects list is a table** — search, a status pill, no duplicate
+   Overview button, Spec table and Chase kept.
+4. **COMPLETED is derived, and there is no button.** Every question on every
+   record in the export's scope confirmed or N/A, an uncategorised record or a
+   single TBC keeping it ACTIVE. Never stored, for the reason Overdue is not.
+5. **The project page reads as cards**, with versions, baselines and the change
+   trail on the page rather than behind a tab.
+6. **A level is guessed at intake** (`0025`), per bill line, flagged, inherited
+   by a line's configurations, and accepted a run at a time under one change
+   set. `spec_records.level` still means a person's decision: the guess lives
+   in `level_suggested`, where no gate can read it.
+
+**Still open.** The level rules are this repo's judgement — nothing in the 17
+cheat sheets defines simple / complex / hero, and the only written basis is the
+BWS boilerplate split. They go in front of Matthew with the TGQ workbook. And
+no real bill has been parsed with a Level column yet: the path is covered by a
+route test, and every staged BOQ in the sandbox predates the feature.
+
 ## Observations 2026-09-16
 
 1. **The export gets a check sheet, and the export route gets a shared scope

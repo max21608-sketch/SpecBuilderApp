@@ -47,6 +47,9 @@ type Line = {
   itemDescription: string;
   qty: number | null;
   replaces?: { recordId: string; recordVersion: number } | null;
+  level?: string | null;
+  levelStatus?: "suggested" | "chosen";
+  levelReason?: string | null;
 };
 
 describeIfDb("BOQ revision", () => {
@@ -98,6 +101,13 @@ describeIfDb("BOQ revision", () => {
       categoryStatus: "chosen",
       ignored: false,
       replaces: over.replaces ?? null,
+      ...(over.level === undefined
+        ? {}
+        : {
+            level: over.level,
+            levelStatus: over.levelStatus ?? "suggested",
+            levelReason: over.levelReason ?? "the bill names no metalwork",
+          }),
     };
   }
 
@@ -244,5 +254,74 @@ describeIfDb("BOQ revision", () => {
     expect(response.status).toBe(409);
     const body = (await response.json()) as { code: string };
     expect(body.code).toBe("pairing_without_revision");
+  });
+
+  // ---- the level a bill arrives with -------------------------------------
+  //
+  // Guessed at parse time and shown in the review table. Which COLUMN the
+  // confirm writes is the whole safety property: a guess must not be able to
+  // satisfy the quote gate, and a decision must not be re-guessed later.
+  it("writes a guessed level as a suggestion and a chosen one as a decision", { timeout: 30_000 }, async () => {
+    const runId = await stage([
+      line({ index: 0, code: "__QAL1", level: "complex", levelStatus: "suggested", levelReason: "the bill names brass" }),
+      line({ index: 1, code: "__QAL2", level: "hero", levelStatus: "chosen" }),
+      line({ index: 2, code: "__QAL3" }),
+    ]);
+    const response = await confirm(runId);
+    expect(response.status).toBe(200);
+
+    const rows = await client.query(
+      `select x.ref_value as code, r.level, r.level_suggested, r.level_suggested_reason
+         from spec_records r join spec_record_refs x on x.record_id = r.id
+        where r.project_id = $1 and x.ref_value like '__QAL%'
+        order by x.ref_value`,
+      [projectId],
+    );
+    const by = new Map(rows.rows.map((row) => [row.code, row]));
+
+    // Guessed: advisory, and it carries its reason so a reviewer can check it.
+    expect(by.get("__QAL1")?.level).toBeNull();
+    expect(by.get("__QAL1")?.level_suggested).toBe("complex");
+    expect(by.get("__QAL1")?.level_suggested_reason).toBe("the bill names brass");
+
+    // Chosen in the review table: a decision, and the gate may read it.
+    expect(by.get("__QAL2")?.level).toBe("hero");
+    expect(by.get("__QAL2")?.level_suggested).toBeNull();
+
+    // A bill staged before any of this existed: no level at all, as before.
+    expect(by.get("__QAL3")?.level).toBeNull();
+    expect(by.get("__QAL3")?.level_suggested).toBeNull();
+  });
+
+  it("never lets a revision override a level somebody decided", { timeout: 40_000 }, async () => {
+    const firstRun = await stage([line({ index: 0, code: "__QAV1", level: "hero", levelStatus: "chosen" })]);
+    expect((await confirm(firstRun)).status).toBe(200);
+
+    const before = await client.query(
+      `select r.id, r.version, r.run_id from spec_records r
+         join spec_record_refs x on x.record_id = r.id
+        where r.project_id = $1 and x.ref_value = '__QAV1'`,
+      [projectId],
+    );
+    const record = before.rows[0];
+
+    // Rev B pairs the same line and guesses something else off the new bill.
+    const revision = await stage(
+      [
+        line({
+          index: 0,
+          code: "__QAV1",
+          level: "simple",
+          levelStatus: "suggested",
+          replaces: { recordId: record.id, recordVersion: Number(record.version) },
+        }),
+      ],
+      record.run_id,
+    );
+    expect((await confirm(revision)).status).toBe(200);
+
+    const after = await client.query(`select level, level_suggested from spec_records where id = $1`, [record.id]);
+    expect(after.rows[0].level).toBe("hero");
+    expect(after.rows[0].level_suggested).toBeNull();
   });
 });

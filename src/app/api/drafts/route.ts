@@ -95,7 +95,8 @@ export async function GET(request: Request): Promise<Response> {
   // ones carrying questions; this list also catches a record whose questions
   // are all answered, so the level can be set before the next document lands.
   const levelless = await sql`
-    select r.id, r.record_no, r.item_description, r.version, p.bws_project_number
+    select r.id, r.record_no, r.item_description, r.version, r.level_suggested, r.level_suggested_reason,
+           p.bws_project_number
     from spec_records r
     join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id
@@ -233,6 +234,10 @@ export async function GET(request: Request): Promise<Response> {
         recordLabel: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
         itemDescription: String(row.item_description ?? ""),
         version: Number(row.version),
+        // What this app would guess, and why. Advisory: the record is still
+        // levelless as far as every tier is concerned.
+        suggested: row.level_suggested === null ? null : String(row.level_suggested),
+        suggestedReason: row.level_suggested_reason === null ? null : String(row.level_suggested_reason),
       })),
       totals: {
         outstanding: outstanding.length,

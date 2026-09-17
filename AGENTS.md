@@ -73,6 +73,11 @@ A human confirms each of these, and nothing else may write it:
 - Pairing a revised BOQ line with an existing record. The reviewer decides it
   at review time and the confirm writes only what they submitted — a code that
   is ambiguous pairs nothing.
+- Accepting a suggested item LEVEL. The app guesses one at intake and shows
+  what it read; only a person's acceptance writes `spec_records.level`, which
+  is the column the quote gate reads. One acceptance may cover a whole run —
+  the levels and their readings are all on the screen — but nothing is
+  accepted unseen.
 
 ## Hard invariants
 
@@ -155,7 +160,7 @@ reasoning.
 | `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox |
 | `spec_runs` | A sub-quote, normally one BOQ tab. Name (editable), `source_sheet`, `boq_revision`/`boq_date` (**text**), `header_notes`. Retired, never deleted; two runs may share a name |
 | `project_contacts` | Who to ask. `designer_code` joins `spec_records.designer`; `capsule_party_id` is the modelled person (0022), optional and flagged when absent |
-| `spec_records` | One per BOQ line. `level` (`simple`/`complex`/`hero`, nullable, a person's decision beside the category — nothing infers it). `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
+| `spec_records` | One per BOQ line. `level` (`simple`/`complex`/`hero`, nullable, a person's decision beside the category — nothing infers it, and `level_suggested` (0025) is where a guess goes instead, where no gate can read it). `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
 | `record_attributes` | What a document SAID about an item: group, label, value, `unit` (dimensions only), the client's own `material_code`, `spec_field_id`, `state` (`confirmed`/`tbc`), source run and page. Multi-valued, requirement-free |
 | `project_notes` | The preamble, per requirement. NOT the chassis `notes` table, which is append-only by trigger and would make a mis-extracted note permanent |
 | `intake_batches` | One delivery of documents. **No status column** — a batch's state is derived from its runs |
@@ -1332,6 +1337,127 @@ panel.
   that reason. Silently discarding a crop is how somebody comes to believe it is
   stored. **Supersede, never delete**, as the swatch route already does.
 
+### A fabric is a fabric, whatever the drawing calls the part
+
+`src/lib/drawing-document.ts` (`classifyCallout`, `upgradeCalloutGuesses`),
+`src/components/imports/ObservationRows.tsx`
+
+The real S-100 sheet captions its upholstery `SOFA / Yarn Tessarae YC04158 -
+01` — the PART in the label, as the prompt asks for, the CLOTH in the value —
+and it staged as group *Other* with no BWS field, while its sibling `SOFA FEET
+/ Dark tinted wood` landed correctly on "feet" and "wood". `classifyGroup` and
+`suggestSpecField` each ran the same word lists over the same text
+INDEPENDENTLY, so the row lost its group and its field in one go, and a
+widened list could have fixed one and left the other.
+
+`classifyCallout` is now the single reading and both call it — the
+`composeDimensionCell` rule, in a third place. Its evidence stops at the first
+thing that decides:
+
+1. **The words**, widened to the vocabulary a swatch caption actually uses
+   (`yarn`, `boucle`, `linen`, `mohair`, `chenille`, …). A fabric is named by
+   its cloth, not by the word "fabric".
+2. **The client's own finish code** — `UPH`/`FAB`/`COM` fabric, `WD`/`TIM`
+   timber, `MT`/`MTL` metal. That is the page speaking. **`CH` is deliberately
+   unmapped**: the real set prints `CH-01.2` and no page says what CH means.
+3. **The caption names the item itself** (`SOFA` on a sofa page) and names no
+   timber, metal or hardware → its upholstery. The ONLY inference here, so it
+   is flagged `groupSuggested` and the card renders it yellow with its reason
+   — the same treatment a guessed dimension slot gets. It requires the value to
+   carry real text, so `PIPING / TBC` still classifies as nothing.
+
+**`upgradeCalloutGuesses` runs at READ time**, like `applyViewGuesses` and
+`mergeNoteBlocks`, so a pack already read gains the corrected reading with no
+second model call. It touches a row only when it is still `pending`, at
+`version === 1` (nobody has patched it), holds no field, and is not a dimension
+or a note — so a reviewer's decision is never second-guessed, and a merged note
+block is never promoted to a fabric. It re-seeds `taken` from the rows that
+already hold fields, so it cannot hand COM 1 to two rows.
+
+**The register has to reach every reader.** `assertStagedDrawings` takes the
+spec fields, and the review GET, its autosave PATCH, the pack screen and
+`confirm-drawings` all pass them. A confirm that resolved the field differently
+from the screen would be a cell the file does not deliver.
+
+A fabric lands in the group **Materials and fabrics**, not *Finishes*: `finish`
+is this app's word for timber and metal. The BWS field is the part that
+matters.
+
+### Completed is computed, and there is no button
+
+`src/lib/project-completion.ts`, `src/app/api/projects/route.ts`,
+`src/app/api/projects/[id]/route.ts`
+
+Asked for directly on 2026-09-17: a project becomes COMPLETED when every spec
+that could be needed is in, rather than when somebody remembers to mark it.
+So it is DERIVED on every read, for the reason Overdue and Waiting are: a
+stored flag would be written when an answer changed, and writing it bumps the
+version M2's snapshots and the chase coverage rows are taken against.
+
+Four clauses, each a trap on its own:
+
+- **It counts the EXPORT's scope** — active records on active runs, a split
+  bill line counted through its configurations. The predicate is duplicated
+  from `loadExportScope` because the driver cannot share a SQL fragment, so
+  `tests/db/project-completion.test.ts` asserts the two agree on a real
+  project. A pill reading COMPLETED over a different set of records from the
+  file is the check sheet's own failure mode, worn as a badge.
+- **TBC blocks it**, because TBC is an answer and not a settled one.
+- **An uncategorised record blocks it.** It has NO questions, so it scores zero
+  outstanding and would otherwise drag a project to COMPLETED by having been
+  ignored.
+- **Zero records is not complete.** An empty project is one nobody has started,
+  and 0/0 rendering green is the empty-programme error again.
+
+Archived wins the pill, because a project put away is put away whether or not
+its specifications were ever finished. Both screens say what is outstanding in
+words, so ACTIVE explains itself and COMPLETED is never a mystery.
+
+### A level is guessed at intake, and a guess is not a level
+
+`db/migrations/0025_level_suggestion.sql`, `src/lib/level-guess.ts`,
+`src/lib/confirm-boq.ts`, `src/lib/record-category.ts`,
+`src/lib/variant-create.ts`
+
+0019 gave a record a level and nothing to set it with but the record screen and
+the drafts blocker, one at a time — so a 59-line bill arrived as 59 records
+reading "Set level", and every chase stayed blocked. Asked for directly on
+2026-09-17: guess it, per bill line, and always flag it.
+
+**`spec_records.level` is untouched and still means a person's decision.** The
+guess lives in `level_suggested` + `level_suggested_reason`, which every
+existing reader ignores for free — `questionTier`, `chase-drafts`,
+`/api/records`, `SpecTable`. No clause anybody forgets can let a guess satisfy
+the quote gate. 0025 refuses a row holding both, and refuses a suggestion with
+no reason.
+
+- **The rules are this repo's judgement.** All 17 cheat sheets were searched on
+  2026-09-17 and not one contains the words simple, complex or hero. The only
+  written basis is the BWS boilerplate names — `Simple`, `with Metalwork`,
+  `Hero` — so metalwork reads complex, the document's own word reads hero, and
+  everything else is simple. It belongs on the list to confirm with Matthew,
+  beside the question-to-BWS-field mapping. It never reads the AREA:
+  *Signature Suites* is a floor.
+- **The bill now, the drawings later.** `guessLevelFromAttributes` runs after a
+  drawings confirm, where a brass leg first appears — and it never returns
+  `simple`, because "this page named no metal" is not evidence that the item
+  has none. It writes only where `level` is null.
+- **The confirm writes one column or the other.** `chosen` in the review
+  table's Level column fills `level`; anything else fills `level_suggested`. A
+  revision fills a gap and never overrides a level that is already there.
+- **A configuration inherits it**, decision as decision and suggestion as
+  suggestion — `ensureVariant` copied neither, so a split hero item produced
+  level-less children blocking a chase for a decision taken one row up. The
+  quantity still does not come down: the bill says 45 and never says how many
+  are fabric A.
+- **Accepting is one click, and it can cover a run.** `acceptSuggestedLevels`
+  writes every suggestion under ONE `level_set` change set, because 59 records
+  must not mean 59 visits. It accepts only what is already suggested — a record
+  with none is untouched.
+- **A pre-filled select cannot be the accept control.** A select showing
+  "Simple" fires no change event when somebody picks Simple, so agreeing would
+  silently do nothing. Every accept is its own button.
+
 ### A link goes somewhere; a button does something
 
 `src/components/ui/Button.tsx`
@@ -1688,10 +1814,52 @@ against its own run as 57 paired, 2 ambiguous — correctly refusing to guess
 which `SX11A` is which; and one finish edit moving 3 records and 8 answers.
 **Not accepted by Max**, on any screen.
 
+**Built 2026-09-17, the first run-through's six findings.** Max drove the app
+end to end and reported one data defect, one gap and four UI changes. Each is
+shippable alone; the load-bearing sections above carry the reasoning.
+
+- **A fabric came through as "Other" with no BWS field.** `classifyCallout` is
+  now the one reading behind both the group and the field, the word lists carry
+  the vocabulary a swatch caption uses, the client's own finish code is read as
+  evidence, and a caption naming the item itself is taken as its upholstery —
+  flagged yellow, because that step is an inference. Applied to packs already
+  read, at read time: **no document was re-read and nothing was charged
+  again.**
+- **A finished review says so.** A green *Review complete* box on both drawings
+  screens, and *Open the project page* at the bottom of each.
+- **The projects list is a table** with a search box, a status pill and no
+  duplicate Overview button.
+- **A project becomes COMPLETED on its own** when every question on every
+  record in the export's scope is confirmed or N/A. Computed, never stored, and
+  there is no button.
+- **The project page reads as cards**, with versions, baselines and the change
+  trail on the page rather than behind a History tab (old `?tab=history` links
+  land on the page).
+- **A level is guessed at intake**, per bill line, flagged, inherited by a
+  line's configurations, and accepted a run at a time.
+
+**Verified in the browser against the sandbox packs**, not fixtures: the real
+AP364 Panther drawings showing `UPH-07` captions resolving to COM 1 plainly and
+`CH-01.1` captions resolving to COM 1 in yellow with their reason, a caption
+whose label names a different piece left alone; the confirmed AP364c run
+showing *Review complete · 240 specs applied*; the projects list, its search and
+a COMPLETED pill appearing with no button pressed; and a run's two suggested
+levels accepted in one click under one change set. **Not accepted by Max**, on
+any screen.
+
 **Outstanding — judgement, not code.**
 
 - **Nobody has used any of this.** The four checks pass with the database tier
   running; human acceptance is outstanding on every screen.
+- **The level guess rules are unconfirmed.** Nothing in the 17 cheat sheets
+  defines simple / complex / hero; the rules read the BWS boilerplate split
+  (metalwork → complex) and the document's own word for a hero. Matthew has not
+  seen them. Until he has, what they produce is a suggestion on a screen, which
+  is the reason nothing writes `spec_records.level` without a person.
+- **No real bill has been parsed with a level column yet.** The parse → review
+  → confirm path is covered by a route-tier test, and the sandbox's staged BOQs
+  all predate the feature, so their Level cells read "— not yet —" (correct).
+  The first real import is the test.
 - **Nothing has been through the revised-BOQ path for real.** The P17231 bill
   was reconciled against its own run and read correctly, and then NOT
   confirmed: doing so would have rewritten 57 records of Max's sandbox data.
@@ -1732,6 +1900,11 @@ which `SX11A` is which; and one finish edit moving 3 records and 8 answers.
   import before anybody relies on the file.
 - `requirement_aliases` is empty and attribute matching measured 1/7 on the M2
   sample; seed it only from verified pilot wording.
+- **The level guess rules are this repo's judgement too**, and for a harder
+  reason than the job columns: nothing written down defines simple / complex /
+  hero. `src/lib/level-guess.ts` encodes the BWS boilerplate split and Max's
+  description of it. Put them in front of Matthew with the TGQ workbook — it is
+  the same sitting and the same person.
 
 **Explicitly excluded, so they are not built speculatively:** feeding preamble
 notes into later model calls; gap and completeness checking, and gates; a BWS *import* file carrying job numbers; PDF bills of

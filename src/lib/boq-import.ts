@@ -29,6 +29,7 @@
 // or write anything. It returns what the sheet said, with the row number it
 // said it on, so a reviewer can go and look.
 import type { SheetData } from "read-excel-file/node";
+import type { ItemLevel } from "@/lib/spec-vocab";
 
 export type BoqLine = {
   /** 1-based row number in the source sheet, for "go and look at line 34". */
@@ -61,6 +62,23 @@ export type StagedBoqLine = BoqLine & {
   categoryId: string | null;
   categoryStatus: string;
   categoryCandidates?: { id: string; name: string }[];
+  /**
+   * The item's level: simple, complex or hero — guessed at parse time and
+   * shown on the review table for a person to correct.
+   *
+   * `levelStatus` is the difference between the app's reading and somebody's
+   * decision, and it decides which COLUMN the confirm writes: `chosen` fills
+   * `spec_records.level`, which the quote gate reads; `suggested` fills
+   * `level_suggested`, which nothing reads until a person accepts it. See
+   * db/migrations/0025_level_suggestion.sql.
+   *
+   * OPTIONAL: every one of these keys is absent on a bill staged before
+   * 2026-09-17, and a reader that required them would refuse to open a run
+   * somebody is halfway through reviewing.
+   */
+  level?: ItemLevel | null;
+  levelStatus?: "suggested" | "chosen";
+  levelReason?: string | null;
   ignored: boolean;
   /** The record this line continues, at the version the reviewer was shown. */
   replaces?: { recordId: string; recordVersion: number } | null;

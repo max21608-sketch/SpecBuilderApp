@@ -23,6 +23,7 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import { usePoll } from "@/lib/use-poll";
 import { intakeStatusLabel, isIntakeRunWorking } from "@/lib/intake-status";
 import Spinner from "@/components/ui/Spinner";
+import { buttonClass } from "@/components/ui/Button";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
   BulkUnit,
@@ -672,12 +673,26 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
       </div>
 
 
+      {/* THE END OF THE PACK, SAID OUT LOUD — the same box the single-document
+          screen shows, because it does not matter which of the two a reviewer
+          happened to finish on. "Review complete", never "complete": settled
+          answers are a different question. */}
       {cards.length === 0 && runs.some((run) => run.staged) && (
-        <p className="mt-6 text-sm text-neutral-700">
-          Nothing left to review in this pack. Settled answers are a different question — the records screen is where
-          those live.
-        </p>
+        <div className="mt-6 text-sm text-green-900 bg-green-50 border border-green-300 rounded px-3 py-2">
+          <p className="font-medium">Review complete</p>
+          <p className="mt-0.5">
+            Nothing left to review in this pack. Settled answers are a different question — the records screen is where
+            those live.
+          </p>
+        </div>
       )}
+
+      {/* Where a reviewer goes next. The bottom of this screen was a dead end. */}
+      <div className="mt-8 pt-4 border-t border-neutral-200">
+        <Link href={`/dashboard/projects/${projectId}`} className={buttonClass("primary")}>
+          Open the project page
+        </Link>
+      </div>
     </div>
   );
 }

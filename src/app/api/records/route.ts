@@ -58,6 +58,10 @@ export async function GET(request: Request): Promise<Response> {
       r.boq_category,
       r.status,
       r.level,
+      -- ADVISORY, and the screens label it as such: a suggestion never
+      -- tiers a question. See db/migrations/0025_level_suggestion.sql.
+      r.level_suggested,
+      r.level_suggested_reason,
       r.retired_at,
       r.retired_by,
       r.run_id,

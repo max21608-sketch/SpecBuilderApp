@@ -16,6 +16,7 @@ import { type EmailMessage } from "@/components/imports/EmailHeader";
 import DrawingsReview from "@/components/imports/DrawingsReview";
 import PreambleReview from "@/components/imports/PreambleReview";
 import Button from "@/components/ui/Button";
+import { ITEM_LEVELS, ITEM_LEVEL_LABELS } from "@/lib/spec-vocab";
 
 type Line = {
   replaces?: { recordId: string; recordVersion: number } | null;
@@ -24,6 +25,9 @@ type Line = {
   qty: number | null; qtyUnit: string | null;
   categoryId: string | null; categoryStatus: string;
   categoryCandidates?: { id: string; name: string }[]; ignored: boolean;
+  // Guessed at parse time, corrected here. `chosen` is what makes it a
+  // decision the quote gate may read; see db/migrations/0025.
+  level?: string | null; levelStatus?: string; levelReason?: string | null;
 };
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
 type Sheet = {
@@ -62,6 +66,9 @@ type Import = {
 const STATUS_LABEL: Record<string, string> = {
   confident: "matched",
   ambiguous: "several possible",
+  // What the parser actually writes for a confident match. It was missing, so
+  // a suggested category rendered with NO chip and read as a decision.
+  suggested: "suggested",
   none: "no match",
   chosen: "chosen",
   pending: "",
@@ -113,7 +120,12 @@ export default function ReviewImportPage() {
   async function setLine(
     sheetIndex: number,
     index: number,
-    patch: { categoryId?: string | null; ignored?: boolean; replaces?: { recordId: string; recordVersion: number } | null },
+    patch: {
+      categoryId?: string | null;
+      level?: string | null;
+      ignored?: boolean;
+      replaces?: { recordId: string; recordVersion: number } | null;
+    },
   ) {
     setError(null);
     const res = await apiFetch(`/api/imports/${id}`, {
@@ -386,6 +398,7 @@ export default function ReviewImportPage() {
                     <th className="text-left font-medium px-3 py-2">Area</th>
                     <th className="text-left font-medium px-3 py-2">Qty</th>
                     <th className="text-left font-medium px-3 py-2">Category (optional)</th>
+                    <th className="text-left font-medium px-3 py-2">Level</th>
                     {reconciliation && <th className="text-left font-medium px-3 py-2">Against the run</th>}
                     <th className="text-left font-medium px-3 py-2"> </th>
                   </tr>
@@ -479,6 +492,36 @@ export default function ReviewImportPage() {
                         {line.categoryStatus !== "chosen" && STATUS_LABEL[line.categoryStatus] && (
                           <span className={`ml-2 text-xs ${line.categoryStatus === "confident" ? "text-green-700" : "text-amber-800"}`}>
                             {STATUS_LABEL[line.categoryStatus]}
+                          </span>
+                        )}
+                      </td>
+                      {/* THE LEVEL, GUESSED AND FLAGGED. A record with no
+                          level cannot be tiered at all, so a 59-line bill used
+                          to arrive as 59 records reading "Set level" — and
+                          nothing suggested one. The guess is amber until
+                          somebody picks, and picking is what turns it from a
+                          suggestion into a decision the quote gate may read.
+                          Leaving it alone is fine: it lands as a suggestion
+                          and can be accepted a whole run at a time later. */}
+                      <td className="px-3 py-2">
+                        <select
+                          value={line.level ?? ""}
+                          disabled={run.status !== "parsed" || line.ignored}
+                          onChange={(e) => setLine(sheetIndex, line.index, { level: e.target.value || null })}
+                          className={`border rounded px-2 py-1 text-sm disabled:opacity-50 ${
+                            line.levelStatus === "chosen" ? "border-neutral-300" : "border-amber-400 bg-amber-50"
+                          }`}
+                        >
+                          <option value="">— not yet —</option>
+                          {ITEM_LEVELS.map((level) => (
+                            <option key={level} value={level}>
+                              {ITEM_LEVEL_LABELS[level]}
+                            </option>
+                          ))}
+                        </select>
+                        {line.levelStatus !== "chosen" && line.level && (
+                          <span className="block text-xs text-amber-800" title={line.levelReason ?? undefined}>
+                            guessed
                           </span>
                         )}
                       </td>

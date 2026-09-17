@@ -22,6 +22,7 @@ import {
   unitSourceOf,
   stageDrawings,
   assertStagedDrawings,
+  classifyCallout,
   variantLettersByItem,
   hasPendingObservations,
   mergeNoteBlocks,
@@ -232,6 +233,140 @@ describe("classifyGroup", () => {
     expect(classifyGroup("SOFA FEET", "Dark tinted wood")).toBe("finish");
     expect(classifyGroup("Runners", "Soft close")).toBe("hardware");
     expect(classifyGroup("PIPING", "TBC")).toBe("other");
+  });
+
+  // The real S-100 sheet. The PART is in the label, as the prompt asks for,
+  // and the CLOTH is in the value -- so before the word lists carried the
+  // vocabulary a swatch caption actually uses, this row staged as `other`
+  // with no BWS field while its timber sibling landed correctly.
+  it("reads a cloth named in the value", () => {
+    expect(classifyGroup("SOFA", "Yarn Tessarae YC04158 - 01")).toBe("material");
+    expect(classifyGroup("SEAT", "Bouclé, ivory")).toBe("material");
+  });
+
+  it("reads the client's own finish code where the words say nothing", () => {
+    expect(classifyGroup("SEAT", "Tessarae 04158", { materialCodeRaw: "UPH-07" })).toBe("material");
+    expect(classifyGroup("BASE", "Tinted, satin", { materialCodeRaw: "WD-02" })).toBe("finish");
+    expect(classifyGroup("TRIM", "Antique, brushed", { materialCodeRaw: "MT-01" })).toBe("finish");
+    // CH is printed on the real set and nothing says what it stands for.
+    expect(classifyGroup("SEAT", "Tessarae 04158", { materialCodeRaw: "CH-01.2" })).toBe("other");
+  });
+
+  it("reads a caption that names the item itself as its upholstery, and says it guessed", () => {
+    const reading = classifyCallout({
+      labelRaw: "SOFA",
+      valueRaw: "Tessarae YC04158 - 01",
+      materialCodeRaw: null,
+      itemNameRaw: "Sofa",
+    });
+    expect(reading.kind).toBe("fabric");
+    expect(reading.guessed).toBe(true);
+    expect(reading.reason).toBeTruthy();
+  });
+
+  it("refuses that guess where the caption names a PART, or says nothing", () => {
+    // A part is about that part. Only the whole piece is about its cloth.
+    expect(
+      classifyCallout({ labelRaw: "SOFA BACK", valueRaw: "Tessarae 04158", materialCodeRaw: null, itemNameRaw: "Sofa" })
+        .kind,
+    ).toBeNull();
+    // One token of nothing is a question, not a fabric.
+    expect(
+      classifyCallout({ labelRaw: "SOFA", valueRaw: "TBC", materialCodeRaw: null, itemNameRaw: "Sofa" }).kind,
+    ).toBeNull();
+    // A fabric nobody has confirmed is still a fabric.
+    expect(
+      classifyCallout({
+        labelRaw: "SOFA",
+        valueRaw: "TBC – Yarn Collective Tessarae",
+        materialCodeRaw: null,
+        itemNameRaw: "Sofa",
+      }).kind,
+    ).toBe("fabric");
+  });
+});
+
+describe("re-reading a callout on an already-staged run", () => {
+  // The shape a pack staged before the word lists were widened holds: group
+  // `other`, no field, nobody has touched it.
+  const staleRun = (overrides: Record<string, unknown> = {}) => ({
+    schemaVersion: 1,
+    kind: "shop_drawings",
+    filename: "S-100.pdf",
+    documentNotes: null,
+    items: [
+      {
+        id: "item-1",
+        version: 1,
+        page: 1,
+        itemCodeRaw: "S-100",
+        itemNameRaw: "Sofa",
+        confidence: "high",
+        targets: null,
+        observations: [
+          {
+            id: "obs-1",
+            version: 1,
+            attrGroup: "other",
+            labelRaw: "SOFA",
+            valueRaw: "Yarn Tessarae YC04158 - 01",
+            materialCodeRaw: null,
+            value: "Yarn Tessarae YC04158 - 01",
+            unit: null,
+            unitSuggested: false,
+            specFieldId: null,
+            state: "confirmed",
+            stateReason: null,
+            reviewStatus: "pending",
+            reviewedAt: null,
+            reviewedBy: null,
+            applied: null,
+            ...overrides,
+          },
+        ],
+      },
+    ],
+  });
+
+  const firstObservation = (doc: unknown) => assertStagedDrawings(doc, FIELDS).items[0]!.observations[0]!;
+
+  it("gives it the group and the BWS field it should have had", () => {
+    const observation = firstObservation(staleRun());
+    expect(observation.attrGroup).toBe("material");
+    expect(observation.specFieldId).toBe("f-com1");
+  });
+
+  it("leaves a row somebody has edited exactly as they left it", () => {
+    // version 2 is the only thing that says a person has been here, and it is
+    // enough: a reviewer who deliberately filed this as Other keeps it.
+    const observation = firstObservation(staleRun({ version: 2 }));
+    expect(observation.attrGroup).toBe("other");
+    expect(observation.specFieldId).toBeNull();
+  });
+
+  it("leaves an applied row alone, because it is history", () => {
+    const observation = firstObservation(staleRun({ reviewStatus: "applied" }));
+    expect(observation.attrGroup).toBe("other");
+  });
+
+  it("never hands one field to two rows", () => {
+    const doc = staleRun();
+    // A second untouched caption on the same page, and COM 1 already taken by
+    // the first: the second takes COM 2, not a second COM 1.
+    (doc.items[0]!.observations as unknown[]).push({
+      ...(doc.items[0]!.observations[0]! as Record<string, unknown>),
+      id: "obs-2",
+      labelRaw: "SCATTER CUSHION",
+      valueRaw: "Linen, natural",
+    });
+    const observations = assertStagedDrawings(doc, FIELDS).items[0]!.observations;
+    expect(observations.map((o) => o.specFieldId)).toEqual(["f-com1", "f-com2"]);
+  });
+
+  it("corrects the group but claims no field when the caller has no register", () => {
+    const observation = assertStagedDrawings(staleRun()).items[0]!.observations[0]!;
+    expect(observation.attrGroup).toBe("material");
+    expect(observation.specFieldId).toBeNull();
   });
 });
 

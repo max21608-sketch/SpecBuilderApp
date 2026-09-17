@@ -45,10 +45,36 @@ type StagedLine = {
   qty: number | null;
   qtyUnit: string | null;
   categoryId: string | null;
+  /**
+   * The level, and whether a person chose it.
+   *
+   * `chosen` writes `spec_records.level` — the column the quote gate reads.
+   * Anything else writes `level_suggested`, which blocks nothing until
+   * somebody accepts it. Both optional: a bill staged before 2026-09-17 has
+   * neither, and reads as a line with no level at all, exactly as it did.
+   */
+  level?: string | null;
+  levelStatus?: string;
+  levelReason?: string | null;
   ignored: boolean;
   /** The record this line continues, at the version the reviewer was shown. */
   replaces?: { recordId: string; recordVersion: number } | null;
 };
+
+/**
+ * Which column a staged line's level belongs in.
+ *
+ * Exactly one of the two is ever non-null — `spec_records_level_or_suggestion`
+ * refuses the other shape — so this is the single place that reading is made,
+ * and both the insert and the carry-forward call it.
+ */
+function levelDecision(line: StagedLine): { level: string | null; suggested: string | null; reason: string | null } {
+  const level = line.level ?? null;
+  if (!level) return { level: null, suggested: null, reason: null };
+  if (line.levelStatus === "chosen") return { level, suggested: null, reason: null };
+  // A guess with no reason is a guess nobody can check; 0025 refuses it.
+  return { level: null, suggested: level, reason: line.levelReason ?? "guessed from the bill" };
+}
 
 export type ConfirmBoqResult = {
   imported: number;
@@ -266,6 +292,25 @@ export async function confirmBoqImport(
               source_import_id = ${runId},
               source_line_no = ${line.lineNo},
               run_id = ${specRunId},
+              -- A REVISION NEVER OVERRIDES A LEVEL SOMEBODY SET. It fills the
+              -- gap where there is one: a record carried forward with no level
+              -- takes the new bill's reading, and one that already has a level
+              -- — decided or suggested — keeps it. Same rule as the category
+              -- and the attributes this update deliberately leaves alone.
+              level = case
+                when spec_records.level is not null then spec_records.level
+                else ${levelDecision(line).level}
+              end,
+              level_suggested = case
+                when spec_records.level is not null or spec_records.level_suggested is not null
+                  then spec_records.level_suggested
+                else ${levelDecision(line).suggested}
+              end,
+              level_suggested_reason = case
+                when spec_records.level is not null or spec_records.level_suggested is not null
+                  then spec_records.level_suggested_reason
+                else ${levelDecision(line).reason}
+              end,
               updated_by = ${actor}
           where id = ${target.recordId}
             and project_id = ${projectId}
@@ -308,14 +353,21 @@ export async function confirmBoqImport(
 
       // `returning id` rather than re-selecting by record_no: the id is the key,
       // and a follow-up select would be a second chance to pick the wrong row.
+      // THE LEVEL GOES IN ONE OF TWO COLUMNS, and which one is the whole
+      // point. A level the reviewer picked in the table is a decision and
+      // lands in `level`; one this app guessed lands in `level_suggested`,
+      // where `questionTier` cannot see it and no gate can rest on it.
+      const decided = levelDecision(line);
       const inserted = await txn`
         insert into spec_records
           (project_id, run_id, record_no, status, category_id, item_description, product_reference, qty,
-           designer, area, boq_category, source_import_id, source_line_no, created_by, updated_by)
+           designer, area, boq_category, level, level_suggested, level_suggested_reason,
+           source_import_id, source_line_no, created_by, updated_by)
         values
           (${projectId}, ${specRunId}, ${recordNo}, 'active', ${line.categoryId ?? null}, ${line.itemDescription},
            ${line.productReference}, ${line.qty}, ${line.designer},
            ${line.area ?? line.boqCategory ?? null}, ${line.boqCategory ?? null},
+           ${decided.level}, ${decided.suggested}, ${decided.reason},
            ${runId}, ${line.lineNo}, ${actor}, ${actor})
         returning id
       `;

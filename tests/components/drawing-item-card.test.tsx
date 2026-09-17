@@ -214,3 +214,29 @@ describe("a page with no code on it", () => {
     expect(screen.getByRole("button", { name: /Ignore this page/ })).toBeInTheDocument();
   });
 });
+
+describe("a callout the app had to guess at", () => {
+  it("says what it read, and marks the line as a guess", () => {
+    // The last-resort reading: a caption naming the item itself, with a cloth
+    // in the value and no word on any list. Right often enough to fill in,
+    // never certain enough to slip past unread — so it is yellow, like a
+    // guessed dimension slot, and it prints its reason.
+    renderCard([
+      callout("SOFA", "Tessarae YC04158 - 01", null, {
+        attrGroup: "material",
+        specFieldId: "field-com1",
+        groupSuggested: true,
+        groupReason: "the caption pairs the item itself with a material",
+      }),
+    ]);
+    expect(screen.getByText(/the caption pairs the item itself with a material/)).toBeTruthy();
+    const row = screen.getByText("SOFA").closest("tr");
+    expect(row?.className).toContain("bg-yellow");
+  });
+
+  it("leaves a callout the words settled looking settled", () => {
+    renderCard([callout("SOFA FEET", "Dark tinted wood", "WD-01", { specFieldId: "field-timber" })]);
+    const row = screen.getByText("SOFA FEET").closest("tr");
+    expect(row?.className).not.toContain("bg-yellow");
+  });
+});

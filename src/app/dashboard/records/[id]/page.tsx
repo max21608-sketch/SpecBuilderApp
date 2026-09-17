@@ -50,6 +50,8 @@ type SpecRecord = {
   id: string; record_no: number; item_description: string; product_reference: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
   source_line_no: number | null; version: number; category_id: string | null; level: string | null;
+  /** A level this app guessed. Advisory until somebody accepts it. */
+  level_suggested: string | null; level_suggested_reason: string | null;
   bws_project_number: string; project_name: string; project_id: string;
   run_id: string; run_name: string;
   category_name: string | null; category_family: string | null;
@@ -652,12 +654,18 @@ export default function RecordPage() {
             ))}
           </select>
         </label>
-        {/* The LEVEL decides which of those questions hold up a quote. Nothing
-            infers it from a BOQ line, so until somebody chooses, no question on
-            this record carries a tier and a chase for it is blocked. */}
+        {/* The LEVEL decides which of those questions hold up a quote. This app
+            GUESSES one at intake and shows it here pre-selected, but the guess
+            is never the answer: until somebody picks, no question on this
+            record carries a tier and a chase for it is blocked. Choosing the
+            suggested value is what accepts it. */}
         <label className="text-sm text-neutral-600">
           Level
           <select
+            // NOT pre-filled with the suggestion. A select showing "Simple"
+            // fires no change event when somebody picks Simple, so the one
+            // action a reader would take to agree would do nothing at all.
+            // Agreeing has its own button below.
             value={record.level ?? ""}
             disabled={savingLevel}
             onChange={(event) => void setLevel(event.target.value)}
@@ -677,7 +685,27 @@ export default function RecordPage() {
           </span>
         )}
         {record.category_id && !record.level && (
-          <span className="text-xs text-amber-800">{NO_LEVEL_EXPLANATION}</span>
+          <span className="text-xs text-amber-800">
+            {record.level_suggested ? (
+              <>
+                Suggested: {normaliseItemLevel(record.level_suggested)
+                  ? ITEM_LEVEL_LABELS[normaliseItemLevel(record.level_suggested)!]
+                  : record.level_suggested}
+                {record.level_suggested_reason && <> — {record.level_suggested_reason}</>}. Nothing on this record is
+                tiered until you agree.{" "}
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  disabled={savingLevel}
+                  onClick={() => void setLevel(record.level_suggested ?? "")}
+                >
+                  Accept it
+                </Button>
+              </>
+            ) : (
+              NO_LEVEL_EXPLANATION
+            )}
+          </span>
         )}
       </div>
 

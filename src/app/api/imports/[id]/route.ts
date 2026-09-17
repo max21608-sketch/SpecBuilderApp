@@ -24,11 +24,19 @@ import {
   type Proposal,
   type StagedSpecDocument,
 } from "@/lib/spec-document";
-import { ANSWER_STATES, ATTRIBUTE_GROUPS, ATTRIBUTE_STATES, ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
+import {
+  ANSWER_STATES,
+  ATTRIBUTE_GROUPS,
+  ATTRIBUTE_STATES,
+  ATTRIBUTE_UNITS,
+  DIMENSION_SLOTS,
+  isItemLevel,
+} from "@/lib/spec-vocab";
 import { assertBoqDocument } from "@/lib/boq-import";
 import { reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
 import {
   assertStagedDrawings,
+  specFieldEntries,
   isMeasuredRow,
   splitFigureAndUnit,
   type DrawingItem,
@@ -83,7 +91,8 @@ async function patchBulkUnit(id: string, raw: unknown, actor: string): Promise<R
       if (run.status !== "parsed") {
         throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
       }
-      const staged: StagedDrawings = assertStagedDrawings(run.parsed);
+      const fieldRows = await txn`select id, json_id, name from spec_fields order by sort_order`;
+      const staged: StagedDrawings = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
       if (scope === "item" && !staged.items.some((item) => item.id === itemId)) {
         throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
       }
@@ -194,7 +203,8 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
       if (run.status !== "parsed") {
         throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
       }
-      const staged: StagedDrawings = assertStagedDrawings(run.parsed);
+      const fieldRows = await txn`select id, json_id, name from spec_fields order by sort_order`;
+      const staged: StagedDrawings = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
       const item = staged.items.find((row) => row.id === itemId);
       if (!item) throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
 
@@ -273,6 +283,12 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
             : {}),
           ...(changes.unit !== undefined
             ? { unit: changes.unit, unitSuggested: false, unitSource: undefined }
+            : {}),
+          // Choosing a group or a field is a DECISION about what this callout
+          // is, so the row stops being a guess and stops being re-read. Same
+          // rule as `slotSuggested` above, for the same reason.
+          ...(changes.attrGroup !== undefined || changes.specFieldId !== undefined
+            ? { groupSuggested: false, groupReason: null }
             : {}),
           ...(changes.attrGroup !== undefined ? { attrGroup: changes.attrGroup } : {}),
           ...(changes.dimensionSlot !== undefined ? { dimensionSlot: changes.dimensionSlot, slotSuggested: false } : {}),
@@ -418,12 +434,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // whether a card can commit, which is what lets a half-reviewed card
     // through. Both sides call the same functions instead.
     if (!run.parsed) return json({ ok: true, import: { ...run, parsed: null } });
-    const staged = assertStagedDrawings(run.parsed);
+    // The register FIRST: a callout the old word lists gave up on is re-read on
+    // the way past (`upgradeCalloutGuesses`), and it can only claim COM 1 if it
+    // is holding the field ids while it does.
+    const fields = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
+    const staged = assertStagedDrawings(run.parsed, specFieldEntries(fields));
     // The same pairing the pack-wide screen uses, so the two can never disagree
     // about whether a card can commit. See src/lib/drawing-resolution.ts.
     const context = await loadDrawingContext(String(run.project_id));
     const items = resolveStagedRun(staged, context);
-    const fields = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
     return json({
       ok: true,
       import: { ...run, parsed: staged },
@@ -567,6 +586,7 @@ async function patchBoqLine(
     sheetIndex?: unknown;
     index?: unknown;
     categoryId?: unknown;
+    level?: unknown;
     ignored?: unknown;
     runName?: unknown;
     replacesRunId?: unknown;
@@ -647,6 +667,19 @@ async function patchBoqLine(
   if (typeof body.categoryId === "string" || body.categoryId === null) {
     patch.categoryId = body.categoryId;
     patch.categoryStatus = body.categoryId ? "chosen" : "none";
+  }
+  // The level, chosen rather than guessed. `chosen` is what tells the confirm
+  // to write `spec_records.level` — the column the quote gate reads — instead
+  // of the advisory `level_suggested`, so this flag is the human decision the
+  // whole model rests on. Clearing it (null) is a real answer too: "I do not
+  // know yet", which leaves the record with no level and says so.
+  if (body.level !== undefined) {
+    if (body.level !== null && !isItemLevel(body.level)) {
+      return json({ ok: false, error: "A level is simple, complex or hero." }, 400);
+    }
+    patch.level = body.level;
+    patch.levelStatus = "chosen";
+    patch.levelReason = null;
   }
   if (typeof body.ignored === "boolean") patch.ignored = body.ignored;
   // The record this line continues. `null` breaks the pairing, which makes the

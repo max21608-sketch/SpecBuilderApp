@@ -25,6 +25,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const rows = await sql`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
            r.boq_category, r.status, r.version, r.source_line_no, r.category_id, r.level,
+           r.level_suggested, r.level_suggested_reason,
            r.parent_id, r.variant_label,
            p.bws_project_number, p.name as project_name, p.id as project_id,
            run.id as run_id, run.name as run_name,

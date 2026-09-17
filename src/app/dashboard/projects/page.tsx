@@ -1,9 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
+import { buttonClass } from "@/components/ui/Button";
+import {
+  completionSentence,
+  PROJECT_STATE_LABELS,
+  type ProjectCompletion,
+  type ProjectState,
+} from "@/lib/project-completion";
 
 type Project = {
   id: string;
@@ -14,26 +21,39 @@ type Project = {
   status: string;
   archived_at: string | null;
   archived_by: string | null;
+  /** Derived on the server; see src/lib/project-completion.ts. */
+  completion: ProjectCompletion;
+  state: ProjectState;
+};
+
+/** ACTIVE green, COMPLETED blue, ARCHIVED grey — the state, at a glance. */
+const STATE_PILL: Record<ProjectState, string> = {
+  active: "bg-green-100 text-green-800 border-green-200",
+  completed: "bg-sky-100 text-sky-800 border-sky-200",
+  archived: "bg-neutral-100 text-neutral-600 border-neutral-300",
 };
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [archivedCount, setArchivedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [number, setNumber] = useState("");
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
   // Opt-in. The point of archiving is that a finished project stops being in
   // the way, so the default list is the work in front of somebody.
   const [includeArchived, setIncludeArchived] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await apiFetch<{ projects: Project[] }>(
+    const res = await apiFetch<{ projects: Project[]; archivedCount: number }>(
       `/api/projects${includeArchived ? "?includeArchived=true" : ""}`,
     );
     if (!res.ok) { setError(res.error); return; }
     setError(null);
     setProjects(res.data.projects);
+    setArchivedCount(res.data.archivedCount ?? 0);
   }, [includeArchived]);
 
   useEffect(() => { void load(); }, [load]);
@@ -56,24 +76,20 @@ export default function ProjectsPage() {
     }
   }
 
-  const archivedCount = projects?.filter((project) => project.status === "archived").length ?? 0;
+  // Client-side, over the three things somebody actually types: the BWS
+  // number, the project name and the client. A server round trip per keystroke
+  // would buy nothing on a list this size.
+  const shown = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term || !projects) return projects;
+    return projects.filter((project) =>
+      `${project.bws_project_number} ${project.name} ${project.client ?? ""}`.toLowerCase().includes(term),
+    );
+  }, [projects, search]);
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="text-xl font-semibold text-neutral-900">Projects</h1>
-        <label className="flex items-center gap-2 text-sm text-neutral-600">
-          <input
-            type="checkbox"
-            checked={includeArchived}
-            onChange={(event) => setIncludeArchived(event.target.checked)}
-          />
-          Include archived
-          {includeArchived && archivedCount > 0 && (
-            <span className="text-xs text-neutral-500">({archivedCount} shown)</span>
-          )}
-        </label>
-      </div>
+    <div className="max-w-5xl mx-auto">
+      <h1 className="text-xl font-semibold text-neutral-900">Projects</h1>
 
       {error && (
         <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
@@ -99,73 +115,95 @@ export default function ProjectsPage() {
         </button>
       </form>
 
+      <div className="mt-6 flex flex-wrap items-center gap-4">
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search projects"
+          className="border border-neutral-300 rounded px-3 py-2 text-sm w-64"
+        />
+        <label className="flex items-center gap-2 text-sm text-neutral-600">
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(event) => setIncludeArchived(event.target.checked)}
+          />
+          Show archived ({archivedCount})
+        </label>
+      </div>
+
       {projects === null ? (
-        <div className="mt-6"><Spinner label="Loading projects" /></div>
-      ) : projects.length === 0 ? (
-        <p className="mt-6 text-sm text-neutral-600">
-          {includeArchived
-            ? "No projects yet. Add one above, then open it to import its BOQ."
-            : "Nothing active. Add a project above, or tick Include archived to see finished ones."}
+        <div className="mt-4"><Spinner label="Loading projects" /></div>
+      ) : (shown ?? []).length === 0 ? (
+        <p className="mt-4 text-sm text-neutral-600">
+          {search.trim()
+            ? "No project matches that."
+            : includeArchived
+              ? "No projects yet. Add one above, then open it to import its BOQ."
+              : "Nothing active. Add a project above, or tick Show archived to see finished ones."}
         </p>
       ) : (
-        <ul className="mt-6 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
-          {projects.map((project) => (
-            <li
-              key={project.id}
-              className={`px-4 py-3 flex items-center gap-4 ${project.status === "archived" ? "bg-neutral-50" : ""}`}
-            >
-              <div className="min-w-0 flex-1">
-                <Link
-                  href={`/dashboard/projects/${project.id}`}
-                  className="font-medium text-neutral-900 underline hover:text-neutral-600"
-                >
-                  {project.bws_project_number} — {project.name}
-                </Link>
-                {project.status === "archived" && (
-                  <span className="ml-2 text-xs px-2 py-0.5 rounded border border-neutral-300 bg-white text-neutral-600">
-                    Archived
-                  </span>
-                )}
-                <p className="text-sm text-neutral-500">
-                  {project.client ?? "No client recorded"} · {project.record_count} spec record
-                  {project.record_count === "1" ? "" : "s"}
-                  {project.status === "archived" && project.archived_at && (
-                    <> · archived {new Date(project.archived_at).toLocaleDateString()}</>
-                  )}
-                </p>
-              </div>
-              {/* TWO buttons, not three. "Open" carried the same href AND the
-                  same styling as "Overview", so the row offered the same
-                  destination twice and read as though one of them went
-                  somewhere else. */}
-              <Link
-                href={`/dashboard/projects/${project.id}`}
-                className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
-              >
-                Overview
-              </Link>
-              {/* The project's own run tabs. There is deliberately no screen
-                  that lists every run's records together: a mock-up run, a main
-                  run and a VE run quote the SAME codes at different quantities,
-                  so merging them is three of everything with no way to tell
-                  which is which. */}
-              <Link
-                href={`/dashboard/projects/${project.id}?tab=spec`}
-                className="shrink-0 text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700"
-              >
-                Spec table
-              </Link>
-              {/* Asking for what is missing is the stage after intake, and it
-                  is where a KAM spends their week. It gets its own way in. */}
-              <Link
-                href={`/dashboard/drafts?projectId=${project.id}`}
-                className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
-              >
-                Chase
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-4 border border-neutral-200 rounded-lg bg-white overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-neutral-50 text-left text-neutral-600">
+              <tr>
+                <th className="px-4 py-2 font-medium">Project</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-200">
+              {(shown ?? []).map((project) => (
+                <tr key={project.id} className={project.status === "archived" ? "bg-neutral-50" : ""}>
+                  <td className="px-4 py-3">
+                    {/* The name IS the way in. The row used to carry an
+                        "Overview" button pointing at the same place, which
+                        read as though one of the two went somewhere else. */}
+                    <Link
+                      href={`/dashboard/projects/${project.id}`}
+                      className="font-medium text-neutral-900 underline hover:text-neutral-600"
+                    >
+                      {project.bws_project_number} — {project.name}
+                    </Link>
+                    <p className="text-xs text-neutral-500">
+                      {project.client ?? "No client recorded"} · {project.record_count} spec record
+                      {project.record_count === "1" ? "" : "s"}
+                      {project.status === "archived" && project.archived_at && (
+                        <> · archived {new Date(project.archived_at).toLocaleDateString()}</>
+                      )}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <span
+                      className={`inline-block text-[11px] tracking-wide px-2 py-0.5 rounded border ${STATE_PILL[project.state]}`}
+                      // COMPLETED arrives on its own, so the pill has to be
+                      // able to say what is still outstanding under ACTIVE.
+                      title={completionSentence(project.completion) ?? "Every question on every record is settled."}
+                    >
+                      {PROJECT_STATE_LABELS[project.state]}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <div className="flex justify-end gap-2">
+                      {/* The project's own run tabs. There is deliberately no
+                          screen that lists every run's records together: a
+                          mock-up run, a main run and a VE run quote the SAME
+                          codes at different quantities. */}
+                      <Link href={`/dashboard/projects/${project.id}?tab=spec`} className={buttonClass("primary")}>
+                        Spec table
+                      </Link>
+                      {/* Asking for what is missing is the stage after intake,
+                          and it is where a KAM spends their week. */}
+                      <Link href={`/dashboard/drafts?projectId=${project.id}`} className={buttonClass("secondary")}>
+                        Chase
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

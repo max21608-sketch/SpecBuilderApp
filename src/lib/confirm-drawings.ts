@@ -33,6 +33,7 @@ import { loadPromotable } from "@/lib/attribute-retire";
 import {
   acknowledgedReplacements,
   assertStagedDrawings,
+  specFieldEntries,
   drawingItemBlockers,
   hasPendingObservations,
   occupancyThrough,
@@ -49,6 +50,7 @@ import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 import { openChangeSet } from "@/lib/change-sets";
+import { guessLevelFromAttributes } from "@/lib/level-guess";
 import { isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
 
 /** A swatch chip cropped off the page, keyed by the row it was cropped for. */
@@ -101,7 +103,16 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
       "This import changed while you were reviewing it. Reload and check before confirming.",
     );
   }
-  return { runId: String(run.id), projectId: String(run.project_id), staged: assertStagedDrawings(run.parsed) };
+  // Read with the register, exactly as the screen reads it: a callout whose
+  // group and BWS field were re-read on the way to the card must land on the
+  // same field when it is written, or the screen is promising a cell the file
+  // does not deliver.
+  const fieldRows = await txn`select id, json_id, name from spec_fields order by sort_order`;
+  return {
+    runId: String(run.id),
+    projectId: String(run.project_id),
+    staged: assertStagedDrawings(run.parsed, specFieldEntries(fieldRows)),
+  };
 }
 
 /**
@@ -661,6 +672,44 @@ export async function confirmDrawingItem(
     await applyAnswerRetractions(txn, recordId, actor, fills);
     answersFilled += filled;
 
+    // ---- a second look at the item's level -------------------------------
+    //
+    // The bill is usually silent about metalwork; the shop drawing is where a
+    // brass leg first appears. So a record whose level NOBODY HAS DECIDED gets
+    // its suggestion revised from what the drawing just said.
+    //
+    // Two things this must not do, and does not. It never touches `level`:
+    // a decision stands, and a drawing is not a person. And it only ever
+    // strengthens — `guessLevelFromAttributes` returns complex or hero or
+    // nothing, never simple, because "this page named no metal" is not
+    // evidence that the item has none.
+    const undecided = await txn`
+      select id from spec_records where id = ${recordId} and level is null for update
+    `;
+    if (undecided[0]) {
+      const held = await txn`
+        select label, value, source_page from record_attributes
+         where record_id = ${recordId} and status = 'active'
+      `;
+      const guess = guessLevelFromAttributes(
+        held.map((row) => ({
+          labelRaw: row.label === null ? null : String(row.label),
+          valueRaw: row.value === null ? null : String(row.value),
+          sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
+        })),
+      );
+      if (guess) {
+        await txn`
+          update spec_records
+             set level_suggested = ${guess.level},
+                 level_suggested_reason = ${guess.reason},
+                 updated_by = ${actor}
+           where id = ${recordId}
+             and level is null
+             and level_suggested is distinct from ${guess.level}
+        `;
+      }
+    }
   }
 
   // One version per target record, taken AFTER the answers were promoted: a

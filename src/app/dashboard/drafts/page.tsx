@@ -81,7 +81,15 @@ type Blocked = {
   reason: string;
 };
 
-type Levelless = { recordId: string; recordLabel: string; itemDescription: string; version: number };
+type Levelless = {
+  recordId: string;
+  recordLabel: string;
+  itemDescription: string;
+  version: number;
+  /** What this app guessed, and why. It tiers nothing until accepted. */
+  suggested: string | null;
+  suggestedReason: string | null;
+};
 
 type Inventory = {
   groups: { contact: Contact; questions: Question[] }[];
@@ -392,6 +400,29 @@ function DraftsView() {
                   {row.recordLabel}
                 </Link>
                 <span className="text-amber-800">{row.itemDescription}</span>
+                {/* WHAT THE APP WOULD SAY, and what it read to say it. The
+                    picker is pre-filled with the guess so agreeing is one
+                    click — but it is still a click, and until it happens the
+                    record counts as having no level. */}
+                {row.suggested && (
+                  <>
+                    <span className="text-xs text-amber-800" title={row.suggestedReason ?? undefined}>
+                      suggested: {row.suggested}
+                      {row.suggestedReason && <> — {row.suggestedReason}</>}
+                    </span>
+                    {/* Its own button: a select pre-filled with the guess fires
+                        no change event when somebody picks the guess, so
+                        agreeing would silently do nothing. */}
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      disabled={settingLevel === row.recordId}
+                      onClick={() => void setLevel(row, row.suggested ?? "")}
+                    >
+                      Accept
+                    </Button>
+                  </>
+                )}
                 <select
                   defaultValue=""
                   disabled={settingLevel === row.recordId}

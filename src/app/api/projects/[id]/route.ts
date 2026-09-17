@@ -15,6 +15,7 @@
 // migration, not a form field.
 import { z } from "zod";
 import { sql, json } from "@/lib/db";
+import { EMPTY_COMPLETION, loadProjectCompletion, projectState } from "@/lib/project-completion";
 import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
 import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
@@ -154,6 +155,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     order by n.flagged desc, n.sort_order, n.created_at
   `;
 
+  // Whether every spec that could be needed is in. COMPUTED, never stored —
+  // see src/lib/project-completion.ts — and returned here so the pill on the
+  // project page and the pill on the projects list can never disagree.
+  const completion = (await loadProjectCompletion([id])).get(id) ?? EMPTY_COMPLETION;
+
   const record = rows[0] as Record<string, unknown>;
   return json({
     ok: true,
@@ -163,6 +169,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       specs_agreed_by: asDate(record.specs_agreed_by),
       delivery_date: asDate(record.delivery_date),
     },
+    completion,
+    state: projectState(String(record.status ?? "active"), completion),
     documents,
     runs,
     notes,

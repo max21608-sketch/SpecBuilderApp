@@ -167,7 +167,12 @@ export function ObservationRow({
   // A GUESSED SLOT TURNS THE WHOLE LINE YELLOW. An amber border on the slot
   // select alone is invisible in a table of twenty-four rows, and a reviewer
   // scanning for what still needs checking is scanning lines, not dropdowns.
-  const guessed = Boolean(observation.slotSuggested && observation.dimensionSlot);
+  // Two kinds of guess turn a line yellow: which of the five slots a figure
+  // fills, and what a material callout IS. The second is the last-resort
+  // reading of a caption naming the item itself (`SOFA / Tessarae YC04158`) —
+  // right often enough to be worth filling in, never certain enough to slip
+  // past unread.
+  const guessed = Boolean((observation.slotSuggested && observation.dimensionSlot) || observation.groupSuggested);
   // What this row can be given, rather than what the vocabulary holds.
   // `dimension` is never offered here: it is unwritable without a slot, and the
   // slot column sends both together.
@@ -213,6 +218,11 @@ export function ObservationRow({
             </option>
           ))}
         </select>
+        {observation.groupSuggested ? (
+          <span className="block mt-0.5 text-[11px] text-amber-700">
+            {observation.groupReason ?? "guessed from the caption"}
+          </span>
+        ) : null}
       </td>
       <td className="px-2 py-2 align-top text-neutral-700">{observation.labelRaw ?? "—"}</td>
       <td className="px-2 py-2 align-top">
@@ -351,7 +361,9 @@ export function ObservationRow({
           <select
             value={observation.specFieldId ?? ""}
             onChange={(event) => callbacks.onChange(observation, { specFieldId: event.target.value || null })}
-            className="border border-neutral-300 rounded px-1 py-0.5 text-xs max-w-[12rem]"
+            className={`border rounded px-1 py-0.5 text-xs max-w-[12rem] ${
+              observation.groupSuggested ? "border-amber-400 bg-amber-50" : "border-neutral-300"
+            }`}
           >
             <option value="">No BWS field</option>
             {specFields.map((field) => (

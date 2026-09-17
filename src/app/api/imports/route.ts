@@ -76,6 +76,7 @@ import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind } from "@/lib/intake-source-types";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
 import { matchName, type MatchCandidate } from "@/lib/matching";
+import { guessLevelFromBill } from "@/lib/level-guess";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
@@ -447,25 +448,38 @@ async function parseBoqInto(
       ...aliases.map((a) => ({ id: String(a.category_id), name: String(a.term) })),
     ];
 
-    const suggest = (line: { itemDescription: string }, index: number) => {
+    // The LEVEL, guessed the same way and for the same reason: stored at parse
+    // time so the confirm writes what the reviewer saw. Unlike the category it
+    // is never written straight into the column the gate reads — a guessed
+    // level lands in `level_suggested` unless the reviewer picks one. See
+    // src/lib/level-guess.ts for what it reads, and what it refuses to.
+    const levelOf = (line: { itemDescription: string; productReference?: string | null }) => {
+      const guess = guessLevelFromBill(line);
+      return guess
+        ? { level: guess.level, levelStatus: "suggested" as const, levelReason: guess.reason }
+        : { level: null, levelStatus: "suggested" as const, levelReason: null };
+    };
+
+    const suggest = (line: { itemDescription: string; productReference?: string | null }, index: number) => {
+      const level = levelOf(line);
       const match = matchName(line.itemDescription, candidates);
       if (match.status === "confident") {
-        return { index, ...line, categoryId: match.id, categoryStatus: "suggested", ignored: false };
+        return { index, ...line, ...level, categoryId: match.id, categoryStatus: "suggested", ignored: false };
       }
       if (match.status === "ambiguous") {
         // Several terms pointing at ONE category is agreement, not ambiguity.
         const ids = [...new Set(match.candidates.map((candidate) => candidate.id))];
         if (ids.length === 1) {
-          return { index, ...line, categoryId: ids[0] ?? null, categoryStatus: "suggested", ignored: false };
+          return { index, ...line, ...level, categoryId: ids[0] ?? null, categoryStatus: "suggested", ignored: false };
         }
         return {
-          index, ...line, categoryId: null, categoryStatus: "ambiguous", ignored: false,
+          index, ...line, ...level, categoryId: null, categoryStatus: "ambiguous", ignored: false,
           categoryCandidates: ids.map((id) => ({
             id, name: String(categories.find((c) => String(c.id) === id)?.name ?? id),
           })),
         };
       }
-      return { index, ...line, categoryId: null, categoryStatus: "none", ignored: false };
+      return { index, ...line, ...level, categoryId: null, categoryStatus: "none", ignored: false };
     };
 
     // v2: every sheet with a header, each becoming a run at confirm. The line

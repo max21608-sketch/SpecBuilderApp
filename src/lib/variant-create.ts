@@ -56,7 +56,7 @@ export async function ensureVariant(
 ): Promise<VariantTarget> {
   const parents = await txn`
     select id, project_id, run_id, category_id, item_description, product_reference,
-           designer, area, boq_category, qty, status
+           designer, area, boq_category, qty, status, level, level_suggested, level_suggested_reason
       from spec_records where id = ${parentId}
   `;
   const parent = parents[0];
@@ -116,15 +116,29 @@ export async function ensureVariant(
   `;
   const recordNo = Number(maxNo[0]?.max_no ?? 0) + 1;
 
+  // ---- THE LEVEL COMES DOWN WITH EVERYTHING ELSE --------------------------
+  //
+  // Asked for directly on 2026-09-17: "if you write it as simple for the
+  // furniture line then it should automatically go simple, simple, simple for
+  // each of the A, B and C options". A configuration is the same piece of
+  // furniture in a different cloth, so it is the same level — and a variant
+  // born level-less blocks a chase for a decision somebody has already taken
+  // one row up. A suggestion comes down as a suggestion, which keeps the one
+  // thing that matters: only a person's decision reaches the gate.
+  //
+  // The qty deliberately does NOT come down. The bill says 45 and never says
+  // how many are fabric A.
   const inserted = await txn`
     insert into spec_records
       (project_id, run_id, record_no, status, category_id, item_description, product_reference,
-       qty, designer, area, boq_category, parent_id, depth, split_reason, variant_label,
+       qty, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+       parent_id, depth, split_reason, variant_label,
        created_by, updated_by)
     values
       (${parent.project_id}, ${parent.run_id}, ${recordNo}, 'active', ${parent.category_id ?? null},
        ${parent.item_description}, ${parent.product_reference ?? null},
        null, ${parent.designer ?? null}, ${parent.area ?? null}, ${parent.boq_category ?? null},
+       ${parent.level ?? null}, ${parent.level_suggested ?? null}, ${parent.level_suggested_reason ?? null},
        ${parentId}, 1, 'fabric', ${variantLabel}, ${actor}, ${actor})
     returning id
   `;

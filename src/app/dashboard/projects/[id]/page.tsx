@@ -40,6 +40,13 @@ import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import { ATTRIBUTE_UNITS, ATTRIBUTE_UNIT_LABELS } from "@/lib/spec-vocab";
 import { intakeStatusLabel } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
+import {
+  completionSentence,
+  EMPTY_COMPLETION,
+  PROJECT_STATE_LABELS,
+  type ProjectCompletion,
+  type ProjectState,
+} from "@/lib/project-completion";
 
 type Project = {
   id: string;
@@ -104,6 +111,38 @@ type ProjectNote = {
   version: number;
 };
 
+/** ACTIVE green, COMPLETED blue, ARCHIVED grey — the same three as the list. */
+const STATE_PILL: Record<ProjectState, string> = {
+  active: "bg-green-100 text-green-800 border-green-200",
+  completed: "bg-sky-100 text-sky-800 border-sky-200",
+  archived: "bg-neutral-100 text-neutral-600 border-neutral-300",
+};
+
+/**
+ * A titled box. The screen is long and every section used to be a bare
+ * heading over a list, so scrolling it read as one continuous document rather
+ * than as a set of things you can deal with separately.
+ */
+function Card({
+  title,
+  aside,
+  children,
+}: {
+  title: string;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mt-6 border border-neutral-200 rounded-lg bg-white p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="font-medium text-neutral-900">{title}</h2>
+        {aside}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 const SOURCE_LABELS: Record<string, string> = { boq_xlsx: "BOQ", spec_document: "Specification document" };
 
 // A document's kind is what a person calls it; the source kind is only which
@@ -166,10 +205,16 @@ function ProjectOverview() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Derived on the server and re-read on every load, because it changes when
+  // an answer changes rather than when the project row does.
+  const [completion, setCompletion] = useState<ProjectCompletion>(EMPTY_COMPLETION);
+  const [state, setState] = useState<ProjectState>("active");
 
   const load = useCallback(async () => {
     const res = await apiFetch<{
       project: Project;
+      completion: ProjectCompletion;
+      state: ProjectState;
       documents: DocumentRun[];
       runs: SpecRun[];
       notes: ProjectNote[];
@@ -180,6 +225,8 @@ function ProjectOverview() {
     }
     setError(null);
     setProject(res.data.project);
+    setCompletion(res.data.completion ?? EMPTY_COMPLETION);
+    setState(res.data.state ?? "active");
     setDocuments(res.data.documents);
     setRuns(res.data.runs ?? []);
     setNotes(res.data.notes ?? []);
@@ -280,9 +327,16 @@ function ProjectOverview() {
     // The two project-wide tabs answer for themselves, and BEFORE the runs
     // arrive: gating them on `runs.length` would leave the old /finishes URL
     // landing on Overview for as long as the first request took.
-    if (wantedTab === "finishes" || wantedTab === "history") {
+    if (wantedTab === "finishes") {
       tabPreselected.current = true;
       setTab(wantedTab);
+      return;
+    }
+    // Old links said ?tab=history. History is on the Overview now, so that is
+    // where they land rather than on an empty screen.
+    if (wantedTab === "history") {
+      tabPreselected.current = true;
+      setTab("overview");
       return;
     }
     if (runs.length === 0) return;
@@ -479,13 +533,30 @@ function ProjectOverview() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="flex items-baseline gap-3">
+      <div className="flex flex-wrap items-baseline gap-3">
+        <Link href="/dashboard/projects" className="text-sm text-neutral-500 underline hover:text-neutral-800">
+          &larr; Projects
+        </Link>
         <h1 className="text-xl font-semibold text-neutral-900">
           {project.bws_project_number} — {project.name}
         </h1>
-        <Link href="/dashboard/projects" className="text-sm text-neutral-500 underline hover:text-neutral-800">
-          All projects
-        </Link>
+        {/* WHAT STATE THIS PROJECT IS IN, derived and never set by hand:
+            COMPLETED arrives on its own when every question on every record is
+            settled. The title says why, because a badge nobody can explain is
+            a badge nobody believes. */}
+        <span
+          className={`text-[11px] tracking-wide px-2 py-0.5 rounded border ${STATE_PILL[state]}`}
+          title={completionSentence(completion) ?? "Every question on every record is settled."}
+        >
+          {PROJECT_STATE_LABELS[state]}
+        </span>
+        <span className="ml-auto text-xs">
+          {dirty ? (
+            <span className="text-amber-800">Unsaved changes</span>
+          ) : saved ? (
+            <span className="text-green-700">Saved</span>
+          ) : null}
+        </span>
       </div>
 
       {error && (
@@ -558,26 +629,16 @@ function ProjectOverview() {
         >
           Finishes
         </button>
-        {/* Last, and project-wide: a change usually belongs to one run, but a
-            baseline and a comparison never do. */}
-        <button
-          type="button"
-          onClick={() => setTab("history")}
-          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
-            tab === "history"
-              ? "border-neutral-900 text-neutral-900 font-medium"
-              : "border-transparent text-neutral-500 hover:text-neutral-800"
-          }`}
-        >
-          History
-        </button>
+        {/* THERE IS NO HISTORY TAB. Versions, baselines and the change trail
+            are on the Overview itself (2026-09-17): a version is the answer to
+            "what did this project look like on the 14th", which is a question
+            somebody asks WHILE looking at the project, not a place they set
+            out for. */}
       </nav>
 
       {/* On every tab, because a person starts a change and then goes looking
           for the item it applies to. */}
       <OpenChangeBar projectId={project.id} />
-
-      {tab === "history" && <ProjectHistory projectId={project.id} />}
 
       {/* Mounted only when selected: it loads the whole library and every item
           each code is on, which is not a query the Overview should be paying
@@ -664,8 +725,8 @@ function ProjectOverview() {
       )}
 
       <div className={tab === "overview" ? "" : "hidden"}>
-      <form onSubmit={save} className="mt-4 border border-neutral-200 rounded-lg bg-white p-4">
-        <h2 className="font-medium text-neutral-900">Identity</h2>
+      <form onSubmit={save} className="mt-6 border border-neutral-200 rounded-lg bg-white p-4">
+        <h2 className="font-medium text-neutral-900">Details</h2>
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <label className="text-sm text-neutral-600">
             BWS project number
@@ -793,33 +854,71 @@ function ProjectOverview() {
         </div>
       </form>
 
-      <div className="mt-8 flex flex-wrap items-baseline gap-3">
-        <h2 className="font-medium text-neutral-900">Contacts</h2>
-        <Link
-          href={`/dashboard/drafts?projectId=${project.id}`}
-          className="text-sm text-neutral-600 underline hover:text-neutral-900"
-        >
-          Chase what is missing
-        </Link>
-      </div>
-      <p className="mt-1 text-xs text-neutral-500">
-        Who to ask about this project. The designer code matches the BOQ&rsquo;s own wording and is what ties a
-        record&rsquo;s questions to a person.
-      </p>
-      {contacts === null ? (
-        <div className="mt-3"><Spinner label="Loading contacts" /></div>
-      ) : (
-        <ContactsPanel
-          projectId={project.id}
-          contacts={contacts}
-          suggestedCodes={suggestedCodes.filter(
-            (code) => !contacts.some((contact) => contact.designerCode === code),
+      {/* WHAT HAS BEEN SPECIFIED, and whether that is everything. The pill at
+          the top of the page is derived from exactly these numbers, so the two
+          cannot disagree about whether a project is finished. */}
+      <Card title="Specifications">
+        <p className="mt-1 text-sm text-neutral-700">
+          {completion.records === 0 ? (
+            <>Nothing imported yet. A bill of quantities is what creates this project&rsquo;s records.</>
+          ) : completion.complete ? (
+            <>
+              {completion.records === 1
+                ? "The one record is settled"
+                : `All ${completion.records} records are settled`}{" "}
+              — every question confirmed or marked not applicable. That is what COMPLETED means here, and it is worked out from the
+              answers rather than set by anybody.
+            </>
+          ) : (
+            <>
+              {completion.records} record{completion.records === 1 ? "" : "s"} in this project&rsquo;s export scope.{" "}
+              {completionSentence(completion)}
+            </>
           )}
-          onChanged={() => void loadContacts()}
-        />
-      )}
+        </p>
+        <p className="mt-2 text-xs text-neutral-500">
+          Counted over the records the export ships: active records on live runs, and a bill line that has been split
+          into configurations is counted through those. Open a run tab above to see them one by one.
+        </p>
+      </Card>
 
-      <h2 className="mt-8 font-medium text-neutral-900">Intake</h2>
+      {/* VERSIONS, ON THE PAGE. It was a tab, and a tab is a place you have to
+          decide to go to — whereas "what did this look like last week" is a
+          question asked while looking at the thing. */}
+      <Card title="Versions and history">
+        <ProjectHistory projectId={project.id} />
+      </Card>
+
+      <Card
+        title="Contacts"
+        aside={
+          <Link
+            href={`/dashboard/drafts?projectId=${project.id}`}
+            className="text-sm text-neutral-600 underline hover:text-neutral-900"
+          >
+            Chase what is missing
+          </Link>
+        }
+      >
+        <p className="mt-1 text-xs text-neutral-500">
+          Who to ask about this project. The designer code matches the BOQ&rsquo;s own wording and is what ties a
+          record&rsquo;s questions to a person.
+        </p>
+        {contacts === null ? (
+          <div className="mt-3"><Spinner label="Loading contacts" /></div>
+        ) : (
+          <ContactsPanel
+            projectId={project.id}
+            contacts={contacts}
+            suggestedCodes={suggestedCodes.filter(
+              (code) => !contacts.some((contact) => contact.designerCode === code),
+            )}
+            onChanged={() => void loadContacts()}
+          />
+        )}
+      </Card>
+
+      <Card title="Source documents">
       <p className="mt-1 text-xs text-neutral-500">
         Drop the whole tender pack in at once — the bill of quantities, the drawings, and the preamble if there is
         one. Each file&rsquo;s kind is declared, because a BOQ and a schedule are both spreadsheets and the bytes
@@ -931,27 +1030,26 @@ function ProjectOverview() {
         })
       )}
 
+      </Card>
+
       {/* What the preamble said the whole package is built under. LAST on this
           screen, because it is reference material: a reader scrolls to it when
           they want it, and it is the longest thing here by far. Retired, never
           deleted -- a mis-read note is still evidence that somebody looked. */}
-      <div className="mt-8 flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="font-medium text-neutral-900">
-          From the preamble
-          {flaggedCount > 0 && (
-            <span className="ml-2 text-xs font-normal text-amber-800">{flaggedCount} flagged</span>
-          )}
-        </h2>
-        {notes.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setOpenNotes(allNotesOpen ? new Set() : new Set(notes.map((note) => note.id)))}
-            className="text-xs text-neutral-500 hover:text-neutral-900"
-          >
-            {allNotesOpen ? "Collapse all" : "Expand all"}
-          </button>
-        )}
-      </div>
+      <Card
+        title={flaggedCount > 0 ? `From the preamble — ${flaggedCount} flagged` : "From the preamble"}
+        aside={
+          notes.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setOpenNotes(allNotesOpen ? new Set() : new Set(notes.map((note) => note.id)))}
+              className="text-xs text-neutral-500 hover:text-neutral-900"
+            >
+              {allNotesOpen ? "Collapse all" : "Expand all"}
+            </button>
+          ) : undefined
+        }
+      >
       {notes.length === 0 ? (
         <p className="mt-1 text-xs text-neutral-500">
           Nothing yet. If the pack came with a preamble, upload it above and review what it requires. Plenty of
@@ -1016,12 +1114,20 @@ function ProjectOverview() {
         </>
       )}
 
+      </Card>
+
       {/* There is no "every run in one table" link any more. The screen it went
           to merged the sub-quotes into one list, which is the one thing the run
           tabs exist to prevent. The project-wide EXPORT is a different matter
           and stays: a BWS import replaces the fields it is given, so the file
           has to carry every record in its scope. */}
-      <div className="mt-8 flex gap-3">
+      <Card title="Export and archive">
+      <p className="mt-1 text-xs text-neutral-500">
+        The export is the complete dataset for this project — a BWS import replaces the fields it is given, so it is
+        never a subset. Archiving hides the project from the list and changes nothing else: nothing here can be
+        deleted, because a record is the only place a client ref maps to a BWS job.
+      </p>
+      <div className="mt-3 flex gap-3">
         {runs.length > 0 && (
           <a
             href={`/api/projects/${project.id}/export`}
@@ -1044,6 +1150,7 @@ function ProjectOverview() {
           </button>
         )}
       </div>
+      </Card>
       </div>
     </div>
   );

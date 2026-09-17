@@ -98,6 +98,20 @@ export type DrawingObservation = {
    * did not actually state.
    */
   slotSuggested?: boolean;
+  /**
+   * True when the GROUP and the BWS field were inferred rather than read.
+   *
+   * Set only by `classifyCallout`'s last-resort step — a caption naming the
+   * item itself — never by a word the page actually printed. The card renders
+   * such a row yellow with `groupReason` beside it, the same treatment a
+   * guessed dimension slot gets, because "this is a guess, confirm it" and
+   * "this cannot commit" must not look alike.
+   *
+   * OPTIONAL, like `unitSource` and `dimensionSlot`: runs staged before this
+   * existed sit in `intake_runs.parsed` and must not need rewriting to read.
+   */
+  groupSuggested?: boolean;
+  groupReason?: string | null;
   specFieldId: string | null;
   state: AttributeState | null;
   stateReason: string | null;
@@ -477,15 +491,203 @@ export const FABRIC_SLOTS = [1, 2, 14] as const; // COM 1, COM 2, COM 3
 export const TIMBER_SLOTS = [4, 31, 143] as const; // Main timber finish, Timber Finish 2, 3
 export const METAL_SLOTS = [5, 35] as const; // Main metal finish, Metal Finish 2
 
-const FABRIC_WORDS = ["fabric", "com", "upholstery", "leather", "textile", "weave", "velvet"];
+// The words a drawing uses for each kind of callout.
+//
+// WIDENED ON 2026-09-17, and the reason is worth keeping. The real S-100 sheet
+// captions its upholstery `SOFA / Yarn Tessarae YC04158 - 01` — the PART in the
+// label, as the prompt asks for, and the CLOTH in the value. Neither string
+// held a word on this list, so the row staged as `other` with no BWS field
+// while its sibling `SOFA FEET / Dark tinted wood` landed correctly on "feet"
+// and "wood". A fabric is named by its cloth, not by the word "fabric".
+const FABRIC_WORDS = [
+  "fabric",
+  "fabrics",
+  "com",
+  "com1",
+  "com2",
+  "com3",
+  "upholstery",
+  "upholstered",
+  "leather",
+  "textile",
+  "weave",
+  "velvet",
+  "yarn",
+  "boucle",
+  "bouclé",
+  "linen",
+  "cotton",
+  "wool",
+  "mohair",
+  "chenille",
+  "tweed",
+  "silk",
+  "canvas",
+  "suede",
+  "hide",
+  "vinyl",
+];
 const TIMBER_WORDS = ["wood", "timber", "oak", "walnut", "veneer", "feet", "leg", "legs", "frame"];
-const METAL_WORDS = ["metal", "brass", "bronze", "steel", "chrome", "nickel"];
+export const METAL_WORDS = ["metal", "brass", "bronze", "steel", "chrome", "nickel"];
+const HARDWARE_WORDS = [
+  "hinge",
+  "hinges",
+  "runner",
+  "runners",
+  "castor",
+  "castors",
+  "mechanism",
+  "glide",
+  "glides",
+];
+
+/**
+ * The client's own finish code, read as evidence of what the callout IS.
+ *
+ * The page prints the code beside the swatch, so this is the page speaking
+ * rather than a rule about furniture. `CH` is DELIBERATELY ABSENT: the Panther
+ * set prints `CH-01.2` and nothing on any page says what CH stands for, and an
+ * invented mapping is exactly the confidently wrong field `suggestSpecField`
+ * refuses to produce.
+ */
+const CODE_PREFIXES: { prefix: string; kind: Exclude<CalloutKind, null> }[] = [
+  { prefix: "uph", kind: "fabric" },
+  { prefix: "fab", kind: "fabric" },
+  { prefix: "com", kind: "fabric" },
+  { prefix: "tim", kind: "timber" },
+  { prefix: "wd", kind: "timber" },
+  { prefix: "mtl", kind: "metal" },
+  { prefix: "mt", kind: "metal" },
+];
 
 export type SpecFieldEntry = { id: string; jsonId: number; name: string };
+
+/**
+ * The BWS register as the classifier wants it, from a `spec_fields` query.
+ *
+ * One mapper, because four call sites now read the register to hand it to
+ * `assertStagedDrawings` — the review screen, its autosave, the pack screen
+ * and the confirm — and a field the confirm resolved differently from the
+ * screen is a cell the file would not deliver.
+ */
+export function specFieldEntries(rows: readonly Record<string, unknown>[]): SpecFieldEntry[] {
+  return rows.map((row) => ({
+    id: String(row.id),
+    jsonId: Number(row.json_id),
+    name: String(row.name ?? ""),
+  }));
+}
 
 function mentions(text: string, words: string[]): boolean {
   const parts = normaliseName(text).split(" ");
   return words.some((word) => parts.includes(word));
+}
+
+/** What a material callout turns out to be. Null means the page did not say. */
+export type CalloutKind = "fabric" | "timber" | "metal" | "hardware" | null;
+
+export type CalloutReading = {
+  kind: CalloutKind;
+  group: AttributeGroup;
+  /** True only for the last-resort reading, which the card badges. */
+  guessed: boolean;
+  /** Why, in the reviewer's words. Null when nothing was decided. */
+  reason: string | null;
+};
+
+/**
+ * WHAT A MATERIAL CALLOUT IS — the single reading behind both the group and
+ * the BWS field.
+ *
+ * Evidence runs in a fixed order and stops at the first thing that decides,
+ * exactly as the unit rule does:
+ *
+ *   1. THE WORDS. A callout that names a cloth, a timber, a metal or a piece
+ *      of hardware is that thing. Certain, and the common case.
+ *   2. THE CLIENT'S OWN CODE. `UPH-07` is the page saying "upholstery" in its
+ *      own vocabulary. Certain for the prefixes we have actually seen; `CH` is
+ *      not one of them and is not guessed at.
+ *   3. THE CAPTION NAMES THE ITEM ITSELF. `SOFA / Tessarae YC04158` pairs the
+ *      piece with a specification and names no timber, metal or hardware — a
+ *      swatch caption for its upholstery. This is the only step that infers
+ *      anything, so it is flagged: the card renders it yellow with this
+ *      reason beside it, like a guessed dimension slot.
+ *
+ * Nothing here reads a brand name or a product code as evidence of a material.
+ * "Tessarae" is a fabric because of where it is printed, not because this app
+ * has heard of it, and a list of mill names would be wrong within a month.
+ */
+export function classifyCallout(input: {
+  labelRaw: string | null;
+  valueRaw: string | null;
+  materialCodeRaw?: string | null;
+  itemNameRaw?: string | null;
+}): CalloutReading {
+  const label = input.labelRaw ?? "";
+  const value = input.valueRaw ?? "";
+  const text = `${label} ${value}`;
+
+  // 1. The words. Fabric first, then metal, then timber -- the order
+  //    `suggestSpecField` has always used, so a "metal frame" is metal rather
+  //    than timber on the strength of "frame".
+  if (mentions(text, FABRIC_WORDS)) return reading("fabric", false, null);
+  if (mentions(text, METAL_WORDS)) return reading("metal", false, null);
+  if (mentions(text, TIMBER_WORDS)) return reading("timber", false, null);
+  if (mentions(text, HARDWARE_WORDS)) return reading("hardware", false, null);
+
+  // 2. The client's own finish code, normalised to its letters.
+  const code = normaliseName(input.materialCodeRaw ?? "").replace(/[^a-z]/g, "");
+  if (code) {
+    const match = CODE_PREFIXES.find((entry) => code.startsWith(entry.prefix));
+    if (match) {
+      return reading(match.kind, false, `the code ${String(input.materialCodeRaw).trim()} says so`);
+    }
+  }
+
+  // 3. The caption names the item itself, and carries a specification.
+  if (namesTheItem(label, input.itemNameRaw ?? null) && hasSubstance(value)) {
+    return reading(
+      "fabric",
+      true,
+      "the caption pairs the item itself with a material, and names no timber, metal or hardware",
+    );
+  }
+
+  return { kind: null, group: "other", guessed: false, reason: null };
+}
+
+function reading(kind: Exclude<CalloutKind, null>, guessed: boolean, reason: string | null): CalloutReading {
+  const group: AttributeGroup =
+    kind === "fabric" ? "material" : kind === "hardware" ? "hardware" : "finish";
+  return { kind, group, guessed, reason };
+}
+
+/**
+ * Does this label name the item the page is about, rather than a part of it?
+ *
+ * Every word of the label has to appear in the item's own name, so `SOFA` on a
+ * sofa page qualifies and `SOFA FEET` does not -- which is the whole point: a
+ * caption naming a PART is about that part, and only a caption naming the
+ * WHOLE piece is about its upholstery.
+ */
+function namesTheItem(labelRaw: string, itemNameRaw: string | null): boolean {
+  const label = normaliseName(labelRaw).split(" ").filter(Boolean);
+  const name = new Set(normaliseName(itemNameRaw ?? "").split(" ").filter(Boolean));
+  if (label.length === 0 || name.size === 0) return false;
+  return label.every((word) => name.has(word));
+}
+
+/**
+ * Does the value say anything, once a TBC marker is set aside?
+ *
+ * `PIPING / TBC` is a question, not a fabric, and staging has always left it
+ * alone. `TBC - Yarn Collective Tessarae` is a fabric nobody has confirmed,
+ * which is a different thing and keeps its reading.
+ */
+function hasSubstance(valueRaw: string): boolean {
+  let text = normaliseName(valueRaw);
+  for (const token of TBC_TOKENS) text = text.split(token).join(" ");
+  return text.split(" ").filter(Boolean).length >= 2;
 }
 
 /**
@@ -500,17 +702,25 @@ function mentions(text: string, words: string[]): boolean {
  * reaches BWS looking exactly like a real answer.
  */
 export function suggestSpecField(
-  observation: { attrGroup: AttributeGroup; labelRaw: string | null; valueRaw: string | null },
+  observation: {
+    attrGroup: AttributeGroup;
+    labelRaw: string | null;
+    valueRaw: string | null;
+    materialCodeRaw?: string | null;
+    itemNameRaw?: string | null;
+  },
   fields: SpecFieldEntry[],
   taken: Set<string>,
 ): string | null {
   if (observation.attrGroup === "dimension") return null; // many compose into Dimensions
-  const text = `${observation.labelRaw ?? ""} ${observation.valueRaw ?? ""}`;
-
-  let slots: readonly number[] | null = null;
-  if (mentions(text, FABRIC_WORDS)) slots = FABRIC_SLOTS;
-  else if (mentions(text, METAL_WORDS)) slots = METAL_SLOTS;
-  else if (mentions(text, TIMBER_WORDS)) slots = TIMBER_SLOTS;
+  // ONE reading, two callers. The group and the field were derived
+  // independently from the same word lists, which is how `SOFA / Yarn
+  // Tessarae` managed to lose both at once — and how a widened list could
+  // have fixed one and left the other. Same discipline as
+  // `composeDimensionCell` being the only composer.
+  const kind = classifyCallout(observation).kind;
+  const slots =
+    kind === "fabric" ? FABRIC_SLOTS : kind === "metal" ? METAL_SLOTS : kind === "timber" ? TIMBER_SLOTS : null;
   if (!slots) return null;
 
   for (const jsonId of slots) {
@@ -998,14 +1208,12 @@ export function repeatedObservations(cards: PackCard[]): RepeatedObservation[] {
  * decided structurally (the model reported it as one); the rest is a display
  * grouping, and `other` is an honest answer rather than a wrong bucket.
  */
-export function classifyGroup(labelRaw: string | null, valueRaw: string | null): AttributeGroup {
-  const text = `${labelRaw ?? ""} ${valueRaw ?? ""}`;
-  if (mentions(text, FABRIC_WORDS)) return "material";
-  if (mentions(text, TIMBER_WORDS) || mentions(text, METAL_WORDS)) return "finish";
-  if (mentions(text, ["hinge", "hinges", "runner", "runners", "castor", "castors", "mechanism", "glide", "glides"])) {
-    return "hardware";
-  }
-  return "other";
+export function classifyGroup(
+  labelRaw: string | null,
+  valueRaw: string | null,
+  extra?: { materialCodeRaw?: string | null; itemNameRaw?: string | null },
+): AttributeGroup {
+  return classifyCallout({ labelRaw, valueRaw, ...extra }).group;
 }
 
 let stagingCounter = 0;
@@ -1282,9 +1490,28 @@ export function stageDrawings(
     let materialNo = 0;
     for (const material of item.materials) {
       materialNo += 1;
-      const attrGroup = classifyGroup(material.labelRaw, material.valueRaw);
+      // The item's own name is part of the evidence: a caption reading
+      // `SOFA` on a sofa page is that sofa's upholstery, and nothing else on
+      // the line says so.
+      const callout = classifyCallout({
+        labelRaw: material.labelRaw,
+        valueRaw: material.valueRaw,
+        materialCodeRaw: material.materialCodeRaw,
+        itemNameRaw: item.itemNameRaw,
+      });
+      const attrGroup = callout.group;
       const state = suggestAttributeState(material.valueRaw);
-      const specFieldId = suggestSpecField({ attrGroup, labelRaw: material.labelRaw, valueRaw: material.valueRaw }, fields, taken);
+      const specFieldId = suggestSpecField(
+        {
+          attrGroup,
+          labelRaw: material.labelRaw,
+          valueRaw: material.valueRaw,
+          materialCodeRaw: material.materialCodeRaw,
+          itemNameRaw: item.itemNameRaw,
+        },
+        fields,
+        taken,
+      );
       if (specFieldId) taken.add(specFieldId);
       observations.push({
         id: nextId(),
@@ -1296,6 +1523,7 @@ export function stageDrawings(
         value: state.value,
         unit: null,
         unitSuggested: false,
+        ...(callout.guessed ? { groupSuggested: true, groupReason: callout.reason } : {}),
         specFieldId,
         state: state.state,
         stateReason: state.reason,
@@ -1344,12 +1572,97 @@ export function stageDrawings(
   return { schemaVersion: 1, kind: "shop_drawings", filename, documentNotes, items: staged };
 }
 
-export function assertStagedDrawings(parsed: unknown): StagedDrawings {
+export function assertStagedDrawings(parsed: unknown, fields?: SpecFieldEntry[]): StagedDrawings {
   const doc = parsed as Partial<StagedDrawings> | null;
   if (!doc || typeof doc !== "object" || doc.kind !== "shop_drawings" || !Array.isArray(doc.items)) {
     throw new Error("This run was not staged as shop drawings. Upload the drawings again.");
   }
-  return applyViewGuesses(upgradeDimensionSlots(doc as StagedDrawings));
+  return applyViewGuesses(upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []));
+}
+
+/**
+ * Re-read a material callout a previous classifier gave up on.
+ *
+ * The word lists were widened on 2026-09-17 after the real S-100 sheet staged
+ * its upholstery as `other` with no BWS field. A prompt is read at call time
+ * and a word list is not, so this is the half that can be fixed without
+ * re-reading a document: the eleven-page Panther pack gains the corrected
+ * reading on its next page load, with no second model call and nothing charged
+ * again. Same discipline as `upgradeDimensionSlots` and `mergeNoteBlocks`.
+ *
+ * A ROW A PERSON HAS TOUCHED IS NEVER SECOND-GUESSED. `version === 1` is what
+ * says nobody has: every edit bumps it, so a reviewer who deliberately set a
+ * row to `Other` with no field keeps that, for good. Neither is a row that
+ * already holds a field, a dimension, or a note — a merged note block is a
+ * statement about the item, not a callout, and promoting one to a fabric would
+ * destroy the very thing `mergeNoteBlocks` preserved.
+ *
+ * `fields` may be empty, and then only the GROUP is corrected. That is the
+ * honest behaviour for a caller with no register to hand: the next read that
+ * has one fills the field in, and until then the screen and the confirm agree
+ * about a row with no field rather than disagreeing about which one.
+ */
+function upgradeCalloutGuesses(doc: StagedDrawings, fields: SpecFieldEntry[]): StagedDrawings {
+  let anyTouched = false;
+  const items = doc.items.map((item) => {
+    // Every field this item's rows already hold, whatever their review state:
+    // a COM 1 taken by an applied row is still taken.
+    const taken = new Set<string>();
+    for (const observation of item.observations) {
+      if (observation.specFieldId) taken.add(observation.specFieldId);
+    }
+
+    let touched = false;
+    const observations = item.observations.map((observation) => {
+      if (observation.reviewStatus !== "pending") return observation;
+      if (observation.version !== 1) return observation;
+      if (observation.specFieldId) return observation;
+      if (observation.attrGroup === "dimension" || observation.attrGroup === "note") return observation;
+
+      const callout = classifyCallout({
+        labelRaw: observation.labelRaw,
+        valueRaw: observation.valueRaw,
+        materialCodeRaw: observation.materialCodeRaw,
+        itemNameRaw: item.itemNameRaw,
+      });
+      if (callout.kind === null) return observation;
+
+      const specFieldId = suggestSpecField(
+        {
+          attrGroup: callout.group,
+          labelRaw: observation.labelRaw,
+          valueRaw: observation.valueRaw,
+          materialCodeRaw: observation.materialCodeRaw,
+          itemNameRaw: item.itemNameRaw,
+        },
+        fields,
+        taken,
+      );
+      if (specFieldId) taken.add(specFieldId);
+
+      const next: DrawingObservation = {
+        ...observation,
+        attrGroup: callout.group,
+        specFieldId,
+        groupSuggested: callout.guessed,
+        groupReason: callout.guessed ? callout.reason : null,
+      };
+      if (
+        next.attrGroup === observation.attrGroup &&
+        next.specFieldId === observation.specFieldId &&
+        Boolean(next.groupSuggested) === Boolean(observation.groupSuggested)
+      ) {
+        return observation;
+      }
+      touched = true;
+      return next;
+    });
+
+    if (!touched) return item;
+    anyTouched = true;
+    return { ...item, observations };
+  });
+  return anyTouched ? { ...doc, items } : doc;
 }
 
 /**

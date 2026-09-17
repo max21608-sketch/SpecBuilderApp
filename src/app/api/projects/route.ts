@@ -10,6 +10,7 @@
 // is why every project ever created was on this screen forever.
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
+import { EMPTY_COMPLETION, loadProjectCompletion, projectState } from "@/lib/project-completion";
 
 // Needed the moment this route started reading a query string: without it Next
 // caches the default (active-only) response and the "include archived" toggle
@@ -33,7 +34,26 @@ export async function GET(request: Request): Promise<Response> {
       case p.status when 'active' then 0 else 1 end,
       p.bws_project_number
   `;
-  return json({ ok: true, projects: rows });
+
+  // How many archived projects there are, counted WHETHER OR NOT they are
+  // being shown: the checkbox has to be able to say what it would reveal, and
+  // counting the rows that came back can only ever say what is already on
+  // screen.
+  const archived = await sql`select count(*)::int as n from projects where status = 'archived'`;
+
+  // COMPLETED is derived, never stored, and it is derived here rather than on
+  // the client because the client cannot see an answer. See
+  // src/lib/project-completion.ts for what counts.
+  const completion = await loadProjectCompletion(rows.map((row) => String(row.id)));
+
+  return json({
+    ok: true,
+    archivedCount: Number(archived[0]?.n ?? 0),
+    projects: rows.map((row) => {
+      const done = completion.get(String(row.id)) ?? EMPTY_COMPLETION;
+      return { ...row, completion: done, state: projectState(String(row.status), done) };
+    }),
+  });
 }
 
 export async function POST(request: Request): Promise<Response> {

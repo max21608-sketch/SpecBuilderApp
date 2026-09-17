@@ -127,7 +127,7 @@ export async function setRecordLevel(
   }: { recordId: string; level: ItemLevel | null; expectedVersion: number; actor: string },
 ): Promise<SetLevelResult> {
   const rows = await txn`
-    select id, project_id, level, version from spec_records where id = ${recordId} for update
+    select id, project_id, level, level_suggested, version from spec_records where id = ${recordId} for update
   `;
   const record = rows[0];
   if (!record) throw new DomainConflictError("not_found", "No such record.", { status: 404 });
@@ -139,7 +139,11 @@ export async function setRecordLevel(
   }
 
   const current = record.level ? (String(record.level) as ItemLevel) : null;
-  if (current === level) {
+  // A record holding a SUGGESTION and nothing else is not settled, whatever
+  // the suggestion happens to say: accepting "simple" over a suggested
+  // "simple" is the click that turns a guess into a decision, and it must
+  // write. Only a decision that is already the same decision is a no-op.
+  if (current === level && !record.level_suggested) {
     return { recordId, level, version: Number(record.version) };
   }
 
@@ -149,9 +153,16 @@ export async function setRecordLevel(
     kind: "level_set",
   });
 
+  // THE SUGGESTION ENDS HERE, whichever way the decision went. 0025 refuses a
+  // row holding both, and a suggestion left behind a decision is a second
+  // answer waiting for a screen to read it first.
   const updated = await txn`
-    update spec_records set level = ${level}, updated_by = ${actor}
-    where id = ${recordId} and version = ${expectedVersion}
+    update spec_records
+       set level = ${level},
+           level_suggested = null,
+           level_suggested_reason = null,
+           updated_by = ${actor}
+     where id = ${recordId} and version = ${expectedVersion}
     returning version
   `;
   if (!updated[0]) {
@@ -161,4 +172,49 @@ export async function setRecordLevel(
   await snapshotRecords(txn, [recordId], changeSetId);
 
   return { recordId, level, version: Number(updated[0].version) };
+}
+
+/**
+ * Accept the levels this app suggested, a run or a project at a time.
+ *
+ * ONE CHANGE SET FOR THE LOT, because it is one decision: a reviewer reading
+ * a run's levels and saying "yes, those are right". Fifty-nine change sets
+ * saying "level set" would bury the trail under the answer to a question
+ * nobody asked.
+ *
+ * It is still a human confirm, in the sense the gates mean: the screen shows
+ * every suggested level and what it was guessed from, and this writes only
+ * what was on that screen. What it refuses to do is invent one — a record
+ * with NO suggestion is untouched, because there is nothing to accept.
+ */
+export async function acceptSuggestedLevels(
+  txn: TxnSql,
+  { projectId, runId, actor }: { projectId: string; runId: string | null; actor: string },
+): Promise<{ accepted: number }> {
+  const pending = await txn`
+    select r.id from spec_records r
+     where r.project_id = ${projectId}
+       and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
+       and r.status = 'active'
+       and r.level is null
+       and r.level_suggested is not null
+     order by r.record_no
+     for update
+  `;
+  const ids = pending.map((row) => String(row.id));
+  if (ids.length === 0) return { accepted: 0 };
+
+  const { changeSetId } = await changeSetForEdit(txn, { projectId, actor, kind: "level_set" });
+
+  const updated = await txn`
+    update spec_records
+       set level = level_suggested,
+           level_suggested = null,
+           level_suggested_reason = null,
+           updated_by = ${actor}
+     where id = any(${ids}::uuid[])
+    returning id
+  `;
+  await snapshotRecords(txn, updated.map((row) => String(row.id)), changeSetId);
+  return { accepted: updated.length };
 }

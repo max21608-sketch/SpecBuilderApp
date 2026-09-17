@@ -19,6 +19,7 @@ import { sql } from "@/lib/db";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import {
   assertStagedDrawings,
+  specFieldEntries,
   drawingItemBlockers,
   drawingItemWarnings,
   occupancyThrough,
@@ -249,13 +250,20 @@ export async function loadBatchDrawings(
 
   // One register read for the whole pack. Thirty per-item drawing PDFs would
   // otherwise be thirty identical reads of the same project's records.
-  const context = await loadDrawingContext(projectId);
+  const [context, fieldRows] = await Promise.all([
+    loadDrawingContext(projectId),
+    // Read once for the pack, for the same reason: `assertStagedDrawings`
+    // re-reads a callout the old word lists gave up on, and needs the register
+    // to give it a BWS field.
+    sql`select id, json_id, name from spec_fields order by sort_order`,
+  ]);
+  const fields = specFieldEntries(fieldRows);
 
   const runs = rows.map((row) => {
     // A run that has not been read yet, or that failed, has no staged JSON.
     // That is a normal state on this screen -- the pack lists every drawing
     // file, including the ones still waiting -- not an error.
-    const staged = row.parsed ? assertStagedDrawings(row.parsed) : null;
+    const staged = row.parsed ? assertStagedDrawings(row.parsed, fields) : null;
     return {
       importId: String(row.id),
       filename: row.filename ? String(row.filename) : null,
