@@ -34,39 +34,33 @@
 // reviewer's decision, taken once instead of once per row.
 // ============================================================================
 import { Fragment, useEffect, useState } from "react";
-import {
-  ATTRIBUTE_GROUPS,
-  ATTRIBUTE_GROUP_LABELS,
-  ATTRIBUTE_UNITS,
-  DIMENSION_SLOTS,
-  DIMENSION_SLOT_LABELS,
-  type AttributeGroup,
-  type AttributeState,
-  type DimensionSlot,
-} from "@/lib/spec-vocab";
+import type { DimensionSlot } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
-import { isMeasuredRow, measuredRows, unitSourceOf } from "@/lib/drawing-document";
+import { isMeasuredRow, measuredRows } from "@/lib/drawing-document";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
-import SwatchPicker from "@/components/imports/SwatchPicker";
+import {
+  ObservationRow,
+  ObservationTableHead,
+  OtherDimensionsToggle,
+  ReplacePanel,
+  RowNotes,
+  RunTargets,
+  orderRows,
+  type Occupant,
+  type RecordChoice,
+  type RowBlocker,
+  type RowWarning,
+  type RunResolution,
+  type SpecField,
+} from "@/components/imports/ObservationRows";
 import type { CroppedImage } from "@/lib/pdf-crop";
 import Button from "@/components/ui/Button";
 
-export type RunResolution =
-  | { runId: string; runName: string; status: "matched"; record: { id: string; label: string; itemDescription: string } }
-  | { runId: string; runName: string; status: "ambiguous"; candidates: { id: string; label: string; itemDescription: string }[] };
-
-export type Occupant = {
-  attributeId: string;
-  attributeVersion: number;
-  label: string;
-  value: string | null;
-  unit: string | null;
-  sourceFilename: string | null;
-  sourcePage: number | null;
-};
+// Re-exported from where they now live, so the screens keep one import.
+export type { Occupant, RecordChoice, RunResolution, SpecField } from "@/components/imports/ObservationRows";
 
 export type ItemResolution = {
   id: string;
@@ -76,18 +70,13 @@ export type ItemResolution = {
   variantLabel?: string | null;
   /** Per ticked record, the variant that already exists to receive these specs. */
   writesTo?: Record<string, string>;
-  blockers: { code: string; message: string; observationId?: string; runId?: string; recordId?: string }[];
+  blockers: RowBlocker[];
   /** Per observation: the rows it would displace, one per target record. */
   occupants?: Record<string, { recordId: string; occupant: Occupant }[]>;
   // NOT blockers. These never disable Confirm and the confirm route never sees
   // them -- see drawingItemWarnings() for why they are a separate type.
-  warnings?: { code: string; message: string; observationId: string }[];
+  warnings?: RowWarning[];
 };
-
-export type SpecField = { id: string; json_id: number; name: string; field_category: string };
-
-/** The project's records, for the card that matched none of them. */
-export type RecordChoice = { id: string; label: string; itemDescription: string; runName: string };
 
 /**
  * Setting the unit on many dimensions at once.
@@ -111,47 +100,12 @@ export function BulkUnit({
     <span className="flex items-center gap-1 text-xs text-neutral-500">
       {label}
       {(["mm", "cm"] as const).map((unit) => (
-        <button
-          key={unit}
-          type="button"
-          disabled={disabled}
-          onClick={() => onSet(unit)}
-          className="px-1.5 py-0.5 rounded border border-neutral-300 text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-        >
+        <Button key={unit} size="xs" disabled={disabled} onClick={() => onSet(unit)}>
           {unit}
-        </button>
+        </Button>
       ))}
     </span>
   );
-}
-
-/**
- * The heading to print above this card, or null.
- *
- * A code drawn more than once produces several cards in a row, and adjacency is
- * not a statement: a reviewer looking at four S-301 cards has to be TOLD they
- * are four configurations of one bill line rather than four items. So the
- * heading is printed once, above the first card of the run of them, and names
- * the letters that are actually on screen — a configuration already reviewed is
- * not in this list, and claiming a count that included it would be a number
- * nobody could check.
- */
-export function configurationGroup(
-  items: readonly { id: string; itemCodeRaw: string | null }[],
-  byItem: Map<string, { variantLabel?: string | null } | undefined>,
-  item: { id: string; itemCodeRaw: string | null },
-  index: number,
-): { code: string; letters: string[] } | null {
-  const letter = byItem.get(item.id)?.variantLabel;
-  if (!letter || !item.itemCodeRaw) return null;
-  const same = (other: { itemCodeRaw: string | null }) => other.itemCodeRaw === item.itemCodeRaw;
-  // Already printed above an earlier card of the same code.
-  if (index > 0 && same(items[index - 1]!)) return null;
-  const letters = items
-    .filter(same)
-    .map((entry) => byItem.get(entry.id)?.variantLabel)
-    .filter((value): value is string => Boolean(value));
-  return letters.length > 1 ? { code: item.itemCodeRaw, letters } : null;
 }
 
 export default function ItemCard({
@@ -211,17 +165,17 @@ export default function ItemCard({
   // The two are different questions -- see `isMeasuredRow` -- and asking the
   // second one here is what left forty-four figures rendered inline on a page
   // whose units could not be inferred.
-  const keyRows = pending.filter((o) => o.dimensionSlot);
-  const measuredWithoutSlot = pending.filter((o) => !o.dimensionSlot && isMeasuredRow(o));
-  // NOTHING TO FOLD BEHIND. The fold puts the four that matter first and the
-  // rest out of the way; with no four that matter, there is no "rest" -- and
-  // folding every figure on the page leaves a card showing a toggle and
-  // nothing else, which reads as a page that measures nothing.
-  const otherDimensionRows = keyRows.length > 0 ? measuredWithoutSlot : [];
-  const otherIds = new Set(otherDimensionRows.map((o) => o.id));
-  const restRows = pending.filter((o) => !o.dimensionSlot && !otherIds.has(o.id));
-  const orderedRows = [...keyRows, ...restRows, ...otherDimensionRows];
-  const firstOtherId = otherDimensionRows[0]?.id;
+  const { ordered, otherIds, otherDimensionRows, firstOtherId } = orderRows(pending);
+
+  // Every control on a row of THIS card writes to THIS page's observation. The
+  // configuration card passes callbacks that reach further; nothing in
+  // `ObservationRow` knows the difference.
+  const rowCallbacks = {
+    onChange: (observation: DrawingObservation, changes: Record<string, unknown>) =>
+      void onSaveObservation(item, observation, changes),
+    onIgnore: (observation: DrawingObservation) => void onReview(item, [observation], "ignore"),
+    onSwatch,
+  };
 
   // A page whose code could not be read opens CLOSED.
   //
@@ -278,8 +232,8 @@ export default function ItemCard({
   };
 
   const ignorePage = (
-    <button
-      type="button"
+    <Button
+      size="xs"
       onClick={() => {
         if (!armed) {
           setArmed(true);
@@ -292,14 +246,10 @@ export default function ItemCard({
         void onReview(item, pending, "ignore");
       }}
       disabled={busy || pending.length === 0}
-      className={`text-xs px-2 py-1 rounded border disabled:opacity-50 ${
-        armed
-          ? "border-amber-400 bg-amber-50 text-amber-900"
-          : "border-neutral-300 text-neutral-600 hover:bg-neutral-50"
-      }`}
+      className={armed ? "border-amber-400 bg-amber-50 text-amber-900" : undefined}
     >
       {armed ? `Ignore all ${pending.length} row${pending.length === 1 ? "" : "s"}?` : "Ignore this page"}
-    </button>
+    </Button>
   );
 
   const header = (
@@ -477,491 +427,65 @@ export default function ItemCard({
       />
 
       {/* Which runs this drawing applies to. */}
-      <div className="px-4 py-3 border-b border-neutral-100">
-        <p className="text-xs uppercase tracking-wide text-neutral-500">Applies to</p>
-        {(resolution?.resolution.runs.length ?? 0) === 0 && (
-          <div className="mt-1">
-            <p className="text-sm text-amber-900">
-              {item.itemCodeRaw
-                ? `No record carries ${item.itemCodeRaw}. Confirm the bill of quantities for this pack, then reload.`
-                : "No item code could be read on this page, so nothing matched."}
-            </p>
-            {/* WHY THIS ESCAPE HATCH EXISTS. On a 40-page set a couple of
-                unreadable codes are tolerable — the rest of the set still
-                commits. At one PDF per line item an unreadable code is a dead
-                FILE: the run checkboxes are built from resolved candidates, so
-                with none there is nothing to click and no way to say what the
-                page is. Picking the record by hand is the way out, and it is
-                recorded as the reviewer's own decision like any other tick. */}
-            {records.length > 0 && (
-              <div className="mt-2">
-                <label className="text-xs text-neutral-600">
-                  Say which record this is
-                  <select
-                    value=""
-                    disabled={busy}
-                    onChange={(event) => {
-                      if (event.target.value) onSaveTargets(item, [event.target.value], []);
-                    }}
-                    className="ml-2 border border-neutral-300 rounded px-2 py-1 text-xs disabled:opacity-50"
-                  >
-                    <option value="">— choose a record —</option>
-                    {records.map((record) => (
-                      <option key={record.id} value={record.id}>
-                        {record.label} · {record.itemDescription} ({record.runName})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p className="mt-1 text-xs text-neutral-500">
-                  This picks one record only. A code that genuinely belongs to several runs is better fixed by
-                  correcting the bill&rsquo;s code, so the fan-out happens on its own.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-        <div className="mt-2 flex flex-wrap gap-4">
-          {resolution?.resolution.runs.map((run) =>
-            run.status === "matched" ? (
-              <label key={run.runId} className="flex items-center gap-2 text-sm text-neutral-800">
-                <input
-                  type="checkbox"
-                  checked={targets.includes(run.record.id)}
-                  onChange={(event) => toggleRun(run.record.id, event.target.checked)}
-                />
-                <span>
-                  {run.runName}
-                  <span className="ml-1 text-xs text-neutral-500">
-                    {run.record.label} · {run.record.itemDescription}
-                  </span>
-                </span>
-              </label>
-            ) : (
-              <div key={run.runId} className="text-sm">
-                <p className="text-amber-900">
-                  {run.runName} has {run.candidates.length} lines with this code — choose which one:
-                </p>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  {/* Candidates, never a pre-selected guess. */}
-                  {run.candidates.map((candidate) => (
-                    <button
-                      key={candidate.id}
-                      type="button"
-                      onClick={() => toggleRun(candidate.id, true)}
-                      className={`text-xs px-2 py-1 rounded border ${
-                        targets.includes(candidate.id)
-                          ? "border-neutral-900 bg-neutral-900 text-white"
-                          : "border-neutral-300 hover:bg-neutral-50"
-                      }`}
-                    >
-                      {candidate.label} · {candidate.itemDescription}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ),
-          )}
-        </div>
-      </div>
+      <RunTargets
+        runs={resolution?.resolution.runs ?? []}
+        ticked={new Set(targets)}
+        itemCodeRaw={item.itemCodeRaw}
+        records={records}
+        busy={busy}
+        onToggle={toggleRun}
+        onPick={(recordId) => void onSaveTargets(item, [recordId], [])}
+      />
 
       {/* The specs themselves. */}
       <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs uppercase tracking-wide text-neutral-500">
-            <th className="px-4 py-2 font-medium">Group</th>
-            <th className="px-2 py-2 font-medium">Label</th>
-            <th className="px-2 py-2 font-medium">Value</th>
-            <th className="px-2 py-2 font-medium">Unit</th>
-            <th className="px-2 py-2 font-medium">Dimension / BWS field</th>
-            <th className="px-2 py-2 font-medium">State</th>
-            <th className="px-4 py-2" />
-          </tr>
-        </thead>
+        <ObservationTableHead />
         {/* NO `divide-y` HERE. A row carrying an occupant or a blocker is
-            THREE table rows (see below), and a divider drawn between tbody
-            children would put a line between a value and its own amber panel —
-            reading as though the panel belonged to the row underneath. The
-            separator goes on the data row instead. */}
+            THREE table rows, and a divider drawn between tbody children would
+            put a line between a value and its own amber panel — reading as
+            though the panel belonged to the row underneath. The separator goes
+            on the data row instead. */}
         <tbody>
-          {orderedRows.map((observation) => {
-            const draft = drafts[observation.id] ?? {};
-            const value = draft.value !== undefined ? draft.value : observation.value;
+          {ordered.map((observation) => {
             const rowBlockers = blockerFor(observation.id);
-            const rowOccupants = resolution?.occupants?.[observation.id] ?? [];
             const rowWarnings = warningFor(observation.id);
-            // ==============================================================
-            // A PANEL THAT SPANS THE ROW IS ITS OWN <tr>.
-            //
-            // The two panels below used to be extra `<td colSpan={7}>` cells
-            // inside the SAME `<tr>` as the seven data cells, which makes that
-            // row 21 column slots wide. The browser then has to find room for
-            // the panels BESIDE the data, and squeezed the replace
-            // acknowledgement — the one thing on the card that decides whether
-            // a confirmed spec is destroyed — into a ribbon of wrapped
-            // monospace about 100px across. A cell can only span the table's
-            // columns from a row of its own.
-            // ==============================================================
-            const amber = rowBlockers.length > 0 || rowWarnings.length > 0;
-            // A GUESSED SLOT TURNS THE WHOLE LINE YELLOW. An amber border on
-            // the slot select alone is invisible in a table of twenty-four
-            // rows, and a reviewer scanning for what still needs checking is
-            // scanning lines, not dropdowns. Distinct from the amber a blocker
-            // uses: yellow is "this is a guess, confirm it", amber is "this
-            // cannot commit as it stands".
-            const guessed = Boolean(observation.slotSuggested && observation.dimensionSlot);
-            // What this row can be given, rather than what the vocabulary
-            // holds. `dimension` is never offered here: it is unwritable
-            // without a slot, and the slot column sends both together.
-            const groupOptions = ATTRIBUTE_GROUPS.filter((group) => {
-              if (group === observation.attrGroup) return true;
-              if (group === "dimension") return false;
-              return observation.unit === null || group === "note";
-            });
+            const rowOccupants = resolution?.occupants?.[observation.id] ?? [];
+            const blocked = rowBlockers.length > 0 || rowWarnings.length > 0;
             const isOther = otherIds.has(observation.id);
             return (
               <Fragment key={observation.id}>
-              {observation.id === firstOtherId && (
-                <tr className="border-t border-neutral-200 bg-neutral-50">
-                  <td colSpan={7} className="px-4 py-2">
-                    <Button
-                      size="xs"
-                      variant="quiet"
-                      onClick={() => setShowOtherDimensions((value) => !value)}
-                    >
-                      {showOtherDimensions
-                        ? `Hide the other ${otherDimensionRows.length} dimensions`
-                        : `Other dimensions (${otherDimensionRows.length}) — show`}
-                    </Button>
-                    <span className="ml-2 text-xs text-neutral-500">
-                      Everything else this page measures. Kept on the item with its label, figure and unit; not part of
-                      the BWS dimension cell.
-                    </span>
-                  </td>
-                </tr>
-              )}
-              {(!isOther || showOtherDimensions) && (
-              <>
-              {/* YELLOW AND AMBER MEAN DIFFERENT THINGS AND A ROW CAN BE BOTH.
-                  Yellow is "this is a guess, confirm it"; amber is "this
-                  cannot commit as it stands". Amber used to REPLACE the
-                  yellow, so a guessed row lost the only marker saying it was
-                  guessed at exactly the moment it most needed checking. The
-                  background keeps saying "guessed" and the left edge says
-                  "blocked". */}
-              <tr
-                className={`border-t border-neutral-100${guessed ? " bg-yellow-100/70" : amber ? " bg-amber-50/40" : ""}${
-                  amber ? " border-l-4 border-l-amber-400" : ""
-                }`}
-              >
-                <td className="px-4 py-2 align-top">
-                  {/* ==========================================================
-                      ONLY OFFER A GROUP THIS ROW CAN ACTUALLY BE GIVEN.
-                      This listed all six, and on a measured row every one of
-                      them was refused: `Dimensions` by `dimension_needs_slot`
-                      (0011's biconditional — a dimension has a slot), and
-                      every other by `unit_not_a_measurement` (only a dimension
-                      or a note may carry a unit). The 400 then landed in the
-                      banner at the TOP of the screen, nowhere near the row, so
-                      the dropdown simply appeared to do nothing — on the
-                      twenty-four-row S-200 card, twenty-four times.
-                      The route's rules are right; offering choices it must
-                      refuse was not. A row that measures something moves
-                      between note and dimension in the SLOT column, which
-                      sends both fields in one patch.
-                      ========================================================== */}
-                  <select
-                    value={observation.attrGroup}
-                    disabled={groupOptions.length < 2}
-                    onChange={(event) =>
-                      void onSaveObservation(item, observation, { attrGroup: event.target.value as AttributeGroup })
-                    }
-                    className="border border-neutral-300 rounded px-1 py-0.5 text-xs disabled:bg-neutral-50 disabled:text-neutral-500"
-                    title={
-                      observation.unit !== null
-                        ? "This row carries a unit, so it is a dimension or a note. Choose the dimension in the next column but one, or clear the unit to file it as a finish."
-                        : undefined
-                    }
-                  >
-                    {groupOptions.map((group) => (
-                      <option key={group} value={group}>
-                        {ATTRIBUTE_GROUP_LABELS[group]}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="px-2 py-2 align-top text-neutral-700">{observation.labelRaw ?? "—"}</td>
-                <td className="px-2 py-2 align-top">
-                  {/* A sheet's note block is many lines in one row, so it gets
-                      a box it fits in. Every line stays editable text: the
-                      merge joined rows, it did not rewrite words. */}
-                  {(value ?? "").includes("\n") ? (
-                    <textarea
-                      value={value ?? ""}
-                      rows={Math.min(12, (value ?? "").split("\n").length + 1)}
-                      onChange={(event) =>
-                        setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
-                      }
-                      onBlur={(event) => {
-                        if (event.target.value === (observation.value ?? "")) return;
-                        void onSaveObservation(item, observation, { value: event.target.value || null });
-                      }}
-                      className="w-full min-w-[18rem] border border-neutral-300 rounded px-2 py-1 text-sm"
+                {observation.id === firstOtherId && (
+                  <OtherDimensionsToggle
+                    count={otherDimensionRows.length}
+                    shown={showOtherDimensions}
+                    onToggle={() => setShowOtherDimensions((value) => !value)}
+                  />
+                )}
+                {(!isOther || showOtherDimensions) && (
+                  <>
+                    <ObservationRow
+                      observation={observation}
+                      page={item.page}
+                      importId={importId}
+                      specFields={specFields}
+                      drafts={drafts}
+                      setDrafts={setDrafts}
+                      busy={busy}
+                      blocked={blocked}
+                      guessWhy={guessWhy.get(observation.id)}
+                      callbacks={rowCallbacks}
                     />
-                  ) : (
-                    <input
-                      value={value ?? ""}
-                      onChange={(event) =>
-                        setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
-                      }
-                      onBlur={(event) => {
-                        if (event.target.value === (observation.value ?? "")) return;
-                        void onSaveObservation(item, observation, { value: event.target.value || null });
-                      }}
-                      className="w-full border border-neutral-300 rounded px-2 py-1 text-sm"
+                    <ReplacePanel
+                      observation={observation}
+                      occupants={rowOccupants}
+                      runs={resolution?.resolution.runs ?? []}
+                      busy={busy}
+                      blocked={blocked}
+                      onChange={(target, changes) => void onSaveObservation(item, target, changes)}
                     />
-                  )}
-                  {/* Not for a block: its raw form is the same lines with the
-                      heading repeated down every one of them. */}
-                  {observation.valueRaw !== null &&
-                    observation.valueRaw !== observation.value &&
-                    !(value ?? "").includes("\n") && (
-                      <p className="mt-0.5 text-xs text-neutral-400">drawing said: {observation.valueRaw}</p>
-                    )}
-                  {observation.materialCodeRaw && (
-                    <>
-                      <p className="mt-0.5 text-xs text-neutral-500">code {observation.materialCodeRaw}</p>
-                      {/* A SWATCH NEEDS A CODE, because that is what
-                          `project_finishes` is keyed on. A row with no code has
-                          no finish to attach a picture to, so the control is
-                          not offered rather than offered and refused. */}
-                      <SwatchPicker
-                        importId={importId}
-                        page={item.page}
-                        code={observation.materialCodeRaw}
-                        disabled={busy}
-                        onCropped={(image) => onSwatch(observation.id, image)}
-                      />
-                    </>
-                  )}
-                </td>
-                <td className="px-2 py-2 align-top">
-                  {/* A TEXT NOTE IS NEVER ASKED FOR A UNIT. "REMARKS: SUBMIT
-                      SHOP DRAWINGS FOR REVIEW" is not a measurement, and an
-                      empty select beside fifteen of them reads as fifteen
-                      unanswered questions where there are none — nothing blocks
-                      a unitless note.
-                      A MEASURED note is offered one whether or not it already
-                      carries one. `ARM HEIGHT 520` is a real measurement with
-                      no BWS slot, and 0011 keeps its unit in its own column
-                      rather than in its text — so a wrong mm must be
-                      correctable without promoting the row to a slot, and a
-                      figure staged with no unit at all must be answerable at
-                      all. It is NOT amber: a unitless note blocks nothing, and
-                      only a dimension is actually being asked. */}
-                  {observation.attrGroup === "dimension" || isMeasuredRow(observation) ? (
-                    <select
-                      value={observation.unit ?? ""}
-                      onChange={(event) =>
-                        void onSaveObservation(item, observation, { unit: event.target.value || null })
-                      }
-                      className={`border rounded px-1 py-0.5 text-xs ${
-                        observation.unit === null && observation.attrGroup === "dimension"
-                          ? "border-amber-400 bg-amber-50"
-                          : "border-neutral-300"
-                      }`}
-                    >
-                      <option value="">Choose…</option>
-                      {ATTRIBUTE_UNITS.map((unit) => (
-                        <option key={unit} value={unit}>
-                          {unit}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span className="text-xs text-neutral-400">—</span>
-                  )}
-                  {/* A printed unit is NOT a guess and must not be labelled as
-                      one — that is the whole reason provenance is tracked. */}
-                  {unitSourceOf(observation) === "printed" && (
-                    <p className="mt-0.5 text-xs text-neutral-500">printed on the page</p>
-                  )}
-                  {unitSourceOf(observation) === "figures" && (
-                    <p className="mt-0.5 text-xs text-amber-700">guessed from the figures</p>
-                  )}
-                  {unitSourceOf(observation) === "project_default" && (
-                    <p className="mt-0.5 text-xs text-amber-700">the project default</p>
-                  )}
-                </td>
-                <td className="px-2 py-2 align-top">
-                  {observation.attrGroup === "dimension" || observation.attrGroup === "note" ? (
-                    // The question the reviewer is actually being asked. A shop
-                    // drawing labels nothing, so its figures stage as notes and
-                    // this is where one becomes the width — and where a figure
-                    // the page DID label, but as something outside the five
-                    // (ARM HEIGHT), stays a note without losing anything.
-                    //
-                    // Both fields go in ONE patch: 0011 refuses a dimension
-                    // with no slot and a note with one, so sending them apart
-                    // would leave the staged row in a shape the confirm cannot
-                    // write.
-                    <div className="flex flex-col gap-0.5">
-                      <select
-                        value={observation.dimensionSlot ?? ""}
-                        onChange={(event) => {
-                          const slot = event.target.value;
-                          void onSaveObservation(item, observation, {
-                            attrGroup: slot ? "dimension" : "note",
-                            dimensionSlot: slot ? (slot as DimensionSlot) : null,
-                          });
-                        }}
-                        className={`border rounded px-1 py-0.5 text-xs ${
-                          observation.slotSuggested ? "border-amber-400 bg-amber-50" : "border-neutral-300"
-                        }`}
-                      >
-                        <option value="">Keep as a note</option>
-                        {DIMENSION_SLOTS.map((slot) => (
-                          <option key={slot} value={slot}>
-                            {DIMENSION_SLOT_LABELS[slot]}
-                          </option>
-                        ))}
-                      </select>
-                      {observation.slotSuggested && observation.dimensionSlot ? (
-                        <span className="text-[11px] text-amber-700">
-                          {/* A view guess and a positional read are both
-                              suggestions and must not claim the same reason:
-                              one is "this figure is drawn on three views", the
-                              other is "these three were printed in order". */}
-                          {guessWhy.get(observation.id) ?? "order assumed W × D × H"}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <select
-                      value={observation.specFieldId ?? ""}
-                      onChange={(event) =>
-                        void onSaveObservation(item, observation, { specFieldId: event.target.value || null })
-                      }
-                      className="border border-neutral-300 rounded px-1 py-0.5 text-xs max-w-[12rem]"
-                    >
-                      <option value="">No BWS field</option>
-                      {specFields.map((field) => (
-                        <option key={field.id} value={field.id}>
-                          {field.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </td>
-                <td className="px-2 py-2 align-top">
-                  <select
-                    value={observation.state ?? ""}
-                    onChange={(event) =>
-                      void onSaveObservation(item, observation, { state: (event.target.value || null) as AttributeState | null })
-                    }
-                    className={`border rounded px-1 py-0.5 text-xs ${
-                      observation.state === null ? "border-amber-400 bg-amber-50" : "border-neutral-300"
-                    }`}
-                  >
-                    <option value="">Choose…</option>
-                    <option value="confirmed">Stated</option>
-                    <option value="tbc">TBC</option>
-                  </select>
-                </td>
-                <td className="px-4 py-2 align-top text-right">
-                  <button
-                    type="button"
-                    onClick={() => void onReview(item, [observation], "ignore")}
-                    className="text-xs text-neutral-500 hover:text-neutral-900"
-                  >
-                    Ignore
-                  </button>
-                </td>
-              </tr>
-              {rowOccupants.length > 0 && (
-                <tr className={amber ? "bg-amber-50/40" : undefined}>
-                  <td colSpan={7} className="px-4 pb-2">
-                    {/* A REVISED DRAWING. The clash is the point of the card,
-                        not a fault in it — but only once the reviewer has seen
-                        what they are dropping. One tick per RECORD, because a
-                        card fans out one record per run and the mock-up run's
-                        value is not the main run's. */}
-                    <div className="border border-amber-300 bg-amber-50 rounded px-2 py-1.5 text-xs">
-                      <p className="text-amber-900">
-                        {rowOccupants.length === 1
-                          ? "This item already holds a value here."
-                          : `${rowOccupants.length} of these records already hold a value here.`}{" "}
-                        Tick to replace it — the old one is kept, marked retired, and linked to this as its
-                        replacement.
-                      </p>
-                      {rowOccupants.map(({ recordId, occupant }) => {
-                        const acknowledged = (observation.replaces ?? []).some(
-                          (entry) => entry.recordId === recordId && entry.attributeId === occupant.attributeId,
-                        );
-                        const runName =
-                          resolution?.resolution.runs.find(
-                            (run) => run.status === "matched" && run.record.id === recordId,
-                          )?.runName ?? "this run";
-                        return (
-                          <label key={recordId} className="mt-1 flex items-start gap-2 text-amber-900">
-                            <input
-                              type="checkbox"
-                              checked={acknowledged}
-                              disabled={busy}
-                              onChange={(event) => {
-                                const others = (observation.replaces ?? []).filter((entry) => entry.recordId !== recordId);
-                                const next = event.target.checked
-                                  ? [
-                                      ...others,
-                                      {
-                                        recordId,
-                                        attributeId: occupant.attributeId,
-                                        attributeVersion: occupant.attributeVersion,
-                                      },
-                                    ]
-                                  : others;
-                                void onSaveObservation(item, observation, { replaces: next });
-                              }}
-                              className="mt-0.5"
-                            />
-                            <span>
-                              <span className="font-medium">{runName}</span>: replace{" "}
-                              <span className="font-mono">
-                                {occupant.label}
-                                {occupant.value ? `: ${occupant.value}` : ""}
-                                {occupant.unit ?? ""}
-                              </span>
-                              {occupant.sourceFilename && (
-                                <span className="text-amber-800">
-                                  {" "}
-                                  (from {occupant.sourceFilename}
-                                  {occupant.sourcePage ? ` p${occupant.sourcePage}` : ""})
-                                </span>
-                              )}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </td>
-                </tr>
-              )}
-              {amber && (
-                <tr className="bg-amber-50/40">
-                  <td colSpan={7} className="px-4 pb-2 text-xs text-amber-900">
-                    {rowBlockers.map((blocker) => blocker.message).join(" ")}
-                    {/* Said out loud, because an amber row that still commits
-                        looks like a bug otherwise. */}
-                    {rowWarnings.length > 0 && (
-                      <span className={rowBlockers.length ? "ml-1" : undefined}>
-                        {rowWarnings.map((warning) => warning.message).join(" ")} This does not stop you confirming.
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              )}
-              </>
-              )}
+                    <RowNotes blockers={rowBlockers} warnings={rowWarnings} />
+                  </>
+                )}
               </Fragment>
             );
           })}
@@ -976,14 +500,13 @@ export default function ItemCard({
         </p>
         <div className="flex items-center gap-2">
           {ignorePage}
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={() => void onReview(item, pending, "confirm")}
             disabled={busy || blockers.length > 0 || pending.length === 0 || targets.length === 0}
-            className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
           >
             {busy ? "Confirming…" : `Confirm ${pending.length} spec${pending.length === 1 ? "" : "s"}`}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

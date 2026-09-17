@@ -1741,28 +1741,53 @@ export function occupancyThrough(occupied: OccupiedSlots, writeTo: ReadonlyMap<s
   return { fields, dimensions };
 }
 
-export function variantLettersByItem(items: readonly DrawingItem[]): Map<string, string | null> {
-  // THE SAME FOLD THE RESOLVER MATCHES BY — `spec-document`'s, the one
-  // `findRecordsByRef` uses, and NOT `boq-import`'s looser one. Two cards that
-  // group here as one code must resolve to the same records, or the letters
-  // would describe a grouping the confirm does not share.
+/**
+ * The pages of one staged run, grouped by the code they carry.
+ *
+ * THE SAME FOLD THE RESOLVER MATCHES BY — `spec-document`'s, the one
+ * `findRecordsByRef` uses, and NOT `boq-import`'s looser one. Two cards that
+ * group here as one code must resolve to the same records, or the grouping
+ * would describe something the confirm does not share.
+ *
+ * EXPORTED because the lettering and the review screen's card grouping are the
+ * same question, and they used to answer it differently: the letters folded
+ * the code and the screen's heading compared `itemCodeRaw` raw, so `S-201` and
+ * `s 201` were lettered A and B and then printed under two separate headings.
+ * A code with no letter is one drawn once; a card with no group is one page.
+ * Both fall out of this, and neither can drift from the other now.
+ *
+ * Page order within a group, then id, so two pages reported without a page
+ * number still land in a fixed order rather than whatever the model listed.
+ * A page with no code at all is not in any group: it is its own card, and it
+ * can never commit.
+ */
+export function groupItemsByCode(items: readonly DrawingItem[]): Map<string, DrawingItem[]> {
   const byCode = new Map<string, DrawingItem[]>();
   for (const item of items) {
     const code = normaliseRef(item.itemCodeRaw ?? "");
     if (!code) continue;
     byCode.set(code, [...(byCode.get(code) ?? []), item]);
   }
+  for (const [code, group] of byCode) {
+    byCode.set(
+      code,
+      [...group].sort(
+        (a, b) => (a.page ?? Number.MAX_SAFE_INTEGER) - (b.page ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
+      ),
+    );
+  }
+  return byCode;
+}
+
+export function variantLettersByItem(items: readonly DrawingItem[]): Map<string, string | null> {
+  const byCode = groupItemsByCode(items);
   const letters = new Map<string, string | null>();
-  for (const [, group] of byCode) {
+  for (const [, ordered] of byCode) {
+    const group = ordered;
     if (group.length < 2) {
       for (const item of group) letters.set(item.id, null);
       continue;
     }
-    // Page order, then id, so two pages reported without a page number still
-    // land in a fixed order rather than whatever the model listed.
-    const ordered = [...group].sort(
-      (a, b) => (a.page ?? Number.MAX_SAFE_INTEGER) - (b.page ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
-    );
     ordered.forEach((item, index) => {
       letters.set(item.id, nextVariantLabel(ordered.slice(0, index).map((earlier) => letters.get(earlier.id) ?? null)));
     });

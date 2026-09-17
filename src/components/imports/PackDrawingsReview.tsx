@@ -25,12 +25,13 @@ import { intakeStatusLabel, isIntakeRunWorking } from "@/lib/intake-status";
 import Spinner from "@/components/ui/Spinner";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
-  configurationGroup,
   BulkUnit,
   type ItemResolution,
   type RecordChoice,
   type SpecField,
 } from "@/components/imports/DrawingItemCard";
+import ConfigurationCard from "@/components/imports/ConfigurationCard";
+import { cardHasPending, configurationCards } from "@/lib/configuration-cards";
 
 type Run = {
   importId: string;
@@ -207,6 +208,38 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     });
   }
 
+  /**
+   * Several rows in one go, saved and reloaded ONCE.
+   *
+   * The configuration card edits one shared measurement and writes it to the
+   * matching row on every configuration's page. Four separate autosaves would
+   * be four reloads under the reviewer's cursor.
+   */
+  async function saveObservations(
+    edits: { item: DrawingItem; observation: DrawingObservation; changes: Record<string, unknown> }[],
+  ) {
+    if (edits.length === 0) return;
+    await queueSave(async () => {
+      const failures: string[] = [];
+      for (const edit of edits) {
+        const run = runOf(edit.item.id);
+        if (!run) continue;
+        const res = await apiFetch(`/api/imports/${run.importId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            itemId: edit.item.id,
+            observationId: edit.observation.id,
+            expectedVersion: edit.observation.version,
+            changes: edit.changes,
+          }),
+        });
+        if (!res.ok) failures.push(res.error);
+      }
+      await reloadThen(failures.length > 0 ? failures[0]! : null);
+    });
+  }
+
   async function saveTargets(item: DrawingItem, ticked: string[], unticked: string[]) {
     const run = runOf(item.id);
     if (!run) return;
@@ -243,46 +276,100 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     });
   }
 
-  async function review(item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") {
+  /**
+   * One item's specs, committed. Returns the failure text, or null.
+   *
+   * No reload and no busy flag of its own, so a caller can put several of these
+   * in a row and report once. Each is still one atomic request naming ONE
+   * staged item.
+   */
+  async function confirmItem(
+    item: DrawingItem,
+    observations: DrawingObservation[],
+    action: "confirm" | "ignore" | "restore",
+  ): Promise<string | null> {
     const run = runOf(item.id);
-    if (!run) return;
+    if (!run) return "That page is no longer part of this pack. Reload.";
+    // Before the confirm, so a failed upload refuses the card rather than
+    // committing its specs and silently losing the picture.
+    let image = null;
+    let swatchList: Awaited<ReturnType<typeof uploadSwatches>> = [];
+    if (action === "confirm") {
+      try {
+        image = await uploadImage(item.id, projectId);
+        swatchList = await uploadSwatches(
+          observations.map((observation) => observation.id),
+          projectId,
+        );
+      } catch (cause) {
+        return `The picture could not be stored, so nothing was confirmed: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`;
+      }
+    }
+    const res = await apiFetch(`/api/imports/${run.importId}/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action,
+        itemId: item.id,
+        ...(action === "confirm"
+          ? { itemVersion: item.version, image, ...(swatchList.length > 0 ? { swatches: swatchList } : {}) }
+          : {}),
+        observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
+      }),
+    });
+    return res.ok ? null : res.error;
+  }
+
+  async function review(item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") {
     await saveChain.current;
     setBusy(item.id);
     setError(null);
     try {
-      // Before the confirm, so a failed upload refuses the card rather than
-      // committing its specs and silently losing the picture.
-      let image = null;
-      let swatchList: Awaited<ReturnType<typeof uploadSwatches>> = [];
-      if (action === "confirm") {
-        try {
-          image = await uploadImage(item.id, projectId);
-          swatchList = await uploadSwatches(
-            observations.map((observation) => observation.id),
-            projectId,
-          );
-        } catch (cause) {
-          setError(
-            `The picture could not be stored, so nothing was confirmed: ${
-              cause instanceof Error ? cause.message : String(cause)
-            }`,
+      await reloadThen(await confirmItem(item, observations, action));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Every configuration of one code, confirmed in letter order.
+   *
+   * Each is its own atomic request, so a refusal on B leaves A applied -- the
+   * correct state, and what the reloaded card then shows. What must not happen
+   * is a silent partial, so the message names what was written, what was
+   * refused and what was never attempted.
+   */
+  async function reviewMany(
+    key: string,
+    entries: { label: string; item: DrawingItem; observations: DrawingObservation[] }[],
+  ) {
+    await saveChain.current;
+    setBusy(key);
+    setError(null);
+    try {
+      const done: string[] = [];
+      for (const [index, entry] of entries.entries()) {
+        const failure = await confirmItem(entry.item, entry.observations, "confirm");
+        if (failure) {
+          const notAttempted = entries.slice(index + 1).map((rest) => rest.label);
+          await reloadThen(
+            [
+              done.length > 0 ? `${done.join(" and ")} confirmed.` : null,
+              `${entry.label} refused: ${failure} Nothing was written for it.`,
+              notAttempted.length > 0
+                ? `${notAttempted.join(" and ")} ${notAttempted.length === 1 ? "was" : "were"} not attempted.`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" "),
           );
           return;
         }
+        done.push(entry.label);
       }
-      const res = await apiFetch(`/api/imports/${run.importId}/confirm`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action,
-          itemId: item.id,
-          ...(action === "confirm"
-            ? { itemVersion: item.version, image, ...(swatchList.length > 0 ? { swatches: swatchList } : {}) }
-            : {}),
-          observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
-        }),
-      });
-      await reloadThen(res.ok ? null : res.error);
+      await reloadThen(null);
     } finally {
       setBusy(null);
     }
@@ -383,14 +470,29 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     );
   }
 
+  // ==========================================================================
+  // GROUPED PER RUN, NEVER ACROSS RUNS.
+  //
+  // The letters come from `variantLettersByItem` over ONE staged run's items,
+  // on the server and in the confirm route alike. So `S-201` drawn once in file
+  // X and once in file Y is letter A in BOTH, and both write to the same
+  // variant -- a card that showed them as A and B would promise a split the
+  // confirm does not make. The pack's own `duplicateTargets` banner above is
+  // what reports that case, and it stays.
+  // ==========================================================================
   const cards = runs.flatMap((run) =>
-    (run.staged?.items ?? [])
-      .filter((item) => item.observations.some((observation) => observation.reviewStatus === "pending"))
-      .map((item) => ({ run, item })),
+    run.staged
+      ? configurationCards(run.staged.items, new Map(run.items.map((entry) => [entry.id, entry])))
+          .filter(cardHasPending)
+          .map((card) => ({ run, card }))
+      : [],
+  );
+  const pendingItems = runs.flatMap((run) =>
+    (run.staged?.items ?? []).filter((item) => item.observations.some((observation) => observation.reviewStatus === "pending")),
   );
   const unread = runs.filter((run) => run.status === "pending" || run.status === "failed");
-  const unitsOutstanding = cards.reduce(
-    (total, { item }) =>
+  const unitsOutstanding = pendingItems.reduce(
+    (total, item) =>
       total +
       item.observations.filter(
         (o) => o.reviewStatus === "pending" && o.attrGroup === "dimension" && o.unit === null && o.value?.trim(),
@@ -522,45 +624,53 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
         </div>
       )}
 
-      {/* ---- the cards, one per item, whichever file it came from ---- */}
+      {/* ---- the cards, one per code, whichever file it came from ---- */}
       <div className="mt-4 space-y-4">
-        {cards.map(({ run, item }, index) => {
-          const group = configurationGroup(
-            cards.map((card) => card.item),
-            new Map(cards.map((card) => [card.item.id, card.run.items.find((entry) => entry.id === card.item.id)])),
-            item,
-            index,
-          );
-          return (
-          <div key={item.id}>
-            {/* Above the filename, because the grouping is about the ITEM and
-                the file is only where this page of it came from. */}
-            {group && (
-              <p className="mb-1 text-sm font-medium text-neutral-800">
-                {group.code} — one bill line, drawn as configurations {group.letters.join(", ")}
-              </p>
-            )}
+        {cards.map(({ run, card }) => (
+          <div key={`${run.importId}:${card.id}`}>
+            {/* Above the card, because the grouping is about the ITEM and the
+                file is only where this page of it came from. */}
             <p className="mb-1 text-xs text-neutral-500">{run.filename ?? "Unnamed file"}</p>
-            <ItemCard
-              item={item}
-              importId={run.importId}
-              resolution={run.items.find((entry) => entry.id === item.id)}
-              specFields={data.specFields}
-              records={data.records}
-              drafts={drafts}
-              setDrafts={setDrafts}
-              busy={busy === item.id}
-              onSaveObservation={saveObservation}
-              onSaveTargets={saveTargets}
-              onSetBulkUnit={setBulkUnit}
-              onImage={rememberImage}
-              onSwatch={rememberSwatch}
-              onReview={review}
-            />
+            {card.kind === "single" ? (
+              <ItemCard
+                item={card.item}
+                importId={run.importId}
+                resolution={run.items.find((entry) => entry.id === card.item.id)}
+                specFields={data.specFields}
+                records={data.records}
+                drafts={drafts}
+                setDrafts={setDrafts}
+                busy={busy === card.item.id}
+                onSaveObservation={saveObservation}
+                onSaveTargets={saveTargets}
+                onSetBulkUnit={setBulkUnit}
+                onImage={rememberImage}
+                onSwatch={rememberSwatch}
+                onReview={review}
+              />
+            ) : (
+              <ConfigurationCard
+                card={card}
+                importId={run.importId}
+                specFields={data.specFields}
+                records={data.records}
+                drafts={drafts}
+                setDrafts={setDrafts}
+                busy={busy}
+                onSaveObservation={saveObservation}
+                onSaveObservations={saveObservations}
+                onSaveTargets={saveTargets}
+                onSetBulkUnit={setBulkUnit}
+                onReview={review}
+                onReviewMany={reviewMany}
+                onImage={rememberImage}
+                onSwatch={rememberSwatch}
+              />
+            )}
           </div>
-          );
-        })}
+        ))}
       </div>
+
 
       {cards.length === 0 && runs.some((run) => run.staged) && (
         <p className="mt-6 text-sm text-neutral-700">

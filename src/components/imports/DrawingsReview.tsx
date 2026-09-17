@@ -33,12 +33,13 @@ import Disclosure, { DisclosureList } from "@/components/ui/Disclosure";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
-  configurationGroup,
   BulkUnit,
   type ItemResolution,
   type RecordChoice,
   type SpecField,
 } from "@/components/imports/DrawingItemCard";
+import ConfigurationCard from "@/components/imports/ConfigurationCard";
+import { cardHasPending, configurationCards } from "@/lib/configuration-cards";
 
 type Run = {
   id: string;
@@ -226,6 +227,38 @@ export default function DrawingsReview({ importId }: { importId: string }) {
     });
   }
 
+  /**
+   * Several rows in one go, saved and reloaded ONCE.
+   *
+   * The configuration card edits one shared measurement and writes it to the
+   * matching row on every configuration's page. Issued as separate autosaves
+   * that would be four requests and four reloads under the reviewer's cursor;
+   * batched, the screen refreshes once and a row somebody else has edited is
+   * refused on its own without taking the others with it.
+   */
+  async function saveObservations(
+    edits: { item: DrawingItem; observation: DrawingObservation; changes: Record<string, unknown> }[],
+  ) {
+    if (edits.length === 0) return;
+    await queueSave(async () => {
+      const failures: string[] = [];
+      for (const edit of edits) {
+        const res = await apiFetch(`/api/imports/${importId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            itemId: edit.item.id,
+            observationId: edit.observation.id,
+            expectedVersion: edit.observation.version,
+            changes: edit.changes,
+          }),
+        });
+        if (!res.ok) failures.push(res.error);
+      }
+      await reloadThen(failures.length > 0 ? failures[0]! : null);
+    });
+  }
+
   async function setBulkUnit(scope: "item" | "run", unit: "mm" | "cm", itemId?: string) {
     await queueSave(async () => {
       const res = await apiFetch(`/api/imports/${importId}`, {
@@ -248,47 +281,99 @@ export default function DrawingsReview({ importId }: { importId: string }) {
     });
   }
 
+  /**
+   * One item's specs, committed. Returns the failure text, or null.
+   *
+   * No reload and no busy flag of its own, so a caller can put several of these
+   * in a row and report once. Each call is still one atomic request naming ONE
+   * staged item -- the item is the unit of commit and that has not changed.
+   */
+  async function confirmItem(
+    item: DrawingItem,
+    observations: DrawingObservation[],
+    action: "confirm" | "ignore" | "restore",
+  ): Promise<string | null> {
+    if (!run) return "This import is no longer loaded. Reload.";
+    // Before the confirm, so a failed upload refuses the card rather than
+    // committing its specs and silently losing the picture.
+    let image = null;
+    let swatchList: Awaited<ReturnType<typeof uploadSwatches>> = [];
+    if (action === "confirm") {
+      try {
+        image = await uploadImage(item.id, run.project_id);
+        swatchList = await uploadSwatches(
+          observations.map((observation) => observation.id),
+          run.project_id,
+        );
+      } catch (cause) {
+        return `The picture could not be stored, so nothing was confirmed: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`;
+      }
+    }
+    const res = await apiFetch(`/api/imports/${importId}/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action,
+        itemId: item.id,
+        ...(action === "confirm"
+          ? { itemVersion: item.version, image, ...(swatchList.length > 0 ? { swatches: swatchList } : {}) }
+          : {}),
+        observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
+      }),
+    });
+    return res.ok ? null : res.error;
+  }
+
   async function review(item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") {
-    if (!run) return;
     // Every queued edit lands before the commit, or the versions sent will be
     // the ones the screen had before the last keystroke.
     await saveChain.current;
     setBusy(item.id);
     setError(null);
     try {
-      // Before the confirm, so a failed upload refuses the card rather than
-      // committing its specs and silently losing the picture.
-      let image = null;
-      let swatchList: Awaited<ReturnType<typeof uploadSwatches>> = [];
-      if (action === "confirm") {
-        try {
-          image = await uploadImage(item.id, run.project_id);
-          swatchList = await uploadSwatches(
-            observations.map((observation) => observation.id),
-            run.project_id,
-          );
-        } catch (cause) {
-          setError(
-            `The picture could not be stored, so nothing was confirmed: ${
-              cause instanceof Error ? cause.message : String(cause)
-            }`,
+      await reloadThen(await confirmItem(item, observations, action));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Every configuration of one code, confirmed in letter order.
+   *
+   * Each is its own atomic request, so a refusal on B leaves A applied -- which
+   * is the correct state, and the reloaded card shows exactly that. What must
+   * not happen is a silent partial: the message names what was written, what
+   * was refused and what was never attempted.
+   */
+  async function reviewMany(
+    key: string,
+    entries: { label: string; item: DrawingItem; observations: DrawingObservation[] }[],
+  ) {
+    await saveChain.current;
+    setBusy(key);
+    setError(null);
+    try {
+      const done: string[] = [];
+      for (const [index, entry] of entries.entries()) {
+        const failure = await confirmItem(entry.item, entry.observations, "confirm");
+        if (failure) {
+          const notAttempted = entries.slice(index + 1).map((rest) => rest.label);
+          await reloadThen(
+            [
+              done.length > 0 ? `${done.join(" and ")} confirmed.` : null,
+              `${entry.label} refused: ${failure} Nothing was written for it.`,
+              notAttempted.length > 0 ? `${notAttempted.join(" and ")} ${notAttempted.length === 1 ? "was" : "were"} not attempted.` : null,
+            ]
+              .filter(Boolean)
+              .join(" "),
           );
           return;
         }
+        done.push(entry.label);
       }
-      const res = await apiFetch(`/api/imports/${importId}/confirm`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action,
-          itemId: item.id,
-          ...(action === "confirm"
-            ? { itemVersion: item.version, image, ...(swatchList.length > 0 ? { swatches: swatchList } : {}) }
-            : {}),
-          observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
-        }),
-      });
-      await reloadThen(res.ok ? null : res.error);
+      await reloadThen(null);
     } finally {
       setBusy(null);
     }
@@ -382,6 +467,8 @@ export default function DrawingsReview({ importId }: { importId: string }) {
   }
 
   const pendingItems = staged.items.filter((item) => item.observations.some((o) => o.reviewStatus === "pending"));
+  // Grouped into cards: one per code, one per page for a code drawn once.
+  const cards = configurationCards(staged.items, byItem).filter(cardHasPending);
   // Split, because the two have different answers. A page whose CODE matched
   // nothing is waiting for the bill of quantities; a page with no code at all
   // will never match one however many bills are confirmed, so sending its
@@ -460,40 +547,52 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         </div>
       )}
 
+      {/* ONE CARD PER CODE. A code drawn on several pages is one item in
+          several configurations -- same chair, different fabric -- and it is
+          shown as one card with a chip per configuration, the geometry once
+          and each configuration's own finishes below. A code drawn once is a
+          plain card, unchanged. See src/lib/configuration-cards.ts. */}
       <div className="mt-4 space-y-4">
-        {pendingItems.map((item, index) => {
-          const group = configurationGroup(pendingItems, byItem, item, index);
-          return (
-            <div key={item.id}>
-              {/* ONE HEADING PER CODE THAT IS DRAWN MORE THAN ONCE. The cards
-                  already sit together (they are in page order), but adjacency
-                  is not a statement — a reviewer looking at four S-301 cards
-                  needs to be told they are four configurations of one bill
-                  line and not four items. Printed once, above the first. */}
-              {group && (
-                <p className="mb-1 text-sm font-medium text-neutral-800">
-                  {group.code} — one bill line, drawn as configurations {group.letters.join(", ")}
-                </p>
-              )}
-              <ItemCard
-            item={item}
-            importId={importId}
-            resolution={byItem.get(item.id)}
-            specFields={specFields}
-            records={records}
-            drafts={drafts}
-            setDrafts={setDrafts}
-            busy={busy === item.id}
-            onSaveObservation={saveObservation}
-            onSaveTargets={saveTargets}
-            onSetBulkUnit={setBulkUnit}
-            onImage={rememberImage}
-                  onSwatch={rememberSwatch}
-                onReview={review}
-              />
-            </div>
-          );
-        })}
+        {cards.map((card) =>
+          card.kind === "single" ? (
+            <ItemCard
+              key={card.id}
+              item={card.item}
+              importId={importId}
+              resolution={byItem.get(card.item.id)}
+              specFields={specFields}
+              records={records}
+              drafts={drafts}
+              setDrafts={setDrafts}
+              busy={busy === card.item.id}
+              onSaveObservation={saveObservation}
+              onSaveTargets={saveTargets}
+              onSetBulkUnit={setBulkUnit}
+              onImage={rememberImage}
+              onSwatch={rememberSwatch}
+              onReview={review}
+            />
+          ) : (
+            <ConfigurationCard
+              key={card.id}
+              card={card}
+              importId={importId}
+              specFields={specFields}
+              records={records}
+              drafts={drafts}
+              setDrafts={setDrafts}
+              busy={busy}
+              onSaveObservation={saveObservation}
+              onSaveObservations={saveObservations}
+              onSaveTargets={saveTargets}
+              onSetBulkUnit={setBulkUnit}
+              onReview={review}
+              onReviewMany={reviewMany}
+              onImage={rememberImage}
+              onSwatch={rememberSwatch}
+            />
+          ),
+        )}
       </div>
 
       <CollapsedList

@@ -1086,6 +1086,48 @@ configuration names the bill line it came from and links back.
 **The unapportioned quantity is stated, never divided**, on both screens. The
 bill says 45 and never says how many are fabric A.
 
+**And the REVIEW screen is one card per CODE** (`src/lib/configuration-cards.ts`,
+`src/components/imports/ConfigurationCard.tsx`, 2026-09-17). Four pages of
+S-301 were four cards carrying a grey chip and a sentence, so the same four
+dimensions were checked four times and the fabric — the only thing that
+actually differs — was what got scrolled past. Now: one card, a chip per
+configuration coloured by LETTER (A is always sky, so the chip finds its own
+section), the geometry ONCE, each configuration's own finishes below it in its
+own band, and a reviewed configuration collapsed to a line.
+
+Five things about it are load-bearing:
+
+- **What is shared on screen is still written per page.** An edit to the shared
+  geometry table fans out to the MATCHING row on every configuration's page
+  (`byMember`, keyed by `measuredKey`), each with its own version, in one
+  batched save. That is the data model, not a shortcut around it:
+  `record_attributes` holds what a PAGE said, so B's width comes from page 6 and
+  carries page 6 as its source. Writing A's row to B would fabricate a source
+  page or lie about one.
+- **The confirm route is untouched.** One request still names ONE staged item
+  and its whole pending set; the card issues several in letter order. A refusal
+  on B leaves A applied — correct, and what the reloaded card shows — and the
+  banner names what was written, what was refused and what was never attempted.
+  Copying rows at confirm time instead would make B's atomicity depend on A.
+- **One APPLIES TO for the card.** Ticking a run is a statement about the CODE.
+  Per-page targets would let A apply to the VE run and B not, producing
+  `S-201 A` under a bill line with no B. Where they currently disagree the tick
+  is indeterminate and says so.
+- **The pages may DISAGREE about the size, and that is never averaged.**
+  `compareGeometry` compares SLOT signatures — not every measured row, because
+  two pages of one chair routinely differ by a radius and failing the card over
+  a 5mm reveal would put four tables back on screen. A difference is an amber
+  notice naming each letter's figure, each configuration keeps its own, and it
+  is NOT a blocker: it is either a configuration split or a misread, and both
+  are a person's call.
+- **`groupItemsByCode` is the one grouping.** `configurationGroup` compared
+  `itemCodeRaw` RAW while `variantLettersByItem` folded it with `normaliseRef`,
+  so `S-201` and `s 201` were lettered A and B and then printed under two
+  separate headings. Both now call the same function. Grouping never crosses
+  runs: letters are per staged run, so a code drawn once in each of two files is
+  letter A in both and writes to the same variant — the pack's
+  `duplicateTargets` banner is what reports that case.
+
 **STILL OUTSTANDING:** nothing lets a person SET a configuration's quantity — the
 gap is reported and there is no field to close it. And a record that already
 carries confirmed specs cannot be split at all (`ensureVariant`'s guard), so the
