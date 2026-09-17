@@ -23,6 +23,7 @@
 // ============================================================================
 import { put } from "@vercel/blob";
 import { sql } from "@/lib/db";
+import { MAILBOX_PREFIX } from "@/lib/blob-source";
 import {
   GraphError,
   assertGraphId,
@@ -106,13 +107,21 @@ function envelopeFromGraph(message: GraphMessage): EmailEnvelope {
   };
 }
 
-/** `mailbox/<slug>/<yyyy>/<mm>/<id>.eml` — outside any project prefix, because no project is known yet. */
+/**
+ * `mailbox/<slug>/<yyyy>/<mm>/<id>.eml` — outside any project prefix, because no
+ * project is known yet.
+ *
+ * This is why `assignMessage` COPIES the message under the project that claims
+ * it. Every read in `blob-source.ts` is scoped to `projects/<id>/`, so a run
+ * pointed at a path under this prefix cannot be read at all — which is exactly
+ * what happened the first time a message arriving this way was assigned.
+ */
 export function mailboxStoragePath(mailbox: string, graphMessageId: string, received: Date): string {
   const slug = mailbox.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   const yyyy = String(received.getUTCFullYear());
   const mm = String(received.getUTCMonth() + 1).padStart(2, "0");
   const safeId = graphMessageId.replace(/[^A-Za-z0-9_-]/g, "");
-  return `mailbox/${slug}/${yyyy}/${mm}/${safeId}.eml`;
+  return `${MAILBOX_PREFIX}${slug}/${yyyy}/${mm}/${safeId}.eml`;
 }
 
 /**

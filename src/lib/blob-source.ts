@@ -77,6 +77,36 @@ export function assertProjectScopedPathname(pathname: string, projectId: string)
   return clean;
 }
 
+/**
+ * The one prefix that is NOT under a project, and why it has to exist.
+ *
+ * A message arrives before anybody knows whose it is — that is the whole of
+ * `email_messages.routing_status`. So its `.eml` is stored here, and it stays
+ * unreadable by every project-scoped path in this file until a person assigns
+ * it, at which point `assignMessage` copies it under the project that claimed
+ * it. Nothing reads a document for the model from this prefix.
+ */
+export const MAILBOX_PREFIX = "mailbox/";
+
+/**
+ * The same check, for the mailbox prefix.
+ *
+ * It exists so the copy at assignment has a scope of its own rather than
+ * "any pathname at all": the source comes off our own row, but the rule this
+ * module is built on is that a pathname is checked at every point it is used,
+ * not trusted because of where it was read from.
+ */
+export function assertMailboxScopedPathname(pathname: string): string {
+  const clean = pathname.replace(/^\/+/, "");
+  if (clean.includes("..") || clean.includes("\\")) {
+    throw new UntrustedBlobError("That file reference is not valid.");
+  }
+  if (!clean.startsWith(MAILBOX_PREFIX)) {
+    throw new UntrustedBlobError("That file is not one the mailbox stored.");
+  }
+  return clean;
+}
+
 export type TrustedBlobMetadata = {
   pathname: string;
   size: number;

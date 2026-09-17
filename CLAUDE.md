@@ -573,6 +573,21 @@ Five things are load-bearing:
   says they never asked for this" is answered by opening the message. Nothing
   renders it: an `.eml` body is untrusted HTML a stranger wrote, so both routes
   that serve one set `content-disposition: attachment` and `nosniff`.
+- **A message arrives before it has a project, so it is COPIED when it gets
+  one.** `mailboxStoragePath` stores an arriving `.eml` under `mailbox/`,
+  because no project is known yet, and every read in `blob-source.ts` is scoped
+  to `projects/<id>/`. Assignment attached the arrival path verbatim, so the
+  run it started could never be read — "That file does not belong to this
+  project", the worker refusing a mailbox path under a project scope. The
+  comment beside the attachment insert already said "under the project's own
+  prefix": it described the UPLOAD path, where the browser had already put the
+  file there, and nothing had ever walked the mailbox path. `planMimeLocation`
+  decides (pure, so it is provable without a store) and `assignMessage` runs
+  the store's own server-side `copy` OUTSIDE the transaction, because blob I/O
+  inside one holds a row lock across a network call. Copied, never moved: the
+  mailbox path is the arrival record and `unassignMessage` must leave the
+  message something to have come from. Found 2026-09-17 by fake mail staged
+  through the real Graph path; it would have been the first real message.
 - **`spec_answers.source_kind = 'email'`** has been allowed by 0002's CHECK
   since the beginning and had never been written. It puts the answer out of
   reach of `applyAnswerFills` and `applyAnswerRetractions`, exactly like
@@ -1736,8 +1751,11 @@ Graph.** The subscription lifecycle, the webhook, the delta poll and the
 ingestion worker exist; `MAIL_INGESTION_MODE` is `disabled` and no mailbox,
 tenant or secret is set anywhere, so none of it runs. Its own guards are
 tested — webhook authentication, message-id validation, the paging-link origin
-check, every disabled path. The subscription lifecycle, the delta semantics and
-the message shape Graph really sends are NOT. Turning it on is five environment
+check, every disabled path. One defect the disabled path was hiding has been
+FIXED (2026-09-17): a message stored under the mailbox prefix could not be read
+once assigned, so every Graph-ingested email would have failed its first read.
+See the copy rule in the email section above. The subscription lifecycle, the
+delta semantics and the message shape Graph really sends are NOT. Turning it on is five environment
 variables and a redeploy, and the first real message is the test that matters:
 `docs/integration.md` carries the checklist, including the access-policy check
 that must pass in BOTH directions.

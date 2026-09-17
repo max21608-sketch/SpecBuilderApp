@@ -21,9 +21,16 @@
 // returns the run it already made instead of opening a second attempt.
 // ============================================================================
 import { randomUUID } from "node:crypto";
+import { copy } from "@vercel/blob";
 import { sql } from "@/lib/db";
 import { DomainConflictError, withTransaction, type TxnSql } from "@/lib/db-transaction";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
+import {
+  assertMailboxScopedPathname,
+  blobPathname,
+  projectUploadPrefix,
+  UntrustedBlobError,
+} from "@/lib/blob-source";
 
 export type AssignResult = {
   messageId: string;
@@ -38,6 +45,53 @@ export function emailRegistrationKey(messageId: string): string {
   return `email:${messageId}`;
 }
 
+/**
+ * Where the message's `.eml` has to be for this project to read it.
+ *
+ * ==========================================================================
+ * THE MAILBOX PREFIX IS NOT READABLE BY ANY PROJECT, AND THAT IS ON PURPOSE
+ *
+ * Mail arrives before anybody knows whose it is, so `mailboxStoragePath` puts
+ * it under `mailbox/`. Every read in `blob-source.ts` is scoped to
+ * `projects/<id>/`. Assignment attached the arrival path verbatim, so the run
+ * it started could never be read: the worker asked for a mailbox path with a
+ * project scope and was refused with "That file does not belong to this
+ * project." The comment beside the attachment insert already SAID "under the
+ * project's own prefix" — it was describing the upload path, where the browser
+ * had already put the file there, and the Graph path had never been walked.
+ *
+ * So the message is COPIED under the project that claims it. Copied, not
+ * moved: the mailbox path is the arrival record, `email_messages` documents it
+ * as the pre-assignment location, and a message taken off a project by
+ * `unassignMessage` must still have somewhere to have come from.
+ *
+ * Pure, so the decision is testable without a store: the store call is the
+ * caller's, and it is made OUTSIDE the transaction — blob I/O inside one holds
+ * row locks across a network round trip.
+ * ==========================================================================
+ */
+export type MimeLocation =
+  | { kind: "none" }
+  | { kind: "already"; pathname: string }
+  | { kind: "copy"; from: string; to: string };
+
+export function planMimeLocation(
+  storedPath: string | null | undefined,
+  projectId: string,
+  messageId: string,
+): MimeLocation {
+  if (!storedPath) return { kind: "none" };
+  const from = blobPathname(String(storedPath));
+  // An uploaded .eml is already under the project the person chose, because
+  // the browser could only have put it there. Nothing to copy.
+  if (from.startsWith(projectUploadPrefix(projectId))) return { kind: "already", pathname: from };
+  return {
+    kind: "copy",
+    from: assertMailboxScopedPathname(from),
+    to: `${projectUploadPrefix(projectId)}emails/${messageId}.eml`,
+  };
+}
+
 type AssignInput = {
   messageId: string;
   projectId: string;
@@ -47,7 +101,12 @@ type AssignInput = {
   expectedVersion?: number;
 };
 
-async function assignInTransaction(txn: TxnSql, input: AssignInput): Promise<AssignResult & { attemptId: string | null }> {
+async function assignInTransaction(
+  txn: TxnSql,
+  input: AssignInput,
+  /** The project-scoped pathname the caller copied the message to, if it had to. */
+  mimePathname: string | null,
+): Promise<AssignResult & { attemptId: string | null }> {
   const rows = await txn`
     select id, project_id, routing_status, version, mime_attachment_id, intake_run_id,
            mailbox_storage_path, subject, mime_size, fetch_status
@@ -115,7 +174,8 @@ async function assignInTransaction(txn: TxnSql, input: AssignInput): Promise<Ass
   if (!attachmentId && message.mailbox_storage_path) {
     const attachment = await txn`
       insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
-      values ('email_messages', ${input.messageId}, 'mime', ${String(message.mailbox_storage_path)},
+      values ('email_messages', ${input.messageId}, 'mime',
+              ${mimePathname ?? String(message.mailbox_storage_path)},
               ${`${String(message.subject ?? "email").slice(0, 120).replace(/[^\w .-]+/g, " ").trim() || "email"}.eml`},
               'message/rfc822', ${message.mime_size ?? null}, ${input.actor})
       returning id
@@ -150,6 +210,66 @@ async function assignInTransaction(txn: TxnSql, input: AssignInput): Promise<Ass
 }
 
 /**
+ * Put the message where the project can read it, and answer with that path.
+ *
+ * Returns null when there is nothing to do — no stored file, or a file already
+ * under this project's prefix — in which case the transaction falls back to
+ * the path on the row.
+ *
+ * `copy` is the store's own server-side copy: the bytes never enter this
+ * process, so a 30MB message costs a request rather than a buffer. A failure
+ * here REFUSES the assignment rather than recording one whose read can never
+ * succeed — nothing has been written at that point, the message is still held,
+ * and the button is still there.
+ */
+async function copyMimeUnderProject(input: AssignInput): Promise<string | null> {
+  const rows = await sql`
+    select mailbox_storage_path, mime_attachment_id from email_messages where id = ${input.messageId}
+  `;
+  const row = rows[0];
+  // A replay: the attachment exists, so its path is already whatever it is.
+  if (!row || row.mime_attachment_id) return null;
+
+  let plan;
+  try {
+    plan = planMimeLocation(
+      row.mailbox_storage_path === null || row.mailbox_storage_path === undefined
+        ? null
+        : String(row.mailbox_storage_path),
+      input.projectId,
+      input.messageId,
+    );
+  } catch (cause) {
+    if (cause instanceof UntrustedBlobError) {
+      throw new DomainConflictError("mime_unreadable", cause.message, { status: 400 });
+    }
+    throw cause;
+  }
+  if (plan.kind !== "copy") return null;
+
+  try {
+    // `addRandomSuffix: false` so the path is the identity: a second attempt
+    // after a failed assignment overwrites its own copy rather than leaving a
+    // second one nothing points at.
+    await copy(plan.from, plan.to, {
+      access: "private",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      contentType: "message/rfc822",
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
+  } catch (cause) {
+    console.error("email mime copy failed", cause);
+    throw new DomainConflictError(
+      "mime_copy_failed",
+      "This email's file could not be copied onto the project, so it was not placed. Try again.",
+      { status: 502 },
+    );
+  }
+  return plan.to;
+}
+
+/**
  * Put a message on a project and start its read.
  *
  * Returns even when the dispatch fails: the message is assigned and the run
@@ -158,7 +278,15 @@ async function assignInTransaction(txn: TxnSql, input: AssignInput): Promise<Ass
  * not arrive when it did would be worse.
  */
 export async function assignMessage(input: AssignInput): Promise<AssignResult & { dispatchError: string | null }> {
-  const result = await withTransaction((txn) => assignInTransaction(txn, input));
+  // The copy happens FIRST and outside the transaction: a store round trip
+  // inside one holds the message's row lock across a network call, and
+  // db-transaction.ts forbids exactly that. It is safe to do before the guards
+  // because it writes nothing anybody reads — a copy made for an assignment
+  // that is then refused is an orphaned file under a project prefix, not a
+  // message on a project.
+  const mimePathname = await copyMimeUnderProject(input);
+
+  const result = await withTransaction((txn) => assignInTransaction(txn, input, mimePathname));
 
   if (!result.attemptId) {
     return { ...result, dispatchError: null };
