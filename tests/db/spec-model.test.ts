@@ -199,26 +199,51 @@ describeIfDb("0002 spec model", () => {
   });
 
   it("caps a split at one level and requires a reason", async () => {
+    // 0024 added `spec_records_variant_requires_parent` -- a parent and a
+    // letter are the same fact stated twice -- and this 0002-era fixture was
+    // never given the letter, so it had been failing on the constraint it was
+    // not testing. Every child below now carries one.
     const parent = await makeRecord(909, "__QA Parent");
     await expect(
       client.query(
-        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, created_by, updated_by)
-         values ($1, $2, 910, $3, '__QA Child no reason', $4, 1, 'qa', 'qa')`,
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, variant_label, created_by, updated_by)
+         values ($1, $2, 910, $3, '__QA Child no reason', $4, 1, 'A', 'qa', 'qa')`,
         [projectId, runId, categoryId, parent],
       ),
     ).rejects.toThrow(/split_reason/);
 
     const child = await client.query(
-      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, split_reason, created_by, updated_by)
-       values ($1, $2, 911, $3, '__QA Child', $4, 1, 'fabric', 'qa', 'qa') returning id`,
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, split_reason, variant_label, created_by, updated_by)
+       values ($1, $2, 911, $3, '__QA Child', $4, 1, 'fabric', 'A', 'qa', 'qa') returning id`,
       [projectId, runId, categoryId, parent],
     );
     await expect(
       client.query(
-        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, split_reason, created_by, updated_by)
-         values ($1, $2, 912, $3, '__QA Grandchild', $4, 2, 'fabric', 'qa', 'qa')`,
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, split_reason, variant_label, created_by, updated_by)
+         values ($1, $2, 912, $3, '__QA Grandchild', $4, 2, 'fabric', 'A', 'qa', 'qa')`,
         [projectId, runId, categoryId, child.rows[0].id],
       ),
     ).rejects.toThrow(/depth/);
+  });
+
+  it("refuses a variant label with no parent, and a parent with no label", async () => {
+    // The other half of 0024's constraint, which nothing exercised: a label
+    // with no parent is a top-level record pretending to be a variant.
+    await expect(
+      client.query(
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, variant_label, created_by, updated_by)
+         values ($1, $2, 913, $3, '__QA Orphan letter', 'B', 'qa', 'qa')`,
+        [projectId, runId, categoryId],
+      ),
+    ).rejects.toThrow(/variant_requires_parent/);
+
+    const parent = await makeRecord(914, "__QA Parent for label test");
+    await expect(
+      client.query(
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, parent_id, depth, split_reason, created_by, updated_by)
+         values ($1, $2, 915, $3, '__QA Child no letter', $4, 1, 'fabric', 'qa', 'qa')`,
+        [projectId, runId, categoryId, parent],
+      ),
+    ).rejects.toThrow(/variant_requires_parent/);
   });
 });

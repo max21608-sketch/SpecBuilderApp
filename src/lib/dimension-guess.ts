@@ -52,7 +52,7 @@
 // the fallback path.
 // ============================================================================
 import type { DimensionSlot } from "@/lib/spec-vocab";
-import { parseDimensionFigure } from "@/lib/dimensions";
+import { parseDimensionFigure, sharesAScale } from "@/lib/dimensions";
 
 /**
  * The views a figure can be drawn on, grouped by what they can measure.
@@ -70,12 +70,34 @@ const FAMILY_WORDS: [ViewFamily, string[]][] = [
   ["front", ["front", "back", "rear", "elevation", "face"]],
 ];
 
-/** Which family a drawing's own view label belongs to. */
+/**
+ * Which family a drawing's own view label belongs to.
+ *
+ * WHOLE WORDS, never substrings. `end` and `face` are both in the side and
+ * front lists, and a substring test put `LEGEND` on the side elevation and
+ * `SURFACE` on the front — two labels a real specification sheet prints. A
+ * wrongly-familied label is worse than an unknown one: `guessSlotsFromViews`
+ * reads agreement ACROSS families as its evidence, so one mis-sorted label
+ * invents a second view that agrees with nothing, and the whole page falls to
+ * the weak fallback.
+ *
+ * This is `normaliseDimensionSlot`'s rule in a second place: it matches the
+ * whole folded label and never a substring, because `WIDTH SEAT` is not a
+ * width.
+ */
 export function viewFamily(labelRaw: string | null): ViewFamily {
   const label = (labelRaw ?? "").toLowerCase();
   if (!label) return "unknown";
-  for (const [family, words] of FAMILY_WORDS) {
-    if (words.some((word) => label.includes(word))) return family;
+  // Split on anything that is not a letter or an apostrophe, so "SIDE SECTION",
+  // "SIDE-SECTION" and "BIRD'S EYE" all read as the words they are.
+  const words = label.split(/[^a-z']+/).filter(Boolean);
+  const phrase = words.join(" ");
+  for (const [family, keywords] of FAMILY_WORDS) {
+    // A multi-word keyword ("bird's eye") is matched against the whole phrase;
+    // a single word against the word list.
+    if (keywords.some((keyword) => (keyword.includes(" ") ? phrase.includes(keyword) : words.includes(keyword)))) {
+      return family;
+    }
   }
   return "unknown";
 }
@@ -234,15 +256,50 @@ export function guessSlotsFromViews(rows: MeasuredRow[], itemName: string | null
   const heightCandidates = shared(front, side);
   const height = largest(heightCandidates);
 
+  // ==========================================================================
+  // A CONFIRMED CANDIDATE STILL HAS TO BE AT THE PAGE'S SCALE.
+  //
+  // Two views stating the same figure is strong evidence that the figure is
+  // real. It is NOT evidence that the figure is an overall dimension: a shop
+  // drawing prints its gaps, reveals and radii on every view too, and a plan
+  // that the model read thinly can easily share nothing with the side
+  // elevation except a 42mm reveal.
+  //
+  // That is what happened on the real S-201 armchair. Its plan and its side
+  // elevation had exactly one figure in common, 42, so the "a depth appears on
+  // the side, the section and the plan" rule returned 42 as the depth of an
+  // item 680 high — and because 42 and 680 cannot be in the same unit, the
+  // whole row set then failed `suggestUnit`, every placed row came back with no
+  // unit, and the card carried four `unit_missing` blockers and could not be
+  // confirmed at all. A bad guess that also blocks the card is the worst of
+  // both outcomes.
+  //
+  // So a confirmed candidate is taken only if it SHARES A SCALE with the
+  // height, which is the same test `suggestUnit` applies to the page and is
+  // about the figures rather than about furniture: nothing here asks whether a
+  // number is about right for an armchair, which is the reasoning that turns an
+  // 8-metre sofa into a plausible one. Where it does not, the elevation's own
+  // largest figure is used instead — the fallback this rule already had for a
+  // page with no plan at all.
+  //
+  // If neither candidate shares the height's scale, the first is kept and the
+  // set fails coherence downstream exactly as it did before: the page has not
+  // been read well enough to place anything, and `fromMagnitudes` says so.
+  // ==========================================================================
+  const atHeightScale = (candidates: (number | null)[]): number | null => {
+    const offered = candidates.filter((figure): figure is number => figure !== null);
+    return offered.find((figure) => sharesAScale([figure, height ?? figure])) ?? offered[0] ?? null;
+  };
+
   // WIDTH from the front and the plan where there is a plan; a plan is a second
   // independent statement of the same number.
   const widthFromPlan = largest(shared(front, plan));
   const widthFromFront = largest(front.filter((figure) => figure !== height));
-  const width = widthFromPlan ?? widthFromFront;
+  const width = atHeightScale([widthFromPlan, widthFromFront]);
 
   const depthFromPlan = largest(shared(side, plan));
   const depthFromSide = largest(side.filter((figure) => figure !== height));
-  const depth = depthFromPlan ?? depthFromSide;
+  const depth = atHeightScale([depthFromPlan, depthFromSide]);
 
   if (width === null || depth === null || height === null) {
     const missing = [
@@ -272,7 +329,7 @@ export function guessSlotsFromViews(rows: MeasuredRow[], itemName: string | null
   // the page contradicting itself and it is worth naming rather than resolving.
   const widthDisagrees =
     widthFromPlan !== null && widthFromFront !== null && widthFromPlan !== widthFromFront
-      ? `The plan's largest figure is ${widthFromPlan} and the front elevation's is ${widthFromFront}, and both should be the width. The plan's is used here because a plan states width and depth together. Check it against the drawing.`
+      ? `The plan's largest figure is ${widthFromPlan} and the front elevation's is ${widthFromFront}, and both should be the width. ${width === widthFromPlan ? "The plan's is used here because a plan states width and depth together." : "The front elevation's is used here because the plan's does not sit at the same scale as the height."} Check it against the drawing.`
       : null;
 
   const seat = seatHeight(heightCandidates, [...byFigure.keys()], height, [width, depth, height]);

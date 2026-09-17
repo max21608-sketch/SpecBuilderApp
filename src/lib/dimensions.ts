@@ -54,6 +54,33 @@ export function toMillimetres(value: string | null, unit: AttributeUnit): Millim
   return { ok: true, mm: Math.round(figure * TO_MM[unit]) };
 }
 
+/**
+ * The magnitude that separates a page drawn in centimetres from one drawn in
+ * millimetres, and the one rule that reads it.
+ *
+ * A shop drawing states no unit, so the only evidence a page offers about its
+ * own scale is how big its figures are: an item measured in centimetres is
+ * two or three digits, the same item in millimetres is three or four. 300 is
+ * the boundary — 300cm is a three-metre sofa and 300mm is a coaster, so
+ * essentially no overall furniture dimension is ambiguous across it.
+ *
+ * EXPORTED AS A PREDICATE because two different questions ask it and they must
+ * not answer differently: `suggestUnit` asks "what unit is this page in", and
+ * `guessSlotsFromViews` asks "can these figures be overall dimensions of ONE
+ * object at ONE scale". A set that does not share a scale cannot be both — so
+ * a width, a depth and a height that straddle this boundary are not three
+ * readings of one item, whatever the views said, and the second caller is what
+ * stopped a 42mm gap being read as an armchair's depth beside a 680mm height.
+ */
+export const SCALE_BOUNDARY = 300;
+
+/** Are these figures all plausibly drawn at one scale? */
+export function sharesAScale(figures: readonly number[]): boolean {
+  return (
+    figures.every((figure) => figure < SCALE_BOUNDARY) || figures.every((figure) => figure >= SCALE_BOUNDARY)
+  );
+}
+
 export type DimensionFigure = { figure: number | null; tbcInline: boolean };
 
 /**

@@ -45,7 +45,7 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
-import { measuredRows, unitSourceOf } from "@/lib/drawing-document";
+import { isMeasuredRow, measuredRows, unitSourceOf } from "@/lib/drawing-document";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
@@ -206,10 +206,15 @@ export default function ItemCard({
   // there is less on the page than there is.
   // ==========================================================================
   const [showOtherDimensions, setShowOtherDimensions] = useState(false);
+  //
+  // FOLDED BY WHETHER IT IS A MEASUREMENT, NEVER BY WHETHER IT HAS A UNIT.
+  // The two are different questions -- see `isMeasuredRow` -- and asking the
+  // second one here is what left forty-four figures rendered inline on a page
+  // whose units could not be inferred.
   const keyRows = pending.filter((o) => o.dimensionSlot);
-  const otherDimensionRows = pending.filter((o) => !o.dimensionSlot && o.unit !== null);
+  const otherDimensionRows = pending.filter((o) => !o.dimensionSlot && isMeasuredRow(o));
   const otherIds = new Set(otherDimensionRows.map((o) => o.id));
-  const restRows = pending.filter((o) => !o.dimensionSlot && o.unit === null);
+  const restRows = pending.filter((o) => !o.dimensionSlot && !isMeasuredRow(o));
   const orderedRows = [...keyRows, ...restRows, ...otherDimensionRows];
   const firstOtherId = otherDimensionRows[0]?.id;
 
@@ -338,7 +343,11 @@ export default function ItemCard({
         )}
       </div>
       <div className="flex items-center gap-3">
-        {open && pending.some((observation) => observation.attrGroup === "dimension") && (
+        {/* Offered whenever the card holds a MEASUREMENT, not only once one has
+            been promoted to a dimension. A page whose units could not be
+            inferred is exactly the page that needs this control, and gating it
+            on `attrGroup === "dimension"` hid it from every one of them. */}
+        {open && pending.some(isMeasuredRow) && (
           <BulkUnit
             label="All dimensions:"
             disabled={busy}
@@ -393,6 +402,11 @@ export default function ItemCard({
       labelRaw: observation.labelRaw,
       value: observation.value ?? observation.valueRaw,
     })),
+    // The page's own name for the item, exactly as the server passes it. Left
+    // out, the seat-height half of the dispute was computed one way on the
+    // server and another here, so an armchair with no seat height said so in
+    // the dump and not on the screen.
+    item.itemNameRaw,
   );
   const guessWhy = new Map(guess.guesses.map((entry) => [entry.observationId, entry.why]));
 
@@ -423,17 +437,28 @@ export default function ItemCard({
         </div>
       )}
 
-      {dimensionCell.text && (
-        <div className="px-4 py-2 border-b border-neutral-100 bg-neutral-50">
-          <p className="text-xs uppercase tracking-wide text-neutral-500">BWS Dimensions</p>
+      {/* ALWAYS SHOWN ON AN OPEN CARD, even when it is empty. It used to render
+          only once something had been placed, so two cards of one code differed
+          on screen purely by whether the guess had found anything -- and a card
+          with no line at all reads as a card with nothing to say about its
+          size, which is the opposite of the truth. An empty line names the gap
+          in words instead. */}
+      <div className="px-4 py-2 border-b border-neutral-100 bg-neutral-50">
+        <p className="text-xs uppercase tracking-wide text-neutral-500">BWS Dimensions</p>
+        {dimensionCell.text ? (
           <p className="font-mono text-sm text-neutral-900">{dimensionCell.text}</p>
-          {dimensionCell.problems.map((problem, index) => (
-            <p key={index} className="text-xs text-amber-700">
-              {problem.message}
-            </p>
-          ))}
-        </div>
-      )}
+        ) : (
+          <p className="text-sm text-neutral-500">
+            No width, depth or height placed yet. Give a figure below its slot, or leave them as notes — they stay on
+            the item either way.
+          </p>
+        )}
+        {dimensionCell.problems.map((problem, index) => (
+          <p key={index} className="text-xs text-amber-700">
+            {problem.message}
+          </p>
+        ))}
+      </div>
 
       {/* The picture, rendered from the real PDF so what is confirmed is what
           was looked at. Shown whether or not the model proposed one: a card
@@ -612,9 +637,16 @@ export default function ItemCard({
               )}
               {(!isOther || showOtherDimensions) && (
               <>
+              {/* YELLOW AND AMBER MEAN DIFFERENT THINGS AND A ROW CAN BE BOTH.
+                  Yellow is "this is a guess, confirm it"; amber is "this
+                  cannot commit as it stands". Amber used to REPLACE the
+                  yellow, so a guessed row lost the only marker saying it was
+                  guessed at exactly the moment it most needed checking. The
+                  background keeps saying "guessed" and the left edge says
+                  "blocked". */}
               <tr
-                className={`border-t border-neutral-100${
-                  amber ? " bg-amber-50/40" : guessed ? " bg-yellow-100/70" : ""
+                className={`border-t border-neutral-100${guessed ? " bg-yellow-100/70" : amber ? " bg-amber-50/40" : ""}${
+                  amber ? " border-l-4 border-l-amber-400" : ""
                 }`}
               >
                 <td className="px-4 py-2 align-top">
@@ -709,18 +741,20 @@ export default function ItemCard({
                   )}
                 </td>
                 <td className="px-2 py-2 align-top">
-                  {/* A NOTE IS NEVER ASKED FOR A UNIT. "REMARKS: SUBMIT SHOP
-                      DRAWINGS FOR REVIEW" is not a measurement, and an empty
-                      amber select beside fifteen of them reads as fifteen
+                  {/* A TEXT NOTE IS NEVER ASKED FOR A UNIT. "REMARKS: SUBMIT
+                      SHOP DRAWINGS FOR REVIEW" is not a measurement, and an
+                      empty select beside fifteen of them reads as fifteen
                       unanswered questions where there are none — nothing blocks
                       a unitless note.
-                      Where a note DOES carry one, it is shown and stays
-                      editable: `ARM HEIGHT 520` is a real measurement that
-                      simply has no BWS slot, and 0011 keeps its unit in its own
-                      column rather than in its text — a wrong mm must still be
-                      correctable without promoting the row to a slot. */}
-                  {observation.attrGroup === "dimension" ||
-                  (observation.attrGroup === "note" && observation.unit !== null) ? (
+                      A MEASURED note is offered one whether or not it already
+                      carries one. `ARM HEIGHT 520` is a real measurement with
+                      no BWS slot, and 0011 keeps its unit in its own column
+                      rather than in its text — so a wrong mm must be
+                      correctable without promoting the row to a slot, and a
+                      figure staged with no unit at all must be answerable at
+                      all. It is NOT amber: a unitless note blocks nothing, and
+                      only a dimension is actually being asked. */}
+                  {observation.attrGroup === "dimension" || isMeasuredRow(observation) ? (
                     <select
                       value={observation.unit ?? ""}
                       onChange={(event) =>

@@ -19,7 +19,8 @@
     "db:backfill-answers": "tsx --env-file-if-exists=.env.local db/backfill-answers.ts",
     "db:backfill-snapshots": "tsx --env-file-if-exists=.env.local db/backfill-snapshots.ts",
     "db:qa-clean": "node --env-file-if-exists=.env.local tools/qa-clean.mjs",
-    "db:backfill-finishes": "tsx --env-file-if-exists=.env.local db/backfill-finishes.ts"
+    "db:backfill-finishes": "tsx --env-file-if-exists=.env.local db/backfill-finishes.ts",
+    "dump:drawings": "tsx --env-file-if-exists=.env.local tools/dump-drawing-run.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

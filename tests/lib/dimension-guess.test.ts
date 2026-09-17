@@ -22,6 +22,63 @@ describe("viewFamily", () => {
     expect(viewFamily("Dimension 3")).toBe("unknown");
     expect(viewFamily(null)).toBe("unknown");
   });
+
+  it("matches whole words, so LEGEND is not a side elevation", () => {
+    // `end` and `face` are keywords, and a substring test put LEGEND on the
+    // side and SURFACE on the front. A mis-sorted label is worse than an
+    // unknown one: the guess reads agreement ACROSS families as its evidence,
+    // so it invents a view that agrees with nothing.
+    expect(viewFamily("LEGEND")).toBe("unknown");
+    expect(viewFamily("SURFACE")).toBe("unknown");
+    expect(viewFamily("END VIEW")).toBe("side");
+    expect(viewFamily("SIDE-SECTION")).toBe("side");
+    expect(viewFamily("BIRD'S EYE")).toBe("plan");
+  });
+});
+
+// ============================================================================
+// A CONFIRMED FIGURE STILL HAS TO BE AT THE PAGE'S SCALE.
+//
+// Two views stating the same figure is strong evidence the figure is real. It
+// is NOT evidence that it is an OVERALL dimension: a drawing prints its gaps
+// and reveals on every view too.
+// ============================================================================
+describe("guessSlotsFromViews — the real S-201 armchair page", () => {
+  // Every figure below is the real staged output of the AP364 seating set, as
+  // read on 2026-09-16. Its plan view shares exactly one figure with its side
+  // elevation, and that figure is a 42mm reveal.
+  const s201 = rows([
+    ["FRONT", "660"], ["FRONT", "640"], ["FRONT", "680"], ["FRONT", "570"], ["FRONT", "160"],
+    ["FRONT", "465"], ["FRONT", "170"], ["FRONT", "135"], ["FRONT", "80"], ["FRONT", "55"],
+    ["FRONT", "5"], ["FRONT", "27"], ["FRONT", "42"], ["FRONT", "556"],
+    ["BACK", "660"], ["BACK", "640"], ["BACK", "27"], ["BACK", "42"], ["BACK", "556"],
+    ["SIDE", "685"], ["SIDE", "680"], ["SIDE", "570"], ["SIDE", "80"], ["SIDE", "55"],
+    ["SIDE", "5"], ["SIDE", "15"], ["SIDE", "50"], ["SIDE", "445"], ["SIDE", "27"], ["SIDE", "42"],
+    ["TOP", "640"], ["TOP", "556"], ["TOP", "42"], ["TOP", "740"], ["TOP", "535"], ["TOP", "505"],
+  ]);
+
+  it("refuses a 42mm reveal as the depth of a 680mm chair", () => {
+    // The plan and the side elevation have exactly one figure in common, 42.
+    // Taken as the depth it is both wrong and self-sealing: 42 and 680 cannot
+    // be in the same unit, so the whole placed set then failed `suggestUnit`
+    // and the card carried four `unit_missing` blockers and could not commit.
+    const result = guessSlotsFromViews(s201, "ARMCHAIR");
+    expect(slotOf(result, s201, "D")).toBe("685");
+  });
+
+  it("reads a set that shares one scale, so the unit can still be derived", () => {
+    const result = guessSlotsFromViews(s201, "ARMCHAIR");
+    const placed = ["W", "D", "H", "SH"].map((slot) => Number(slotOf(result, s201, slot)));
+    expect(placed).toEqual([640, 685, 680, 445]);
+    expect(placed.every((figure) => figure >= 300)).toBe(true);
+  });
+
+  it("says the seat height came from one view only", () => {
+    // S-201 prints 445 on the side elevation alone; the elevations share
+    // nothing in the seat window.
+    const result = guessSlotsFromViews(s201, "ARMCHAIR");
+    expect(result.dispute).toMatch(/seat height/i);
+  });
 });
 
 // Every figure below is the real staged output of the AP364 seating set.

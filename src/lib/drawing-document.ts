@@ -52,7 +52,7 @@ import {
   type AttributeUnit,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
-import { parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
+import { parseCombinedDimensions, parseDimensionFigure, sharesAScale, SCALE_BOUNDARY } from "@/lib/dimensions";
 import type { RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
 import { nextVariantLabel } from "@/lib/record-variants";
@@ -262,11 +262,10 @@ export function suggestUnit(values: (string | null)[]): UnitSuggestion {
   const numbers = values.map(figureOf).filter((n): n is number => n !== null);
   if (numbers.length === 0) return { status: "none" };
 
-  const allSmall = numbers.every((n) => n < 300);
-  const allLarge = numbers.every((n) => n >= 300);
-  if (allSmall) return { status: "confident", unit: "cm" };
-  if (allLarge) return { status: "confident", unit: "mm" };
-  return { status: "ambiguous" };
+  // The boundary lives in dimensions.ts because `guessSlotsFromViews` asks the
+  // same question of a candidate set of overall figures. See `SCALE_BOUNDARY`.
+  if (!sharesAScale(numbers)) return { status: "ambiguous" };
+  return { status: "confident", unit: numbers[0]! < SCALE_BOUNDARY ? "cm" : "mm" };
 }
 
 // ---- a unit the page actually printed --------------------------------------
@@ -1378,8 +1377,14 @@ export function assertStagedDrawings(parsed: unknown): StagedDrawings {
  * record of what was reviewed would make the two disagree about what happened.
  */
 function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
-  let touched = false;
+  // PER ITEM, then per document. A single flag hoisted outside the map made
+  // every item after the first changed one return a rebuilt object whether or
+  // not anything about it had changed -- harmless only because the rebuilt
+  // observations happened to be equivalent, and one edit away from an item
+  // inheriting a neighbour's upgrade.
+  let anyTouched = false;
   const items = doc.items.map((item) => {
+    let touched = false;
     const slotted = item.observations.map((observation) => {
       if (observation.reviewStatus === "applied") return observation;
       if (observation.attrGroup !== "dimension") return observation;
@@ -1400,9 +1405,11 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
     if (observations.length !== slotted.length || observations.some((row, index) => row !== slotted[index])) {
       touched = true;
     }
-    return touched ? { ...item, observations } : item;
+    if (!touched) return item;
+    anyTouched = true;
+    return { ...item, observations };
   });
-  return touched ? { ...doc, items } : doc;
+  return anyTouched ? { ...doc, items } : doc;
 }
 
 /**
@@ -1438,32 +1445,83 @@ const POSITIONAL_LABEL = /^dimension \d+$/i;
  *
  * Only PENDING rows. An applied row is history and a reviewer's own edit is
  * theirs; nothing here removes either.
+ *
+ * The KEY is exported because the configuration card matches one page's rows
+ * against another's with it: "the same measurement, on the other page" is the
+ * same question as "the same measurement, twice on this one", and two answers
+ * to it would let the shared table pair up rows the de-duplicator would not.
  */
+export function measuredKey(observation: DrawingObservation): string | null {
+  if (!isMeasuredRow(observation)) return null;
+  const figure = parseDimensionFigure(observation.value ?? observation.valueRaw).figure;
+  const label = (observation.labelRaw ?? "").trim();
+  const view = POSITIONAL_LABEL.test(label) ? "" : label.toLowerCase();
+  // A unitless figure keys as itself. The unit is part of the key so a page
+  // that states 79 in centimetres and 790 in millimetres keeps both rows --
+  // they are the same size said twice, and collapsing them would hide the
+  // disagreement rather than settle it.
+  return `${view}|${figure}|${observation.unit ?? ""}`;
+}
+
 function dedupeMeasured(observations: DrawingObservation[]): DrawingObservation[] {
   const seen = new Set<string>();
   return observations.filter((observation) => {
-    if (observation.reviewStatus !== "pending") return true;
-    if (observation.unit === null) return true;
-    if (observation.attrGroup !== "dimension" && observation.attrGroup !== "note") return true;
-    const figure = parseDimensionFigure(observation.value ?? observation.valueRaw).figure;
-    if (figure === null) return true;
-    const label = (observation.labelRaw ?? "").trim();
-    const view = POSITIONAL_LABEL.test(label) ? "" : label.toLowerCase();
-    const key = `${view}|${figure}|${observation.unit}`;
+    const key = measuredKey(observation);
+    if (key === null) return true;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-/** Every pending row on an item that carries a figure and a unit. */
+/**
+ * IS THIS ROW A MEASUREMENT? ONE DEFINITION, FOR EVERYTHING THAT ASKS.
+ *
+ * A pending row whose value is a bare figure, in the two groups a figure can
+ * arrive in: a `dimension` (the vocabulary recognised its label) or a `note`
+ * (it did not, which on a shop drawing is most of them).
+ *
+ * ============================================================================
+ * IT DELIBERATELY DOES NOT ASK FOR A UNIT, AND THAT IS THE WHOLE FIX.
+ *
+ * Four places each used to decide this for themselves, and all four required
+ * `unit !== null`: `measuredRows` (which feeds the view guess), `dedupeMeasured`,
+ * the card's fold, and the bulk-unit PATCH. On a page whose figures disagree
+ * about magnitude -- S-201 prints 5, 27 and 42 beside 640 and 680, because most
+ * figures on a shop drawing are COMPONENTS -- `suggestUnit` abstains, and on a
+ * project with no `default_dimension_unit` the row is staged with no unit at
+ * all. `unit: null` was then SELF-SEALING:
+ *
+ *   - no guess ran, so no W/D/H/SH was ever placed;
+ *   - nothing was de-duplicated, so the front elevation's 5, 5, 27, 27 all
+ *     showed;
+ *   - nothing folded, so forty-four figures rendered inline;
+ *   - the unit select did not render, the per-item mm/cm control did not
+ *     render, and the bulk PATCH skipped the rows -- so there was no way to
+ *     supply the unit that would have unlocked all of it.
+ *
+ * And the one step that exists to rescue a bad unit -- the overall-figures
+ * correction inside `applyViewGuesses` -- could only REPLACE a unit, never
+ * supply one, so it could not reach these rows either.
+ *
+ * A figure is a measurement because it is a figure. What unit it is in is the
+ * NEXT question, and on these pages it is one only the overall figures can
+ * answer. Keeping the two questions apart is what lets the second one be asked.
+ * ============================================================================
+ *
+ * `parseDimensionFigure` accepts only a bare number (with an optional leading
+ * or trailing TBC), so `O20`, `Room note: MUR 2 DESK CHAIR` and a merged block
+ * of REMARKS are not measurements however they are grouped.
+ */
+export function isMeasuredRow(observation: DrawingObservation): boolean {
+  if (observation.reviewStatus !== "pending") return false;
+  if (observation.attrGroup !== "dimension" && observation.attrGroup !== "note") return false;
+  return parseDimensionFigure(observation.value ?? observation.valueRaw).figure !== null;
+}
+
+/** Every pending row on an item that states a figure. */
 export function measuredRows(item: DrawingItem): DrawingObservation[] {
-  return item.observations.filter(
-    (observation) =>
-      observation.reviewStatus === "pending" &&
-      observation.unit !== null &&
-      (observation.attrGroup === "dimension" || observation.attrGroup === "note"),
-  );
+  return item.observations.filter(isMeasuredRow);
 }
 
 /**
@@ -1485,7 +1543,9 @@ export function measuredRows(item: DrawingItem): DrawingObservation[] {
  * wearing their authority.
  */
 function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
-  let touched = false;
+  // Document level only: every early return below leaves its item untouched,
+  // so this never has to be read per item the way `upgradeDimensionSlots` does.
+  let anyTouched = false;
   const items = doc.items.map((item) => {
     const measured = measuredRows(item);
     if (measured.length === 0) return item;
@@ -1559,8 +1619,24 @@ function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
     // `SH4450mm` — a 4.5-metre seat height, which is the exact failure the
     // unit rule exists to prevent, reappearing through a half-corrected row
     // set. A row set must end up in ONE unit.
+    //
+    // AND A ROW WITH NO UNIT AT ALL IS THE WEAKEST OF THE LOT.
+    //
+    // It used to be unreachable instead. `measuredRows` required a unit, so a
+    // page whose figures disagree about magnitude on a project with no default
+    // never got here: no slots, no fold, no unit select, nothing. Now the
+    // figures are placed first and the unit is asked afterwards, which is the
+    // order the resolution rule in CLAUDE.md always described -- "the OVERALL
+    // figures agreeing, once `applyViewGuesses` knows which they are" -- and
+    // the only step that knows which figures are overall is this one.
+    //
+    // Supplying a unit here is therefore the SAME rule as correcting one, not a
+    // new one: the page's own overall figures, agreeing. Where they do not
+    // agree the row keeps no unit and the card asks for it in amber, which is
+    // the existing `unit_missing` treatment and the honest answer.
     const placed = measured.filter((observation) => slotOf.has(observation.id));
     const weak = (observation: DrawingObservation) => {
+      if (observation.unit === null) return true;
       const source = unitSourceOf(observation);
       return source === "project_default" || source === "figures";
     };
@@ -1570,7 +1646,7 @@ function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
     const overall = suggestUnit(placed.map((observation) => observation.value ?? observation.valueRaw));
     const unitFix = printed ?? (placed.length > 0 && overall.status === "confident" ? overall.unit : null);
 
-    touched = true;
+    anyTouched = true;
     return {
       ...item,
       observations: item.observations.map((observation) => {
@@ -1595,7 +1671,7 @@ function applyViewGuesses(doc: StagedDrawings): StagedDrawings {
       }),
     };
   });
-  return touched ? { ...doc, items } : doc;
+  return anyTouched ? { ...doc, items } : doc;
 }
 
 /**

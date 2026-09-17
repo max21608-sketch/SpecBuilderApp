@@ -1099,7 +1099,7 @@ describe("stageDrawings pictures", () => {
 // arrived with forty-three measured rows for one armchair.
 // ============================================================================
 describe("assertStagedDrawings de-duplication", () => {
-  const page = (figures: [string, string][]) => ({
+  const page = (figures: [string, string][], unit: AttributeUnit | null = "mm") => ({
     schemaVersion: 1 as const,
     kind: "shop_drawings" as const,
     filename: "set.pdf",
@@ -1120,9 +1120,9 @@ describe("assertStagedDrawings de-duplication", () => {
           labelRaw,
           value,
           valueRaw: value,
-          unit: "mm" as AttributeUnit,
-          unitSuggested: true,
-          unitSource: "figures" as UnitSource,
+          unit,
+          unitSuggested: unit !== null,
+          ...(unit === null ? {} : { unitSource: "figures" as UnitSource }),
           materialCodeRaw: null,
           specFieldId: null,
           dimensionSlot: null,
@@ -1167,6 +1167,72 @@ describe("assertStagedDrawings de-duplication", () => {
     expect(twice.items[0]!.observations.map((o) => o.id)).toEqual(
       once.items[0]!.observations.map((o) => o.id),
     );
+  });
+
+  // ==========================================================================
+  // A FIGURE IS A MEASUREMENT WHETHER OR NOT IT HAS A UNIT.
+  //
+  // `suggestUnit` abstains on a page whose figures disagree about magnitude,
+  // and a real shop drawing always does: S-201 prints 5, 27 and 42 beside 640
+  // and 680 because most figures on a shop drawing are COMPONENTS. On a
+  // project with no `default_dimension_unit` those rows stage with no unit at
+  // all -- and every one of the four places that asked "is this a measured
+  // row" required one, so nothing was guessed, nothing was de-duplicated,
+  // nothing folded, and no control was offered that could have supplied the
+  // unit that would have unlocked all of it.
+  // ==========================================================================
+  describe("a page staged with no unit at all", () => {
+    // The real S-201 armchair, as the model read it on a project with no
+    // default dimension unit. Every figure arrives unitless.
+    const s201 = (): [string, string][] => [
+      ["FRONT", "660"], ["FRONT", "640"], ["FRONT", "680"], ["FRONT", "465"],
+      ["FRONT", "42"], ["FRONT", "42"], ["FRONT", "27"], ["FRONT", "27"],
+      ["BACK", "660"], ["BACK", "640"], ["BACK", "42"],
+      ["SIDE", "685"], ["SIDE", "680"], ["SIDE", "445"], ["SIDE", "42"],
+      ["TOP", "640"], ["TOP", "42"],
+    ];
+
+    it("places the slots, and takes the unit from the OVERALL figures", () => {
+      const out = assertStagedDrawings(page(s201(), null));
+      const placed = out.items[0]!.observations.filter((o) => o.dimensionSlot);
+      expect(placed.map((o) => `${o.dimensionSlot}${o.value}`).sort()).toEqual(
+        ["D685", "H680", "SH445", "W640"],
+      );
+      // Every placed row carries the same unit, read off the placed figures
+      // themselves -- the resolution step that could previously only REPLACE a
+      // unit, never supply one.
+      expect(new Set(placed.map((o) => o.unit))).toEqual(new Set(["mm"]));
+      expect(new Set(placed.map((o) => o.unitSource))).toEqual(new Set(["figures"]));
+      expect(placed.every((o) => o.slotSuggested)).toBe(true);
+    });
+
+    it("de-duplicates the symmetrical figures it could not see before", () => {
+      const out = assertStagedDrawings(page(s201(), null));
+      // FRONT printed 42 twice and 27 twice because the chair is symmetrical.
+      const front = out.items[0]!.observations.filter((o) => o.labelRaw === "FRONT");
+      expect(front.map((o) => o.value)).toEqual(["660", "640", "680", "465", "42", "27"]);
+    });
+
+    it("leaves the unit blank when the overall figures do not share a scale", () => {
+      // Nothing is invented: the slots are still placed, and the card asks for
+      // the unit in amber rather than picking one.
+      const out = assertStagedDrawings(
+        page([["FRONT", "80"], ["FRONT", "900"], ["SIDE", "900"], ["SIDE", "70"], ["TOP", "80"], ["TOP", "70"]], null),
+      );
+      const placed = out.items[0]!.observations.filter((o) => o.dimensionSlot);
+      expect(placed.length).toBeGreaterThanOrEqual(3);
+      expect(placed.some((o) => o.unit === null)).toBe(true);
+    });
+
+    it("never overwrites a unit the page printed or a person chose", () => {
+      const doc = page(s201(), null);
+      doc.items[0]!.observations[11]!.unit = "cm";
+      doc.items[0]!.observations[11]!.unitSuggested = false;
+      doc.items[0]!.observations[11]!.unitSource = "printed";
+      const out = assertStagedDrawings(doc);
+      const depth = out.items[0]!.observations.find((o) => o.dimensionSlot === "D");
+      expect(depth?.unit).toBe("cm");
+    });
   });
 
   it("re-guesses over a slot an autosave persisted, but never over a person's", () => {

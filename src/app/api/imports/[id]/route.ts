@@ -29,6 +29,7 @@ import { assertBoqDocument } from "@/lib/boq-import";
 import { reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
 import {
   assertStagedDrawings,
+  isMeasuredRow,
   splitFigureAndUnit,
   type DrawingItem,
   type StagedDrawings,
@@ -93,7 +94,13 @@ async function patchBulkUnit(id: string, raw: unknown, actor: string): Promise<R
         let touched = false;
         const observations = item.observations.map((observation) => {
           if (observation.reviewStatus !== "pending") return observation;
-          if (observation.attrGroup !== "dimension") return observation;
+          // EVERY MEASURED ROW, not only the ones already promoted to a
+          // dimension. "All dimensions: mm" is the answer to "this page does
+          // not print its units", and on such a page most figures are still
+          // notes -- gating on `attrGroup` made the control skip exactly the
+          // rows it was offered for. A row carrying no figure is untouched: a
+          // unit on a paragraph of REMARKS is meaningless.
+          if (!isMeasuredRow(observation)) return observation;
           if (observation.unit === unit) return observation;
           touched = true;
           changed += 1;
