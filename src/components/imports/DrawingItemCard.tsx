@@ -212,9 +212,14 @@ export default function ItemCard({
   // second one here is what left forty-four figures rendered inline on a page
   // whose units could not be inferred.
   const keyRows = pending.filter((o) => o.dimensionSlot);
-  const otherDimensionRows = pending.filter((o) => !o.dimensionSlot && isMeasuredRow(o));
+  const measuredWithoutSlot = pending.filter((o) => !o.dimensionSlot && isMeasuredRow(o));
+  // NOTHING TO FOLD BEHIND. The fold puts the four that matter first and the
+  // rest out of the way; with no four that matter, there is no "rest" -- and
+  // folding every figure on the page leaves a card showing a toggle and
+  // nothing else, which reads as a page that measures nothing.
+  const otherDimensionRows = keyRows.length > 0 ? measuredWithoutSlot : [];
   const otherIds = new Set(otherDimensionRows.map((o) => o.id));
-  const restRows = pending.filter((o) => !o.dimensionSlot && !isMeasuredRow(o));
+  const restRows = pending.filter((o) => !o.dimensionSlot && !otherIds.has(o.id));
   const orderedRows = [...keyRows, ...restRows, ...otherDimensionRows];
   const firstOtherId = otherDimensionRows[0]?.id;
 
