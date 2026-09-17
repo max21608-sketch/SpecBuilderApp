@@ -33,6 +33,8 @@ one agent.
 | `npm run db:backfill-snapshots` | one-off: gives every record that predates 0012 a version 1 under a `history_begins` change. Dry run unless `--apply`; safe to re-run |
 | `npm run db:backfill-finishes` | one-off: builds each project's finishes library from the codes its drawings carry, and links them. Dry run unless `--apply`; safe to re-run. Leaves a code whose items disagree blank, and names it |
 | `npm run db:qa-clean` | sweeps what a failed database-tier test run left behind. Refuses production outright |
+| `npm run qa:fake-inbox` | invented correspondence for the inbox screen, recorded through the app's own `recordMessage` so the routing outcomes are real. Sandbox only, no production flag. Dry run unless `--apply`; `--clear --apply` sweeps it, keeping any message somebody has since assigned |
+| `npm run qa:levels -- --project=<ref>` | makes up a level for every line item and a designer contact behind them, so the chase screen can be walked before anybody has decided either. Levels go through `setRecordLevel`; the designer code is a plain update, because nothing in the app edits what a BOQ said. Same guards, and `--clear --apply` puts it back |
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
 | `npm run dump:drawings -- --run=<id>` | read only: what a staged drawing run reduces to through the REAL read-time pipeline — measured rows, placed slots, folded rows, unit provenance, the composed BWS cell. Run it before and after a change to that pipeline; the diff is the change |
 
