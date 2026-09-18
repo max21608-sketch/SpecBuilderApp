@@ -32,6 +32,12 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
 import Disclosure, { DisclosureList } from "@/components/ui/Disclosure";
+import PageHeader from "@/components/ui/PageHeader";
+import PageBody from "@/components/ui/PageBody";
+import Card from "@/components/ui/Card";
+import Note from "@/components/ui/Note";
+import Button from "@/components/ui/Button";
+import Tabs from "@/components/ui/Tabs";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
@@ -58,7 +64,20 @@ type Run = {
   parsed: StagedDrawings | null;
 };
 
-export default function DrawingsReview({ importId }: { importId: string }) {
+export default function DrawingsReview({
+  importId,
+  crumb,
+  packHref,
+  packDrawingCount,
+}: {
+  importId: string;
+  /** Where this document came from: its pack, or the project. Optional so the
+   *  component-tier test can render the screen without a route around it. */
+  crumb?: { label: string; href: string };
+  /** The pack's combined drawings screen, when this document is in a pack. */
+  packHref?: string;
+  packDrawingCount?: number;
+}) {
   const [run, setRun] = useState<Run | null>(null);
   const [resolution, setResolution] = useState<ItemResolution[]>([]);
   const [specFields, setSpecFields] = useState<SpecField[]>([]);
@@ -150,6 +169,15 @@ export default function DrawingsReview({ importId }: { importId: string }) {
    * without being opened.
    */
   const [reviewTab, setReviewTab] = useState<"pending" | "applied" | "ignored">("pending");
+  /**
+   * Which card the navigator is pointing at.
+   *
+   * A SCROLL, NEVER A FILTER. Every card stays on the page — hiding the others
+   * would make "confirm this one" mean something different depending on where
+   * you had walked to, and the screen's own rule is that nothing is hidden from
+   * a reviewer who has to rule on it.
+   */
+  const [current, setCurrent] = useState(0);
 
   // Server-acked state is held separately from what the reviewer is typing, so
   // a reload cannot wipe an unsaved edit and an autosave cannot fight the input.
@@ -388,32 +416,87 @@ export default function DrawingsReview({ importId }: { importId: string }) {
     }
   }
 
-  if (!run) return error ? <p className="mt-6 text-sm text-red-700">{error}</p> : <Spinner label="Loading" />;
+  // ---- the band ------------------------------------------------------------
+  //
+  // Rendered by this component rather than by the route above it, for the
+  // reason the email review's is: `PageHeader` is full-bleed and sits outside
+  // `PageBody`, and the tabs, the counts on them and the item navigator all
+  // read state that lives in here.
+  const shell = (tabs: React.ReactNode, children: React.ReactNode) => (
+    <>
+      <PageHeader
+        crumbs={crumb ? [crumb] : undefined}
+        title={run?.filename ?? "Shop drawings"}
+        subtitle={
+          <>
+            {DOCUMENT_KIND_LABELS.shop_drawings}
+            {run?.parsed && (
+              <>
+                {" · "}
+                {run.parsed.items.length} item{run.parsed.items.length === 1 ? "" : "s"}
+              </>
+            )}{" "}
+            ·{" "}
+            <a
+              href={`/api/imports/${importId}/source`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-blue-700 no-underline hover:underline"
+            >
+              open the PDF
+            </a>
+          </>
+        }
+        actions={
+          packHref && (packDrawingCount ?? 0) > 1 ? (
+            <Link href={packHref} className={buttonClass("secondary", "sm", "no-underline")}>
+              Review all {packDrawingCount} drawings together
+            </Link>
+          ) : undefined
+        }
+        tabs={tabs}
+      />
+      <PageBody width="wide">{children}</PageBody>
+    </>
+  );
+
+  /** Move the navigator, and put the card it names on screen. */
+  function step(delta: number, count: number) {
+    setCurrent((index) => {
+      const next = Math.max(0, Math.min(count - 1, index + delta));
+      // Optional-called: `scrollIntoView` is not implemented in jsdom, and a
+      // navigator that threw in a component test would be a navigator nobody
+      // could test.
+      document.getElementById(`drawing-card-${next}`)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      return next;
+    });
+  }
+
+  if (!run) return error ? <Note tone="danger">{error}</Note> : <Spinner label="Loading" />;
 
   // ---- not read yet --------------------------------------------------------
   if (run.status === "pending" || run.status === "failed") {
-    return (
-      <div className="mt-6 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6 text-center">
-        <p className="text-sm text-neutral-600">
+    return shell(
+      undefined,
+      <Card title="These drawings have not been read">
+        <p className="text-neutral-600">
           {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS.shop_drawings}
         </p>
-        {run.status === "failed" && run.error && (
-          <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2 text-left">{run.error}</p>
-        )}
-        <p className="mt-3 text-sm text-neutral-700">
+        {run.status === "failed" && run.error && <Note tone="danger">{run.error}</Note>}
+        <p className="mt-3 text-neutral-700">
           The item codes and dimensions on these pages are drawn, not typed — only the model reading the page as an
           image can get them. This is the step that {run.status === "failed" ? "charges again." : "costs money."}
         </p>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          className="mt-3"
           onClick={() => void startExtraction("start")}
           disabled={busy !== null}
-          className="mt-4 text-sm px-4 py-2 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
         >
           {busy === "extract" ? "Starting…" : run.status === "failed" ? "Retry extraction" : "Read the drawings"}
-        </button>
-        {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
-      </div>
+        </Button>
+        {error && <Note tone="danger">{error}</Note>}
+      </Card>,
     );
   }
 
@@ -429,49 +512,44 @@ export default function DrawingsReview({ importId }: { importId: string }) {
     // deadline before `restartable` offers anything -- which stopped being a
     // rare state when every upload began dispatching its own read.
     const dispatchable = run.status === "queued" && run.claim_count === 0 && run.within_deadline !== false;
-    return (
-      <div className="mt-6 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6">
+    return shell(
+      undefined,
+      <Card title="Being read">
         <Spinner label="Reading the drawings" />
-        <p className="mt-3 text-sm text-neutral-600">
+        <p className="mt-3 text-neutral-600">
           A long drawing set can take a few minutes. You can leave this page — it carries on without you.
         </p>
-        {run.error && (
-          <p className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
-            Last attempt reported: {run.error}
-          </p>
-        )}
-        {dispatchable && (
-          <button
-            type="button"
-            onClick={() => void startExtraction("retry-dispatch")}
-            disabled={busy !== null}
-            className="mt-4 mr-2 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
-            title="Sends the same request again. It charges nothing new, and it will not disturb a worker that already has it."
-          >
-            {busy === "extract" ? "Retrying…" : "Retry dispatch"}
-          </button>
-        )}
-        {restartable && (
-          <button
-            type="button"
-            onClick={() => void startExtraction("restart-expired")}
-            disabled={busy !== null}
-            className="mt-4 text-sm px-3 py-1.5 rounded border border-amber-400 text-amber-900 hover:bg-amber-50 disabled:opacity-50"
-          >
-            Start again (may be charged again)
-          </button>
-        )}
-      </div>
+        {run.error && <Note tone="plain">Last attempt reported: {run.error}</Note>}
+        <div className="mt-3 flex gap-2">
+          {dispatchable && (
+            <Button
+              onClick={() => void startExtraction("retry-dispatch")}
+              disabled={busy !== null}
+              title="Sends the same request again. It charges nothing new, and it will not disturb a worker that already has it."
+            >
+              {busy === "extract" ? "Retrying…" : "Retry dispatch"}
+            </Button>
+          )}
+          {restartable && (
+            <Button variant="danger" onClick={() => void startExtraction("restart-expired")} disabled={busy !== null}>
+              Start again (may be charged again)
+            </Button>
+          )}
+        </div>
+      </Card>,
     );
   }
 
   const staged = run.parsed;
   if (!staged || staged.items.length === 0) {
-    return (
-      <p className="mt-6 text-sm text-neutral-700">
-        No items were found in this drawing set. That is a result, not an error — check the document is the one you
-        meant, and that its pages are drawings rather than a scan.
-      </p>
+    return shell(
+      undefined,
+      <Card title="Nothing to review">
+        <p className="text-neutral-700">
+          No items were found in this drawing set. That is a result, not an error — check the document is the one you
+          meant, and that its pages are drawings rather than a scan.
+        </p>
+      </Card>,
     );
   }
 
@@ -514,151 +592,150 @@ export default function DrawingsReview({ importId }: { importId: string }) {
     0,
   );
 
-  return (
-    <div className="mt-6">
-      {error && (
-        <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
-      )}
+  const tabs = (
+    // `useState`, not the URL: this strip is nested inside a review component
+    // and nothing links into it.
+    <Tabs
+      label="Observations in this document"
+      value={reviewTab}
+      onChange={setReviewTab}
+      items={[
+        { id: "pending", label: "To review", count: pendingCount, tone: pendingCount > 0 ? "warn" : "plain" },
+        { id: "applied", label: "Applied", count: appliedCount, tone: appliedCount > 0 ? "good" : "plain" },
+        { id: "ignored", label: "Ignored", count: ignoredCount },
+      ]}
+    />
+  );
 
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <p className="text-sm text-neutral-600">
-          {staged.items.length} item{staged.items.length === 1 ? "" : "s"} · {pendingItems.length} still to review
-        </p>
-        <a
-          href={`/api/imports/${importId}/source`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-sm text-neutral-600 hover:text-neutral-900 underline"
-        >
-          Open the original drawings
-        </a>
-      </div>
+  return shell(
+    tabs,
+    <>
+      {error && <Note tone="danger">{error}</Note>}
 
       {/* THE END OF THE JOB, SAID OUT LOUD. Every card disappears as it is
-          reviewed, so a finished document was an empty screen under a heading
-          — indistinguishable from one whose cards had failed to load. */}
+          reviewed, so a finished document was an empty screen under a heading —
+          indistinguishable from one whose cards had failed to load. */}
       {reviewComplete && (
-        <div className="mt-3 text-sm text-green-900 bg-green-50 border border-green-300 rounded px-3 py-2">
-          <p className="font-medium">Review complete</p>
-          <p className="mt-0.5">
-            All {staged.items.length} item{staged.items.length === 1 ? "" : "s"} in this document have been reviewed
-            {appliedCount > 0 && <> · {appliedCount} spec{appliedCount === 1 ? "" : "s"} applied</>}
-            {ignoredCount > 0 && <> · {ignoredCount} ignored</>}. Nothing here is waiting on you.
-          </p>
-        </div>
+        <Note tone="good" title="Review complete">
+          All {staged.items.length} item{staged.items.length === 1 ? "" : "s"} in this document have been reviewed
+          {appliedCount > 0 && <> · {appliedCount} spec{appliedCount === 1 ? "" : "s"} applied</>}
+          {ignoredCount > 0 && <> · {ignoredCount} ignored</>}. Nothing here is waiting on you.
+        </Note>
       )}
 
-      {staged.documentNotes && (
-        <p className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
-          The model noted: {staged.documentNotes}
-        </p>
-      )}
+      {staged.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
 
       {unresolved.length > 0 && (
-        <p className="mt-3 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-          {unresolved.length} item{unresolved.length === 1 ? "" : "s"} match no record yet. Confirm this pack&apos;s bill
-          of quantities and reload — nothing needs re-reading, and you will not be charged again.
-        </p>
+        <Note tone="warn">
+          {unresolved.length} item{unresolved.length === 1 ? "" : "s"} match no record yet. Confirm this pack&apos;s
+          bill of quantities and reload — nothing needs re-reading, and you will not be charged again.
+        </Note>
       )}
 
       {codeless.length > 0 && (
-        <p className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
+        <Note tone="plain">
           {codeless.length} page{codeless.length === 1 ? "" : "s"} carr{codeless.length === 1 ? "ies" : "y"} no item
           code, so nothing matched {codeless.length === 1 ? "it" : "them"} — usually further views of the item on an
           earlier page. Each one is collapsed below: open it to say which record it is, or ignore the page.
-        </p>
+        </Note>
       )}
 
       {/* Offered only where it is the answer. A set whose pages print their
-          units, or whose figures agree, needs nothing here — showing the
-          control anyway would invite overwriting a unit the page stated. */}
+          units, or whose figures agree, needs nothing here — showing the control
+          anyway would invite overwriting a unit the page stated. */}
       {unitsOutstanding > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-          <span>
-            {unitsOutstanding} dimension{unitsOutstanding === 1 ? "" : "s"} across this document still need a unit.
-          </span>
-          <BulkUnit
-            label="Set every one to:"
-            disabled={busy !== null}
-            onSet={(unit) => void setBulkUnit("run", unit)}
-          />
-          <span className="text-xs">
-            Setting a project default on the overview does this for future documents.
-          </span>
-        </div>
+        <Note
+          tone="warn"
+          actions={<BulkUnit label="Set every one to:" disabled={busy !== null} onSet={(unit) => void setBulkUnit("run", unit)} />}
+        >
+          {unitsOutstanding} dimension{unitsOutstanding === 1 ? "" : "s"} across this document still need a unit.
+          Setting a project default on the overview does this for future documents.
+        </Note>
       )}
 
-      <div className="mt-4 flex flex-wrap gap-0.5 border-b border-neutral-200">
-        {([
-          ["pending", "To review", pendingCount],
-          ["applied", "Applied", appliedCount],
-          ["ignored", "Ignored", ignoredCount],
-        ] as const).map(([name, label, count]) => (
-          <button
-            key={name}
-            type="button"
-            onClick={() => setReviewTab(name)}
-            aria-current={reviewTab === name ? "page" : undefined}
-            className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
-              reviewTab === name
-                ? "border-neutral-900 font-semibold text-neutral-900"
-                : "border-transparent text-neutral-500 hover:text-neutral-800"
-            }`}
+      {/* WHERE YOU ARE IN THE SET. A six-card screen is six screens of
+          scrolling, and the thing a reviewer loses is which item they are on.
+          The navigator says it and moves between them; it is a scroll, not a
+          filter, so nothing is ever hidden by it. */}
+      {reviewTab === "pending" && cards.length > 1 && (() => {
+        const card = cards[Math.min(current, cards.length - 1)];
+        if (!card) return null;
+        const code = card.kind === "single" ? (card.item.itemCodeRaw ?? "no code") : card.codeRaw;
+        return (
+          <Note
+            tone="info"
+            actions={
+              <>
+                <Button variant="quiet" size="xs" onClick={() => step(-1, cards.length)}>
+                  ◀ Previous
+                </Button>
+                <Button variant="quiet" size="xs" onClick={() => step(1, cards.length)}>
+                  Next ▶
+                </Button>
+              </>
+            }
           >
-            {label}
-            <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
-              {count}
-            </span>
-          </button>
-        ))}
-      </div>
+            <b>
+              Item {Math.min(current + 1, cards.length)} of {cards.length}
+            </b>{" "}
+            — <span className="font-mono">{code}</span>
+            {card.kind === "configurations" && (
+              <>
+                , drawn on {card.members.length} pages as{" "}
+                {card.split ? `${card.members.length} configurations` : "one item"}
+              </>
+            )}
+            .
+          </Note>
+        );
+      })()}
 
       {/* ONE CARD PER CODE. A code drawn on several pages is one item in
           several configurations -- same chair, different fabric -- and it is
           shown as one card with a chip per configuration, the geometry once
           and each configuration's own finishes below. A code drawn once is a
           plain card, unchanged. See src/lib/configuration-cards.ts. */}
-      <div className={`mt-4 space-y-4 ${reviewTab === "pending" ? "" : "hidden"}`}>
-        {cards.map((card) =>
-          card.kind === "single" ? (
-            <ItemCard
-              key={card.id}
-              item={card.item}
-              importId={importId}
-              resolution={byItem.get(card.item.id)}
-              specFields={specFields}
-              records={records}
-              drafts={drafts}
-              setDrafts={setDrafts}
-              busy={busy === card.item.id}
-              onSaveObservation={saveObservation}
-              onSaveTargets={saveTargets}
-              onSetBulkUnit={setBulkUnit}
-              onImage={rememberImage}
-              onSwatch={rememberSwatch}
-              onReview={review}
-            />
-          ) : (
-            <ConfigurationCard
-              key={card.id}
-              card={card}
-              importId={importId}
-              specFields={specFields}
-              records={records}
-              drafts={drafts}
-              setDrafts={setDrafts}
-              busy={busy}
-              onSaveObservation={saveObservation}
-              onSaveObservations={saveObservations}
-              onSaveTargets={saveTargets}
-              onSetBulkUnit={setBulkUnit}
-              onReview={review}
-              onReviewMany={reviewMany}
-              onImage={rememberImage}
-              onSwatch={rememberSwatch}
-            />
-          ),
-        )}
+      <div className={reviewTab === "pending" ? "" : "hidden"}>
+        {cards.map((card, index) => (
+          <div key={card.id} id={`drawing-card-${index}`} className="scroll-mt-4">
+            {card.kind === "single" ? (
+              <ItemCard
+                item={card.item}
+                importId={importId}
+                resolution={byItem.get(card.item.id)}
+                specFields={specFields}
+                records={records}
+                drafts={drafts}
+                setDrafts={setDrafts}
+                busy={busy === card.item.id}
+                onSaveObservation={saveObservation}
+                onSaveTargets={saveTargets}
+                onSetBulkUnit={setBulkUnit}
+                onImage={rememberImage}
+                onSwatch={rememberSwatch}
+                onReview={review}
+              />
+            ) : (
+              <ConfigurationCard
+                card={card}
+                importId={importId}
+                specFields={specFields}
+                records={records}
+                drafts={drafts}
+                setDrafts={setDrafts}
+                busy={busy}
+                onSaveObservation={saveObservation}
+                onSaveObservations={saveObservations}
+                onSaveTargets={saveTargets}
+                onSetBulkUnit={setBulkUnit}
+                onReview={review}
+                onReviewMany={reviewMany}
+                onImage={rememberImage}
+                onSwatch={rememberSwatch}
+              />
+            )}
+          </div>
+        ))}
       </div>
 
       <CollapsedList
@@ -679,17 +756,17 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         status="applied"
       />
 
-      {/* WHERE A REVIEWER GOES NEXT. Reviewing a drawing set is a step inside
-          a project, and the bottom of this screen was a dead end: the only way
-          back was the browser's own. It is navigation, so it is a link — but
-          one wearing `buttonClass`, because at the foot of a long page an
-          underlined phrase is not findable. */}
-      <div className="mt-8 pt-4 border-t border-neutral-200">
+      {/* WHERE A REVIEWER GOES NEXT. Reviewing a drawing set is a step inside a
+          project, and the bottom of this screen was a dead end: the only way
+          back was the browser's own. It is navigation, so it is a link — but one
+          wearing `buttonClass`, because at the foot of a long page an underlined
+          phrase is not findable. */}
+      <div className="mt-8 border-t border-neutral-200 pt-4">
         <Link href={`/dashboard/projects/${run.project_id}`} className={buttonClass("primary")}>
           Open the project page
         </Link>
       </div>
-    </div>
+    </>,
   );
 }
 

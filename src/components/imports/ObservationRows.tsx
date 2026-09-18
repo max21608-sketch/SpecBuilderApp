@@ -35,6 +35,7 @@ import {
 import { foldableRow, isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
 import SwatchPicker from "@/components/imports/SwatchPicker";
 import Button from "@/components/ui/Button";
+import { Th } from "@/components/ui/Table";
 import type { CroppedImage } from "@/lib/pdf-crop";
 
 export type RunResolution =
@@ -114,18 +115,24 @@ export function orderRows(pending: DrawingObservation[]): {
  */
 const GROUP_ORDER: AttributeGroup[] = ["dimension", "material", "finish", "hardware", "other", "note"];
 
-/** The table head every observation table shares. */
+/**
+ * The table head every observation table shares.
+ *
+ * `Th` rather than a hand-rolled `<th>`, so this table's header reads the same
+ * as every other table in the app. The CELLS below stay as they are: they hold
+ * a select in almost every column and `Td`'s padding is built for text.
+ */
 export function ObservationTableHead() {
   return (
     <thead>
-      <tr className="text-left text-xs uppercase tracking-wide text-neutral-500">
-        <th className="px-4 py-2 font-medium">Group</th>
-        <th className="px-2 py-2 font-medium">Label</th>
-        <th className="px-2 py-2 font-medium">Value</th>
-        <th className="px-2 py-2 font-medium">Unit</th>
-        <th className="px-2 py-2 font-medium">Dimension / BWS field</th>
-        <th className="px-2 py-2 font-medium">State</th>
-        <th className="px-4 py-2" />
+      <tr>
+        <Th className="px-4">Group</Th>
+        <Th className="px-2">Label</Th>
+        <Th className="px-2">Value</Th>
+        <Th className="px-2">Unit</Th>
+        <Th className="px-2">Dimension / BWS field</Th>
+        <Th className="px-2">State</Th>
+        <Th className="px-4" />
       </tr>
     </thead>
   );
@@ -560,6 +567,7 @@ export function RunTargets({
   onToggle,
   onPick,
   note,
+  className,
 }: {
   runs: RunResolution[];
   ticked: ReadonlySet<string>;
@@ -570,10 +578,12 @@ export function RunTargets({
   onToggle: (recordId: string, on: boolean) => void;
   onPick: (recordId: string) => void;
   note?: ReactNode;
+  /** Layout only. The card decides whether this is a band or a sidebar box. */
+  className?: string;
 }) {
   return (
-    <div className="px-4 py-3 border-b border-neutral-100">
-      <p className="text-xs uppercase tracking-wide text-neutral-500">Applies to</p>
+    <div className={className ?? "px-4 py-3 border-b border-neutral-100"}>
+      <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">Applies to</p>
       {runs.length === 0 && (
         <div className="mt-1">
           <p className="text-sm text-amber-900">
@@ -616,7 +626,7 @@ export function RunTargets({
           )}
         </div>
       )}
-      <div className="mt-2 flex flex-wrap gap-4">
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
         {runs.map((run) =>
           run.status === "matched" ? (
             <label key={run.runId} className="flex items-center gap-2 text-sm text-neutral-800">

@@ -236,7 +236,7 @@ export default function ReviewImportPage() {
    * deliveries were grouped has none — and the crumb falls back to the project,
    * which is the way back either way.
    */
-  const [pack, setPack] = useState<{ id: string; created_at: string } | null>(null);
+  const [pack, setPack] = useState<{ id: string; created_at: string; drawings: number } | null>(null);
 
   // `quiet` skips the loading state. The spec-document view re-reads every
   // three seconds while a document is being read, and blanking the screen out
@@ -268,11 +268,20 @@ export default function ReviewImportPage() {
   const projectId = data?.import.project_id ?? "";
   useEffect(() => {
     if (!projectId || !id) return;
-    void apiFetch<{ batches: { id: string; created_at: string; runs: { id: string }[] }[] }>(
+    void apiFetch<{ batches: { id: string; created_at: string; runs: { id: string; documentKind: string | null }[] }[] }>(
       `/api/projects/${projectId}/batches`,
     ).then((res) => {
       if (!res.ok) return;
-      setPack(res.data.batches.find((batch) => batch.runs.some((batchRun) => batchRun.id === id)) ?? null);
+      const found = res.data.batches.find((batch) => batch.runs.some((batchRun) => batchRun.id === id));
+      setPack(
+        found
+          ? {
+              id: found.id,
+              created_at: found.created_at,
+              drawings: found.runs.filter((batchRun) => batchRun.documentKind === "shop_drawings").length,
+            }
+          : null,
+      );
     });
   }, [projectId, id]);
 
@@ -409,12 +418,14 @@ export default function ReviewImportPage() {
   // it cannot display.
   if (run.document_kind === "shop_drawings") {
     return (
-      <PageBody width="wide">
-        <h1 className="text-xl font-semibold text-neutral-900">
-          Review drawings — {run.bws_project_number} {run.project_name}
-        </h1>
-        <DrawingsReview importId={run.id} />
-      </PageBody>
+      // The review component renders its own band — see the note on the
+      // spec-document branch below.
+      <DrawingsReview
+        importId={run.id}
+        crumb={packCrumb}
+        packHref={pack ? `/dashboard/projects/${run.project_id}/intake/${pack.id}/drawings` : undefined}
+        packDrawingCount={pack?.drawings}
+      />
     );
   }
 

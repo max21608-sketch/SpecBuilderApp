@@ -11,6 +11,11 @@
 // whole page, from the same cached parse — so a card showing this costs one
 // more rasterise of a document the screen has already loaded. A failure is
 // never fatal: the message and the link to the PDF stand on their own.
+//
+// NEUTRAL, NOT AMBER. It was born inside the key-measurement dispute banner and
+// wore that banner's colour; it now sits in every card's sidebar, where amber
+// would say "this page needs a person" about a page that is simply there to be
+// read.
 import { useEffect, useRef, useState } from "react";
 import { cropPdfRegion } from "@/lib/pdf-crop";
 
@@ -67,9 +72,9 @@ export default function PagePreview({
         /* eslint-disable-next-line @next/next/no-img-element --
            a blob URL for a crop made in this browser; next/image can do
            nothing with it. */
-        <img src={url} alt={`Page ${page ?? 1} of the drawing`} className="block w-full h-auto rounded border border-amber-300 bg-white" />
+        <img src={url} alt={`Page ${page ?? 1} of the drawing`} className="block h-auto w-full rounded border border-neutral-200 bg-white" />
       ) : (
-        <span className="block h-40 rounded border border-amber-300 bg-white text-xs text-amber-800 flex items-center justify-center">
+        <span className="flex h-40 items-center justify-center rounded border border-neutral-200 bg-white text-xs text-neutral-500">
           Rendering the page…
         </span>
       )}

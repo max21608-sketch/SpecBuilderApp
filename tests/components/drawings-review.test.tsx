@@ -6,6 +6,7 @@
 // to the project. Both were reported after the first real run-through.
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import DrawingsReview from "@/components/imports/DrawingsReview";
 import { item, observation, resetIds } from "./fixtures";
 import type { DrawingItem } from "@/lib/drawing-document";
@@ -68,5 +69,43 @@ describe("a reviewed drawing set", () => {
     // must not be made over a document somebody is halfway through.
     await screen.findByRole("link", { name: "Open the project page" });
     expect(screen.queryByText("Review complete")).toBeNull();
+  });
+});
+
+// The navigator, added when the screen was rebuilt to the approved mock-up.
+//
+// A six-card screen is six screens of scrolling and the thing a reviewer loses
+// is which item they are on. It is a SCROLL, never a filter: every card stays
+// on the page, because hiding the others would make "confirm this one" mean
+// something different depending on where somebody had walked to.
+describe("the item navigator", () => {
+  beforeEach(() => resetIds());
+
+  it("says where you are, and only appears once there is more than one card", async () => {
+    show([
+      item({ id: "item-a", itemCodeRaw: "S-100", observations: [observation({ reviewStatus: "pending" })] }),
+      item({ id: "item-b", itemCodeRaw: "S-201", observations: [observation({ reviewStatus: "pending" })] }),
+    ]);
+    expect(await screen.findByText(/Item 1 of 2/)).toBeTruthy();
+    expect(screen.getAllByText("S-100").length).toBeGreaterThan(0);
+  });
+
+  it("is absent on a document with one item, because there is nowhere to go", async () => {
+    show([item({ id: "item-a", itemCodeRaw: "S-100", observations: [observation({ reviewStatus: "pending" })] })]);
+    await screen.findByRole("link", { name: "Open the project page" });
+    expect(screen.queryByText(/Item 1 of/)).toBeNull();
+  });
+
+  it("moves to the next card and never hides the one it left", async () => {
+    show([
+      item({ id: "item-a", itemCodeRaw: "S-100", observations: [observation({ reviewStatus: "pending" })] }),
+      item({ id: "item-b", itemCodeRaw: "S-201", observations: [observation({ reviewStatus: "pending" })] }),
+    ]);
+    await screen.findByText(/Item 1 of 2/);
+    await userEvent.click(screen.getByRole("button", { name: /Next/ }));
+    expect(screen.getByText(/Item 2 of 2/)).toBeTruthy();
+    // Both cards are still on the page: the navigator scrolls, it does not filter.
+    expect(screen.getAllByText("S-100").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("S-201").length).toBeGreaterThan(0);
   });
 });

@@ -58,6 +58,7 @@ import {
 } from "@/components/imports/ObservationRows";
 import type { CroppedImage } from "@/lib/pdf-crop";
 import Button from "@/components/ui/Button";
+import Chip from "@/components/ui/Chip";
 
 // Re-exported from where they now live, so the screens keep one import.
 export type { Occupant, RecordChoice, RunResolution, SpecField } from "@/components/imports/ObservationRows";
@@ -262,44 +263,42 @@ export default function ItemCard({
   );
 
   const header = (
-    <div className="flex flex-wrap items-baseline justify-between gap-3 px-4 py-3 border-b border-neutral-100">
-      <div>
-        <h3 className="text-base font-semibold text-neutral-900">
-          {item.itemCodeRaw ?? "No item code on this page"}
-          {item.itemNameRaw && <span className="ml-2 text-sm font-normal text-neutral-600">{item.itemNameRaw}</span>}
-        </h3>
-        <p className="text-xs text-neutral-500">
-          {item.page ? (
-            <a
-              href={`/api/imports/${importId}/source#page=${item.page}`}
-              target="_blank"
-              rel="noreferrer"
-              className="underline hover:text-neutral-900"
-            >
-              Page {item.page}
-            </a>
-          ) : (
-            "Page unknown"
-          )}
-          {item.confidence === "low" && <span className="ml-2 text-amber-700">code was hard to read</span>}
-        </p>
-      </div>
-      <div className="flex items-center gap-3">
-        {/* Offered whenever the card holds a MEASUREMENT, not only once one has
-            been promoted to a dimension. A page whose units could not be
-            inferred is exactly the page that needs this control, and gating it
-            on `attrGroup === "dimension"` hid it from every one of them. */}
-        {open && pending.some(isMeasuredRow) && (
-          <BulkUnit
-            label="All dimensions:"
-            disabled={busy}
-            onSet={(unit) => void onSetBulkUnit("item", unit, item.id)}
-          />
-        )}
-        <Button size="xs" variant="quiet" onClick={() => setOpen((value) => !value)}>
-          {open ? "Collapse" : "Expand"}
-        </Button>
-      </div>
+    <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2.5">
+      {/* THE CODE IS THE NAME. Mono, normal case, at the size a heading is read
+          at — not the card heading's uppercase tracking, which turns `S-201`
+          into something to decipher. */}
+      <span className="font-mono text-[13px] font-semibold text-neutral-900">
+        {item.itemCodeRaw ?? "No item code on this page"}
+      </span>
+      {item.itemNameRaw && <span className="text-neutral-700">{item.itemNameRaw}</span>}
+      {item.page ? (
+        <a
+          href={`/api/imports/${importId}/source#page=${item.page}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-blue-700 no-underline hover:underline"
+        >
+          <Chip>page {item.page}</Chip>
+        </a>
+      ) : (
+        <Chip tone="warn">page unknown</Chip>
+      )}
+      {item.confidence === "low" && <Chip tone="warn">code was hard to read</Chip>}
+      <span className="flex-1" />
+      {/* Offered whenever the card holds a MEASUREMENT, not only once one has
+          been promoted to a dimension. A page whose units could not be inferred
+          is exactly the page that needs this control, and gating it on
+          `attrGroup === "dimension"` hid it from every one of them. */}
+      {open && pending.some(isMeasuredRow) && (
+        <BulkUnit
+          label="All dimensions:"
+          disabled={busy}
+          onSet={(unit) => void onSetBulkUnit("item", unit, item.id)}
+        />
+      )}
+      <Button size="xs" variant="quiet" onClick={() => setOpen((value) => !value)}>
+        {open ? "Collapse" : "Expand"}
+      </Button>
     </div>
   );
 
@@ -310,10 +309,10 @@ export default function ItemCard({
       .map((observation) => observation.labelRaw)
       .filter((label): label is string => Boolean(label));
     return (
-      <div className="border border-neutral-200 rounded-lg bg-white">
+      <div className="mt-4 rounded-[10px] border border-neutral-200 bg-white">
         {header}
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <p className="text-sm text-neutral-600">
+          <p className="text-neutral-600">
             {pending.length} spec{pending.length === 1 ? "" : "s"}
             {targets.length === 0
               ? ", nothing matched a record"
@@ -359,149 +358,185 @@ export default function ItemCard({
   );
   const guessWhy = new Map(guess.guesses.map((entry) => [entry.observationId, entry.why]));
 
+  // Which rows the reviewer is being asked to confirm rather than merely read.
+  const guessedRows = ordered.filter(
+    (o) => (o.slotSuggested && o.dimensionSlot) || o.groupSuggested,
+  );
+
   return (
-    <div className="border border-neutral-200 rounded-lg bg-white">
+    <div className="mt-4 rounded-[10px] border border-neutral-200 bg-white">
       {header}
 
-      {/* A KEY MEASUREMENT DISPUTE, WITH THE DRAWING. The views do not agree
-          about which figure is the overall size, so the sizes below are the
-          weak reading — and the page goes here, because a question that is
-          unreadable as a list of figures is answerable in two seconds off the
-          drawing. NOT a blocker: the slots are filled either way, every
-          guessed line is yellow, and confirming is a decision the reviewer
-          takes with the page in front of them. */}
-      {guess.dispute && (
-        <div className="px-4 py-3 border-b border-amber-300 bg-amber-50">
-          <p className="text-xs uppercase tracking-wide text-amber-800">Key measurement dispute</p>
-          <div className="mt-1 flex flex-wrap gap-4">
-            <p className="flex-1 min-w-[16rem] text-sm text-amber-900">
-              {guess.dispute}
-              <span className="block mt-1 text-xs text-amber-800">
-                The yellow lines below carry this guess. Correct any that are wrong, or set one back to a note — it
-                stays on the item with its label and figure intact either way.
-              </span>
+      {/* TWO COLUMNS, AND THE RIGHT ONE STAYS PUT. The rows are read against the
+          drawing, so the drawing, the picture and the runs this page applies to
+          are a sticky sidebar rather than three bands stacked above the table —
+          which is what put the page off screen by the time anybody reached the
+          figures. */}
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0">
+          {/* The specs themselves. */}
+          <div className="overflow-x-auto rounded-lg border border-neutral-200">
+            <table className="w-full border-collapse text-cell">
+              <ObservationTableHead />
+              {/* NO `divide-y` HERE. A row carrying an occupant or a blocker is
+                  THREE table rows, and a divider drawn between tbody children
+                  would put a line between a value and its own amber panel —
+                  reading as though the panel belonged to the row underneath.
+                  The separator goes on the data row instead. */}
+              <tbody>
+                {ordered.map((observation) => {
+                  const rowBlockers = blockerFor(observation.id);
+                  const rowWarnings = warningFor(observation.id);
+                  const rowOccupants = resolution?.occupants?.[observation.id] ?? [];
+                  const blocked = rowBlockers.length > 0 || rowWarnings.length > 0;
+                  const isOther = otherIds.has(observation.id);
+                  return (
+                    <Fragment key={observation.id}>
+                      {observation.id === firstOtherId && (
+                        <OtherDimensionsToggle
+                          count={otherDimensionRows.length}
+                          shown={showOtherDimensions}
+                          onToggle={() => setShowOtherDimensions((value) => !value)}
+                        />
+                      )}
+                      {(!isOther || showOtherDimensions) && (
+                        <>
+                          <ObservationRow
+                            observation={observation}
+                            page={item.page}
+                            importId={importId}
+                            specFields={specFields}
+                            drafts={drafts}
+                            setDrafts={setDrafts}
+                            busy={busy}
+                            blocked={blocked}
+                            guessWhy={guessWhy.get(observation.id)}
+                            callbacks={rowCallbacks}
+                          />
+                          <ReplacePanel
+                            observation={observation}
+                            occupants={rowOccupants}
+                            runs={resolution?.resolution.runs ?? []}
+                            busy={busy}
+                            blocked={blocked}
+                            onChange={(target, changes) => void onSaveObservation(item, target, changes)}
+                          />
+                          <RowNotes blockers={rowBlockers} warnings={rowWarnings} />
+                        </>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ONE SENTENCE UNDER THE TABLE, not a reason repeated on every row.
+              It says what the yellow means and what this card's particular
+              guess was read from — a dispute where the views could not settle
+              it, the model's own evidence where they did. NOT a blocker: the
+              slots are filled either way and confirming is a decision the
+              reviewer takes with the page beside them. */}
+          {guessedRows.length > 0 && (
+            <p className="mt-2 rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-900">
+              <b>
+                {guessedRows.length === 1 ? "The yellow row is a guess." : "Yellow rows are guesses."}
+              </b>{" "}
+              {guess.dispute ??
+                "Each says what it was read from beside the control it fills."}{" "}
+              Confirm or correct them — a row set back to a note keeps its label and figure either way.
             </p>
-            <PagePreview importId={importId} page={item.page} className="w-72 max-w-full" />
+          )}
+
+          {/* WHAT BWS WILL ACTUALLY RECEIVE in field 3, from this card's pending
+              rows, through the same function the export calls. This is the only
+              place a human can check the whole ruling at a glance, and it is
+              what makes the positional W x D x H assumption acceptable: a
+              transposed order is obvious here in a second. ALWAYS SHOWN, even
+              when empty — a card with no line at all reads as one with nothing
+              to say about its size, which is the opposite of the truth. */}
+          <div className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
+            <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">BWS Dimensions</p>
+            {dimensionCell.text ? (
+              <p className="font-mono text-[13px] text-neutral-900">{dimensionCell.text}</p>
+            ) : (
+              <p className="text-neutral-500">
+                No width, depth or height placed yet. Give a figure below its slot, or leave them as notes — they stay
+                on the item either way.
+              </p>
+            )}
+            {dimensionCell.problems.map((problem, index) => (
+              <p key={index} className="text-xs text-amber-700">
+                {problem.message}
+              </p>
+            ))}
+            <p className="mt-1 text-[11px] text-neutral-500">Exactly what BWS field 3 will receive.</p>
           </div>
         </div>
-      )}
 
-      {/* ALWAYS SHOWN ON AN OPEN CARD, even when it is empty. It used to render
-          only once something had been placed, so two cards of one code differed
-          on screen purely by whether the guess had found anything -- and a card
-          with no line at all reads as a card with nothing to say about its
-          size, which is the opposite of the truth. An empty line names the gap
-          in words instead. */}
-      <div className="px-4 py-2 border-b border-neutral-100 bg-neutral-50">
-        <p className="text-xs uppercase tracking-wide text-neutral-500">BWS Dimensions</p>
-        {dimensionCell.text ? (
-          <p className="font-mono text-sm text-neutral-900">{dimensionCell.text}</p>
-        ) : (
-          <p className="text-sm text-neutral-500">
-            No width, depth or height placed yet. Give a figure below its slot, or leave them as notes — they stay on
-            the item either way.
-          </p>
-        )}
-        {dimensionCell.problems.map((problem, index) => (
-          <p key={index} className="text-xs text-amber-700">
-            {problem.message}
-          </p>
-        ))}
+        {/* THE SIDEBAR. Sticky, because the page is what the rows are checked
+            against and it used to scroll away above them. */}
+        <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+          {/* The page itself. A question that is unreadable as a list of figures
+              is answerable in two seconds off the drawing, and this is also
+              where the key-measurement dispute used to render its own copy —
+              one preview per card rather than two. */}
+          <PagePreview importId={importId} page={item.page} className="w-full" />
+
+          {/* The picture, rendered from the real PDF so what is confirmed is
+              what was looked at. Shown whether or not the model proposed one: a
+              card with nothing proposed is one where a box can still be
+              dragged. */}
+          <div className="rounded-lg border border-neutral-200">
+            <ItemImagePicker
+              importId={importId}
+              itemPage={item.page}
+              proposal={item.imageProposal ?? null}
+              views={item.viewRegions ?? []}
+              onCropped={(image) => onImage(item.id, image)}
+            />
+          </div>
+
+          {/* Which runs this drawing applies to. */}
+          <RunTargets
+            runs={resolution?.resolution.runs ?? []}
+            ticked={new Set(targets)}
+            itemCodeRaw={item.itemCodeRaw}
+            records={records}
+            busy={busy}
+            onToggle={toggleRun}
+            onPick={(recordId) => void onSaveTargets(item, [recordId], [])}
+            className="rounded-lg border border-neutral-200 px-3 py-2.5"
+          />
+        </div>
       </div>
 
-      {/* The picture, rendered from the real PDF so what is confirmed is what
-          was looked at. Shown whether or not the model proposed one: a card
-          with nothing proposed is one where a box can still be dragged. */}
-      <ItemImagePicker
-        importId={importId}
-        itemPage={item.page}
-        proposal={item.imageProposal ?? null}
-        views={item.viewRegions ?? []}
-        onCropped={(image) => onImage(item.id, image)}
-      />
-
-      {/* Which runs this drawing applies to. */}
-      <RunTargets
-        runs={resolution?.resolution.runs ?? []}
-        ticked={new Set(targets)}
-        itemCodeRaw={item.itemCodeRaw}
-        records={records}
-        busy={busy}
-        onToggle={toggleRun}
-        onPick={(recordId) => void onSaveTargets(item, [recordId], [])}
-      />
-
-      {/* The specs themselves. */}
-      <table className="w-full text-sm">
-        <ObservationTableHead />
-        {/* NO `divide-y` HERE. A row carrying an occupant or a blocker is
-            THREE table rows, and a divider drawn between tbody children would
-            put a line between a value and its own amber panel — reading as
-            though the panel belonged to the row underneath. The separator goes
-            on the data row instead. */}
-        <tbody>
-          {ordered.map((observation) => {
-            const rowBlockers = blockerFor(observation.id);
-            const rowWarnings = warningFor(observation.id);
-            const rowOccupants = resolution?.occupants?.[observation.id] ?? [];
-            const blocked = rowBlockers.length > 0 || rowWarnings.length > 0;
-            const isOther = otherIds.has(observation.id);
-            return (
-              <Fragment key={observation.id}>
-                {observation.id === firstOtherId && (
-                  <OtherDimensionsToggle
-                    count={otherDimensionRows.length}
-                    shown={showOtherDimensions}
-                    onToggle={() => setShowOtherDimensions((value) => !value)}
-                  />
-                )}
-                {(!isOther || showOtherDimensions) && (
-                  <>
-                    <ObservationRow
-                      observation={observation}
-                      page={item.page}
-                      importId={importId}
-                      specFields={specFields}
-                      drafts={drafts}
-                      setDrafts={setDrafts}
-                      busy={busy}
-                      blocked={blocked}
-                      guessWhy={guessWhy.get(observation.id)}
-                      callbacks={rowCallbacks}
-                    />
-                    <ReplacePanel
-                      observation={observation}
-                      occupants={rowOccupants}
-                      runs={resolution?.resolution.runs ?? []}
-                      busy={busy}
-                      blocked={blocked}
-                      onChange={(target, changes) => void onSaveObservation(item, target, changes)}
-                    />
-                    <RowNotes blockers={rowBlockers} warnings={rowWarnings} />
-                  </>
-                )}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-neutral-100">
-        <p className="text-xs text-neutral-500">
-          {blockers.length > 0
-            ? blockers.filter((b) => !b.observationId).map((b) => b.message).join(" ")
-            : `Writes ${pending.length} spec${pending.length === 1 ? "" : "s"} to ${targets.length} record${targets.length === 1 ? "" : "s"}.`}
+      <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
+        {/* WHAT CONFIRM WILL WRITE, or what is stopping it — and a blocker on a
+            ROW still has to be counted here. The card printed only the blockers
+            that belong to the card itself, so an item whose every blocker was on
+            a row showed an EMPTY sentence beside a disabled button: the one
+            thing a screen must never do is refuse without saying why. */}
+        <p className="text-neutral-600">
+          {(() => {
+            if (blockers.length === 0) {
+              return `Writes ${pending.length} spec${pending.length === 1 ? "" : "s"} to ${targets.length} record${targets.length === 1 ? "" : "s"}.`;
+            }
+            const cardLevel = blockers.filter((b) => !b.observationId).map((b) => b.message);
+            if (cardLevel.length > 0) return cardLevel.join(" ");
+            const rows = new Set(blockers.map((b) => b.observationId)).size;
+            return `${rows} row${rows === 1 ? "" : "s"} above need${rows === 1 ? "s" : ""} attention before this can be confirmed.`;
+          })()}
         </p>
-        <div className="flex items-center gap-2">
-          {ignorePage}
-          <Button
-            variant="primary"
-            onClick={() => void onReview(item, pending, "confirm")}
-            disabled={busy || blockers.length > 0 || pending.length === 0 || targets.length === 0}
-          >
-            {busy ? "Confirming…" : `Confirm ${pending.length} spec${pending.length === 1 ? "" : "s"}`}
-          </Button>
-        </div>
+        <span className="flex-1" />
+        {ignorePage}
+        <Button
+          variant="primary"
+          onClick={() => void onReview(item, pending, "confirm")}
+          disabled={busy || blockers.length > 0 || pending.length === 0 || targets.length === 0}
+        >
+          {busy ? "Confirming…" : `Confirm ${pending.length} spec${pending.length === 1 ? "" : "s"}`}
+        </Button>
       </div>
     </div>
   );

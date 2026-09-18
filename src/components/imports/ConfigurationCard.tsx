@@ -58,6 +58,7 @@ import {
 } from "@/components/imports/ObservationRows";
 import { BulkUnit, type ItemResolution } from "@/components/imports/DrawingItemCard";
 import Button from "@/components/ui/Button";
+import Chip from "@/components/ui/Chip";
 import type { CroppedImage } from "@/lib/pdf-crop";
 
 /**
@@ -128,6 +129,8 @@ export default function ConfigurationCard({
 }: ConfigurationCardProps) {
   const [open, setOpen] = useState(true);
   const [showOther, setShowOther] = useState(false);
+  /** Which of the card's pages the sidebar preview is showing. */
+  const [previewPage, setPreviewPage] = useState<number | null>(null);
 
   const pendingMembers = card.members.filter((member) => member.state === "pending");
   const busyHere = busy === card.id || pendingMembers.some((member) => busy === member.item.id);
@@ -135,50 +138,16 @@ export default function ConfigurationCard({
 
   // ------------------------------------------------------------------ header
   const header = (
-    <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b border-neutral-100">
-      <div>
-        <h3 className="text-base font-semibold text-neutral-900">
-          {card.codeRaw}
-          {card.name && <span className="ml-2 text-sm font-normal text-neutral-600">{card.name}</span>}
-        </h3>
-        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          {card.members.map((member) => (
-            <ConfigurationChip key={member.item.id} card={card} member={member} importId={pageImportId(member.item.id)} />
-          ))}
-        </div>
-        {/* WHAT THIS CARD IS ABOUT TO DO, said differently for the two cases it
-            covers — because they are different, and the card used to claim the
-            expensive one whatever the truth.
-
-            A SPLIT creates a record per configuration and takes the bill line
-            out of the export, so the file ships several jobs where the bill has
-            one line. Saying that about one armchair drawn on its specification
-            sheet and again on its shop drawing is the S-200 defect, and the
-            sentence was how it announced itself. */}
-        <p className="mt-1.5 max-w-3xl text-xs text-neutral-600">
-          {card.split
-            ? `One bill line, drawn as ${card.members.length} configurations. ` +
-              (card.geometry.status === "shared"
-                ? "They are the same size; each carries its own finishes and becomes its own record under the bill line, and the export ships the configurations rather than the line."
-                : "These pages do not state the same size — see below.")
-            : `One item, described on ${card.members.length} pages. Everything confirmed here lands on the same record, and the bill line is what the export ships. ` +
-              (card.geometry.status === "shared"
-                ? "The pages state the same size."
-                : "These pages do not state the same size — see below, and one of the readings is wrong.")}
-        </p>
-        {/* WHY THEY ARE ON ONE CARD, quoting the pages. Whether these are one
-            item or several is the most consequential thing this card asserts,
-            and it is checked the same way a dimension is: by reading the reason
-            against the drawing. A version 1 run has none — a page count gave
-            no reason — and says nothing rather than inventing one. */}
-        {card.groupedBecause && (
-          <p className="mt-1 max-w-3xl text-xs text-neutral-500">
-            <span className="font-medium text-neutral-600">Read as {card.split ? "configurations" : "one item"}:</span>{" "}
-            {card.groupedBecause}
-          </p>
-        )}
-      </div>
-      <div className="flex items-center gap-3">
+    <div className="border-b border-neutral-200 px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[13px] font-semibold text-neutral-900">{card.codeRaw}</span>
+        {card.name && <span className="text-neutral-700">{card.name}</span>}
+        <Chip>
+          page{card.members.length === 1 ? "" : "s"}{" "}
+          {card.members.map((member) => member.item.page ?? "?").join(", ")}
+        </Chip>
+        {card.split && <Chip tone="info">{card.members.length} configurations</Chip>}
+        <span className="flex-1" />
         {open && pendingMembers.length > 0 && (
           <BulkUnit
             label="All dimensions:"
@@ -192,14 +161,50 @@ export default function ConfigurationCard({
           {open ? "Collapse" : "Expand"}
         </Button>
       </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        {card.members.map((member) => (
+          <ConfigurationChip key={member.item.id} card={card} member={member} importId={pageImportId(member.item.id)} />
+        ))}
+      </div>
+      {/* WHAT THIS CARD IS ABOUT TO DO, said differently for the two cases it
+          covers — because they are different, and the card used to claim the
+          expensive one whatever the truth.
+
+          A SPLIT creates a record per configuration and takes the bill line out
+          of the export, so the file ships several jobs where the bill has one
+          line. Saying that about one armchair drawn on its specification sheet
+          and again on its shop drawing is the S-200 defect, and the sentence was
+          how it announced itself. */}
+      <p className="mt-1.5 max-w-3xl text-xs text-neutral-600">
+        {card.split
+          ? `One bill line, drawn as ${card.members.length} configurations. ` +
+            (card.geometry.status === "shared"
+              ? "They are the same size; each carries its own finishes and becomes its own record under the bill line, and the export ships the configurations rather than the line."
+              : "These pages do not state the same size — see below.")
+          : `One item, described on ${card.members.length} pages. Everything confirmed here lands on the same record, and the bill line is what the export ships. ` +
+            (card.geometry.status === "shared"
+              ? "The pages state the same size."
+              : "These pages do not state the same size — see below, and one of the readings is wrong.")}
+      </p>
+      {/* WHY THEY ARE ON ONE CARD, quoting the pages. Whether these are one item
+          or several is the most consequential thing this card asserts, and it is
+          checked the same way a dimension is: by reading the reason against the
+          drawing. A version 1 run has none — a page count gave no reason — and
+          says nothing rather than inventing one. */}
+      {card.groupedBecause && (
+        <p className="mt-1 max-w-3xl text-xs text-neutral-500">
+          <span className="font-medium text-neutral-600">Read as {card.split ? "configurations" : "one item"}:</span>{" "}
+          {card.groupedBecause}
+        </p>
+      )}
     </div>
   );
 
   if (!open) {
     return (
-      <div className="border border-neutral-200 rounded-lg bg-white">
+      <div className="mt-4 rounded-[10px] border border-neutral-200 bg-white">
         {header}
-        <p className="px-4 py-3 text-sm text-neutral-600">
+        <p className="px-4 py-3 text-neutral-600">
           {pendingMembers.length} configuration{pendingMembers.length === 1 ? "" : "s"} still to review.
         </p>
       </div>
@@ -314,219 +319,264 @@ export default function ConfigurationCard({
   const sharedRows = geometry.status === "shared" ? geometry.rows : [];
   const sharedOrder = orderRows(sharedRows.map((row) => row.leader));
 
+  // Which page the sidebar is showing. The card covers several, and the rows
+  // beside it are checked against one at a time.
+  const pages = card.members.map((member) => member.item.page).filter((page): page is number => Boolean(page));
+  const shownPage = pages.includes(previewPage ?? -1) ? previewPage : (leader?.item.page ?? pages[0] ?? null);
+  const previewImportId = card.members.find((member) => member.item.page === shownPage)?.item.id;
+
+  const guessedRows = sharedOrder.ordered.filter(
+    (o) => (o.slotSuggested && o.dimensionSlot) || o.groupSuggested,
+  );
+
   return (
-    <div className="border border-neutral-200 rounded-lg bg-white">
+    <div className="mt-4 rounded-[10px] border border-neutral-200 bg-white">
       {header}
 
-      {/* A KEY MEASUREMENT DISPUTE, WITH THE DRAWING. The views do not agree
-          about which figure is the overall size, so the sizes below are the
-          weak reading — and the page goes here, because a question that is
-          unreadable as a list of figures is answerable in two seconds off the
-          drawing. */}
-      {geometry.status === "shared" && guess.dispute && leader && (
-        <div className="px-4 py-3 border-b border-amber-300 bg-amber-50">
-          <p className="text-xs uppercase tracking-wide text-amber-800">Key measurement dispute</p>
-          <div className="mt-1 flex flex-wrap gap-4">
-            <p className="flex-1 min-w-[16rem] text-sm text-amber-900">
-              {guess.dispute}
-              <span className="block mt-1 text-xs text-amber-800">
-                The yellow lines below carry this guess. Correct any that are wrong, or set one back to a note — it
-                stays on the item with its label and figure intact either way.
-              </span>
-            </p>
-            <PagePreview importId={pageImportId(leader.item.id)} page={leader.item.page} className="w-72 max-w-full" />
-          </div>
-        </div>
-      )}
-
-      {/* THE PAGES DISAGREE ABOUT THE SIZE. Never averaged and never resolved:
-          either these are genuinely different sizes, which is a real thing a
-          bill line can be, or one of them is a misread. Both are a person's
-          call, so each configuration keeps its own figures and shows them
-          below. Not a blocker — the card still commits. */}
-      {geometry.status === "disagree" && (
-        <div className="px-4 py-3 border-b border-amber-300 bg-amber-50 text-sm text-amber-900">
-          <p className="text-xs uppercase tracking-wide text-amber-800">These pages do not agree on the size</p>
-          <ul className="mt-1 space-y-0.5">
-            {geometry.differences.map((difference) => (
-              <li key={difference.slot}>
-                <span className="font-medium">{DIMENSION_SLOT_LABELS[difference.slot]}</span>:{" "}
-                {Object.entries(difference.byLetter)
-                  .map(([letter, value]) => `${letter} ${value ?? "says nothing"}`)
-                  .join(", ")}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-1 text-xs text-amber-800">
-            If these are genuinely different sizes this is a configuration split rather than a fabric one — confirm
-            them as they are and each keeps its own figures. If one is a misread, correct it in that configuration
-            below and the shared view comes back.
-          </p>
-        </div>
-      )}
-
-      {geometry.status === "shared" && (
-        <>
-          <div className="px-4 py-2 border-b border-neutral-100 bg-neutral-50">
-            <p className="text-xs uppercase tracking-wide text-neutral-500">BWS Dimensions</p>
-            {dimensionCell.text ? (
-              <p className="font-mono text-sm text-neutral-900">{dimensionCell.text}</p>
-            ) : (
-              <p className="text-sm text-neutral-500">
-                No width, depth or height placed yet. Give a figure below its slot, or leave them as notes — they stay
-                on the item either way.
+      {/* TWO COLUMNS, AND THE RIGHT ONE STAYS PUT. A card covering four
+          configurations is long, and the drawing the figures are checked
+          against used to scroll away above them. */}
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0">
+          {/* THE PAGES DISAGREE ABOUT THE SIZE. Never averaged and never
+              resolved: either these are genuinely different sizes, which is a
+              real thing a bill line can be, or one of them is a misread. Both
+              are a person's call, so each configuration keeps its own figures
+              and shows them below. Not a blocker — the card still commits. */}
+          {geometry.status === "disagree" && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-900">
+              <p className="text-th font-semibold uppercase tracking-wider text-amber-800">
+                These pages do not agree on the size
               </p>
-            )}
-            {dimensionCell.problems.map((problem, index) => (
-              <p key={index} className="text-xs text-amber-700">
-                {problem.message}
+              <ul className="mt-1 space-y-0.5">
+                {geometry.differences.map((difference) => (
+                  <li key={difference.slot}>
+                    <span className="font-medium">{DIMENSION_SLOT_LABELS[difference.slot]}</span>:{" "}
+                    {Object.entries(difference.byLetter)
+                      .map(([letter, value]) => `${letter} ${value ?? "says nothing"}`)
+                      .join(", ")}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-xs text-amber-800">
+                If these are genuinely different sizes this is a configuration split rather than a fabric one — confirm
+                them as they are and each keeps its own figures. If one is a misread, correct it in that configuration
+                below and the shared view comes back.
               </p>
-            ))}
-          </div>
+            </div>
+          )}
 
-          <div className="px-4 pt-3">
-            <p className="text-xs uppercase tracking-wide text-neutral-500">
-              Shared geometry — written to every configuration from its own page
-            </p>
-            {geometry.withoutGeometry.length > 0 && (
-              <p className="mt-0.5 text-xs text-neutral-600">
-                {geometry.withoutGeometry.join(" and ")} draw{geometry.withoutGeometry.length === 1 ? "s" : ""} no
-                dimensions, so {geometry.withoutGeometry.length === 1 ? "that configuration carries" : "those configurations carry"}{" "}
-                only their own finishes.
+          {geometry.status === "shared" && (
+            <>
+              <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">
+                Shared geometry{" "}
+                <span className="font-medium normal-case tracking-normal text-neutral-500">
+                  — written to every configuration from its own page
+                </span>
               </p>
-            )}
-          </div>
+              {geometry.withoutGeometry.length > 0 && (
+                <p className="mt-0.5 text-xs text-neutral-600">
+                  {geometry.withoutGeometry.join(" and ")} draw{geometry.withoutGeometry.length === 1 ? "s" : ""} no
+                  dimensions, so{" "}
+                  {geometry.withoutGeometry.length === 1
+                    ? "that configuration carries"
+                    : "those configurations carry"}{" "}
+                  only their own finishes.
+                </p>
+              )}
 
-          <table className="w-full text-sm">
-            <ObservationTableHead />
-            <tbody>
-              {sharedOrder.ordered.map((leaderRow) => {
-                const row = sharedRows.find((entry) => entry.leader.id === leaderRow.id)!;
-                // Blocked where ANY configuration is blocked on its own copy of
-                // this measurement: the shared row is one control over several
-                // rows, so it cannot look clear while one of them refuses.
-                const blockers = pendingMembers.flatMap(
-                  (member) =>
-                    member.resolution?.blockers.filter(
-                      (blocker) => blocker.observationId === row.byMember[member.item.id]?.id,
-                    ) ?? [],
-                );
-                const warnings = pendingMembers.flatMap(
-                  (member) =>
-                    member.resolution?.warnings?.filter(
-                      (warning) => warning.observationId === row.byMember[member.item.id]?.id,
-                    ) ?? [],
-                );
-                const isOther = sharedOrder.otherIds.has(leaderRow.id);
-                return (
-                  <Fragment key={leaderRow.id}>
-                    {leaderRow.id === sharedOrder.firstOtherId && (
-                      <OtherDimensionsToggle
-                        count={sharedOrder.otherDimensionRows.length}
-                        shown={showOther}
-                        onToggle={() => setShowOther((value) => !value)}
-                      />
-                    )}
-                    {(!isOther || showOther) && (
-                      <>
-                        <ObservationRow
-                          observation={leaderRow}
-                          page={leader?.item.page ?? null}
-                          importId={leader ? pageImportId(leader.item.id) : importId}
-                          specFields={specFields}
-                          drafts={drafts}
-                          setDrafts={setDrafts}
-                          busy={busyHere}
-                          blocked={blockers.length > 0 || warnings.length > 0}
-                          guessWhy={guessWhy.get(leaderRow.id)}
-                          callbacks={{ onChange: fanOut, onIgnore: fanOutIgnore, onSwatch }}
-                        />
-                        {row.missingOn.length > 0 && (
-                          <tr>
-                            <td colSpan={7} className="px-4 pb-1 text-xs text-neutral-500">
-                              Not drawn on {row.missingOn.join(" or ")} — nothing is written there for this
-                              measurement.
-                            </td>
-                          </tr>
-                        )}
-                        {/* PER CONFIGURATION, because what a measurement
-                            replaces is the VARIANT's own existing value: A may
-                            hold a height that B does not. */}
-                        {pendingMembers.map((member) => {
-                          const observation = row.byMember[member.item.id];
-                          if (!observation) return null;
-                          const occupants = member.resolution?.occupants?.[observation.id] ?? [];
-                          if (occupants.length === 0) return null;
-                          return (
-                            <ReplacePanel
-                              key={`${member.item.id}-${observation.id}`}
-                              observation={observation}
-                              occupants={occupants}
-                              runs={member.resolution?.resolution.runs ?? []}
-                              busy={busyHere}
-                              blocked
-                              heading={memberName(card, member)}
-                              onChange={(target, changes) => void onSaveObservation(member.item, target, changes)}
+              <div className="mt-1.5 overflow-x-auto rounded-lg border border-neutral-200">
+                <table className="w-full border-collapse text-cell">
+                  <ObservationTableHead />
+                  <tbody>
+                    {sharedOrder.ordered.map((leaderRow) => {
+                      const row = sharedRows.find((entry) => entry.leader.id === leaderRow.id)!;
+                      // Blocked where ANY configuration is blocked on its own
+                      // copy of this measurement: the shared row is one control
+                      // over several rows, so it cannot look clear while one of
+                      // them refuses.
+                      const blockers = pendingMembers.flatMap(
+                        (member) =>
+                          member.resolution?.blockers.filter(
+                            (blocker) => blocker.observationId === row.byMember[member.item.id]?.id,
+                          ) ?? [],
+                      );
+                      const warnings = pendingMembers.flatMap(
+                        (member) =>
+                          member.resolution?.warnings?.filter(
+                            (warning) => warning.observationId === row.byMember[member.item.id]?.id,
+                          ) ?? [],
+                      );
+                      const isOther = sharedOrder.otherIds.has(leaderRow.id);
+                      return (
+                        <Fragment key={leaderRow.id}>
+                          {leaderRow.id === sharedOrder.firstOtherId && (
+                            <OtherDimensionsToggle
+                              count={sharedOrder.otherDimensionRows.length}
+                              shown={showOther}
+                              onToggle={() => setShowOther((value) => !value)}
                             />
-                          );
-                        })}
-                        <RowNotes blockers={blockers} warnings={warnings} />
-                      </>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </>
-      )}
+                          )}
+                          {(!isOther || showOther) && (
+                            <>
+                              <ObservationRow
+                                observation={leaderRow}
+                                page={leader?.item.page ?? null}
+                                importId={leader ? pageImportId(leader.item.id) : importId}
+                                specFields={specFields}
+                                drafts={drafts}
+                                setDrafts={setDrafts}
+                                busy={busyHere}
+                                blocked={blockers.length > 0 || warnings.length > 0}
+                                guessWhy={guessWhy.get(leaderRow.id)}
+                                callbacks={{ onChange: fanOut, onIgnore: fanOutIgnore, onSwatch }}
+                              />
+                              {row.missingOn.length > 0 && (
+                                <tr>
+                                  <td colSpan={7} className="px-4 pb-1 text-xs text-neutral-500">
+                                    Not drawn on {row.missingOn.join(" or ")} — nothing is written there for this
+                                    measurement.
+                                  </td>
+                                </tr>
+                              )}
+                              {/* PER CONFIGURATION, because what a measurement
+                                  replaces is the VARIANT's own existing value:
+                                  A may hold a height that B does not. */}
+                              {pendingMembers.map((member) => {
+                                const observation = row.byMember[member.item.id];
+                                if (!observation) return null;
+                                const occupants = member.resolution?.occupants?.[observation.id] ?? [];
+                                if (occupants.length === 0) return null;
+                                return (
+                                  <ReplacePanel
+                                    key={`${member.item.id}-${observation.id}`}
+                                    observation={observation}
+                                    occupants={occupants}
+                                    runs={member.resolution?.resolution.runs ?? []}
+                                    busy={busyHere}
+                                    blocked
+                                    heading={memberName(card, member)}
+                                    onChange={(target, changes) => void onSaveObservation(member.item, target, changes)}
+                                  />
+                                );
+                              })}
+                              <RowNotes blockers={blockers} warnings={warnings} />
+                            </>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-      <RunTargets
-        runs={pendingMembers[0]?.resolution?.resolution.runs ?? card.members[0]?.resolution?.resolution.runs ?? []}
-        ticked={ticked}
-        mixed={mixed}
-        itemCodeRaw={card.codeRaw}
-        records={records}
-        busy={busyHere}
-        onToggle={toggleRun}
-        onPick={(recordId) => {
-          for (const member of pendingMembers) void onSaveTargets(member.item, [recordId], []);
-        }}
-        note={
-          mixed.size > 0 ? (
-            <p className="mt-1 text-xs text-amber-800">
-              The configurations do not currently agree about which runs they apply to. Tick or untick to settle it —
-              a run that quotes this line quotes every configuration of it.
-            </p>
-          ) : undefined
-        }
-      />
+              {/* ONE SENTENCE UNDER THE TABLE, not a reason repeated on every
+                  row. Where the views could not settle which figure is which,
+                  it carries the dispute — which used to be a banner at the top
+                  of the card with its own copy of the page beside it. */}
+              {guessedRows.length > 0 && (
+                <p className="mt-2 rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-900">
+                  <b>{guessedRows.length === 1 ? "The yellow row is a guess." : "Yellow rows are guesses."}</b>{" "}
+                  {guess.dispute ?? "Each says what it was read from beside the control it fills."} Confirm or correct
+                  them — a row set back to a note keeps its label and figure either way.
+                </p>
+              )}
 
-      {card.members.map((member) => (
-        <ConfigurationSection
-          key={member.item.id}
-          card={card}
-          member={member}
-          importId={pageImportId(member.item.id)}
-          specFields={specFields}
-          drafts={drafts}
-          setDrafts={setDrafts}
-          busy={busyHere}
-          sharedRowIds={
-            geometry.status === "shared"
-              ? new Set(sharedRows.map((row) => row.byMember[member.item.id]?.id).filter(Boolean) as string[])
-              : new Set<string>()
-          }
-          extras={geometry.status === "shared" ? (geometry.extras[member.item.id] ?? []) : []}
-          onSaveObservation={onSaveObservation}
-          onReview={onReview}
-          onImage={onImage}
-          onSwatch={onSwatch}
-        />
-      ))}
+              <div className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
+                <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">BWS Dimensions</p>
+                {dimensionCell.text ? (
+                  <p className="font-mono text-[13px] text-neutral-900">{dimensionCell.text}</p>
+                ) : (
+                  <p className="text-neutral-500">
+                    No width, depth or height placed yet. Give a figure below its slot, or leave them as notes — they
+                    stay on the item either way.
+                  </p>
+                )}
+                {dimensionCell.problems.map((problem, index) => (
+                  <p key={index} className="text-xs text-amber-700">
+                    {problem.message}
+                  </p>
+                ))}
+                <p className="mt-1 text-[11px] text-neutral-500">Exactly what BWS field 3 will receive.</p>
+              </div>
+            </>
+          )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-neutral-100">
-        <p className="text-xs text-neutral-500">
+          {/* Each configuration's own band, in its own colour. */}
+          {card.members.map((member) => (
+            <ConfigurationSection
+              key={member.item.id}
+              card={card}
+              member={member}
+              importId={pageImportId(member.item.id)}
+              specFields={specFields}
+              drafts={drafts}
+              setDrafts={setDrafts}
+              busy={busyHere}
+              sharedRowIds={
+                geometry.status === "shared"
+                  ? new Set(sharedRows.map((row) => row.byMember[member.item.id]?.id).filter(Boolean) as string[])
+                  : new Set<string>()
+              }
+              extras={geometry.status === "shared" ? (geometry.extras[member.item.id] ?? []) : []}
+              onSaveObservation={onSaveObservation}
+              onReview={onReview}
+              onImage={onImage}
+              onSwatch={onSwatch}
+            />
+          ))}
+        </div>
+
+        {/* THE SIDEBAR. Sticky, and one preview rather than one per band: the
+            pages of one code are the same drawing from different sheets, and
+            the buttons say which one is up. */}
+        <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+          <PagePreview
+            importId={previewImportId ? pageImportId(previewImportId) : importId}
+            page={shownPage}
+            className="w-full"
+          />
+          {pages.length > 1 && (
+            <div className="flex flex-wrap gap-1.5">
+              {pages.map((page) => (
+                <Button
+                  key={page}
+                  size="xs"
+                  variant={page === shownPage ? "secondary" : "quiet"}
+                  onClick={() => setPreviewPage(page)}
+                >
+                  page {page}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          <RunTargets
+            runs={pendingMembers[0]?.resolution?.resolution.runs ?? card.members[0]?.resolution?.resolution.runs ?? []}
+            ticked={ticked}
+            mixed={mixed}
+            itemCodeRaw={card.codeRaw}
+            records={records}
+            busy={busyHere}
+            onToggle={toggleRun}
+            onPick={(recordId) => {
+              for (const member of pendingMembers) void onSaveTargets(member.item, [recordId], []);
+            }}
+            className="rounded-lg border border-neutral-200 px-3 py-2.5"
+            note={
+              mixed.size > 0 ? (
+                <p className="mt-1 text-xs text-amber-800">
+                  The configurations do not currently agree about which runs they apply to. Tick or untick to settle it
+                  — a run that quotes this line quotes every configuration of it.
+                </p>
+              ) : undefined
+            }
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
+        <p className="text-neutral-600">
           {blockedMember
             ? `${memberName(card, blockedMember)} cannot be confirmed yet: ${
                 blockedMember.resolution?.blockers[0]?.message ?? ""
@@ -535,12 +585,13 @@ export default function ConfigurationCard({
                 pendingMembers.length === 1 ? "" : "s"
               }.`}
         </p>
-        {/* ONE CONFIRM FOR THE CARD. Each configuration still commits on its
-            own request, atomically, in letter order -- the item is the unit of
-            commit and that has not changed. What has changed is that a
-            reviewer rules on the item once, having seen all of it.
-            Enabled only when EVERY configuration can commit: one that skipped
-            a blocked configuration would read as done. */}
+        <span className="flex-1" />
+        {/* ONE CONFIRM FOR THE CARD. Each configuration still commits on its own
+            request, atomically, in letter order -- the item is the unit of
+            commit and that has not changed. What has changed is that a reviewer
+            rules on the item once, having seen all of it.
+            Enabled only when EVERY configuration can commit: one that skipped a
+            blocked configuration would read as done. */}
         <Button variant="primary" onClick={confirmAll} disabled={busyHere || !confirmable}>
           {busyHere
             ? "Confirming…"
@@ -680,7 +731,7 @@ function ConfigurationSection({
     const applied = member.item.observations.filter((o) => o.reviewStatus === "applied");
     const reviewed = member.item.observations.find((o) => o.reviewedAt)?.reviewedAt ?? null;
     return (
-      <div className={`border-t border-neutral-100 border-l-4 ${colour.border} px-4 py-2 text-xs text-neutral-500`}>
+      <div className={`mt-3 rounded-lg border border-neutral-200 border-l-4 ${colour.border} px-3 py-2 text-xs text-neutral-500`}>
         <span className="font-medium text-neutral-700">{name}</span>{" "}
         {member.state === "applied"
           ? `— applied${reviewed ? ` on ${new Date(reviewed).toLocaleDateString("en-GB")}` : ""}, ${applied.length} spec${
@@ -702,8 +753,8 @@ function ConfigurationSection({
   };
 
   return (
-    <div className={`border-t border-neutral-100 border-l-4 ${colour.border}`}>
-      <div className={`flex flex-wrap items-center justify-between gap-2 px-4 py-2 ${colour.band}`}>
+    <div className={`mt-3 overflow-hidden rounded-lg border border-neutral-200 border-l-4 ${colour.border}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2 ${colour.band}`}>
         <p className="text-sm">
           <span className={`inline-flex rounded border px-1.5 py-0.5 text-xs font-medium ${colour.chip}`}>{name}</span>
           {member.item.page && <span className="ml-2 text-xs text-neutral-600">Page {member.item.page}</span>}

@@ -19,11 +19,18 @@ import { apiFetch } from "@/lib/api-fetch";
 import { upload } from "@vercel/blob/client";
 import { projectUploadPrefix } from "@/lib/blob-source";
 import type { CroppedImage } from "@/lib/pdf-crop";
+import { formatDay } from "@/lib/format-day";
 
 import { usePoll } from "@/lib/use-poll";
-import { intakeStatusLabel, isIntakeRunWorking } from "@/lib/intake-status";
+import { intakeStatusLabel, intakeStatusTone, isIntakeRunWorking } from "@/lib/intake-status";
 import Spinner from "@/components/ui/Spinner";
-import { buttonClass } from "@/components/ui/Button";
+import Button, { buttonClass } from "@/components/ui/Button";
+import PageHeader from "@/components/ui/PageHeader";
+import PageBody from "@/components/ui/PageBody";
+import Card from "@/components/ui/Card";
+import Chip from "@/components/ui/Chip";
+import Note from "@/components/ui/Note";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
   BulkUnit,
@@ -66,7 +73,16 @@ type Payload = {
   repeated: Repeated[];
 };
 
-export default function PackDrawingsReview({ projectId, batchId }: { projectId: string; batchId: string }) {
+export default function PackDrawingsReview({
+  projectId,
+  batchId,
+  packDay,
+}: {
+  projectId: string;
+  batchId: string;
+  /** The day the pack was delivered, `YYYY-MM-DD`, for the crumb. */
+  packDay?: string | null;
+}) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -461,13 +477,36 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     }
   }
 
-  if (!data) return error ? <p className="mt-6 text-sm text-red-700">{error}</p> : <Spinner label="Loading the pack" />;
+  // ---- the band ------------------------------------------------------------
+  const shell = (children: React.ReactNode) => (
+    <>
+      <PageHeader
+        crumbs={[
+          {
+            label: packDay ? `Pack delivered ${formatDay(packDay)}` : "The pack",
+            href: `/dashboard/projects/${projectId}/intake/${batchId}`,
+          },
+        ]}
+        title="Drawings in this pack"
+        subtitle={
+          data
+            ? `${data.runs.length} drawing document${data.runs.length === 1 ? "" : "s"}, reviewed together — one card per item code, whichever file it came from`
+            : undefined
+        }
+      />
+      <PageBody width="wide">{children}</PageBody>
+    </>
+  );
+
+  if (!data) return error ? <Note tone="danger">{error}</Note> : <Spinner label="Loading the pack" />;
 
   if (runs.length === 0) {
-    return (
-      <p className="mt-6 text-sm text-neutral-700">
-        This pack has no drawing documents. Upload them on the project and declare their kind as shop drawings.
-      </p>
+    return shell(
+      <Card title="No drawings in this pack">
+        <p className="text-neutral-700">
+          This pack has no drawing documents. Upload them on the project and declare their kind as shop drawings.
+        </p>
+      </Card>,
     );
   }
 
@@ -478,7 +517,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
   // on the server and in the confirm route alike. So `S-201` drawn once in file
   // X and once in file Y is letter A in BOTH, and both write to the same
   // variant -- a card that showed them as A and B would promise a split the
-  // confirm does not make. The pack's own `duplicateTargets` banner above is
+  // confirm does not make. The pack's own `duplicateTargets` banner below is
   // what reports that case, and it stays.
   // ==========================================================================
   const cards = runs.flatMap((run) =>
@@ -501,198 +540,216 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
     0,
   );
 
-  return (
-    <div className="mt-6">
-      {error && <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
-
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <p className="text-sm text-neutral-600">
-          {runs.length} drawing document{runs.length === 1 ? "" : "s"} · {cards.length} item
-          {cards.length === 1 ? "" : "s"} still to review
-        </p>
-        <Link
-          href={`/dashboard/projects/${projectId}/intake/${batchId}`}
-          className="text-sm text-neutral-600 hover:text-neutral-900 underline"
-        >
-          Back to the pack
-        </Link>
-      </div>
+  return shell(
+    <>
+      {error && <Note tone="danger">{error}</Note>}
 
       {/* Which files are in, and what state each is in. At one PDF per line
           item this list IS the progress bar. */}
-      <ul className="mt-3 border border-neutral-200 rounded-lg divide-y divide-neutral-100 bg-white">
-        {runs.map((run) => (
-          <li key={run.importId} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
-            <span className="flex-1 min-w-[12rem] truncate text-neutral-900" title={run.filename ?? undefined}>
-              {run.filename ?? "Unnamed file"}
+      <Card
+        flush
+        title={
+          <>
+            The documents
+            <span className="font-medium normal-case tracking-normal text-neutral-500">
+              {cards.length} item{cards.length === 1 ? "" : "s"} still to review
             </span>
-            <span className="text-xs text-neutral-600">{intakeStatusLabel(run.status)}</span>
-            {isIntakeRunWorking(run.status) && <Spinner label="" />}
-            {run.error && <span className="w-full text-xs text-red-700">{run.error}</span>}
-            <Link
-              href={`/dashboard/imports/${run.importId}`}
-              className="text-xs text-neutral-500 underline hover:text-neutral-900"
-            >
-              On its own
-            </Link>
-          </li>
-        ))}
-      </ul>
-
-      {unread.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
-          <span>
-            {unread.length} document{unread.length === 1 ? "" : "s"} not read yet.
-          </span>
-          <button
-            type="button"
-            onClick={() => void readAll()}
-            disabled={busy !== null}
-            className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
-          >
-            {busy === "read-all" ? "Starting…" : `Read all ${unread.length}`}
-          </button>
-          <span className="text-xs text-neutral-500">
-            One model call per document, each charged.
-          </span>
-        </div>
-      )}
+          </>
+        }
+        actions={
+          unread.length > 0 ? (
+            <Button variant="primary" size="xs" onClick={() => void readAll()} disabled={busy !== null}>
+              {busy === "read-all" ? "Starting…" : `Read all ${unread.length} — each is charged`}
+            </Button>
+          ) : undefined
+        }
+      >
+        <Table>
+          <thead>
+            <tr>
+              <Th>File</Th>
+              <Th>State</Th>
+              <Th />
+            </tr>
+          </thead>
+          <tbody>
+            {runs.map((run) => (
+              <Tr
+                key={run.importId}
+                tone={run.status === "failed" ? "danger" : run.status === "parsed" ? "warn" : "plain"}
+              >
+                <Td>
+                  <span className="block truncate" title={run.filename ?? undefined}>
+                    {run.filename ?? "Unnamed file"}
+                  </span>
+                  {run.error && <span className="mt-0.5 block text-xs text-neutral-500">{run.error}</span>}
+                </Td>
+                <Td>
+                  <Chip tone={intakeStatusTone(run.status)} dot={isIntakeRunWorking(run.status)}>
+                    {intakeStatusLabel(run.status)}
+                  </Chip>
+                </Td>
+                <Td>
+                  <div className="flex justify-end">
+                    <Link
+                      href={`/dashboard/imports/${run.importId}`}
+                      className={buttonClass("quiet", "xs", "no-underline")}
+                    >
+                      On its own
+                    </Link>
+                  </div>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+      </Card>
 
       {/* ---- the two pack-level diagnostics ---- */}
 
       {data.duplicates.length > 0 && (
-        <div className="mt-3 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-          <p className="font-medium">
-            {data.duplicates.length} record{data.duplicates.length === 1 ? " is" : "s are"} described by more than one
-            document in this pack.
-          </p>
-          <p className="mt-1 text-xs">
-            Dimensions are exempt from the one-value-per-field rule by design, so confirming both writes both sets and
-            nothing will complain. Decide which document wins before confirming the second — these sheets usually say
-            the signed shop drawings take precedence.
-          </p>
-          <ul className="mt-2 space-y-1 text-xs">
+        <Note
+          tone="warn"
+          title={`${data.duplicates.length} record${data.duplicates.length === 1 ? " is" : "s are"} described by more than one document in this pack.`}
+        >
+          Dimensions are exempt from the one-value-per-field rule by design, so confirming both writes both sets and
+          nothing will complain. Decide which document wins before confirming the second — these sheets usually say the
+          signed shop drawings take precedence.
+          <ul className="mt-1.5 space-y-0.5 text-xs">
             {data.duplicates.map((entry) => (
               <li key={entry.recordId}>
                 <span className="font-medium">{entry.recordLabel ?? entry.recordId}</span>
                 {" — "}
-                {entry.cards.map((card) => `${card.itemCodeRaw ?? "?"} in ${card.filename ?? "an unnamed file"}`).join(", ")}
+                {entry.cards
+                  .map((card) => `${card.itemCodeRaw ?? "?"} in ${card.filename ?? "an unnamed file"}`)
+                  .join(", ")}
               </li>
             ))}
           </ul>
-        </div>
+        </Note>
       )}
 
       {data.repeated.length > 0 && (
-        <div className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
-          <p className="font-medium text-neutral-900">
-            {data.repeated.length} line{data.repeated.length === 1 ? "" : "s"} appear on three or more items.
+        <Card
+          flush
+          title={
+            <>
+              {data.repeated.length} line{data.repeated.length === 1 ? "" : "s"} appear on three or more items
+              <span className="font-medium normal-case tracking-normal text-neutral-500">
+                usually the package conditions every specification sheet repeats
+              </span>
+            </>
+          }
+        >
+          <Table>
+            <thead>
+              <tr>
+                <Th>The line</Th>
+                <Th>On</Th>
+                <Th />
+              </tr>
+            </thead>
+            <tbody>
+              {data.repeated.map((group) => (
+                <Tr key={`${group.label}-${group.value}`}>
+                  <Td>
+                    <span className="text-neutral-500">{group.label}:</span> {group.value}
+                  </Td>
+                  <Td muted>{new Set(group.occurrences.map((o) => o.itemId)).size} items</Td>
+                  <Td>
+                    <div className="flex justify-end">
+                      <Button
+                        size="xs"
+                        variant="quiet"
+                        onClick={() => void ignoreRepeated(group)}
+                        disabled={busy !== null}
+                      >
+                        {busy === `repeat:${group.label}` ? "Ignoring…" : "Ignore on all"}
+                      </Button>
+                    </div>
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+          <p className="px-4 py-2.5 text-xs text-neutral-500">
+            Ignoring one here ignores every copy, and every copy can be restored on its own document.
           </p>
-          <p className="mt-1 text-xs text-neutral-500">
-            Usually the package conditions every specification sheet repeats. Ignoring one here ignores every copy, and
-            every copy can be restored on its own document.
-          </p>
-          <ul className="mt-2 divide-y divide-neutral-200 border border-neutral-200 rounded bg-white">
-            {data.repeated.map((group) => (
-              <li key={`${group.label}-${group.value}`} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
-                <span className="flex-1 min-w-[14rem] text-neutral-800">
-                  <span className="text-neutral-500">{group.label}:</span> {group.value}
-                </span>
-                <span className="text-neutral-500">
-                  on {new Set(group.occurrences.map((o) => o.itemId)).size} items
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void ignoreRepeated(group)}
-                  disabled={busy !== null}
-                  className="px-2 py-0.5 rounded border border-neutral-300 text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                >
-                  {busy === `repeat:${group.label}` ? "Ignoring…" : "Ignore on all"}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+        </Card>
       )}
 
       {unitsOutstanding > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-          <span>
-            {unitsOutstanding} dimension{unitsOutstanding === 1 ? "" : "s"} across this pack still need a unit.
-          </span>
-          <BulkUnit label="Set every one to:" disabled={busy !== null} onSet={(unit) => void setBulkUnit("run", unit)} />
-          <span className="text-xs">Setting a project default on the overview does this for future packs.</span>
-        </div>
+        <Note
+          tone="warn"
+          actions={<BulkUnit label="Set every one to:" disabled={busy !== null} onSet={(unit) => void setBulkUnit("run", unit)} />}
+        >
+          {unitsOutstanding} dimension{unitsOutstanding === 1 ? "" : "s"} across this pack still need a unit. Setting a
+          project default on the overview does this for future packs.
+        </Note>
       )}
 
       {/* ---- the cards, one per code, whichever file it came from ---- */}
-      <div className="mt-4 space-y-4">
-        {cards.map(({ run, card }) => (
-          <div key={`${run.importId}:${card.id}`}>
-            {/* Above the card, because the grouping is about the ITEM and the
-                file is only where this page of it came from. */}
-            <p className="mb-1 text-xs text-neutral-500">{run.filename ?? "Unnamed file"}</p>
-            {card.kind === "single" ? (
-              <ItemCard
-                item={card.item}
-                importId={run.importId}
-                resolution={run.items.find((entry) => entry.id === card.item.id)}
-                specFields={data.specFields}
-                records={data.records}
-                drafts={drafts}
-                setDrafts={setDrafts}
-                busy={busy === card.item.id}
-                onSaveObservation={saveObservation}
-                onSaveTargets={saveTargets}
-                onSetBulkUnit={setBulkUnit}
-                onImage={rememberImage}
-                onSwatch={rememberSwatch}
-                onReview={review}
-              />
-            ) : (
-              <ConfigurationCard
-                card={card}
-                importId={run.importId}
-                specFields={data.specFields}
-                records={data.records}
-                drafts={drafts}
-                setDrafts={setDrafts}
-                busy={busy}
-                onSaveObservation={saveObservation}
-                onSaveObservations={saveObservations}
-                onSaveTargets={saveTargets}
-                onSetBulkUnit={setBulkUnit}
-                onReview={review}
-                onReviewMany={reviewMany}
-                onImage={rememberImage}
-                onSwatch={rememberSwatch}
-              />
-            )}
-          </div>
-        ))}
-      </div>
-
+      {cards.map(({ run, card }) => (
+        <div key={`${run.importId}:${card.id}`}>
+          {/* Above the card, because the grouping is about the ITEM and the file
+              is only where this page of it came from. */}
+          <p className="mt-4 text-xs text-neutral-500">{run.filename ?? "Unnamed file"}</p>
+          {card.kind === "single" ? (
+            <ItemCard
+              item={card.item}
+              importId={run.importId}
+              resolution={run.items.find((entry) => entry.id === card.item.id)}
+              specFields={data.specFields}
+              records={data.records}
+              drafts={drafts}
+              setDrafts={setDrafts}
+              busy={busy === card.item.id}
+              onSaveObservation={saveObservation}
+              onSaveTargets={saveTargets}
+              onSetBulkUnit={setBulkUnit}
+              onImage={rememberImage}
+              onSwatch={rememberSwatch}
+              onReview={review}
+            />
+          ) : (
+            <ConfigurationCard
+              card={card}
+              importId={run.importId}
+              specFields={data.specFields}
+              records={data.records}
+              drafts={drafts}
+              setDrafts={setDrafts}
+              busy={busy}
+              onSaveObservation={saveObservation}
+              onSaveObservations={saveObservations}
+              onSaveTargets={saveTargets}
+              onSetBulkUnit={setBulkUnit}
+              onReview={review}
+              onReviewMany={reviewMany}
+              onImage={rememberImage}
+              onSwatch={rememberSwatch}
+            />
+          )}
+        </div>
+      ))}
 
       {/* THE END OF THE PACK, SAID OUT LOUD — the same box the single-document
           screen shows, because it does not matter which of the two a reviewer
           happened to finish on. "Review complete", never "complete": settled
           answers are a different question. */}
       {cards.length === 0 && runs.some((run) => run.staged) && (
-        <div className="mt-6 text-sm text-green-900 bg-green-50 border border-green-300 rounded px-3 py-2">
-          <p className="font-medium">Review complete</p>
-          <p className="mt-0.5">
-            Nothing left to review in this pack. Settled answers are a different question — the records screen is where
-            those live.
-          </p>
-        </div>
+        <Note tone="good" title="Review complete">
+          Nothing left to review in this pack. Settled answers are a different question — the records screen is where
+          those live.
+        </Note>
       )}
 
       {/* Where a reviewer goes next. The bottom of this screen was a dead end. */}
-      <div className="mt-8 pt-4 border-t border-neutral-200">
+      <div className="mt-8 border-t border-neutral-200 pt-4">
         <Link href={`/dashboard/projects/${projectId}`} className={buttonClass("primary")}>
           Open the project page
         </Link>
       </div>
-    </div>
+    </>,
   );
 }
