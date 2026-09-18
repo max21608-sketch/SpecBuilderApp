@@ -166,6 +166,17 @@ export default function ConfigurationCard({
                 ? "The pages state the same size."
                 : "These pages do not state the same size — see below, and one of the readings is wrong.")}
         </p>
+        {/* WHY THEY ARE ON ONE CARD, quoting the pages. Whether these are one
+            item or several is the most consequential thing this card asserts,
+            and it is checked the same way a dimension is: by reading the reason
+            against the drawing. A version 1 run has none — a page count gave
+            no reason — and says nothing rather than inventing one. */}
+        {card.groupedBecause && (
+          <p className="mt-1 max-w-3xl text-xs text-neutral-500">
+            <span className="font-medium text-neutral-600">Read as {card.split ? "configurations" : "one item"}:</span>{" "}
+            {card.groupedBecause}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-3">
         {open && pendingMembers.length > 0 && (

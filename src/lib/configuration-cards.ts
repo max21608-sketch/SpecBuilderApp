@@ -40,6 +40,7 @@ import {
   groupItemsByCode,
   measuredKey,
   measuredRows,
+  codeGroupFor,
   variantLettersByItem,
   type StagedDrawings,
   type DrawingItem,
@@ -111,6 +112,18 @@ export type ReviewCard<R> =
        * for any run where nothing allocated a variant letter.
        */
       split: boolean;
+      /**
+       * WHY these pages were put together, in the model's own words, quoting
+       * them — or null on a version 1 run, where a page count decided it and
+       * there is no reason to give.
+       *
+       * It is on the card because the grouping is the most consequential thing
+       * the card asserts: split the wrong way and one armchair becomes several
+       * BWS jobs, or several chairs collapse into one. A reviewer settles that
+       * by reading this against the pages, which is the same job as checking a
+       * dimension against its drawing.
+       */
+      groupedBecause: string | null;
       /** The folded code, which is what the grouping is keyed on. */
       code: string;
       /** The code as the first page printed it — what a chip says. */
@@ -239,7 +252,7 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
   doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
 ): ReviewCard<R>[] {
   const letters = variantLettersByItem(items, doc);
-  const groups = groupItemsByCode(items);
+  const groups = groupItemsByCode(items, doc);
   const cards: ReviewCard<R>[] = [];
   const grouped = new Set<string>();
 
@@ -279,6 +292,7 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
       kind: "configurations",
       id: `code:${code}`,
       split,
+      groupedBecause: codeGroupFor(doc ?? { schemaVersion: 1 }, group[0]!.itemCodeRaw)?.evidence ?? null,
       code,
       codeRaw: group[0]!.itemCodeRaw ?? code,
       name: group.find((item) => item.itemNameRaw)?.itemNameRaw ?? null,

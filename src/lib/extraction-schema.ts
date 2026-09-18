@@ -552,15 +552,22 @@ export const DRAWINGS_TOOL = {
         type: "array",
         maxItems: MAX_DRAWING_ITEMS,
         description:
-          "One entry for every item code you reported on MORE THAN ONE page. Omit a code drawn only once.",
+          "One entry for every item you reported on MORE THAN ONE page, INCLUDING an item whose pages title it differently. " +
+          "Omit an item that appears on one page only.",
         items: {
           type: "object",
           additionalProperties: false,
           properties: {
-            itemCodeRaw: {
-              type: "string",
-              maxLength: MAX_SHORT,
-              description: "The code, exactly as you reported it on those pages.",
+            itemCodes: {
+              type: "array",
+              minItems: 1,
+              maxItems: MAX_VIEW_REGIONS,
+              items: { type: "string", maxLength: MAX_SHORT },
+              description:
+                "Every code or title you reported for this item, exactly as reported, FIRST the one a client's bill of " +
+                "quantities would use. Pages often title one item differently — a specification sheet headed 'S-200' and " +
+                "its shop drawing headed 'MUR.2 ARMCHAIR' in the title block are the same chair, and the bill says S-200. " +
+                "List both; put S-200 first.",
             },
             pages: {
               type: "array",
@@ -581,7 +588,13 @@ export const DRAWINGS_TOOL = {
             },
             evidence: {
               type: "string",
-              maxLength: MAX_SHORT,
+              // MAX_NOTE, not MAX_SHORT. This is the sentence that decides
+              // whether one armchair becomes one BWS job or several, and a
+              // reviewer settles it by reading it against two pages -- so it
+              // has to be allowed to name both pages, what each is, and what
+              // they agree about. The first real read wrote 480 characters
+              // doing exactly that and `MAX_SHORT` (300) threw it away.
+              maxLength: MAX_NOTE,
               description:
                 "What on the pages tells you that, quoting them — \"page 1 is the specification sheet and page 2 the shop " +
                 "drawing of the same chair, both stating Tibor Blob Amber Fern\", \"the sheets are titled OPTION A and " +
@@ -672,10 +685,22 @@ export const RawDrawingDimension = RawDrawingObservation.extend({
  * is the one that turns an item into several BWS jobs.
  */
 export const RawCodeGroup = z.object({
-  itemCodeRaw: z.string().max(MAX_SHORT),
+  // PLURAL, and the first is the one the bill would use. A group's pages
+  // routinely title one item differently -- Panther's S-200 is headed `S-200`
+  // on its specification sheet and `MUR.2 ARMCHAIR` in the shop drawing's
+  // title block -- so a single code cannot name the group, and asking for one
+  // produced the compound string "S-200 / MLR 2 ARMCHAIR", which matched
+  // neither page.
+  itemCodes: z.array(z.string().max(MAX_SHORT)).min(1).max(MAX_VIEW_REGIONS),
   pages: z.array(z.number().int().min(1).max(100_000)).max(MAX_VIEW_REGIONS).catch([]).default([]),
   relationship: z.enum(["one_item", "configurations", "unclear"]).catch("unclear").default("unclear"),
-  evidence: nullableText(MAX_SHORT).catch(null).default(null),
+  // `.catch(null)` keeps a paid run alive when the evidence is malformed, and
+  // it is also how the best output of the first real read was silently lost:
+  // the model wrote 480 useful characters, the bound was 300, and the row
+  // arrived with `evidence: null` and nothing anywhere saying why. The bound is
+  // the fix; the catch stays, because failing a charged call over a sentence
+  // costs more than losing the sentence.
+  evidence: nullableText(MAX_NOTE).catch(null).default(null),
 });
 
 export type RawCodeGroup = z.infer<typeof RawCodeGroup>;

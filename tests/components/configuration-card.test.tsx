@@ -267,7 +267,7 @@ describe("a card that is not splitting anything", () => {
     schemaVersion: 2 as const,
     codeGroups: [
       {
-        itemCodeRaw: "S-200",
+        itemCodes: ["S-200"],
         pages: [1, 2],
         relationship: "one_item" as const,
         evidence: "the specification sheet and the shop drawing of one chair",

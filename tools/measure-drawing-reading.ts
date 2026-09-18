@@ -165,7 +165,7 @@ function measure(staged: StagedDrawings, counts: Counts, label: string, notes: s
   const guesses = staged.schemaVersion !== 2;
   if (!guesses) counts.runsV2 += 1;
   const letters = variantLettersByItem(staged.items, staged);
-  const groups = groupItemsByCode(staged.items);
+  const groups = groupItemsByCode(staged.items, staged);
 
   for (const [code, group] of groups) {
     if (group.length < 2) continue;

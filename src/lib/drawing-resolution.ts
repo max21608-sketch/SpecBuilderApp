@@ -25,6 +25,7 @@ import {
   occupancyThrough,
   resolveDrawingTargets,
   targetRecordIds,
+  canonicalCode,
   variantLettersByItem,
   type DrawingBlocker,
   type DrawingResolution,
@@ -177,7 +178,10 @@ export function resolveStagedRun(
 ): ResolvedItem[] {
   const letters = variantLettersByItem(staged.items, staged);
   return staged.items.map((item) => {
-    const resolution = resolveDrawingTargets(item.itemCodeRaw, context.records);
+    // THE CANONICAL CODE, not the page's own heading. A shop drawing titled
+    // `MUR.2 ARMCHAIR` is the S-200 the bill lists, and matching on its title
+    // block would leave it an item no record carries.
+    const resolution = resolveDrawingTargets(canonicalCode(staged, item.itemCodeRaw), context.records);
     const targets = targetRecordIds(item, resolution);
     const variantLabel = letters.get(item.id) ?? null;
 

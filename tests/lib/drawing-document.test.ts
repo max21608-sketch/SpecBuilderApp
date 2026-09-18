@@ -22,6 +22,8 @@ import {
   unitSourceOf,
   stageDrawings,
   assertStagedDrawings,
+  canonicalCode,
+  groupItemsByCode,
   classifyCallout,
   variantLettersByItem,
   hasPendingObservations,
@@ -1605,7 +1607,7 @@ describe("one item drawn twice, or two things to make", () => {
     return [...variantLettersByItem(doc.items, doc).values()];
   };
   const group = (relationship: RawCodeGroup["relationship"]): RawCodeGroup => ({
-    itemCodeRaw: "S-200",
+    itemCodes: ["S-200"],
     pages: [1, 2],
     relationship,
     evidence: "the specification sheet and the shop drawing of one chair",
@@ -1629,6 +1631,43 @@ describe("one item drawn twice, or two things to make", () => {
 
   it("letters A and B only when the model says they are configurations", () => {
     expect(lettersFor([group("configurations")])).toEqual(["A", "B"]);
+  });
+
+  it("groups pages that TITLE the item differently, under the code the bill uses", () => {
+    // Panther's S-200: the specification sheet is headed `S-200` and the shop
+    // drawing's title block reads `MUR.2 ARMCHAIR`. The first version 2 read of
+    // it produced two separate cards and an item no record could be found for,
+    // because the grouping key was each page's own heading.
+    const doc = assertStagedDrawings(
+      stageDrawings(
+        [rawItem({ itemCodeRaw: "S-200", page: 1 }), rawItem({ itemCodeRaw: "MUR.2 ARMCHAIR", page: 2 })],
+        FIELDS,
+        null,
+        null,
+        null,
+        [{ itemCodes: ["S-200", "MUR.2 ARMCHAIR"], pages: [1, 2], relationship: "one_item", evidence: "same chair" }],
+      ),
+      FIELDS,
+    );
+    expect(canonicalCode(doc, "MUR.2 ARMCHAIR")).toBe("S-200");
+    expect([...groupItemsByCode(doc.items, doc).keys()]).toEqual(["S200"]);
+    expect([...variantLettersByItem(doc.items, doc).values()]).toEqual([null, null]);
+  });
+
+  it("drops a code group it cannot read rather than throwing on it", () => {
+    // STAGED JSON IS DATA FROM THE PAST, and this shape has already changed
+    // once: the first version 2 read wrote `itemCodeRaw: "S-200 / MLR 2
+    // ARMCHAIR"`, and an hour later the field was `itemCodes: string[]`.
+    // `assertStagedDrawings` casts rather than validates, so TypeScript said
+    // the old rows could not exist and the database said otherwise — every
+    // screen reading that run threw `Cannot read properties of undefined`.
+    const doc = {
+      ...assertStagedDrawings(stageDrawings(pages("S-200"), FIELDS, null, null), FIELDS),
+      schemaVersion: 2 as const,
+      codeGroups: [{ itemCodeRaw: "S-200 / MLR 2 ARMCHAIR", pages: [1, 2], relationship: "configurations" }],
+    } as unknown as Parameters<typeof variantLettersByItem>[1];
+    expect(() => variantLettersByItem(pages("S-200").map((raw, index) => ({ ...stageDrawings([raw], FIELDS, null, null).items[0]!, id: `p${index}` })), doc)).not.toThrow();
+    expect(canonicalCode(doc, "S-200")).toBe("S-200");
   });
 
   it("leaves a version 1 run counting pages, because that is how it was staged", () => {

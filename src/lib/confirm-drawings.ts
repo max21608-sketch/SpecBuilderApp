@@ -39,6 +39,7 @@ import {
   occupancyThrough,
   resolveDrawingTargets,
   targetRecordIds,
+  canonicalCode,
   variantLettersByItem,
   type DrawingItem,
   type DrawingObservation,
@@ -264,7 +265,10 @@ export async function confirmDrawingItem(
   }
 
   const records = await loadRecords(txn, run.projectId);
-  const resolution = resolveDrawingTargets(item.itemCodeRaw, records);
+  // The canonical code, matching `resolveStagedRun` exactly: the screen and the
+  // confirm must resolve an item the same way or a card commits somewhere the
+  // reviewer was not shown.
+  const resolution = resolveDrawingTargets(canonicalCode(run.staged, item.itemCodeRaw), records);
   const targets = targetRecordIds(item, resolution);
 
   // The card-changed guard, in its fan-out form. A record the live resolution

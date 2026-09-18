@@ -209,8 +209,13 @@ where you can see it on the page. Never infer one from how large the number is, 
 never append a unit to the figure — a wrong unit is worse than none, because it reads as a real
 measurement and nothing afterwards questions it.
 
-ONE ITEM DRAWN TWICE, OR TWO THINGS TO MAKE. For every code you reported on more than one page, add
-a \`codeGroups\` entry saying which it is. \`one_item\` is the common case: a specification sheet and
+ONE ITEM DRAWN TWICE, OR TWO THINGS TO MAKE. For every item you reported on more than one page, add
+a \`codeGroups\` entry saying which it is.
+
+THE PAGES MAY TITLE IT DIFFERENTLY, and that is not two items. A specification sheet headed "S-200"
+and a shop drawing whose title block reads "MUR.2 ARMCHAIR" are one chair; report each page's own
+heading as you read it, and then list BOTH in that group's \`itemCodes\` with the one a bill of
+quantities would use FIRST. Without that the shop drawing is an item no record can be found for. \`one_item\` is the common case: a specification sheet and
 its shop drawing, a general view and a detail, an elevation and a section — the same piece of
 furniture described in different ways, often in different vocabularies. One page may name a fabric
 "Tibor Blob Amber Fern" and the other file the same cloth under a code like "CLO003 A"; that is one

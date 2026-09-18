@@ -42,11 +42,11 @@ earlier the SAME DAY (2026-09-18, the long comment above the grid in
 label inside `RecordDetails` — is not where the right column's box top is, so
 `items-start` aligns two things that do not begin at the same place.
 
-**One thing to check with Max before fixing**: "misaligned" may also be about
-the CROP rather than the column. The 3D view in the screenshot is off-centre in
-its box, with a sliver of the neighbouring view still showing down the left
-edge. That would be a confirmed crop being what it is rather than a layout
-fault, and a different job.
+**It is the COLUMN, confirmed by Max on the day.** Asked whether he meant the
+column or the crop, the answer was the column. The 3D view also sits off-centre
+in its box with a sliver of the neighbouring view down the left edge — that is
+a confirmed crop being what it is, it is NOT what was reported here, and
+changing it is not part of this.
 
 ### A gate's count folds "nowhere to record it" into "outstanding"
 

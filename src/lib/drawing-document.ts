@@ -217,7 +217,8 @@ export type ItemView = {
  * model can decline rather than guess.
  */
 export type StagedCodeGroup = {
-  itemCodeRaw: string;
+  /** Every code its pages title it with; the FIRST is the one the bill uses. */
+  itemCodes: string[];
   pages: number[];
   relationship: "one_item" | "configurations" | "unclear";
   evidence: string | null;
@@ -1408,10 +1409,34 @@ export function stageDrawings(
         tbc: part.tbc,
       }));
     });
-    const unitGuess = suggestUnit([
-      ...dimensions.map((dimension) => dimension.valueRaw),
-      ...combined.map((part) => part.valueRaw),
-    ]);
+    // ======================================================================
+    // THE UNIT VOTE IS TAKEN OVER THE OVERALL FIGURES WHERE THE MODEL NAMED
+    // THEM, AND OVER THE WHOLE PAGE WHERE IT DID NOT.
+    //
+    // `suggestUnit` abstains on a page whose figures disagree about magnitude,
+    // and a shop drawing always disagrees: S-200's second page prints 5, 50,
+    // 110 and 125 beside 840 and 790, because most figures on a shop drawing
+    // are COMPONENTS and components are small whatever the page is drawn in.
+    // So the whole-page vote abstains and every figure came back unitless,
+    // which the card reports as four `unit_missing` blockers.
+    //
+    // CLAUDE.md's resolution order has always had this step -- "the OVERALL
+    // figures agreeing, once something knows which they are" -- and until now
+    // the only thing that knew was `applyViewGuesses`, at read time, after
+    // sorting the figures by size. The model states it outright, so the step
+    // moves to staging where it belongs and stops depending on a guess.
+    //
+    // It is still the page's own figures agreeing, narrowed to the figures the
+    // question is about. Where the overall figures do not share a scale the
+    // unit stays blank and amber, which is the honest answer and the existing
+    // treatment.
+    // ======================================================================
+    const overallFigures = dimensions.filter((dimension) => dimension.slot !== null || dimension.isOverall === true);
+    const unitGuess = suggestUnit(
+      overallFigures.length > 0
+        ? [...overallFigures.map((dimension) => dimension.valueRaw), ...combined.map((part) => part.valueRaw)]
+        : [...dimensions.map((dimension) => dimension.valueRaw), ...combined.map((part) => part.valueRaw)],
+    );
     const views = usableViews(item.viewRegions, item.page);
     const taken = new Set<string>();
     const observations: DrawingObservation[] = [];
@@ -1646,7 +1671,7 @@ export function stageDrawings(
     documentNotes,
     items: staged,
     codeGroups: codeGroups.map((group) => ({
-      itemCodeRaw: group.itemCodeRaw,
+      itemCodes: group.itemCodes,
       pages: group.pages,
       relationship: group.relationship,
       evidence: group.evidence,
@@ -1881,9 +1906,43 @@ export function measuredKey(observation: DrawingObservation): string | null {
   return `${view}|${figure}|${observation.unit ?? ""}`;
 }
 
+/**
+ * One measurement stated twice is one measurement.
+ *
+ * WITHIN A VIEW this has always collapsed: a front elevation prints 5, 5, 27,
+ * 27 because the chair is symmetrical.
+ *
+ * ACROSS VIEWS IT USED TO KEEP BOTH, DELIBERATELY, and that is now wrong for
+ * one specific case. An overall dimension is drawn on every view that shows it,
+ * which is a fact about orthographic projection: S-200's width 840 appears on
+ * the front, the back and the plan. That REPETITION WAS THE EVIDENCE
+ * `guessSlotsFromViews` read the overall size from, so collapsing it would have
+ * tidied the table by breaking the guess — and the rule was written down as
+ * such.
+ *
+ * There is no guess left to break. The model states which figure fills which
+ * slot, and the first version 2 read of S-200 put ten rows on a card for four
+ * measurements: W 840 three times, D 790 three times, H 720 twice, SH 460
+ * twice. So where two rows claim the SAME SLOT with the SAME FIGURE, they are
+ * one statement made on several views and the first is kept.
+ *
+ * SAME SLOT, DIFFERENT FIGURE IS NEVER COLLAPSED. That is two views disagreeing
+ * about the size of the chair, and it has to reach the card, where
+ * `composeDimensionCell` raises `duplicate_slot` and a person decides.
+ */
 function dedupeMeasured(observations: DrawingObservation[]): DrawingObservation[] {
   const seen = new Set<string>();
+  const slotSeen = new Set<string>();
   return observations.filter((observation) => {
+    if (observation.dimensionSlot) {
+      const figure = parseDimensionFigure(observation.value ?? observation.valueRaw).figure;
+      if (figure !== null) {
+        const key = `${observation.dimensionSlot}|${figure}|${observation.unit ?? ""}`;
+        if (slotSeen.has(key)) return false;
+        slotSeen.add(key);
+        return true;
+      }
+    }
     const key = measuredKey(observation);
     if (key === null) return true;
     if (seen.has(key)) return false;
@@ -2179,10 +2238,71 @@ export function occupancyThrough(occupied: OccupiedSlots, writeTo: ReadonlyMap<s
  * A page with no code at all is not in any group: it is its own card, and it
  * can never commit.
  */
-export function groupItemsByCode(items: readonly DrawingItem[]): Map<string, DrawingItem[]> {
+/**
+ * The code an item is KNOWN BY, which is not always the code its page is headed
+ * with.
+ *
+ * Panther's S-200 is headed `S-200` on its specification sheet and
+ * `MUR.2 ARMCHAIR` in the shop drawing's title block. Both are what the page
+ * says and both are staged as such — but the bill of quantities says S-200, so
+ * that is the code the two pages group under and the code the records resolve
+ * against. A `codeGroup` names every title its pages carry and puts the bill's
+ * one first; without that the shop drawing is an item nothing can place, which
+ * is what the first version 2 read produced.
+ *
+ * Version 1 has no groups and every page is known by its own heading.
+ */
+/**
+ * The code groups on a staged document, TOLERANTLY.
+ *
+ * `assertStagedDrawings` casts rather than validates, so a staged document is
+ * whatever was written on the day it was staged — and this one has already
+ * changed shape once. The first version 2 read of S-200 stored
+ * `{ itemCodeRaw: "S-200 / MLR 2 ARMCHAIR" }`; an hour later the field was
+ * `itemCodes: string[]`, because one string cannot name a group whose pages
+ * title the item differently. TypeScript says the old rows do not exist and the
+ * database says otherwise, and the app crashed reading them.
+ *
+ * A group this cannot make sense of is DROPPED, not repaired: the consequence
+ * is an item left whole and a reviewer asked, which is the safe end of this
+ * question. Guessing a code out of a compound string would be a new inference,
+ * in the function whose whole point is that there are none left.
+ */
+function codeGroupsOf(doc: Pick<StagedDrawings, "schemaVersion" | "codeGroups"> | undefined): StagedCodeGroup[] {
+  if (doc?.schemaVersion !== 2) return [];
+  const groups: StagedCodeGroup[] = [];
+  for (const group of doc.codeGroups ?? []) {
+    const codes = Array.isArray(group?.itemCodes)
+      ? group.itemCodes.filter((code): code is string => typeof code === "string" && code.trim() !== "")
+      : [];
+    if (codes.length === 0) continue;
+    groups.push({ ...group, itemCodes: codes });
+  }
+  return groups;
+}
+
+export function canonicalCode(
+  doc: Pick<StagedDrawings, "schemaVersion" | "codeGroups"> | undefined,
+  itemCodeRaw: string | null,
+): string | null {
+  const raw = (itemCodeRaw ?? "").trim();
+  if (!raw) return null;
+  const folded = normaliseRef(raw);
+  for (const group of codeGroupsOf(doc)) {
+    if (group.itemCodes.some((code) => normaliseRef(code) === folded)) {
+      return group.itemCodes[0] ?? raw;
+    }
+  }
+  return raw;
+}
+
+export function groupItemsByCode(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): Map<string, DrawingItem[]> {
   const byCode = new Map<string, DrawingItem[]>();
   for (const item of items) {
-    const code = normaliseRef(item.itemCodeRaw ?? "");
+    const code = normaliseRef(canonicalCode(doc, item.itemCodeRaw) ?? "");
     if (!code) continue;
     byCode.set(code, [...(byCode.get(code) ?? []), item]);
   }
@@ -2232,13 +2352,13 @@ export function variantLettersByItem(
   items: readonly DrawingItem[],
   doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
 ): Map<string, string | null> {
-  const byCode = groupItemsByCode(items);
+  const byCode = groupItemsByCode(items, doc);
   const letters = new Map<string, string | null>();
-  // Keyed the way the group is, so `S-201` and `s 201` cannot be looked up
-  // differently from the way they were grouped.
+  // Keyed the way the group is — on the canonical code, folded — so `S-201` and
+  // `s 201` cannot be looked up differently from the way they were grouped.
   const relationship = new Map<string, StagedCodeGroup["relationship"]>();
-  for (const group of doc?.codeGroups ?? []) {
-    relationship.set(normaliseRef(group.itemCodeRaw ?? ""), group.relationship);
+  for (const group of codeGroupsOf(doc)) {
+    relationship.set(normaliseRef(group.itemCodes[0] ?? ""), group.relationship);
   }
   const version2 = doc?.schemaVersion === 2;
 
@@ -2261,10 +2381,9 @@ export function codeGroupFor(
   doc: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
   itemCodeRaw: string | null,
 ): StagedCodeGroup | null {
-  if (doc.schemaVersion !== 2) return null;
   const code = normaliseRef(itemCodeRaw ?? "");
   if (!code) return null;
-  return (doc.codeGroups ?? []).find((group) => normaliseRef(group.itemCodeRaw ?? "") === code) ?? null;
+  return codeGroupsOf(doc).find((group) => group.itemCodes.some((entry) => normaliseRef(entry) === code)) ?? null;
 }
 
 export function hasPendingObservations(doc: StagedDrawings): boolean {
