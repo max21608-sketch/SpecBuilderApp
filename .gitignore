@@ -52,3 +52,7 @@ db/backups/
 # Generated working documents (tools/tgq-checklist.mjs). The generator is the
 # artefact worth keeping; a filled-in copy comes back by email, not by git.
 /out/
+
+# Documents the demo writes for somebody to upload live on a call
+# (tools/qa-demo-project.ts). Generated, never source.
+demo-documents/
