@@ -7,19 +7,30 @@
 // each file — made three unrelated runs out of one delivery, in whatever order
 // somebody happened to click.
 //
-// EVERY FILE'S KIND IS DECLARED, and the list will not start until each one is
-// set. A BOQ and an FF&E schedule are both .xlsx, so the bytes cannot say which
-// pipeline a file belongs in; guessing would eventually feed a schedule to the
-// BOQ parser and make a project's worth of wrong records. The filename hint
-// below is shown as TEXT next to the select, never used to choose for you.
+// ============================================================================
+// ONE PRESS. THE APP WORKS OUT WHAT EACH FILE IS.
 //
-// STARTING AN INTAKE SPENDS MONEY, and this screen is where that is said.
+// Every file's kind used to be typed into a dropdown, and the reason was sound:
+// a bill of quantities and an FF&E schedule are both .xlsx, so the bytes cannot
+// say which pipeline a file belongs in, and a schedule fed to the BOQ parser
+// would stage a project's worth of wrong records. A filename hint sat beside
+// each row as grey text the screen refused to act on.
 //
-// Every specification document in the queue is sent to the model as it
-// registers -- see /api/imports, which explains why the per-document press
-// went away. So the count and the charge are stated here, before anything is
-// uploaded, rather than N times on the screen after. A bill of quantities is
-// not part of that: it is parsed by code and costs nothing.
+// A filename is not the only evidence a document carries. Its cover page, its
+// sheet names and its columns all say what it is, and a person settles it in
+// two seconds by looking. So the press uploads each file, asks the model what
+// it is, fills the box in and reads it — and every answer is FLAGGED with the
+// evidence it was read from, because the reviewer is the one who decides.
+//
+// A FILE THE MODEL CANNOT SETTLE IS HELD, not guessed at. It stays on this
+// screen with an empty box and nothing is read for it, which costs nothing.
+// Choosing one by hand always wins over the suggestion.
+//
+// STARTING AN INTAKE SPENDS MONEY, and this screen is still where that is said:
+// one small call per file to work out what it is, then one full read per
+// specification document. A bill of quantities is parsed by code and costs
+// nothing to read.
+// ============================================================================
 import { useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { apiFetch } from "@/lib/api-fetch";
@@ -45,30 +56,41 @@ const CHOICES: { value: string; label: string; importType: "boq" | "spec_documen
   { value: "other", label: DOCUMENT_KIND_LABELS.other, importType: "spec_document", documentKind: "other" },
 ];
 
-/** A guess shown as a hint for a HUMAN to accept or ignore. Never applied. */
-function hint(filename: string): string | null {
-  const lower = filename.toLowerCase();
-  if (lower.includes("preamble")) return "looks like a preamble";
-  if (lower.includes("boq") || lower.includes("bill of")) return "looks like a bill of quantities";
-  if (lower.includes("drawing")) return "looks like drawings";
-  if (lower.endsWith(".eml")) return "looks like a saved email";
-  return null;
+/** The app's two fields, back to the one word this screen's dropdown uses. */
+function choiceFor(decision: { importType: string; documentKind: string | null } | null): string {
+  if (!decision) return "";
+  return (
+    CHOICES.find(
+      (choice) => choice.importType === decision.importType && choice.documentKind === decision.documentKind,
+    )?.value ?? ""
+  );
 }
 
 type Queued = {
   key: string;
   file: File;
+  /** A person's own choice, which always beats the suggestion. */
   choice: string;
-  status: "waiting" | "uploading" | "registering" | "done" | "failed";
+  /** What the model read it as, and why. Never applied without being shown. */
+  suggested: string;
+  evidence: string | null;
+  status: "waiting" | "uploading" | "reading" | "registering" | "needs-kind" | "done" | "failed";
+  /** Kept so a file held for a kind is not uploaded a second time. */
+  pathname: string | null;
+  registrationRequestId: string;
   progress: number;
   error: string | null;
 };
+
+/** What will be used for a file: what somebody chose, else what was read. */
+const kindOf = (item: Queued) => item.choice || item.suggested;
 
 export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId: string; onUploaded?: () => void }) {
   const [queue, setQueue] = useState<Queued[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [batchId, setBatchId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   function addFiles(files: FileList | null) {
@@ -80,7 +102,13 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         key: `${file.name}-${file.size}-${crypto.randomUUID()}`,
         file,
         choice: "",
+        suggested: "",
+        evidence: null,
         status: "waiting" as const,
+        pathname: null,
+        // Generated ONCE per file and reused on every retry, so a lost response
+        // cannot register the same upload twice.
+        registrationRequestId: crypto.randomUUID(),
         progress: 0,
         error: null,
       })),
@@ -90,96 +118,152 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
   const update = (key: string, patch: Partial<Queued>) =>
     setQueue((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
 
-  const undeclared = queue.filter((item) => item.status === "waiting" && !item.choice).length;
   const pending = queue.filter((item) => item.status !== "done");
-  // What will actually be charged: a spec document each, and never the bill.
-  const toRead = pending.filter(
-    (item) => CHOICES.find((choice) => choice.value === item.choice)?.importType === "spec_document",
-  );
+  const held = queue.filter((item) => item.status === "needs-kind");
+  const heldAndAnswered = held.filter((item) => item.choice);
 
   async function start() {
-    if (queue.length === 0 || undeclared > 0) return;
+    if (pending.length === 0) return;
     setBusy(true);
     setError(null);
 
     try {
-      const batch = await apiFetch<{ batch: { id: string } }>(`/api/projects/${projectId}/batches`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label: `${queue.length} document${queue.length === 1 ? "" : "s"}` }),
-      });
-      if (!batch.ok) {
-        setError(batch.error);
-        return;
+      let id = batchId;
+      if (!id) {
+        const batch = await apiFetch<{ batch: { id: string } }>(`/api/projects/${projectId}/batches`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ label: `${queue.length} document${queue.length === 1 ? "" : "s"}` }),
+        });
+        if (!batch.ok) {
+          setError(batch.error);
+          return;
+        }
+        id = batch.data.batch.id;
+        setBatchId(id);
       }
-      const batchId = batch.data.batch.id;
 
       // Sequential, so a failure names the file it belongs to and the others
       // still land. A pack whose drawings failed is still a pack with a bill.
       for (const item of queue) {
         if (item.status === "done") continue;
-        const choice = CHOICES.find((entry) => entry.value === item.choice);
-        if (!choice) continue;
+        // HELD FOR A KIND AND STILL UNANSWERED. Skipped rather than guessed at:
+        // reading it under the wrong prompt spends a call on output that
+        // answers a different question.
+        if (item.status === "needs-kind" && !item.choice) continue;
 
-        // Generated ONCE per file and reused on retry, so a lost response
-        // cannot register the same upload twice.
-        const registrationRequestId = crypto.randomUUID();
-        update(item.key, { status: "uploading", progress: 0, error: null });
-
+        let pathname = item.pathname;
         try {
-          // Bytes go browser -> blob store directly, never through a route
-          // handler: a real drawing set is well over the request-body ceiling.
-          // The store is PRIVATE and stays that way — NDA client documents.
-          const blob = await upload(`${projectUploadPrefix(projectId)}${item.file.name}`, item.file, {
-            access: "private",
-            handleUploadUrl: "/api/uploads/token",
-            clientPayload: projectId,
-            onUploadProgress: ({ percentage }) => update(item.key, { progress: Math.round(percentage) }),
-          });
+          if (!pathname) {
+            update(item.key, { status: "uploading", progress: 0, error: null });
+            // Bytes go browser -> blob store directly, never through a route
+            // handler: a real drawing set is well over the request-body ceiling.
+            // The store is PRIVATE and stays that way — NDA client documents.
+            const blob = await upload(`${projectUploadPrefix(projectId)}${item.file.name}`, item.file, {
+              access: "private",
+              handleUploadUrl: "/api/uploads/token",
+              clientPayload: projectId,
+              onUploadProgress: ({ percentage }) => update(item.key, { progress: Math.round(percentage) }),
+            });
+            pathname = blob.pathname;
+            update(item.key, { pathname });
+          }
+        } catch (cause) {
+          const detail = cause instanceof Error ? cause.message : String(cause);
+          update(item.key, { status: "failed", error: `Could not be stored: ${detail}` });
+          continue;
+        }
 
-          update(item.key, { status: "registering" });
-          const res = await apiFetch<{ importId: string; autoRead?: { dispatched: boolean; error?: string } }>("/api/imports", {
+        // WHAT IS IT? Only where nobody has said. A person's choice is never
+        // second-guessed, and a file already classified is never re-read.
+        let choice = kindOf(item);
+        if (!choice) {
+          update(item.key, { status: "reading" });
+          const asked = await apiFetch<{
+            decision: { importType: string; documentKind: string | null } | null;
+            evidence?: string;
+            titleText?: string | null;
+          }>("/api/imports/classify", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
               projectId,
-              batchId,
-              importType: choice.importType,
-              documentKind: choice.documentKind,
-              pathname: blob.pathname,
+              pathname,
               filename: item.file.name,
               contentType: item.file.type,
-              size: item.file.size,
-              registrationRequestId,
             }),
           });
-          if (!res.ok) {
-            update(item.key, { status: "failed", error: res.error });
+          const suggested = asked.ok ? choiceFor(asked.data.decision) : "";
+          const evidence = asked.ok ? (asked.data.evidence ?? null) : asked.error;
+          update(item.key, { suggested, evidence });
+          choice = suggested;
+          if (!choice) {
+            // Uploaded and kept. A second press registers it once somebody has
+            // said what it is, with no second upload and no second reading.
+            update(item.key, { status: "needs-kind" });
             continue;
           }
-          // Stored and registered, but its read did not reach the queue. NOT a
-          // failed upload -- the file is there and the pack screen offers the
-          // retry -- so it is said next to the file rather than thrown away.
-          const autoRead = res.data.autoRead;
-          update(item.key, {
-            status: "done",
-            progress: 100,
-            error: autoRead && !autoRead.dispatched ? (autoRead.error ?? "Stored, but not queued for reading.") : null,
-          });
-        } catch (cause) {
-          const detail = cause instanceof Error ? cause.message : String(cause);
-          update(item.key, { status: "failed", error: `Could not be stored: ${detail}` });
         }
+
+        const entry = CHOICES.find((option) => option.value === choice);
+        if (!entry) {
+          update(item.key, { status: "needs-kind" });
+          continue;
+        }
+
+        update(item.key, { status: "registering" });
+        const res = await apiFetch<{ importId: string; autoRead?: { dispatched: boolean; error?: string } }>("/api/imports", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            projectId,
+            batchId: id,
+            importType: entry.importType,
+            documentKind: entry.documentKind,
+            pathname,
+            filename: item.file.name,
+            contentType: item.file.type,
+            size: item.file.size,
+            registrationRequestId: item.registrationRequestId,
+          }),
+        });
+        if (!res.ok) {
+          update(item.key, { status: "failed", error: res.error });
+          continue;
+        }
+        // Stored and registered, but its read did not reach the queue. NOT a
+        // failed upload -- the file is there and the pack screen offers the
+        // retry -- so it is said next to the file rather than thrown away.
+        const autoRead = res.data.autoRead;
+        update(item.key, {
+          status: "done",
+          progress: 100,
+          error: autoRead && !autoRead.dispatched ? (autoRead.error ?? "Stored, but not queued for reading.") : null,
+        });
       }
 
       onUploaded?.();
-      window.location.href = `/dashboard/projects/${projectId}/intake/${batchId}`;
+      // ONLY WHEN NOTHING IS STILL WAITING ON A PERSON. Navigating away from a
+      // file the app could not identify would lose it — it is uploaded, it is
+      // in no batch row, and this screen is the only place that knows.
+      setQueue((current) => {
+        if (!current.some((row) => row.status === "needs-kind" || row.status === "failed")) {
+          window.location.href = `/dashboard/projects/${projectId}/intake/${id}`;
+        }
+        return current;
+      });
     } finally {
       // Always reset, so an HTML error page or a network failure cannot leave
       // the button disabled with no way back.
       setBusy(false);
     }
   }
+
+  const label = busy
+    ? "Working…"
+    : held.length > 0
+      ? `Read the ${heldAndAnswered.length} you have named`
+      : `Start intake${pending.length ? ` (${pending.length})` : ""}`;
 
   return (
     <div className="mt-3 border border-neutral-200 rounded-lg bg-white p-3">
@@ -228,49 +312,62 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
 
       {queue.length > 0 && (
         <ul className="mt-3 divide-y divide-neutral-100 border border-neutral-200 rounded">
-          {queue.map((item) => (
-            <li key={item.key} className="flex flex-wrap items-center gap-2 px-3 py-2">
-              <span className="text-sm text-neutral-900 flex-1 min-w-[12rem] truncate" title={item.file.name}>
-                {item.file.name}
-                {hint(item.file.name) && (
-                  <span className="ml-2 text-xs text-neutral-400">{hint(item.file.name)}</span>
-                )}
-              </span>
+          {queue.map((item) => {
+            // AMBER MEANS THE APP ANSWERED THIS AND NOBODY HAS CHECKED. The
+            // same treatment a guessed dimension slot gets on a review card.
+            const unchecked = Boolean(item.suggested) && !item.choice;
+            return (
+              <li key={item.key} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <span className="text-sm text-neutral-900 flex-1 min-w-[12rem] truncate" title={item.file.name}>
+                  {item.file.name}
+                </span>
 
-              <select
-                value={item.choice}
-                onChange={(event) => update(item.key, { choice: event.target.value })}
-                disabled={busy || item.status === "done"}
-                className="border border-neutral-300 rounded px-2 py-1 text-sm text-neutral-900"
-              >
-                <option value="">What is this?</option>
-                {CHOICES.map((choice) => (
-                  <option key={choice.value} value={choice.value}>
-                    {choice.label}
-                  </option>
-                ))}
-              </select>
-
-              <span className="text-xs text-neutral-500 w-24 text-right">
-                {item.status === "uploading" && `${item.progress}%`}
-                {item.status === "registering" && "Registering…"}
-                {item.status === "done" && "Added"}
-                {item.status === "failed" && <span className="text-red-700">Failed</span>}
-              </span>
-
-              {item.status !== "done" && !busy && (
-                <button
-                  type="button"
-                  onClick={() => setQueue((current) => current.filter((row) => row.key !== item.key))}
-                  className="text-xs text-neutral-500 hover:text-neutral-900"
+                <select
+                  value={kindOf(item)}
+                  onChange={(event) => update(item.key, { choice: event.target.value })}
+                  disabled={busy || item.status === "done"}
+                  className={`border rounded px-2 py-1 text-sm text-neutral-900 ${
+                    unchecked ? "border-amber-400 bg-amber-50" : "border-neutral-300"
+                  }`}
                 >
-                  Remove
-                </button>
-              )}
+                  <option value="">What is this?</option>
+                  {CHOICES.map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
 
-              {item.error && <p className="w-full text-xs text-red-700">{item.error}</p>}
-            </li>
-          ))}
+                <span className="text-xs text-neutral-500 w-24 text-right">
+                  {item.status === "uploading" && `${item.progress}%`}
+                  {item.status === "reading" && "Looking…"}
+                  {item.status === "registering" && "Registering…"}
+                  {item.status === "needs-kind" && <span className="text-amber-700">Say which</span>}
+                  {item.status === "done" && "Added"}
+                  {item.status === "failed" && <span className="text-red-700">Failed</span>}
+                </span>
+
+                {item.status !== "done" && !busy && (
+                  <button
+                    type="button"
+                    onClick={() => setQueue((current) => current.filter((row) => row.key !== item.key))}
+                    className="text-xs text-neutral-500 hover:text-neutral-900"
+                  >
+                    Remove
+                  </button>
+                )}
+
+                {/* WHAT IT WAS READ FROM, so the suggestion can be checked
+                    against the file rather than taken on trust. */}
+                {item.evidence && (
+                  <p className={`w-full text-xs ${unchecked ? "text-amber-700" : "text-neutral-500"}`}>
+                    {item.evidence}
+                  </p>
+                )}
+                {item.error && <p className="w-full text-xs text-red-700">{item.error}</p>}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -278,36 +375,34 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         <button
           type="button"
           onClick={() => void start()}
-          disabled={busy || queue.length === 0 || undeclared > 0 || pending.length === 0}
+          disabled={busy || pending.length === 0 || (held.length > 0 && heldAndAnswered.length === 0)}
           className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
         >
-          {busy ? "Starting intake…" : `Start intake${pending.length ? ` (${pending.length})` : ""}`}
+          {label}
         </button>
-        {undeclared > 0 && (
-          <p className="text-xs text-neutral-500">
-            Say what {undeclared === 1 ? "the remaining file is" : `each of the ${undeclared} remaining files is`} first —
-            a BOQ and a schedule are both spreadsheets, so the file cannot say.
+        {held.length > 0 && (
+          <p className="text-xs text-amber-700">
+            {held.length === 1 ? "One file could not be identified" : `${held.length} files could not be identified`} —
+            say what {held.length === 1 ? "it is" : "they are"} and press again. Nothing has been read for{" "}
+            {held.length === 1 ? "it" : "them"}, so nothing has been charged.
           </p>
         )}
       </div>
 
-      {/* Stated before the press, with the count, because the press is what
-          spends the money. Deliberately not a confirm dialog: every document
-          in a tender pack is going to be read, and a modal per pack is
-          ceremony rather than a decision. */}
+      {/* Stated before the press, because the press is what spends the money.
+          Deliberately not a confirm dialog: every document in a tender pack is
+          going to be read, and a modal per pack is ceremony rather than a
+          decision. */}
       <p className="mt-2 text-xs text-neutral-500">
-        {toRead.length === 0 ? (
-          <>
-            A bill of quantities is read by code, not by the model, and costs nothing.
-          </>
+        {pending.length === 0 ? (
+          <>Drop the pack above. Nothing is read, and nothing is charged, until you press.</>
         ) : (
           <>
-            {toRead.length === 1
-              ? "The specification document is sent to the model as soon as it uploads"
-              : `All ${toRead.length} specification documents are sent to the model as soon as they upload`}
-            {" — "}
-            {toRead.length === 1 ? "one charged call" : `${toRead.length} separate charged calls`}, with no further
-            clicking. Reviewing what comes back is still yours.
+            One press: each file is stored, looked at to work out what it is, and then read. That is{" "}
+            {pending.length === 1 ? "one small call" : `${pending.length} small calls`} to identify{" "}
+            {pending.length === 1 ? "it" : "them"}, and a full charged read for every specification document — a bill of
+            quantities is read by code and costs nothing. Anything the app cannot identify waits for you rather than
+            being guessed at. What it decides is shown with its reasons, and reviewing what comes back is still yours.
           </>
         )}
       </p>
