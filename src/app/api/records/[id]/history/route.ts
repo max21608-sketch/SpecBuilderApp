@@ -6,6 +6,8 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { loadRecordHistory, compareRecordVersions } from "@/lib/change-history";
 import { loadRecordBaselines } from "@/lib/baselines";
+import { parseAtoms } from "@/lib/snapshot-diff";
+import type { StoredCell } from "@/lib/record-snapshot";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -34,7 +36,55 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     }
     const result = await compareRecordVersions(sql, id, a, b);
     if ("error" in result) return json({ ok: false, error: result.error }, 404);
-    return json({ ok: true, record: { id, label, itemDescription: String(record.item_description) }, ...result });
+
+    // ---- what the FILE said that day, and what this change did not touch ---
+    //
+    // Two different questions, and the screen asks both. The DIFF recomposes
+    // both ends with today's rules, so a change to the composer never shows as
+    // an edit on a record nobody touched; the STORED cells answer the other
+    // one — what BWS would have received on that date — and they are read, not
+    // recomposed, which is the whole reason 0012 keeps them.
+    //
+    // `unchanged` is the proof the diff cannot give on its own: a list that
+    // hides what did not move cannot show that nothing else did. Counted off
+    // the newer version's own atoms, against the keys the diff names.
+    const stored = await sql`
+      select atoms, cells from record_snapshots where record_id = ${id} and snapshot_no = ${b}
+    `;
+    const cells = ((stored[0]?.cells ?? []) as StoredCell[]).filter(
+      (cell) => String(cell.value ?? "").trim() !== "",
+    );
+    let unchanged: { key: string; label: string; value: string | null }[] = [];
+    if (stored[0]) {
+      try {
+        const atoms = parseAtoms(stored[0].atoms);
+        const touched = new Set(
+          [...result.diff.refs, ...result.diff.attributes, ...result.diff.answers].map((change) => change.key),
+        );
+        unchanged = [
+          ...atoms.refs
+            .filter((ref) => !touched.has(`${ref.system}:${ref.value}`))
+            .map((ref) => ({ key: `${ref.system}:${ref.value}`, label: ref.system, value: ref.value })),
+          ...atoms.attributes
+            .filter((attribute) => !touched.has(attribute.id))
+            .map((attribute) => ({ key: attribute.id, label: attribute.label, value: attribute.value })),
+          ...atoms.answers
+            .filter((answer) => !touched.has(answer.requirementId))
+            .map((answer) => ({ key: answer.requirementId, label: answer.prompt, value: answer.value })),
+        ];
+      } catch {
+        // A version a newer build wrote. The diff above already reported that;
+        // an empty unchanged list is better than failing the whole comparison.
+      }
+    }
+
+    return json({
+      ok: true,
+      record: { id, label, itemDescription: String(record.item_description) },
+      ...result,
+      cells,
+      unchanged,
+    });
   }
 
   // The named points this record sits inside, so the versions list can draw a

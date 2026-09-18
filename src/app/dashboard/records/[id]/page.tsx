@@ -1109,7 +1109,9 @@ function RecordView() {
 
         {/* NOT COLLAPSED ANY MORE. It was behind a toggle because it sat under
             four screens of checklist; on its own tab it can simply be the page. */}
-        {tab === "versions" && <RecordHistory recordId={record.id} reloadKey={historyKey} />}
+        {tab === "versions" && (
+          <RecordHistory recordId={record.id} projectId={record.project_id} reloadKey={historyKey} />
+        )}
       </PageBody>
     </>
   );
