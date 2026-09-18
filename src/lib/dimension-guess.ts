@@ -213,6 +213,9 @@ function seatHeight(
  * every MEASURED row on one item — a figure with a number — and it returns at
  * most one row per slot.
  */
+/** No guess at all: what a version 2 item needs, and what a card with no rows gets. */
+export const EMPTY_GUESS: DimensionGuess = { guesses: [], dispute: null };
+
 export function guessSlotsFromViews(rows: MeasuredRow[], itemName: string | null = null): DimensionGuess {
   // One entry per distinct figure: which families draw it, and the first row
   // on each family that does. The FIRST is deliberate — a figure drawn twice on

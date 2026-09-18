@@ -36,8 +36,8 @@
 import { Fragment, useEffect, useState } from "react";
 import type { DimensionSlot } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
-import { isMeasuredRow, measuredRows } from "@/lib/drawing-document";
-import { guessSlotsFromViews } from "@/lib/dimension-guess";
+import { isMeasuredRow, measuredRows, wasReadByModel } from "@/lib/drawing-document";
+import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
@@ -338,7 +338,14 @@ export default function ItemCard({
   // to print beside each amber select, and the dispute on a page whose views do
   // not settle it. Storing either would freeze a reading that changes the
   // moment somebody edits a figure.
-  const guess = guessSlotsFromViews(
+  // NOT ON A VERSION 2 ITEM. The model said which figure is which and why, and
+  // those reasons are on the rows; re-guessing here only produces a dispute
+  // banner describing a sort this app no longer does, printed above rows that
+  // say something else. `EMPTY_GUESS` keeps the two render paths identical
+  // rather than making every use below conditional.
+  const guess = wasReadByModel(item)
+    ? EMPTY_GUESS
+    : guessSlotsFromViews(
     measuredRows(item).map((observation) => ({
       id: observation.id,
       labelRaw: observation.labelRaw,

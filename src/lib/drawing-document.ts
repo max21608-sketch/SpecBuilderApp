@@ -275,6 +275,26 @@ export function isOverallRow(observation: DrawingObservation): boolean {
  * count taken with its own copy of this rule would report a card getting better
  * while the card got worse.
  */
+/**
+ * Was this item read by a model that was asked which figure is which?
+ *
+ * Read off the ITEM rather than the document, because the two card components
+ * are handed items and threading a schema version through both to answer one
+ * question would be four props for a fact the rows already carry: `isOverall`
+ * is set on every dimension row a version 2 read produced, and on none before.
+ *
+ * It exists because the card RE-RUNS `guessSlotsFromViews` at render time, for
+ * the sentence beside a suggested slot and for the "key measurement dispute"
+ * banner. On a version 2 item that banner said "the page labels none of its
+ * figures with a view, so this is the three largest read as width, then depth,
+ * then height" directly above rows reading "first of three in the printed line
+ * '80 x 70 x 90 cm'" — the card contradicting itself, and the louder half being
+ * the one that was no longer true.
+ */
+export function wasReadByModel(item: Pick<DrawingItem, "observations">): boolean {
+  return item.observations.some((observation) => observation.isOverall !== undefined);
+}
+
 export function foldableRow(observation: DrawingObservation): boolean {
   if (observation.dimensionSlot) return false;
   return observation.isOverall === false || (observation.isOverall === undefined && isMeasuredRow(observation));

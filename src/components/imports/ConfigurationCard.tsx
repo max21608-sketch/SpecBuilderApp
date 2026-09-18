@@ -38,8 +38,8 @@
 // ============================================================================
 import { Fragment, useEffect, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
-import { measuredRows, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
-import { guessSlotsFromViews } from "@/lib/dimension-guess";
+import { measuredRows, wasReadByModel, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
+import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import { sharedTargets, type ConfigurationMember, type ReviewCard } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import { DIMENSION_SLOT_LABELS, type DimensionSlot } from "@/lib/spec-vocab";
@@ -214,15 +214,21 @@ export default function ConfigurationCard({
   // Computed from the LEADER, and identical rows give an identical answer on
   // every configuration — which is exactly what `status: "shared"` established.
   const guess = leader
-    ? guessSlotsFromViews(
-        measuredRows(leader.item).map((observation) => ({
-          id: observation.id,
-          labelRaw: observation.labelRaw,
-          value: observation.value ?? observation.valueRaw,
-        })),
-        leader.item.itemNameRaw,
-      )
-    : { guesses: [], dispute: null };
+    ? // NOT ON A VERSION 2 ITEM — see `wasReadByModel`. The model said which
+      // figure is which and why, and those reasons are on the rows; re-guessing
+      // here only produces a dispute banner describing a sort this app no
+      // longer does, above rows that say something else.
+      wasReadByModel(leader.item)
+      ? EMPTY_GUESS
+      : guessSlotsFromViews(
+          measuredRows(leader.item).map((observation) => ({
+            id: observation.id,
+            labelRaw: observation.labelRaw,
+            value: observation.value ?? observation.valueRaw,
+          })),
+          leader.item.itemNameRaw,
+        )
+    : EMPTY_GUESS;
   const guessWhy = new Map(guess.guesses.map((entry) => [entry.observationId, entry.why]));
 
   const dimensionCell = leader
@@ -578,14 +584,24 @@ function ConfigurationChip({
 }) {
   const colour = colourFor(member.letter);
   const exists = Object.keys(member.resolution?.writesTo ?? {}).length > 0;
-  const state =
-    member.state === "applied"
+  // "RECORD WILL BE CREATED" IS ABOUT A RECORD PER CONFIGURATION, and printing
+  // it on each page of a card that is creating none says the opposite of what
+  // the card is doing — two chips, two promises of a record, for one chair. On
+  // a non-split card the pages write to the SAME record, which the Applies-to
+  // panel below states once; only what has happened to this page belongs here.
+  const state = card.split
+    ? member.state === "applied"
       ? "applied"
       : member.state === "ignored"
         ? "ignored"
         : exists
           ? "record exists"
-          : "record will be created";
+          : "record will be created"
+    : member.state === "applied"
+      ? "applied"
+      : member.state === "ignored"
+        ? "ignored"
+        : null;
   return (
     <span
       className={`inline-flex items-center gap-2 rounded border px-2 py-0.5 text-xs ${colour.chip} ${
@@ -596,15 +612,23 @@ function ConfigurationChip({
           what somebody will later quote in an email. It must not appear on a
           card that is not splitting anything — there the pages are sources, and
           the page number is what identifies one. */}
-      <span className="font-medium">
-        {memberName(card, member)}
-      </span>
-      {member.item.page && (
-        <a href={`/api/imports/${importId}/source#page=${member.item.page}`} className="underline" target="_blank" rel="noreferrer">
+      {/* The NAME, then a link to the page it came from. On a non-splitting
+          card the name IS the page, so the link carries the word instead of
+          the chip saying "Page 1 Page 1". */}
+      {card.split && <span className="font-medium">{memberName(card, member)}</span>}
+      {member.item.page ? (
+        <a
+          href={`/api/imports/${importId}/source#page=${member.item.page}`}
+          className={card.split ? "underline" : "font-medium underline"}
+          target="_blank"
+          rel="noreferrer"
+        >
           Page {member.item.page}
         </a>
+      ) : (
+        !card.split && <span className="font-medium">{memberName(card, member)}</span>
       )}
-      <span>· {state}</span>
+      {state && <span>· {state}</span>}
     </span>
   );
 }
