@@ -16,7 +16,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen antialiased">
+      {/* The size, the colour and the ground are all in `globals.css`'s base
+          layer now, so this element carries layout and nothing else. */}
+      <body className="min-h-screen">
         <EnvironmentBanner />
         {children}
       </body>

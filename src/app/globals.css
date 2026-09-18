@@ -2,7 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  color: #1a1a1a;
-  background: #f7f7f5;
+/* The body is 14px and the ground is #fafaf9, as the approved mock-ups draw
+   them. Both are set HERE and nowhere else, because a page that states its own
+   size is a page that will drift from the next one.
+
+   NEVER `html { font-size }`. It is the obvious way to move the whole app down
+   to 14px in one line, and it rescales every rem in the build at once — every
+   Tailwind spacing step, every rounded corner, every max-width — so the layout
+   shrinks with the text and nothing on screen says why. `text-sm` on the body
+   moves the TEXT and leaves the geometry alone. */
+@layer base {
+  body {
+    @apply bg-stone-50 text-sm text-neutral-900 antialiased;
+  }
 }
