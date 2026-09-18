@@ -30,9 +30,6 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import {
-  ANSWER_STATES,
-  ANSWER_STATE_LABELS,
-  ANSWER_STATE_TONE,
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
   type AnswerState,
@@ -45,7 +42,7 @@ import {
   normaliseItemLevel,
 } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
-import { questionTierOrNull, TIER_LABELS, NO_LEVEL_EXPLANATION } from "@/lib/tgq";
+import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
 import RecordHistory from "@/components/history/RecordHistory";
@@ -55,7 +52,7 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import GatePanel from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
-import AnswerValue from "@/components/records/AnswerValue";
+import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
 import type { Palette } from "@/lib/palettes";
 import { GATES, type Gate, type GateStatus } from "@/lib/gates";
@@ -127,6 +124,29 @@ type RetiredAttribute = Attribute & {
 /** Who owes us the unanswered questions, resolved from the BOQ's designer code. */
 export type DesignerContact = { id: string; name: string; email: string | null; role: string | null; designer_code: string };
 
+/**
+ * One row of Matthew's matrix as the record route sends it.
+ *
+ * Its own shape rather than `GateField`, because the route renames
+ * `specFieldJsonId` to `jsonId` on the way out and a type that merely omitted
+ * fields would keep the old name and quietly typecheck.
+ */
+export type MatrixFieldRow = {
+  matrixRow: number;
+  gate: Gate;
+  capture: GateField["capture"];
+  fieldName: string;
+  jsonId: number | null;
+  localKey: string | null;
+  dimensionSlot: GateField["dimensionSlot"];
+  valueType: GateField["valueType"];
+  paletteKey: string | null;
+  paletteRaw: string | null;
+  conditionalOnKey: string | null;
+  conditionalOnValue: string | null;
+  notes: string | null;
+};
+
 /** The four jobs this screen does, one tab each. */
 const RECORD_TABS = ["specs", "checklist", "gates", "versions"] as const;
 type RecordTab = (typeof RECORD_TABS)[number];
@@ -171,11 +191,7 @@ export type Payload = {
     noLevel: boolean;
   };
   /** Matthew's matrix rows for this category. Null where his matrix does not reach it. */
-  matrixFields: (Omit<GateField, "capture" | "gate" | "valueType"> & {
-    gate: Gate;
-    capture: GateField["capture"];
-    valueType: GateField["valueType"];
-  })[] | null;
+  matrixFields: MatrixFieldRow[] | null;
 };
 
 /**
@@ -461,50 +477,13 @@ function RecordView() {
     group,
     rows: attributes.filter((attribute) => attribute.attr_group === group),
   })).filter((entry) => entry.rows.length > 0);
-
-  // ---- the checklist, until the next commit rebuilds it --------------------
-  const sections = answers.reduce<Map<string, Answer[]>>((map, answer) => {
-    const key = answer.section ?? "Other";
-    map.set(key, [...(map.get(key) ?? []), answer]);
-    return map;
-  }, new Map());
-  const tgqMatrix = data.tgqMatrix
-    ? { fields: new Set<number>(data.tgqMatrix.fields), localKeys: new Set<string>(data.tgqMatrix.localKeys) }
-    : null;
-  const tierOf = (answer: Answer) =>
-    questionTierOrNull(
-      { tgqLevels: answer.tgq_levels ?? [], jsonId: answer.json_id, localKey: answer.local_key },
-      level,
-      tgqMatrix,
-    );
-  const palettesByKey = new Map((data.palettes ?? []).map((row) => [row.key, {
-    key: row.key,
-    name: row.name,
-    owner: row.owner,
-    allowsFreeText: Boolean(row.allows_free_text),
-    sourceNote: row.source_note,
-    syncedAt: row.synced_at,
-    options: row.options ?? [],
-  } satisfies Palette]));
-  const paletteKeyByField = new Map<number, string>();
-  const paletteKeyByLocal = new Map<string, string>();
-  for (const row of data.paletteByQuestion ?? []) {
-    if (row.json_id !== null && row.json_id !== undefined) paletteKeyByField.set(Number(row.json_id), row.palette_key);
-    if (row.local_key) paletteKeyByLocal.set(row.local_key, row.palette_key);
-  }
-  const paletteFor = (answer: Answer): Palette | null => {
-    const key =
-      (answer.local_key ? paletteKeyByLocal.get(answer.local_key) : undefined) ??
-      (answer.json_id !== null ? paletteKeyByField.get(answer.json_id) : undefined);
-    return key ? (palettesByKey.get(key) ?? null) : null;
-  };
   // How many distinct pages the captured specs came off, for the card heading.
   const pageCount = new Set(
     attributes
       .filter((attribute) => attribute.source_run_id)
       .map((attribute) => `${attribute.source_run_id}:${attribute.source_page ?? ""}`),
   ).size;
-  /** The drawing set most of this item's specs came off — where its crop is chosen. */
+  /** The drawing set this item's specs came off — where its crop is chosen. */
   const drawingRunId =
     attributes.find((attribute) => attribute.source_document_kind === "shop_drawings" && attribute.source_run_id)
       ?.source_run_id ?? null;
@@ -1117,50 +1096,25 @@ function RecordView() {
           </div>
         )}
 
-        {/* REBUILT IN THE NEXT COMMIT. Untouched here so that the header and
-            the Specs tab can be read, and refused, on their own. */}
-        {tab === "checklist" && [...sections.entries()].map(([section, rows]) => (
-          <section key={section} className="mt-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">{section}</h2>
-            <ul className="mt-2 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
-              {rows.map((answer) => (
-                <li key={answer.requirement_id} className="px-4 py-3">
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-neutral-900">{answer.prompt}</p>
-                      {answer.field_name && (
-                        <p className="text-xs text-neutral-500">
-                          BWS: {answer.field_name.trim()} ({answer.json_id})
-                        </p>
-                      )}
-                      {tierOf(answer) === "to_quote" && <Chip tone="danger">{TIER_LABELS.to_quote}</Chip>}
-                    </div>
-                    <Chip tone={ANSWER_STATE_TONE[answer.state]}>{ANSWER_STATE_LABELS[answer.state]}</Chip>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <AnswerValue
-                      palette={paletteFor(answer)}
-                      value={answer.value}
-                      disabled={savingId === answer.answer_id}
-                      inputKey={`${answer.answer_id}:${answer.version}:${historyKey}`}
-                      onCommit={(next) => void save(answer, next, next ? "confirmed" : "missing")}
-                    />
-                    <select
-                      value={answer.state}
-                      disabled={savingId === answer.answer_id}
-                      onChange={(e) => void save(answer, answer.value ?? "", e.target.value as AnswerState)}
-                      className="rounded border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
-                    >
-                      {ANSWER_STATES.map((state) => (
-                        <option key={state} value={state}>{ANSWER_STATE_LABELS[state]}</option>
-                      ))}
-                    </select>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+        {tab === "checklist" && (
+          <RecordChecklist
+            recordId={record.id}
+            projectId={record.project_id}
+            answers={answers}
+            level={level}
+            tgqMatrix={data.tgqMatrix}
+            matrixFields={data.matrixFields}
+            palettes={data.palettes ?? []}
+            paletteByQuestion={data.paletteByQuestion ?? []}
+            waiting={data.waiting ?? {}}
+            designerContact={data.designerContact}
+            attributes={attributes}
+            readiness={readiness}
+            savingId={savingId}
+            reloadKey={historyKey}
+            onSave={(answer, value, state) => void save(answer as Answer, value, state)}
+          />
+        )}
 
         {/* MATTHEW'S MATRIX, and what each gate still wants. Its own tab rather
             than a panel above the 43-question checklist: the checklist is the
