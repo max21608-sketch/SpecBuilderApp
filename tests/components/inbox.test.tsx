@@ -1,0 +1,144 @@
+// The inbox, rendered.
+//
+// ============================================================================
+// THE TWO RULES WORTH A TEST
+//
+// HELD MAIL IS NEVER HIDDEN BY THE TAB. An email nobody has placed is the one
+// state in this feature that silently stops work — the sender believes they
+// have told us and no project screen says otherwise — so the amber table is
+// under the default view as well as under its own tab.
+//
+// AND "READ, AND IT SAID NOTHING" IS NOT A BLANK. An email that was read and
+// produced no specification is a different outcome from one waiting to be
+// reviewed and from one the queue has not reached, and the column says which.
+// A blank cell reads as a document nobody has got to yet.
+// ============================================================================
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { render, screen } from "@testing-library/react";
+import InboxPage from "@/app/dashboard/inbox/page";
+
+const replace = vi.fn();
+let search = "";
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(search),
+  usePathname: () => "/dashboard/inbox",
+  useRouter: () => ({ replace }),
+}));
+
+function message(over: Record<string, unknown> = {}) {
+  return {
+    id: "msg-1",
+    origin: "upload",
+    mailbox: "ashcombe.specs@example.com",
+    fetch_status: "fetched",
+    fetch_error: null,
+    from_addr: "priya.raman@example.com",
+    from_name: "Priya Raman",
+    subject: "AC-101 lounge armchair, revised specification",
+    received_at: "2026-09-16T10:00:00.000Z",
+    has_attachments: false,
+    attachments_meta: null,
+    routing_status: "assigned",
+    routing_reason: "addressed to the project inbox — ashcombe.specs@example.com",
+    routing_candidates: null,
+    project_id: "proj-1",
+    bws_project_number: "AP401",
+    project_name: "Ashcombe House",
+    assignment_kind: "auto",
+    intake_run_id: "run-1",
+    run_status: "parsed",
+    run_error: null,
+    pending_count: 4,
+    applied_count: 0,
+    chase_match: "confident",
+    chaseReply: true,
+    found: { proposals: 4, runs: 2, changesConfirmed: 1, nothingToRecord: false },
+    triage: "open",
+    parse_error: null,
+    version: 1,
+    ...over,
+  };
+}
+
+const PAYLOAD = {
+  ok: true,
+  messages: [
+    message(),
+    message({
+      id: "msg-2",
+      subject: "Lindow wool — lead times for the autumn",
+      chase_match: null,
+      chaseReply: false,
+      pending_count: 0,
+      found: { proposals: 0, runs: 0, changesConfirmed: 0, nothingToRecord: true },
+    }),
+    message({
+      id: "msg-3",
+      subject: "FW: client comments - armchairs",
+      routing_status: "unassigned",
+      routing_reason: "Nothing in this message names a project.",
+      project_id: null,
+      bws_project_number: null,
+      project_name: null,
+      intake_run_id: null,
+      run_status: null,
+      found: null,
+    }),
+  ],
+  heldCount: 1,
+  arrivedToday: 0,
+  ruledThisWeek: 3,
+  projects: [{ id: "proj-1", bws_project_number: "AP401", name: "Ashcombe House" }],
+};
+
+beforeEach(() => {
+  search = "";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify(PAYLOAD), { status: 200, headers: { "content-type": "application/json" } })),
+  );
+});
+
+describe("the inbox", () => {
+  it("shows held mail under the default tab, not only under its own", async () => {
+    render(<InboxPage />);
+    await screen.findByRole("heading", { name: /Could not be placed/ });
+    // The default tab is "To review"; the held message is still on screen.
+    expect(screen.getByText("FW: client comments - armchairs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Assign & read" })).toBeInTheDocument();
+  });
+
+  it("says a charged call before the button that spends it", async () => {
+    render(<InboxPage />);
+    expect(await screen.findByText("One charged model call.")).toBeInTheDocument();
+  });
+
+  it("says what a read turned up, in the column", async () => {
+    render(<InboxPage />);
+    await screen.findByText("AC-101 lounge armchair, revised specification");
+    expect(screen.getByText("4 specs")).toBeInTheDocument();
+    expect(screen.getByText("2 runs")).toBeInTheDocument();
+    expect(screen.getByText(/1 changes a confirmed value/)).toBeInTheDocument();
+    // An email that produced nothing is NOT in the list of things waiting for a
+    // person: it is a different outcome and it has its own tab.
+    expect(screen.queryByText("Lindow wool — lead times for the autumn")).not.toBeInTheDocument();
+  });
+
+  it("says a read that found nothing is a read, not a blank", async () => {
+    search = "tab=nothing";
+    render(<InboxPage />);
+    await screen.findByText("Lindow wool — lead times for the autumn");
+    expect(screen.getByText("nothing to record")).toBeInTheDocument();
+    expect(screen.getByText("read, found no specification")).toBeInTheDocument();
+    // And it can be ruled on from there.
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("prints the signal that placed it, so a wrong placement is visible", async () => {
+    render(<InboxPage />);
+    await screen.findByText("AC-101 lounge armchair, revised specification");
+    expect(screen.getByText(/auto · addressed to the project inbox/)).toBeInTheDocument();
+    expect(screen.getByText("reply to a chase")).toBeInTheDocument();
+  });
+});

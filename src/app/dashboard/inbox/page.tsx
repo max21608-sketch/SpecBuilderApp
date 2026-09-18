@@ -8,19 +8,47 @@
 // An email nobody has placed on a project is the one state in this feature
 // that silently stops work: the sender believes they have told us, and nothing
 // on any project screen says otherwise. So held messages sort first, are never
-// hidden behind a filter, and carry the reason the headers were not enough.
+// hidden behind a filter — INCLUDING the tabs, which is why the amber table
+// renders under every tab that could hold one — and carry the reason the
+// headers were not enough.
 //
 // Assigning one is the SPEND POINT — it starts a charged model read — and the
 // button says so. Nothing is ever assigned automatically from an ambiguous
 // outcome: two projects matching equally well is a decision, not a tie to
-// break.
+// break, and the picker is pre-filled with the CANDIDATES rather than with a
+// choice.
+//
+// ---- ROWS, NOT CARDS -----------------------------------------------------
+//
+// Seventeen stacked cards is four screens of scrolling; seventeen rows is one.
+// The job on this screen is scanning — which of these has eleven specs and
+// four that change a confirmed value — and that is a column, not a paragraph.
+// `What it found` is the column that earns its place: an email that was read
+// and produced nothing is a different thing from one waiting to be reviewed,
+// and it now says so instead of looking identical.
 // ============================================================================
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
-import { intakeStatusLabel } from "@/lib/intake-status";
 import PageBody from "@/components/ui/PageBody";
+import PageHeader from "@/components/ui/PageHeader";
+import Tabs from "@/components/ui/Tabs";
+import Card from "@/components/ui/Card";
+import Chip from "@/components/ui/Chip";
+import Note from "@/components/ui/Note";
+import StatTile from "@/components/ui/StatTile";
+import Button, { buttonClass } from "@/components/ui/Button";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
+import { useUrlTab } from "@/lib/use-url-tab";
+
+/** What a read turned up. Computed in the route by `describeChange`, per 0021. */
+type Found = {
+  proposals: number;
+  runs: number;
+  changesConfirmed: number;
+  nothingToRecord: boolean;
+};
 
 type Message = {
   id: string;
@@ -33,6 +61,7 @@ type Message = {
   subject: string | null;
   received_at: string | null;
   has_attachments: boolean;
+  attachments_meta: { filename?: string }[] | null;
   routing_status: "assigned" | "ambiguous" | "unassigned";
   routing_reason: string | null;
   routing_candidates: { projectId: string; signal: string; evidence: string }[] | null;
@@ -46,6 +75,10 @@ type Message = {
   pending_count: string | number;
   applied_count: string | number;
   chase_match: string | null;
+  /** The confident reading only. A boolean cannot carry a caveat. */
+  chaseReply: boolean;
+  /** Null until the run has been read: "not read yet" is not "found nothing". */
+  found: Found | null;
   triage: string;
   parse_error: string | null;
   version: number;
@@ -53,23 +86,92 @@ type Message = {
 
 type Project = { id: string; bws_project_number: string; name: string };
 
-type Payload = { messages: Message[]; heldCount: number; projects: Project[] };
+type Payload = {
+  messages: Message[];
+  heldCount: number;
+  arrivedToday: number;
+  ruledThisWeek: number;
+  projects: Project[];
+};
 
-export default function InboxPage() {
+const TABS = ["review", "held", "nothing", "everything"] as const;
+type Tab = (typeof TABS)[number];
+
+/**
+ * How a message reads on this screen.
+ *
+ * `reading` and `failed` are deliberately NOT folded into `review`: an email
+ * the queue has not got to is not an email waiting for a person, and saying so
+ * is the difference between a queue somebody watches and a queue somebody
+ * believes is stuck.
+ */
+function outcome(message: Message): "held" | "reading" | "failed" | "nothing" | "review" {
+  if (message.routing_status !== "assigned") return "held";
+  if (message.run_status === "failed") return "failed";
+  if (!message.found) return "reading";
+  if (message.found.nothingToRecord) return "nothing";
+  return "review";
+}
+
+/** Today where the reader is, which is where this app is pinned. */
+function arrivedToday(message: Message): boolean {
+  if (!message.received_at) return false;
+  const at = new Date(message.received_at);
+  return !Number.isNaN(at.getTime()) && at.toDateString() === new Date().toDateString();
+}
+
+/**
+ * When it arrived, and how long ago in CALENDAR DAYS.
+ *
+ * Not elapsed hours: an email at 4pm yesterday is twenty-two hours old and it
+ * is not "today", and a screen that said so beside a tile counting today's
+ * post would be contradicting itself on one line. Midnights crossed, which is
+ * what a person means.
+ */
+function whenItArrived(received: string | null): { on: string; ago: string } {
+  if (!received) return { on: "unknown", ago: "" };
+  const at = new Date(received);
+  if (Number.isNaN(at.getTime())) return { on: received, ago: "" };
+  const midnight = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((midnight(new Date()) - midnight(at)) / 86_400_000);
+  return {
+    on: at.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
+    ago: days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`,
+  };
+}
+
+function sender(message: Message): string {
+  return message.from_name
+    ? `${message.from_name} <${message.from_addr ?? "unknown"}>`
+    : (message.from_addr ?? "unknown sender");
+}
+
+function InboxView() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [includeTriaged, setIncludeTriaged] = useState(false);
+  const [assignTo, setAssignTo] = useState<Record<string, string>>({});
+  const [tab, setTab] = useUrlTab<Tab>({
+    fallback: "review",
+    resolve: (raw) => (TABS.includes(raw as Tab) ? (raw as Tab) : null),
+  });
 
+  /**
+   * EVERY message, triaged ones included, and the tabs narrow it here.
+   *
+   * A tab's count cannot be derived from the rows you are already looking at —
+   * the projects list's rule — and "Ruled on this week" would read zero on
+   * exactly the screen it appears on if the request hid them.
+   */
   const load = useCallback(async () => {
-    const res = await apiFetch<Payload>(`/api/email-messages?includeTriaged=${includeTriaged ? "1" : "0"}`);
+    const res = await apiFetch<Payload>(`/api/email-messages?includeTriaged=1`);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setError(null);
     setData(res.data);
-  }, [includeTriaged]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -100,151 +202,432 @@ export default function InboxPage() {
     }
   }
 
-  if (error && !data) return <p className="text-sm text-red-700">{error}</p>;
-  if (!data) return <Spinner label="Loading the inbox" />;
+  const buckets = useMemo(() => {
+    const all = data?.messages ?? [];
+    const open = all.filter((message) => message.triage === "open");
+    return {
+      all,
+      held: open.filter((message) => outcome(message) === "held"),
+      nothing: open.filter((message) => outcome(message) === "nothing"),
+      review: open.filter((message) => ["review", "reading", "failed"].includes(outcome(message))),
+    };
+  }, [data]);
 
-  const held = data.messages.filter((m) => m.routing_status !== "assigned");
-  const assigned = data.messages.filter((m) => m.routing_status === "assigned");
+  if (error && !data) {
+    return (
+      <PageBody>
+        <Note tone="danger">{error}</Note>
+      </PageBody>
+    );
+  }
+  if (!data) {
+    return (
+      <PageBody>
+        <Spinner label="Loading the inbox" />
+      </PageBody>
+    );
+  }
+
+  const specsProposed = buckets.review.reduce((sum, message) => sum + (message.found?.proposals ?? 0), 0);
+  const heldToday = buckets.held.filter(arrivedToday).length;
+  const listed =
+    tab === "held" ? [] : tab === "nothing" ? buckets.nothing : tab === "everything" ? buckets.all : buckets.review;
 
   return (
-    <PageBody>
-      <h1 className="text-xl font-semibold text-neutral-900">Inbox</h1>
-      <p className="mt-1 text-sm text-neutral-600">
-        Mail forwarded from the project inboxes. An email assigned to a project is read automatically — one charged
-        model call each. An unplaced email is never read.
-      </p>
+    <>
+      <PageHeader
+        title="Inbox"
+        subtitle="Mail forwarded from the project inboxes. An email the headers place on a project is assigned and read the moment it arrives — one charged model call each."
+        actions={
+          // AN .eml IS UPLOADED ON THE PROJECT IT BELONGS TO, through the pack
+          // upload, because a spec document arrives as part of a delivery and
+          // the store is scoped to `projects/<id>/`. There is no project-less
+          // upload to offer here, so this goes where one can be chosen.
+          <Link href="/dashboard/projects" className={buttonClass("secondary")}>
+            Upload an .eml
+          </Link>
+        }
+        tabs={
+          <Tabs
+            label="Which mail"
+            value={tab}
+            onChange={setTab}
+            items={[
+              { id: "review", label: "To review", count: buckets.review.length, tone: "info" },
+              { id: "held", label: "Could not be placed", count: buckets.held.length, tone: "warn" },
+              { id: "nothing", label: "Nothing to record", count: buckets.nothing.length },
+              { id: "everything", label: "Everything", count: buckets.all.length },
+            ]}
+          />
+        }
+      />
 
-      {error && (
-        <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
-      )}
+      <PageBody>
+        {error && <Note tone="danger">{error}</Note>}
 
-      <label className="mt-3 flex items-center gap-1.5 text-sm text-neutral-700">
-        <input type="checkbox" checked={includeTriaged} onChange={(e) => setIncludeTriaged(e.target.checked)} />
-        Include emails already ruled on
-      </label>
+        <div className="mt-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          <StatTile
+            label="Read, waiting for you"
+            tone="info"
+            value={buckets.review.length}
+            meaning={`${specsProposed} spec${specsProposed === 1 ? "" : "s"} proposed`}
+            action={tab === "review" ? undefined : "open the list"}
+            onPress={tab === "review" ? undefined : () => setTab("review")}
+            active={tab === "review"}
+          />
+          <StatTile
+            label="Could not be placed"
+            tone={buckets.held.length > 0 ? "warn" : "plain"}
+            value={buckets.held.length}
+            meaning="needs a person to say which project"
+            action={buckets.held.length > 0 && tab !== "held" ? "place them" : undefined}
+            onPress={buckets.held.length > 0 && tab !== "held" ? () => setTab("held") : undefined}
+            active={tab === "held"}
+          />
+          {/* THE SERVER'S COUNT, over every message rather than the 200 this
+              screen holds. What is said UNDER it is about the held ones, which
+              sort first and are never truncated away. */}
+          <StatTile
+            label="Arrived today"
+            value={data.arrivedToday}
+            meaning={
+              data.arrivedToday === 0
+                ? "nothing yet today"
+                : heldToday > 0
+                  ? `${heldToday} could not be placed`
+                  : "all assigned automatically"
+            }
+          />
+          <StatTile
+            label="Ruled on this week"
+            tone="good"
+            value={data.ruledThisWeek}
+            meaning="applied or dismissed"
+            action={tab === "everything" ? undefined : "show them"}
+            onPress={tab === "everything" ? undefined : () => setTab("everything")}
+            active={tab === "everything"}
+          />
+        </div>
 
-      <h2 className="mt-6 text-sm font-semibold text-neutral-800">
-        Not on a project {held.length > 0 && <span className="text-amber-800">({held.length})</span>}
-      </h2>
-      {held.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-600">Nothing waiting to be placed.</p>
-      ) : (
-        <ul className="mt-2 space-y-2">
-          {held.map((message) => (
-            <li key={message.id} className="border border-amber-200 bg-amber-50 rounded-lg p-3">
-              <MessageSummary message={message} />
-              <p className="mt-1 text-xs text-amber-900">{message.routing_reason}</p>
-              {message.routing_candidates && message.routing_candidates.length > 0 && (
-                <ul className="mt-1 text-xs text-amber-800 list-disc list-inside">
-                  {message.routing_candidates.slice(0, 4).map((candidate, index) => (
-                    <li key={index}>{candidate.evidence}</li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <select
-                  defaultValue=""
-                  disabled={busy === message.id}
-                  onChange={(event) => {
-                    if (!event.target.value) return;
-                    void act(message, { action: "assign", projectId: event.target.value });
-                  }}
-                  className="border border-amber-400 rounded px-2 py-1 text-sm bg-white disabled:opacity-50"
-                >
-                  <option value="">Assign and read (one charged call)…</option>
-                  {data.projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.bws_project_number} {project.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  disabled={busy === message.id}
-                  onClick={() => void act(message, { action: "triage", triage: "not_specification" })}
-                  className="text-xs px-2 py-1 rounded border border-amber-400 disabled:opacity-50"
-                >
-                  Not specification
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+        {tab !== "held" && (
+          <>
+            <h2 className="mt-6 text-th font-bold uppercase tracking-wider text-neutral-500">
+              {tab === "nothing" ? "Nothing to record" : tab === "everything" ? "Everything" : "Read and waiting for you"}
+              <span className="font-medium normal-case tracking-normal text-neutral-500">
+                {" "}· newest first ·{" "}
+                {tab === "nothing"
+                  ? "read, and they state nothing this app can record"
+                  : tab === "everything"
+                    ? "including the ones already ruled on"
+                    : "already on a project, already extracted"}
+              </span>
+            </h2>
+            {listed.length === 0 ? (
+              <p className="mt-2 text-sm text-neutral-600">Nothing here.</p>
+            ) : (
+              <Card flush className="mt-2">
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th className="w-[42%]">Subject</Th>
+                      <Th className="w-[16%]">Project</Th>
+                      <Th className="w-[18%]">What it found</Th>
+                      <Th className="w-[14%]">Arrived</Th>
+                      <Th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listed.map((message) => (
+                      <MessageRow
+                        key={message.id}
+                        message={message}
+                        busy={busy === message.id}
+                        onAct={(body) => void act(message, body)}
+                      />
+                    ))}
+                  </tbody>
+                </Table>
+              </Card>
+            )}
+          </>
+        )}
 
-      <h2 className="mt-8 text-sm font-semibold text-neutral-800">On a project</h2>
-      {assigned.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-600">No email has been placed on a project yet.</p>
-      ) : (
-        <ul className="mt-2 space-y-2">
-          {assigned.map((message) => {
-            const pending = Number(message.pending_count ?? 0);
-            const applied = Number(message.applied_count ?? 0);
-            return (
-              <li key={message.id} className="border border-neutral-200 bg-white rounded-lg p-3">
-                <MessageSummary message={message} />
-                <p className="mt-1 text-xs text-neutral-600">
-                  {message.bws_project_number} {message.project_name}
-                  {message.assignment_kind === "auto" ? " · placed automatically" : " · placed by hand"}
-                  {message.run_status && ` · ${intakeStatusLabel(message.run_status)}`}
-                </p>
-                {message.run_error && <p className="mt-1 text-xs text-red-700">{message.run_error}</p>}
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-                  {message.intake_run_id && (
-                    <Link
-                      href={`/dashboard/imports/${message.intake_run_id}`}
-                      className="text-neutral-900 underline hover:text-neutral-600"
-                    >
-                      {pending > 0
-                        ? `Review ${pending} proposal${pending === 1 ? "" : "s"}`
-                        : applied > 0
-                          ? `Review complete — ${applied} applied`
-                          : "Open the review"}
-                    </Link>
-                  )}
-                  <Link
-                    href={`/api/email-messages/${message.id}/mime`}
-                    className="text-xs px-2 py-1 rounded border border-neutral-300 hover:bg-neutral-100 text-neutral-700"
-                  >
-                    Open in Outlook (.eml)
-                  </Link>
-                  {applied === 0 && (
-                    <button
-                      type="button"
-                      disabled={busy === message.id}
-                      onClick={() => void act(message, { action: "unassign" })}
-                      className="text-xs text-neutral-600 underline hover:text-neutral-900 disabled:opacity-50"
-                    >
-                      Wrong project
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </PageBody>
+        {/* HELD MAIL IS NEVER HIDDEN BY A TAB. It is the exception rather than
+            the page — three rows in an amber table under the main list — but a
+            default view that hid it would put the one state that silently
+            stops work behind a click. */}
+        {buckets.held.length > 0 && (
+          <>
+            <h2 className="mt-6 text-th font-bold uppercase tracking-wider text-amber-700">
+              Could not be placed
+              <span className="font-medium normal-case tracking-normal text-neutral-500">
+                {" "}· the headers name no project, or name two equally well
+              </span>
+            </h2>
+            <Card flush className="mt-2 border-amber-200">
+              <Table>
+                <thead>
+                  <tr>
+                    <Th className="w-[44%]">Subject</Th>
+                    <Th className="w-[30%]">Why it is here</Th>
+                    <Th className="w-[26%]">Put it on a project</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {buckets.held.map((message) => {
+                    const candidates = (message.routing_candidates ?? [])
+                      .map((candidate) => data.projects.find((project) => project.id === candidate.projectId))
+                      .filter((project): project is Project => Boolean(project));
+                    // AMBIGUOUS OFFERS ONLY THE CANDIDATES, and chooses none:
+                    // two projects matching equally well is a decision, and a
+                    // pre-selected picker would make agreeing with it silent.
+                    const offer = message.routing_status === "ambiguous" && candidates.length > 0 ? candidates : data.projects;
+                    return (
+                      <Tr key={message.id}>
+                        <Td>
+                          <span className="block font-semibold text-neutral-900">
+                            {message.subject ?? "(no subject)"}
+                          </span>
+                          <span className="block text-neutral-500">{sender(message)}</span>
+                          <span className="block text-neutral-500">{whenItArrived(message.received_at).on}</span>
+                          {message.parse_error && (
+                            <span className="block text-red-700">
+                              This message could not be fully parsed: {message.parse_error}
+                            </span>
+                          )}
+                        </Td>
+                        <Td muted>
+                          {message.routing_status === "ambiguous" && <Chip tone="warn">two projects match equally</Chip>}
+                          <span className="mt-1 block">{message.routing_reason}</span>
+                          {/* The candidates are listed only where they are the
+                              QUESTION. On an unplaced message the reason
+                              already contains the evidence, and printing it
+                              twice reads as two separate findings. */}
+                          {message.routing_status === "ambiguous" && (message.routing_candidates ?? []).length > 0 && (
+                            <ul className="mt-1 list-inside list-disc">
+                              {(message.routing_candidates ?? []).slice(0, 4).map((candidate, index) => (
+                                <li key={index}>{candidate.evidence}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </Td>
+                        <Td>
+                          <select
+                            value={assignTo[message.id] ?? ""}
+                            disabled={busy === message.id}
+                            aria-label={`Which project ${message.subject ?? "this email"} belongs to`}
+                            onChange={(event) =>
+                              setAssignTo((prev) => ({ ...prev, [message.id]: event.target.value }))
+                            }
+                            className="w-full rounded border border-amber-300 bg-white px-2 py-1 disabled:opacity-50"
+                          >
+                            <option value="">Choose a project…</option>
+                            {offer.map((project) => (
+                              <option key={project.id} value={project.id}>
+                                {project.bws_project_number} — {project.name}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            <Button
+                              variant="primary"
+                              size="xs"
+                              disabled={busy === message.id || !assignTo[message.id]}
+                              onClick={() =>
+                                void act(message, { action: "assign", projectId: assignTo[message.id] })
+                              }
+                            >
+                              Assign &amp; read
+                            </Button>
+                            <Button
+                              variant="quiet"
+                              size="xs"
+                              disabled={busy === message.id}
+                              onClick={() => void act(message, { action: "triage", triage: "not_specification" })}
+                            >
+                              Not a spec
+                            </Button>
+                          </div>
+                          {/* THE SPEND POINT, said before the click. */}
+                          <span className="mt-1 block text-[11px] text-neutral-500">One charged model call.</span>
+                        </Td>
+                      </Tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </Card>
+          </>
+        )}
+      </PageBody>
+    </>
   );
 }
 
-function MessageSummary({ message }: { message: Message }) {
-  const from = message.from_name
-    ? `${message.from_name} <${message.from_addr ?? "unknown"}>`
-    : (message.from_addr ?? "unknown sender");
+/** One assigned message. */
+function MessageRow({
+  message,
+  busy,
+  onAct,
+}: {
+  message: Message;
+  busy: boolean;
+  onAct: (body: Record<string, unknown>) => void;
+}) {
+  const state = outcome(message);
+  const arrived = whenItArrived(message.received_at);
+  const attachments = message.attachments_meta?.length ?? 0;
+  const applied = Number(message.applied_count ?? 0);
+  const review = message.intake_run_id ? `/dashboard/imports/${message.intake_run_id}` : null;
+
   return (
-    <>
-      <p className="text-sm font-medium text-neutral-900">{message.subject ?? "(no subject)"}</p>
-      <p className="text-xs text-neutral-600">
-        {from}
-        {message.received_at && ` · ${new Date(message.received_at).toLocaleString("en-GB")}`}
-        {message.has_attachments && " · has attachments"}
-        {message.chase_match === "confident" && " · reads as a reply to a chase"}
-        {message.triage !== "open" && " · ruled on"}
-      </p>
-      {message.parse_error && (
-        <p className="text-xs text-red-700">This message could not be fully parsed: {message.parse_error}</p>
-      )}
-    </>
+    <Tr>
+      <Td>
+        {review ? (
+          <Link href={review} className="block font-semibold text-blue-700 no-underline hover:underline">
+            {message.subject ?? "(no subject)"}
+          </Link>
+        ) : (
+          <span className="block font-semibold text-neutral-900">{message.subject ?? "(no subject)"}</span>
+        )}
+        <span className="block text-neutral-500">{sender(message)}</span>
+        <span className="mt-1 flex flex-wrap items-center gap-1.5">
+          {/* THE SIGNAL THAT PLACED IT, printed on every row, so a wrong
+              placement is visible rather than hidden. */}
+          {/* THE SIGNAL THAT PLACED IT — only where something did. An unplaced
+              message was not assigned by hand either, and saying so would be a
+              claim about a decision nobody took.
+
+              The FIRST clause of the reason, with the whole of it on hover: the
+              resolver writes a sentence and the review screen prints it in
+              full, and a chip 400px wide pushes the columns this screen exists
+              to align. */}
+          {message.routing_status === "assigned" ? (
+            <Chip dot tone={message.assignment_kind === "auto" ? "live" : "plain"} title={message.routing_reason ?? undefined}>
+              {message.assignment_kind === "auto" ? "auto" : "by hand"}
+              {message.routing_reason ? ` · ${message.routing_reason.split(" — ")[0]}` : ""}
+            </Chip>
+          ) : (
+            <Chip tone="warn" title={message.routing_reason ?? undefined}>
+              not on a project
+            </Chip>
+          )}
+          {message.chaseReply && <Chip tone="good">reply to a chase</Chip>}
+          {attachments > 0 && (
+            <Chip>
+              {attachments} attachment{attachments === 1 ? "" : "s"}
+            </Chip>
+          )}
+          {message.triage !== "open" && <Chip>ruled on</Chip>}
+        </span>
+        {message.parse_error && (
+          <span className="block text-red-700">This message could not be fully parsed: {message.parse_error}</span>
+        )}
+      </Td>
+      <Td>
+        {message.project_id ? (
+          <>
+            <Link
+              href={`/dashboard/projects/${message.project_id}`}
+              className="block font-semibold text-blue-700 no-underline hover:underline"
+            >
+              {message.bws_project_number}
+            </Link>
+            <span className="block text-neutral-500">{message.project_name}</span>
+          </>
+        ) : (
+          <span className="text-neutral-400">none</span>
+        )}
+      </Td>
+      <Td>
+        {state === "held" ? (
+          /* NEVER READ, and that is the rule rather than a gap: an unassigned
+             email is not read at all, because there are no registers to
+             resolve it against and the read is what costs money. */
+          <>
+            <Chip tone="warn">not read</Chip>
+            <span className="mt-1 block text-[11px] text-neutral-500">nothing is read until it is placed</span>
+          </>
+        ) : state === "failed" ? (
+          <>
+            <Chip tone="danger">Read failed</Chip>
+            {message.run_error && <span className="mt-1 block text-[11px] text-neutral-500">{message.run_error}</span>}
+          </>
+        ) : state === "reading" ? (
+          <Chip dot tone="info">Reading…</Chip>
+        ) : message.found?.nothingToRecord ? (
+          <>
+            <Chip>nothing to record</Chip>
+            <span className="mt-1 block text-[11px] text-neutral-500">read, found no specification</span>
+          </>
+        ) : (
+          <>
+            <span className="flex flex-wrap items-center gap-1.5">
+              <Chip tone="info">
+                {message.found?.proposals} spec{message.found?.proposals === 1 ? "" : "s"}
+              </Chip>
+              <Chip>
+                {message.found?.runs} run{message.found?.runs === 1 ? "" : "s"}
+              </Chip>
+            </span>
+            {/* A `changes` needs an overwrite acknowledgement and a `withdraws`
+                does not; both undo something somebody settled, which is the
+                column's question. */}
+            {(message.found?.changesConfirmed ?? 0) > 0 && (
+              <span className="mt-1 block text-[11px] text-neutral-500">
+                {message.found?.changesConfirmed} change{message.found?.changesConfirmed === 1 ? "s" : ""} a confirmed
+                value
+              </span>
+            )}
+          </>
+        )}
+      </Td>
+      <Td muted>
+        {arrived.on}
+        <span className="block">{arrived.ago}</span>
+      </Td>
+      <Td className="text-right">
+        <span className="flex flex-wrap items-center justify-end gap-1.5">
+          {review && Number(message.pending_count ?? 0) > 0 ? (
+            <Link href={review} className={buttonClass("primary", "xs")}>
+              Review
+            </Link>
+          ) : review ? (
+            <Link href={review} className={buttonClass("secondary", "xs")}>
+              Open
+            </Link>
+          ) : null}
+          {message.triage === "open" && state === "nothing" && (
+            <Button
+              variant="quiet"
+              size="xs"
+              disabled={busy}
+              onClick={() => onAct({ action: "triage", triage: "nothing_to_record" })}
+            >
+              Dismiss
+            </Button>
+          )}
+          {/* A WRONG PLACEMENT IS UNDOABLE UNTIL SOMETHING HAS BEEN APPLIED.
+              After that the specs are on records and unassigning would leave
+              them standing on a message the project no longer holds. */}
+          {applied === 0 && message.routing_status === "assigned" && (
+            <Button variant="quiet" size="xs" disabled={busy} onClick={() => onAct({ action: "unassign" })}>
+              Wrong project
+            </Button>
+          )}
+          <a href={`/api/email-messages/${message.id}/mime`} className={buttonClass("quiet", "xs")}>
+            .eml
+          </a>
+        </span>
+      </Td>
+    </Tr>
+  );
+}
+
+export default function InboxPage() {
+  return (
+    <Suspense fallback={<PageBody><Spinner label="Loading the inbox" /></PageBody>}>
+      <InboxView />
+    </Suspense>
   );
 }
