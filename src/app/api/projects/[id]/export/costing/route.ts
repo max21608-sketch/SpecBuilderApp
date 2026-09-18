@@ -19,7 +19,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
 import { composeCostingSheet, costingRowCells, type CostingSource } from "@/lib/costing-sheet";
-import { toCsv, exportFilename } from "@/lib/bws-export";
+import { toCsv } from "@/lib/bws-export";
 import { blobPathname, readTrustedBlob } from "@/lib/blob-source";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +40,17 @@ const IMAGE_EXTENSIONS: Record<string, "png" | "jpeg" | "gif"> = {
   "image/jpg": "jpeg",
   "image/gif": "gif",
 };
+
+/**
+ * Allowlisted the way `exportFilename` is, so a client's project name cannot
+ * put a quote, a newline or a path separator into a Content-Disposition
+ * header — but named for THIS file. See the call site.
+ */
+function costingFilename(projectNumber: string, runName: string | null, extension: string): string {
+  const safe = (raw: string) => raw.replace(/[^A-Za-z0-9 &-]/g, "").slice(0, 60).trim();
+  const scope = runName ? ` - ${safe(runName)}` : "";
+  return `${safe(projectNumber) || "project"}${scope} - costing block.${extension}`;
+}
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -131,11 +142,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return json({ ok: true, ...sheet, records: sheet.rows.length });
   }
 
-  const filename = exportFilename(
-    `${loaded.projectNumber} costing`,
-    scope.runName,
-    format === "csv" ? "csv" : "xlsx",
-  );
+  // NOT `exportFilename`, which hardcodes "BWS spec fields" — it is the BWS
+  // layout's own helper. Found by opening a generated file: this one arrived
+  // named `AP364c costing - MAIN RUN - BWS spec fields.xlsx`, which names it
+  // after the one file it must never be mistaken for. Same allowlist, so a
+  // client's project name still cannot reach the header.
+  const filename = costingFilename(loaded.projectNumber, scope.runName, format === "csv" ? "csv" : "xlsx");
   const headers = {
     "content-disposition": `attachment; filename="${filename}"`,
     "cache-control": "private, no-store",

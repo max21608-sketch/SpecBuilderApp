@@ -208,6 +208,15 @@ describeIfDb("the costing block", () => {
     expect(body.notes.join(" ")).toContain("no document link");
   });
 
+  it("is not named after the BWS file it must never be mistaken for", async () => {
+    // Found by opening a generated one: `exportFilename` hardcodes
+    // "BWS spec fields", and this file arriving under that name is the whole
+    // confusion the export exists to avoid.
+    const disposition = (await costing("?format=csv")).headers.get("content-disposition") ?? "";
+    expect(disposition).toContain("costing block.csv");
+    expect(disposition).not.toContain("BWS spec fields");
+  });
+
   it("says in the file that it is the item block and not the sheet", async () => {
     const body = await json();
     expect(body.notes[0]).toContain("Columns A to J only");
