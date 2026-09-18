@@ -132,8 +132,9 @@ Each of these is a trap, not a preference.
   resolves in one fixed order and stops: **printed on the page** (the Panther
   spec sheets do print it), then **the page's own figures agreeing**
   (`suggestUnit`, which abstains on a mixed page), then **the OVERALL figures
-  agreeing** once `applyViewGuesses` knows which they are — which overrides a
-  project default and nothing else — then **`projects.default_dimension_unit`**,
+  agreeing** — which since 2026-09-18 are the figures the MODEL placed, read at
+  staging rather than guessed at read time, and which override a project default
+  and nothing else — then **`projects.default_dimension_unit`**,
   then nothing, and nothing still blocks the card. A project is not more
   authoritative about a page than the page is, which is why the default is last.
   The third step was added on 2026-09-16 and it closed a live defect: a shop
@@ -143,6 +144,11 @@ Each of these is a trap, not a preference.
   centimetres — stood in. An 840mm armchair composed as `W8400mm`, and nothing
   flagged it, because a project default is not a guess the screen apologises
   for. The overall figures are the ones that carry a page's scale.
+- **WHICH figure fills a slot is READ OFF THE PAGE, never sorted by size.** The
+  model says, with the evidence it read it from, and a disagreement with the
+  page's own printed label is flagged rather than settled. Sorting by magnitude
+  recorded a sheet printing `80 x 70 x 90 cm` as a chair 900mm wide, and had
+  decided 141 of 183 dimensions that way. See the load-bearing section.
 - **A dimension is one of five slots — W, D, H, SH, Dia — and nothing else.**
   `0011` makes `attr_group = 'dimension'` *mean* that. Everything else a
   document measures (`ARM HEIGHT`, `WIDTH SEAT`, an unlabelled figure off a shop
@@ -1692,62 +1698,139 @@ registered. Reload first and report afterwards (`reloadThen` on both drawings
 screens). The reload itself is still required: a refused request means the
 screen is out of date.
 
-### A page that labels its figures by VIEW can still be read
+### The model says which figure is the width; nothing sorts them by size
 
-`src/lib/dimension-guess.ts`, `src/lib/drawing-document.ts`
-(`applyViewGuesses`), `src/components/imports/PagePreview.tsx`
+`src/lib/extraction-schema.ts` (`DRAWINGS_TOOL`, `slotFromModel`, `RawCodeGroup`),
+`src/lib/anthropic.ts` (`PROMPTS.shop_drawings`),
+`src/lib/drawing-document.ts` (`stageDrawings`, `assertStagedDrawings`,
+`canonicalCode`, `variantLettersByItem`, `foldableRow`, `wasReadByModel`),
+`src/lib/dimension-guess.ts`, `tools/measure-drawing-reading.ts`
 
-The real AP364 shop-drawing set labels its figures by the view they are drawn
-on. S-200 carries twenty-four:
+Three defects reported on one pack in one sitting, 2026-09-18 — a transposed
+dimension cell, a card nobody could read, one armchair about to become two BWS
+jobs — were three faces of one thing: **code was inferring what the model could
+have been asked to read off the page**, and every rule doing the inferring had
+been tuned against this one pack. Max: *"it's not always as simple as one item
+per page … we need a total overhaul here, because it seems that this issue keeps
+occurring."*
 
-```
-FRONT         110 100 460 125 240 420 520 720 50 5 840
-SIDE          650 790
-BACK          520 840
-TOP           540 790 840
-SIDE SECTION  540 720 300 460 650 790
-```
+`house/conventions.md` §6 was rewritten to allow it, and the reason is measured
+rather than argued: forbidding the model to say which figure was the width did
+not remove the decision, it moved it into code, which cannot see the page.
 
-`normaliseDimensionSlot` places none of them, correctly — "FRONT" is not a
-width — so all twenty-four staged as notes and the item's Dimensions question
-sat empty on a page that states its size four times over.
+**MEASURE FIRST. `npm run measure:drawings` is read only and calls
+`assertStagedDrawings`, the same function the screens call.** Before: 18 staged
+runs, 70 items, **141 of 183 placed dimensions were guesses (77%)**, 19 items
+slotted BY SIZE, 45 raising a dispute, 38 items lettered as configurations. Run
+it before and after; a sentence in a document cannot be re-run.
 
-**The repetition across views is the evidence, and the magnitudes are not.** An
-overall dimension is drawn on every view that shows it, which is a fact about
-orthographic projection rather than about furniture: a WIDTH appears on the
-front, the back and the plan (840), a DEPTH on the side, the section and the
-plan (790), a HEIGHT on the front and the side and never on the plan (720). A
-seat height is the largest remaining figure both elevations state, judged as a
-FRACTION of the height — an absolute range would have to know whether the page
-is in millimetres, which is the thing these pages do not say. Nothing here asks
-whether a number is about right for an armchair; that is the reasoning that
-turns an 8-metre sofa into a plausible one.
+**A staged run is `schemaVersion: 2`** when the model was asked. Version 1 keeps
+the old guessing pipeline, FROZEN, until it is re-read — nothing is upgraded in
+place, because inventing the fields an old run never carried would be one more
+inference layer.
 
-Four things are load-bearing:
+Seven things are load-bearing.
 
-- **It is a suggestion and it says so.** Every slot is `slotSuggested`, which
-  the card already renders amber with the composed cell beside it — the same
-  treatment `parseCombinedDimensions` gets for reading `80 x 70 x 90`
-  positionally, and the reason the inference is allowed at all. The two must not
-  claim the same reason: one is "this figure is drawn on three views", the other
-  "these three were printed in order", and the card prints whichever applies.
-- **All of them or none.** A page whose views share no figure, or that labels no
-  view, or where the plan and the front disagree about the width, gets NO slots
-  and a **key measurement dispute** — the message plus the page itself rendered
-  on the card, because a question that is unreadable as a list of figures is
-  answerable in two seconds off the drawing. Three slots filled and the fourth
-  silently absent reads as a complete answer. A dispute is not a blocker: the
-  card still commits, with the figures as notes.
-- **It never second-guesses a placed row.** If any pending measured row on the
-  item already carries a slot, the whole item is left alone. A guess that filled
-  the gaps around somebody's decision would be a guess wearing their authority.
-- **Read time, never written back**, like `upgradeDimensionSlots` and
-  `mergeNoteBlocks` — which is what gave the eleven-document pack already staged
-  in the sandbox all of this with no second model call and nothing charged
-  again. Verified against that pack: S-200 `W840 x D790 x H720 x SH460mm`,
-  S-201 `W660 x D685 x H680mm`, S-301 `W550 x D565 x H735mm`, the S-100
-  specification sheet still in centimetres at `W1900 x D790 x H720mm`, and
-  S-100's eight bare figures, UP-101 and S-400 left unplaced with a dispute.
+- **TWO READINGS OF A SLOT, and a disagreement is never settled silently.** The
+  model says which figure fills which slot and why; `normaliseDimensionSlot` is
+  now a VALIDATOR over the page's own label, keeping its whole-label rule
+  (`WIDTH SEAT` is not a width). Agreeing is unflagged. The model alone is
+  flagged, with its own evidence as the reason. **A conflict gives the slot to
+  the page's printed word and names the disagreement on the row** — that is the
+  S-203 signature, `"Width" = 80` landing in the depth slot.
+- **A COMBINED LINE NO LONGER INVENTS SLOTS FROM PRINT ORDER.** A printed prefix
+  (`W1520`, `Dia.460`) is the page speaking and is kept; three bare figures get
+  none, and the model reports the same figures with the evidence for each. Two
+  inferences on one line meant the weaker winning silently: `80 x 70 x 90 cm`
+  shipped as `W900 x D800 x H700mm`.
+- **A PAGE COUNT IS NOT EVIDENCE OF A SPLIT.** `variantLettersByItem` reads the
+  model's `one_item` / `configurations` / `unclear`, and only `configurations`
+  letters anything — because lettering takes the bill line out of
+  `loadExportScope` and ships each letter to BWS as its own job. **No string
+  rule can do this instead, and that was measured.** S-200 states `Tibor Blob
+  Amber Fern` on one page and `CLO003 A = Tibor Blob Amber Fern` on the other;
+  comparing codes calls it a split, and comparing descriptions calls it a split
+  too, because one page adds "as per approved sample".
+- **IT IS NOT ONE ITEM PER PAGE, IN EITHER DIRECTION**, and the pages may TITLE
+  one item differently. S-200 is headed `S-200` on its specification sheet and
+  `MUR.2 ARMCHAIR` in the shop drawing's title block. `codeGroups.itemCodes` is
+  a LIST with the bill's code first, and `canonicalCode` is what grouping AND
+  resolution key on — without it the shop drawing is an item no record carries.
+- **THE FOLD ASKS WHETHER A FIGURE IS OVERALL**, not whether the value is a
+  number. `isOverall` is the model's answer; `foldableRow` lives in
+  `drawing-document.ts` so the card and anything measuring the card ask one
+  function. S-201's five blank `TBC` sub-dimensions state no figure, so the old
+  test could never fold them and they printed inline between the four that
+  matter and the fabrics. Slots also sort W/D/H/SH/Dia to match the composed
+  cell above them, and the rest group by kind.
+- **ONE DIMENSION STATED ON FOUR VIEWS IS ONE DIMENSION.** Cross-view duplicates
+  used to be kept deliberately — that repetition was the evidence the magnitude
+  guess read — and there is no guess left to feed. Same slot and same figure
+  collapses; same slot and a DIFFERENT figure never does, because that is two
+  views disagreeing about the chair.
+- **A CARD THE MODEL READ DOES NOT ALSO GUESS.** Both cards re-run
+  `guessSlotsFromViews` at render time, and on a version 2 item that printed a
+  dispute banner describing a sort the app no longer does, directly above rows
+  saying something else. `wasReadByModel` reads it off the item, because
+  `isOverall` is set on every version 2 dimension row and on none before.
+
+**THE UNIT VOTE IS DELIBERATELY KEPT.** `suggestUnit` still reads cm or mm from
+magnitude where the page prints nothing — the same KIND of inference, and not
+the same situation: a page that prints `80 x 70 x 90 cm` beside the word Width
+HAS stated which figure is the width, where the AP364 shop drawings state no
+unit anywhere. It is flagged on every row it touches, one click corrects a whole
+page, and removing it left every card blocked by `unit_missing` with no control
+able to unblock it. What moved is the NARROWING to the overall figures, which
+used to live inside `applyViewGuesses` and now runs at staging off the model's
+own answer.
+
+**NEVER FAIL A PAID RUN OVER A HINT.** `itemCodes` came back as a bare string on
+one document and `z.array()` refused it, so a read that had already been charged
+for went terminal with "Expected array, received string". A string is read as a
+one-entry list, and a group that still makes no sense is dropped —
+`codeGroupsOf` — which leaves the item whole and asks a person. The same rule
+put `evidence` at `MAX_NOTE`: the model wrote 480 useful characters explaining a
+grouping and a 300-character bound silently nulled them.
+
+**STAGED JSON IS DATA FROM THE PAST.** `assertStagedDrawings` casts rather than
+validates, and this shape changed twice in one afternoon — so every screen
+reading the first version 2 run threw `Cannot read properties of undefined`.
+Read a staged field defensively or a schema iteration is an outage.
+
+**Verified on the sandbox by re-reading the Panther-d pack, ten charged calls.**
+Every guess gone: items slotted by size 10 → **0**, disputes 14 → **0**, rows
+whose label disagrees 3 → **0**, items lettered 4 → **0**, inline rows with no
+figure 25 → **3**. S-203 `W900 x D800 x H700mm` → **`W800 x D700 x H900mm`**;
+S-200 one item on two pages, both `W840 x D790 x H720 x SH460mm`; S-100's
+previously CODELESS second page now groups with S-100 through its title block.
+S-201's reason followed the page: *"page 1 explicitly instructs 'ITEM: REFER TO
+JACQUES GRANGE DRAWINGS' … tying the two pages to the same armchair."*
+
+### The upload works out what each file is
+
+`src/lib/document-classify.ts`, `src/app/api/imports/classify/route.ts`,
+`src/components/projects/IntakeBatchUpload.tsx`
+
+The same thesis at the other end. Eleven dropdowns stood between a pack and the
+app because "a BOQ and an FF&E schedule are both .xlsx", and a filename hint sat
+beside each row as grey text the screen refused to act on. One press now stores
+each file, asks what it is, fills the box in and reads it.
+
+- **The model answers in TRADE terms and code files it.** `DOCUMENT_GENRES` is
+  what somebody in furniture manufacturing would call the document;
+  `KIND_FROM_GENRE` maps it onto `importType` and `DocumentKind`. The model is
+  never shown `ffe_schedule` — the exact step, unchanged by the §6 revision.
+- **Unsure fills nothing in.** `unclear`, and anything the model is not certain
+  of, produces no decision: the file is uploaded, held on the screen, and NOT
+  read. The prompt says outright that a spreadsheet which could be a bill or a
+  schedule must come back unclear, because the cost is not symmetric.
+- **Every answer is flagged with its evidence**, and a person's choice always
+  beats the suggestion.
+- **The kind still arrives DECLARED** at `/api/imports`, which is untouched. The
+  classify route creates no run, opens no attempt and stages nothing.
+- A `.eml` costs nothing — it is unambiguously an email. Haiku, not the
+  extraction model. The blob is addressed by PATHNAME and scoped to the project
+  before a byte is read.
 
 ### One bill line, two things to make
 
@@ -1911,121 +1994,26 @@ configuration first, which is a path that does not exist.
 
 ### A drawing dimensions everything, and four of them matter
 
-`src/lib/drawing-document.ts` (`dedupeMeasured`, `applyViewGuesses`),
-`src/lib/dimension-guess.ts` (`seatHeight`, `hasASeat`)
+`src/lib/drawing-document.ts` (`dedupeMeasured`, `foldableRow`),
+`src/components/imports/ObservationRows.tsx` (`orderRows`)
 
-The real S-201 armchair card carried **forty-three** measured rows. Three
-things were wrong with that, all found by walking it.
+The real S-201 armchair card carried **forty-three** measured rows. A figure
+repeated on ONE view is one measurement — a front elevation prints 5, 5, 27, 27
+because the chair is symmetrical — and `dedupeMeasured` collapses those, keyed
+on the view label, the figure and the unit, keeping the FIRST so ids are stable
+across reads. An unlabelled figure is keyed WITHOUT its label: `Dimension 37`
+and `Dimension 42` are positions this app invented, not names the page gave.
 
-- **A figure repeated on ONE view is one measurement.** That front elevation
-  prints 5, 5, 27, 27, 42, 42 because the chair is symmetrical. `dedupeMeasured`
-  collapses those (43 → 36, S-100 8 → 6, S-400 25 → 21). **Across** views it
-  does NOT: `FRONT 640` and `BACK 640` are two statements and their agreement
-  is the whole evidence `guessSlotsFromViews` reads the overall size from —
-  de-duplicating those would tidy the table by breaking the guess. Keyed on the
-  view label, the figure and the unit, keeping the FIRST row, so ids are stable
-  across reads. An unlabelled figure is keyed WITHOUT its label: `Dimension 37`
-  and `Dimension 42` are positions this app invented, not names the page gave.
-- **The five slots go first and the rest fold away.** Four of thirty-six rows
-  compose BWS field 3; the others are arm heights, gaps and radii, kept on the
-  item and used by nothing today. Inline they bury the four that matter. They
-  are FOLDED, never dropped — what the document said is the point of
-  `record_attributes`, and a figure nobody can see is one nobody can correct —
-  with the count on the toggle so the card never implies the page says less
-  than it does.
-- **A seat height has two tiers, and silence is not an option.** A figure BOTH
-  elevations state is strong (S-200's 460). One view alone is weak, and the
-  first rule threw those away: S-201 prints 465 on the front only, its
-  elevations share nothing in the seat window, and an ARMCHAIR came back with
-  no seat height. Now the weak tier is taken and flagged, the candidate nearest
-  60% of the height wins (never the first reported, or the answer would depend
-  on the order the model listed its figures), and `hasASeat` — read off the
-  page's own `itemNameRaw`, not the record's category, which an uncategorised
-  record has not got — makes an armchair with no seat height say so.
+**The ones that matter go first and the rest fold away.** Four of thirty-six
+rows compose BWS field 3; the others are arm heights, gaps and radii. Inline
+they bury the four. They are FOLDED, never dropped — what the document said is
+the point of `record_attributes`, and a figure nobody can see is one nobody can
+correct — with the count on the toggle so the card never implies the page says
+less than it does.
 
-**And a persisted guess must stay re-guessable.** `applyViewGuesses` skipped any
-item where a measured row already carried a slot. The guess is computed on read
-and never written back — but a PATCH writes the staged doc as the server read
-it, so the first autosave on any row persists it. S-201 was found holding W/H/D
-at `slotSuggested: true`, saved by an unrelated edit, and from then on the item
-was skipped: the corrected seat-height rule could never reach it. `slotSuggested`
-is the marker that tells a guess from a decision — the PATCH route sets it false
-when a person chooses — so a decision is untouchable and a guess is re-made.
-
-**The unit fix is per ROW SET, not all-or-nothing.** It required every placed
-row to be carrying the project default. S-201 showed why that fails: an earlier
-pass had corrected its W, D and H to mm, so when the seat height joined them
-still holding the project's `cm` the test refused and the cell composed
-`SH4450mm` — a 4.5-metre seat height, the exact failure the unit rule exists to
-prevent, reappearing through a half-corrected set. A printed unit anywhere in
-the set now settles it, otherwise the overall figures do, and only a WEAK unit
-(`project_default` or `figures`) is ever replaced.
-
-Verified against the real pack: S-100 `W1900 x D790 x H720 x SH440mm`, S-200
-`W840 x D790 x H720 x SH460mm`, S-201 `W660 x D685 x H680 x SH445mm`, S-301
-`W550 x D565 x H735 x SH430mm`, S-400 `W570 x D493 x H473 x SH358mm`, the
-UP-101 headboard correctly given no seat height, and S-101's `SH TBC` left as
-the page states it.
-
-### An empty viewRegions is why the whole page stood in
-
-`src/lib/anthropic.ts`, `src/lib/extraction-schema.ts`,
-`src/lib/drawing-document.ts` (`pickItemView`)
-
-`VIEW_PREFERENCE` has always ranked photo → render → **3d** → front → side →
-back → plan, and two tests have always asserted it, so "the 3D view when there
-is one, the front view otherwise" was never the missing part. The real AP364
-set arrived with `viewRegions: []` on every item — the model said so in its own
-document note: it could not fix exact crop boxes from what it had read. With
-nothing to prefer, the whole-page fallback stood in on a page whose 3D panel is
-titled `3D VIEW` in the corner.
-
-The cause was the instruction, which read as a demand for precision — "enclose
-the picture and nothing else". It now says an APPROXIMATE box is wanted, that
-omitting a region is the one answer that helps nobody, and that these sheets
-TITLE their panels (`3D VIEW`, `FRONT`, `SIDE`, `BACK`, `TOP`, `SIDE SECTION`)
-so there is one region per titled panel with the `viewType` its title names.
-
-**Nothing is retro-active, and that is the cost.** A prompt is read at call
-time, so a document already read keeps the output it has: the pilot pack gains
-real crops only by being read again, which is eleven billed model calls, or by
-somebody dragging a box. The tool SHAPE is unchanged — only two descriptions —
-so this forces no re-read of anything.
-
-### A guessed dimension is filled in, and the line turns yellow
-
-Asked for directly on 2026-09-16, after the first real run-through: **assign W,
-D, H and SH even when unsure, and highlight the lines so I know to confirm
-them.** An empty Dimensions question helps nobody; a wrong one a reviewer can
-see does. So `guessSlotsFromViews` never withholds a guess — `dispute` says the
-guess is WEAK, it does not suppress it, and the two paths are not presented as
-equally good:
-
-- **Strong**: the views agree, which is the page stating the same figure on two
-  or three of them. `dispute` is null.
-- **Weak**: no view labels, or the views share nothing, or the same figure reads
-  as two slots. Falls back to the three largest distinct figures as
-  W ≥ D ≥ H — an assumption that furniture is wider than deep and deeper than
-  tall, which is right for the S-100 sofa (190 / 79 / 72) and wrong for a desk
-  chair and a headboard. `dispute` always set, the panel shows the page, and
-  every guessed line is **yellow** (`bg-yellow-100/70`) — distinct from the
-  amber a blocker uses: yellow means "this is a guess, confirm it", amber means
-  "this cannot commit as it stands".
-
-Below three distinct figures it fills nothing: two figures could be W × H,
-W × D or Dia × H with nothing to choose between them, and a third slot invented
-from two numbers is not a guess a reviewer could check — it is one they would
-have to undo.
-
-**And only offer a group the row can be given.** The group dropdown listed all
-six, and on a measured row every one of them was refused: `Dimensions` by
-`dimension_needs_slot` (0011's biconditional) and every other by
-`unit_not_a_measurement`. The 400 landed in the banner at the top of the
-screen, nowhere near the row, so the dropdown appeared to do nothing —
-twenty-four times on the S-200 card. The route's rules are right; offering
-choices it must refuse was not. `dimension` is never an option there, because
-it is unwritable without a slot and the SLOT column sends both fields in one
-patch.
+**Which rows fold is the section above**: `isOverall`, as the model read it, not
+"does the value state a figure". That older test is why a page whose
+sub-dimensions were all `TBC` printed five rows of nothing inline.
 
 ### A swatch is cropped off the page it is printed on
 
@@ -2129,7 +2117,7 @@ thing that decides:
    — the same treatment a guessed dimension slot gets. It requires the value to
    carry real text, so `PIPING / TBC` still classifies as nothing.
 
-**`upgradeCalloutGuesses` runs at READ time**, like `applyViewGuesses` and
+**`upgradeCalloutGuesses` runs at READ time**, like `upgradeDimensionSlots` and
 `mergeNoteBlocks`, so a pack already read gains the corrected reading with no
 second model call. It touches a row only when it is still `pending`, at
 `version === 1` (nobody has patched it), holds no field, and is not a dimension
@@ -2863,6 +2851,19 @@ and with the chain none can reach TG0 or TG1 either. Every gate tick in the
 sandbox is now correctly gone. This is a seed/migration question and a question
 for Matthew, not something a reviewer can answer, and it must not be fixed by
 weakening the chain.
+
+**Built 2026-09-18, the intake reads the document and the app stops guessing.**
+Three defects reported in one sitting — a transposed dimension cell, a card
+nobody could read, one armchair about to become two BWS jobs — were three faces
+of code inferring what the model could have been asked to read off the page.
+`house/conventions.md` §6 was rewritten to allow it; the two load-bearing
+sections above carry the reasoning. Measured before and after with a new read-only
+`npm run measure:drawings`. **On the Panther-d pack, re-read for ten charged
+calls: items slotted by size 10 → 0, disputes 14 → 0, label disagreements 3 → 0,
+false configuration splits 4 → 0, inline rows with no figure 25 → 3.** The nine
+other staged runs are untouched and still version 1, which is what versioning the
+staged shape is for. **Not accepted by Max**, and the intake classification path
+has never been driven with real files.
 
 **Outstanding — judgement, not code.**
 
