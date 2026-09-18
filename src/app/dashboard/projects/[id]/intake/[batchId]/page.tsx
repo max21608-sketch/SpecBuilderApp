@@ -14,6 +14,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
+import StatTile from "@/components/ui/StatTile";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { intakeStatusLabel, isIntakeRunWorking } from "@/lib/intake-status";
 
@@ -101,6 +102,25 @@ export default function IntakeBatchPage({
 
   const drawingRuns = (batch?.runs ?? []).filter((run) => run.documentKind === "shop_drawings");
 
+  /**
+   * What the pack is waiting on, counted once.
+   *
+   * `confirmed` means no pending proposals remain — applied or explicitly
+   * ignored — which is what the review screens call "Review complete". It does
+   * NOT mean the answers it produced are settled, and the wording here follows
+   * that: "reviewed", never "complete".
+   */
+  const packState = (batch?.runs ?? []).reduce(
+    (acc, run) => {
+      if (run.status === "confirmed") acc.reviewed += 1;
+      else if (run.status === "parsed") acc.toReview += 1;
+      else if (run.status === "failed") acc.failed += 1;
+      else if (isIntakeRunWorking(run.status)) acc.reading += 1;
+      return acc;
+    },
+    { reviewed: 0, toReview: 0, reading: 0, failed: 0 },
+  );
+
   if (!batch && !error) return <Spinner label="Loading the pack" />;
 
   return (
@@ -122,6 +142,39 @@ export default function IntakeBatchPage({
         then the drawings. The bill is what creates the records the drawings attach to; a drawing read before that is
         fine, its specs simply have nothing to land on until the bill is confirmed.
       </p>
+
+      {/* WHAT THIS PACK WANTS FROM YOU, at a glance.
+          ==================================================================
+          Reading is dispatched at upload, so most of the time the answer is
+          "nothing" — and a screen of file rows makes you work that out by
+          reading every status. The tiles say it in four numbers, and the only
+          one that is ever a call to action is the one that failed. A document
+          being READ is deliberately shown as information rather than as work:
+          it needs nobody, and offering a button beside it would invite a second
+          charged call for a read that is already running. */}
+      {(batch?.runs ?? []).length > 0 && (
+        <div className="mt-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          <StatTile label="Reviewed" tone="good" value={packState.reviewed} meaning="applied or ruled on" />
+          <StatTile
+            label="Waiting for you"
+            tone={packState.toReview > 0 ? "warn" : "plain"}
+            value={packState.toReview}
+            meaning="staged and unreviewed"
+          />
+          <StatTile
+            label="Still being read"
+            tone="info"
+            value={packState.reading}
+            meaning={packState.reading > 0 ? "nothing to do" : "none in flight"}
+          />
+          <StatTile
+            label="Read failed"
+            tone={packState.failed > 0 ? "danger" : "plain"}
+            value={packState.failed}
+            meaning={packState.failed > 0 ? "a retry charges again" : "none"}
+          />
+        </div>
+      )}
 
       {/* At one PDF per line item a pack holds thirty drawing files. Reviewing
           them one screen at a time is thirty screens, and nothing can then see
