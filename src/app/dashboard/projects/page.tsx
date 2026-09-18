@@ -478,7 +478,7 @@ function ProjectsView() {
                       Spec table is gone from here because the name goes there
                       anyway; Export is the one thing the name does NOT reach. */}
                   <Td>
-                    <div className="flex flex-col items-end gap-0.5">
+                    <div className="flex items-center justify-end gap-1">
                       <Link
                         href={`/dashboard/drafts?projectId=${project.id}`}
                         className={buttonClass("quiet", "xs", "no-underline")}
