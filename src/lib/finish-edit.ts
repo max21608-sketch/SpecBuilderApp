@@ -102,6 +102,7 @@ export async function editFinish(
     reason,
     evidence,
     actor,
+    changeSetId: attachTo,
   }: {
     projectId: string;
     finishId: string;
@@ -110,6 +111,17 @@ export async function editFinish(
     reason: string;
     evidence?: UploadedEvidence | null;
     actor: string;
+    /**
+     * An ALREADY OPEN change to attach this edit to, instead of opening one.
+     *
+     * For a caller that edits several finishes as ONE act — filing a library's
+     * suggested kinds in a single click. Without it every finish opens its own
+     * change set and eleven codes filed in one press become eleven entries in
+     * the project trail, which is the failure `acceptSuggestedLevels` avoids by
+     * calling `changeSetForEdit` once and writing every row under the id it
+     * returns. The caller owns the change and the reason on it.
+     */
+    changeSetId?: string;
   },
 ): Promise<FinishEditResult> {
   const rows = await txn`
@@ -130,13 +142,17 @@ export async function editFinish(
     );
   }
 
-  const { changeSetId } = await changeSetForEdit(txn, {
-    projectId,
-    actor,
-    kind: "finish_edit",
-    reason,
-    evidence,
-  });
+  const changeSetId =
+    attachTo ??
+    (
+      await changeSetForEdit(txn, {
+        projectId,
+        actor,
+        kind: "finish_edit",
+        reason,
+        evidence,
+      })
+    ).changeSetId;
 
   const code = fields.code === undefined ? String(finish.code) : fields.code.trim();
   if (!code) throw new DomainConflictError("code_required", "A finish needs the client's own code.", { status: 400 });

@@ -37,6 +37,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import { FINISH_KINDS, FINISH_KIND_LABELS, type FinishKind } from "@/lib/finishes";
+import { suggestKindsFor } from "@/lib/finish-kind-guess";
 import FinishSwatch from "@/components/finishes/FinishSwatch";
 import Button from "@/components/ui/Button";
 
@@ -189,11 +190,12 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
   /**
    * FILING A FINISH UNDER ITS KIND, FROM THE ROW.
    *
-   * The kind filter is dead until something records a kind, and nothing does:
-   * `kind` is never inferred, deliberately — `classifyGroup` already guesses a
-   * group from the words in a label, and a second guess stacked on it fills the
-   * register with confident mistakes. So a person says it, and saying it has to
-   * cost one click or nobody will file eleven codes.
+   * `kind` is still never INFERRED — nothing writes one on its own. What the
+   * app does now is SUGGEST one, from the client's own code prefix and the
+   * words of the description, and print the evidence beside it; a person's
+   * click is what files it. That is the `level_suggested` rule (0025) in a
+   * second place, and it is why the register cannot fill with confident
+   * mistakes: every one of them was agreed to by somebody looking at the row.
    *
    * Offered only on a TBC finish, which is the route's own rule rather than a
    * new one: a CONFIRMED finish is a decision, and changing one needs a reason,
@@ -232,6 +234,46 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
     }
   }
 
+  /**
+   * FILE EVERY SUGGESTED KIND IN ONE ACT.
+   *
+   * Sends the ids and the versions and NOT the kinds: the route re-derives each
+   * one from the live row, so this button can only file what the screen showed.
+   * The whole lot lands under one change set, because eleven finishes filed in
+   * one press is one thing that happened, not eleven.
+   */
+  async function fileAllKinds() {
+    const pending = fileable;
+    if (pending.length === 0) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch<{ filed: { code: string; kind: string }[]; skipped: { code: string; why: string }[] }>(
+        `/api/projects/${id}/finishes/kinds`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            finishes: pending.map((finish) => ({ id: finish.id, version: finish.version })),
+          }),
+        },
+      );
+      if (!res.ok) {
+        await reloadThen(res.error, false);
+        return;
+      }
+      // Name what was skipped. A count that quietly came back smaller than the
+      // one on the button is how somebody believes a code was filed when it
+      // was not.
+      const filed = `${res.data.filed.length} finish${res.data.filed.length === 1 ? "" : "es"} filed`;
+      const skipped = res.data.skipped.length
+        ? ` · ${res.data.skipped.map((entry) => `${entry.code} not filed — ${entry.why}`).join("; ")}`
+        : "";
+      await reloadThen(`${filed}${skipped}`, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function create() {
     if (!newCode.trim()) return;
     setBusy(true);
@@ -253,6 +295,36 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
   // use to decide where to look next.
   const active = useMemo(() => (data?.finishes ?? []).filter((finish) => finish.status === "active"), [data]);
   const retired = useMemo(() => (data?.finishes ?? []).filter((finish) => finish.status === "retired"), [data]);
+
+  /**
+   * WHAT THE APP WOULD FILE EACH UNFILED ROW AS, and why.
+   *
+   * Derived on the client from the payload already loaded, like the filters —
+   * there is no second request, and `suggestFinishKind` is the SAME pure
+   * function the bulk route re-runs server-side against the live row. The
+   * server deriving it again rather than trusting this list is the
+   * `proposalBlockers()` rule: two readers, one implementation, so a button can
+   * only ever file what the row beside it offered.
+   */
+  const suggestions = useMemo(
+    () => new Map(suggestKindsFor(active).map((entry) => [entry.id, entry.suggestion])),
+    [active],
+  );
+
+  /**
+   * The rows "file all" would actually write, which is NOT every suggestion.
+   *
+   * A CONFIRMED finish is a decision, and changing one needs a reason the Edit
+   * panel collects — the route's own rule, and the same reason the inline
+   * picker has always been offered on TBC rows alone. Counting suggestions in
+   * the banner and filing only the TBC ones would put a number on the button
+   * that does not match what it does, which is the mismatch the check sheet
+   * exists to prevent, in miniature.
+   */
+  const fileable = useMemo(
+    () => active.filter((finish) => suggestions.has(finish.id) && finish.state === "tbc"),
+    [active, suggestions],
+  );
 
   const kindCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -388,13 +460,43 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
         )}
       </div>
 
-      {/* A dropdown offering one option reads as broken. It is not: nothing
-          infers a kind, so until somebody files these codes there is nothing to
-          filter by, and the row's own picker is where that happens. */}
-      {active.length > 0 && kindCounts.size === 1 && kindCounts.has(NO_KIND) && (
+      {/* WHAT THE APP CAN FILE FOR YOU, and the one button that does it.
+          Nothing here is written until it is pressed — the row's own dashed
+          button files one, this files all of them, and both show the evidence.
+          Offered only where something is actually unfiled, so it disappears
+          the moment the library is in order rather than becoming furniture. */}
+      {fileable.length > 0 && (
+        <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <p className="text-sm text-blue-900">
+              <span className="font-medium">
+                {kindCounts.get(NO_KIND) ?? 0} finish{(kindCounts.get(NO_KIND) ?? 0) === 1 ? "" : "es"} with no kind
+              </span>
+              , and the kind is what these screens group and filter by.{" "}
+              {fileable.length === 1 ? "One can" : `${fileable.length} can`} be read off the client&rsquo;s own code
+              or the description — each is shown on its row with the reason.
+            </p>
+            <Button
+              size="xs"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void fileAllKinds()}
+              className="border-dashed border-blue-400 text-blue-800 bg-white hover:bg-blue-100"
+            >
+              File all {fileable.length}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* A dropdown offering one option reads as broken. It is not: a kind is
+          suggested but never written, so until somebody files these codes there
+          is nothing to filter by. Said only when there is nothing to suggest
+          either — otherwise the banner above is the more useful sentence. */}
+      {active.length > 0 && kindCounts.size === 1 && kindCounts.has(NO_KIND) && fileable.length === 0 && (
         <p className="mt-2 text-xs text-neutral-500">
-          No finish has a kind recorded yet, so there is nothing to filter by — nothing guesses whether a code is a
-          fabric or a timber. Set one on any row and it becomes a filter.
+          No finish has a kind recorded yet, so there is nothing to filter by — and nothing in these codes or their
+          descriptions says whether they are a fabric or a timber. Set one on any row and it becomes a filter.
         </p>
       )}
 
@@ -443,6 +545,10 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
         <ul className="mt-4 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
           {shownActive.map((finish) => {
             const onRun = runFilter ? finish.used_on.filter((use) => use.runId === runFilter).length : 0;
+            // Only where nothing is filed — `suggestKindsFor` skips a finish
+            // that already carries a kind, because re-suggesting over one would
+            // be the app second-guessing a person's decision.
+            const suggestion = suggestions.get(finish.id);
             return (
             <li key={finish.id} className="px-4 py-3">
               <div className="flex flex-wrap items-start gap-3">
@@ -451,20 +557,59 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <span className="font-mono text-sm font-medium text-neutral-900">{finish.code}</span>
                     {finish.state === "tbc" ? (
-                      <select
-                        value={finish.kind ?? ""}
-                        disabled={busy}
-                        onChange={(event) => void setKind(finish, event.target.value)}
-                        aria-label={`Kind of ${finish.code}`}
-                        className={`text-xs border rounded px-1 py-0.5 bg-white disabled:opacity-50 ${
-                          finish.kind ? "border-neutral-200 text-neutral-600" : "border-dashed border-neutral-300 text-neutral-400"
-                        }`}
-                      >
-                        <option value="">Kind?</option>
-                        {FINISH_KINDS.map((kind) => (
-                          <option key={kind} value={kind}>{FINISH_KIND_LABELS[kind]}</option>
-                        ))}
-                      </select>
+                      // THE SUGGESTION IS A BUTTON, AND THE PICKER IS BESIDE IT.
+                      //
+                      // Never a pre-selected dropdown: a select already reading
+                      // "Timber" fires no change event when somebody chooses
+                      // Timber, so the one action that records their agreement
+                      // would do nothing at all. That is the level picker's
+                      // trap (0025), and it applies to every suggestion in this
+                      // app.
+                      suggestion ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={() => void setKind(finish, suggestion.kind)}
+                            title={suggestion.reason}
+                            className="border-dashed border-blue-400 text-blue-800 bg-blue-50 hover:bg-blue-100"
+                          >
+                            {FINISH_KIND_LABELS[suggestion.kind]}?
+                          </Button>
+                          <span className="text-xs text-neutral-500">{suggestion.reason}</span>
+                          {/* The way out of the suggestion, always offered. A
+                              guess with no alternative is a guess wearing the
+                              authority of a decision. */}
+                          <select
+                            value=""
+                            disabled={busy}
+                            onChange={(event) => void setKind(finish, event.target.value)}
+                            aria-label={`Kind of ${finish.code}`}
+                            className="text-xs border border-dashed border-neutral-300 rounded px-1 py-0.5 bg-white text-neutral-400 disabled:opacity-50"
+                          >
+                            <option value="">or…</option>
+                            {FINISH_KINDS.map((kind) => (
+                              <option key={kind} value={kind}>{FINISH_KIND_LABELS[kind]}</option>
+                            ))}
+                          </select>
+                        </span>
+                      ) : (
+                        <select
+                          value={finish.kind ?? ""}
+                          disabled={busy}
+                          onChange={(event) => void setKind(finish, event.target.value)}
+                          aria-label={`Kind of ${finish.code}`}
+                          className={`text-xs border rounded px-1 py-0.5 bg-white disabled:opacity-50 ${
+                            finish.kind ? "border-neutral-200 text-neutral-600" : "border-dashed border-neutral-300 text-neutral-400"
+                          }`}
+                        >
+                          <option value="">Kind?</option>
+                          {FINISH_KINDS.map((kind) => (
+                            <option key={kind} value={kind}>{FINISH_KIND_LABELS[kind]}</option>
+                          ))}
+                        </select>
+                      )
                     ) : (
                       finish.kind && <span className="text-xs text-neutral-500">{FINISH_KIND_LABELS[finish.kind]}</span>
                     )}

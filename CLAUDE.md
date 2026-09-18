@@ -1423,9 +1423,17 @@ words so a value stays checkable against its page; the CELL renders the library.
 - **Normalisation is case and whitespace only.** `CH-01.1` and `CH-01-1` stay
   two finishes. A normaliser clever enough to merge them is clever enough to
   merge two codes a client meant to keep apart, and there is no way back.
-- **`kind` is never inferred.** `classifyGroup` already guesses a group from
-  words in a label; a second guess stacked on it produces a register full of
-  confident mistakes.
+- **`kind` is SUGGESTED and never written.** The rule was "never inferred", on
+  the grounds that `classifyGroup` already guesses a group from words in a
+  label and a second guess stacked silently on it produces a register full of
+  confident mistakes. That reasoning stands and nothing writes a kind on its
+  own. What changed on 2026-09-18 is WHO DECIDES: `suggestFinishKind`
+  (`src/lib/finish-kind-guess.ts`) reads the client's own code prefix and then
+  the description's material words, the row prints the kind as a dashed blue
+  button with its evidence beside it, and a person's click files it. The
+  `level_suggested` rule (0025) in a second place — the register cannot fill
+  with mistakes, because every entry in it was agreed to by somebody looking at
+  the row.
 - **A CONFLICT links nothing.** Where the library has committed to a
   description and a new drawing says something else, the attribute stays
   unlinked and shows on the finishes page as a code needing a person. Linking
@@ -1454,12 +1462,39 @@ words so a value stays checkable against its page; the CELL renders the library.
   not just the kind — a partial patch there silently deletes the description,
   supplier and reference. Anything else that patches a finish must do the same,
   or merge `undefined` in `editFinish` deliberately.
-- **Nothing infers a `kind`, so the kind filter is empty until a person files
-  the codes.** All eleven finishes on the sandbox Panther project had none. The
-  picker is offered inline only on a TBC finish — that is the route's own rule,
-  not a new one: a confirmed finish is a decision and changing it needs a
-  reason, which the Edit panel collects. Where nothing is filed the screen says
-  so in words, because a dropdown with one option reads as broken.
+- **The kind is suggested, filed one click at a time, and the banner counts
+  what the button files.** All eleven finishes on the sandbox Panther project
+  had none, which made the kind filter dead. Six things about it:
+  - **The word lists are shared and the callout half is FROZEN.**
+    `src/lib/material-words.ts` is a leaf holding both, so the drawings path and
+    the library cannot drift apart about whether `WD-05` is a timber. Everything
+    named `*_CALLOUT_WORDS` is exactly what `classifyCallout` matched on before
+    the move: `upgradeCalloutGuesses` runs at READ time, so widening those would
+    silently re-classify rows on every pack already read. The library's extra
+    vocabulary is additive and used by nothing else.
+  - **A material word is not a part word.** The timber list has always carried
+    `feet`, `leg`, `legs`, `frame`, which is right for a caption whose LABEL is
+    the part and wrong for a description, where "for the legs" says where the
+    finish goes. The library reads `TIMBER_MATERIAL_WORDS` only.
+  - **Leather is read before fabric**, because `FABRIC_CALLOUT_WORDS` contains
+    `leather`, `hide` and `suede` — the drawings path cannot tell them apart and
+    does not need to, and `FinishKind` can.
+  - **The route re-derives every kind from the live row** and the client sends
+    ids and versions only, so the button can only file what the screen offered.
+    The `questionTier` rule: a request that tries to SET one is not honoured.
+  - **One click is ONE change set**, not N. `editFinish` now takes an optional
+    `changeSetId` to attach to, because it otherwise calls `changeSetForEdit`
+    per finish and eleven codes filed in one press become eleven entries in the
+    trail. `finish_edit` is in `REASON_REQUIRED_KINDS` AND has a database
+    constraint behind it, so the bulk route must supply a reason — found by
+    pressing the button, which reported "A finish edited has to say why" and
+    correctly wrote nothing.
+  - **The picker is offered inline only on a TBC finish** — the route's own
+    rule: a confirmed finish is a decision and changing it needs a reason, which
+    the Edit panel collects. So the banner counts the TBC-and-suggested rows,
+    not every suggestion, or the number on the button would not match what it
+    does. Where nothing can be suggested the row keeps the empty picker and the
+    screen says why.
 
 ### A CHECK is re-listed in full, so copying a stale list DELETES values
 

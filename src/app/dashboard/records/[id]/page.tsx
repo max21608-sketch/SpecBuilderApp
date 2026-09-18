@@ -481,32 +481,55 @@ export default function RecordPage() {
         />
       )}
 
-      {/* The picture, first, because it is what a person recognises. A record
-          was a description and a quantity, and nobody could look at one and
-          tell which item it was. Rendered from a crop somebody confirmed off
-          the drawings; `hasImage` goes false on a 404 so a record without one
-          says so in words instead of showing a broken image. */}
-      {hasImage && (
-        <div className="mt-6 float-right ml-4 mb-2 w-44 border border-neutral-200 rounded-lg bg-white p-2">
-          {/* eslint-disable-next-line @next/next/no-img-element --
-              an authenticated same-origin route that streams from private blob
-              storage; next/image cannot fetch it with the session cookie. */}
-          <img
-            src={`/api/records/${record.id}/image`}
-            alt={`${record.item_description}`}
-            onError={() => setHasImage(false)}
-            className="w-full h-auto rounded"
-          />
-          <p className="mt-1 text-center text-xs text-neutral-500">From the drawings</p>
-        </div>
-      )}
+      {/* THE PICTURE IS A COLUMN, NEVER A FLOAT.
+          ==================================================================
+          It was `float-right` on a div sitting between the configurations
+          panel and the details form, so it floated over WHATEVER rendered
+          next — which is the details card — and landed clipped across the top
+          of it, overlapping the Description and Qty fields. Found in the
+          browser on 2026-09-18; a float has no relationship with the box it
+          lands on, so nothing about the card could have prevented it.
 
-      {/* What the documents actually said. */}
-      {/* THE BILL'S OWN WORDS, AND THE TWO FREE-TEXT COLUMNS (0028). The
-          description was not editable at all until now, so a typo in a bill
-          line was permanent, and there was nowhere to write down what the
-          structured fields cannot hold — which is what Matthew asked for. */}
-      <RecordDetails recordId={record.id} record={record} onSaved={load} />
+          It is a real grid column instead, and STICKY: recognising the item is
+          the reason the picture is there at all, so it should stay beside you
+          while the spec table scrolls rather than leaving the screen. It
+          collapses above the content on a narrow viewport, where a 176px
+          sidebar beside a table is unreadable anyway.
+
+          Rendered from a crop somebody confirmed off the drawings; `hasImage`
+          goes false on a 404, and the column then disappears rather than the
+          layout keeping a hole for it. */}
+      <div
+        className={`mt-6 grid items-start gap-4 ${hasImage ? "lg:grid-cols-[minmax(0,1fr)_11rem]" : "grid-cols-1"}`}
+      >
+        <div className="min-w-0">
+          {/* What the documents actually said. */}
+          {/* THE BILL'S OWN WORDS, AND THE TWO FREE-TEXT COLUMNS (0028). The
+              description was not editable at all until now, so a typo in a bill
+              line was permanent, and there was nowhere to write down what the
+              structured fields cannot hold — which is what Matthew asked for. */}
+          <RecordDetails recordId={record.id} record={record} onSaved={load} />
+        </div>
+
+        {/* `w-44` on the box itself, not only on the grid track: below `lg` the
+            grid is one column and the track is the full page width, so without
+            it an A3 drawing crop renders as a full-width hero image above the
+            specs. */}
+        {hasImage && (
+          <div className="w-44 lg:w-auto lg:sticky lg:top-4 border border-neutral-200 rounded-lg bg-white p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element --
+                an authenticated same-origin route that streams from private blob
+                storage; next/image cannot fetch it with the session cookie. */}
+            <img
+              src={`/api/records/${record.id}/image`}
+              alt={`${record.item_description}`}
+              onError={() => setHasImage(false)}
+              className="w-full h-auto rounded"
+            />
+            <p className="mt-1 text-center text-xs text-neutral-500">From the drawings</p>
+          </div>
+        )}
+      </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">Specs captured</h2>

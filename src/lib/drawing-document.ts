@@ -487,72 +487,31 @@ export const METAL_SLOTS = [5, 35] as const; // Main metal finish, Metal Finish 
 
 // The words a drawing uses for each kind of callout.
 //
-// WIDENED ON 2026-09-17, and the reason is worth keeping. The real S-100 sheet
-// captions its upholstery `SOFA / Yarn Tessarae YC04158 - 01` — the PART in the
-// label, as the prompt asks for, and the CLOTH in the value. Neither string
-// held a word on this list, so the row staged as `other` with no BWS field
-// while its sibling `SOFA FEET / Dark tinted wood` landed correctly on "feet"
-// and "wood". A fabric is named by its cloth, not by the word "fabric".
-const FABRIC_WORDS = [
-  "fabric",
-  "fabrics",
-  "com",
-  "com1",
-  "com2",
-  "com3",
-  "upholstery",
-  "upholstered",
-  "leather",
-  "textile",
-  "weave",
-  "velvet",
-  "yarn",
-  "boucle",
-  "bouclé",
-  "linen",
-  "cotton",
-  "wool",
-  "mohair",
-  "chenille",
-  "tweed",
-  "silk",
-  "canvas",
-  "suede",
-  "hide",
-  "vinyl",
-];
-const TIMBER_WORDS = ["wood", "timber", "oak", "walnut", "veneer", "feet", "leg", "legs", "frame"];
-export const METAL_WORDS = ["metal", "brass", "bronze", "steel", "chrome", "nickel"];
-const HARDWARE_WORDS = [
-  "hinge",
-  "hinges",
-  "runner",
-  "runners",
-  "castor",
-  "castors",
-  "mechanism",
-  "glide",
-  "glides",
-];
+// THE WORD LISTS AND THE CODE PREFIXES NOW LIVE IN `material-words.ts`, moved
+// there unedited on 2026-09-18 so the finishes library can read the same
+// vocabulary (`suggestFinishKind`). Two copies of these lists is how the
+// drawings path and the library start disagreeing about whether `WD-05` is a
+// timber — the `composeDimensionCell` rule, applied to a word list.
+//
+// The names carry `_CALLOUT_` because the library reads a WIDER set: a library
+// row has a full description to read and finer kinds to choose between
+// (leather apart from fabric, stone, glass, paint). What this file matches on
+// is unchanged, which is what keeps a pack already read classifying exactly as
+// it did — `upgradeCalloutGuesses` runs at READ time, so a widened list here
+// would silently re-classify rows on every existing document.
+import {
+  CODE_PREFIXES,
+  FABRIC_CALLOUT_WORDS,
+  HARDWARE_WORDS,
+  METAL_WORDS,
+  TIMBER_CALLOUT_WORDS,
+} from "@/lib/material-words";
 
-/**
- * The client's own finish code, read as evidence of what the callout IS.
- *
- * The page prints the code beside the swatch, so this is the page speaking
- * rather than a rule about furniture. `CH` is DELIBERATELY ABSENT: the Panther
- * set prints `CH-01.2` and nothing on any page says what CH stands for, and an
- * invented mapping is exactly the confidently wrong field `suggestSpecField`
- * refuses to produce.
- */
-const CODE_PREFIXES: { prefix: string; kind: Exclude<CalloutKind, null> }[] = [
-  { prefix: "uph", kind: "fabric" },
-  { prefix: "fab", kind: "fabric" },
-  { prefix: "com", kind: "fabric" },
-  { prefix: "tim", kind: "timber" },
-  { prefix: "wd", kind: "timber" },
-  { prefix: "mtl", kind: "metal" },
-  { prefix: "mt", kind: "metal" },
-];
+/** Re-exported from its old home, so no caller of this module changed. */
+export { METAL_WORDS };
+
+const FABRIC_WORDS = FABRIC_CALLOUT_WORDS;
+const TIMBER_WORDS = TIMBER_CALLOUT_WORDS;
 
 export type SpecFieldEntry = { id: string; jsonId: number; name: string };
 
@@ -572,7 +531,7 @@ export function specFieldEntries(rows: readonly Record<string, unknown>[]): Spec
   }));
 }
 
-function mentions(text: string, words: string[]): boolean {
+function mentions(text: string, words: readonly string[]): boolean {
   const parts = normaliseName(text).split(" ");
   return words.some((word) => parts.includes(word));
 }
