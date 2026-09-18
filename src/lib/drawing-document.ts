@@ -47,7 +47,8 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { parseCombinedDimensions, parseDimensionFigure, sharesAScale, SCALE_BOUNDARY } from "@/lib/dimensions";
-import type { RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
+import type { RawCodeGroup, RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
+import { slotFromModel } from "@/lib/extraction-schema";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
 import { nextVariantLabel } from "@/lib/record-variants";
 
@@ -92,6 +93,34 @@ export type DrawingObservation = {
    * did not actually state.
    */
   slotSuggested?: boolean;
+  /**
+   * WHY this figure has that slot, in the page's own terms, as the model read
+   * it — "labelled WIDTH on the specification table", "spans the whole chair on
+   * the front elevation", "second of three in the printed line 80 x 70 x 90".
+   *
+   * It replaces a sentence this app used to compose about its own reasoning
+   * ("the second largest — no view says so"), which told a reviewer what the
+   * code did rather than what the drawing shows. A reviewer checks this against
+   * the page; that is the whole job, and it cannot be done against a sort order.
+   *
+   * OPTIONAL, like every field below: `schemaVersion: 1` runs are already
+   * sitting in `intake_runs.parsed` and must keep reading.
+   */
+  slotReason?: string | null;
+  /**
+   * Whether this figure measures the WHOLE item or a part of it, as the model
+   * read it off the page.
+   *
+   * The card shows the overall figures and folds the parts away. This used to
+   * be decided by "does it carry a slot, and is there a figure in the value" —
+   * which put five blank `TBC` sub-dimension rows inline on the Panther S-201
+   * card, between the four that matter and the fabrics, because a row with no
+   * figure is not a measurement and so could never be folded.
+   *
+   * Absent means a `schemaVersion: 1` run that was never asked. Read it through
+   * `isOverallRow()`, never directly.
+   */
+  isOverall?: boolean;
   /**
    * True when the GROUP and the BWS field were inferred rather than read.
    *
@@ -177,13 +206,54 @@ export type ItemView = {
   bbox: [number, number, number, number];
 };
 
+/**
+ * Whether the pages carrying one code are one item or several things to make,
+ * as the MODEL read them — never as a page count.
+ *
+ * `relationship: "configurations"` is what allocates variant letters and, at
+ * confirm, creates a `spec_records` row per letter — which takes the bill line
+ * out of the export and ships each letter to BWS as its own job. It is
+ * therefore the expensive answer to get wrong, and `unclear` exists so the
+ * model can decline rather than guess.
+ */
+export type StagedCodeGroup = {
+  itemCodeRaw: string;
+  pages: number[];
+  relationship: "one_item" | "configurations" | "unclear";
+  evidence: string | null;
+};
+
 export type StagedDrawings = {
-  schemaVersion: 1;
+  /**
+   * 1 — the model reported figures and this app worked out which was the width,
+   *     by sorting them. Read through the guessing pipeline, which is frozen.
+   * 2 — the model reported which figure is which, whether it measures the whole
+   *     item, and whether repeated pages are one item. Nothing guesses.
+   *
+   * Both are read. A version 1 run is not upgraded into a version 2 one:
+   * inventing the fields it never carried would be one more inference layer,
+   * which is the thing version 2 removes. It is re-read, or it stays as it is.
+   */
+  schemaVersion: 1 | 2;
   kind: "shop_drawings";
   filename: string | null;
   documentNotes: string | null;
   items: DrawingItem[];
+  /** Version 2 only. Absent on every version 1 run. */
+  codeGroups?: StagedCodeGroup[];
 };
+
+/**
+ * Does this figure measure the whole item?
+ *
+ * Version 1 runs carry no answer, and the honest fallback is "treat it the way
+ * the old card did" — a placed slot is overall, anything else is not — rather
+ * than folding a whole pack's dimensions out of sight or printing every reveal
+ * inline.
+ */
+export function isOverallRow(observation: DrawingObservation): boolean {
+  return observation.isOverall ?? Boolean(observation.dimensionSlot);
+}
 
 // ---- resolution ------------------------------------------------------------
 
@@ -1303,6 +1373,7 @@ export function stageDrawings(
   filename: string | null,
   documentNotes: string | null,
   projectDefaultUnit: AttributeUnit | null = null,
+  codeGroups: RawCodeGroup[] = [],
 ): StagedDrawings {
   const staged: DrawingItem[] = items.map((item) => {
     // Split before guessing. A page that prints "1800mm" would otherwise have
@@ -1323,11 +1394,17 @@ export function stageDrawings(
       const parsed = parseCombinedDimensions(line);
       const printedUnit = normaliseUnit(parsed.unitRaw);
       return parsed.parts.map((part) => ({
-        labelRaw: part.slot ? DIMENSION_SLOT_LABELS[part.slot] : null,
+        labelRaw: part.slot && !part.slotSuggested ? DIMENSION_SLOT_LABELS[part.slot] : null,
         valueRaw: part.value,
         printedUnit,
-        slot: part.slot,
-        slotSuggested: part.slotSuggested,
+        // A PREFIX THE LINE PRINTED IS THE PAGE SPEAKING AND IS KEPT. A slot
+        // the parser worked out from print ORDER is NOT, any more: those three
+        // bare figures are reported by the model in `dimensions`, each with the
+        // evidence for its slot, and taking a positional read here as well
+        // would put two answers on one line and let the weaker one through.
+        // `slotSuggested` is exactly the parser's own marker for "I inferred
+        // this from the order", which is why it is the test.
+        slot: part.slotSuggested ? null : part.slot,
         tbc: part.tbc,
       }));
     });
@@ -1355,23 +1432,54 @@ export function stageDrawings(
       });
       // WHICH OF THE FIVE SLOTS, OR NONE — and "none" is not a failure.
       //
-      // A label the vocabulary recognises gives the slot. Everything else stays
-      // exactly as the page wrote it and becomes a NOTE: `ARM HEIGHT 520mm`
-      // keeps its label, its figure and its unit, and simply stops claiming a
-      // BWS dimension. So does an unlabelled figure off a shop drawing, where
-      // the page genuinely did not say which measurement it is — the reviewer
-      // promotes it to a slot on the review screen, seeing the page.
+      // TWO READINGS, AND WHAT TO DO WHEN THEY DISAGREE.
       //
-      // The alternative was to stage it as a slotless dimension and block. That
-      // reads as an error for the commonest case on a drawing set, and 0011
-      // cannot store one anyway.
-      const slot = normaliseDimensionSlot(dimension.labelRaw);
+      // The MODEL says which figure is the overall width, because it can see
+      // the page: the figure is labelled, or it spans the object on the front
+      // elevation. The LABEL VOCABULARY says what the page's own word means, by
+      // exact lookup on the whole folded label. They are independent, and that
+      // is what makes them worth having both of:
+      //
+      //   agree            — two readings, one answer. Not flagged.
+      //   only the label   — the page named it and the model did not place it.
+      //                      Today's behaviour, unchanged.
+      //   only the model   — an unlabelled figure on an elevation, or a part of
+      //                      a printed line. Flagged, with the model's own
+      //                      evidence beside it.
+      //   DISAGREE         — the page's printed word wins, and the row is
+      //                      flagged loudly. This is the S-203 signature:
+      //                      "Width" = 80 landing in the depth slot. Neither
+      //                      reading is allowed to win silently.
+      //
+      // `normaliseDimensionSlot` is therefore a VALIDATOR now, and keeps its
+      // whole-label rule — `WIDTH SEAT` is not a width and `ARM HEIGHT` is not
+      // a height, and both are printed beside the figures they would destroy.
+      //
+      // Everything unplaced stays exactly as the page wrote it and becomes a
+      // NOTE, keeping its label, figure and unit; 0011 cannot store a dimension
+      // with no slot anyway.
+      const fromLabel = normaliseDimensionSlot(dimension.labelRaw);
+      const fromModel = slotFromModel(dimension.slot);
+      const conflict = fromLabel !== null && fromModel !== null && fromLabel !== fromModel;
+      const slot = conflict ? fromLabel : (fromModel ?? fromLabel);
+      const slotReason = conflict
+        ? `The page labels this "${dimension.labelRaw}". It was read as ${DIMENSION_SLOT_LABELS[fromModel as DimensionSlot].toLowerCase()} instead — ${dimension.slotEvidence ?? "no reason given"}. Check it against the drawing.`
+        : fromModel !== null && fromLabel === null
+          ? (dimension.slotEvidence ?? null)
+          : null;
       observations.push({
         id: nextId(),
         version: 1,
         attrGroup: slot ? "dimension" : "note",
         dimensionSlot: slot,
-        slotSuggested: false,
+        // Flagged when the page's own word did not settle it, so the row is
+        // yellow and its reason is the model's evidence rather than a sentence
+        // about this app's sort order.
+        slotSuggested: slot !== null && (conflict || fromLabel === null),
+        ...(slotReason === null ? {} : { slotReason }),
+        // Version 2 states it; a figure carrying a slot is overall by
+        // definition, which is the fallback for a model that omitted it.
+        isOverall: dimension.isOverall ?? slot !== null,
         labelRaw: dimension.labelRaw ?? `Dimension ${dimensionNo}`,
         valueRaw: dimension.valueRaw,
         materialCodeRaw: null,
@@ -1393,11 +1501,13 @@ export function stageDrawings(
       });
     }
 
-    // The combined line's parts. A part whose slot came from printed ORDER
-    // carries `slotSuggested`, so the screen badges it amber and the reviewer
-    // checks the composed cell rather than taking W x D x H on trust. A part
-    // the parser would not place becomes a note, exactly like an unlabelled
-    // figure off a shop drawing.
+    // The combined line's parts. A part the LINE ITSELF prefixed ("W1520",
+    // "Dia.460") keeps that slot, because the page said so. A bare figure gets
+    // none and becomes a note — the model reports the same figure in
+    // `dimensions` with its slot and the evidence for it, so a reviewer sees
+    // one answer with a reason rather than two answers, one of which came from
+    // assuming that three numbers are always printed widest first. Reading
+    // `80 x 70 x 90 cm` positionally is how S-203 came to say it was 900mm wide.
     for (const part of combined) {
       // NOT through `suggestAttributeState`, and the difference matters. That
       // function refuses to choose when a value both states something and says
@@ -1419,7 +1529,11 @@ export function stageDrawings(
         version: 1,
         attrGroup: part.slot ? "dimension" : "note",
         dimensionSlot: part.slot,
-        slotSuggested: part.slotSuggested,
+        // A printed prefix is a reading, not a suggestion.
+        slotSuggested: false,
+        // The line states the item's overall size, which is what a combined
+        // dimension line is for.
+        isOverall: true,
         labelRaw: part.labelRaw ?? `Dimension ${dimensionNo}`,
         valueRaw: part.valueRaw,
         materialCodeRaw: null,
@@ -1522,15 +1636,53 @@ export function stageDrawings(
     };
   });
 
-  return { schemaVersion: 1, kind: "shop_drawings", filename, documentNotes, items: staged };
+  return {
+    // VERSION 2: the model was asked which figure is which, whether each one
+    // measures the whole item, and whether repeated pages are one item. The
+    // read-time guessing pipeline is skipped for these, and only for these.
+    schemaVersion: 2,
+    kind: "shop_drawings",
+    filename,
+    documentNotes,
+    items: staged,
+    codeGroups: codeGroups.map((group) => ({
+      itemCodeRaw: group.itemCodeRaw,
+      pages: group.pages,
+      relationship: group.relationship,
+      evidence: group.evidence,
+    })),
+  };
 }
 
+/**
+ * THE READ-TIME PIPELINE, AND WHICH HALF OF IT A DOCUMENT GETS.
+ *
+ * `upgradeDimensionSlots` and `upgradeCalloutGuesses` run on everything. Both
+ * only ever fill a gap from the page's own words — a label the vocabulary
+ * recognises, a caption naming a cloth — and both leave a row a person has
+ * touched alone. Running them on every read is what let a corrected word list
+ * reach an eleven-document pack with no second model call.
+ *
+ * `applyViewGuesses` runs on VERSION 1 ONLY, and that is the 2026-09-18 change.
+ * It decides which figure is the width by sorting the page's figures by size,
+ * which across the sandbox produced 141 guessed slots out of 183 and read a
+ * sheet printing `80 x 70 x 90 cm` as a 900mm-wide chair. A version 2 run has
+ * been read by a model that could see the page and said which figure is which
+ * and why, so there is nothing left to guess and guessing would overwrite it.
+ *
+ * Version 1 runs keep it, FROZEN. They were staged without the model ever being
+ * asked, and inventing the answers they never carried would be one more
+ * inference layer — the thing version 2 removes. Re-read a pack to move it
+ * forward; nothing upgrades in place. The whole branch goes when the last
+ * version 1 run has been re-read.
+ */
 export function assertStagedDrawings(parsed: unknown, fields?: SpecFieldEntry[]): StagedDrawings {
   const doc = parsed as Partial<StagedDrawings> | null;
   if (!doc || typeof doc !== "object" || doc.kind !== "shop_drawings" || !Array.isArray(doc.items)) {
     throw new Error("This run was not staged as shop drawings. Upload the drawings again.");
   }
-  return applyViewGuesses(upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []));
+  const upgraded = upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []);
+  return upgraded.schemaVersion === 2 ? upgraded : applyViewGuesses(upgraded);
 }
 
 /**
@@ -2045,12 +2197,55 @@ export function groupItemsByCode(items: readonly DrawingItem[]): Map<string, Dra
   return byCode;
 }
 
-export function variantLettersByItem(items: readonly DrawingItem[]): Map<string, string | null> {
+/**
+ * Which pages are CONFIGURATIONS of an item, and which are just more pages
+ * about it.
+ *
+ * ============================================================================
+ * THIS USED TO COUNT PAGES, AND A PAGE COUNT IS NOT EVIDENCE OF ANYTHING.
+ *
+ * Two pages carrying one code became `S-200 A` and `S-200 B`. 0024 then makes
+ * the bill line a HEADING that stops exporting and ships each letter to BWS as
+ * its own job — so one armchair, drawn on its specification sheet and again on
+ * its shop drawing, became two things to manufacture. Measured on the sandbox
+ * before this changed: 15 groups, 38 items lettered.
+ *
+ * It cannot be recovered by comparing the pages afterwards either, and that was
+ * measured rather than argued. Panther's S-200 states `Tibor Blob Amber Fern`
+ * on one page and `CLO003 A = Tibor Blob Amber Fern` on the other — same chair,
+ * same cloth, two vocabularies. Comparing the CODES calls it a split; comparing
+ * the DESCRIPTIONS calls it a split too, because one page adds "as per approved
+ * sample". Both miss the case a person settles in two seconds by looking.
+ *
+ * So the MODEL says, with its evidence, and only `configurations` letters
+ * anything. `unclear` and `one_item` both letter nothing, because they are the
+ * two answers that leave the item whole — and an item wrongly left whole shows
+ * up as one card with more specs on it, where an item wrongly split becomes
+ * separate jobs in a file that replaces rather than merges.
+ *
+ * A VERSION 1 RUN HAS NO ANSWER, and keeps the page count until it is re-read.
+ * Changing what those runs mean underneath a reviewer would be worse than
+ * leaving them as they were staged.
+ * ============================================================================
+ */
+export function variantLettersByItem(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): Map<string, string | null> {
   const byCode = groupItemsByCode(items);
   const letters = new Map<string, string | null>();
-  for (const [, ordered] of byCode) {
+  // Keyed the way the group is, so `S-201` and `s 201` cannot be looked up
+  // differently from the way they were grouped.
+  const relationship = new Map<string, StagedCodeGroup["relationship"]>();
+  for (const group of doc?.codeGroups ?? []) {
+    relationship.set(normaliseRef(group.itemCodeRaw ?? ""), group.relationship);
+  }
+  const version2 = doc?.schemaVersion === 2;
+
+  for (const [code, ordered] of byCode) {
     const group = ordered;
-    if (group.length < 2) {
+    const splits = version2 ? relationship.get(code) === "configurations" : group.length >= 2;
+    if (group.length < 2 || !splits) {
       for (const item of group) letters.set(item.id, null);
       continue;
     }
@@ -2059,6 +2254,17 @@ export function variantLettersByItem(items: readonly DrawingItem[]): Map<string,
     });
   }
   return letters;
+}
+
+/** What the model said about a code's pages, or null on a version 1 run. */
+export function codeGroupFor(
+  doc: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+  itemCodeRaw: string | null,
+): StagedCodeGroup | null {
+  if (doc.schemaVersion !== 2) return null;
+  const code = normaliseRef(itemCodeRaw ?? "");
+  if (!code) return null;
+  return (doc.codeGroups ?? []).find((group) => normaliseRef(group.itemCodeRaw ?? "") === code) ?? null;
 }
 
 export function hasPendingObservations(doc: StagedDrawings): boolean {

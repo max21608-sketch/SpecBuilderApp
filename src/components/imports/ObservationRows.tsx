@@ -66,21 +66,60 @@ export type RowCallbacks = {
   onSwatch: (observationId: string, image: CroppedImage | null) => void;
 };
 
-/** Split a card's pending rows into the four that matter, the rest, and the fold. */
+/**
+ * A row the card should fold: something the page measured that is not one of
+ * the item's overall dimensions.
+ *
+ * VERSION 2 STATES IT. `isOverall === false` is the model saying this figure is
+ * a reveal, a radius, a rail, a gap — and it is set only on rows staged from a
+ * page's DIMENSIONS, so a fabric callout or a paragraph of remarks has it
+ * `undefined` and is never caught here.
+ *
+ * VERSION 1 FALLS BACK to the old test: does the value state a figure. That
+ * test is why the Panther S-201 card sprawled — its sheet prints a dimensions
+ * table whose `WIDTH SEAT`, `DEPTH BACK` and `HEIGHT BACK` rows are all `TBC`,
+ * so they state no figure, were not "measurements", could not be folded, and
+ * printed inline between the four that matter and the fabrics. A version 2 run
+ * reports them as dimensions that are not overall, and they fold.
+ */
+function foldableRow(o: DrawingObservation): boolean {
+  if (o.dimensionSlot) return false;
+  return o.isOverall === false || (o.isOverall === undefined && isMeasuredRow(o));
+}
+
+/** Split a card's pending rows into the ones that matter, the rest, and the fold. */
 export function orderRows(pending: DrawingObservation[]): {
   ordered: DrawingObservation[];
   otherIds: Set<string>;
   otherDimensionRows: DrawingObservation[];
   firstOtherId: string | undefined;
 } {
-  const keyRows = pending.filter((o) => o.dimensionSlot);
-  const measuredWithoutSlot = pending.filter((o) => !o.dimensionSlot && isMeasuredRow(o));
-  // NOTHING TO FOLD BEHIND. The fold puts the four that matter first and the
-  // rest out of the way; with no four that matter there is no "rest", and
-  // folding every figure leaves a card showing a toggle and nothing else.
-  const otherDimensionRows = keyRows.length > 0 ? measuredWithoutSlot : [];
+  // IN SLOT ORDER, not in the order the model happened to report them. The
+  // composed cell above the table is written W x D x H x SH by
+  // `composeDimensionCell`, and a table under it in a different order makes a
+  // transposition harder to see rather than easier -- which is the one thing
+  // that panel is for.
+  const keyRows = [...pending.filter((o) => o.dimensionSlot)].sort(
+    (a, b) =>
+      DIMENSION_SLOTS.indexOf(a.dimensionSlot as DimensionSlot) -
+      DIMENSION_SLOTS.indexOf(b.dimensionSlot as DimensionSlot),
+  );
+  const foldable = pending.filter(foldableRow);
+  // NOTHING TO FOLD BEHIND. The fold puts the ones that matter first and the
+  // rest out of the way; with none that matter there is no "rest", and folding
+  // every figure leaves a card showing a toggle and nothing else.
+  const otherDimensionRows = keyRows.length > 0 ? foldable : [];
   const otherIds = new Set(otherDimensionRows.map((o) => o.id));
-  const restRows = pending.filter((o) => !o.dimensionSlot && !otherIds.has(o.id));
+  // GROUPED, not in staged order. A card used to interleave fabrics, hardware
+  // and paragraphs of remarks in whatever order the model reported them, which
+  // is the other half of "nothing's grouped, it's all over the place". Within a
+  // group the staged order is kept, because that is the order of the page.
+  const rank = (o: DrawingObservation) => GROUP_ORDER.indexOf(o.attrGroup);
+  const restRows = pending
+    .filter((o) => !o.dimensionSlot && !otherIds.has(o.id))
+    .map((o, index) => ({ o, index }))
+    .sort((a, b) => rank(a.o) - rank(b.o) || a.index - b.index)
+    .map((entry) => entry.o);
   return {
     ordered: [...keyRows, ...restRows, ...otherDimensionRows],
     otherIds,
@@ -88,6 +127,13 @@ export function orderRows(pending: DrawingObservation[]): {
     firstOtherId: otherDimensionRows[0]?.id,
   };
 }
+
+/**
+ * The order the groups read in: what the item is made of, then what was said
+ * about it. Notes last because they are the longest and the least decisive --
+ * a merged block of general conditions runs to eighteen hundred characters.
+ */
+const GROUP_ORDER: AttributeGroup[] = ["dimension", "material", "finish", "hardware", "other", "note"];
 
 /** The table head every observation table shares. */
 export function ObservationTableHead() {
@@ -349,11 +395,17 @@ export function ObservationRow({
             </select>
             {observation.slotSuggested && observation.dimensionSlot ? (
               <span className="text-[11px] text-amber-700">
-                {/* A view guess and a positional read are both suggestions and
-                    must not claim the same reason: one is "this figure is drawn
-                    on three views", the other "these three were printed in
-                    order". */}
-                {guessWhy ?? "order assumed W × D × H"}
+                {/* WHAT THE PAGE SHOWS, in preference to what this app worked
+                    out. `slotReason` is the model's own evidence -- "labelled
+                    WIDTH on the specification table", "spans the whole chair on
+                    the front elevation" -- and it is the only one of these a
+                    reviewer can actually check against the drawing.
+
+                    `guessWhy` is the version 1 fallback and says what the CODE
+                    did: "the second largest -- no view says so". Kept so a run
+                    staged before 2026-09-18 still explains itself, and it goes
+                    with the guessing pipeline. */}
+                {observation.slotReason ?? guessWhy ?? "order assumed W × D × H"}
               </span>
             ) : null}
           </div>

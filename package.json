@@ -24,7 +24,8 @@
     "vocab:gap": "tsx --env-file-if-exists=.env.local tools/vocab-gap.ts",
     "qa:fake-inbox": "tsx --env-file-if-exists=.env.local tools/qa-fake-inbox.ts",
     "qa:levels": "tsx --env-file-if-exists=.env.local tools/qa-levels-and-designer.ts",
-    "qa:demo": "tsx --env-file-if-exists=.env.local tools/qa-demo-project.ts"
+    "qa:demo": "tsx --env-file-if-exists=.env.local tools/qa-demo-project.ts",
+    "measure:drawings": "tsx --env-file-if-exists=.env.local tools/measure-drawing-reading.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

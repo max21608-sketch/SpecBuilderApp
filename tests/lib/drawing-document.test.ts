@@ -37,7 +37,7 @@ import {
 } from "@/lib/drawing-document";
 import type { AttributeUnit } from "@/lib/spec-vocab";
 import type { RecordEntry } from "@/lib/spec-document";
-import type { RawDrawingItem } from "@/lib/extraction-schema";
+import type { RawCodeGroup, RawDrawingDimension, RawDrawingItem } from "@/lib/extraction-schema";
 
 /** A project where nothing is spoken for yet. */
 const NO_OCCUPANCY: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
@@ -839,13 +839,19 @@ describe("stageDrawings, a dimension printed as one line", () => {
   const staged = (lines: string[], projectDefault: AttributeUnit | null = null) =>
     stageDrawings([rawItem({ dimensionsCombinedRaw: lines })], FIELDS, null, null, projectDefault).items[0]!;
 
-  it("stages three bare figures as W, D and H, badged as assumed", () => {
-    const dims = staged(["80 x 70 x 90 cm"]).observations.filter((o) => o.attrGroup === "dimension");
-    expect(dims.map((o) => [o.dimensionSlot, o.value, o.unit, o.slotSuggested])).toEqual([
-      ["W", "80", "cm", true],
-      ["D", "70", "cm", true],
-      ["H", "90", "cm", true],
-    ]);
+  it("places NOTHING from three bare figures — the order is not the page speaking", () => {
+    // It used to read them as W, D and H in printed order and badge it amber.
+    // The badge was not enough: `applyViewGuesses` then re-sorted the same three
+    // by magnitude, and S-203 shipped `W900 x D800 x H700mm` off a page printing
+    // `80 x 70 x 90 cm` beside the words Width, Depth and Height. Two inferences
+    // on one line, the weaker winning silently.
+    //
+    // The model reports these three figures in `dimensions` now, each with the
+    // slot it read and the evidence for it. The verbatim line is still staged,
+    // as notes, so a reviewer can check the cell against the page.
+    const item = staged(["80 x 70 x 90 cm"]);
+    expect(item.observations.filter((o) => o.attrGroup === "dimension")).toHaveLength(0);
+    expect(item.observations.filter((o) => o.attrGroup === "note").map((o) => o.value)).toEqual(["80", "70", "90"]);
   });
 
   it("does not call a printed prefix a guess, and keeps its TBC", () => {
@@ -868,9 +874,12 @@ describe("stageDrawings, a dimension printed as one line", () => {
     // threshold, enough to carry the page to millimetres and record an 80cm
     // armchair as 8 metres.
     expect(suggestUnit(["80 x 70 x 90"])).toEqual({ status: "none" });
-    const dims = staged(["80 x 70 x 90"]).observations.filter((o) => o.attrGroup === "dimension");
-    expect(dims.every((o) => o.unit === "cm")).toBe(true);
-    expect(dims.every((o) => unitSourceOf(o) === "figures")).toBe(true);
+    // The parts still vote on the unit whether or not they are given slots:
+    // they are figures off the same page, and that was never the problem.
+    const parts = staged(["80 x 70 x 90"]).observations.filter((o) => o.value === "80" || o.value === "70");
+    expect(parts.length).toBeGreaterThan(0);
+    expect(parts.every((o) => o.unit === "cm")).toBe(true);
+    expect(parts.every((o) => unitSourceOf(o) === "figures")).toBe(true);
   });
 });
 
@@ -1447,5 +1456,188 @@ describe("variantLettersByItem", () => {
   it("ignores a codeless page entirely", () => {
     const letters = variantLettersByItem([item("i1", null, 1), item("i2", null, 2)]);
     expect(letters.has("i1")).toBe(false);
+  });
+});
+
+// ============================================================================
+// THE MODEL READS THE PAGE; THE APP STOPS GUESSING WHAT IT MEANT (2026-09-18)
+//
+// EVERY TEST HERE GOES THROUGH `assertStagedDrawings`, NOT `stageDrawings`.
+// That is not a style choice, it is the defect. The old suite asserted the
+// staged result and stopped, and the transposition happened in the read-time
+// pass AFTER it: `stageDrawings` placed W80 / D70 / H90 correctly off
+// `80 x 70 x 90 cm`, a green test said so, and `applyViewGuesses` then re-sorted
+// the three by magnitude into `W900 x D800 x H700mm`. A test that stops at
+// staging cannot see the pipeline the screen actually calls.
+// ============================================================================
+describe("the model's own reading of a page", () => {
+  const read = (item: RawDrawingItem, codeGroups: RawCodeGroup[] = []) =>
+    assertStagedDrawings(stageDrawings([item], FIELDS, null, null, null, codeGroups), FIELDS);
+
+  const dim = (over: Partial<RawDrawingDimension>): RawDrawingDimension => ({
+    labelRaw: null,
+    valueRaw: "0",
+    unitRaw: null,
+    slot: null,
+    slotEvidence: null,
+    isOverall: false,
+    ...over,
+  });
+
+  it("keeps the slots the model read, through the whole read-time pipeline", () => {
+    // The S-203 case, end to end. The page prints `80 x 70 x 90 cm` and the
+    // words Width, Depth, Height; the model reports which is which and why.
+    const doc = read(
+      rawItem({
+        dimensionsCombinedRaw: ["80 x 70 x 90 cm"],
+        dimensions: [
+          dim({ labelRaw: "Width", valueRaw: "80", unitRaw: "cm", slot: "width", slotEvidence: "first of three in the printed line", isOverall: true }),
+          dim({ labelRaw: "Depth", valueRaw: "70", unitRaw: "cm", slot: "depth", slotEvidence: "second of three in the printed line", isOverall: true }),
+          dim({ labelRaw: "Height", valueRaw: "90", unitRaw: "cm", slot: "height", slotEvidence: "third of three in the printed line", isOverall: true }),
+        ],
+      }),
+    );
+    const placed = doc.items[0]!.observations.filter((o) => o.dimensionSlot);
+    expect(placed.map((o) => [o.labelRaw, o.value, o.dimensionSlot])).toEqual([
+      ["Width", "80", "W"],
+      ["Depth", "70", "D"],
+      ["Height", "90", "H"],
+    ]);
+    expect(doc.schemaVersion).toBe(2);
+  });
+
+  it("does not flag a slot the page's own label confirms", () => {
+    // Two independent readings agreeing is not a guess, and painting it yellow
+    // would leave a reviewer with nothing but yellow to look at.
+    const doc = read(
+      rawItem({
+        dimensions: [dim({ labelRaw: "WIDTH", valueRaw: "1800", unitRaw: "mm", slot: "width", slotEvidence: "labelled WIDTH", isOverall: true })],
+      }),
+    );
+    const row = doc.items[0]!.observations.find((o) => o.dimensionSlot)!;
+    expect(row.slotSuggested).toBe(false);
+    expect(row.slotReason ?? null).toBeNull();
+  });
+
+  it("flags a slot the page did not name, and shows the model's own evidence", () => {
+    const doc = read(
+      rawItem({
+        dimensions: [dim({ valueRaw: "840", unitRaw: "mm", slot: "width", slotEvidence: "spans the whole chair on the front elevation", isOverall: true })],
+      }),
+    );
+    const row = doc.items[0]!.observations.find((o) => o.dimensionSlot)!;
+    expect(row.slotSuggested).toBe(true);
+    expect(row.slotReason).toBe("spans the whole chair on the front elevation");
+  });
+
+  it("lets the PAGE'S WORD win when the two readings disagree, and says so", () => {
+    // Neither reading is allowed to win silently. The label is the page's own
+    // statement, so it takes the slot, and the row carries the disagreement.
+    const doc = read(
+      rawItem({
+        dimensions: [dim({ labelRaw: "Width", valueRaw: "80", unitRaw: "cm", slot: "depth", slotEvidence: "the second largest figure", isOverall: true })],
+      }),
+    );
+    const row = doc.items[0]!.observations.find((o) => o.dimensionSlot)!;
+    expect(row.dimensionSlot).toBe("W");
+    expect(row.slotSuggested).toBe(true);
+    expect(row.slotReason).toContain("The page labels this \"Width\"");
+    expect(row.slotReason).toContain("depth");
+  });
+
+  it("still votes on a unit the page never printed, and never calls that vote printed", () => {
+    // THE UNIT VOTE IS DELIBERATELY KEPT, and it is worth saying why here
+    // rather than only in a plan. `suggestUnit` reads cm or mm from the
+    // magnitudes on the page, which is the same KIND of inference the slot
+    // sort was — but the two are not the same situation. A page that prints
+    // `80 x 70 x 90 cm` beside the words Width, Depth and Height HAS stated
+    // which figure is the width, and the sort overrode it. The AP364 shop
+    // drawings print no unit anywhere, so there is nothing to override: the
+    // vote is the only reading available, it is flagged amber on every row it
+    // touches, and the card carries a one-click mm/cm control to correct a
+    // whole page. Removing it left every figure unitless, every card blocked
+    // by `unit_missing`, and no control able to unblock it — which is the
+    // self-sealing failure recorded as item 95 on 2026-09-17.
+    //
+    // What must never happen is the vote passing itself off as a reading.
+    const doc = read(
+      rawItem({
+        dimensions: [dim({ labelRaw: "WIDTH", valueRaw: "840", slot: "width", isOverall: true })],
+      }),
+    );
+    const row = doc.items[0]!.observations.find((o) => o.dimensionSlot)!;
+    expect(row.unit).toBe("mm");
+    expect(unitSourceOf(row)).toBe("figures");
+    expect(unitSourceOf(row)).not.toBe("printed");
+  });
+
+  it("takes the unit the page printed over the vote, and calls it printed", () => {
+    const doc = read(
+      rawItem({
+        dimensions: [dim({ labelRaw: "WIDTH", valueRaw: "80", unitRaw: "cm", slot: "width", isOverall: true })],
+      }),
+    );
+    const row = doc.items[0]!.observations.find((o) => o.dimensionSlot)!;
+    expect(row.unit).toBe("cm");
+    expect(unitSourceOf(row)).toBe("printed");
+  });
+
+  it("takes null for a slot as an answer, and keeps the row as a note", () => {
+    // ARM HEIGHT is named in the dimension invariant as the label a substring
+    // rule destroys. It has no slot, and never had one.
+    const doc = read(
+      rawItem({ dimensions: [dim({ labelRaw: "ARM HEIGHT", valueRaw: "520", unitRaw: "mm" })] }),
+    );
+    const row = doc.items[0]!.observations.find((o) => o.labelRaw === "ARM HEIGHT")!;
+    expect(row.dimensionSlot ?? null).toBeNull();
+    expect(row.attrGroup).toBe("note");
+    expect(row.value).toBe("520");
+  });
+});
+
+describe("one item drawn twice, or two things to make", () => {
+  const pages = (code: string) => [
+    rawItem({ itemCodeRaw: code, page: 1 }),
+    rawItem({ itemCodeRaw: code, page: 2 }),
+  ];
+  const lettersFor = (groups: RawCodeGroup[]) => {
+    const doc = assertStagedDrawings(stageDrawings(pages("S-200"), FIELDS, null, null, null, groups), FIELDS);
+    return [...variantLettersByItem(doc.items, doc).values()];
+  };
+  const group = (relationship: RawCodeGroup["relationship"]): RawCodeGroup => ({
+    itemCodeRaw: "S-200",
+    pages: [1, 2],
+    relationship,
+    evidence: "the specification sheet and the shop drawing of one chair",
+  });
+
+  it("letters NOTHING when the model says the pages are one item", () => {
+    // The S-200 case. Lettering here makes one armchair into two BWS jobs,
+    // because 0024 takes a split bill line out of the export and ships its
+    // configurations instead.
+    expect(lettersFor([group("one_item")])).toEqual([null, null]);
+  });
+
+  it("letters nothing when the model could not tell", () => {
+    // `unclear` must not fall towards the expensive answer.
+    expect(lettersFor([group("unclear")])).toEqual([null, null]);
+  });
+
+  it("letters nothing when the model said nothing at all about the code", () => {
+    expect(lettersFor([])).toEqual([null, null]);
+  });
+
+  it("letters A and B only when the model says they are configurations", () => {
+    expect(lettersFor([group("configurations")])).toEqual(["A", "B"]);
+  });
+
+  it("leaves a version 1 run counting pages, because that is how it was staged", () => {
+    // Re-reading moves a pack forward. Changing what an already-staged run
+    // MEANS, underneath a reviewer who is part way through it, does not.
+    const v1 = assertStagedDrawings(
+      { ...stageDrawings(pages("S-200"), FIELDS, null, null), schemaVersion: 1, codeGroups: undefined },
+      FIELDS,
+    );
+    expect([...variantLettersByItem(v1.items, v1).values()]).toEqual(["A", "B"]);
   });
 });

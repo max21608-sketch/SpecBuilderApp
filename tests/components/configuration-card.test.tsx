@@ -35,7 +35,14 @@ const page = (id: string, pageNo: number, fabric: string, code: string, over: Pa
     ...over,
   });
 
-function renderConfigurations(pages: DrawingItem[], resolutions?: Map<string, ItemResolution>) {
+function renderConfigurations(
+  pages: DrawingItem[],
+  resolutions?: Map<string, ItemResolution>,
+  // The staged DOCUMENT. Without one the card falls back to counting pages,
+  // which is the version 1 reading -- so a test about what a version 2 run
+  // does has to supply it, exactly as the review screens do.
+  doc?: Parameters<typeof configurationCards>[2],
+) {
   const spies = callbacks();
   const byItem =
     resolutions ??
@@ -45,7 +52,7 @@ function renderConfigurations(pages: DrawingItem[], resolutions?: Map<string, It
         resolution({ id: staged.id, variantLabel: String.fromCharCode(65 + index) }),
       ]),
     );
-  const cards = configurationCards(pages, byItem);
+  const cards = configurationCards(pages, byItem, doc);
   const card = cards[0]!;
   if (card.kind !== "configurations") throw new Error("expected a configuration card");
   // The value boxes are controlled by `drafts`, so a stub setter would make
@@ -235,5 +242,56 @@ describe("applies to, across configurations", () => {
     renderConfigurations(twoPages());
     const boxes = screen.getAllByRole("checkbox");
     expect(boxes.every((box) => (box as HTMLInputElement).checked)).toBe(true);
+  });
+});
+
+// ============================================================================
+// ONE ITEM DESCRIBED TWICE MUST NOT CLAIM TO BE TWO THINGS TO MAKE
+//
+// The S-200 card announced "One bill line, drawn as 2 configurations" and
+// chipped its two pages `S-200 A` and `S-200 B`, each "record will be created",
+// over an armchair whose specification sheet and shop drawing both state the
+// same fabric and the same timber. Confirming it would have created two records
+// and taken the bill line out of the export, so BWS would receive two jobs for
+// one chair.
+// ============================================================================
+describe("a card that is not splitting anything", () => {
+  const pages = () => [page("a", 1, "Tibor Blob Amber Fern", "S-200"), page("b", 2, "Tibor Blob Amber Fern", "S-200")];
+
+  /** No variant labels anywhere: what a `one_item` group resolves to. */
+  const notSplit = (staged: DrawingItem[]) =>
+    new Map(staged.map((entry) => [entry.id, resolution({ id: entry.id, variantLabel: null })]));
+
+  /** A version 2 document whose model said these pages are one chair. */
+  const oneItem = {
+    schemaVersion: 2 as const,
+    codeGroups: [
+      {
+        itemCodeRaw: "S-200",
+        pages: [1, 2],
+        relationship: "one_item" as const,
+        evidence: "the specification sheet and the shop drawing of one chair",
+      },
+    ],
+  };
+
+  it("says the pages describe one item, and that the bill line is what ships", () => {
+    renderConfigurations(pages(), notSplit(pages()), oneItem);
+    expect(screen.getByText(/One item, described on 2 pages/)).toBeInTheDocument();
+    expect(screen.queryByText(/drawn as 2 configurations/)).not.toBeInTheDocument();
+  });
+
+  it("names its pages by page, never as records that are about to exist", () => {
+    // `S-200 A` is the name of a record somebody will quote in an email. It
+    // must not appear on a card that is creating no such record.
+    renderConfigurations(pages(), notSplit(pages()), oneItem);
+    expect(screen.getAllByText("Page 1").length).toBeGreaterThan(0);
+    expect(screen.queryByText("S-200 A")).not.toBeInTheDocument();
+  });
+
+  it("still says configurations when something really is being split", () => {
+    renderConfigurations(pages());
+    expect(screen.getByText(/One bill line, drawn as 2 configurations/)).toBeInTheDocument();
+    expect(screen.getAllByText("S-200 A").length).toBeGreaterThan(0);
   });
 });

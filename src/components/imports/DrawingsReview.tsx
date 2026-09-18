@@ -495,7 +495,7 @@ export default function DrawingsReview({ importId }: { importId: string }) {
   );
   const reviewComplete = pendingItems.length === 0;
   // Grouped into cards: one per code, one per page for a code drawn once.
-  const cards = configurationCards(staged.items, byItem).filter(cardHasPending);
+  const cards = configurationCards(staged.items, byItem, staged).filter(cardHasPending);
   // Split, because the two have different answers. A page whose CODE matched
   // nothing is waiting for the bill of quantities; a page with no code at all
   // will never match one however many bills are confirmed, so sending its

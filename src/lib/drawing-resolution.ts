@@ -175,7 +175,7 @@ export function resolveStagedRun(
   staged: StagedDrawings,
   context: Awaited<ReturnType<typeof loadDrawingContext>>,
 ): ResolvedItem[] {
-  const letters = variantLettersByItem(staged.items);
+  const letters = variantLettersByItem(staged.items, staged);
   return staged.items.map((item) => {
     const resolution = resolveDrawingTargets(item.itemCodeRaw, context.records);
     const targets = targetRecordIds(item, resolution);

@@ -41,6 +41,7 @@ import {
   measuredKey,
   measuredRows,
   variantLettersByItem,
+  type StagedDrawings,
   type DrawingItem,
   type DrawingObservation,
 } from "@/lib/drawing-document";
@@ -95,6 +96,21 @@ export type ReviewCard<R> =
   | {
       kind: "configurations";
       id: string;
+      /**
+       * Whether these pages are SEVERAL THINGS TO MAKE, or one item described
+       * more than once.
+       *
+       * The card is the same shape either way — one heading, the geometry once,
+       * each page's own finishes below it — because reviewing a chair drawn on
+       * its specification sheet and again on its shop drawing is the same job
+       * as reviewing two fabric options. What changes is what it CLAIMS: a
+       * split says two records will be created and the bill line will stop
+       * exporting, and saying that about one armchair is the S-200 defect.
+       *
+       * False for a version 2 run the model called `one_item` or `unclear`, and
+       * for any run where nothing allocated a variant letter.
+       */
+      split: boolean;
       /** The folded code, which is what the grouping is keyed on. */
       code: string;
       /** The code as the first page printed it — what a chip says. */
@@ -216,8 +232,13 @@ export function compareGeometry(members: readonly { item: DrawingItem; letter: s
 export function configurationCards<R extends { variantLabel?: string | null }>(
   items: readonly DrawingItem[],
   resolved: ReadonlyMap<string, R | undefined>,
+  // The DOCUMENT, not only its items, because whether a repeated code is one
+  // item or several things to make is the model's answer and lives on the
+  // document. Optional so a version 1 run -- and every fixture written before
+  // 2026-09-18 -- keeps the page-count reading it was staged under.
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
 ): ReviewCard<R>[] {
-  const letters = variantLettersByItem(items);
+  const letters = variantLettersByItem(items, doc);
   const groups = groupItemsByCode(items);
   const cards: ReviewCard<R>[] = [];
   const grouped = new Set<string>();
@@ -225,13 +246,31 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
   for (const [code, group] of groups) {
     if (group.length < 2) continue;
     for (const item of group) grouped.add(item.id);
-    const members: ConfigurationMember<R>[] = group.map((item) => ({
+    // TWO DIFFERENT LETTERS, AND KEEPING THEM APART IS THE POINT.
+    //
+    // The VARIANT letter is what the confirm writes: it creates `S-200 A` as a
+    // record of its own and takes the bill line out of the export. It is null
+    // unless the model said these pages are configurations.
+    //
+    // The DISPLAY letter is a position in this card — it colours the chip (A is
+    // always sky, so a chip finds its own section), keys the geometry
+    // comparison and names a band. Every member needs a distinct one whether or
+    // not anything is being split, or two sources collide on one key and the
+    // card compares a page with itself.
+    // The SERVER'S answer first, exactly as `letter` below resolves it: the
+    // resolution is what the confirm will act on, and a card whose sentence
+    // disagreed with what the confirm does would be the worse of the two lies.
+    const split = group.some((item) => resolved.get(item.id)?.variantLabel ?? letters.get(item.id));
+    const members: ConfigurationMember<R>[] = group.map((item, index) => ({
       item,
       // `resolution.variantLabel` is the server's answer and the one the
       // confirm will use; the local computation is the fallback for a screen
       // rendering before resolution has arrived. They agree by construction —
       // both are `variantLettersByItem` over the same items.
-      letter: resolved.get(item.id)?.variantLabel ?? letters.get(item.id) ?? "",
+      letter:
+        resolved.get(item.id)?.variantLabel ??
+        letters.get(item.id) ??
+        String.fromCharCode(65 + Math.min(index, 25)),
       resolution: resolved.get(item.id),
       pending: item.observations.filter((o) => o.reviewStatus === "pending"),
       state: stateOf(item),
@@ -239,6 +278,7 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
     cards.push({
       kind: "configurations",
       id: `code:${code}`,
+      split,
       code,
       codeRaw: group[0]!.itemCodeRaw ?? code,
       name: group.find((item) => item.itemNameRaw)?.itemNameRaw ?? null,

@@ -28,6 +28,7 @@
 // under any schema, and TypeScript types are not runtime validation.
 // ============================================================================
 import { z } from "zod";
+import type { DimensionSlot } from "@/lib/spec-vocab";
 
 export const TOOL_NAME = "record_specification_observations";
 
@@ -348,6 +349,60 @@ const dimensionUnitProperty = {
   },
 };
 
+// ============================================================================
+// WHICH FIGURE IS THE WIDTH — READ OFF THE PAGE, NOT SORTED BY SIZE.
+//
+// This is the 2026-09-18 change and the reason for it is measured, not
+// theoretical. Across 18 staged runs on the sandbox, 141 of 183 placed
+// dimensions — 77% — were the app's guess rather than the page's statement,
+// 19 items had their slots SORTED BY MAGNITUDE, and S-203 composed
+// `W900 x D800 x H700mm` from a page printing `80 x 70 x 90 cm` with the
+// labels Width, Depth and Height beside the figures. The app was outvoting the
+// page with an assumption that furniture is wider than it is deep.
+//
+// Which figure is the overall width is something a person answers BY LOOKING AT
+// THE PAGE — it is drawn on the front elevation, it is labelled, it spans the
+// whole object — so under the revised house convention 6 it is the model's to
+// read and report, with the evidence it read it from. What this app CALLS that
+// slot is still resolved in code (`slotFromModel` below maps to
+// `DIMENSION_SLOTS`), which is the exact half of the same rule.
+//
+// `null` has to be a real answer. `ARM HEIGHT` is not one of the five slots and
+// never was; a model that cannot decline produces exactly the confident wrong
+// answers the magnitude sort produced.
+// ============================================================================
+const dimensionSlotProperties = {
+  slot: {
+    anyOf: [
+      { type: "string", enum: ["width", "depth", "height", "seat_height", "diameter"] },
+      { type: "null" },
+    ],
+    description:
+      "Which OVERALL dimension of the whole item this figure gives, if it gives one. " +
+      "Null unless you can see that it does — a reveal, a radius, a component thickness, an arm height, a seat-only width " +
+      "and a gap all take null, and null is a good answer. Use the page: a figure is the overall width when it is labelled " +
+      "as one, or spans the whole item on a front or plan view; the depth spans it on a side or plan view; the height spans " +
+      "it on a front or side view. 'seat_height' only for the height of a seat above the floor. Never choose a slot because " +
+      "of how large the number is.",
+  },
+  slotEvidence: {
+    type: ["string", "null"],
+    maxLength: MAX_SHORT,
+    description:
+      "Why you gave this figure that slot, in a few words, quoting the page — \"labelled WIDTH on the specification table\", " +
+      "\"spans the whole chair on the front elevation\", \"first of three in the printed line 80 x 70 x 90\". " +
+      "Null when slot is null. A reviewer checks this against the drawing, so it must say what you SAW, not what you reasoned.",
+  },
+  isOverall: {
+    type: "boolean",
+    description:
+      "True if this figure measures the whole item, false if it measures a part of it — a reveal, a radius, a gap, a rail, " +
+      "a cushion thickness, an arm height. A shop drawing is mostly parts: S-200 prints 5, 50, 110 and 125 beside 840 and 790. " +
+      "The card shows the overall figures and folds the parts away, so this decides what a reviewer reads first. " +
+      "Every figure with a slot is overall; a figure can be overall without filling one of the five slots.",
+  },
+};
+
 export const DRAWINGS_TOOL = {
   name: DRAWINGS_TOOL_NAME,
   description:
@@ -385,8 +440,8 @@ export const DRAWINGS_TOOL = {
               items: {
                 type: "object",
                 additionalProperties: false,
-                properties: { ...drawingObservationProperties, ...dimensionUnitProperty },
-                required: ["labelRaw", "valueRaw", "unitRaw"],
+                properties: { ...drawingObservationProperties, ...dimensionUnitProperty, ...dimensionSlotProperties },
+                required: ["labelRaw", "valueRaw", "unitRaw", "slot", "slotEvidence", "isOverall"],
               },
             },
             materials: {
@@ -413,9 +468,11 @@ export const DRAWINGS_TOOL = {
               type: "array",
               maxItems: MAX_PER_ITEM,
               description:
-                "Any overall dimension printed as ONE line rather than as separate labelled figures, copied verbatim and NOT split " +
-                "('80 x 70 x 90 cm', 'W1520 TBC x D560 x H1005 mm', 'Dia.460 x H450mm'). " +
-                "Report a line here OR its figures in `dimensions`, never both.",
+                "Any overall dimension printed as ONE line, copied VERBATIM ('80 x 70 x 90 cm', 'W1520 TBC x D560 x H1005 mm', " +
+                "'Dia.460 x H450mm'), so a reviewer can check it against the page. " +
+                "ALSO report each of its figures in `dimensions`, giving each one its slot and saying in `slotEvidence` which " +
+                "part of the printed line it came from. You can see the order the page printed them in; this app cannot, and " +
+                "when it used to assume one it read `80 x 70 x 90` as a 900mm-wide chair.",
               items: { type: "string", maxLength: MAX_VALUE },
             },
             notesRaw: {
@@ -470,13 +527,77 @@ export const DRAWINGS_TOOL = {
           required: ["itemCodeRaw", "itemNameRaw", "page", "dimensions", "dimensionsCombinedRaw", "materials", "notesRaw", "confidence"],
         },
       },
+      // ====================================================================
+      // ONE ITEM DRAWN TWICE, OR TWO THINGS TO MAKE.
+      //
+      // The app used to answer this by COUNTING PAGES: a code appearing on two
+      // pages became two configurations, `S-200 A` and `S-200 B`, and 0024 then
+      // takes the bill line out of the export and ships the configurations as
+      // separate BWS jobs. One armchair, two jobs, from a page count.
+      //
+      // It cannot be recovered by comparing strings afterwards, and that was
+      // measured rather than assumed. Panther's S-200 states
+      // `FABRIC REFERENCE = Tibor Blob Amber Fern` on its specification sheet
+      // and `FABRIC / CLO003 A = Tibor Blob Amber Fern` on its shop drawing —
+      // same chair, same cloth, two vocabularies. Comparing the codes calls it
+      // a split; comparing the descriptions calls it a split too, because one
+      // page adds "as per approved sample". Both miss the case a person gets
+      // right in two seconds by looking at the pages.
+      //
+      // So the model says, and says why. `unclear` is a real answer and it
+      // leaves the reviewer to decide — which is strictly better than a page
+      // count deciding for them.
+      // ====================================================================
+      codeGroups: {
+        type: "array",
+        maxItems: MAX_DRAWING_ITEMS,
+        description:
+          "One entry for every item code you reported on MORE THAN ONE page. Omit a code drawn only once.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            itemCodeRaw: {
+              type: "string",
+              maxLength: MAX_SHORT,
+              description: "The code, exactly as you reported it on those pages.",
+            },
+            pages: {
+              type: "array",
+              maxItems: MAX_VIEW_REGIONS,
+              items: { type: "integer", minimum: 1 },
+              description: "The 1-based pages carrying this code.",
+            },
+            relationship: {
+              type: "string",
+              enum: ["one_item", "configurations", "unclear"],
+              description:
+                "'one_item' when the pages describe the SAME piece of furniture in different ways — a specification sheet and " +
+                "its shop drawing, an elevation and a section, a general view and a detail. This is the common case. " +
+                "'configurations' ONLY when the pages are genuinely different things to manufacture: the same shape offered in " +
+                "different fabrics or finishes, usually lettered or numbered by the document itself. " +
+                "'unclear' when you cannot tell — a person will decide, and that is far better than a wrong guess, because " +
+                "'configurations' makes this one item into several separate jobs.",
+            },
+            evidence: {
+              type: "string",
+              maxLength: MAX_SHORT,
+              description:
+                "What on the pages tells you that, quoting them — \"page 1 is the specification sheet and page 2 the shop " +
+                "drawing of the same chair, both stating Tibor Blob Amber Fern\", \"the sheets are titled OPTION A and " +
+                "OPTION B with different fabrics\".",
+            },
+          },
+          required: ["itemCodeRaw", "pages", "relationship", "evidence"],
+        },
+      },
       documentNotes: {
         type: ["string", "null"],
         maxLength: MAX_NOTE,
         description: "One note about the drawing set as a whole: what it covers, pages you could not read, units if they ARE stated anywhere.",
       },
     },
-    required: ["items", "documentNotes"],
+    required: ["items", "codeGroups", "documentNotes"],
   },
 };
 
@@ -494,9 +615,70 @@ export const RawDrawingObservation = z.object({
 // Optional in the INFERRED type too, deliberately. Most dimensions this app
 // will ever see carry no printed unit, so a caller constructing one should not
 // have to write `unitRaw: null` to say the ordinary thing.
+/**
+ * The words the TOOL offers for a slot, and what this app calls them.
+ *
+ * The exact half of house convention 6: the model reports what the page shows a
+ * figure to be, in plain words, and the mapping to `DIMENSION_SLOTS` — the
+ * vocabulary `record_attributes_dimension_slot_check` enforces — happens here,
+ * in code, where it is testable. The model is never shown `SH` or `DIA`.
+ */
+export const MODEL_SLOT_WORDS = ["width", "depth", "height", "seat_height", "diameter"] as const;
+export type ModelSlotWord = (typeof MODEL_SLOT_WORDS)[number];
+
+export const SLOT_FROM_MODEL: Record<ModelSlotWord, DimensionSlot> = {
+  width: "W",
+  depth: "D",
+  height: "H",
+  seat_height: "SH",
+  diameter: "DIA",
+};
+
+/** The model's word as a slot, or null — including for anything unrecognised. */
+export function slotFromModel(word: unknown): DimensionSlot | null {
+  return typeof word === "string" && word in SLOT_FROM_MODEL ? SLOT_FROM_MODEL[word as ModelSlotWord] : null;
+}
+
+/**
+ * `.catch(null)` / `.catch(false)` on the three new fields, and `.optional()`
+ * on all of them, for the reason `unitRaw` has both.
+ *
+ * OPTIONAL IS NOT A CONCESSION, IT IS THE MIGRATION. Every run staged before
+ * 2026-09-18 sits in `intake_runs.parsed` with no slot, no evidence and no
+ * `isOverall`, and a required key would make each of those runs unreadable —
+ * the review screen 500s on a pack somebody has already paid to read. Absent
+ * means "staged before the model was asked", which `stageDrawings` handles by
+ * falling back to the label vocabulary alone.
+ *
+ * A malformed value must also not fail a call that has already been paid for.
+ * Losing one slot puts one amber row in front of a reviewer; failing the run
+ * costs another call.
+ */
 export const RawDrawingDimension = RawDrawingObservation.extend({
   unitRaw: nullableText(MAX_SHORT).optional().catch(null),
+  slot: z.enum(MODEL_SLOT_WORDS).nullable().catch(null).optional(),
+  slotEvidence: nullableText(MAX_SHORT).optional().catch(null),
+  // Defaults TRUE when absent, and that is deliberate: an old staged run has no
+  // `isOverall`, and treating every one of its figures as a component would
+  // fold an entire pack's dimensions out of sight. A new run always states it.
+  isOverall: z.boolean().catch(true).optional(),
 });
+
+/**
+ * Whether the pages carrying one code are one item or several things to make.
+ *
+ * `.catch("unclear")` on the relationship: a value this app does not recognise
+ * must land on the answer that asks a person, never on `configurations`, which
+ * is the one that turns an item into several BWS jobs.
+ */
+export const RawCodeGroup = z.object({
+  itemCodeRaw: z.string().max(MAX_SHORT),
+  pages: z.array(z.number().int().min(1).max(100_000)).max(MAX_VIEW_REGIONS).catch([]).default([]),
+  relationship: z.enum(["one_item", "configurations", "unclear"]).catch("unclear").default("unclear"),
+  evidence: nullableText(MAX_SHORT).catch(null).default(null),
+});
+
+export type RawCodeGroup = z.infer<typeof RawCodeGroup>;
 
 export const RawDrawingMaterial = RawDrawingObservation.extend({
   materialCodeRaw: nullableText(MAX_SHORT),
@@ -551,6 +733,11 @@ export type RawDrawingObservation = z.infer<typeof RawDrawingObservation>;
 
 export const DrawingsOutput = z.object({
   items: z.array(RawDrawingItem).max(MAX_DRAWING_ITEMS),
+  // `.catch([])` and optional, unlike `items`: a run staged before 2026-09-18
+  // has none, and a malformed group must leave the grouping unstated rather
+  // than fail a paid call. Unstated means the reviewer is asked, which is the
+  // safe end of this particular question.
+  codeGroups: z.array(RawCodeGroup).max(MAX_DRAWING_ITEMS).catch([]).optional(),
   documentNotes: nullableText(MAX_NOTE),
 });
 

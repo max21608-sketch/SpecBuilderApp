@@ -162,9 +162,16 @@ ${SHARED_RULES}`,
   // row. This prompt matches DRAWINGS_TOOL.
   shop_drawings: `You are reading a set of furniture shop drawings for a manufacturer's specification record.
 
-Each page normally shows ONE item: elevations and plans with dimension figures, and a panel of
-material swatches with captions. The item code is usually large text in a corner of the page
-("S-100", "UP-101", "S-301"); read it from the page as drawn.
+A page shows dimension figures, elevations and plans, and usually a panel of material swatches with
+captions. The item code is usually large text in a corner ("S-100", "UP-101", "S-301"); read it from
+the page as drawn.
+
+IT IS NOT ONE ITEM PER PAGE, IN EITHER DIRECTION. A page can carry several items, and one item is
+very often drawn across several pages — a specification sheet and its shop drawing, an elevation and
+a section. Report what each page states, and then say in \`codeGroups\` which of the repeated codes
+are one piece of furniture and which are genuinely different things to manufacture. Getting that
+wrong in the direction of "different" turns one armchair into several separate jobs, so when you
+cannot tell, say \`unclear\`.
 
 For each item, record:
 - every dimension figure, with the drawing's own label for it where there is one ("Width", "Seat
@@ -174,12 +181,25 @@ For each item, record:
   YC04158 - 01"), and the client's own finish code ("CH-01.1", "WD-01", "MT-01") where one is shown;
 - anything else stated about the item, including annotations in other languages, as a note.
 
-A DIMENSION PRINTED AS ONE LINE. Some specification sheets give the overall size as a single line
-rather than as separate labelled figures — "80 x 70 x 90 cm", "W1520 TBC x D560 x H1005 mm",
-"Dia.460 x H450mm". Copy that line verbatim into \`dimensionsCombinedRaw\` and do NOT split it into
-separate figures yourself: which number is the width and which the depth is carried by the ORDER it
-is printed in, and that is a reading a person confirms afterwards. Report a line there OR its
-figures in \`dimensions\`, never both.
+WHICH FIGURE IS THE WIDTH. For every dimension, say in \`slot\` which overall dimension of the whole
+item it gives — width, depth, height, seat height or diameter — or null, and say in \`slotEvidence\`
+what on the page told you, quoting it. You can see the page; this app cannot. Left to itself it
+sorts the figures by size and calls the largest the width, which read a sheet printing
+"80 x 70 x 90 cm" as a 900mm-wide chair.
+
+Most figures take null, and null is a good answer. A reveal, a radius, a rail, a cushion thickness,
+an arm height, a seat-only width: none of these is one of the five, and forcing one destroys the
+measurement it overwrites. Set \`isOverall\` false for those and true for a figure that measures the
+whole item — a shop drawing is mostly parts, and this is what decides which four figures a reviewer
+reads first and which are folded out of the way.
+
+A DIMENSION PRINTED AS ONE LINE. Some specification sheets give the overall size as a single line —
+"80 x 70 x 90 cm", "W1520 TBC x D560 x H1005 mm", "Dia.460 x H450mm". Copy the line verbatim into
+\`dimensionsCombinedRaw\` so it can be checked against the page, AND report each of its figures in
+\`dimensions\` with its slot, saying in \`slotEvidence\` which part of the printed line it came from
+("second of three in the printed line 80 x 70 x 90 cm"). Where the line prints its own prefixes
+("W1520", "Dia.460") those prefixes are the answer. Where it does not, the order it is printed in is
+what you have, and saying so in the evidence is what lets a person check it.
 
 UNITS. Put the figure in \`valueRaw\` and the unit, if the page prints one, in \`unitRaw\` — separately,
 never combined into the value. A shop drawing usually prints NO unit and mixes millimetres and
@@ -188,6 +208,19 @@ print one ("WIDTH 1800mm"), and then \`valueRaw\` is "1800" and \`unitRaw\` is "
 where you can see it on the page. Never infer one from how large the number is, never convert, and
 never append a unit to the figure — a wrong unit is worse than none, because it reads as a real
 measurement and nothing afterwards questions it.
+
+ONE ITEM DRAWN TWICE, OR TWO THINGS TO MAKE. For every code you reported on more than one page, add
+a \`codeGroups\` entry saying which it is. \`one_item\` is the common case: a specification sheet and
+its shop drawing, a general view and a detail, an elevation and a section — the same piece of
+furniture described in different ways, often in different vocabularies. One page may name a fabric
+"Tibor Blob Amber Fern" and the other file the same cloth under a code like "CLO003 A"; that is one
+chair, not two. Use \`configurations\` ONLY where the pages are genuinely different things to
+manufacture — the same shape offered in different fabrics or finishes, which a document that means
+it almost always letters or numbers itself. Say in \`evidence\` what on the pages told you.
+
+Pages disagreeing about a measurement is NOT evidence of configurations: it is usually one page
+being a shop drawing with no printed units. Say \`unclear\` rather than guessing; a person decides,
+and \`configurations\` is the answer that turns one item into several separate jobs.
 
 PICTURES OF THE ITEM. In \`viewRegions\`, report every drawn view or photograph OF THE ITEM ITSELF and
 roughly where each sits on its page, as fractions of the page from 0 to 1 with the origin at the top

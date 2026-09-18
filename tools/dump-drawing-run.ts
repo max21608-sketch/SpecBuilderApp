@@ -135,7 +135,7 @@ async function dumpRun(row: Record<string, unknown>) {
     return;
   }
 
-  const letters = variantLettersByItem(staged.items);
+  const letters = variantLettersByItem(staged.items, staged);
   const context = await loadDrawingContext(String(row.project_id));
 
   console.log("");

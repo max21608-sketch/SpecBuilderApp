@@ -146,11 +146,25 @@ export default function ConfigurationCard({
             <ConfigurationChip key={member.item.id} card={card} member={member} importId={pageImportId(member.item.id)} />
           ))}
         </div>
+        {/* WHAT THIS CARD IS ABOUT TO DO, said differently for the two cases it
+            covers — because they are different, and the card used to claim the
+            expensive one whatever the truth.
+
+            A SPLIT creates a record per configuration and takes the bill line
+            out of the export, so the file ships several jobs where the bill has
+            one line. Saying that about one armchair drawn on its specification
+            sheet and again on its shop drawing is the S-200 defect, and the
+            sentence was how it announced itself. */}
         <p className="mt-1.5 max-w-3xl text-xs text-neutral-600">
-          One bill line, drawn as {card.members.length} configurations.{" "}
-          {card.geometry.status === "shared"
-            ? "They are the same size; each carries its own finishes and becomes its own record under the bill line, and the export ships the configurations rather than the line."
-            : "These pages do not state the same size — see below."}
+          {card.split
+            ? `One bill line, drawn as ${card.members.length} configurations. ` +
+              (card.geometry.status === "shared"
+                ? "They are the same size; each carries its own finishes and becomes its own record under the bill line, and the export ships the configurations rather than the line."
+                : "These pages do not state the same size — see below.")
+            : `One item, described on ${card.members.length} pages. Everything confirmed here lands on the same record, and the bill line is what the export ships. ` +
+              (card.geometry.status === "shared"
+                ? "The pages state the same size."
+                : "These pages do not state the same size — see below, and one of the readings is wrong.")}
         </p>
       </div>
       <div className="flex items-center gap-3">
@@ -274,7 +288,7 @@ export default function ConfigurationCard({
     void onReviewMany(
       card.id,
       pendingMembers.map((member) => ({
-        label: variantName(card.codeRaw, member.letter, card.codeRaw),
+        label: memberName(card, member),
         item: member.item,
         observations: member.pending,
       })),
@@ -434,7 +448,7 @@ export default function ConfigurationCard({
                               runs={member.resolution?.resolution.runs ?? []}
                               busy={busyHere}
                               blocked
-                              heading={variantName(card.codeRaw, member.letter, card.codeRaw)}
+                              heading={memberName(card, member)}
                               onChange={(target, changes) => void onSaveObservation(member.item, target, changes)}
                             />
                           );
@@ -497,7 +511,7 @@ export default function ConfigurationCard({
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-neutral-100">
         <p className="text-xs text-neutral-500">
           {blockedMember
-            ? `${variantName(card.codeRaw, blockedMember.letter, card.codeRaw)} cannot be confirmed yet: ${
+            ? `${memberName(card, blockedMember)} cannot be confirmed yet: ${
                 blockedMember.resolution?.blockers[0]?.message ?? ""
               }`
             : `Writes ${totalSpecs} spec${totalSpecs === 1 ? "" : "s"} across ${pendingMembers.length} configuration${
@@ -518,6 +532,28 @@ export default function ConfigurationCard({
       </div>
     </div>
   );
+}
+
+/**
+ * What to call one member of a configuration card.
+ *
+ * `S-200 A` is THE NAME OF A RECORD — the confirm creates it, the export ships
+ * it, and somebody will quote it in an email six weeks later. It may only
+ * appear where such a record is actually being created. Where the card is not
+ * splitting anything, the pages are sources and a page number is what tells
+ * them apart.
+ *
+ * One helper because five places name a member — the chip, the band header, the
+ * picture heading, the blocker sentence and the confirm summary — and four of
+ * them saying "S-200 A" while the fifth says "Page 2" is its own confusion.
+ */
+function memberName(
+  card: Extract<ReviewCard<ItemResolution>, { kind: "configurations" }>,
+  member: ConfigurationMember<ItemResolution>,
+): string {
+  return card.split
+    ? variantName(card.codeRaw, member.letter, card.codeRaw)
+    : `Page ${member.item.page ?? "?"}`;
 }
 
 function ConfigurationChip({
@@ -545,7 +581,13 @@ function ConfigurationChip({
         member.state === "pending" ? "" : "opacity-60"
       }`}
     >
-      <span className="font-medium">{variantName(card.codeRaw, member.letter, card.codeRaw)}</span>
+      {/* "S-200 A" is the NAME OF A RECORD this confirm will create, and it is
+          what somebody will later quote in an email. It must not appear on a
+          card that is not splitting anything — there the pages are sources, and
+          the page number is what identifies one. */}
+      <span className="font-medium">
+        {memberName(card, member)}
+      </span>
       {member.item.page && (
         <a href={`/api/imports/${importId}/source#page=${member.item.page}`} className="underline" target="_blank" rel="noreferrer">
           Page {member.item.page}
@@ -597,7 +639,7 @@ function ConfigurationSection({
   const [armed, setArmed] = useState(false);
   const [showExtras, setShowExtras] = useState(false);
   useEffect(() => setArmed(false), [member.pending.length]);
-  const name = variantName(card.codeRaw, member.letter, card.codeRaw);
+  const name = memberName(card, member);
 
   if (member.state !== "pending") {
     const applied = member.item.observations.filter((o) => o.reviewStatus === "applied");
@@ -644,7 +686,11 @@ function ConfigurationSection({
             void onReview(member.item, member.pending, "ignore");
           }}
         >
-          {armed ? `Ignore all ${member.pending.length} rows?` : `Ignore page ${member.item.page ?? ""}`.trim()}
+          {/* IT IGNORES THIS ITEM'S ROWS, NOT THE PAGE. `onReview` is called
+              with `member.pending`, which is correct — but a page can carry
+              several item codes, and on such a sheet "Ignore page 4" promises
+              to discard the other items on it too. */}
+          {armed ? `Ignore all ${member.pending.length} rows?` : "Ignore these rows"}
         </Button>
       </div>
 

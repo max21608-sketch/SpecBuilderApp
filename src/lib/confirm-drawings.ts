@@ -318,7 +318,7 @@ export async function confirmDrawingItem(
   //   `writeIds` where the specs actually land.
   // A code drawn ONCE has the two identical, which is most of any pack.
   // ==========================================================================
-  const variantLabel = variantLettersByItem(run.staged.items).get(item.id) ?? null;
+  const variantLabel = variantLettersByItem(run.staged.items, run.staged).get(item.id) ?? null;
   const ordered = [...targets].sort();
   const variantOf = new Map<string, string>();
   if (variantLabel) {

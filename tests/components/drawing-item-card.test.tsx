@@ -240,3 +240,68 @@ describe("a callout the app had to guess at", () => {
     expect(row?.className).not.toContain("bg-yellow");
   });
 });
+
+// ============================================================================
+// THE S-201 SPRAWL, AS A TEST
+//
+// Reported on sight of the real card: "loads of dimensions everywhere,
+// nothing's grouped, it's all just over the place". The sheet prints a
+// dimensions TABLE and only W, D and H were filled in, so WIDTH SEAT, WIDTH
+// BACK, DEPTH SEAT, DEPTH BACK and HEIGHT BACK all came through as `TBC`.
+//
+// They state no figure, so the old fold -- which asked "is this value a number"
+// -- could not catch them, and five rows of nothing printed inline between the
+// four that matter and the fabrics. Version 2 asks the model whether a figure
+// measures the whole item instead, and a blank sub-dimension is not overall.
+// ============================================================================
+describe("a specification sheet's blank sub-dimensions", () => {
+  const s201Sheet = () => {
+    resetIds();
+    return [
+      figure("WIDTH", "660", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm", unitSource: "printed", isOverall: true }),
+      figure("DEPTH", "720", { attrGroup: "dimension", dimensionSlot: "D", unit: "mm", unitSource: "printed", isOverall: true }),
+      figure("HEIGHT", "700", { attrGroup: "dimension", dimensionSlot: "H", unit: "mm", unitSource: "printed", isOverall: true }),
+      figure("HEIGHT SEAT", "TBC", { attrGroup: "dimension", dimensionSlot: "SH", unit: "mm", unitSource: "figures", state: "tbc", isOverall: true }),
+      figure("WIDTH SEAT", "TBC", { state: "tbc", isOverall: false }),
+      figure("WIDTH BACK", "TBC", { state: "tbc", isOverall: false }),
+      figure("DEPTH SEAT", "TBC", { state: "tbc", isOverall: false }),
+      figure("DEPTH BACK", "TBC", { state: "tbc", isOverall: false }),
+      figure("HEIGHT BACK", "TBC", { state: "tbc", isOverall: false }),
+      callout("FABRIC CODE", "TBC – Aissa Dione black/straw diamonds", "UPH-07"),
+      callout("EXPOSED WOODWORK", "TBC", null),
+    ];
+  };
+
+  it("folds a blank sub-dimension away, though it states no figure at all", async () => {
+    renderCard(s201Sheet());
+    const labels = rowLabels();
+    expect(labels).toContain("WIDTH");
+    expect(labels).not.toContain("WIDTH SEAT");
+    expect(labels).not.toContain("DEPTH BACK");
+
+    await userEvent.click(screen.getByRole("button", { name: /Other dimensions \(5\)/ }));
+    expect(rowLabels()).toContain("WIDTH SEAT");
+  });
+
+  it("puts the four that matter first, in the order the composed cell writes them", () => {
+    // The panel above the table says `W660 x D720 x H700mm x SH TBC`. A table
+    // under it in a different order makes a transposition harder to spot, not
+    // easier, and spotting one is the entire point of that panel.
+    renderCard(s201Sheet());
+    expect(rowLabels().slice(0, 4)).toEqual(["WIDTH", "DEPTH", "HEIGHT", "HEIGHT SEAT"]);
+  });
+
+  it("groups what is left instead of leaving it in the order the model reported it", () => {
+    resetIds();
+    renderCard([
+      figure("WIDTH", "660", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm", unitSource: "printed", isOverall: true }),
+      { ...callout("REMARKS", "Comply with the preamble", null), attrGroup: "note" as const },
+      callout("FABRIC CODE", "Woven raffia", "UPH-07", { attrGroup: "material" }),
+      { ...callout("Item", "REFER TO JACQUES GRANGE DRAWINGS", null), attrGroup: "note" as const },
+      callout("EXPOSED WOODWORK", "Dark tinted wood", "WD-05"),
+    ]);
+    // Materials, then finishes, then the paragraphs — whatever order the page
+    // happened to state them in.
+    expect(rowLabels()).toEqual(["WIDTH", "FABRIC CODE", "EXPOSED WOODWORK", "REMARKS", "Item"]);
+  });
+});

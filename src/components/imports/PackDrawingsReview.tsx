@@ -483,7 +483,7 @@ export default function PackDrawingsReview({ projectId, batchId }: { projectId: 
   // ==========================================================================
   const cards = runs.flatMap((run) =>
     run.staged
-      ? configurationCards(run.staged.items, new Map(run.items.map((entry) => [entry.id, entry])))
+      ? configurationCards(run.staged.items, new Map(run.items.map((entry) => [entry.id, entry])), run.staged)
           .filter(cardHasPending)
           .map((card) => ({ run, card }))
       : [],

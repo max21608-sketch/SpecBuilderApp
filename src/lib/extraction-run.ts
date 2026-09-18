@@ -219,6 +219,7 @@ export async function runDocumentExtraction({
       filename,
       result.output.data.documentNotes,
       projectDefaultUnit,
+      result.output.data.codeGroups ?? [],
     );
     staged = drawings;
     stagedCount = drawings.items.reduce((total, item) => total + item.observations.length, 0);
