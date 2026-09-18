@@ -518,7 +518,13 @@ function RecordView() {
         href={`/api/imports/${attribute.source_run_id}/source${attribute.source_page ? `#page=${attribute.source_page}` : ""}`}
         target="_blank"
         rel="noreferrer"
-        className="underline hover:text-neutral-900"
+        title={`${attribute.source_filename ?? "source"}${attribute.source_page ? ` — page ${attribute.source_page}` : ""}`}
+        // TRUNCATED, NOT WRAPPED. A real filename is `Ashcombe House - Shop
+        // Drawings - Issue A.pdf`, and wrapping it made every row in the table
+        // six lines tall — the value the reader came for pushed apart by the
+        // name of the file it came from. The full name is on hover and in the
+        // document it opens.
+        className="block max-w-[9rem] truncate underline hover:text-neutral-900"
       >
         {attribute.source_filename ?? "source"}
         {attribute.source_page ? ` p${attribute.source_page}` : ""}
