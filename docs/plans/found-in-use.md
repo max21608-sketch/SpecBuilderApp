@@ -164,7 +164,17 @@ changing it is not part of this.
 
 ### A gate's count folds "nowhere to record it" into "outstanding"
 
-**Status: open.** Seen on a record screen (screenshot), Armchair, lounge @ suite
+**Status: FIXED, 2026-09-18**, by the record screen's Gates tab rebuilt against
+`#record-gates`. A gate in play now shows up to TWO chips — `n to answer` in
+red and `n nowhere to record` in dashed slate — and they are never added
+together. The board's Chase button counts only the first, because chasing
+somebody about a field this app has nowhere to store is asking them to fix our
+migration. `src/lib/gates.ts` was not touched: `unanswerable` still counts
+against the gate, which was never the fault. Checked against the record the
+entry names — it reads `1 to answer` and `1 nowhere to record`, and the list
+under it is Spec notes and Product code.
+
+Seen on a record screen (screenshot), Armchair, lounge @ suite
 living area — `Uph · Armchairs Benches Stools Sofas`, level Simple.
 
 The pill reads **`TGQ 2 outstanding`**. Reading the list underneath it, exactly

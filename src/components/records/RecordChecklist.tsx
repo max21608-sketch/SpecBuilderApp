@@ -36,7 +36,7 @@
 // change event on a value the server holds, which is not the pre-selected
 // accept control the level picker documents.
 // ============================================================================
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ANSWER_STATES,
@@ -187,9 +187,29 @@ export default function RecordChecklist({
   // level: `toQuote` is then null, and filtering to a number that does not
   // exist would show an empty screen with no explanation.
   const [focus, setFocus] = useState<Focus>(
-    readiness.toQuote !== null && readiness.toQuote > 0 ? "tgq" : null,
+    // ARRIVING FROM A GATE ROW IS NOT BROWSING. The gates tab links to one
+    // question by its own anchor, and that question is routinely a TG0 or TG1
+    // field, which the default TGQ filter would hide — so a link that opened
+    // the tab filtered would land on a screen the question is not on.
+    typeof window !== "undefined" && window.location.hash.startsWith("#q-")
+      ? null
+      : readiness.toQuote !== null && readiness.toQuote > 0
+        ? "tgq"
+        : null,
   );
   const [search, setSearch] = useState("");
+  // The rows render after the payload, so the browser's own hash scroll has
+  // already happened by the time the target exists.
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (scrolled.current || typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (!hash.startsWith("#q-")) return;
+    const target = document.getElementById(hash.slice(1));
+    if (!target) return;
+    scrolled.current = true;
+    target.scrollIntoView({ block: "center" });
+  });
 
   const matrix = useMemo(
     () =>
@@ -429,7 +449,14 @@ export default function RecordChecklist({
               const attribute = attributeFor(answer);
               const gates = gatesFor(answer);
               return (
-                <div key={answer.requirement_id} className={`${ROW_GRID} border-b border-neutral-100`}>
+                <div
+                  key={answer.requirement_id}
+                  // The anchor the gates tab links to. Its own id rather than
+                  // the answer's, because an answer row may not exist yet and
+                  // the question always does.
+                  id={`q-${answer.requirement_id}`}
+                  className={`${ROW_GRID} scroll-mt-6 border-b border-neutral-100`}
+                >
                   <div className="flex items-start gap-2 px-4 py-2.5">
                     {/* The tier survives a widened filter: a red dot beside a
                         question says it blocks a price even when the list is

@@ -49,14 +49,13 @@ import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
 import Button, { buttonClass } from "@/components/ui/Button";
-import GatePanel from "@/components/records/GatePanel";
+import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
 import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
 import type { Palette } from "@/lib/palettes";
 import { GATES, type Gate, type GateStatus } from "@/lib/gates";
-import type { GateField } from "@/lib/gates";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
@@ -123,29 +122,6 @@ type RetiredAttribute = Attribute & {
 
 /** Who owes us the unanswered questions, resolved from the BOQ's designer code. */
 export type DesignerContact = { id: string; name: string; email: string | null; role: string | null; designer_code: string };
-
-/**
- * One row of Matthew's matrix as the record route sends it.
- *
- * Its own shape rather than `GateField`, because the route renames
- * `specFieldJsonId` to `jsonId` on the way out and a type that merely omitted
- * fields would keep the old name and quietly typecheck.
- */
-export type MatrixFieldRow = {
-  matrixRow: number;
-  gate: Gate;
-  capture: GateField["capture"];
-  fieldName: string;
-  jsonId: number | null;
-  localKey: string | null;
-  dimensionSlot: GateField["dimensionSlot"];
-  valueType: GateField["valueType"];
-  paletteKey: string | null;
-  paletteRaw: string | null;
-  conditionalOnKey: string | null;
-  conditionalOnValue: string | null;
-  notes: string | null;
-};
 
 /** The four jobs this screen does, one tab each. */
 const RECORD_TABS = ["specs", "checklist", "gates", "versions"] as const;
@@ -1120,7 +1096,16 @@ function RecordView() {
             than a panel above the 43-question checklist: the checklist is the
             full cheat sheet and always was, and this is the part somebody has
             to act on before the next milestone. */}
-        {tab === "gates" && <GatePanel gates={data.gates} />}
+        {tab === "gates" && (
+          <GatePanel
+            gates={data.gates}
+            matrixFields={data.matrixFields}
+            answers={answers}
+            palettes={data.palettes ?? []}
+            categoryName={record.category_name}
+            chaseHref={chaseHref}
+          />
+        )}
 
         {/* NOT COLLAPSED ANY MORE. It was behind a toggle because it sat under
             four screens of checklist; on its own tab it can simply be the page. */}
