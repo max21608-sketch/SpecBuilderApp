@@ -14,6 +14,7 @@
 import { useState } from "react";
 import type { AnswerState } from "@/lib/spec-vocab";
 import EvidenceUpload, { type UploadedEvidence } from "@/components/history/EvidenceUpload";
+import Button from "@/components/ui/Button";
 
 export type PendingReason = {
   prompt: string;
@@ -70,17 +71,15 @@ export default function ReasonPrompt({
         <EvidenceUpload projectId={projectId} onUploaded={setEvidence} />
       </div>
       <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void submit()}
-          disabled={!reason.trim() || busy}
-          className="border border-amber-400 bg-white rounded px-3 py-1 text-sm hover:bg-amber-100 disabled:opacity-50"
-        >
+        {/* A button, because it OVERRIDES a confirmed answer — the one thing
+            `danger` grades. It was a bordered div and a line of underlined
+            text, which read as a link. */}
+        <Button variant="danger" size="sm" disabled={!reason.trim() || busy} onClick={() => void submit()}>
           {busy ? "Saving…" : "Save the change"}
-        </button>
-        <button type="button" onClick={onCancel} className="text-sm text-amber-800 hover:text-amber-950">
+        </Button>
+        <Button variant="quiet" size="sm" onClick={onCancel}>
           Leave it as it is
-        </button>
+        </Button>
       </div>
     </div>
   );

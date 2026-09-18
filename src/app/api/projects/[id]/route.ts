@@ -121,7 +121,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            (r.attachment_id is not null) as source_preserved,
            r.batch_id,
            b.label as batch_label,
-           b.created_at as batch_created_at
+           b.created_at as batch_created_at,
+           -- WHAT THIS DOCUMENT PRODUCED, which is the only thing that makes a
+           -- list of eleven filenames worth reading. A state on its own says
+           -- what the app did to the file; these say what the file did to the
+           -- project, which is the question somebody scanning a pack has.
+           --
+           -- Both are counted off the FK the confirm wrote, never off the
+           -- staged JSON: a proposal that was ignored is staged and produced
+           -- nothing, and a row that says "12 items" over a review where eleven
+           -- were dismissed is a number nobody can act on.
+           (select count(*) from record_attributes ra
+             where ra.source_run_id = r.id and ra.status = 'active') as specs_applied,
+           (select count(*) from spec_runs sr where sr.source_import_id = r.id) as runs_created,
+           (select count(*) from spec_records rec
+              join spec_runs sr on sr.id = rec.run_id
+             where sr.source_import_id = r.id and rec.status = 'active') as records_created
     from intake_runs r
     left join attachments a on a.id = r.attachment_id
     left join intake_batches b on b.id = r.batch_id

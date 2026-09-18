@@ -5,7 +5,33 @@
 // Two questions, one screen, because they are the same question at different
 // resolutions: "what has happened here" and "what is different between the
 // version we issued and the one we hold now".
-import { useCallback, useEffect, useState } from "react";
+//
+// ============================================================================
+// A VERSION IS NOT A CHANGE, AND THE TRAIL HAS TO SHOW IT.
+//
+// Asked for on 2026-09-18: "I want to make it quite clear when a version has
+// been created… there need to be quite distinctive differences between just a
+// normal change and a version change." Everything here rendered identically, so
+// a named point — the thing you compare against, and the only row anybody reads
+// deliberately — was a line of grey text among forty.
+//
+// A BASELINE is a green bar straight across the list. A KEY DATE is a violet
+// bar in the same list, because the programme reads against the work rather
+// than only in a field at the top. An ordinary change is a row: what kind it
+// was, what it touched, why, and who. Scrolling then answers the one question
+// anybody asks of a trail — which changes fall inside Rev A and which came
+// after — by looking.
+//
+// The key date is a `YYYY-MM-DD` STRING and is compared as one. A component
+// taking a `Date` here is where the TOE-dates trap comes back.
+//
+// THE THREE CONTROLS ARE THE CARD'S, not this component's. `Name this point`,
+// `Compare two points` and `All n` live in the heading of the card that holds
+// the trail, which is where the mock-up puts them — so they are optional
+// controlled props, and this still works standalone with its own state when
+// nobody passes them.
+// ============================================================================
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -13,7 +39,10 @@ import DiffTable from "@/components/history/DiffTable";
 import type { ProjectChange } from "@/lib/change-history";
 import type { ProjectComparison, RecordComparison } from "@/lib/baselines";
 import Button from "@/components/ui/Button";
+import Chip from "@/components/ui/Chip";
+import Pill from "@/components/ui/Pill";
 import { SPECS_AGREED_LABEL, daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
+import { formatDay } from "@/lib/format-day";
 
 type Payload = { changes: ProjectChange[] };
 
@@ -21,7 +50,6 @@ function when(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
     day: "numeric",
     month: "short",
-    year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -52,11 +80,30 @@ const CHANGE_CLASS: Record<RecordComparison["change"], string> = {
   unchanged: "text-neutral-500 bg-neutral-50 border-neutral-200",
 };
 
+export type ProjectHistoryControls = {
+  /** How many entries the trail holds, so the card's heading can say "All n". */
+  onLoaded?: (count: number) => void;
+  naming?: boolean;
+  onNamingChange?: (open: boolean) => void;
+  comparing?: boolean;
+  onComparingChange?: (open: boolean) => void;
+  showAll?: boolean;
+  onShowAllChange?: (open: boolean) => void;
+};
+
 export default function ProjectHistory({
   projectId,
   runId,
   specsAgreedBy,
-}: {
+  toQuote,
+  onLoaded,
+  naming,
+  onNamingChange,
+  comparing: comparingOpen,
+  onComparingChange,
+  showAll,
+  onShowAllChange,
+}: ProjectHistoryControls & {
   projectId: string;
   runId?: string | null;
   /**
@@ -69,6 +116,8 @@ export default function ProjectHistory({
    * component that took a Date here would be the place that quietly broke it.
    */
   specsAgreedBy?: string | null;
+  /** What is still blocking a quote, for the key-date bar. Absent prints nothing. */
+  toQuote?: number | null;
 }) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +129,23 @@ export default function ProjectHistory({
   const [showUnchanged, setShowUnchanged] = useState(false);
   const [baselineLabel, setBaselineLabel] = useState("");
   const [baselineReason, setBaselineReason] = useState("");
-  const [namingPoint, setNamingPoint] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [showAllChanges, setShowAllChanges] = useState(false);
+
+  // Uncontrolled fallbacks, so this component is still usable on its own.
+  const [ownNaming, setOwnNaming] = useState(false);
+  const [ownComparePanel, setOwnComparePanel] = useState(false);
+  const [ownShowAll, setOwnShowAll] = useState(false);
+  const namingPoint = naming ?? ownNaming;
+  const setNamingPoint = (value: boolean) => (onNamingChange ? onNamingChange(value) : setOwnNaming(value));
+  const comparePanel = comparingOpen ?? ownComparePanel;
+  const setComparePanel = (value: boolean) =>
+    onComparingChange ? onComparingChange(value) : setOwnComparePanel(value);
+  const showAllChanges = showAll ?? ownShowAll;
+  const setShowAllChanges = (value: boolean) => (onShowAllChange ? onShowAllChange(value) : setOwnShowAll(value));
+
+  // In a ref, so a caller passing a lambda does not re-run the load.
+  const loadedRef = useRef(onLoaded);
+  loadedRef.current = onLoaded;
 
   const load = useCallback(async () => {
     const query = runId ? `?runId=${runId}` : "";
@@ -93,6 +156,7 @@ export default function ProjectHistory({
     }
     setError(null);
     setData(res.data);
+    loadedRef.current?.(res.data.changes.length);
   }, [projectId, runId]);
 
   useEffect(() => {
@@ -139,23 +203,33 @@ export default function ProjectHistory({
     }
   }
 
-  if (error && !data) return <p className="mt-3 text-sm text-red-700">{error}</p>;
-  if (!data) return <Spinner label="Loading history" />;
+  /** Compare a named point against everything since, in one press. */
+  function compareToNow(changeId: string) {
+    const newest = data?.changes[0];
+    if (!newest) return;
+    setFrom(changeId);
+    setTo(newest.id);
+    setComparePanel(true);
+  }
+
+  if (error && !data) return <p className="p-4 text-sm text-red-700">{error}</p>;
+  if (!data) return <div className="p-4"><Spinner label="Loading history" /></div>;
 
   const { changes } = data;
   const baselines = changes.filter((change) => change.kind === "baseline");
   const visible = comparison?.records.filter((record) => showUnchanged || record.change !== "unchanged") ?? [];
   const visibleChanges = showAllChanges ? changes : changes.slice(0, RECENT_CHANGES);
   const hiddenChanges = changes.length - visibleChanges.length;
+  const overdue = specsAgreedBy ? daysUntil(specsAgreedBy) < 0 : false;
 
   return (
-    <div className="mt-3">
-      {error && <p className="mb-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
+    <div>
+      {error && <p className="mx-4 mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       {/* Naming a point. A baseline writes down the exact version of every
           record, so a comparison against it later is two exact sets. */}
-      {namingPoint ? (
-        <div className="border border-neutral-300 rounded-lg bg-white px-4 py-3 text-sm">
+      {namingPoint && (
+        <div className="border-b border-neutral-200 px-4 py-3 text-sm">
           <p className="font-medium text-neutral-900">Name this point</p>
           <p className="mt-0.5 text-xs text-neutral-500">
             Records what every item holds right now, so you can compare against it later.
@@ -165,36 +239,38 @@ export default function ProjectHistory({
             autoFocus
             onChange={(event) => setBaselineLabel(event.target.value)}
             placeholder="Issued to client, 16 Sep"
-            className="mt-2 w-full border border-neutral-300 rounded px-2 py-1"
+            className="mt-2 w-full rounded border border-neutral-300 px-2 py-1"
           />
           <input
             value={baselineReason}
             onChange={(event) => setBaselineReason(event.target.value)}
             placeholder="What was issued, and to whom"
-            className="mt-2 w-full border border-neutral-300 rounded px-2 py-1"
+            className="mt-2 w-full rounded border border-neutral-300 px-2 py-1"
           />
           <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => void takeBaseline()}
               disabled={!baselineLabel.trim() || !baselineReason.trim() || busy}
-              className="border border-neutral-300 rounded px-3 py-1 hover:bg-neutral-50 disabled:opacity-50"
             >
               {busy ? "Saving…" : "Save this point"}
-            </button>
-            <Button variant="quiet" onClick={() => setNamingPoint(false)}>
+            </Button>
+            <Button variant="quiet" size="sm" onClick={() => setNamingPoint(false)}>
               Cancel
             </Button>
           </div>
         </div>
-      ) : (
-        <Button onClick={() => setNamingPoint(true)}>Name this point</Button>
       )}
 
-      {changes.length > 1 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm border border-neutral-200 rounded-lg bg-white px-3 py-2">
+      {comparePanel && changes.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2.5 text-sm">
           <span className="text-neutral-500">Compare</span>
-          <select value={from} onChange={(event) => setFrom(event.target.value)} className="border border-neutral-300 rounded px-2 py-1 max-w-[16rem]">
+          <select
+            value={from}
+            onChange={(event) => setFrom(event.target.value)}
+            className="max-w-[16rem] rounded border border-neutral-300 px-2 py-1"
+          >
             <option value="">from…</option>
             {/* Baselines first: they are what somebody means by "the version we
                 issued", and picking one out of a list of every edit is not a
@@ -214,7 +290,11 @@ export default function ProjectHistory({
               ))}
             </optgroup>
           </select>
-          <select value={to} onChange={(event) => setTo(event.target.value)} className="border border-neutral-300 rounded px-2 py-1 max-w-[16rem]">
+          <select
+            value={to}
+            onChange={(event) => setTo(event.target.value)}
+            className="max-w-[16rem] rounded border border-neutral-300 px-2 py-1"
+          >
             <option value="">to…</option>
             {baselines.length > 0 && (
               <optgroup label="Baselines">
@@ -231,24 +311,19 @@ export default function ProjectHistory({
               ))}
             </optgroup>
           </select>
-          <button
-            type="button"
-            onClick={() => void compare()}
-            disabled={!from || !to || comparing}
-            className="border border-neutral-300 rounded px-3 py-1 hover:bg-neutral-50 disabled:opacity-50"
-          >
+          <Button size="sm" onClick={() => void compare()} disabled={!from || !to || comparing}>
             {comparing ? "Comparing…" : "Show"}
-          </button>
+          </Button>
           {comparison && (
-            <button type="button" onClick={() => setComparison(null)} className="text-neutral-500 hover:text-neutral-900">
+            <Button size="sm" variant="quiet" onClick={() => setComparison(null)}>
               clear
-            </button>
+            </Button>
           )}
         </div>
       )}
 
       {comparison && (
-        <div className="mt-3 border border-neutral-300 rounded-lg bg-white px-4 py-3">
+        <div className="border-b border-neutral-200 px-4 py-3">
           <p className="text-sm font-medium text-neutral-900">
             {comparison.from.label ?? when(comparison.from.createdAt)} → {comparison.to.label ?? when(comparison.to.createdAt)}
           </p>
@@ -266,27 +341,23 @@ export default function ProjectHistory({
             </p>
           )}
           {comparison.counts.unchanged > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowUnchanged((value) => !value)}
-              className="mt-1 text-xs text-neutral-600 hover:text-neutral-900"
-            >
+            <Button size="xs" variant="quiet" className="mt-1" onClick={() => setShowUnchanged((value) => !value)}>
               {showUnchanged ? "Hide" : "Show"} the {comparison.counts.unchanged} unchanged
-            </button>
+            </Button>
           )}
 
-          <ul className="mt-2 border border-neutral-200 rounded divide-y divide-neutral-200">
+          <ul className="mt-2 divide-y divide-neutral-200 rounded border border-neutral-200">
             {visible.map((record) => (
               <li key={record.recordId} className="px-3 py-2">
                 <button
                   type="button"
                   onClick={() => setOpenRecord(openRecord === record.recordId ? null : record.recordId)}
-                  className="w-full text-left flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm"
+                  className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm"
                   disabled={!record.diff}
                 >
                   <span className="font-mono text-neutral-900">{record.label}</span>
                   <span className="text-neutral-700">{record.itemDescription}</span>
-                  <span className={`text-xs px-1.5 py-0.5 rounded border ${CHANGE_CLASS[record.change]}`}>{record.change}</span>
+                  <span className={`rounded border px-1.5 py-0.5 text-xs ${CHANGE_CLASS[record.change]}`}>{record.change}</span>
                   {record.fromVersion !== null && record.toVersion !== null && record.fromVersion !== record.toVersion && (
                     <span className="text-xs text-neutral-400">v{record.fromVersion} → v{record.toVersion}</span>
                   )}
@@ -305,125 +376,132 @@ export default function ProjectHistory({
         </div>
       )}
 
-      <h3 className="mt-5 text-xs font-medium text-neutral-500 uppercase tracking-wide">
-        Everything that has happened
-        {changes.length > 0 && <span className="ml-2 normal-case tracking-normal text-neutral-400">{changes.length}</span>}
-      </h3>
       {/* THE PROGRAMME BELONGS IN THE TRAIL, NOT ONLY IN A FIELD AT THE TOP.
-          ================================================================
           Asked for on 2026-09-18, looking at the history: "I don't see any key
           date." A trail of what has happened, with the date everything is
-          working towards recorded somewhere else entirely, makes the reader
-          hold the deadline in their head while they read.
+          working towards recorded somewhere else entirely, makes the reader hold
+          the deadline in their head while they read.
 
           It sits above the changes because it is the only entry here in the
           FUTURE, and the list is newest first. Violet, so it reads as neither a
           change (grey) nor a baseline (green) — it is not something somebody
-          did. When the date has passed it says so in red, which is the same
-          fact the spec table calls overdue. */}
+          did. When the date has passed it says so in red, which is the same fact
+          the spec table calls overdue. */}
       {specsAgreedBy && (
         <div
-          className={`mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg border px-4 py-2.5 text-sm ${
-            daysUntil(specsAgreedBy) < 0
-              ? "border-red-200 bg-red-50"
-              : "border-violet-200 bg-violet-50"
+          className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 border-y px-4 py-2.5 text-sm ${
+            overdue ? "border-red-200 bg-red-50" : "border-violet-200 bg-violet-50"
           }`}
         >
-          <span
-            className={`rounded-full border bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-              daysUntil(specsAgreedBy) < 0 ? "border-red-300 text-red-700" : "border-violet-300 text-violet-700"
-            }`}
+          <Pill
+            className={
+              overdue
+                ? "border-red-300 bg-white text-red-700"
+                : "border-violet-300 bg-white text-violet-700"
+            }
           >
             Key date
+          </Pill>
+          <span className={overdue ? "font-semibold text-red-900" : "font-semibold text-violet-900"}>
+            {/* Written the way a person writes a day. `formatDay` reads the
+                STRING's own parts — a `new Date` here is where the TOE-dates
+                trap comes back, and it would render the day before in BST. */}
+            {SPECS_AGREED_LABEL} — {formatDay(specsAgreedBy)}
           </span>
-          <span className={daysUntil(specsAgreedBy) < 0 ? "font-semibold text-red-900" : "font-semibold text-violet-900"}>
-            {SPECS_AGREED_LABEL} — {specsAgreedBy}
-          </span>
-          <span className={`text-xs ${daysUntil(specsAgreedBy) < 0 ? "text-red-800" : "text-violet-800"}`}>
+          <span className={`text-xs ${overdue ? "text-red-800" : "text-violet-800"}`}>
             {describeDays(daysUntil(specsAgreedBy))}
+            {typeof toQuote === "number" && toQuote > 0 && <> · {toQuote.toLocaleString()} still TGQ</>}
           </span>
         </div>
       )}
+
       {changes.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-600">
+        <p className="px-4 py-3 text-sm text-neutral-600">
           Nothing recorded yet. Changes start when a document is confirmed or somebody edits an item.
         </p>
       ) : (
-        <ul className="mt-2 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
+        <ul>
           {visibleChanges.map((change) => {
-            /* A BASELINE IS NOT A CHANGE, AND MUST NOT LOOK LIKE ONE.
-               ==========================================================
-               Asked for on 2026-09-18: "I want to make it quite clear when a
-               version has been created… they need to be quite distinctive
-               differences between just a normal change and a version change."
-
-               Everything in this list rendered identically, so a named point —
-               the thing you compare against, and the only row here anybody
-               reads deliberately — was a line of grey text among forty. It is
-               now a green bar straight across the list with its name at full
-               size, so scrolling tells you which changes fall inside Rev A and
-               which came after. That is the only question anybody asks of a
-               trail, and it was unanswerable by looking.
-
-               `label` is baseline-only by constraint (0012: "a baseline is
+            /* `label` is baseline-only by constraint (0012: "a baseline is
                named, and nothing else is"), so `kind === "baseline"` and the
                presence of a name are the same fact, and the row can lean on
                either. */
             const isBaseline = change.kind === "baseline";
+            if (isBaseline) {
+              return (
+                <li
+                  key={change.id}
+                  className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-y border-green-200 bg-green-50 px-4 py-2.5 text-sm"
+                >
+                  <Pill tone="good">Baseline</Pill>
+                  <span className="font-semibold text-green-900">{change.label ?? change.kindLabel}</span>
+                  <span className="text-xs text-green-800">
+                    {when(change.createdAt)} · {change.actor}
+                    {change.recordsChanged > 0 && (
+                      <> · {change.recordsChanged} item{change.recordsChanged === 1 ? "" : "s"} fixed at this point</>
+                    )}
+                  </span>
+                  {changes[0] && changes[0].id !== change.id && (
+                    <Button size="xs" className="ml-auto" onClick={() => compareToNow(change.id)}>
+                      Compare to now
+                    </Button>
+                  )}
+                </li>
+              );
+            }
+            const first = change.records[0];
             return (
-            <li
-              key={change.id}
-              className={
-                isBaseline
-                  ? "px-4 py-2.5 text-sm bg-green-50 border-y border-green-200"
-                  : "px-4 py-2 text-sm"
-              }
-            >
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                {isBaseline && (
-                  <span className="rounded-full border border-green-300 bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-green-700">
-                    Baseline
-                  </span>
-                )}
-                <span className={isBaseline ? "font-semibold text-green-900" : "text-neutral-900"}>
-                  {change.label ?? change.kindLabel}
-                </span>
-                {change.label && !isBaseline && <span className="text-xs text-neutral-500">{change.kindLabel}</span>}
-                <span className={`text-xs ${isBaseline ? "text-green-800" : "text-neutral-500"}`}>
+              <li key={change.id} className="flex items-start gap-3 border-b border-neutral-100 px-4 py-2.5 text-sm">
+                <Chip className="mt-0.5 shrink-0">{change.kindLabel}</Chip>
+                <div className="min-w-0 flex-1">
+                  <p className="text-neutral-800">
+                    {first ? (
+                      <Link
+                        href={`/dashboard/records/${first.id}`}
+                        className="text-blue-700 no-underline hover:underline"
+                      >
+                        {first.label}
+                      </Link>
+                    ) : (
+                      <span className="text-neutral-500">nothing versioned</span>
+                    )}
+                    {change.recordsChanged > 1 && (
+                      <span className="text-neutral-500"> and {change.recordsChanged - 1} more</span>
+                    )}
+                    {change.closedAt === null && (
+                      <Chip tone="info" className="ml-2">
+                        open
+                      </Chip>
+                    )}
+                  </p>
+                  {change.reason && <p className="text-xs text-neutral-500">&ldquo;{change.reason}&rdquo;</p>}
+                  <p className="flex flex-wrap gap-x-4 text-xs">
+                    {change.source && (
+                      <a
+                        href={`/api/imports/${change.source.intakeRunId}/source`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-neutral-500 underline hover:text-neutral-900"
+                      >
+                        {change.source.filename ?? "source document"}
+                      </a>
+                    )}
+                    {change.evidence && (
+                      <a
+                        href={`/api/change-sets/${change.id}/evidence`}
+                        className="text-neutral-500 underline hover:text-neutral-900"
+                      >
+                        {change.evidence.filename ?? "evidence"} (download)
+                      </a>
+                    )}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right text-xs text-neutral-500">
                   {when(change.createdAt)}
-                </span>
-                <span className={`text-xs ${isBaseline ? "text-green-800" : "text-neutral-500"}`}>{change.actor}</span>
-                {change.recordsChanged > 0 && (
-                  <span className={`text-xs ${isBaseline ? "text-green-800" : "text-neutral-400"}`}>
-                    {change.recordsChanged} item{change.recordsChanged === 1 ? "" : "s"}
-                    {isBaseline && " fixed at this point"}
-                  </span>
-                )}
-                {change.closedAt === null && (
-                  <span className="text-xs text-blue-700 border border-blue-200 bg-blue-50 rounded px-1.5">open</span>
-                )}
-              </div>
-              {change.reason && (
-                <p className={`text-xs ${isBaseline ? "text-green-900" : "text-neutral-600"}`}>{change.reason}</p>
-              )}
-              <div className="flex flex-wrap gap-x-4 text-xs">
-                {change.source && (
-                  <a
-                    href={`/api/imports/${change.source.intakeRunId}/source`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-neutral-500 underline hover:text-neutral-900"
-                  >
-                    {change.source.filename ?? "source document"}
-                  </a>
-                )}
-                {change.evidence && (
-                  <a href={`/api/change-sets/${change.id}/evidence`} className="text-neutral-500 underline hover:text-neutral-900">
-                    {change.evidence.filename ?? "evidence"} (download)
-                  </a>
-                )}
-              </div>
-            </li>
+                  <br />
+                  {change.actor}
+                </div>
+              </li>
             );
           })}
         </ul>
@@ -432,8 +510,8 @@ export default function ProjectHistory({
           trail is already here. The count says how many are hidden, so the
           list never reads as the whole of what has happened. */}
       {changes.length > RECENT_CHANGES && (
-        <div className="mt-2">
-          <Button variant="quiet" onClick={() => setShowAllChanges((value) => !value)}>
+        <div className="px-4 py-2">
+          <Button variant="quiet" size="xs" onClick={() => setShowAllChanges(!showAllChanges)}>
             {showAllChanges ? `Show the ${RECENT_CHANGES} most recent` : `Show all ${changes.length} — ${hiddenChanges} more`}
           </Button>
         </div>

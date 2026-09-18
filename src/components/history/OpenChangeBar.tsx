@@ -10,10 +10,27 @@
 // Closing is explicit. A change left open is not a problem: it simply keeps
 // collecting the edits the same person makes on the same project, which is
 // what it is for.
+//
+// ============================================================================
+// IT LIVES IN THE HEADER BAND, ON EVERY TAB.
+//
+// A person starts a change and then goes looking for the item it applies to,
+// so it cannot belong to one tab's content — and it is CONSEQUENTIAL, which is
+// why it is a `Button` rather than the grey underlined 12px text it used to be,
+// fainter on the page than the link beside it to a spreadsheet.
+//
+// The form opens as a panel anchored under the button rather than as a band
+// across the page: the header row is a sentence, and a three-field form laid
+// out along it would push the tabs down on every visit for something somebody
+// does once a day. `relative`/`absolute` rather than a portal, because the
+// header's actions are the only positioned ancestor and there is no scrolling
+// container to escape.
+// ============================================================================
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import EvidenceUpload, { type UploadedEvidence } from "@/components/history/EvidenceUpload";
 import Button from "@/components/ui/Button";
+import Chip from "@/components/ui/Chip";
 
 type OpenChange = {
   id: string;
@@ -84,79 +101,63 @@ export default function OpenChangeBar({ projectId, onChanged }: { projectId: str
 
   if (!loaded) return null;
 
+  // A CHANGE IS OPEN, so the header says what everything is being recorded
+  // against and offers the one control that ends it. It is not an action to
+  // start another: there is at most one open change per person per project.
   if (open) {
     return (
-      <div className="mt-3 border border-blue-300 bg-blue-50 rounded-lg px-4 py-2 text-sm">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="font-medium text-blue-900">Change open</span>
-          <span className="text-blue-900">{open.reason}</span>
-          {open.evidenceFilename && (
-            <a href={`/api/change-sets/${open.id}/evidence`} className="text-xs text-blue-800 underline">
-              {open.evidenceFilename}
-            </a>
-          )}
-          <span className="text-xs text-blue-800">
-            {open.recordsChanged} item{open.recordsChanged === 1 ? "" : "s"} so far
-          </span>
-          <button
-            type="button"
-            onClick={() => void send({ action: "close" })}
-            disabled={busy}
-            className="ml-auto text-xs border border-blue-400 bg-white rounded px-2 py-0.5 hover:bg-blue-100 disabled:opacity-50"
-          >
-            {busy ? "…" : "Finish"}
-          </button>
-        </div>
-        <p className="mt-0.5 text-xs text-blue-800">
-          Everything you change on this project is recorded against this until you finish it.
-        </p>
-        {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
-      </div>
-    );
-  }
-
-  if (!starting) {
-    return (
-      <div className="mt-3 text-sm">
-        {/* An ACTION, and a consequential one: every edit made on this
-            project afterwards attaches to it. It was underlined 14px grey text,
-            fainter than the link beside it to a spreadsheet. */}
-        <Button onClick={() => setStarting(true)}>Start a change</Button>
-        <span className="ml-2 text-xs text-neutral-500">
-          Say why once — an email, a call — and everything you edit is recorded against it.
-        </span>
-        {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
-      </div>
+      <span className="inline-flex flex-wrap items-center gap-2">
+        <Chip tone="info" title="Everything you change on this project is recorded against this until you finish it.">
+          Change open{open.reason ? `: ${open.reason}` : ""}
+          {open.recordsChanged > 0 && ` · ${open.recordsChanged} item${open.recordsChanged === 1 ? "" : "s"}`}
+        </Chip>
+        {open.evidenceFilename && (
+          <a href={`/api/change-sets/${open.id}/evidence`} className="text-xs text-blue-700 underline">
+            {open.evidenceFilename}
+          </a>
+        )}
+        <Button size="sm" disabled={busy} onClick={() => void send({ action: "close" })}>
+          {busy ? "…" : "Finish"}
+        </Button>
+        {error && <span className="text-xs text-red-700">{error}</span>}
+      </span>
     );
   }
 
   return (
-    <div className="mt-3 border border-neutral-300 rounded-lg bg-white px-4 py-3 text-sm">
-      <p className="font-medium text-neutral-900">What is changing, and why?</p>
-      <input
-        value={reason}
-        autoFocus
-        onChange={(event) => setReason(event.target.value)}
-        placeholder="Hayley's email of 14 Sep — fabric changes on the guestroom seating"
-        className="mt-2 w-full border border-neutral-300 rounded px-2 py-1"
-      />
-      <div className="mt-2">
-        <EvidenceUpload projectId={projectId} onUploaded={setEvidence} />
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void start()}
-          disabled={!reason.trim() || busy}
-          className="border border-neutral-300 rounded px-3 py-1 hover:bg-neutral-50 disabled:opacity-50"
-        >
-          {busy ? "Starting…" : "Start"}
-        </button>
-        <button type="button" onClick={() => setStarting(false)} className="text-neutral-500 hover:text-neutral-900">
-          Cancel
-        </button>
-      </div>
-      {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
-    </div>
+    <span className="relative inline-flex">
+      <Button onClick={() => setStarting((value) => !value)}>Start a change</Button>
+      {starting && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-[26rem] rounded-lg border border-neutral-300 bg-white p-3 text-sm shadow-lg">
+          <p className="font-medium text-neutral-900">What is changing, and why?</p>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            Say it once — an email, a call — and everything you edit on this project is recorded against it.
+          </p>
+          <input
+            value={reason}
+            autoFocus
+            onChange={(event) => setReason(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setStarting(false);
+            }}
+            placeholder="Hayley's email of 14 Sep — fabric changes on the guestroom seating"
+            className="mt-2 w-full rounded border border-neutral-300 px-2 py-1"
+          />
+          <div className="mt-2">
+            <EvidenceUpload projectId={projectId} onUploaded={setEvidence} />
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <Button variant="primary" size="sm" disabled={!reason.trim() || busy} onClick={() => void start()}>
+              {busy ? "Starting…" : "Start"}
+            </Button>
+            <Button variant="quiet" size="sm" onClick={() => setStarting(false)}>
+              Cancel
+            </Button>
+          </div>
+          {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
+        </div>
+      )}
+      {error && !starting && <span className="ml-2 text-xs text-red-700">{error}</span>}
+    </span>
   );
 }

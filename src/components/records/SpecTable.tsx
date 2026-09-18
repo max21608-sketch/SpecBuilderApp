@@ -11,22 +11,43 @@
 // because the merged view is not a view anybody wanted.
 //
 // Extracted from the page so the project screen can mount one per run tab. The
-// SPECS CAPTURED column is the intake stage's own measure: how much a client
-// document has actually said about each item. The cheat-sheet counts beside it
-// measure a checklist that a record may not even have been given yet, which is
-// why an uncategorised record reads as "no checklist yet" rather than as a
-// failure — intake no longer waits for that decision.
-import { useCallback, useEffect, useState } from "react";
+// CAPTURED bar is how much of the record's checklist is answered; the number of
+// statements a document has made about it is on the record itself, because two
+// raw fractions side by side told a reader less than one picture does.
+//
+// ============================================================================
+// THE HEADER BAND IS THE PROJECT'S, AND THIS REPORTS INTO IT.
+//
+// The mock-up puts the run's own subtitle and its actions in the page's header
+// band — `MAIN RUN · BOQ rev 0, 14-Sep-26 · 22 items`, and `Chase 148` beside
+// the outputs. Those are numbers this component has already loaded, and a
+// second fetch for one of them would be a second reading of the same rule: the
+// project screen's summary counts the WHOLE project, and `to_quote_outstanding`
+// is per record and per run. So `onSummary` hands the run's own tally up, from
+// the payload already on screen, and the header renders what the table is
+// showing rather than a number computed somewhere else.
+//
+// It is held in a ref and called from `load`, never from an effect with the
+// callback in its dependencies: a caller passing a lambda is ordinary React,
+// and the crop queue already paid for that mistake once (33 rasterisations for
+// 12 panels).
+// ============================================================================
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
-import Button, { buttonClass } from "@/components/ui/Button";
+import Button from "@/components/ui/Button";
 import Tip from "@/components/ui/Tip";
 import StatTile from "@/components/ui/StatTile";
+import Chip from "@/components/ui/Chip";
+import Note from "@/components/ui/Note";
+import SuggestButton from "@/components/ui/SuggestButton";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { unallocatedQty } from "@/lib/record-variants";
 import { GATE_SHORT_LABELS, NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
 import type { GateSummaryEntry } from "@/lib/gate-load";
 import AddItem from "@/components/records/AddItem";
+import { letterColour } from "@/components/records/letter-colours";
 import {
   SPECS_AGREED_LABEL,
   URGENCY_LABELS,
@@ -59,6 +80,8 @@ export type SpecRecord = {
   /** A level this app guessed. Advisory: it tiers nothing until accepted. */
   level_suggested: string | null;
   level_suggested_reason: string | null;
+  /** The optimistic lock, for the inline level accept. */
+  version: number;
   /** Derived per read, never stored: see /api/records. */
   waiting: number;
   /** null where the record has no level — not the same as "nothing is blocking". */
@@ -77,6 +100,13 @@ export type SpecRecord = {
    * nobody could quote.
    */
   gates: Record<Gate, GateSummaryEntry> | null;
+};
+
+/** What the run's header band needs, from the payload this table already has. */
+export type RunTally = {
+  records: number;
+  toQuote: number;
+  toQuoteItems: number;
 };
 
 const DOTS: Record<RecordUrgency, string> = {
@@ -119,56 +149,8 @@ function Captured({
         <span className="block bg-amber-400" style={{ width: pct(tbc) }} />
       </span>
       <span className="shrink-0 tabular-nums text-xs text-neutral-500">
-        {settled}/{total}
+        {settled} of {total}
       </span>
-    </span>
-  );
-}
-
-/**
- * One OUTPUT, with the formats it comes in.
- *
- * A segmented control rather than loose buttons, because the row is where
- * somebody counts how many deliverables this app produces. The name is a
- * static label and each format is the action — a download is an `<a href>`
- * because the browser has to fetch it, and `buttonClass`'s reason for
- * existing is that such a link should still look like the action it is.
- */
-function Output({
-  name,
-  formats,
-  emphasis = false,
-}: {
-  name: string;
-  formats: { label: string; href: string }[];
-  emphasis?: boolean;
-}) {
-  return (
-    <span
-      className={`inline-flex items-stretch overflow-hidden rounded border ${
-        emphasis ? "border-neutral-900" : "border-neutral-300"
-      }`}
-    >
-      <span
-        className={`px-3 py-1.5 text-sm ${
-          emphasis ? "bg-neutral-900 text-white" : "bg-white text-neutral-700"
-        }`}
-      >
-        {name}
-      </span>
-      {formats.map((format) => (
-        <a
-          key={format.label}
-          href={format.href}
-          className={`border-l px-2.5 py-1.5 text-sm ${
-            emphasis
-              ? "border-neutral-700 bg-neutral-900 text-neutral-200 hover:bg-neutral-700 hover:text-white"
-              : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900"
-          }`}
-        >
-          {format.label}
-        </a>
-      ))}
     </span>
   );
 }
@@ -176,12 +158,24 @@ function Output({
 /** What the tiles above the table can narrow it to. Null lists everything. */
 type Focus = null | "tgq" | "waiting" | "no_category" | "no_level" | "quotable";
 
+/** The word beside the removable chip in the filter row, per tile. */
+const FOCUS_LABELS: Record<Exclude<Focus, null>, string> = {
+  tgq: "TGQ",
+  waiting: "Waiting on a reply",
+  no_category: "No category",
+  no_level: "No level",
+  quotable: "Ready to quote",
+};
+
 export default function SpecTable({
   projectId,
   runId,
+  onSummary,
 }: {
   projectId: string;
   runId: string;
+  /** Called after every load with this run's own numbers, for the header band. */
+  onSummary?: (tally: RunTally) => void;
 }) {
   const [records, setRecords] = useState<SpecRecord[] | null>(null);
   const [programme, setProgramme] = useState<ProgrammeDates | null>(null);
@@ -192,6 +186,8 @@ export default function SpecTable({
   // the file.
   const [showRetired, setShowRetired] = useState(false);
   const [acceptingLevels, setAcceptingLevels] = useState(false);
+  /** Which single row's suggestion is being filed, if any. */
+  const [acceptingRow, setAcceptingRow] = useState<string | null>(null);
   /**
    * WHICH TILE IS PRESSED, and therefore what the table lists.
    *
@@ -201,7 +197,16 @@ export default function SpecTable({
    * footer says how many rows are hidden.
    */
   const [focus, setFocus] = useState<Focus>(null);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [designer, setDesigner] = useState("");
   const [categories, setCategories] = useState<{ id: string; family: string; name: string }[]>([]);
+
+  // The callback lives in a ref so a caller passing a lambda — which is every
+  // caller — does not make `load` a new function on every render and re-fetch
+  // the table.
+  const summaryRef = useRef(onSummary);
+  summaryRef.current = onSummary;
 
   const load = useCallback(async () => {
     const query = new URLSearchParams({ projectId, runId });
@@ -221,6 +226,11 @@ export default function SpecTable({
     setProgramme(res.data.programme);
     setRetiredCount(Number(res.data.retiredCount ?? 0));
     setCategories(res.data.categories ?? []);
+    summaryRef.current?.({
+      records: res.data.records.length,
+      toQuote: res.data.records.reduce((sum, record) => sum + (record.to_quote_outstanding ?? 0), 0),
+      toQuoteItems: res.data.records.filter((record) => (record.to_quote_outstanding ?? 0) > 0).length,
+    });
   }, [projectId, runId, showRetired]);
 
   useEffect(() => {
@@ -247,6 +257,38 @@ export default function SpecTable({
     }
   }
 
+  /**
+   * Agree with ONE row's suggestion, at the version the row was rendered at.
+   *
+   * The run-wide button exists because 22 items must not mean 22 visits; this
+   * exists because a control sitting on one row must do what that row says.
+   * Sending the run id from here would file twenty-one decisions nobody looked
+   * at, which is the whole thing `level_suggested` is a separate column to
+   * prevent.
+   */
+  async function acceptLevel(record: SpecRecord) {
+    if (!record.level_suggested) return;
+    setAcceptingRow(record.id);
+    try {
+      const res = await apiFetch(`/api/records/${encodeURIComponent(record.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ level: record.level_suggested, version: record.version }),
+      });
+      await load();
+      if (!res.ok) setError(res.error);
+    } finally {
+      setAcceptingRow(null);
+    }
+  }
+
+  /** The designers this run's own records name. A filter offers only what is here. */
+  const designers = useMemo(() => {
+    return [
+      ...new Set((records ?? []).map((record) => (record.designer ?? "").trim()).filter((code) => code !== "")),
+    ].sort();
+  }, [records]);
+
   if (error) return <p className="text-sm text-red-700">{error}</p>;
   if (!records) return <Spinner label="Loading spec records" />;
 
@@ -254,12 +296,14 @@ export default function SpecTable({
   const today = todayLocal();
   const daysLate = daysUntilSpecsAgreed(programme?.specsAgreedBy ?? null, today);
   const overdueBy = daysLate === null ? null : -daysLate;
-  const withSpecs = records.filter((record) => n(record.attribute_count) > 0).length;
-  const uncategorised = records.filter((record) => !record.category_name).length;
   // Records carrying a level this app guessed and nobody has agreed to. Until
   // somebody does, every one of them is unquotable-by-unknown rather than
   // unquotable-by-answer, which is not the same thing and reads the same.
-  const suggestedLevels = records.filter((record) => !record.level && record.level_suggested).length;
+  const suggested = records.filter((record) => !record.level && record.level_suggested);
+  const suggestedLevels = suggested.length;
+  const suggestedBreakdown = [...new Set(suggested.map((record) => record.level_suggested))]
+    .map((level) => `${suggested.filter((record) => record.level_suggested === level).length} ${level}`)
+    .join(", ");
 
   /**
    * The run's own numbers, for the tiles.
@@ -281,8 +325,21 @@ export default function SpecTable({
     readyToQuote: records.filter((record) => record.to_quote_outstanding === 0).length,
   };
 
-  /** What the table lists. The tiles narrow this and nothing else. */
+  /** What the table lists. The tiles and the filter row narrow this, nothing else. */
+  const term = search.trim().toLowerCase();
   const shown = records.filter((record) => {
+    if (
+      term &&
+      !`${record.record_no} ${record.refs ?? ""} ${record.parent_refs ?? ""} ${record.item_description} ${
+        record.area ?? ""
+      }`
+        .toLowerCase()
+        .includes(term)
+    ) {
+      return false;
+    }
+    if (category && record.category_name !== category) return false;
+    if (designer && (record.designer ?? "").trim() !== designer) return false;
     switch (focus) {
       case "tgq":
         return (record.to_quote_outstanding ?? 0) > 0;
@@ -298,110 +355,39 @@ export default function SpecTable({
         return true;
     }
   });
-
-  // The export URL is a plain link, never apiFetch: the helper always reads the
-  // body as text, and a workbook is bytes.
-  const exportHref = `/api/projects/${projectId}/export?runId=${runId}`;
+  const narrowed = focus !== null || term !== "" || category !== "" || designer !== "";
 
   return (
     <>
-      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-3">
-        <p className="text-sm text-neutral-600">
-          {records.length} record{records.length === 1 ? "" : "s"} · {withSpecs} with specs captured
-          {uncategorised > 0 && <> · {uncategorised} with no checklist yet</>}
-          {/* Said out loud, so "38 records" cannot quietly mean "38 of 41".
-              A record retired by a BOQ revision is out of the export, and a
-              BWS job created from it is NOT deleted by that absence — so
-              somebody has to be able to find it. */}
-          {retiredCount > 0 && (
-            <>
-              {" · "}
-              <Button size="xs" variant="quiet" onClick={() => setShowRetired((value) => !value)}>
-                {showRetired ? `hide the ${retiredCount} retired` : `${retiredCount} retired — show`}
-              </Button>
-            </>
-          )}
-        </p>
-        <div className="flex items-center gap-2">
-          {/* ADDING AN ITEM BY HAND is offered even on an empty run — that is
-              the case it exists for. Until 0028 a record could only be created
-              by confirming a bill, so a project whose documents are drawings
-              and emails could not be started at all. */}
-          <AddItem projectId={projectId} runId={runId} categories={categories} onAdded={load} />
-        </div>
-          {/* ---- THREE OUTPUTS, AND A FORMAT IS NOT ONE OF THEM ------------
-              Asked for directly on 2026-09-18, on sight of five buttons in a
-              row: "surely we only should have three". There ARE three — the
-              spec upload, the quote and the costing block — and the row was
-              showing a FORMAT (.csv) and a VERIFICATION TOOL (Check sheet) as
-              their peers, which made five things that look equally like
-              deliverables and are not.
-
-              So each output is one segmented control: its name, then the
-              formats it comes in. A format sits inside the thing it is a
-              format of, and cannot be mistaken for a fourth output. The check
-              sheet moves below, labelled with what it is for — it produces no
-              deliverable, it is how the spec upload gets accepted against the
-              pack. */}
-        {records.length > 0 && (
-          <div className="flex flex-col items-end gap-1.5">
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Output
-                name="Spec upload"
-                emphasis
-                formats={[
-                  { label: ".xlsx", href: exportHref },
-                  // Tim's grid importer takes the csv, so this is not a
-                  // lesser format — it is the one BWS actually reads.
-                  { label: ".csv", href: `${exportHref}&format=csv` },
-                ]}
-              />
-              <Output
-                name="Quote lines"
-                formats={[{ label: ".csv", href: `/api/projects/${projectId}/export/quote?runId=${runId}` }]}
-              />
-              <Output
-                name="Costing block"
-                formats={[
-                  { label: ".xlsx", href: `/api/projects/${projectId}/export/costing?runId=${runId}` },
-                  { label: ".csv", href: `/api/projects/${projectId}/export/costing?runId=${runId}&format=csv` },
-                ]}
-              />
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-neutral-500">
-              <span>Checking the spec upload against the pack:</span>
-              <a
-                href={`/api/projects/${projectId}/export/check-sheet?runId=${runId}`}
-                className={buttonClass("quiet", "xs")}
-              >
-                Check sheet
-              </a>
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* ONE CLICK FOR THE RUN, because 59 records must not mean 59 visits —
           the same reason the drafts screen carries an inline level picker. It
           is still a person agreeing: the level of every record is on this
           screen with what it was guessed from, and this accepts only what is
           already suggested. */}
       {suggestedLevels > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-          <span>
-            {suggestedLevels} record{suggestedLevels === 1 ? "" : "s"} carr{suggestedLevels === 1 ? "ies" : "y"} a
-            level this app guessed from the bill and the drawings. Nothing is sorted into what blocks a quote until
-            you agree with it — each one shows its reading in the TGQ column.
-          </span>
-          <Button
-            size="xs"
-            variant="secondary"
-            disabled={acceptingLevels}
-            onClick={() => void acceptLevels()}
-          >
-            {acceptingLevels ? "Accepting…" : `Accept all ${suggestedLevels}`}
-          </Button>
-        </div>
+        <Note
+          tone="info"
+          title={`${suggestedLevels} item${suggestedLevels === 1 ? "" : "s"} ${
+            suggestedLevels === 1 ? "has" : "have"
+          } a suggested level`}
+          actions={
+            <>
+              <SuggestButton
+                size="sm"
+                value={`Accept all ${suggestedLevels}`}
+                evidence={suggestedBreakdown}
+                busy={acceptingLevels}
+                onAccept={() => void acceptLevels()}
+              />
+              <Button size="xs" variant="quiet" onClick={() => setFocus("no_level")}>
+                Review one by one
+              </Button>
+            </>
+          }
+        >
+          — read off the bill&rsquo;s own wording and the drawings. Nothing on them is tiered until you agree, and
+          each row carries its own reading beside the button.
+        </Note>
       )}
 
       {/* THE RUN'S NUMBERS, AND EACH ONE NARROWS THE TABLE.
@@ -409,14 +395,15 @@ export default function SpecTable({
           Asked for on 2026-09-18: "those boxes at the top, if we click on
           those then that could filter them". Pressing a tile lists only the
           records it counts; pressing it again lists everything. The tile that
-          is on is outlined, and the footer under the table says in words how
-          many rows are hidden — a filter you cannot see is a filter you forget
-          you set, and this table is the one people judge a run by.
+          is on is outlined, the filter is repeated as a removable chip in the
+          row below, and the footer says in words how many rows are hidden — a
+          filter you cannot see is a filter you forget you set, and this table
+          is the one people judge a run by.
 
           The counts NEVER change with the filter. They are the run's own, so
           narrowing the screen can never make a run look finished. */}
       {records.length > 0 && (
-        <div className="mt-3 grid grid-cols-2 gap-2.5 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-5">
           <StatTile
             label="TGQ"
             tone="danger"
@@ -470,58 +457,139 @@ export default function SpecTable({
       )}
 
       {records.length === 0 ? (
-        <p className="mt-4 text-sm text-neutral-600">
-          No records here yet. Import a bill of quantities, or add an item by hand.
-        </p>
+        <div className="mt-4">
+          <p className="text-sm text-neutral-600">
+            No records here yet. Import a bill of quantities, or add an item by hand.
+          </p>
+          <div className="mt-3">
+            {/* ADDING AN ITEM BY HAND is offered even on an empty run — that is
+                the case it exists for. Until 0028 a record could only be
+                created by confirming a bill, so a project whose documents are
+                drawings and emails could not be started at all. */}
+            <AddItem projectId={projectId} runId={runId} categories={categories} onAdded={load} />
+          </div>
+        </div>
       ) : (
         <>
           {overdueBy !== null && overdueBy > 0 && (
-            <p className="mt-2 text-sm text-red-800 bg-red-50 border border-red-200 rounded px-3 py-2">
-              {SPECS_AGREED_LABEL} {programme?.specsAgreedBy} — {overdueBy} day{overdueBy === 1 ? "" : "s"} ago.
-              Everything still outstanding below is overdue.
-            </p>
+            <Note tone="danger" title={`${SPECS_AGREED_LABEL} ${programme?.specsAgreedBy}`}>
+              — {overdueBy} day{overdueBy === 1 ? "" : "s"} ago. Everything still outstanding below is overdue.
+            </Note>
           )}
 
-          {/* An absent date is NOT "on time". Saying nothing here would let a
-              project with no programme read as a healthy one. */}
+          {/* An absent date is NOT "on time". IN WORDS, never a tip: a project
+              with no programme and a project on time render identically
+              otherwise, which is the one test a tip has to pass. */}
           {programme && !programme.specsAgreedBy && (
-            <p className="mt-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            <Note tone="warn">
               {hasProgramme(programme)
                 ? `No date for ${SPECS_AGREED_LABEL.toLowerCase()}, so nothing here can be flagged overdue.`
                 : "No programme recorded for this project, so nothing here can be flagged overdue — which is not the same as being on time."}
+            </Note>
+          )}
+
+          {/* THE FILTER ROW. Search, the two closed lists this run's own rows
+              offer, and the tile that is pressed repeated as a chip you can
+              take off — the tile is at the top of the screen and the rows are
+              at the bottom, so by the time somebody wonders why an item is
+              missing the tile is off the screen. */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search a code, an item, an area"
+              className="w-64 rounded border border-neutral-300 px-3 py-1.5 text-sm"
+            />
+            <select
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+              className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">All categories</option>
+              {[...new Set(records.map((record) => record.category_name).filter(Boolean))].sort().map((name) => (
+                <option key={name} value={name!}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={designer}
+              onChange={(event) => setDesigner(event.target.value)}
+              className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+              disabled={designers.length === 0}
+            >
+              <option value="">All designers</option>
+              {designers.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+            {focus !== null && (
+              <button type="button" onClick={() => setFocus(null)} className="inline-flex">
+                <Chip tone={focus === "quotable" ? "good" : focus === "tgq" ? "danger" : "warn"}>
+                  {FOCUS_LABELS[focus]} <span aria-hidden>✕</span>
+                  <span className="sr-only">remove this filter</span>
+                </Chip>
+              </button>
+            )}
+            <span className="flex-1" />
+            {/* ONLY WHEN THE LIST WAS ACTUALLY NARROWED. Printing "22 of 22"
+                on every visit teaches people to ignore the one time it
+                matters. */}
+            {narrowed && (
+              <span className="text-sm text-neutral-500">
+                {shown.length} of {records.length} shown
+              </span>
+            )}
+            <AddItem projectId={projectId} runId={runId} categories={categories} onAdded={load} />
+          </div>
+
+          {/* Said out loud, so "38 records" cannot quietly mean "38 of 41". A
+              record retired by a BOQ revision is out of the export, and a BWS
+              job created from it is NOT deleted by that absence — so somebody
+              has to be able to find it. */}
+          {retiredCount > 0 && (
+            <p className="mt-2 text-xs text-neutral-500">
+              {retiredCount} retired record{retiredCount === 1 ? "" : "s"} on this run — out of the export.{" "}
+              <Button size="xs" variant="quiet" onClick={() => setShowRetired((value) => !value)}>
+                {showRetired ? "hide them" : "show them"}
+              </Button>
             </p>
           )}
 
-          <div className="mt-3 overflow-x-auto border border-neutral-200 rounded-lg bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-neutral-50 text-neutral-600">
+          <div className="mt-3 rounded-[10px] border border-neutral-200 bg-white">
+            <Table scroll>
+              <thead>
                 <tr>
-                  <th className="text-left font-medium px-3 py-2">No.</th>
-                  <th className="text-left font-medium px-3 py-2">Client ref</th>
-                  <th className="text-left font-medium px-3 py-2">Item</th>
-                  <th className="text-left font-medium px-3 py-2">Area</th>
-                  <th className="text-left font-medium px-3 py-2">Qty</th>
-                  <th className="text-left font-medium px-3 py-2">Specs captured</th>
-                  <th className="text-left font-medium px-3 py-2">Category</th>
-                  <th className="text-left font-medium px-3 py-2 whitespace-nowrap">
-                    TGQ
-                    <Tip>
-                      Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for this
-                      category, the older per-level model where he has not.
-                    </Tip>
-                  </th>
-                  <th className="text-left font-medium px-3 py-2">TG0</th>
-                  <th className="text-left font-medium px-3 py-2">TG1</th>
-                  <th className="text-left font-medium px-3 py-2 whitespace-nowrap">
+                  <Th>No.</Th>
+                  <Th>Client ref</Th>
+                  <Th>Item</Th>
+                  <Th>Area</Th>
+                  <Th num>Qty</Th>
+                  <Th>Category</Th>
+                  <Th>Level</Th>
+                  <Th className="w-[130px]">
                     Captured
                     <Tip>
                       How much of the checklist is answered — green settled, amber TBC. The split between spec
                       fields and readiness questions is on the record itself.
                     </Tip>
-                  </th>
+                  </Th>
+                  <Th num>
+                    TGQ
+                    <Tip>
+                      Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for this
+                      category, the older per-level model where he has not.
+                    </Tip>
+                  </Th>
+                  <Th num>Waiting</Th>
+                  <Th>TG0</Th>
+                  <Th>TG1</Th>
+                  <Th />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-200">
+              <tbody>
                 {shown.map((record) => {
                   const outstanding =
                     n(record.spec_tbc) + n(record.spec_missing) + n(record.ready_tbc) + n(record.ready_missing);
@@ -536,127 +604,179 @@ export default function SpecTable({
                     today,
                   });
                   const dot = urgency === "action_required" && !anyMissing ? "bg-amber-500" : DOTS[urgency];
-                  const attributes = n(record.attribute_count);
+                  const isConfiguration = Boolean(record.variant_label);
+                  const isHeading = n(record.variant_count) > 0;
+                  const retired = record.status === "retired";
                   return (
-                    <tr
+                    <Tr
                       key={record.id}
-                      className={record.status === "retired" ? "bg-neutral-50 text-neutral-400" : "hover:bg-neutral-50"}
+                      /* A CONFIGURATION IS TINTED AND INDENTED under its bill
+                         line. It is sorted there by the query — on the
+                         PARENT'S record_no, because its own is just the next
+                         free number in the project. */
+                      className={
+                        retired
+                          ? "bg-neutral-50 text-neutral-400"
+                          : isConfiguration
+                            ? "bg-[#fcfcfc]"
+                            : ""
+                      }
                       title={
-                        record.status === "retired"
+                        retired
                           ? `Retired${record.retired_by ? ` by ${record.retired_by}` : ""}${record.retired_at ? ` on ${new Date(record.retired_at).toLocaleDateString()}` : ""}. Not in the export.`
                           : undefined
                       }
                     >
-                      <td className="px-3 py-2 text-neutral-500 tabular-nums">
+                      <Td className={`text-neutral-500 tabular-nums ${isConfiguration ? "pl-6" : ""}`}>
                         <span
                           title={URGENCY_LABELS[urgency]}
-                          className={`inline-block w-2 h-2 rounded-full mr-2 align-middle ${dot}`}
+                          className={`mr-2 inline-block h-2 w-2 rounded-full align-middle ${dot}`}
                         />
-                        {record.record_no}
-                      </td>
-                      {/* ==================================================
-                          A CONFIGURATION IS SHOWN UNDER ITS BILL LINE.
-                          It is sorted there by the query, indented here, and
-                          named the way a person says it: S-201 A. Its own
-                          `record_no` is just the next free number in the
-                          project, so on its own it reads as an unrelated line.
-                          ================================================== */}
-                      <td className={`px-3 py-2 font-medium ${record.status === "retired" ? "text-neutral-400 line-through" : "text-neutral-900"}`}>
-                        {record.variant_label ? (
-                          <span className="pl-4 text-neutral-900">
-                            <span className="text-neutral-400">└ </span>
-                            {record.parent_refs ?? record.refs ?? "—"} {record.variant_label}
+                        <Link
+                          href={`/dashboard/records/${record.id}`}
+                          className="font-mono text-neutral-600 no-underline hover:underline"
+                        >
+                          {record.record_no}
+                        </Link>
+                      </Td>
+                      <Td
+                        mono
+                        className={`font-medium ${retired ? "text-neutral-400 line-through" : "text-neutral-900"}`}
+                      >
+                        {isConfiguration ? (
+                          <span className="text-neutral-500">
+                            {record.parent_refs ?? record.refs ?? "—"}{" "}
+                            {/* THE LETTER, coloured the way the review card
+                                colours it — A is sky on every screen. */}
+                            <b className={letterColour(record.variant_label!)}>{record.variant_label}</b>
                           </span>
                         ) : (
                           (record.refs ?? "—")
                         )}
-                        {/* A HEADING, not an item. Its configurations are what
-                            the export ships — and a row that stayed silent
-                            would read as an item nobody had specced. */}
-                        {n(record.variant_count) > 0 && (
-                          <span className="block text-xs font-normal text-neutral-500">
-                            {n(record.variant_count)} configurations — they are what the export carries, not this line
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
+                      </Td>
+                      <Td className={isConfiguration ? "pl-6" : ""}>
                         <Link
                           href={`/dashboard/records/${record.id}`}
-                          className="text-neutral-900 underline hover:text-neutral-600"
+                          className="text-blue-700 no-underline hover:underline"
                         >
                           {record.item_description}
                         </Link>
                         {record.product_reference && (
                           <span className="text-neutral-500"> · {record.product_reference}</span>
                         )}
-                      </td>
-                      <td className="px-3 py-2 text-neutral-700">{record.area ?? "—"}</td>
-                      <td className="px-3 py-2 text-neutral-700 tabular-nums">
-                        {record.qty ?? "—"}
+                        {/* A HEADING, not an item. Its configurations are what
+                            the export ships — and a row that stayed silent
+                            would read as an item nobody had specced. */}
+                        {isHeading && (
+                          <p className="text-xs text-neutral-500">
+                            {n(record.variant_count)} configuration{n(record.variant_count) === 1 ? "" : "s"} — they
+                            are what the export carries, not this line
+                          </p>
+                        )}
+                      </Td>
+                      <Td className="text-neutral-700">{record.area ?? "—"}</Td>
+                      <Td num className="text-neutral-700">
                         {/* THE BILL'S QUANTITY IS NOT APPORTIONED BY ANYTHING.
                             The bill says 45 of S-201 and never says how many
                             are fabric A. Splitting it has a price attached, so
                             the table says how much is unaccounted for rather
                             than dividing it. */}
-                        {n(record.variant_count) > 0 &&
+                        {isConfiguration && record.qty === null ? (
+                          <Chip tone="warn">qty not set</Chip>
+                        ) : (
+                          (record.qty ?? "—")
+                        )}
+                        {isHeading &&
                           record.qty !== null &&
                           unallocatedQty(record.qty, [n(record.variant_qty)]) !== 0 && (
-                            <span className="block text-xs text-amber-800" title="Set a quantity on each configuration.">
+                            <span
+                              className="block text-xs text-amber-800"
+                              title="Set a quantity on each configuration."
+                            >
                               {unallocatedQty(record.qty, [n(record.variant_qty)])} not allocated
                             </span>
                           )}
-                      </td>
-                      <td className="px-3 py-2 tabular-nums">
-                        {attributes > 0 ? (
-                          <span className="text-neutral-900">{attributes}</span>
+                      </Td>
+                      <Td>
+                        {record.category_name ? (
+                          <>
+                            <Link
+                              href={`/dashboard/records/${record.id}`}
+                              className="text-neutral-800 no-underline hover:underline"
+                            >
+                              {record.category_name}
+                            </Link>
+                            {!record.requirements_authored && (
+                              <span className="ml-1 text-xs text-amber-800">(not yet defined)</span>
+                            )}
+                          </>
                         ) : (
-                          <span className="text-neutral-400">none yet</span>
+                          <Chip tone="warn">not set</Chip>
                         )}
-                      </td>
-                      <td className="px-3 py-2 text-neutral-700">
-                        {record.category_name ?? <span className="text-neutral-400">no checklist yet</span>}
-                        {record.category_name && !record.requirements_authored && (
-                          <span className="ml-1 text-xs text-amber-800">(not yet defined)</span>
+                      </Td>
+                      {/* THE LEVEL. A decision, a suggestion with its evidence,
+                          or nothing — and the three must not look alike. A
+                          pre-filled select could not be the accept control: it
+                          fires no change event when somebody picks the value it
+                          is already showing. */}
+                      <Td>
+                        {record.level ? (
+                          <Chip>{record.level}</Chip>
+                        ) : record.level_suggested ? (
+                          <SuggestButton
+                            value={record.level_suggested}
+                            evidence={record.level_suggested_reason ?? "guessed from the bill"}
+                            busy={acceptingRow === record.id || acceptingLevels}
+                            onAccept={() => void acceptLevel(record)}
+                            className="flex-col items-start gap-0.5"
+                          />
+                        ) : (
+                          <Chip tone="warn">not set</Chip>
                         )}
-                      </td>
-                      <td className="px-3 py-2 tabular-nums">
+                      </Td>
+                      <Td>
+                        {isHeading ? (
+                          <span className="text-xs text-neutral-500">counted through its configurations</span>
+                        ) : (
+                          <Captured
+                            settled={n(record.spec_settled) + n(record.ready_settled)}
+                            tbc={n(record.spec_tbc) + n(record.ready_tbc)}
+                            total={n(record.spec_total) + n(record.ready_total)}
+                          />
+                        )}
+                      </Td>
+                      <Td num>
                         {/* A SPLIT LINE IS A HEADING. It is neither "0, can
                             quote" nor "nobody has set a level" — its questions
                             live on its configurations, which are the rows
                             indented under it. Said before the level case,
                             because a split line may also have no level and the
                             heading is the more useful answer. */}
-                        {n(record.variant_count) > 0 ? (
-                          <span className="text-neutral-400" title="Counted on its configurations, which are what the export ships.">
-                            through its {n(record.variant_count)}
-                          </span>
+                        {isHeading ? (
+                          <span className="text-neutral-400">—</span>
                         ) : record.to_quote_outstanding === null ? (
-                          <Link
-                            href={`/dashboard/records/${record.id}`}
-                            className="text-amber-800 underline hover:text-amber-900"
-                            title={
-                              record.level_suggested
-                                ? `Suggested ${record.level_suggested} — ${record.level_suggested_reason ?? "guessed"}. Nothing is sorted into what blocks a quote until somebody accepts it.`
-                                : "No level set, so nothing on this record can be sorted into what blocks a quote."
-                            }
-                          >
-                            {/* A SUGGESTION IS NOT A LEVEL, and the wording has
-                                to keep saying so: the number in this column is
-                                what blocks a quote, and it stays unavailable
-                                until a person agrees. */}
-                            {record.level_suggested ? `${record.level_suggested}?` : "Set level"}
-                          </Link>
+                          /* A DASH IS NEVER A ZERO. 0 here would read as
+                             ready, and the record is not unready — it is
+                             untiered, which is a different thing and the tip
+                             says which. */
+                          <span className="text-neutral-400">
+                            —
+                            <Tip>
+                              A level is what decides which questions block a quote. Until one is set, nothing on
+                              this record is tiered.
+                            </Tip>
+                          </span>
                         ) : record.to_quote_outstanding > 0 ? (
                           <span>
                             <Link
                               href={`/dashboard/records/${record.id}`}
-                              className="font-medium text-red-700 no-underline hover:underline"
+                              className="font-semibold text-red-700 no-underline hover:underline"
                               title="Open the record to see which questions"
                             >
                               {record.to_quote_outstanding}
                             </Link>
                             {record.to_quote_waiting > 0 && (
-                              <span className="ml-1 text-xs text-blue-700 font-normal">
+                              <span className="ml-1 text-xs font-normal text-blue-700">
                                 ({record.to_quote_waiting} asked)
                               </span>
                             )}
@@ -666,7 +786,10 @@ export default function SpecTable({
                         ) : (
                           <span className="text-neutral-400">—</span>
                         )}
-                      </td>
+                      </Td>
+                      <Td num muted>
+                        {isHeading ? "—" : (record.waiting ?? 0)}
+                      </Td>
                       {/* THE GATES. Same numbers the record screen shows,
                           from the same `gateStatus` — a table that disagreed
                           with the screen it links to would be worse than no
@@ -680,15 +803,13 @@ export default function SpecTable({
                            quote — and it did, until 2026-09-18. */
                         const waitingFor = entry?.blockedBy[0] ?? null;
                         return (
-                          <td key={gate} className="px-3 py-2 tabular-nums">
+                          <Td key={gate}>
                             {entry === null ? (
                               <span className="text-neutral-400" title={NO_MATRIX_CATEGORY_EXPLANATION}>
                                 —
                               </span>
                             ) : entry.satisfied ? (
-                              <span className="text-green-700" title={`${gate} is satisfied`}>
-                                ✓
-                              </span>
+                              <Chip tone="good">met</Chip>
                             ) : (
                               /* THE COUNT IS A LINK TO WHAT IT COUNTS. Asked
                                  for on 2026-09-18 — "when it goes red three, I
@@ -704,80 +825,73 @@ export default function SpecTable({
                                  used to. */
                               <Link
                                 href={`/dashboard/records/${record.id}?tab=gates`}
-                                className={`font-medium no-underline hover:underline ${
-                                  waitingFor ? "text-slate-500" : "text-red-700"
-                                }`}
+                                className="no-underline"
                                 title={
                                   waitingFor
                                     ? `${gate} has not been reached — ${GATE_SHORT_LABELS[waitingFor]} comes first. ${entry.outstanding} of ${gate}'s own fields outstanding.`
                                     : `${entry.outstanding} outstanding at ${gate} — open the record to see which`
                                 }
                               >
-                                {entry.outstanding}
-                                {waitingFor && (
-                                  <span className="ml-1 text-xs font-normal">
-                                    after {GATE_SHORT_LABELS[waitingFor]}
-                                  </span>
-                                )}
+                                <Chip tone={waitingFor ? "blocked" : "danger"}>
+                                  {waitingFor ? `after ${GATE_SHORT_LABELS[waitingFor]}` : entry.outstanding}
+                                </Chip>
                               </Link>
                             )}
-                          </td>
+                          </Td>
                         );
                       })}
-                      <td className="px-3 py-2">
-                        <Captured
-                          settled={n(record.spec_settled) + n(record.ready_settled)}
-                          tbc={n(record.spec_tbc) + n(record.ready_tbc)}
-                          total={n(record.spec_total) + n(record.ready_total)}
-                        />
-                      </td>
-                    </tr>
+                      <Td>
+                        <div className="flex justify-end">
+                          {record.category_name ? (
+                            <Link
+                              href={`/dashboard/records/${record.id}`}
+                              className="rounded border border-transparent px-2 py-1 text-xs text-neutral-600 no-underline hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900"
+                            >
+                              Open
+                            </Link>
+                          ) : (
+                            /* AN UNCATEGORISED RECORD HAS NO QUESTIONS AT ALL,
+                               so the useful action is not "look at it" — it is
+                               the decision that creates its checklist. */
+                            <Link
+                              href={`/dashboard/records/${record.id}`}
+                              className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-700 no-underline hover:bg-neutral-50"
+                            >
+                              Set category
+                            </Link>
+                          )}
+                        </div>
+                      </Td>
+                    </Tr>
                   );
                 })}
               </tbody>
-            </table>
+            </Table>
           </div>
 
           {/* A FILTER YOU CANNOT SEE IS A FILTER YOU FORGET YOU SET. Said in
-              words, with the way out beside it, and only when the list was
-              actually narrowed — printing "0 hidden" on every visit teaches
-              people to ignore the one time it matters. */}
-          {focus !== null && (
+              words at the bottom too, with the way out beside it, and only when
+              the list was actually narrowed. */}
+          {narrowed && (
             <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-neutral-700">
               <span>
                 Showing {shown.length} of {records.length} item{records.length === 1 ? "" : "s"}.{" "}
-                <span className="text-neutral-500">
-                  {records.length - shown.length} hidden by the tile you have selected.
-                </span>
+                <span className="text-neutral-500">{records.length - shown.length} hidden by the filters.</span>
               </span>
-              <Button size="xs" variant="quiet" onClick={() => setFocus(null)}>
+              <Button
+                size="xs"
+                variant="quiet"
+                onClick={() => {
+                  setFocus(null);
+                  setSearch("");
+                  setCategory("");
+                  setDesigner("");
+                }}
+              >
                 Show all {records.length}
               </Button>
             </p>
           )}
-          {/* THE STANDING EXPLANATION GOES LAST. It is a permanent caveat about
-              a file, not news about this run, and at the top it pushed the
-              records themselves below the fold on every visit. */}
-          <p className="mt-2 text-xs text-neutral-500">
-            <strong>Quote lines</strong> is a different file: eight of the twelve columns Matthew&rsquo;s quote sheet
-        carries. The prices, the UUID and the image URL are blank because this app holds none of them, and the
-        interliner, stone, mattress and delivery lines are not generated — the interliner quantity is the fabric
-        metreage, which this app deliberately does not hold. A person adds those and prices the file.
-      </p>
-      <p className="mt-2 text-xs text-neutral-500">
-        <strong>Costing block</strong> is columns A–J of the estimating sheet — the item block, to paste into the
-        template. Everything from K rightwards is the estimator&rsquo;s: three pricing blocks and the stone block,
-        whose formulas and rates this app does not hold and will not reproduce. Tags carries the composed
-        dimensions, from the same composer as the BWS file, and the two Specs columns open this app&rsquo;s own copy
-        of the document at the page a value came from.
-      </p>
-      <p className="mt-2 text-xs text-neutral-500">
-        <strong>Spec upload</strong> is always every record in scope — a BWS import replaces the fields it is
-            given, so a partial file would erase what it left out. It carries no job number: it is a file to read,
-            not to import. The <strong>check sheet</strong> is not a fourth output: it is the same data one line per
-            field, naming the document and page each value came from, with the verdict column left empty for whoever
-            reads it against the pack.
-          </p>
         </>
       )}
     </>

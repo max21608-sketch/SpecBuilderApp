@@ -72,6 +72,12 @@ export async function GET(request: Request): Promise<Response> {
       -- tiers a question. See db/migrations/0025_level_suggestion.sql.
       r.level_suggested,
       r.level_suggested_reason,
+      -- The optimistic lock, so the spec table's inline level control can
+      -- accept ONE row's suggestion through PATCH /api/records/[id] rather
+      -- than accepting the whole run's. Accepting a suggestion is a person's
+      -- decision about one item; a control that quietly filed the other
+      -- twenty-one would be the opposite of the rule it exists to serve.
+      r.version,
       r.retired_at,
       r.retired_by,
       r.run_id,
