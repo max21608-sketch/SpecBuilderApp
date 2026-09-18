@@ -149,8 +149,9 @@ Each is a stage of the plan, and each depends on an answer that has not come:
 - **The qualifier / return line.** Nothing is captured and the export is
   unchanged and still one line per cell.
 - **The Product code / boilerplate derivation**, and what selects Hero.
-- **The costing sheet.** Max does not have the `skill.md`; ask Matthew for it.
-  The app holds no prices and will not generate one.
+- **The costing sheet.** BUILT 2026-09-18, and the blocker recorded here was
+  the wrong one — see below. What is still open is what `Specs 2` points at and
+  whether `Tags` should go on receiving pasted prose.
 
 ---
 
@@ -210,8 +211,15 @@ All of it on `staging`, none of it accepted by anybody.
 - **Stage 6, the BW standard finishes register.** Blocked on Matthew's lists
   (question 7). Five palettes are seeded with zero options and the screen says
   so in words; nothing is invented.
-- **The costing sheet.** Blocked on his `skill.md` (question 8). The app holds
-  no price of any kind and will not generate one.
+- **The costing sheet.** ~~Blocked on his `skill.md` (question 8). The app
+  holds no price of any kind and will not generate one.~~ **CORRECTED
+  2026-09-18.** The skill.md and its user guide arrived; the skill generates no
+  price either — it adds page links, crops photos, converts imperial to metric
+  and deletes blank rows. Pricing was never the blocker. The export is built
+  (`src/lib/costing-sheet.ts`): columns A-J of
+  `Estimating Sheet Template - with stone.xlsx`, the item block, with the
+  composed dimensions in `Tags`. K rightwards is still the estimator's and this
+  app still holds no rate of any kind — that part of the old note stands.
 - **Loading the finishes library BY SCANNING the schedule.** `finishes_schedule`
   is already a document kind with its own prompt, but the model's output shape
   (`RawProposal`) has no field for a finish code — so pulling codes out of it

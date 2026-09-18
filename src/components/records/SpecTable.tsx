@@ -309,6 +309,16 @@ export default function SpecTable({
             >
               Quote lines
             </a>
+            {/* THE COSTING SHEET'S ITEM BLOCK — columns A to J, to paste into
+                the estimating template. Everything right of J is the
+                estimator's own, and the file says so on its own second sheet
+                rather than only here. */}
+            <a
+              href={`/api/projects/${projectId}/export/costing?runId=${runId}`}
+              className={buttonClass("secondary")}
+            >
+              Costing block
+            </a>
           </div>
         )}
       </div>
@@ -655,6 +665,13 @@ export default function SpecTable({
         carries. The prices, the UUID and the image URL are blank because this app holds none of them, and the
         interliner, stone, mattress and delivery lines are not generated — the interliner quantity is the fabric
         metreage, which this app deliberately does not hold. A person adds those and prices the file.
+      </p>
+      <p className="mt-2 text-xs text-neutral-500">
+        <strong>Costing block</strong> is columns A–J of the estimating sheet — the item block, to paste into the
+        template. Everything from K rightwards is the estimator&rsquo;s: three pricing blocks and the stone block,
+        whose formulas and rates this app does not hold and will not reproduce. Tags carries the composed
+        dimensions, from the same composer as the BWS file, and the two Specs columns open this app&rsquo;s own copy
+        of the document at the page a value came from.
       </p>
       <p className="mt-2 text-xs text-neutral-500">
         The export is always every record in scope — a BWS import replaces the fields it is given, so a partial file

@@ -21,6 +21,48 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-18 — the costing sheet, and a blocker that was never real
+
+Matthew sent the `skill.md` and its user guide (after an email saying he had
+"moved them to the Project spec builder project — in the outputs area", which
+matched nothing in SharePoint, OneDrive or this repo — Max supplied them
+directly). Max also supplied a REAL COMPLETED costing sheet: Maybourne Paris
+seating, 69 items.
+
+**The recorded blocker was wrong.** `matrix-assumptions.md` said the costing
+sheet was blocked on the skill.md because "the app holds no price of any kind".
+The skill generates no price either — it adds page links, crops photos,
+converts imperial to metric and deletes blank rows. Both entries are corrected
+there.
+
+**What the completed sheet showed, which the blank template could not.**
+83 columns: A-J identify the item, K rightwards is three identical estimator
+blocks and a stone block. Only 26 of 69 rows were priced and only the first of
+the three blocks was used. Two link columns, not one — `Specs` (65/69) and
+`Specs 2` (36/69) — so the skill's single `SP_URL` could not populate it.
+
+And `Tags` was holding measurements pasted by hand: `Height: 91 cm\n- Width :
+110 cm\n- Seat depth: 102cm`, `H800mm x D635mm x W700mm SH480mm.`, `H 93 - L 47
+- P 56 cm - seat H-53cm which reduces by 3/4cm when seated`, `58 x 36 x 43cm`.
+Mixed units with nothing saying which a row is, French `L`/`P`, a qualifier
+welded to a figure, a bare triple whose order is an assumption. Every trap the
+dimension model exists for, in one column, because the sheet had nowhere
+structured to put a size.
+
+**Built:** `/api/projects/[id]/export/costing`, columns A-J, xlsx with
+hyperlinks and embedded pictures or csv, sharing `loadExportScope`. `Tags`
+carries the composed dimension cell from the single composer. The reasoning is
+in `CLAUDE.md`.
+
+**Verified** against the sandbox, not fixtures (AP364c MAIN RUN: 19 rows, 11
+with dimensions off the real shop drawings, 11 links, 11 pictures, a
+configuration with a blank quantity) and by 22 pure-tier tests. `Specs 2` has
+unit coverage only — no record in the sandbox is yet specified across two
+pages. Nobody has pasted one into the real template.
+
+**Still open for Matthew:** what `Specs 2` points at, and whether `Tags` should
+go on receiving pasted prose now that the app composes a real cell there.
+
 ## Observations 2026-09-17 — the first run-through
 
 Max drove the app end to end and reported six things. All six are built; none

@@ -692,6 +692,86 @@ quote cannot cover a different set of records from the file.
   families do. His rule says nothing about a hero sofa because there is no hero
   sofa code. Also a question for him.
 
+### The costing sheet is TEN columns of eighty-three
+
+`src/lib/costing-sheet.ts`, `src/app/api/projects/[id]/export/costing/route.ts`
+
+The third of Matthew's three outputs, built 2026-09-18 against his skill.md,
+its user guide and a REAL COMPLETED SHEET (Maybourne Paris seating, 69 items).
+
+**The blocker this repo had recorded was the wrong one.** `matrix-assumptions.md`
+said the costing sheet was blocked on the skill.md because "the app holds no
+price of any kind and will not generate one". The skill generates no price
+either: it adds page links, crops photos, converts imperial to metric and
+deletes blank rows. Pricing was never what stood in the way.
+
+`Estimating Sheet Template - with stone.xlsx` is 83 columns. A-J identify the
+item; K rightwards is three identical estimator blocks whose median is taken,
+then a stone block. **This export stops at J**, and that is the design rather
+than a gap:
+
+- **Emitting all 83 would produce a sheet that looks like the estimating sheet
+  and prices nothing.** The template's value is its FORMULAS — exchange rate,
+  multiples, GP targets, the median across three estimators — and this app
+  holds none of the rates behind them. 73 empty columns where an estimator
+  expects formulas is the plausible-looking wrong answer wearing a familiar
+  layout. The BWS export's complete-or-nothing rule does NOT apply here: a BWS
+  import replaces what it is given, and nothing imports the costing sheet — a
+  person pastes into it.
+- **A-J is contiguous, which is what makes the narrow file the useful one.** It
+  pastes in as a block and columns K onwards keep their formulas. B is the
+  template's own spacer and stays empty, or everything lands one column across.
+
+**`Tags` carries the composed dimensions, and that is the point of the export.**
+On the completed sheet that column holds a few real tags (`dining chair`) and,
+on every other filled row, a measurement somebody pasted out of a drawing or a
+designer's website: `Height: 91 cm\n- Width : 110 cm\n- Seat depth: 102cm`,
+`H800mm x D635mm x W700mm SH480mm.`, `H 93 - L 47 - P 56 cm - seat H-53cm which
+reduces by 3/4cm when seated`, `58 x 36 x 43cm`. Every trap the dimension model
+exists for is in those four lines — cm and mm in one column with nothing saying
+which a row is, `L`/`P` for longueur and profondeur, a qualifier welded to a
+figure, and a bare triple whose order is an assumption. It is there because the
+sheet had nowhere structured to put a size. `composeDimensionCell` is still the
+single composer, so the figure an estimator prices against is the same one the
+BWS file ships. **This is this repo's judgement, not Matthew's instruction, and
+the file says so on its own second sheet.**
+
+Four more things are load-bearing:
+
+- **The links point at THIS APP'S copy, not SharePoint.** The app holds the
+  document and `/api/imports/[id]/source` streams it inline with range support,
+  so `#page=N` works. Where the file also sits in SharePoint this app has never
+  been told, and composing a URL from a filename would resolve to a 404 or, far
+  worse, to a different revision of the same drawing. The skill's own guide
+  spends a page on getting that URL right, which is the cost of not holding the
+  document.
+- **NO PAGE MEANS NO LINK.** A hand-typed spec carries no source run and no
+  page, deliberately. A link opening a document at page 1 to stand in would be
+  a false provenance rather than a missing one.
+- **Which page to link is COUNTED, not picked.** The (document, page) that
+  accounts for most of the record's attributes goes first, ties breaking on the
+  lower page so the order is stable between exports — an estimator who wrote
+  down "Specs opens page 7" must not find it opening page 11 next week.
+- **The quantity is never apportioned**, the 0024 rule in a fourth place, and
+  the notes say how many rows it left blank.
+
+The notes go IN the file, on an "About this file" sheet, not only on the screen
+that produced the download: a caveat that lives on the screen is one nobody
+reads at the moment it matters, which is when somebody opens the workbook next
+week and wonders why column K is empty.
+
+**Verified against the sandbox, 2026-09-18**, not fixtures: AP364c MAIN RUN
+composed 19 rows with 11 carrying dimensions off the real shop drawings
+(`S-100 W1900 x D790 x H720 x SH440mm`, `S-400 W570 x D493 x H473 x SH358mm`),
+11 links into the real pack, 11 pictures, and `S-201 Armchair (A)` correctly
+carrying a blank quantity. **`Specs 2` has never fired against real data** — no
+record in the sandbox is yet specified across two pages — so it holds unit
+coverage only.
+
+**STILL OPEN:** what `Specs 2` should point at on the real sheet (a second
+drawing set? the designer's own sheet?), and whether Matthew wants `Tags` to go
+on receiving pasted prose once the app composes a real cell there.
+
 ### A palette this app does not hold is a row with no options
 
 `db/migrations/0030_spec_palettes.sql`, `db/seed/0008_spec_palettes.sql`,
@@ -2668,6 +2748,40 @@ finish landing on COM 1 and filling that checklist answer. Two defects were
 found by running the real email rather than a fixture, and both are tested:
 every re-matched fabric taking COM 1, and a finish re-reading looking like a
 no-op. **Not accepted by Max.**
+
+**Built 2026-09-18, the costing sheet's item block — the third output.** Matthew
+sent the `skill.md` and its user guide; Max supplied a REAL COMPLETED sheet
+(Maybourne Paris seating, 69 items). All three were read, and the first finding
+was that **this repo had recorded the wrong blocker**: the skill generates no
+price either, so "the app holds no pricing" was never what stood in the way.
+`docs/plans/matrix-assumptions.md` is corrected.
+
+`/api/projects/[id]/export/costing` emits columns A-J of
+`Estimating Sheet Template - with stone.xlsx` — xlsx with real hyperlinks and
+embedded item pictures, or csv — sharing `loadExportScope` with the BWS file,
+the check sheet and the quote. The load-bearing section above carries the
+reasoning, including why it stops at J and why `Tags` carries the composed
+dimensions.
+
+**What the skill does that the app now makes unnecessary:** OCRing 300 pages to
+learn which page each ref is on (the app recorded it at confirm, per
+attribute), a ruled-line heuristic with a `BLANK_THRESHOLD` you lower when pale
+items crop blank (the app has a reviewer-confirmed crop), and deleting
+section-header rows (`parseBoqSheets` never made records from them). What the
+skill contributed was the target: the template, its location and its layout.
+
+**One rule of the skill is deliberately NOT adopted.** It converts every
+dimension and rounds UP to the nearest 0.5cm. That is right for an estimator
+pricing the safe side and wrong for the spec record, where
+`composeDimensionCell` refuses to emit a number it could not derive. The export
+ships the composed millimetre cell; nothing here learned to round.
+
+**Verified against the sandbox, not fixtures** — AP364c MAIN RUN, 19 rows, 11
+carrying dimensions off the real shop drawings, 11 links, 11 pictures, and a
+configuration correctly carrying a blank quantity — plus 22 pure-tier tests.
+**`Specs 2` has never fired against real data**, because no record in the
+sandbox is yet specified across two pages. **Not accepted by Max**, and nobody
+has pasted one into the real template.
 
 **Outstanding — judgement, not code.**
 
