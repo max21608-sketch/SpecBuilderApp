@@ -77,15 +77,40 @@ until a human confirms them.
 - Every ignore path is reversible. If a reviewer can dismiss something, they
   can get it back.
 
-## 6. The fuzzy step and the exact step are separate
+## 6. The model reads the page; the app names what it read
 
-The model reads the document and decides nothing. Everything with a controlled
-vocabulary — units, statuses, categories, suppliers, dates — is resolved
-*afterwards*, deterministically, in code, against the app's own registers.
+The model reads **what the document states**, including which of its own figures
+is a width and which is a reveal, and reports the evidence it read it from. The
+app resolves **what the app names** — spec fields, categories, registers,
+suppliers, its own statuses — *afterwards*, deterministically, in code, against
+its own registers. Where the two disagree the app flags it and asks; it never
+silently picks.
 
-The fuzzy part is "which column means what". The exact part is "what this app
-calls it". Keep them in different functions. Mixing them puts the app's
-vocabulary inside a prompt, where it cannot be tested and drifts silently.
+The test: **could a person answer this by looking at the document?** If yes, it
+is the model's to read, and it must come back with the evidence beside it. If
+answering needs the app's own registers, it is code's to resolve. Keep the two
+in different functions — mixing them puts the app's vocabulary inside a prompt,
+where it cannot be tested and drifts silently.
+
+Every reading is a suggestion under §5: shown, flagged, correctable, and
+committed by a person. "The model may read it" is never "the model may write
+it".
+
+**This rule used to read "the model reads the document and decides nothing",
+and that was changed on 2026-09-18 because it produced confidently wrong
+answers.** Forbidding the model to say which figure was the width did not remove
+the decision; it moved it into code, which cannot see the page and had to guess
+from something else. What it guessed from was magnitude — the largest of three
+figures is the width — so a specification sheet printing `80 x 70 x 90 cm`
+beside the words Width, Depth and Height was recorded as a chair 900mm wide.
+Across one app's staged documents, 141 of 183 dimensions had been decided that
+way. A rule written to keep judgement out of the model had put it somewhere with
+less information and no way to show its working.
+
+Note what did NOT change. `normaliseDimensionSlot` still maps the page's word to
+the app's slot; a genre still becomes an import type through a table in code;
+every controlled vocabulary is still resolved against its own register. The
+exact step is exactly where it was.
 
 ## 7. Audit and concurrency are database-level
 
