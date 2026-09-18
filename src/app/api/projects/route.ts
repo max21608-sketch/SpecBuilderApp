@@ -11,6 +11,7 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { EMPTY_COMPLETION, loadProjectCompletion, projectState } from "@/lib/project-completion";
+import { EMPTY_SUMMARY, loadProjectSummaries } from "@/lib/project-summary";
 
 // Needed the moment this route started reading a query string: without it Next
 // caches the default (active-only) response and the "include archived" toggle
@@ -25,6 +26,10 @@ export async function GET(request: Request): Promise<Response> {
   const rows = await sql`
     select p.id, p.bws_project_number, p.name, p.client, p.status,
            p.archived_at::text, p.archived_by,
+           -- ::text, ALWAYS. A date column parsed into local midnight renders
+           -- as the day BEFORE in British Summer Time — the TOE-dates trap, and
+           -- this list is the newest place it could come back.
+           p.specs_agreed_by::text,
            (select count(*) from spec_records r where r.project_id = p.id) as record_count
     from projects p
     where (${includeArchived} or p.status = 'active')
@@ -45,13 +50,22 @@ export async function GET(request: Request): Promise<Response> {
   // the client because the client cannot see an answer. See
   // src/lib/project-completion.ts for what counts.
   const completion = await loadProjectCompletion(rows.map((row) => String(row.id)));
+  // The same numbers the overview shows, so the list and the project page
+  // cannot report different amounts of work outstanding. One query for the
+  // whole page — see loadProjectSummaries.
+  const summaries = await loadProjectSummaries(rows.map((row) => String(row.id)));
 
   return json({
     ok: true,
     archivedCount: Number(archived[0]?.n ?? 0),
     projects: rows.map((row) => {
       const done = completion.get(String(row.id)) ?? EMPTY_COMPLETION;
-      return { ...row, completion: done, state: projectState(String(row.status), done) };
+      return {
+        ...row,
+        completion: done,
+        summary: summaries.get(String(row.id)) ?? EMPTY_SUMMARY,
+        state: projectState(String(row.status), done),
+      };
     }),
   });
 }

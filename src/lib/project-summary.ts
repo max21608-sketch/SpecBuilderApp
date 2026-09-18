@@ -113,16 +113,46 @@ export const EMPTY_SUMMARY: ProjectSummary = {
   tgqFromFallback: 0,
 };
 
+/**
+ * The summary for SEVERAL projects in one query.
+ *
+ * The projects list needs the same TGQ figure the overview shows, and a query
+ * per row would be one per project. More to the point, a second SQL expression
+ * of the TGQ rule is a third place for it to drift — `loadOutstanding` already
+ * computes it in TypeScript and this file already re-expresses it once because
+ * the driver cannot share a fragment. Once is the budget.
+ *
+ * Projects with no records in scope are ABSENT from the result, and
+ * `EMPTY_SUMMARY` is the honest reading of that — the same contract
+ * `loadProjectCompletion` has.
+ */
+export async function loadProjectSummaries(projectIds: string[]): Promise<Map<string, ProjectSummary>> {
+  const out = new Map<string, ProjectSummary>();
+  if (projectIds.length === 0) return out;
+  for (const row of await summaryRows(projectIds)) {
+    out.set(String(row.project_id), toSummary(row));
+  }
+  return out;
+}
+
 export async function loadProjectSummary(projectId: string): Promise<ProjectSummary> {
-  const rows = await sql`
+  const rows = await summaryRows([projectId]);
+  const row = rows[0];
+  return row ? toSummary(row) : EMPTY_SUMMARY;
+}
+
+type SummaryRow = Record<string, unknown>;
+
+async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
+  return await sql`
     with scoped as (
       -- THE EXPORT'S SCOPE. Duplicated from loadExportScope, asserted equal by
       -- a db-tier test: a summary over a different set of records from the file
       -- is worse than no summary.
-      select r.id, r.category_id, r.level, r.level_suggested
+      select r.id, r.project_id, r.category_id, r.level, r.level_suggested
       from spec_records r
       join spec_runs run on run.id = r.run_id
-      where r.project_id = ${projectId}
+      where r.project_id = any(${projectIds}::uuid[])
         and r.status = 'active'
         and run.status = 'active'
         and not exists (
@@ -145,8 +175,7 @@ export async function loadProjectSummary(projectId: string): Promise<ProjectSumm
     -- category he has never written.
     mapped_cats as (select distinct item_category_id from spec_matrix_category_map),
     answers as (
-      select s.id as record_id,
-             s.level,
+      select s.project_id,
              -- No answer row at all is MISSING, not satisfied, which is why
              -- this drives off the requirements table with a left join.
              -- (No backticks in here: one closes the tagged template.)
@@ -170,44 +199,77 @@ export async function loadProjectSummary(projectId: string): Promise<ProjectSumm
       left join spec_fields f on f.id = q.spec_field_id
       left join spec_answers a
         on a.record_id = s.id and a.requirement_id = q.id and a.revision_no = 0
+    ),
+    rec as (
+      select project_id,
+             count(*)::int as records,
+             count(*) filter (where category_id is null)::int as uncategorised,
+             count(*) filter (where level is null)::int as no_level,
+             count(*) filter (where level is null and level_suggested is not null)::int as level_suggested,
+             -- Which model is deciding TGQ, counted over the records it decides
+             -- for. Uncategorised records are in NEITHER: they have no questions
+             -- at all and are reported on their own row, so counting them as
+             -- fallback would blame the gate model for something else entirely.
+             count(*) filter (
+               where category_id is not null
+                 and category_id in (select item_category_id from mapped_cats)
+             )::int as tgq_from_matrix,
+             count(*) filter (
+               where category_id is not null
+                 and category_id not in (select item_category_id from mapped_cats)
+             )::int as tgq_from_fallback
+        from scoped group by project_id
+    ),
+    ans as (
+      select project_id,
+             -- Under the FALLBACK a record with no level is absent from this on
+             -- purpose: nothing on it is tiered and picking a reading is the app
+             -- answering a question only a person can. Under his matrix the tier
+             -- needs no level, because his matrix has no level column.
+             count(*) filter (where state in ('missing', 'tbc') and to_quote)::int as to_quote,
+             count(*) filter (where state = 'missing' and not to_quote)::int as missing,
+             count(*) filter (where state = 'tbc' and not to_quote)::int as tbc,
+             count(*) filter (where state in ('confirmed', 'na'))::int as settled
+        from answers group by project_id
+    ),
+    fin as (
+      select project_id,
+             count(*)::int as finishes,
+             count(*) filter (where kind is null)::int as finishes_no_kind
+        from project_finishes
+       where project_id = any(${projectIds}::uuid[]) and status = 'active'
+       group by project_id
+    ),
+    docs as (
+      select project_id,
+             -- pending covers a document whose read is dispatched and running.
+             -- It needs nothing from anybody, which is why the screen says so
+             -- rather than offering a button.
+             count(*) filter (where status in ('pending', 'parsing'))::int as documents_reading,
+             count(*) filter (where status = 'failed')::int as documents_failed
+        from intake_runs
+       where project_id = any(${projectIds}::uuid[])
+       group by project_id
     )
-    select
-      (select count(*)::int from scoped) as records,
-      (select count(*)::int from scoped where category_id is null) as uncategorised,
-      (select count(*)::int from scoped where level is null) as no_level,
-      (select count(*)::int from scoped where level is null and level_suggested is not null) as level_suggested,
-      -- Under the FALLBACK a record with no level is absent from this on
-      -- purpose: nothing on it is tiered and picking a reading is the app
-      -- answering a question only a person can. Under his matrix the tier needs
-      -- no level, because his matrix has no level column.
-      (select count(*)::int from answers where state in ('missing', 'tbc') and to_quote) as to_quote,
-      (select count(*)::int from answers where state = 'missing' and not to_quote) as missing,
-      (select count(*)::int from answers where state = 'tbc' and not to_quote) as tbc,
-      (select count(*)::int from answers where state in ('confirmed', 'na')) as settled,
-      (select count(*)::int from project_finishes
-        where project_id = ${projectId} and status = 'active') as finishes,
-      (select count(*)::int from project_finishes
-        where project_id = ${projectId} and status = 'active' and kind is null) as finishes_no_kind,
-      -- pending covers a document whose read is dispatched and running. It
-      -- needs nothing from anybody, which is why the screen says so rather than
-      -- offering a button.
-      (select count(*)::int from intake_runs
-        where project_id = ${projectId} and status in ('pending', 'parsing')) as documents_reading,
-      (select count(*)::int from intake_runs
-        where project_id = ${projectId} and status = 'failed') as documents_failed,
-      -- Which model is deciding TGQ, counted over the records it decides for.
-      -- Uncategorised records are in NEITHER: they have no questions at all and
-      -- are reported on their own row, so counting them as "fallback" would
-      -- blame the gate model for something else entirely.
-      (select count(*)::int from scoped
-        where category_id is not null
-          and category_id in (select item_category_id from mapped_cats)) as tgq_from_matrix,
-      (select count(*)::int from scoped
-        where category_id is not null
-          and category_id not in (select item_category_id from mapped_cats)) as tgq_from_fallback
+    select rec.project_id,
+           rec.records, rec.uncategorised, rec.no_level, rec.level_suggested,
+           rec.tgq_from_matrix, rec.tgq_from_fallback,
+           coalesce(ans.to_quote, 0) as to_quote,
+           coalesce(ans.missing, 0) as missing,
+           coalesce(ans.tbc, 0) as tbc,
+           coalesce(ans.settled, 0) as settled,
+           coalesce(fin.finishes, 0) as finishes,
+           coalesce(fin.finishes_no_kind, 0) as finishes_no_kind,
+           coalesce(docs.documents_reading, 0) as documents_reading,
+           coalesce(docs.documents_failed, 0) as documents_failed
+      from rec
+      left join ans on ans.project_id = rec.project_id
+      left join fin on fin.project_id = rec.project_id
+      left join docs on docs.project_id = rec.project_id
   `;
-  const row = rows[0];
-  if (!row) return EMPTY_SUMMARY;
+}
+
+function toSummary(row: SummaryRow): ProjectSummary {
   return {
     records: Number(row.records ?? 0),
     uncategorised: Number(row.uncategorised ?? 0),
