@@ -12,7 +12,7 @@ import {
   type ProjectState,
 } from "@/lib/project-completion";
 import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary";
-import { SPECS_AGREED_LABEL, daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
+import { daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
 import Tip from "@/components/ui/Tip";
 import StatTile from "@/components/ui/StatTile";
 
@@ -26,6 +26,9 @@ type Project = {
   archived_at: string | null;
   archived_by: string | null;
   specs_agreed_by: string | null;
+  run_count: string;
+  /** Questions asked and not yet answered. Derived; see loadOutstanding. */
+  waiting: number;
   /** Derived on the server; see src/lib/project-completion.ts. */
   completion: ProjectCompletion;
   /** The same numbers the project page shows. See src/lib/project-summary.ts. */
@@ -33,12 +36,45 @@ type Project = {
   state: ProjectState;
 };
 
-/** ACTIVE green, COMPLETED blue, ARCHIVED grey — the state, at a glance. */
+/**
+ * ACTIVE sky, COMPLETED green, ARCHIVED grey.
+ *
+ * Green is SETTLED in this app's colour language, everywhere — a confirmed
+ * answer, a satisfied gate, a finished review. So green belongs to COMPLETED
+ * and not to ACTIVE, which is merely where most projects live. They were the
+ * other way round.
+ */
 const STATE_PILL: Record<ProjectState, string> = {
-  active: "bg-green-100 text-green-800 border-green-200",
-  completed: "bg-sky-100 text-sky-800 border-sky-200",
+  active: "bg-sky-50 text-sky-700 border-sky-200",
+  completed: "bg-green-50 text-green-700 border-green-200",
   archived: "bg-neutral-100 text-neutral-600 border-neutral-300",
 };
+
+/** The tabs across the top. `all` is every project whatever its state. */
+type StateTab = ProjectState | "all";
+
+const TAB_LABELS: Record<StateTab, string> = {
+  active: "Active",
+  completed: "Completed",
+  archived: "Archived",
+  all: "All",
+};
+
+/**
+ * A calendar day as a person writes it — `14 Oct 2026`, never `2026-10-14`.
+ *
+ * Built from the STRING's own parts, never from a `Date`. These are `date`
+ * columns; both drivers parse one into local midnight and any date maths on it
+ * renders the day before in British Summer Time. The TOE-dates rule, applied
+ * to formatting rather than to comparison.
+ */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"];
+function formatDay(day: string): string {
+  const [year, month, date] = day.split("-");
+  const index = Number(month) - 1;
+  if (!year || !date || Number.isNaN(index) || !MONTHS[index]) return day;
+  return `${Number(date)} ${MONTHS[index]} ${year}`;
+}
 
 /**
  * The specs-agreed-by date, and whether it has passed.
@@ -52,28 +88,35 @@ const STATE_PILL: Record<ProjectState, string> = {
  * renders the day BEFORE it in British Summer Time.
  */
 function Programme({ day }: { day: string | null }) {
-  if (!day) return <span className="text-neutral-400">no programme</span>;
+  const none = (
+    <span className="text-neutral-400">
+      no programme
+      <Tip>
+        Nothing on this project can be flagged overdue until this date is set. That is not the same as being on
+        time.
+      </Tip>
+    </span>
+  );
+  if (!day) return none;
   const days = daysUntilSpecsAgreed(day, todayLocal());
-  if (days === null) return <span className="text-neutral-400">no programme</span>;
-  if (days < 0) {
-    return (
-      <span className="text-red-700">
-        {day}
-        <span className="ml-1 rounded border border-red-200 bg-red-50 px-1 py-0.5 text-[10px] font-semibold">
-          {-days} day{days === -1 ? "" : "s"} over
-        </span>
-      </span>
-    );
-  }
+  if (days === null) return none;
   return (
-    <span className="text-neutral-700">
-      {day}
+    <span className={days < 0 ? "text-red-700" : "text-neutral-700"}>
+      {formatDay(day)}
       <span
-        className={`ml-1 rounded border px-1 py-0.5 text-[10px] font-semibold ${
-          days <= 14 ? "border-amber-200 bg-amber-50 text-amber-800" : "border-neutral-200 bg-neutral-50 text-neutral-500"
+        className={`ml-1.5 inline-block rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
+          days < 0
+            ? "border-red-200 bg-red-50 text-red-700"
+            : days <= 14
+              ? "border-amber-200 bg-amber-50 text-amber-800"
+              : "border-neutral-200 bg-neutral-50 text-neutral-500"
         }`}
       >
-        {days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"}`}
+        {days < 0
+          ? `${-days} day${days === -1 ? "" : "s"} over`
+          : days === 0
+            ? "today"
+            : `${days} day${days === 1 ? "" : "s"}`}
       </span>
     </span>
   );
@@ -81,27 +124,33 @@ function Programme({ day }: { day: string | null }) {
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[] | null>(null);
-  const [archivedCount, setArchivedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [number, setNumber] = useState("");
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
-  // Opt-in. The point of archiving is that a finished project stops being in
-  // the way, so the default list is the work in front of somebody.
-  const [includeArchived, setIncludeArchived] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [unplacedMail, setUnplacedMail] = useState(0);
+  /**
+   * WHICH TAB. Active by default — the point of archiving is that a finished
+   * project stops being in the way — but every project is LOADED whatever the
+   * tab, because the tabs carry counts and a count of what you are not looking
+   * at cannot be derived from the rows you are.
+   */
+  const [tab, setTab] = useState<StateTab>("active");
+  /** Which tile is pressed, if any. Narrows the list and nothing else. */
+  const [focus, setFocus] = useState<null | "to_quote" | "overdue" | "waiting">(null);
 
   const load = useCallback(async () => {
-    const res = await apiFetch<{ projects: Project[]; archivedCount: number }>(
-      `/api/projects${includeArchived ? "?includeArchived=true" : ""}`,
+    const res = await apiFetch<{ projects: Project[]; archivedCount: number; unplacedMail: number }>(
+      "/api/projects?includeArchived=true",
     );
     if (!res.ok) { setError(res.error); return; }
     setError(null);
     setProjects(res.data.projects);
-    setArchivedCount(res.data.archivedCount ?? 0);
-  }, [includeArchived]);
+    setUnplacedMail(res.data.unplacedMail ?? 0);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -130,13 +179,35 @@ export default function ProjectsPage() {
   // Client-side, over the three things somebody actually types: the BWS
   // number, the project name and the client. A server round trip per keystroke
   // would buy nothing on a list this size.
+  /** How many projects each tab holds. Over EVERY project, never the listed ones. */
+  const tabCounts = useMemo(() => {
+    const all = projects ?? [];
+    return {
+      active: all.filter((project) => project.state === "active").length,
+      completed: all.filter((project) => project.state === "completed").length,
+      archived: all.filter((project) => project.state === "archived").length,
+      all: all.length,
+    } satisfies Record<StateTab, number>;
+  }, [projects]);
+
   const shown = useMemo(() => {
+    if (!projects) return projects;
     const term = search.trim().toLowerCase();
-    if (!term || !projects) return projects;
-    return projects.filter((project) =>
-      `${project.bws_project_number} ${project.name} ${project.client ?? ""}`.toLowerCase().includes(term),
-    );
-  }, [projects, search]);
+    const today = todayLocal();
+    return projects.filter((project) => {
+      if (tab !== "all" && project.state !== tab) return false;
+      if (term && !`${project.bws_project_number} ${project.name} ${project.client ?? ""}`.toLowerCase().includes(term)) {
+        return false;
+      }
+      if (focus === "to_quote") return (project.summary ?? EMPTY_SUMMARY).toQuote > 0;
+      if (focus === "waiting") return (project.waiting ?? 0) > 0;
+      if (focus === "overdue") {
+        const days = project.specs_agreed_by ? daysUntilSpecsAgreed(project.specs_agreed_by, today) : null;
+        return days !== null && days < 0;
+      }
+      return true;
+    });
+  }, [projects, search, tab, focus]);
 
   /**
    * The strip at the top, over the rows that are LISTED.
@@ -149,26 +220,29 @@ export default function ProjectsPage() {
     const rows = shown ?? [];
     const today = todayLocal();
     let toQuote = 0;
-    let settled = 0;
+    let waiting = 0;
     let overdue = 0;
-    let noProgramme = 0;
     let withWork = 0;
     for (const project of rows) {
       const summary = project.summary ?? EMPTY_SUMMARY;
       toQuote += summary.toQuote;
-      settled += summary.settled;
+      waiting += project.waiting ?? 0;
       if (summary.toQuote > 0) withWork += 1;
       const days = project.specs_agreed_by ? daysUntilSpecsAgreed(project.specs_agreed_by, today) : null;
-      if (days === null) noProgramme += 1;
-      else if (days < 0) overdue += 1;
+      if (days !== null && days < 0) overdue += 1;
     }
-    return { toQuote, settled, overdue, noProgramme, withWork };
+    return { toQuote, waiting, overdue, withWork };
   }, [shown]);
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold text-neutral-900">Projects</h1>
+      <div className="flex flex-wrap items-start gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-neutral-900">Projects</h1>
+          <p className="mt-0.5 text-sm text-neutral-600">
+            Everything in the spec builder, and what each one is waiting on.
+          </p>
+        </div>
         <span className="flex-1" />
         {/* COLLAPSED. It stays ABOVE the list when open, for the reason it was
             moved here — on a new deployment adding a project is the first thing
@@ -178,6 +252,31 @@ export default function ProjectsPage() {
         <Button variant={adding ? "secondary" : "primary"} onClick={() => setAdding((open) => !open)}>
           {adding ? "Cancel" : "Add a project"}
         </Button>
+      </div>
+
+      {/* STATE IS A TAB, NOT A CHECKBOX. Archived was opt-in through a tick box
+          beside the search, which hid Completed entirely — it had nowhere to be.
+          Every project is loaded whatever the tab, because a tab's count cannot
+          be derived from the rows you are already looking at. */}
+      <div className="mt-4 flex flex-wrap gap-0.5 border-b border-neutral-200">
+        {(["active", "completed", "archived", "all"] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setTab(name)}
+            aria-current={tab === name ? "page" : undefined}
+            className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
+              tab === name
+                ? "border-neutral-900 font-semibold text-neutral-900"
+                : "border-transparent text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            {TAB_LABELS[name]}
+            <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
+              {tabCounts[name]}
+            </span>
+          </button>
+        ))}
       </div>
 
       {error && (
@@ -213,102 +312,141 @@ export default function ProjectsPage() {
           filtered list that did not say so would be read as a total over the
           business. */}
       {(projects ?? []).length > 0 && (
-        <div className="mt-6 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <div className="mt-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
           <StatTile
-            label="TGQ, all projects"
+            label="Needed to quote"
             tone={totals.toQuote > 0 ? "danger" : "good"}
             value={totals.toQuote}
             meaning={`across ${totals.withWork} project${totals.withWork === 1 ? "" : "s"}`}
+            action={totals.withWork > 0 ? "show those projects" : undefined}
+            onPress={totals.withWork > 0 ? () => setFocus(focus === "to_quote" ? null : "to_quote") : undefined}
+            active={focus === "to_quote"}
           />
           <StatTile
             label="Overdue"
             tone={totals.overdue > 0 ? "danger" : "plain"}
             value={totals.overdue}
-            meaning="past the specs-agreed date"
+            meaning="past specs-agreed-by"
+            action={totals.overdue > 0 ? "show them" : undefined}
+            onPress={totals.overdue > 0 ? () => setFocus(focus === "overdue" ? null : "overdue") : undefined}
+            active={focus === "overdue"}
           />
           <StatTile
-            label="No programme"
-            tone={totals.noProgramme > 0 ? "warn" : "plain"}
-            value={totals.noProgramme}
-            meaning="cannot be flagged overdue at all"
+            label="Waiting on a reply"
+            tone="info"
+            value={totals.waiting}
+            meaning="chases sent, nothing back"
+            action={totals.waiting > 0 ? "show them" : undefined}
+            onPress={totals.waiting > 0 ? () => setFocus(focus === "waiting" ? null : "waiting") : undefined}
+            active={focus === "waiting"}
           />
+          {/* BELONGS TO NO PROJECT, by definition — which is exactly why it is
+              here. Unplaced mail is the one state in the app that silently
+              stops work: the sender believes they have told us, and no project
+              screen says otherwise. So it is a link out to the inbox rather
+              than a filter on this list. */}
           <StatTile
-            label="Settled"
-            tone="good"
-            value={totals.settled}
-            meaning="questions confirmed or N/A"
+            label="Unplaced mail"
+            tone={unplacedMail > 0 ? "warn" : "plain"}
+            value={unplacedMail}
+            meaning="could not be auto-assigned"
+            href="/dashboard/inbox"
+            action="open the inbox"
           />
         </div>
       )}
 
-      <div className="mt-6 flex flex-wrap items-center gap-4">
+      <div className="mt-5 flex flex-wrap items-center gap-3">
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search projects"
-          className="border border-neutral-300 rounded px-3 py-2 text-sm w-64"
+          placeholder="Search a number, a name, or a client"
+          className="border border-neutral-300 rounded px-3 py-2 text-sm w-72"
         />
-        <label className="flex items-center gap-2 text-sm text-neutral-600">
-          <input
-            type="checkbox"
-            checked={includeArchived}
-            onChange={(event) => setIncludeArchived(event.target.checked)}
-          />
-          Show archived ({archivedCount})
-        </label>
+        {focus !== null && (
+          <Button size="xs" variant="quiet" onClick={() => setFocus(null)}>
+            Clear the filter
+          </Button>
+        )}
+        <span className="flex-1" />
+        <span className="text-sm text-neutral-500">
+          {(shown ?? []).length} project{(shown ?? []).length === 1 ? "" : "s"}
+        </span>
       </div>
 
       {projects === null ? (
         <div className="mt-4"><Spinner label="Loading projects" /></div>
       ) : (shown ?? []).length === 0 ? (
         <p className="mt-4 text-sm text-neutral-600">
-          {search.trim()
+          {search.trim() || focus !== null
             ? "No project matches that."
-            : includeArchived
-              ? "No projects yet. Add one above, then open it to import its BOQ."
-              : "Nothing active. Add a project above, or tick Show archived to see finished ones."}
+            : tab === "all"
+              ? "No projects yet. Add one, then open it to import its BOQ."
+              : `Nothing ${TAB_LABELS[tab].toLowerCase()}. Try another tab, or add a project.`}
         </p>
       ) : (
         <div className="mt-4 border border-neutral-200 rounded-lg bg-white overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-neutral-50 text-left text-neutral-600">
               <tr>
-                <th className="px-4 py-2 font-medium">Project</th>
-                <th className="px-4 py-2 font-medium">Client</th>
-                <th className="px-4 py-2 font-medium text-right">Items</th>
-                <th className="px-4 py-2 font-medium text-right">
-                  TGQ
+                <th className="px-4 py-2 font-medium w-[11%]">Number</th>
+                <th className="px-4 py-2 font-medium w-[23%]">Project</th>
+                <th className="px-4 py-2 font-medium w-[14%]">Client</th>
+                <th className="px-4 py-2 font-medium text-right w-[8%]">Items</th>
+                <th className="px-4 py-2 font-medium text-right w-[11%]">
+                  To quote
                   <Tip>
-                    Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for the
+                    TGQ — questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for the
                     category, the older per-level model where he has not.
                   </Tip>
                 </th>
-                <th className="px-4 py-2 font-medium whitespace-nowrap">
-                  Specs by
-                  <Tip>{`${SPECS_AGREED_LABEL}. The gate before drawings can be issued, and the date Overdue is measured against.`}</Tip>
+                <th className="px-4 py-2 font-medium w-[15%]">
+                  Specs agreed by
+                  <Tip>The gate before drawings can be issued, and the date Overdue is measured against.</Tip>
                 </th>
-                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium w-[10%]">State</th>
                 <th className="px-4 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
               {(shown ?? []).map((project) => (
                 <tr key={project.id} className={project.status === "archived" ? "bg-neutral-50" : ""}>
-                  <td className="px-4 py-3">
-                    {/* The name IS the way in. The row used to carry an
-                        "Overview" button pointing at the same place, which
-                        read as though one of the two went somewhere else. */}
+                  {/* THE NUMBER IS ITS OWN COLUMN, and monospace. It is what
+                      people say out loud and what every export is labelled
+                      with, and a number glued to a name with an em dash is a
+                      column you cannot scan. */}
+                  <td className="px-4 py-3 align-top">
                     <Link
                       href={`/dashboard/projects/${project.id}`}
-                      className="font-medium text-neutral-900 underline hover:text-neutral-600"
+                      className="font-mono text-[13px] font-semibold text-blue-700 no-underline hover:underline"
                     >
-                      {project.bws_project_number} — {project.name}
+                      {project.bws_project_number}
                     </Link>
-                    {project.status === "archived" && project.archived_at && (
-                      <p className="text-xs text-neutral-500">
-                        archived {new Date(project.archived_at).toLocaleDateString()}
-                      </p>
-                    )}
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <Link
+                      href={`/dashboard/projects/${project.id}`}
+                      className="text-blue-700 no-underline hover:underline"
+                    >
+                      {project.name}
+                    </Link>
+                    {/* What the project IS MADE OF, under its name. A run count
+                        is the first thing that tells you whether a bill has
+                        been through at all. */}
+                    <p className="text-xs text-neutral-500">
+                      {(project.summary ?? EMPTY_SUMMARY).records === 0 ? (
+                        "nothing imported yet"
+                      ) : (
+                        <>
+                          {project.run_count} run{Number(project.run_count) === 1 ? "" : "s"} ·{" "}
+                          {(project.summary ?? EMPTY_SUMMARY).finishes} finish
+                          {(project.summary ?? EMPTY_SUMMARY).finishes === 1 ? "" : "es"}
+                        </>
+                      )}
+                      {project.status === "archived" && project.archived_at && (
+                        <> · archived {formatDay(String(project.archived_at).slice(0, 10))}</>
+                      )}
+                    </p>
                   </td>
                   <td className="px-4 py-3 align-top text-neutral-700">
                     {project.client ?? <span className="text-neutral-400">none recorded</span>}
@@ -357,20 +495,26 @@ export default function ProjectsPage() {
                       {PROJECT_STATE_LABELS[project.state]}
                     </span>
                   </td>
+                  {/* THE TWO THINGS YOU LEAVE THIS SCREEN TO DO, quiet: the
+                      project's NAME is the way in, and two filled buttons a row
+                      compete with it for the eye. `quiet` is the per-row variant
+                      for exactly this — bordered on hover, still a hit area.
+                      Spec table is gone from here because the name goes there
+                      anyway; Export is the one thing the name does NOT reach. */}
                   <td className="px-4 py-3 align-top">
-                    <div className="flex justify-end gap-2">
-                      {/* The project's own run tabs. There is deliberately no
-                          screen that lists every run's records together: a
-                          mock-up run, a main run and a VE run quote the SAME
-                          codes at different quantities. */}
-                      <Link href={`/dashboard/projects/${project.id}?tab=spec`} className={buttonClass("primary")}>
-                        Spec table
-                      </Link>
-                      {/* Asking for what is missing is the stage after intake,
-                          and it is where a KAM spends their week. */}
-                      <Link href={`/dashboard/drafts?projectId=${project.id}`} className={buttonClass("secondary")}>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <Link
+                        href={`/dashboard/drafts?projectId=${project.id}`}
+                        className={buttonClass("quiet", "xs", "no-underline")}
+                      >
                         Chase
                       </Link>
+                      <a
+                        href={`/api/projects/${project.id}/export`}
+                        className={buttonClass("quiet", "xs", "no-underline")}
+                      >
+                        Export
+                      </a>
                     </div>
                   </td>
                 </tr>

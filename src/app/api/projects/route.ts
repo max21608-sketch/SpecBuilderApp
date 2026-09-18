@@ -12,6 +12,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { EMPTY_COMPLETION, loadProjectCompletion, projectState } from "@/lib/project-completion";
 import { EMPTY_SUMMARY, loadProjectSummaries } from "@/lib/project-summary";
+import { loadOutstanding, loadSentCoverage, waitingByQuestion, questionKey } from "@/lib/chase-drafts";
 
 // Needed the moment this route started reading a query string: without it Next
 // caches the default (active-only) response and the "include archived" toggle
@@ -30,6 +31,7 @@ export async function GET(request: Request): Promise<Response> {
            -- as the day BEFORE in British Summer Time — the TOE-dates trap, and
            -- this list is the newest place it could come back.
            p.specs_agreed_by::text,
+           (select count(*) from spec_runs sr where sr.project_id = p.id and sr.status = 'active') as run_count,
            (select count(*) from spec_records r where r.project_id = p.id) as record_count
     from projects p
     where (${includeArchived} or p.status = 'active')
@@ -55,15 +57,53 @@ export async function GET(request: Request): Promise<Response> {
   // whole page — see loadProjectSummaries.
   const summaries = await loadProjectSummaries(rows.map((row) => String(row.id)));
 
+  // WAITING, PER PROJECT, over the SAME rule the chase screen runs.
+  //
+  // It cannot be a SQL count: a question is waiting when it is still
+  // outstanding AND a sent draft item still matches it, and `isCoverageFresh`
+  // compares a frozen context snapshot with `canonicalJson`. Expressing that in
+  // SQL would be a second implementation of the staleness rule, which is how
+  // this list and the chase screen would come to report different numbers —
+  // the defect the TGQ split already cost a day.
+  //
+  // So it is the real functions, called ONCE for every project on the page
+  // rather than once per row: two queries for the list instead of two per
+  // project. It is not free — `loadOutstanding` returns every outstanding
+  // question across every project — and if this list ever gets long that is
+  // the thing to make lazy.
+  const ids = rows.map((row) => String(row.id));
+  const [outstanding, coverage] = await Promise.all([loadOutstanding(ids), loadSentCoverage(ids)]);
+  const waitingKeys = waitingByQuestion(outstanding, coverage);
+  const projectOfQuestion = new Map(
+    outstanding.map((question) => [questionKey(question.recordId, question.requirementId, 0), question.projectId]),
+  );
+  const waitingByProject = new Map<string, number>();
+  for (const key of waitingKeys.keys()) {
+    const projectId = projectOfQuestion.get(key);
+    if (!projectId) continue;
+    waitingByProject.set(projectId, (waitingByProject.get(projectId) ?? 0) + 1);
+  }
+
+  // Mail nobody has placed on a project. The ONE state in the whole app that
+  // silently stops work — the sender believes they have told us and no project
+  // screen says otherwise — so the projects list carries the count even though
+  // it belongs to no project by definition.
+  const unplaced = await sql`
+    select count(*)::int as n from email_messages
+     where routing_status <> 'assigned' and triage = 'open'
+  `;
+
   return json({
     ok: true,
     archivedCount: Number(archived[0]?.n ?? 0),
+    unplacedMail: Number(unplaced[0]?.n ?? 0),
     projects: rows.map((row) => {
       const done = completion.get(String(row.id)) ?? EMPTY_COMPLETION;
       return {
         ...row,
         completion: done,
         summary: summaries.get(String(row.id)) ?? EMPTY_SUMMARY,
+        waiting: waitingByProject.get(String(row.id)) ?? 0,
         state: projectState(String(row.status), done),
       };
     }),

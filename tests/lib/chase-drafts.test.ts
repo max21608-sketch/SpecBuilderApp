@@ -21,6 +21,7 @@ import {
 
 function question(overrides: Partial<OutstandingQuestion> = {}): OutstandingQuestion {
   return {
+    projectId: "proj-1",
     recordId: "rec-1",
     recordNo: 7,
     recordLabel: "P17231-007",

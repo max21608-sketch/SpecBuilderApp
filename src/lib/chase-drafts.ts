@@ -34,6 +34,8 @@ export type SqlExecutor = (strings: TemplateStringsArray, ...values: unknown[]) 
 
 /** A question that still needs an answer, with everything needed to ask it. */
 export type OutstandingQuestion = {
+  /** Which project, so a multi-project load can be grouped back apart. */
+  projectId: string;
   recordId: string;
   recordNo: number;
   recordLabel: string;
@@ -454,9 +456,22 @@ export function groupByContact(
  * and are surfaced separately by the caller, because 0 of 0 renders as
  * complete and is the opposite of the truth.
  */
-export async function loadOutstanding(projectId: string): Promise<OutstandingQuestion[]> {
+/**
+ * One project, or several.
+ *
+ * The projects LIST needs a Waiting count per project, and Waiting is derived
+ * rather than stored: a question is waiting when it is still outstanding and a
+ * sent draft item still matches it, with `isCoverageFresh` comparing a context
+ * snapshot that no SQL expression can reproduce. Calling this once per project
+ * would be two queries per row; taking an array makes it two queries for the
+ * page, over the SAME rule the chase screen runs.
+ */
+export async function loadOutstanding(project: string | string[]): Promise<OutstandingQuestion[]> {
+  const projectIds = Array.isArray(project) ? project : [project];
+  if (projectIds.length === 0) return [];
   const rows = await sql`
     select
+      r.project_id,
       r.id            as record_id,
       r.record_no,
       r.status        as record_status,
@@ -505,7 +520,7 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
     join requirements q on q.category_id = r.category_id
     left join spec_fields f on f.id = q.spec_field_id
     left join spec_answers a on a.record_id = r.id and a.requirement_id = q.id and a.revision_no = 0
-    where r.project_id = ${projectId}
+    where r.project_id = any(${projectIds}::uuid[])
       and r.status = 'active'
       and run.status = 'active'
       -- A SPLIT BILL LINE IS A HEADING, AND ITS QUESTIONS ARE NOBODY'S TO
@@ -547,6 +562,7 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): Outs
   const level = normaliseItemLevel(row.level);
   const tgqLevels = Array.isArray(row.tgq_levels) ? row.tgq_levels.map(String) : [];
   return {
+    projectId: String(row.project_id),
     recordId: String(row.record_id),
     recordNo,
     recordLabel: recordLabel(String(row.bws_project_number), recordNo),
@@ -618,6 +634,7 @@ export async function loadQuestionsByKey(
 
   const rows = await exec`
     select
+      r.project_id,
       r.id            as record_id,
       r.record_no,
       r.status        as record_status,
@@ -718,9 +735,11 @@ export async function loadUncategorisedRecords(projectId: string): Promise<
  * path that does not exist. Dropped from the predicate here; the column goes
  * in a later migration, once the screen has been accepted.
  */
-export async function loadSentCoverage(projectId: string): Promise<
+export async function loadSentCoverage(project: string | string[]): Promise<
   (CoverageSnapshot & { draftId: string; sentAt: string | null; contactName: string })[]
 > {
+  const projectIds = Array.isArray(project) ? project : [project];
+  if (projectIds.length === 0) return [];
   const rows = await sql`
     select i.draft_id, i.record_id, i.requirement_id, i.revision_no,
            i.answer_id, i.snapshot_answer_version, i.record_version, i.context_snapshot,
@@ -728,7 +747,7 @@ export async function loadSentCoverage(projectId: string): Promise<
     from email_draft_items i
     join email_drafts d on d.id = i.draft_id
     join project_contacts c on c.id = d.contact_id
-    where d.project_id = ${projectId}
+    where d.project_id = any(${projectIds}::uuid[])
       and d.status = 'sent'
     order by d.sent_at desc
   `;
