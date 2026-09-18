@@ -18,6 +18,12 @@ import {
 import { ITEM_LEVELS } from "@/lib/spec-vocab";
 import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
 import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
+import {
+  designerKey,
+  loadOutstanding,
+  loadSentCoverage,
+  waitingByQuestion,
+} from "@/lib/chase-drafts";
 
 export const dynamic = "force-dynamic";
 
@@ -188,6 +194,107 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
      order by r.parent_id nulls first, r.variant_label
   `;
 
+  // ---- what has already been ASKED about this record ----------------------
+  //
+  // Waiting is DERIVED, never stored (0005): a `chased_at` column fires
+  // bump_version and invalidates every extraction snapshot taken against the
+  // answer, for a reason that has nothing to do with the answer. So a question
+  // is waiting when it is still outstanding AND some sent draft item still
+  // matches it, which `isCoverageFresh` decides by comparing a context
+  // snapshot no SQL expression can reproduce.
+  //
+  // THE COST IS A WHOLE-PROJECT LOAD FOR ONE RECORD. `loadOutstanding` and
+  // `loadSentCoverage` both take a project, and the chase screen's numbers are
+  // computed from them — so this route calls them for the project and filters
+  // to this record. Re-expressing the rule in SQL for one record would be a
+  // second implementation of Waiting, which is how two screens come to disagree
+  // about whether somebody has already been asked. Two queries, bounded by the
+  // project's own size.
+  const projectId = String(record.project_id);
+  const [projectOutstanding, sentCoverage] = await Promise.all([
+    loadOutstanding(projectId),
+    loadSentCoverage(projectId),
+  ]);
+  const outstanding = projectOutstanding.filter((question) => question.recordId === id);
+  // Filtered FIRST: a coverage row for another record then matches no live
+  // question and drops out on its own, which is the same answer the unfiltered
+  // call gives for this record's keys.
+  const waitingMap = waitingByQuestion(outstanding, sentCoverage);
+  const waiting: Record<string, { draftId: string; sentAt: string | null; contactName: string }> = {};
+  for (const [key, info] of waitingMap) waiting[key] = info;
+
+  // ---- who to ask ----------------------------------------------------------
+  //
+  // `spec_records.designer` is free text off the BOQ and `project_contacts`
+  // stores the code already normalised, so `designerKey` is the one place the
+  // two have to agree — the same function `groupByContact` matches on, so the
+  // "Ask Hayley" link on this screen and the chase screen's grouping can never
+  // name different people.
+  //
+  // A code held by two contacts resolves to NOBODY. The partial unique index on
+  // (project_id, designer_code) makes that unreachable today; the flag is what
+  // would make its loss visible rather than letting this route quietly pick one.
+  const contactRows = await sql`
+    select id, name, email, role, designer_code
+      from project_contacts where project_id = ${projectId} and designer_code is not null
+  `;
+  const wanted = designerKey(record.designer as string | null);
+  const matches = wanted ? contactRows.filter((row) => String(row.designer_code) === wanted) : [];
+  const designerContact = matches.length === 1 ? matches[0] : null;
+
+  // ---- can this item be priced --------------------------------------------
+  //
+  // The tier is read off the rows `loadOutstanding` already tiered, never
+  // recomputed here: `questionTier` is one implementation with six callers, and
+  // a seventh reading is how the record screen and the spec table start
+  // reporting different figures under one name.
+  //
+  // A NULL TIER IS A DASH, NEVER A ZERO. It means the fallback model with no
+  // level — `questionTierOrNull` refuses to pick a reading, because "needed at
+  // any level" makes the record look urgent and "needed at none" makes it look
+  // quotable. Both counts go null together: reporting `alsoOutstanding: 0`
+  // beside 48 untiered questions would be a number that is simply false.
+  const untiered = outstanding.some((question) => question.tier === null);
+  const settled = answers.filter((row) => String(row.state ?? "") === "confirmed").length;
+  const notApplicable = answers.filter((row) => String(row.state ?? "") === "na").length;
+  const quoteReadiness = {
+    toQuote: untiered ? null : outstanding.filter((question) => question.tier === "to_quote").length,
+    alsoOutstanding: untiered ? null : outstanding.filter((question) => question.tier === "later").length,
+    /** Missing plus TBC, whatever the tier. Always a number, so a dash above it still has a size beside it. */
+    outstanding: outstanding.length,
+    settled,
+    notApplicable,
+    noLevel: untiered,
+  };
+
+  // ---- why these questions -------------------------------------------------
+  //
+  // Matthew's matrix rows for this category, as DATA. Null where his matrix
+  // does not cover the category — the `gatesForRecord` rule, and for its
+  // reason: an empty list computes as "nothing outstanding" and would report a
+  // cabinetry item ready against rules nobody has written.
+  const matrixFieldRows = record.category_id
+    ? (gateContext.fieldsByCategory.get(String(record.category_id)) ?? null)
+    : null;
+  const matrixFields =
+    matrixFieldRows && matrixFieldRows.length > 0
+      ? matrixFieldRows.map((field) => ({
+          matrixRow: field.matrixRow,
+          gate: field.gate,
+          capture: field.capture,
+          fieldName: field.fieldName,
+          jsonId: field.specFieldJsonId,
+          localKey: field.localKey,
+          dimensionSlot: field.dimensionSlot,
+          valueType: field.valueType,
+          paletteKey: field.paletteKey,
+          paletteRaw: field.paletteRaw,
+          conditionalOnKey: field.conditionalOnKey,
+          conditionalOnValue: field.conditionalOnValue,
+          notes: field.notes,
+        }))
+      : null;
+
   return json({
     ok: true,
     record,
@@ -204,6 +311,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     tgqMatrix: tgqMatrix
       ? { fields: [...tgqMatrix.fields], localKeys: [...tgqMatrix.localKeys] }
       : null,
+    // Keyed by `questionKey(recordId, requirementId, 0)`, so a checklist row
+    // looks its own chase up without the screen matching on anything.
+    waiting,
+    designerContact,
+    designerContactAmbiguous: matches.length > 1,
+    quoteReadiness,
+    matrixFields,
   });
 }
 
