@@ -43,7 +43,7 @@ import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
 import AnswerValue from "@/components/records/AnswerValue";
 import type { Palette } from "@/lib/palettes";
-import type { Gate, GateStatus } from "@/lib/gates";
+import { GATES, type Gate, type GateStatus } from "@/lib/gates";
 
 type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
@@ -97,6 +97,60 @@ type RetiredAttribute = Attribute & {
   superseded_by_id: string | null;
 };
 
+/**
+ * One tab, with the count that says whether there is anything behind it.
+ *
+ * A button, not a link: it changes what you are looking at on this page, which
+ * is not navigation — `Button.tsx`'s rule. The count is a string rather than a
+ * number because two of the four say something more useful than a total
+ * ("37 of 43", "2 of 3"), and null where a count would be a lie: the version
+ * list is not loaded until its tab is opened, so a number there would either
+ * be wrong or force a query nobody asked for.
+ */
+function RecordTabButton({
+  tab,
+  current,
+  onSelect,
+  count,
+  tone = "plain",
+  children,
+}: {
+  tab: RecordTab;
+  current: RecordTab;
+  onSelect: (tab: RecordTab) => void;
+  count: string | number | null;
+  tone?: "plain" | "warn" | "good";
+  children: React.ReactNode;
+}) {
+  const on = current === tab;
+  const countClass =
+    tone === "warn"
+      ? "bg-amber-100 text-amber-800"
+      : tone === "good"
+        ? "bg-green-100 text-green-800"
+        : "bg-neutral-100 text-neutral-500";
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(tab)}
+      aria-current={on ? "page" : undefined}
+      className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
+        on
+          ? "border-neutral-900 font-semibold text-neutral-900"
+          : "border-transparent text-neutral-500 hover:text-neutral-800"
+      }`}
+    >
+      {children}
+      {count !== null && count !== 0 && (
+        <span className={`rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${countClass}`}>{count}</span>
+      )}
+    </button>
+  );
+}
+
+/** The four jobs this screen does, one tab each. */
+type RecordTab = "specs" | "checklist" | "gates" | "versions";
+
 type Payload = {
   record: SpecRecord;
   refs: { ref_system: string; ref_value: string }[];
@@ -136,12 +190,24 @@ export default function RecordPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savingCategory, setSavingCategory] = useState(false);
   const [savingLevel, setSavingLevel] = useState(false);
-  const [showChecklist, setShowChecklist] = useState(false);
+  /**
+   * WHICH TAB. The record was one page of four stacked sections — the specs,
+   * the checklist, the gates and the history — and the checklist alone is 43
+   * questions, so the history sat below about four screens of scrolling and
+   * was collapsed behind a toggle to stop it being five.
+   *
+   * Collapsing was the wrong fix: a thing you have to expand every time is a
+   * thing people stop opening. They are four different jobs done at four
+   * different moments, and a tab each is how you get to the one you came for.
+   * The identity above them — the picture, the description, the category and
+   * the level — stays on every tab, because it is what tells you which item
+   * you are looking at.
+   */
+  const [tab, setTab] = useState<RecordTab>("specs");
   // Optimistic: the image is requested, and the 404 for a record that has none
   // turns it off. Asking first would be a second round trip on every record to
   // learn something the image request itself reports.
   const [hasImage, setHasImage] = useState(true);
-  const [showHistory, setShowHistory] = useState(false);
   // Bumped after every successful write, so the history list below reloads
   // under the edit that caused it instead of going stale until a page reload.
   const [historyKey, setHistoryKey] = useState(0);
@@ -343,6 +409,30 @@ export default function RecordPage() {
   // return is a hook that does not run in the same order every render. The
   // sets are at most a few dozen entries and are rebuilt per render, which is
   // nothing beside the table this screen already renders.
+  /**
+   * The counts the tabs carry.
+   *
+   * Outstanding is missing OR TBC, which are two different things and both
+   * unsettled — the invariant the whole gate model rests on. Settled is
+   * confirmed or N/A.
+   *
+   * The gate label is "n of 3" over the three gates, and NULL where Matthew's
+   * matrix does not cover this category. A gates tab reading "0 of 3" there
+   * would say the record fails three gates; it has none, and the panel inside
+   * says so in words.
+   */
+  const outstandingCount = answers.filter(
+    (answer) => answer.state === "missing" || answer.state === "tbc",
+  ).length;
+  const gateSummaryLabel = data.gates
+    ? `${GATES.filter((gate) => data.gates![gate].satisfied).length} of ${GATES.length}`
+    : null;
+  const gateTone: "warn" | "good" | "plain" = !data.gates
+    ? "plain"
+    : GATES.every((gate) => data.gates![gate].satisfied)
+      ? "good"
+      : "warn";
+
   const tgqMatrix = data.tgqMatrix
     ? {
         fields: new Set<number>(data.tgqMatrix.fields),
@@ -564,7 +654,110 @@ export default function RecordPage() {
         )}
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+      {/* CATEGORY AND LEVEL SIT ABOVE THE TABS, because they govern two of
+          them. The category is what creates the questions at all; the level is
+          what decides which of them block a quote under the fallback half of
+          TGQ, and which BWS boilerplate the item is priced against. Putting
+          them inside the checklist tab would hide the reason the gates tab is
+          empty. */}
+      <div className="mt-6 flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3">
+        <label className="text-sm text-neutral-600">
+          Category
+          <select
+            value={record.category_id ?? ""}
+            disabled={savingCategory}
+            onChange={(event) => void setCategory(event.target.value)}
+            className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
+          >
+            <option value="">— not chosen —</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.family === "upholstery" ? "Uph" : "Cab"} · {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {/* The LEVEL decides which of those questions hold up a quote. This app
+            GUESSES one at intake and shows it here pre-selected, but the guess
+            is never the answer: until somebody picks, no question on this
+            record carries a tier and a chase for it is blocked. Choosing the
+            suggested value is what accepts it. */}
+        <label className="text-sm text-neutral-600">
+          Level
+          <select
+            // NOT pre-filled with the suggestion. A select showing "Simple"
+            // fires no change event when somebody picks Simple, so the one
+            // action a reader would take to agree would do nothing at all.
+            // Agreeing has its own button below.
+            value={record.level ?? ""}
+            disabled={savingLevel}
+            onChange={(event) => void setLevel(event.target.value)}
+            className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
+          >
+            <option value="">— not set —</option>
+            {ITEM_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {ITEM_LEVEL_LABELS[level]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {!record.category_id && (
+          <span className="text-xs text-neutral-500">
+            No checklist yet — choosing a category adds its questions. This is a later stage than intake.
+          </span>
+        )}
+        {record.category_id && !record.level && (
+          <span className="text-xs text-amber-800">
+            {record.level_suggested ? (
+              <>
+                Suggested: {normaliseItemLevel(record.level_suggested)
+                  ? ITEM_LEVEL_LABELS[normaliseItemLevel(record.level_suggested)!]
+                  : record.level_suggested}
+                {record.level_suggested_reason && <> — {record.level_suggested_reason}</>}. Nothing on this record is
+                tiered until you agree.{" "}
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  disabled={savingLevel}
+                  onClick={() => void setLevel(record.level_suggested ?? "")}
+                >
+                  Accept it
+                </Button>
+              </>
+            ) : (
+              NO_LEVEL_EXPLANATION
+            )}
+          </span>
+        )}
+      </div>
+
+      {/* THE TABS. Counts on every one, so you can see where the work is
+          before clicking — the same reason the project's run tabs carry them. */}
+      <div className="mt-6 flex flex-wrap gap-0.5 border-b border-neutral-200">
+        <RecordTabButton tab="specs" current={tab} onSelect={setTab} count={attributes.length}>
+          Specs captured
+        </RecordTabButton>
+        <RecordTabButton
+          tab="checklist"
+          current={tab}
+          onSelect={setTab}
+          count={answers.length === 0 ? null : `${outstandingCount} of ${answers.length}`}
+          tone={outstandingCount > 0 ? "warn" : "good"}
+        >
+          Checklist
+        </RecordTabButton>
+        <RecordTabButton tab="gates" current={tab} onSelect={setTab} count={gateSummaryLabel} tone={gateTone}>
+          Gates
+        </RecordTabButton>
+        <RecordTabButton tab="versions" current={tab} onSelect={setTab} count={null}>
+          Versions
+        </RecordTabButton>
+      </div>
+
+      {tab === "specs" && (
+      <>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">Specs captured</h2>
         {/* The counterpart to confirming a drawing card. `record_attributes` is
             requirement-free on purpose; this is the only way to record a
@@ -757,97 +950,10 @@ export default function RecordPage() {
         </div>
       )}
 
-      {/* The checklist. A record with no category has none yet, which is not
-          the same as having none outstanding. */}
-      <h2 className="mt-8 text-sm font-semibold text-neutral-500 uppercase tracking-wide">Checklist</h2>
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        <label className="text-sm text-neutral-600">
-          Category
-          <select
-            value={record.category_id ?? ""}
-            disabled={savingCategory}
-            onChange={(event) => void setCategory(event.target.value)}
-            className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
-          >
-            <option value="">— not chosen —</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.family === "upholstery" ? "Uph" : "Cab"} · {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {/* The LEVEL decides which of those questions hold up a quote. This app
-            GUESSES one at intake and shows it here pre-selected, but the guess
-            is never the answer: until somebody picks, no question on this
-            record carries a tier and a chase for it is blocked. Choosing the
-            suggested value is what accepts it. */}
-        <label className="text-sm text-neutral-600">
-          Level
-          <select
-            // NOT pre-filled with the suggestion. A select showing "Simple"
-            // fires no change event when somebody picks Simple, so the one
-            // action a reader would take to agree would do nothing at all.
-            // Agreeing has its own button below.
-            value={record.level ?? ""}
-            disabled={savingLevel}
-            onChange={(event) => void setLevel(event.target.value)}
-            className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
-          >
-            <option value="">— not set —</option>
-            {ITEM_LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {ITEM_LEVEL_LABELS[level]}
-              </option>
-            ))}
-          </select>
-        </label>
-        {!record.category_id && (
-          <span className="text-xs text-neutral-500">
-            No checklist yet — choosing a category adds its questions. This is a later stage than intake.
-          </span>
-        )}
-        {record.category_id && !record.level && (
-          <span className="text-xs text-amber-800">
-            {record.level_suggested ? (
-              <>
-                Suggested: {normaliseItemLevel(record.level_suggested)
-                  ? ITEM_LEVEL_LABELS[normaliseItemLevel(record.level_suggested)!]
-                  : record.level_suggested}
-                {record.level_suggested_reason && <> — {record.level_suggested_reason}</>}. Nothing on this record is
-                tiered until you agree.{" "}
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  disabled={savingLevel}
-                  onClick={() => void setLevel(record.level_suggested ?? "")}
-                >
-                  Accept it
-                </Button>
-              </>
-            ) : (
-              NO_LEVEL_EXPLANATION
-            )}
-          </span>
-        )}
-      </div>
-
-      {/* WHAT EACH GATE STILL WANTS, above the 43-question checklist. The
-          checklist is the full cheat sheet and always was; this is the part
-          somebody has to act on before the next milestone. */}
-      <GatePanel gates={data.gates} />
-
-      {answers.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setShowChecklist((value) => !value)}
-          className="mt-3 text-sm text-neutral-600 hover:text-neutral-900"
-        >
-          {showChecklist ? "▾" : "▸"} {answers.length} question{answers.length === 1 ? "" : "s"}
-        </button>
+      </>
       )}
 
-      {showChecklist && [...sections.entries()].map(([section, rows]) => (
+      {tab === "checklist" && [...sections.entries()].map(([section, rows]) => (
         <section key={section} className="mt-6">
           <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">{section}</h2>
           <ul className="mt-2 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
@@ -908,18 +1014,15 @@ export default function RecordPage() {
         </section>
       ))}
 
-      {/* Every version of this item, and what changed at each. Collapsed by
-          default: the question it answers is asked occasionally, and the specs
-          above are what the screen is for. */}
-      <h2 className="mt-8 text-sm font-semibold text-neutral-500 uppercase tracking-wide">History</h2>
-      <button
-        type="button"
-        onClick={() => setShowHistory((value) => !value)}
-        className="mt-1 text-sm text-neutral-600 hover:text-neutral-900"
-      >
-        {showHistory ? "▾ Hide versions" : "▸ Show versions and what changed"}
-      </button>
-      {showHistory && <RecordHistory recordId={record.id} reloadKey={historyKey} />}
+      {/* NOT COLLAPSED ANY MORE. It was behind a toggle because it sat under
+          four screens of checklist; on its own tab it can simply be the page. */}
+      {tab === "versions" && <RecordHistory recordId={record.id} reloadKey={historyKey} />}
+
+      {/* MATTHEW'S MATRIX, and what each gate still wants. Its own tab rather
+          than a panel above the 43-question checklist: the checklist is the
+          full cheat sheet and always was, and this is the part somebody has to
+          act on before the next milestone. */}
+      {tab === "gates" && <GatePanel gates={data.gates} />}
     </div>
   );
 }

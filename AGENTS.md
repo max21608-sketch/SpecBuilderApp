@@ -2193,6 +2193,43 @@ no reason.
   "Simple" fires no change event when somebody picks Simple, so agreeing would
   silently do nothing. Every accept is its own button.
 
+### The record is four jobs, and a tab each
+
+`src/app/dashboard/records/[id]/page.tsx`, `src/components/records/RecordDetails.tsx`
+
+The record screen was one page of four stacked sections — the specs, the
+checklist, the gates and the history — and the checklist alone is 43 questions.
+So the history sat under about four screens of scrolling, and the fix applied at
+the time was to collapse it behind a toggle. That is the wrong fix: a thing you
+have to expand every visit is a thing people stop opening, and both the
+checklist and the history were behind one.
+
+They are four different jobs done at four different moments, so they are four
+tabs. Five things about it.
+
+- **The identity stays on every tab.** The picture, the description, the
+  category and the level are what tell you which item you are looking at, so
+  they are above the tab bar and not in any of them.
+- **Category and level are above the tabs too, because they govern two of
+  them.** The category is what creates the questions at all, and the level
+  decides which block a quote under the fallback half of TGQ and which BWS
+  boilerplate the item is priced against. Inside the checklist tab they would
+  hide the reason the gates tab is empty.
+- **Every tab carries its count**, so you can see where the work is before
+  clicking — the project's run tabs' rule. The gates count is `n of 3` and
+  **null where Matthew's matrix does not cover the category**: `0 of 3` there
+  would say the record fails three gates, when it has none.
+- **Versions is no longer collapsed.** It was behind a toggle because it sat
+  under the checklist; on its own tab it can simply be the page. It still loads
+  only when opened, which is why its tab carries no count — a number there would
+  either be wrong or force a query nobody asked for.
+- **`RecordDetails` reads as a summary until Edit**, like the project's. Six
+  inputs and two paragraphs of help above the tabs on every visit put the tabs
+  themselves below the fold. The form inside is UNCHANGED, including the rule
+  that matters most about it: it saves as ONE act rather than on blur, because
+  typing the quote description, tabbing to Internal notes and typing there used
+  to lose the second box.
+
 ### A link goes somewhere; a button does something
 
 `src/components/ui/Button.tsx`

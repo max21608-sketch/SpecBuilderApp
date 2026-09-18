@@ -60,6 +60,21 @@ const formOf = (record: Details): Form => ({
   internalNotes: record.internal_notes ?? "",
 });
 
+/** One field of the read-only summary. */
+function Read({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={wide ? "col-span-2 sm:col-span-4" : ""}>
+      <dt className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{label}</dt>
+      <dd className="mt-0.5 text-neutral-900">{children}</dd>
+    </div>
+  );
+}
+
+/** A value nobody has set — in words, never an empty cell. */
+function Blank({ children = "not set" }: { children?: React.ReactNode }) {
+  return <span className="text-neutral-400">{children}</span>;
+}
+
 export default function RecordDetails({
   recordId,
   record,
@@ -74,6 +89,10 @@ export default function RecordDetails({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string[] | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  /** Back to exactly what the server holds. */
+  const reset = () => setForm(server);
 
   // Re-seed only when the SERVER's copy changes — a reload, or somebody else's
   // edit arriving. Keyed on the version, so a save of this panel resets it and
@@ -112,6 +131,8 @@ export default function RecordDetails({
       // Reload FIRST and report afterwards. A screen that refreshes after every
       // action clears its banner on a successful load, so setError() followed
       // by a reload showed a 409 for a few milliseconds and then nothing at all.
+      // Back to the summary. The panel exists to be filled in and left.
+      setEditing(false);
       await onSaved();
       if (!result.ok) setError(result.error);
       else setSaved(result.data.changed ?? []);
@@ -122,9 +143,52 @@ export default function RecordDetails({
 
   return (
     <section className="mt-6">
-      <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">This item</h2>
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">This item</h2>
+        <span className="flex-1" />
+        {/* FILLED IN ONCE, THEN READ. Six inputs and two paragraphs of help,
+            above the tabs, on every visit to every record — so the tabs
+            themselves started below the fold. It reads as a summary until
+            somebody presses Edit.
+
+            The form is UNCHANGED inside, including the rule that matters most
+            about it: it saves as ONE act rather than on blur, because typing
+            the quote description, tabbing to Internal notes and typing there
+            used to lose the second box — the first blur saved, the screen
+            reloaded, and the reload re-keyed every input to what the server
+            held. */}
+        {!editing && (
+          <Button size="xs" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+        )}
+      </div>
       {error && <p className="mt-2 text-xs text-red-700 border border-red-200 bg-red-50 rounded px-2 py-1">{error}</p>}
-      <div className="mt-2 rounded-lg border border-neutral-200 bg-white p-4 space-y-4">
+
+      {!editing && (
+        <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border border-neutral-200 bg-white px-4 py-3 text-sm sm:grid-cols-4">
+          <Read label="Description">{form.itemDescription || <Blank />}</Read>
+          <Read label="Area or room">{form.area || <Blank />}</Read>
+          <Read label="Qty">{form.qty || <Blank />}</Read>
+          <Read label="Designer">{form.designer || <Blank />}</Read>
+          <Read label="For the quote" wide>
+            {form.specDescription ? (
+              <span className="whitespace-pre-line">{form.specDescription}</span>
+            ) : (
+              <Blank>nothing recorded</Blank>
+            )}
+          </Read>
+          <Read label="Internal notes" wide>
+            {form.internalNotes ? (
+              <span className="whitespace-pre-line">{form.internalNotes}</span>
+            ) : (
+              <Blank>nothing recorded — never leaves this app</Blank>
+            )}
+          </Read>
+        </dl>
+      )}
+
+      <div className={`mt-2 rounded-lg border border-neutral-200 bg-white p-4 space-y-4 ${editing ? "" : "hidden"}`}>
         <div className="flex flex-wrap gap-4">
           <label className="text-xs text-neutral-600">
             Description
@@ -209,6 +273,19 @@ export default function RecordDetails({
               {saved.length === 0 ? "Nothing had changed." : `Saved ${saved.length} field${saved.length === 1 ? "" : "s"}.`}
             </span>
           )}
+          <span className="flex-1" />
+          {/* Puts the form back to what the server holds and closes it — the
+              only state the summary can honestly render. `dirty` is what makes
+              the difference visible before it goes. */}
+          <Button
+            size="sm"
+            onClick={() => {
+              reset();
+              setEditing(false);
+            }}
+          >
+            {dirty.length > 0 ? "Discard changes" : "Close"}
+          </Button>
         </div>
       </div>
     </section>
