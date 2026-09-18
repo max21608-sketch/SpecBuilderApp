@@ -420,29 +420,28 @@ export default function ReviewImportPage() {
 
   if (run.document_kind === "preamble") {
     return (
-      <PageBody width="wide">
-        <h1 className="text-xl font-semibold text-neutral-900">
-          Review preamble — {run.bws_project_number} {run.project_name}
-        </h1>
-        <PreambleReview importId={run.id} />
-      </PageBody>
+      <PreambleReview
+        importId={run.id}
+        crumb={packCrumb}
+        project={{ id: run.project_id, number: run.bws_project_number, name: run.project_name }}
+      />
     );
   }
 
   if (run.source_kind === "spec_document") {
     if (!data.registers) return <Spinner label="Loading the document" />;
     return (
-      <PageBody width="wide">
-        <h1 className="text-xl font-semibold text-neutral-900">
-          Review {run.document_kind === "email" ? "email" : "document"} — {run.bws_project_number}{" "}
-          {run.project_name}
-        </h1>
-        <SpecDocumentReview
-          data={{ import: run as unknown as SpecImport, registers: data.registers, message: data.message }}
-          reload={() => load()}
-          quietReload={() => load(true)}
-        />
-      </PageBody>
+      // The review component renders its OWN band: `PageHeader` is full-bleed
+      // and sits outside `PageBody`, and the tabs, the Re-match button and the
+      // confirm footer all read state that lives inside it.
+      <SpecDocumentReview
+        data={{ import: run as unknown as SpecImport, registers: data.registers, message: data.message }}
+        reload={() => load()}
+        quietReload={() => load(true)}
+        crumb={
+          run.document_kind === "email" ? { label: "Inbox", href: "/dashboard/inbox" } : packCrumb
+        }
+      />
     );
   }
 

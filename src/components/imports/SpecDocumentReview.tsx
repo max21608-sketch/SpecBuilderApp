@@ -25,10 +25,11 @@
 // and a key on it would remount the whole grid mid-edit.
 // ============================================================================
 import { useCallback, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import { usePoll } from "@/lib/use-poll";
-import EmailHeader, { type EmailMessage } from "@/components/imports/EmailHeader";
+import EmailEnvelope, { type EmailMessage } from "@/components/imports/EmailHeader";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import {
   classifyProposal,
@@ -41,6 +42,13 @@ import {
 import { commitGroups, groupIntoSpecRows, type SpecRow } from "@/lib/spec-review-rows";
 import type { ChangeDescription } from "@/lib/spec-change";
 import Tabs from "@/components/ui/Tabs";
+import PageHeader from "@/components/ui/PageHeader";
+import PageBody from "@/components/ui/PageBody";
+import Card from "@/components/ui/Card";
+import Chip from "@/components/ui/Chip";
+import Note from "@/components/ui/Note";
+import Button from "@/components/ui/Button";
+import type { Tone } from "@/components/ui/tone";
 import {
   ANSWER_STATES,
   ANSWER_STATE_LABELS,
@@ -87,10 +95,13 @@ export default function SpecDocumentReview({
   data,
   reload,
   quietReload,
+  crumb,
 }: {
   data: { import: SpecImport; registers: Registers; message?: EmailMessage | null };
   reload: () => Promise<void>;
   quietReload: () => Promise<void>;
+  /** Where this document came from: the Inbox for an email, its pack otherwise. */
+  crumb: { label: string; href: string };
 }) {
   const run = data.import;
   const proposals = useMemo(() => run.parsed?.lines ?? [], [run.parsed]);
@@ -228,89 +239,6 @@ export default function SpecDocumentReview({
     }
   }
 
-  // ---- the four body states ------------------------------------------------
-
-  if (run.status === "pending" || run.status === "failed") {
-    return (
-      <div className="mt-6 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6 text-center">
-        <p className="text-sm text-neutral-600">
-          {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS[run.document_kind] ?? run.document_kind}
-        </p>
-        {run.status === "failed" && run.error && (
-          <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2 text-left">
-            {run.error}
-          </p>
-        )}
-        <p className="mt-3 text-sm text-neutral-700">
-          Reading this document sends it to the model. Registering it did not; this is the step that
-          {run.status === "failed" ? " charges again." : " costs money."}
-        </p>
-        <button
-          type="button"
-          onClick={() => void startExtraction("start")}
-          disabled={busy !== null}
-          className="mt-4 text-sm px-4 py-2 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
-        >
-          {busy === "extract" ? "Starting…" : run.status === "failed" ? "Retry extraction" : "Extract"}
-        </button>
-        {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
-      </div>
-    );
-  }
-
-  if (waiting) {
-    // An expired claim writes an error while returning the row to `queued`, so
-    // an error here is NOT a failure and must not read like one.
-    const restartable =
-      (run.status === "parsing" && run.claim_live === false) ||
-      (run.status === "queued" && run.within_deadline === false) ||
-      run.claim_count >= 4;
-    const dispatchable = run.status === "queued" && run.claim_count === 0;
-
-    return (
-      <div className="mt-6 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6">
-        <Spinner label="Reading the document" />
-        <p className="mt-3 text-sm text-neutral-800">
-          {run.status === "queued" ? "Queued — starting shortly." : "Reading the document…"}
-        </p>
-        <p className="mt-1 text-sm text-neutral-600">
-          A long schedule can take a few minutes. You can leave this page — it carries on without you.
-        </p>
-        {run.error && (
-          <p className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
-            Last attempt reported: {run.error}
-          </p>
-        )}
-        {(restartable || dispatchable) && (
-          <div className="mt-4 flex gap-2">
-            {dispatchable && (
-              <button
-                type="button"
-                onClick={() => void startExtraction("retry-dispatch")}
-                disabled={busy !== null}
-                className="text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
-              >
-                Retry dispatch
-              </button>
-            )}
-            {restartable && (
-              <button
-                type="button"
-                onClick={() => void startExtraction("restart-expired")}
-                disabled={busy !== null}
-                className="text-sm px-3 py-1.5 rounded border border-amber-400 text-amber-900 hover:bg-amber-50 disabled:opacity-50"
-                title="This starts a new attempt and may be charged for another model call."
-              >
-                Start again (may be charged again)
-              </button>
-            )}
-          </div>
-        )}
-        {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
-      </div>
-    );
-  }
-
   // ---- the grid ------------------------------------------------------------
 
   /**
@@ -424,66 +352,243 @@ export default function SpecDocumentReview({
     setError(outcome);
   }
 
+  // ---- the band -----------------------------------------------------------
+  //
+  // THE HEADER BELONGS TO THE SCREEN, AND THIS COMPONENT IS THE SCREEN.
+  // `PageHeader` is full-bleed and sits OUTSIDE `PageBody`, so it cannot be
+  // rendered by the route above while the tabs, the re-match button and the
+  // confirm footer all live on state held in here. Lifting that state out to
+  // put one band above it would be three props and a second source of truth.
+  const message = data.message;
+  const isEmail = run.document_kind === "email";
+  const sender = message
+    ? message.from_name
+      ? `${message.from_name} <${message.from_addr ?? "unknown"}>`
+      : (message.from_addr ?? "unknown sender")
+    : null;
+  const received = message?.received_at
+    ? new Date(message.received_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
+    : null;
+
+  const shell = (tabs: React.ReactNode, children: React.ReactNode) => (
+    <>
+      <PageHeader
+        crumbs={[crumb]}
+        title={message?.subject?.trim() || run.filename || (isEmail ? "(no subject)" : "Specification document")}
+        subtitle={
+          <>
+            {sender && <>{sender} · </>}
+            {received && <>{received} · </>}
+            on{" "}
+            <Link href={`/dashboard/projects/${run.project_id}`} className="text-blue-700 no-underline hover:underline">
+              {run.bws_project_number} — {run.project_name}
+            </Link>
+            {/* WHY THIS MESSAGE IS ON THIS PROJECT, in the app's own words.
+                Routing never breaks its own tie, so a reader has to be able to
+                see which signal decided it and disagree with it. */}
+            {message?.routing_reason && (
+              <>
+                {" "}
+                <Chip tone="info">auto · {message.routing_reason}</Chip>
+              </>
+            )}
+            {" · "}
+            {/* A plain link, not a button: it is a DOWNLOAD of the evidence,
+                and nothing on this screen renders an .eml body — it is markup a
+                stranger wrote. */}
+            <a
+              href={message ? `/api/email-messages/${message.id}/mime` : `/api/imports/${run.id}/source`}
+              className="text-blue-700 no-underline hover:underline"
+            >
+              {message ? "open the .eml" : "open the source document"}
+            </a>
+          </>
+        }
+        actions={
+          rows.length > 0 ? (
+            // Says plainly that it is free. Every other button on this screen
+            // that touches extraction spends money, so one that does not has to
+            // say so or nobody will press it.
+            <Button disabled={busy !== null} onClick={() => void rematch()}>
+              {busy === "rematch" ? "Matching…" : "Re-match"}
+              <span className="font-normal text-neutral-400"> · free</span>
+            </Button>
+          ) : undefined
+        }
+        tabs={tabs}
+      />
+      <PageBody width="wide">{children}</PageBody>
+    </>
+  );
+
+  // ---- the four body states ------------------------------------------------
+
+  if (run.status === "pending" || run.status === "failed") {
+    return shell(
+      undefined,
+      <Card title="This document has not been read">
+        <p className="text-neutral-600">
+          {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS[run.document_kind] ?? run.document_kind}
+        </p>
+        {run.status === "failed" && run.error && <Note tone="danger">{run.error}</Note>}
+        <p className="mt-3 text-neutral-700">
+          Reading this document sends it to the model. Registering it did not; this is the step that
+          {run.status === "failed" ? " charges again." : " costs money."}
+        </p>
+        <Button
+          variant="primary"
+          className="mt-3"
+          onClick={() => void startExtraction("start")}
+          disabled={busy !== null}
+        >
+          {busy === "extract" ? "Starting…" : run.status === "failed" ? "Retry extraction" : "Extract"}
+        </Button>
+        {error && <Note tone="danger">{error}</Note>}
+      </Card>,
+    );
+  }
+
+  if (waiting) {
+    // An expired claim writes an error while returning the row to `queued`, so
+    // an error here is NOT a failure and must not read like one.
+    const restartable =
+      (run.status === "parsing" && run.claim_live === false) ||
+      (run.status === "queued" && run.within_deadline === false) ||
+      run.claim_count >= 4;
+    const dispatchable = run.status === "queued" && run.claim_count === 0;
+
+    return shell(
+      undefined,
+      <Card title="Being read">
+        <Spinner label="Reading the document" />
+        <p className="mt-3 text-neutral-800">
+          {run.status === "queued" ? "Queued — starting shortly." : "Reading the document…"}
+        </p>
+        <p className="mt-1 text-neutral-600">
+          A long schedule can take a few minutes. You can leave this page — it carries on without you.
+        </p>
+        {run.error && <Note tone="plain">Last attempt reported: {run.error}</Note>}
+        {(restartable || dispatchable) && (
+          <div className="mt-3 flex gap-2">
+            {dispatchable && (
+              <Button disabled={busy !== null} onClick={() => void startExtraction("retry-dispatch")}>
+                Retry dispatch
+              </Button>
+            )}
+            {restartable && (
+              <Button
+                variant="danger"
+                disabled={busy !== null}
+                onClick={() => void startExtraction("restart-expired")}
+                title="This starts a new attempt and may be charged for another model call."
+              >
+                Start again (may be charged again)
+              </Button>
+            )}
+          </div>
+        )}
+        {error && <Note tone="danger">{error}</Note>}
+      </Card>,
+    );
+  }
+
+  /**
+   * Ignore everything still pending, in one request.
+   *
+   * Reversible: an ignored proposal keeps its row and the Ignored tab restores
+   * it. That is what makes a bulk dismissal safe here and would not make a bulk
+   * CONFIRM safe — a confirm writes answers and each one is a decision.
+   */
+  async function ignoreAll() {
+    for (const proposal of sections.pending) await flush(proposal);
+    await act("ignore:all", {
+      action: "ignore",
+      proposals: sections.pending.map((proposal) => ({ id: proposal.id, version: versionOf(proposal) })),
+    });
+  }
+
   if (proposals.length === 0) {
-    const isEmail = run.document_kind === "email";
-    return (
-      <div className="mt-4">
-        {data.message && <EmailHeader message={data.message} />}
-        <div className="mt-4 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6 text-center">
-          <p className="font-medium text-neutral-900">
-            {isEmail ? "Nothing to record" : "No proposals found"}
-          </p>
-          <p className="mt-2 text-sm text-neutral-600">
+    return shell(
+      undefined,
+      <>
+        <Card title={isEmail ? "Nothing to record" : "No proposals found"}>
+          <p className="text-neutral-600">
             The model read {isEmail ? "this email" : (run.filename ?? "this document")} and found nothing it could
             record as a specification value.{" "}
-            {run.parsed?.documentNotes ? `It noted: “${run.parsed.documentNotes}”` : ""}
+            {run.parsed?.documentNotes ? `It noted: \u201C${run.parsed.documentNotes}\u201D` : ""}
           </p>
-          <p className="mt-2 text-sm text-neutral-600">
+          <p className="mt-2 text-neutral-600">
             {isEmail
               ? "That is a normal outcome: most email is not specification. The message is kept either way."
               : "That is a result, not an error — check the document is the one you meant."}
           </p>
-        </div>
-      </div>
+        </Card>
+        {message && <EmailEnvelope message={message} />}
+      </>,
     );
   }
 
+  const runsWritten = new Set(rows.flatMap((row) => row.runs.map((member) => member.runName).filter(Boolean))).size;
+  const needsAck = commitBlockers.filter((blocker) => blocker.code === "overwrite" || blocker.code === "replace").length;
 
-  return (
-    <div className="mt-4">
-      {data.message && <EmailHeader message={data.message} />}
-      {error && (
-        <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
+  const tabs = (
+    // `useState`, not the URL: this strip is nested inside a review component,
+    // nothing links into it, and a `?tab=` would be a second address for a
+    // screen that already has one.
+    <Tabs
+      label="Proposals in this document"
+      value={tab}
+      onChange={setTab}
+      items={[
+        { id: "pending", label: "To review", count: sections.pending.length || null, tone: "warn" },
+        { id: "applied", label: "Applied", count: sections.applied.length || null, tone: "good" },
+        { id: "ignored", label: "Ignored", count: sections.ignored.length || null },
+        { id: "message", label: message ? "The message" : "The document", count: null },
+      ]}
+    />
+  );
+
+  return shell(
+    tabs,
+    <>
+      {error && <Note tone="danger">{error}</Note>}
+
+      {/* THE FAN-OUT, SAID ONCE AT THE TOP. One code on three runs is three
+          records and all three are written together; a reviewer who does not
+          know that reads twenty-one proposals as twenty-one problems. */}
+      {tab === "pending" && rows.length > 0 && (
+        <Note
+          tone="info"
+          title={`${rows.length} ${rows.length === 1 ? "specification" : "specifications"}, each landing on ${
+            runsWritten || 1
+          } ${runsWritten === 1 ? "run" : "runs"}.`}
+        >
+          {rows[0]?.distinctRuns.length ? (
+            <>
+              A code on {rows[0].distinctRuns.map((entry) => entry.runName ?? "no run").join(", ")} is one record per
+              run — a fan-out, written together. Untick a run whose spec genuinely differs.
+            </>
+          ) : (
+            <>One record per run is a fan-out, and all of them are written together.</>
+          )}
+        </Note>
       )}
 
-      <p className="text-sm text-neutral-600">
-        {sections.pending.length} to review · {sections.applied.length} applied · {sections.ignored.length} ignored
-        {run.model_metadata?.elapsedMs ? ` · read in ${Math.round(run.model_metadata.elapsedMs / 1000)}s` : ""} ·{" "}
-        <a href={`/api/imports/${run.id}/source`} target="_blank" rel="noreferrer" className="underline">
-          open the source document
-        </a>
-      </p>
-      {run.parsed?.documentNotes && (
-        <p className="mt-2 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
-          {run.parsed.documentNotes}
-        </p>
+      {rows.some((row) => row.unplacedCount > 0) && tab === "pending" && (
+        <Note tone="warn">
+          {rows.filter((row) => row.unplacedCount > 0).length} of these did not find an item on this project. If the
+          bill has changed since this was read, or the app has learnt to read something it could not before, press
+          Re-match — it re-reads nothing and costs nothing.
+        </Note>
       )}
 
-      {/* `useState`, not the URL: this strip is nested inside a review
-          component, nothing links into it, and a `?tab=` would be a second
-          address for a screen that already has one. */}
-      <Tabs
-        className="mt-4"
-        label="Proposals in this document"
-        value={tab}
-        onChange={setTab}
-        items={[
-          { id: "pending", label: "To review", count: sections.pending.length || null },
-          { id: "applied", label: "Applied", count: sections.applied.length || null },
-          { id: "ignored", label: "Ignored", count: sections.ignored.length || null },
-          { id: "message", label: data.message ? "The message" : "The document", count: null },
-        ]}
-      />
+      {run.status === "confirmed" && (
+        // Never "complete": nothing is left to REVIEW, which is not the same as
+        // every answer being settled.
+        <Note tone="good">Review complete — every proposal has been applied or ignored. Some answers may still be TBC.</Note>
+      )}
+
+      {run.parsed?.documentNotes && tab === "pending" && <Note tone="plain">{run.parsed.documentNotes}</Note>}
 
       {/* THE MESSAGE ITSELF, which had nowhere on this screen.
           ==============================================================
@@ -495,136 +600,104 @@ export default function SpecDocumentReview({
           `nosniff`. Quoted history is kept and marked rather than stripped,
           because a reply quotes the question it answers. */}
       {tab === "message" && (
-        <div className="mt-4 rounded-lg border border-neutral-200 bg-white p-4">
-          {data.message?.body_text ? (
-            <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap font-sans text-sm text-neutral-800">
-              {data.message.body_text}
-            </pre>
-          ) : (
-            <p className="text-sm text-neutral-600">
-              No plain-text body was recorded for this document.{" "}
-              <a href={`/api/imports/${run.id}/source`} target="_blank" rel="noreferrer" className="underline">
-                Open the source document
-              </a>{" "}
-              instead — it downloads rather than rendering, because its markup is not ours.
-            </p>
-          )}
-        </div>
-      )}
-      {run.status === "confirmed" && (
-        // Never "complete": nothing is left to REVIEW, which is not the same as
-        // every answer being settled.
-        <p className="mt-2 text-sm text-green-800 bg-green-50 border border-green-200 rounded px-3 py-2">
-          Review complete — every proposal has been applied or ignored. Some answers may still be TBC.
-        </p>
-      )}
-
-      {rows.length > 0 && (
-        // Offered whenever anything is still pending, not only when something
-        // failed to place. A matching rule corrected AFTER a document was read
-        // reaches it only through here — the dimension reading landed after
-        // this email was read, and every row had already resolved to a record,
-        // so a control that only appeared for unplaced rows would have left the
-        // fix reachable solely by paying for a second read.
-        <div
-          className={`mt-4 rounded-lg px-4 py-3 border ${
-            rows.some((row) => row.unplacedCount > 0) ? "border-amber-200 bg-amber-50" : "border-neutral-200 bg-white"
-          }`}
-        >
-          {rows.some((row) => row.unplacedCount > 0) && (
-            <p className="text-sm text-amber-900">
-              {rows.filter((row) => row.unplacedCount > 0).length} of these did not find an item on this project.
-            </p>
-          )}
-          <p className="mt-1 text-sm text-neutral-700">
-            {/* Says plainly that it is free. Every other button on this screen
-                that touches extraction spends money, so one that does not has
-                to say so or nobody will press it. */}
-            If the bill has changed since this was read, or the app has learnt to read something it could not before,
-            match it again — this re-reads nothing and costs nothing.
-          </p>
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => void rematch()}
-            className="mt-2 text-sm px-3 py-1.5 rounded border border-neutral-300 bg-white hover:bg-neutral-100 disabled:opacity-50"
-          >
-            {busy === "rematch" ? "Matching…" : "Match against the bill again"}
-          </button>
-        </div>
+        <>
+          {message && <EmailEnvelope message={message} />}
+          <Card title={message ? "The message, as plain text" : "The document"}>
+            {message?.body_text ? (
+              <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap font-sans text-sm text-neutral-800">
+                {message.body_text}
+              </pre>
+            ) : (
+              <p className="text-neutral-600">
+                No plain-text body was recorded for this document.{" "}
+                <a href={`/api/imports/${run.id}/source`} target="_blank" rel="noreferrer" className="underline">
+                  Open the source document
+                </a>{" "}
+                instead — it downloads rather than rendering, because its markup is not ours.
+              </p>
+            )}
+          </Card>
+        </>
       )}
 
       {tab === "pending" && (
-      <SpecReviewTable
-        rows={rows}
-        all={proposals}
-        registers={data.registers}
-        dirty={dirty}
-        saveErrors={saveErrors}
-        busy={busy}
-        expanded={expanded}
-        onToggleExpand={(key) =>
-          setExpanded((current) => ({ ...current, [key]: !current[key] }))
-        }
-        onType={typeValue}
-        onChange={(proposal, changes) => void save(proposal, changes, ++seq.current)}
-        onIgnoreRow={async (row) => {
-          for (const member of row.runs) {
-            const proposal = proposals.find((p) => p.id === member.proposalId);
-            if (proposal) await flush(proposal);
-          }
-          await act(`ignore:${row.key}`, {
-            action: "ignore",
-            proposals: row.runs.map((member) => {
-              const proposal = proposals.find((p) => p.id === member.proposalId);
-              return { id: member.proposalId, version: proposal ? versionOf(proposal) : 0 };
-            }),
-          });
-        }}
-      />
-      )}
+        <Card flush>
+          <SpecReviewTable
+            rows={rows}
+            all={proposals}
+            registers={data.registers}
+            dirty={dirty}
+            saveErrors={saveErrors}
+            busy={busy}
+            expanded={expanded}
+            onToggleExpand={(key) => setExpanded((current) => ({ ...current, [key]: !current[key] }))}
+            onType={typeValue}
+            onChange={(proposal, changes) => void save(proposal, changes, ++seq.current)}
+            onIgnoreRow={async (row) => {
+              for (const member of row.runs) {
+                const proposal = proposals.find((p) => p.id === member.proposalId);
+                if (proposal) await flush(proposal);
+              }
+              await act(`ignore:${row.key}`, {
+                action: "ignore",
+                proposals: row.runs.map((member) => {
+                  const proposal = proposals.find((p) => p.id === member.proposalId);
+                  return { id: member.proposalId, version: proposal ? versionOf(proposal) : 0 };
+                }),
+              });
+            }}
+          />
 
-      {commits.length > 0 && (
-        <div className="mt-4 border border-neutral-200 rounded-lg bg-white px-4 py-3 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            disabled={busy !== null || commitBlockers.length > 0}
-            onClick={() => void confirmAll()}
-            className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50"
-          >
-            {busy === "confirm:all" ? "Confirming…" : `Confirm ${pendingPlaced} ${pendingPlaced === 1 ? "answer" : "answers"}`}
-          </button>
-          <p className="text-sm text-neutral-600">
-            {/* The record is still the unit of commit: one request per record,
-                each carrying that record's whole pending set. Said out loud,
-                because "confirm everything" over three runs is three writes and
-                a reviewer should know one can be refused while another lands. */}
-            Writes to {commits.length} {commits.length === 1 ? "record" : "records"} across{" "}
-            {new Set(rows.flatMap((row) => row.runs.map((r) => r.runName).filter(Boolean))).size || 1} run
-            {new Set(rows.flatMap((row) => row.runs.map((r) => r.runName).filter(Boolean))).size === 1 ? "" : "s"}.
-          </p>
-          {commitBlockers.length > 0 && (
-            <p className="text-sm text-amber-800 w-full">
-              {commitBlockers.length} {commitBlockers.length === 1 ? "row needs" : "rows need"} attention before this can
-              be confirmed. Open the rows marked below.
-            </p>
+          {/* THE FOOTER SAYS WHAT CONFIRM WRITES, AND WHAT IS STOPPING IT.
+              The record is still the unit of commit: one request per record,
+              each carrying that record's whole pending set. Said out loud,
+              because "confirm everything" over three runs is three writes and a
+              reviewer should know one can be refused while another lands. */}
+          {commits.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
+              <span className="text-neutral-600">
+                <b className="text-neutral-900">
+                  {pendingPlaced} {pendingPlaced === 1 ? "spec" : "specs"}
+                </b>{" "}
+                · writes to {commits.length} {commits.length === 1 ? "record" : "records"} across{" "}
+                {runsWritten || 1} {runsWritten === 1 ? "run" : "runs"}
+              </span>
+              {commitBlockers.length > 0 && (
+                <Chip tone="danger">
+                  {needsAck > 0
+                    ? `${needsAck} ${needsAck === 1 ? "needs" : "need"} your acknowledgement before it can commit`
+                    : `${commitBlockers.length} ${commitBlockers.length === 1 ? "row needs" : "rows need"} attention before this can be confirmed`}
+                </Chip>
+              )}
+              <span className="flex-1" />
+              <Button disabled={busy !== null} onClick={() => void ignoreAll()}>
+                {busy === "ignore:all" ? "Ignoring…" : "Ignore the rest"}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={busy !== null || commitBlockers.length > 0}
+                onClick={() => void confirmAll()}
+              >
+                {busy === "confirm:all" ? "Confirming…" : "Confirm"}
+              </Button>
+            </div>
           )}
-        </div>
+        </Card>
       )}
 
       {tab === "ignored" && (
-        <div className="mt-4 border border-neutral-200 rounded-lg bg-white">
+        <Card flush>
           {sections.ignored.length === 0 && (
-            <p className="px-4 py-6 text-sm text-neutral-500">Nothing has been ignored on this document.</p>
+            <p className="px-4 py-6 text-neutral-500">Nothing has been ignored on this document.</p>
           )}
-          <ul className="divide-y divide-neutral-100">
+          <ul>
             {sections.ignored.map((proposal) => (
-              <li key={proposal.id} className="px-4 py-2 flex items-center gap-3 text-sm">
+              <li key={proposal.id} className="flex items-center gap-3 border-b border-neutral-100 px-4 py-2">
                 <span className="flex-1 text-neutral-600">
                   {proposal.raw.refRaw ?? "—"} · {proposal.raw.attributeRaw ?? "—"} · {proposal.raw.valueRaw ?? "—"}
                 </span>
-                <button
-                  type="button"
+                <Button
+                  size="xs"
                   disabled={busy !== null}
                   onClick={() =>
                     void act(`restore:${proposal.id}`, {
@@ -632,50 +705,46 @@ export default function SpecDocumentReview({
                       proposals: [{ id: proposal.id, version: versionOf(proposal) }],
                     })
                   }
-                  className="text-sm px-2 py-1 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
                 >
                   Restore
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
-        </div>
+        </Card>
       )}
 
       {tab === "applied" && (
-        <div className="mt-4 border border-neutral-200 rounded-lg bg-white">
+        <Card flush>
           {sections.applied.length === 0 && (
-            <p className="px-4 py-6 text-sm text-neutral-500">Nothing has been applied from this document yet.</p>
+            <p className="px-4 py-6 text-neutral-500">Nothing has been applied from this document yet.</p>
           )}
-          <ul className="divide-y divide-neutral-100 text-sm">
+          <ul>
             {sections.applied.map((proposal) => (
-              <li key={proposal.id} className="px-4 py-2 text-neutral-600">
+              <li key={proposal.id} className="border-b border-neutral-100 px-4 py-2 text-neutral-600">
                 {proposal.target?.recordLabel} · {proposal.target?.requirementPrompt} →{" "}
                 <span className="text-neutral-900">{proposal.applied?.value ?? "N/A"}</span>{" "}
                 <span className="text-xs">({proposal.applied?.state})</span>
               </li>
             ))}
           </ul>
-        </div>
+        </Card>
       )}
 
       {/* The diagnostic fallback. It should always be empty; if it is not, a
           proposal is being held in the run and this is the only place it is
           visible. An invisible row is one nobody can fix. */}
       {sections.unclassified.length > 0 && (
-        <div className="mt-4 border border-red-300 bg-red-50 rounded-lg p-4">
-          <p className="text-sm font-medium text-red-900">
-            {sections.unclassified.length} row{sections.unclassified.length === 1 ? "" : "s"} could not be
-            classified. This is a bug — please report it with this import&rsquo;s address.
-          </p>
-          <ul className="mt-2 text-xs text-red-800 font-mono">
+        <Note tone="danger" title={`${sections.unclassified.length} rows could not be classified.`}>
+          This is a bug — please report it with this import&rsquo;s address.
+          <ul className="mt-1 font-mono text-xs">
             {sections.unclassified.map((proposal) => (
               <li key={proposal.id}>{proposal.id}</li>
             ))}
           </ul>
-        </div>
+        </Note>
       )}
-    </div>
+    </>,
   );
 }
 
@@ -870,16 +939,27 @@ function ProposalRow({
 //   snapshot, not the model's reasoning paragraph, which is kept but folded
 //   away: what a reviewer needs first is whether this is new, a confirmation
 //   or an overwrite.
-const CHANGE_CLASS: Record<ChangeDescription["kind"], string> = {
-  provides: "text-neutral-700 border-neutral-300 bg-neutral-50",
-  confirms: "text-green-700 border-green-300 bg-green-50",
-  changes: "text-amber-800 border-amber-300 bg-amber-50",
-  repeats: "text-neutral-500 border-neutral-200 bg-white",
-  withdraws: "text-amber-800 border-amber-300 bg-amber-50",
-  not_applicable: "text-neutral-600 border-neutral-300 bg-neutral-50",
-  no_question: "text-amber-800 border-amber-300 bg-amber-50",
-  unplaced: "text-red-700 border-red-300 bg-red-50",
+/**
+ * What each verb MEANS, in the house colour language.
+ *
+ * Green is settled — a value provided or confirmed. Amber needs a person: an
+ * overwrite, a withdrawal to TBC, a question nothing matched, an item nothing
+ * placed. Plain is a repeat, which changes nothing and should not compete for
+ * attention with the row above it that does.
+ */
+const CHANGE_TONE: Record<ChangeDescription["kind"], Tone> = {
+  provides: "good",
+  confirms: "good",
+  changes: "warn",
+  repeats: "plain",
+  withdraws: "warn",
+  not_applicable: "plain",
+  no_question: "warn",
+  unplaced: "warn",
 };
+
+/** The six-column grid the header and every row share. */
+const ROW_GRID = "grid grid-cols-[minmax(0,1fr)_200px_150px_140px_100px] gap-2.5 px-4";
 
 function SpecReviewTable({
   rows,
@@ -906,49 +986,114 @@ function SpecReviewTable({
   onChange: (proposal: Proposal, changes: Record<string, unknown>) => void;
   onIgnoreRow: (row: SpecRow) => Promise<void>;
 }) {
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    return <p className="px-4 py-6 text-neutral-500">Nothing is waiting to be reviewed on this document.</p>;
+  }
 
   return (
-    // NOT overflow-hidden on the wrapper: it makes the wrapper the sticky
-    // scroll container and the column header then covers the first row — the
-    // lesson the chase table learned.
-    <div className="mt-4 border border-neutral-200 rounded-lg bg-white">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-200">
-            <th className="px-3 py-2 font-medium">Spec</th>
-            <th className="px-3 py-2 font-medium">What this says</th>
-            <th className="px-3 py-2 font-medium">Value</th>
-            <th className="px-3 py-2 font-medium">Applies to</th>
-            <th className="px-3 py-2 font-medium sr-only">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const isOpen = expanded[row.key] ?? false;
-            const blocked = row.blockers.length > 0;
-            return (
-              <SpecRowView
-                key={row.key}
-                row={row}
-                isOpen={isOpen}
-                blocked={blocked}
-                all={all}
-                registers={registers}
-                dirty={dirty}
-                saveErrors={saveErrors}
-                busy={busy}
-                onToggleExpand={onToggleExpand}
-                onType={onType}
-                onChange={onChange}
-                onIgnoreRow={onIgnoreRow}
-              />
-            );
-          })}
-        </tbody>
-      </table>
+    // A GRID, NOT A TABLE, and that is what removes the trap rather than
+    // working around it. The old markup was a `<table>` whose expanded panel
+    // and blocker line were each an extra `<tr colSpan={5}>`, which is the
+    // shape the drawings card had to learn its way out of. Here the row and its
+    // panel are siblings in a bordered block, so there is no column count for a
+    // panel to be squeezed into and no `divide-y` to draw a line between a row
+    // and its own panel.
+    <div>
+      <div
+        className={`${ROW_GRID} border-b border-neutral-200 bg-[#fcfcfc] py-2 text-th font-semibold uppercase tracking-wider text-neutral-500`}
+      >
+        <span>What the email says</span>
+        <span>Lands on</span>
+        <span>Value</span>
+        <span>Does what</span>
+        <span />
+      </div>
+      {rows.map((row) => (
+        <SpecRowView
+          key={row.key}
+          row={row}
+          isOpen={expanded[row.key] ?? false}
+          blocked={row.blockers.length > 0}
+          all={all}
+          registers={registers}
+          dirty={dirty}
+          saveErrors={saveErrors}
+          busy={busy}
+          onToggleExpand={onToggleExpand}
+          onType={onType}
+          onChange={onChange}
+          onIgnoreRow={onIgnoreRow}
+        />
+      ))}
     </div>
   );
+}
+
+/**
+ * WHERE THE VALUE LANDS, read off the members rather than off the wording.
+ *
+ * A dimension lands in a SLOT and all five compose into BWS field 3; a finish
+ * lands in a BWS field decided by what the record already holds; everything
+ * else answers a checklist question. Those are three different destinations and
+ * the column says which, because "Dimensions" beside four slot chips is what
+ * makes an "Overall" line that placed W, D and H legible at a glance.
+ */
+function LandsOn({ row, members }: { row: SpecRow; members: Proposal[] }) {
+  const first = members[0];
+  const finish = members.find((proposal) => proposal.finish)?.finish;
+  // `SpecRow.slots` deliberately holds a finish's BWS FIELD NAME as well as a
+  // dimension's slot — both answer "where does this land" — so the branch is
+  // chosen on the MEMBER, never on that list. Reading it first printed
+  // "Dimensions · COM 3" over a fabric.
+  const dimensionSlots = members.map((proposal) => proposal.dimension?.slot).filter(Boolean) as string[];
+
+  if (dimensionSlots.length > 0) {
+    return (
+      <span>
+        Dimensions{" "}
+        {[...new Set(dimensionSlots)].map((slot) => (
+          <Chip key={slot} tone="live" className="ml-1">
+            {slot}
+          </Chip>
+        ))}
+        <span className="mt-0.5 block text-[11px] text-neutral-500">
+          {new Set(dimensionSlots).size} {new Set(dimensionSlots).size === 1 ? "slot" : "slots"} · {row.runs.length}{" "}
+          {row.runs.length === 1 ? "proposal" : "proposals"}
+        </span>
+      </span>
+    );
+  }
+
+  if (finish) {
+    return (
+      <span>
+        {finish.specFieldName ?? "no BWS field"}
+        {finish.codeRaw && (
+          <Chip mono className="ml-1">
+            {finish.codeRaw}
+          </Chip>
+        )}
+        <span className="mt-0.5 block text-[11px] text-neutral-500">
+          {row.runs.length} {row.runs.length === 1 ? "proposal" : "proposals"}
+        </span>
+      </span>
+    );
+  }
+
+  if (first?.target?.requirementPrompt) {
+    return (
+      <span>
+        {first.target.requirementPrompt}
+        <span className="mt-0.5 block text-[11px] text-neutral-500">
+          {row.runs.length} {row.runs.length === 1 ? "proposal" : "proposals"}
+        </span>
+      </span>
+    );
+  }
+
+  // "Item not found" and "question not matched" are different jobs, and the
+  // blocker on the row names which half is missing.
+  return <Chip tone="warn">Not placed</Chip>;
 }
 
 function SpecRowView({
@@ -983,162 +1128,137 @@ function SpecRowView({
     .filter((proposal): proposal is Proposal => Boolean(proposal));
 
   return (
-    <>
-      <tr className={`border-b border-neutral-100 align-top ${blocked ? "bg-amber-50/40" : ""}`}>
-        <td className="px-3 py-2">
+    <div className={`border-b border-neutral-200 ${blocked ? "bg-amber-50/40" : ""}`.trim()}>
+      <div className={`${ROW_GRID} py-2.5`}>
+        <div className="min-w-0">
           <button
             type="button"
             onClick={() => onToggleExpand(row.key)}
-            className="text-left font-medium text-neutral-900 hover:underline"
+            className="text-left font-semibold text-neutral-900 hover:underline"
           >
             {row.attributeRaw ?? "Unlabelled"}
           </button>
-          {row.slots.length > 0 && (
-            // A dimension does not answer a question — it fills a slot, and
-            // all five compose into one BWS cell. Saying which slots makes an
-            // "Overall" line that placed W, D and H legible at a glance.
-            <span className="ml-2 text-xs px-1.5 py-0.5 rounded border border-sky-300 bg-sky-50 text-sky-800">
-              {row.slots.join(" · ")}
-            </span>
-          )}
           {row.configurationLabel && (
             // A READING of the wording, never a target. 0024's configurations
             // are real records and this email names one; nothing resolves it,
             // because a configuration carries no client ref and may not exist.
-            <span className="ml-2 text-xs px-1.5 py-0.5 rounded border border-yellow-300 bg-yellow-100/70 text-yellow-900">
-              configuration {row.configurationLabel}
-            </span>
+            <Chip tone="guess" className="ml-1.5">
+              Configuration {row.configurationLabel}
+            </Chip>
           )}
-        </td>
-
-        <td className="px-3 py-2">
-          <span className={`text-xs px-1.5 py-0.5 rounded border ${CHANGE_CLASS[row.summary.kind]}`}>
-            {row.summary.label}
-          </span>
-          {row.summary.was && <span className="ml-2 text-xs text-neutral-500">was {row.summary.was}</span>}
+          {/* THE SENTENCE IT WAS READ FROM IS THE PROVENANCE. An email has no
+              page to turn to, so the quoted line is what makes a proposal
+              checkable — it belongs on the row, not behind a disclosure. */}
+          {row.quotedText && (
+            <p className="mt-1 border-l-2 border-neutral-300 pl-2.5 text-xs italic text-neutral-700">
+              “{row.quotedText}”
+            </p>
+          )}
+          {row.note && <p className="mt-1 text-[11px] text-neutral-500">{row.note}</p>}
           {row.varies && (
             // Never averaged. One row genuinely being several decisions is the
             // case most worth saying out loud.
             <p className="mt-1 text-xs text-amber-800">The runs do not agree — open the row.</p>
           )}
-        </td>
+        </div>
 
-        <td className="px-3 py-2 text-neutral-800">{row.valueRaw ?? "—"}</td>
+        <div className="min-w-0 text-neutral-700">
+          <LandsOn row={row} members={members} />
+        </div>
 
-        <td className="px-3 py-2 text-neutral-700">
-          {row.placedCount > 0 && (
-            <span>
-              {row.placedCount} {row.placedCount === 1 ? "run" : "runs"}
-              <span className="text-neutral-500">
-                {" "}
-                · {row.distinctRuns.map((r) => r.runName ?? "—").join(", ")}
-              </span>
-            </span>
-          )}
-          {row.unplacedCount > 0 && (
-            <p className="text-xs text-red-700">
-              {row.placedCount > 0 ? `${row.unplacedCount} not placed` : "Not placed — open the row to choose"}
-            </p>
-          )}
-        </td>
+        <div className="min-w-0 font-mono text-neutral-800">{row.valueRaw ?? "—"}</div>
 
-        <td className="px-3 py-2 text-right whitespace-nowrap">
+        <div className="min-w-0">
+          <Chip tone={CHANGE_TONE[row.summary.kind]}>{row.summary.label}</Chip>
+          {row.summary.was && <span className="mt-0.5 block text-[11px] text-neutral-500">was {row.summary.was}</span>}
+        </div>
+
+        <div className="text-right">
           <button
             type="button"
             onClick={() => onToggleExpand(row.key)}
-            className="text-sm px-2 py-1 rounded border border-transparent hover:border-neutral-300 hover:bg-neutral-50"
+            className="text-xs text-blue-700 hover:underline"
           >
-            {isOpen ? "Close" : "Open"}
+            {row.placedCount > 0
+              ? `${row.distinctRuns.length} ${row.distinctRuns.length === 1 ? "run" : "runs"}`
+              : "open"}{" "}
+            {isOpen ? "▴" : "▾"}
           </button>
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => void onIgnoreRow(row)}
-            className="ml-1 text-sm px-2 py-1 rounded border border-transparent hover:border-neutral-300 hover:bg-neutral-50 disabled:opacity-50"
-          >
-            Ignore
-          </button>
-        </td>
-      </tr>
+          <span className="mt-1 block">
+            <Button variant="quiet" size="xs" disabled={busy !== null} onClick={() => void onIgnoreRow(row)}>
+              Ignore
+            </Button>
+          </span>
+        </div>
+      </div>
 
       {/* Blockers on the ROW, beside what they are about — not in a banner at
           the top of the page, which is where a 400 used to land. */}
       {blocked && !isOpen && (
-        <tr className="border-b border-neutral-100">
-          <td colSpan={5} className="px-3 pb-2 text-sm text-amber-800">
-            {[...new Set(row.blockers.map((blocker) => blocker.message))].join(" ")}
-          </td>
-        </tr>
+        <p className="px-4 pb-2 text-xs text-amber-900">
+          {[...new Set(row.blockers.map((blocker) => blocker.message))].join(" ")}
+        </p>
       )}
 
       {isOpen && (
-        // A spanning panel is its OWN <tr>, never an extra <td colSpan> beside
-        // the data cells — that makes the row 10 column slots wide and the
-        // browser finds room for the panel beside the data.
-        <tr className="border-b border-neutral-100 bg-neutral-50/60">
-          <td colSpan={5} className="px-3 py-3">
-            {row.quotedText && (
-              <p className="mb-2 text-sm text-neutral-700 italic">“{row.quotedText}”</p>
-            )}
-            {row.note && <p className="mb-3 text-xs text-neutral-500">{row.note}</p>}
-            {/* ProposalRow renders its OWN <li>, so the per-run wrapper is a
-                <div> and the <ul> sits inside it. Nesting one <li> in another
-                is invalid HTML and React reports it as a hydration error. */}
-            <div className="space-y-3">
-              {members.map((proposal) => {
-                const record = registers.records.find((entry) => entry.id === proposal.recordId);
-                return (
-                  <div key={proposal.id} className="bg-white border border-neutral-200 rounded">
-                    <p className="px-3 pt-2 text-xs uppercase tracking-wide text-neutral-500">
-                      {proposal.runName ?? "No run"}
-                      {proposal.target ? ` · ${proposal.target.recordLabel}` : ""}
-                    </p>
-                    {proposal.finish ? (
-                      <FinishRow
-                        proposal={proposal}
-                        all={all}
-                        busy={busy}
-                        onChange={onChange}
-                        onIgnore={async () => {
-                          await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
-                        }}
-                      />
-                    ) : proposal.dimension ? (
-                      <DimensionRow
-                        proposal={proposal}
-                        all={all}
-                        busy={busy}
-                        onChange={onChange}
-                        onIgnore={async () => {
-                          await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
-                        }}
-                      />
-                    ) : (
-                    <ul>
-                    <ProposalRow
+        <div className="border-t border-neutral-100 bg-neutral-50/60 px-4 py-3">
+          {/* ProposalRow renders its OWN <li>, so the per-run wrapper is a
+              <div> and the <ul> sits inside it. Nesting one <li> in another is
+              invalid HTML and React reports it as a hydration error. */}
+          <div className="space-y-3">
+            {members.map((proposal) => {
+              const record = registers.records.find((entry) => entry.id === proposal.recordId);
+              return (
+                <div key={proposal.id} className="rounded border border-neutral-200 bg-white">
+                  <p className="px-3 pt-2 text-th uppercase tracking-wider text-neutral-500">
+                    {proposal.runName ?? "No run"}
+                    {proposal.target ? ` · ${proposal.target.recordLabel}` : ""}
+                  </p>
+                  {proposal.finish ? (
+                    <FinishRow
                       proposal={proposal}
                       all={all}
-                      registers={registers}
-                      record={record}
-                      dirtyValue={dirty[proposal.id]?.value}
-                      saveError={saveErrors[proposal.id]}
                       busy={busy}
-                      onType={onType}
                       onChange={onChange}
                       onIgnore={async () => {
                         await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
                       }}
                     />
+                  ) : proposal.dimension ? (
+                    <DimensionRow
+                      proposal={proposal}
+                      all={all}
+                      busy={busy}
+                      onChange={onChange}
+                      onIgnore={async () => {
+                        await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
+                      }}
+                    />
+                  ) : (
+                    <ul>
+                      <ProposalRow
+                        proposal={proposal}
+                        all={all}
+                        registers={registers}
+                        record={record}
+                        dirtyValue={dirty[proposal.id]?.value}
+                        saveError={saveErrors[proposal.id]}
+                        busy={busy}
+                        onType={onType}
+                        onChange={onChange}
+                        onIgnore={async () => {
+                          await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
+                        }}
+                      />
                     </ul>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </td>
-        </tr>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 

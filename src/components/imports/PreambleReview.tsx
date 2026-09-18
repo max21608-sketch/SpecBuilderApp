@@ -13,6 +13,12 @@ import { apiFetch } from "@/lib/api-fetch";
 import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
 import Disclosure, { DisclosureList } from "@/components/ui/Disclosure";
+import PageHeader from "@/components/ui/PageHeader";
+import PageBody from "@/components/ui/PageBody";
+import Card, { CardHeadingNote } from "@/components/ui/Card";
+import Note from "@/components/ui/Note";
+import Button from "@/components/ui/Button";
+import Link from "next/link";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { PreambleNote, StagedPreamble } from "@/lib/preamble-document";
 
@@ -28,7 +34,21 @@ type Run = {
   parsed: StagedPreamble | null;
 };
 
-export default function PreambleReview({ importId }: { importId: string }) {
+// NO MOCK-UP EXISTS FOR THIS SCREEN. It is built to the EMAIL review's
+// pattern — the same three bands, the same primitives — because the two are the
+// same job on two staged shapes, and a preamble review that looked like neither
+// would be the third layout on one route. Say so rather than implying it was
+// signed off.
+export default function PreambleReview({
+  importId,
+  crumb,
+  project,
+}: {
+  importId: string;
+  /** Where this document came from: its pack, or the project. */
+  crumb: { label: string; href: string };
+  project: { id: string; number: string; name: string };
+}) {
   const [run, setRun] = useState<Run | null>(null);
   const [blockers, setBlockers] = useState<{ noteId: string; message: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -119,30 +139,56 @@ export default function PreambleReview({ importId }: { importId: string }) {
     }
   }
 
-  if (!run) return error ? <p className="mt-6 text-sm text-red-700">{error}</p> : <Spinner label="Loading" />;
+  const shell = (children: React.ReactNode) => (
+    <>
+      <PageHeader
+        crumbs={[crumb]}
+        title={run?.filename ?? "Preamble"}
+        subtitle={
+          <>
+            {DOCUMENT_KIND_LABELS.preamble} · on{" "}
+            <Link href={`/dashboard/projects/${project.id}`} className="text-blue-700 no-underline hover:underline">
+              {project.number} — {project.name}
+            </Link>{" "}
+            ·{" "}
+            <a
+              href={`/api/imports/${importId}/source`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-blue-700 no-underline hover:underline"
+            >
+              open the original
+            </a>
+          </>
+        }
+      />
+      <PageBody>{children}</PageBody>
+    </>
+  );
+
+  if (!run) return error ? <Note tone="danger">{error}</Note> : <Spinner label="Loading" />;
 
   if (run.status === "pending" || run.status === "failed") {
-    return (
-      <div className="mt-6 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6 text-center">
-        <p className="text-sm text-neutral-600">
+    return shell(
+      <Card title="This preamble has not been read">
+        <p className="text-neutral-600">
           {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS.preamble}
         </p>
-        {run.status === "failed" && run.error && (
-          <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2 text-left">{run.error}</p>
-        )}
-        <p className="mt-3 text-sm text-neutral-700">
-          Reading this sends it to the model, which is the step that {run.status === "failed" ? "charges again." : "costs money."}
+        {run.status === "failed" && run.error && <Note tone="danger">{run.error}</Note>}
+        <p className="mt-3 text-neutral-700">
+          Reading this sends it to the model, which is the step that{" "}
+          {run.status === "failed" ? "charges again." : "costs money."}
         </p>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          className="mt-3"
           onClick={() => void startExtraction("start")}
           disabled={busy !== null}
-          className="mt-4 text-sm px-4 py-2 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
         >
           {busy === "extract" ? "Starting…" : run.status === "failed" ? "Retry extraction" : "Read the preamble"}
-        </button>
-        {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
-      </div>
+        </Button>
+        {error && <Note tone="danger">{error}</Note>}
+      </Card>,
     );
   }
 
@@ -157,158 +203,148 @@ export default function PreambleReview({ importId }: { importId: string }) {
     // deadline before `restartable` offers anything -- which stopped being a
     // rare state when every upload began dispatching its own read.
     const dispatchable = run.status === "queued" && run.claim_count === 0 && run.within_deadline !== false;
-    return (
-      <div className="mt-6 max-w-xl mx-auto border border-neutral-200 rounded-lg bg-white p-6">
+    return shell(
+      <Card title="Being read">
         <Spinner label="Reading the preamble" />
-        <p className="mt-3 text-sm text-neutral-600">You can leave this page — it carries on without you.</p>
-        {dispatchable && (
-          <button
-            type="button"
-            onClick={() => void startExtraction("retry-dispatch")}
-            disabled={busy !== null}
-            className="mt-4 mr-2 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
-            title="Sends the same request again. It charges nothing new, and it will not disturb a worker that already has it."
-          >
-            {busy === "extract" ? "Retrying…" : "Retry dispatch"}
-          </button>
-        )}
-        {restartable && (
-          <button
-            type="button"
-            onClick={() => void startExtraction("restart-expired")}
-            disabled={busy !== null}
-            className="mt-4 text-sm px-3 py-1.5 rounded border border-amber-400 text-amber-900 hover:bg-amber-50 disabled:opacity-50"
-          >
-            Start again (may be charged again)
-          </button>
-        )}
-      </div>
+        <p className="mt-3 text-neutral-600">You can leave this page — it carries on without you.</p>
+        <div className="mt-3 flex gap-2">
+          {dispatchable && (
+            <Button
+              onClick={() => void startExtraction("retry-dispatch")}
+              disabled={busy !== null}
+              title="Sends the same request again. It charges nothing new, and it will not disturb a worker that already has it."
+            >
+              {busy === "extract" ? "Retrying…" : "Retry dispatch"}
+            </Button>
+          )}
+          {restartable && (
+            <Button variant="danger" onClick={() => void startExtraction("restart-expired")} disabled={busy !== null}>
+              Start again (may be charged again)
+            </Button>
+          )}
+        </div>
+      </Card>,
     );
   }
 
   const staged = run.parsed;
   if (!staged || staged.notes.length === 0) {
-    return <p className="mt-6 text-sm text-neutral-700">No requirements were found in this document.</p>;
+    return shell(
+      <Card title="Nothing to record">
+        <p className="text-neutral-700">No requirements were found in this document.</p>
+      </Card>,
+    );
   }
 
   const pending = staged.notes.filter((note) => note.reviewStatus === "pending");
   const chosen = pending.filter((note) => selected.has(note.id));
   const blocked = new Set(blockers.map((blocker) => blocker.noteId));
 
-  return (
-    <div className="mt-6">
-      {error && <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
+  return shell(
+    <>
+      {error && <Note tone="danger">{error}</Note>}
+      {staged.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
 
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <p className="text-sm text-neutral-600">
-          {staged.notes.length} requirement{staged.notes.length === 1 ? "" : "s"} · {pending.length} still to review
-        </p>
-        <a
-          href={`/api/imports/${importId}/source`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-sm text-neutral-600 hover:text-neutral-900 underline"
-        >
-          Open the original
-        </a>
-      </div>
-
-      {staged.documentNotes && (
-        <p className="mt-3 text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-2">
-          The model noted: {staged.documentNotes}
-        </p>
-      )}
-
-      <ul className="mt-4 space-y-3">
-        {pending.map((note) => {
-          const draft = drafts[note.id] ?? {};
-          return (
-            <li key={note.id} className="border border-neutral-200 rounded-lg bg-white p-3">
-              <div className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={selected.has(note.id)}
-                  onChange={(event) =>
-                    setSelected((current) => {
-                      const next = new Set(current);
-                      if (event.target.checked) next.add(note.id);
-                      else next.delete(note.id);
-                      return next;
-                    })
-                  }
-                  className="mt-1"
-                />
-                <div className="flex-1">
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <input
-                      value={draft.title !== undefined ? draft.title ?? "" : note.title ?? ""}
+      <Card
+        flush
+        title={
+          <>
+            {staged.notes.length} requirement{staged.notes.length === 1 ? "" : "s"}
+            <CardHeadingNote>{pending.length} still to review</CardHeadingNote>
+          </>
+        }
+      >
+        <ul>
+          {pending.map((note) => {
+            const draft = drafts[note.id] ?? {};
+            return (
+              <li key={note.id} className="border-b border-neutral-100 px-4 py-3">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(note.id)}
+                    aria-label={`Add ${note.title ?? "this requirement"}`}
+                    onChange={(event) =>
+                      setSelected((current) => {
+                        const next = new Set(current);
+                        if (event.target.checked) next.add(note.id);
+                        else next.delete(note.id);
+                        return next;
+                      })
+                    }
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <input
+                        value={draft.title !== undefined ? (draft.title ?? "") : (note.title ?? "")}
+                        onChange={(event) =>
+                          setDrafts((current) => ({ ...current, [note.id]: { ...draft, title: event.target.value } }))
+                        }
+                        onBlur={(event) => {
+                          if (event.target.value === (note.title ?? "")) return;
+                          void saveNote(note, { title: event.target.value || null });
+                        }}
+                        placeholder="Untitled requirement"
+                        className="border-b border-transparent text-sm font-medium text-neutral-900 outline-none hover:border-neutral-300 focus:border-neutral-500"
+                      />
+                      <span className="text-xs text-neutral-500">
+                        {note.topic}
+                        {note.page && (
+                          <>
+                            {" · "}
+                            <a
+                              href={`/api/imports/${importId}/source#page=${note.page}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="underline hover:text-neutral-900"
+                            >
+                              page {note.page}
+                            </a>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    <textarea
+                      value={draft.body !== undefined ? (draft.body ?? "") : (note.body ?? "")}
                       onChange={(event) =>
-                        setDrafts((current) => ({ ...current, [note.id]: { ...draft, title: event.target.value } }))
+                        setDrafts((current) => ({ ...current, [note.id]: { ...draft, body: event.target.value } }))
                       }
                       onBlur={(event) => {
-                        if (event.target.value === (note.title ?? "")) return;
-                        void saveNote(note, { title: event.target.value || null });
+                        if (event.target.value === (note.body ?? "")) return;
+                        void saveNote(note, { body: event.target.value || null });
                       }}
-                      placeholder="Untitled requirement"
-                      className="font-medium text-sm text-neutral-900 border-b border-transparent hover:border-neutral-300 focus:border-neutral-500 outline-none"
+                      rows={3}
+                      className="mt-2 w-full rounded border border-neutral-200 px-2 py-1 text-sm text-neutral-800"
                     />
-                    <span className="text-xs text-neutral-500">
-                      {note.topic}
-                      {note.page && (
-                        <>
-                          {" · "}
-                          <a
-                            href={`/api/imports/${importId}/source#page=${note.page}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline hover:text-neutral-900"
-                          >
-                            page {note.page}
-                          </a>
-                        </>
-                      )}
-                    </span>
+                    {/* The blocker on the row, beside what it is about. */}
+                    {blocked.has(note.id) && (
+                      <p className="mt-1 text-xs text-amber-900">A note needs a body, or ignore it.</p>
+                    )}
                   </div>
-                  <textarea
-                    value={draft.body !== undefined ? draft.body ?? "" : note.body ?? ""}
-                    onChange={(event) =>
-                      setDrafts((current) => ({ ...current, [note.id]: { ...draft, body: event.target.value } }))
-                    }
-                    onBlur={(event) => {
-                      if (event.target.value === (note.body ?? "")) return;
-                      void saveNote(note, { body: event.target.value || null });
-                    }}
-                    rows={3}
-                    className="mt-2 w-full text-sm text-neutral-800 border border-neutral-200 rounded px-2 py-1"
-                  />
-                  {blocked.has(note.id) && (
-                    <p className="mt-1 text-xs text-amber-900">A note needs a body, or ignore it.</p>
-                  )}
+                  <Button variant="quiet" size="xs" onClick={() => void review([note], "ignore")}>
+                    Ignore
+                  </Button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void review([note], "ignore")}
-                  className="text-xs text-neutral-500 hover:text-neutral-900"
-                >
-                  Ignore
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+              </li>
+            );
+          })}
+        </ul>
 
-      <div className="mt-4 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => void review(chosen, "confirm")}
-          disabled={busy !== null || chosen.length === 0 || chosen.some((note) => blocked.has(note.id))}
-          className="text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50"
-        >
-          {busy === "confirm" ? "Adding…" : `Add ${chosen.length} note${chosen.length === 1 ? "" : "s"} to the project`}
-        </button>
-        <p className="text-xs text-neutral-500">They appear on the project overview, and can be retired later.</p>
-      </div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
+          <span className="text-neutral-600">
+            They appear on the project overview, and can be retired later.
+          </span>
+          <span className="flex-1" />
+          <Button
+            variant="primary"
+            onClick={() => void review(chosen, "confirm")}
+            disabled={busy !== null || chosen.length === 0 || chosen.some((note) => blocked.has(note.id))}
+          >
+            {busy === "confirm" ? "Adding…" : `Add ${chosen.length} note${chosen.length === 1 ? "" : "s"} to the project`}
+          </Button>
+        </div>
+      </Card>
 
       <Collapsed
         title="Ignored"
@@ -323,7 +359,7 @@ export default function PreambleReview({ importId }: { importId: string }) {
         onToggle={() => setShowApplied((value) => !value)}
         notes={staged.notes.filter((note) => note.reviewStatus === "applied")}
       />
-    </div>
+    </>,
   );
 }
 
@@ -347,13 +383,9 @@ function Collapsed({
           <li key={note.id} className="flex items-center gap-3 px-3 py-2 text-sm">
             <span className="flex-1 text-neutral-800">{note.title ?? note.body?.slice(0, 80)}</span>
             {onRestore && (
-              <button
-                type="button"
-                onClick={() => onRestore(note)}
-                className="text-xs text-neutral-500 hover:text-neutral-900"
-              >
+              <Button variant="quiet" size="xs" onClick={() => onRestore(note)}>
                 Restore
-              </button>
+              </Button>
             )}
           </li>
         ))}
