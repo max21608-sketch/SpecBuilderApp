@@ -7,8 +7,19 @@
 // change_sets and record_snapshots ARE cleaned up, because unlike audit_log
 // they are scoped to a project this test created and would otherwise leave a
 // project's whole trail behind.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
+
+// The history route is behind a session like every other read. Nothing else in
+// this file imports it.
+vi.mock("@/lib/session", () => ({
+  getSessionUser: async () => ({
+    id: "00000000-0000-0000-0000-000000000001",
+    email: "__qa@example.test",
+    name: "QA User",
+    role: "admin",
+  }),
+}));
 
 const databaseUrl = process.env.DATABASE_URL;
 const describeIfDb = databaseUrl ? describe : describe.skip;
@@ -219,6 +230,55 @@ describeIfDb("0012 change sets and versions", () => {
     await client.query(`insert into change_sets (project_id, kind, actor) values ($1, 'manual_edit', '__qa_two')`, [
       projectId,
     ]);
+  });
+
+  it("tells the versions list which version each baseline froze", async () => {
+    // A baseline sits BETWEEN two versions on the screen, and where it sits is
+    // read off `baseline_members` — never off a date. `created_at` is
+    // transaction START time, so two overlapping guarded transactions can
+    // commit in the opposite order, and a bar placed by date would put a
+    // version on the wrong side of a point somebody signed off.
+    const record = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9013, $3, '__QA Baselined', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
+    );
+    const recordId = record.rows[0].id;
+    const snapshots: string[] = [];
+    for (const no of [1, 2, 3]) {
+      const changeSetId = await openChange("manual_edit");
+      const row = await client.query(
+        `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
+         values ($1, $2, $3, '{"schemaVersion":1}'::jsonb, '[]'::jsonb) returning id`,
+        [recordId, changeSetId, no],
+      );
+      snapshots.push(row.rows[0].id);
+    }
+
+    // Named at version 2, so the bar belongs between 2 and 3 — which only the
+    // member row can say.
+    const baseline = await client.query(
+      `insert into change_sets (project_id, kind, label, reason, closed_at, actor)
+       values ($1, 'baseline', '__QA Issued to client', 'issued', now(), 'qa') returning id`,
+      [projectId],
+    );
+    await client.query(
+      `insert into baseline_members (change_set_id, record_id, snapshot_id) values ($1, $2, $3)`,
+      [baseline.rows[0].id, recordId, snapshots[1]],
+    );
+
+    const { GET } = await import("@/app/api/records/[id]/history/route");
+    const response = await GET(new Request("http://localhost/test"), {
+      params: Promise.resolve({ id: recordId }),
+    });
+    const body = (await response.json()) as {
+      ok: boolean;
+      baselines: { changeSetId: string; label: string; memberSnapshotNo: number }[];
+    };
+    expect(body.ok).toBe(true);
+    expect(body.baselines).toHaveLength(1);
+    expect(body.baselines[0]?.label).toBe("__QA Issued to client");
+    expect(body.baselines[0]?.memberSnapshotNo).toBe(2);
   });
 
   it("COVERAGE: every spec-content write in the DATABASE belongs to a change that took a version", async () => {

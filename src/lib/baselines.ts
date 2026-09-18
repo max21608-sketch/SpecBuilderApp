@@ -224,3 +224,50 @@ export async function compareChangeSets(
 
   return { from: end(fromRow), to: end(toRow), records, counts };
 }
+
+/** A named point this record was a member of, and which version it pinned. */
+export type RecordBaseline = {
+  changeSetId: string;
+  label: string;
+  createdAt: string;
+  /** The version of THIS record the baseline froze. */
+  memberSnapshotNo: number;
+};
+
+/**
+ * The baselines one record sits inside, newest first.
+ *
+ * ==========================================================================
+ * READ FROM THE MEMBER ROW, NEVER FROM THE DATE.
+ *
+ * The versions list draws a baseline as a bar between two rows, and the
+ * tempting way to place that bar is to compare the baseline's `created_at`
+ * against each version's. That is the error this whole table exists to
+ * prevent: `created_at` is transaction START time, so two overlapping guarded
+ * transactions can commit in the opposite order, and a bar placed by date
+ * would put a version on the wrong side of a point somebody signed off.
+ *
+ * `baseline_members` already says which version this record was at. The bar
+ * goes immediately after that version, and nothing is inferred.
+ * ==========================================================================
+ *
+ * `label` is not null on any of these: 0012 makes `label` baseline-only by
+ * constraint, so the kind and the name are the same fact and the filter on
+ * kind is what makes the column safe to print.
+ */
+export async function loadRecordBaselines(exec: SqlLike, recordId: string): Promise<RecordBaseline[]> {
+  const rows = await exec`
+    select cs.id, cs.label, cs.created_at, s.snapshot_no
+    from baseline_members m
+    join change_sets cs on cs.id = m.change_set_id
+    join record_snapshots s on s.id = m.snapshot_id
+    where m.record_id = ${recordId} and cs.kind = 'baseline'
+    order by s.snapshot_no desc, cs.created_at desc
+  `;
+  return rows.map((row) => ({
+    changeSetId: String(row.id),
+    label: String(row.label ?? ""),
+    createdAt: String(row.created_at),
+    memberSnapshotNo: Number(row.snapshot_no),
+  }));
+}

@@ -5,6 +5,7 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { loadRecordHistory, compareRecordVersions } from "@/lib/change-history";
+import { loadRecordBaselines } from "@/lib/baselines";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -36,10 +37,22 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return json({ ok: true, record: { id, label, itemDescription: String(record.item_description) }, ...result });
   }
 
-  const versions = await loadRecordHistory(sql, id);
+  // The named points this record sits inside, so the versions list can draw a
+  // bar between two rows. Its own key rather than a field on each version: a
+  // baseline sits BETWEEN versions, and hanging it off the one below would
+  // make a point that covers no version of this record invisible.
+  //
+  // Each baseline names the version it froze. Placing the bar by comparing
+  // dates instead is the error `baseline_members` exists to prevent — see
+  // `loadRecordBaselines`.
+  const [versions, baselines] = await Promise.all([
+    loadRecordHistory(sql, id),
+    loadRecordBaselines(sql, id),
+  ]);
   return json({
     ok: true,
     record: { id, label, itemDescription: String(record.item_description) },
     versions,
+    baselines,
   });
 }
