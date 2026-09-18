@@ -22,6 +22,53 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-18
 
+### A level cannot be set or changed at the drawings stage
+
+**Status: open. A CHANGE ASKED FOR, and its first half is still to be
+confirmed by Max** — "I'm going to check up on this, but I'm pretty sure".
+
+Seen on the BOQ review screen (screenshot), `MAIN RUN`, 14 lines. Every row
+reads **Simple · guessed**, including `PACK · Packaging` and `DEL · Delivery`,
+which are not furniture at all. The descriptions the guess had to work with are
+`Sofa`, `Armchair`, `Desk chair`, `Headboard` — one or two words each.
+
+Two separate things were said, and they are not the same size:
+
+1. **Probably the level can only really be determined at the drawing stage.**
+   Max's own reading, offered as something he will go and check. If it holds,
+   it questions whether guessing at BOQ intake is worth doing at all.
+2. **At minimum, there must be a way to switch it AT the drawings intake
+   stage.** Asked for outright, and not conditional on (1).
+
+**(2) is a plain gap today.** `confirm-drawings.ts:689` revises the level after
+a drawings confirm — but only `level_suggested`, only where `level is null`,
+and `guessLevelFromAttributes` never returns `simple`, because "this page named
+no metal" is not evidence the item has none. So a drawing can strengthen a
+suggestion and can never be used by a person to SET one: the drawings review
+screen carries no level control at all. The only places a level can be set are
+the record screen, the drafts blocker's inline picker, and the BOQ review's own
+Level column.
+
+That means today a level decided at the moment it is actually knowable — the
+reviewer has the page open and can see the brass leg — has to be recorded
+somewhere else, one record at a time.
+
+Three things a plan has to carry, all already written down elsewhere:
+
+- **The level guess rules are this repo's judgement and Matthew has not seen
+  them.** Nothing in the 17 cheat sheets defines simple / complex / hero;
+  `src/lib/level-guess.ts` encodes the BWS boilerplate split. (1) is the same
+  conversation and the same person — put it in front of him together.
+- **Nothing infers a level onto `spec_records.level`, ever.** 0025 keeps the
+  guess in `level_suggested` where no gate can read it. Whatever goes on the
+  drawings screen writes `level` only on a person's action, and the run-wide
+  `acceptSuggestedLevels` is the precedent for doing that in one change set
+  rather than 59 visits.
+- **A pre-filled select cannot be the accept control.** The screenshot shows
+  every row's select already reading `Simple`, so choosing Simple fires no
+  change event and the one action recording the reviewer's agreement does
+  nothing. Whatever is built for drawings must not repeat it.
+
 ### A confidently routed email still waits for somebody to press Assign
 
 **Status: open. This one is a CHANGE ASKED FOR, not a fault** — the app is
