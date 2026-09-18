@@ -38,8 +38,28 @@
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
 
+// ---- THE ORDER OF THIS ARRAY IS THE MODEL, NOT A PRESENTATION CHOICE -------
+//
+// The gates BUILD ON EACH OTHER. TGQ is enough information to put a price on
+// the item, TG0 is the design intent agreed on top of that price, TG1 is the
+// production lock on top of that intent. It is not possible to be at TG1
+// without having reached TG0, and not possible to reach TG0 without TGQ.
+//
+// Judged field-by-field they look independent, and they are not: Matthew's
+// matrix deliberately puts the SAME field at two gates — Assembly guide is
+// TGQ and TG1, Dimensions is TGQ (four slots) and TG1 (the whole cell
+// re-checked) — so a later gate is largely a RE-CHECK of an earlier one. A
+// TG1 re-check reported as met over a TGQ that was never met is the app
+// agreeing with itself about a question nobody answered.
+//
+// Reordering this array changes which gate is a prerequisite for which.
 export const GATES = ["TGQ", "TG0", "TG1"] as const;
 export type Gate = (typeof GATES)[number];
+
+/** Every gate that must be satisfied before this one can be. In order. */
+export function gatesBefore(gate: Gate): Gate[] {
+  return GATES.slice(0, GATES.indexOf(gate));
+}
 
 export const GATE_LABELS: Record<Gate, string> = {
   TGQ: "TGQ — enough to quote",
@@ -96,11 +116,43 @@ export type GateFieldStatus = {
   state: AnswerState | null;
 };
 
-export type GateStatus = {
+/**
+ * One gate judged over its OWN fields, and NOTHING ELSE.
+ *
+ * ==========================================================================
+ * THIS TYPE HAS NO `satisfied`, DELIBERATELY.
+ *
+ * `ownSatisfied` means "every field this gate asks for is settled". That is
+ * not the same as the gate being MET, because a gate is also waiting on the
+ * gates before it, and the difference is the whole point: TG1's own fields
+ * were all settled on a record whose TGQ had two outstanding and whose TG0
+ * had five, and the screen printed a green TG1 ✓ beside two red pills.
+ *
+ * If this type carried a field called `satisfied`, every caller that reached
+ * for the obvious name would get that same wrong answer, and the one who
+ * forgot to chain would never find out. So the honest reading only exists on
+ * `GateStatus`, which you can only get from `chainGates`, and TypeScript
+ * refuses the unchained one.
+ * ==========================================================================
+ */
+export type GateFieldsStatus = {
   gate: Gate;
-  satisfied: boolean;
+  /** Every field THIS gate asks for is settled. Says nothing about TGQ/TG0. */
+  ownSatisfied: boolean;
   fields: GateFieldStatus[];
   counts: Record<GateOutcome, number>;
+};
+
+/** A gate in its chain: its own fields, plus whether it has been reached. */
+export type GateStatus = GateFieldsStatus & {
+  /** Own fields settled AND every earlier gate satisfied. The real answer. */
+  satisfied: boolean;
+  /**
+   * The earlier gates still holding this one up, earliest first. Empty means
+   * this gate is the one in play. A gate with entries here is NOT a person's
+   * outstanding work today — the work is at the gate named first.
+   */
+  blockedBy: Gate[];
 };
 
 /** A checklist answer, keyed by the BWS field its requirement points at. */
@@ -150,7 +202,8 @@ function outcomeForState(state: AnswerState, value: string | null): { outcome: G
 }
 
 /**
- * The state of one gate for one record.
+ * One gate's OWN fields, for one record. Call `chainGates` to learn whether
+ * the gate has actually been reached.
  *
  * `fields` is every row of the overlay that applies to this record's category,
  * already filtered by the caller's query — this function does no category
@@ -167,7 +220,7 @@ export function gateStatus(
     /** The BWS field ids this record's category actually asks a question for. */
     askedFieldIds: ReadonlySet<number>;
   },
-): GateStatus {
+): GateFieldsStatus {
   const byField = new Map(input.answers.map((a) => [a.specFieldJsonId, a]));
   const bySlot = new Map(input.slots.map((s) => [s.dimensionSlot, s]));
   const locals = input.locals ?? {};
@@ -275,13 +328,63 @@ export function gateStatus(
   const counts = { ...EMPTY_COUNTS };
   for (const s of statuses) counts[s.outcome] += 1;
 
-  // Satisfied means nothing is outstanding for a reason anyone could act on.
+  // Settled means nothing is outstanding for a reason anyone could act on.
   // `unknown` and `unanswerable` both count against it: the first because we
   // cannot tell, the second because the app cannot hold the answer. Reporting
   // a gate met over either would be the app agreeing with itself.
-  const satisfied = statuses.length > 0 && counts.blocking === 0 && counts.unknown === 0 && counts.unanswerable === 0;
+  //
+  // An EMPTY field list is never settled, because nothing was checked. That
+  // matters more once gates chain: an empty earlier gate that read as settled
+  // would wave every later gate through.
+  const ownSatisfied =
+    statuses.length > 0 && counts.blocking === 0 && counts.unknown === 0 && counts.unanswerable === 0;
 
-  return { gate, satisfied, fields: statuses, counts };
+  return { gate, ownSatisfied, fields: statuses, counts };
+}
+
+/**
+ * The three gates as a CHAIN, which is what a screen may report.
+ *
+ * ==========================================================================
+ * A GATE IS MET ONLY IF EVERY GATE BEFORE IT IS MET.
+ *
+ * Asked for directly on 2026-09-18, on seeing a record whose panel read
+ * `TGQ 2 outstanding` · `TG0 5 outstanding` · `TG1 ✓`: "it's impossible to be
+ * at TG1 if you haven't reached TG0 or TGQ. They build on each other."
+ *
+ * Three things about this are traps rather than preferences:
+ *
+ *   - The FIELD LIST is untouched. TG1 still lists TG1's own rows and nothing
+ *     else, which is what was asked for and what keeps the panel readable. It
+ *     is the VERDICT that chains, not the contents.
+ *   - `ownSatisfied` is kept and reported apart, because "TG1's own fields are
+ *     all settled but TG0 is not reached" is a real state and a different one
+ *     from "TG1 has three fields outstanding". Collapsing them would put work
+ *     on somebody's desk that is already done.
+ *   - A blocked gate's own outstanding rows are NOT today's work, and the
+ *     screens colour them accordingly. Painting a gate red for work that
+ *     cannot start yet teaches people to ignore red — the same argument that
+ *     keeps `unanswerable` slate.
+ *
+ * Note that an earlier gate held up by an `unanswerable` field — the app has
+ * nowhere to record it — blocks the later gates too, and cannot be cleared by
+ * anybody answering a question. That is the honest reading: we cannot claim
+ * TG1 over a TGQ we were never able to judge. The panel names which kind of
+ * blocker it is, so it does not read as a reviewer's fault.
+ * ==========================================================================
+ */
+export function chainGates(byGate: Record<Gate, GateFieldsStatus>): Record<Gate, GateStatus> {
+  const out = {} as Record<Gate, GateStatus>;
+  const unmet: Gate[] = [];
+  // In order, so a gate only ever sees the gates decided before it.
+  for (const gate of GATES) {
+    const own = byGate[gate];
+    const blockedBy = [...unmet];
+    const satisfied = own.ownSatisfied && blockedBy.length === 0;
+    out[gate] = { ...own, satisfied, blockedBy };
+    if (!satisfied) unmet.push(gate);
+  }
+  return out;
 }
 
 /** What a screen says where a category has no mapping onto Matthew's nine. */

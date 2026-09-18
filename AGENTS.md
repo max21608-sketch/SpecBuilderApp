@@ -377,6 +377,64 @@ names them and `palette_raw` keeps his wording, so the gap is a recorded
 question rather than a forgotten one, and the screen says so in words instead
 of offering an empty dropdown. FMT-GEN-01 applies: never invent one.
 
+### The gates BUILD ON EACH OTHER, and only the chained reading is called satisfied
+
+`src/lib/gates.ts` (`GATES`, `chainGates`, `GateFieldsStatus`),
+`src/lib/gate-load.ts` (`gatesForRecord`, `gateSummary`),
+`src/components/records/GatePanel.tsx`, `src/components/records/SpecTable.tsx`
+
+The panel printed `TGQ 2 outstanding` · `TG0 5 outstanding` · `TG1 ✓` on a real
+record, and the spec table ticked the same TG1. Max, 2026-09-18: "it's
+impossible to be at TG1 if you haven't reached TG0 or TGQ. They build on each
+other." TGQ is enough to put a price on the item, TG0 is the design intent
+agreed on top of that price, TG1 is the production lock on top of that intent.
+
+Judged field by field they look independent and they are not — Matthew's matrix
+deliberately puts the SAME field at two gates (Assembly guide at TGQ and TG1,
+Dimensions at TGQ as four slots and at TG1 as the whole cell re-checked), so a
+later gate is largely a RE-CHECK of an earlier one. A TG1 re-check reported as
+met over a TGQ nobody could judge is the app agreeing with itself.
+
+Five things are load-bearing.
+
+- **The ORDER of `GATES` is the model.** It was a display list and is now the
+  prerequisite chain; reordering it changes which gate requires which.
+- **The FIELD LIST does not chain, only the VERDICT does.** TG1 still lists
+  TG1's own rows and nothing else — asked for in the same breath ("it's fine to
+  have it so that in TG1 it only shows the TG1 specific specs"), and mixing
+  three gates' fields into one list is how the panel became unreadable before.
+- **`gateStatus` returns `GateFieldsStatus`, which HAS NO `satisfied`.** Only
+  `chainGates` produces a `GateStatus`, and only that type carries `satisfied`.
+  This is the guarantee, not a convention: a future caller reaching for the
+  obvious name on a single gate's reading gets a type error rather than the
+  wrong answer. `ownSatisfied` is kept and reported apart, because "TG1 has
+  nothing of its own left" and "TG1 is met" are different states and collapsing
+  them either puts finished work back on a desk or claims a gate nobody
+  reached.
+- **A blocked gate is SLATE, never red, and never green.** Its own count still
+  shows — hiding it would say less than the screen used to — but painting it red
+  for work that cannot start yet teaches people to ignore red, the same argument
+  that keeps `unanswerable` slate. The pill names the EARLIEST unmet gate,
+  because that is the one to do next; the panel lists them all and each one
+  opens from there.
+- **An `unanswerable` predecessor blocks the whole chain, and that is correct.**
+  `gateStatus` has always refused to call a gate satisfied over a field the app
+  cannot record; the chain inherits it. The consequence is large and was
+  MEASURED on the sandbox, 2026-09-18: **Product code is unanswerable on all 179
+  records with a matrix view** — one of Matthew's id-less rows with no home in
+  this app — so no record can satisfy TGQ, and therefore none can reach TG0 or
+  TG1. Every gate tick in the sandbox is gone, correctly. Closing it is a seed
+  or a migration, NOT a person answering, so the panel breaks a predecessor's
+  count into "n to answer" and "n nowhere to record" rather than putting an app
+  gap on a reviewer's desk. Do not weaken the chain to get the ticks back.
+
+**The table's TGQ column is still a DIFFERENT measure from the TGQ gate**, and
+the chain makes that visible: a row can read "Can quote" beside "5 after TGQ".
+The column counts outstanding to-quote QUESTIONS and the gate counts FIELDS —
+the gap the section below already records as not directly comparable. It is now
+side by side on one screen, and which of the two the column should show is
+Max's decision, not this repo's.
+
 ### A chase records that a question was asked, and writes no answer
 
 `db/migrations/0005_chase_drafts.sql`, `src/lib/chase-drafts.ts`,
@@ -2782,6 +2840,28 @@ configuration correctly carrying a blank quantity — plus 22 pure-tier tests.
 **`Specs 2` has never fired against real data**, because no record in the
 sandbox is yet specified across two pages. **Not accepted by Max**, and nobody
 has pasted one into the real template.
+
+**Built 2026-09-18, the gates build on each other.** Reported on sight of a real
+record: `TGQ 2 outstanding` · `TG0 5 outstanding` · `TG1 ✓`. A gate is now
+satisfied only when every gate before it is, `gateStatus` no longer returns a
+field called `satisfied` at all, and the panel and the spec table both say what
+a gate is waiting on instead of ticking it. The load-bearing section above
+carries the reasoning. **No schema change, no seed change, no model call.**
+
+**Verified in the browser against the sandbox demo project**, not fixtures: the
+exact record from the screenshot now reads `TGQ 2 outstanding` ·
+`TG0 TGQ first · 5 of its own` · `TG1 TGQ first`, its tab count `0 of 3` rather
+than `1 of 3`, the panel naming both gates in its way with a click through to
+each, and the spec table's TG1 column reading `0 after TGQ` in slate where it
+ticked green before. Plus 7 new pure-tier tests. **Not accepted by Max.**
+
+**And it found a bigger one, measured rather than assumed: `Product code` is
+`unanswerable` on all 179 sandbox records that have a matrix view** — one of
+Matthew's id-less rows with no home in this app — so NO record can satisfy TGQ,
+and with the chain none can reach TG0 or TG1 either. Every gate tick in the
+sandbox is now correctly gone. This is a seed/migration question and a question
+for Matthew, not something a reviewer can answer, and it must not be fixed by
+weakening the chain.
 
 **Outstanding — judgement, not code.**
 

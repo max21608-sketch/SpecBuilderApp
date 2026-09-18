@@ -28,11 +28,13 @@ import type { SqlLike } from "@/lib/record-atoms";
 import type { AnswerState } from "@/lib/spec-vocab";
 import type { TgqMatrix } from "@/lib/tgq";
 import {
+  chainGates,
   gateStatus,
   GATES,
   type Gate,
   type GateAnswerInput,
   type GateField,
+  type GateFieldsStatus,
   type GateLocalInput,
   type GateSlotInput,
   type GateStatus,
@@ -196,8 +198,13 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
 }
 
 /**
- * Every gate for one record, or null where its category is not on Matthew's
- * matrix. Null is a real answer and the screens print it as one.
+ * Every gate for one record, CHAINED, or null where its category is not on
+ * Matthew's matrix. Null is a real answer and the screens print it as one.
+ *
+ * Chained means a gate is satisfied only when every gate before it is — see
+ * `chainGates`. This is the only way a caller gets a `GateStatus`, and it is
+ * the only type that carries `satisfied`, so no reader can pick up the
+ * per-gate reading by mistake.
  */
 export function gatesForRecord(
   context: GateContext,
@@ -214,20 +221,43 @@ export function gatesForRecord(
     askedFieldIds: context.askedByCategory.get(record.categoryId) ?? new Set<number>(),
   };
 
-  const out = {} as Record<Gate, GateStatus>;
+  // Each gate over its OWN fields, then CHAINED — a gate is met only when
+  // every gate before it is. Judged separately they read as independent, and
+  // they are not: TG1 is largely a re-check of TGQ.
+  const own = {} as Record<Gate, GateFieldsStatus>;
   for (const gate of GATES) {
-    out[gate] = gateStatus(gate, fields.filter((f) => f.gate === gate), input);
+    own[gate] = gateStatus(gate, fields.filter((f) => f.gate === gate), input);
   }
-  return out;
+  return chainGates(own);
 }
 
-/** What a table column needs: outstanding per gate, or null for no matrix view. */
-export function gateSummary(statuses: Record<Gate, GateStatus> | null): Record<Gate, number> | null {
+/**
+ * What a table column needs, per gate, or null for no matrix view.
+ *
+ * `outstanding` is this gate's OWN unsettled fields and `blockedBy` is what is
+ * holding the gate up regardless. Both are needed, because a bare number
+ * cannot tell "TG1 has nothing left" from "TG1 has nothing left and has not
+ * been reached" — and the second must never render as a tick.
+ */
+export type GateSummaryEntry = {
+  outstanding: number;
+  blockedBy: Gate[];
+  satisfied: boolean;
+};
+
+export function gateSummary(
+  statuses: Record<Gate, GateStatus> | null,
+): Record<Gate, GateSummaryEntry> | null {
   if (!statuses) return null;
-  const out = {} as Record<Gate, number>;
+  const out = {} as Record<Gate, GateSummaryEntry>;
   for (const gate of GATES) {
-    const c = statuses[gate].counts;
-    out[gate] = c.blocking + c.unknown + c.unanswerable;
+    const status = statuses[gate];
+    const c = status.counts;
+    out[gate] = {
+      outstanding: c.blocking + c.unknown + c.unanswerable,
+      blockedBy: status.blockedBy,
+      satisfied: status.satisfied,
+    };
   }
   return out;
 }
