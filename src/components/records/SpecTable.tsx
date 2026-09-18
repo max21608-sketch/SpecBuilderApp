@@ -24,7 +24,8 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import Tip from "@/components/ui/Tip";
 import StatTile from "@/components/ui/StatTile";
 import { unallocatedQty } from "@/lib/record-variants";
-import { NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
+import { GATE_SHORT_LABELS, NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
+import type { GateSummaryEntry } from "@/lib/gate-load";
 import AddItem from "@/components/records/AddItem";
 import {
   SPECS_AGREED_LABEL,
@@ -64,12 +65,18 @@ export type SpecRecord = {
   to_quote_outstanding: number | null;
   to_quote_waiting: number;
   /**
-   * Outstanding per gate, from Matthew's matrix (0026). NULL where this
-   * record's category is not one of the nine his matrix covers — printed as
-   * "—", never as zero, because "no rules written yet" and "nothing left to
-   * do" are different answers.
+   * Per gate, from Matthew's matrix (0026): this gate's own outstanding
+   * fields, and the earlier gates holding it up. NULL where this record's
+   * category is not one of the nine his matrix covers — printed as "—", never
+   * as zero, because "no rules written yet" and "nothing left to do" are
+   * different answers.
+   *
+   * `blockedBy` is why a bare number is not enough: a gate whose own fields
+   * are all settled is NOT satisfied while an earlier gate is outstanding, and
+   * a tick there would claim a record is at production lock over a price
+   * nobody could quote.
    */
-  gates: Record<Gate, number> | null;
+  gates: Record<Gate, GateSummaryEntry> | null;
 };
 
 const DOTS: Record<RecordUrgency, string> = {
@@ -114,6 +121,54 @@ function Captured({
       <span className="shrink-0 tabular-nums text-xs text-neutral-500">
         {settled}/{total}
       </span>
+    </span>
+  );
+}
+
+/**
+ * One OUTPUT, with the formats it comes in.
+ *
+ * A segmented control rather than loose buttons, because the row is where
+ * somebody counts how many deliverables this app produces. The name is a
+ * static label and each format is the action — a download is an `<a href>`
+ * because the browser has to fetch it, and `buttonClass`'s reason for
+ * existing is that such a link should still look like the action it is.
+ */
+function Output({
+  name,
+  formats,
+  emphasis = false,
+}: {
+  name: string;
+  formats: { label: string; href: string }[];
+  emphasis?: boolean;
+}) {
+  return (
+    <span
+      className={`inline-flex items-stretch overflow-hidden rounded border ${
+        emphasis ? "border-neutral-900" : "border-neutral-300"
+      }`}
+    >
+      <span
+        className={`px-3 py-1.5 text-sm ${
+          emphasis ? "bg-neutral-900 text-white" : "bg-white text-neutral-700"
+        }`}
+      >
+        {name}
+      </span>
+      {formats.map((format) => (
+        <a
+          key={format.label}
+          href={format.href}
+          className={`border-l px-2.5 py-1.5 text-sm ${
+            emphasis
+              ? "border-neutral-700 bg-neutral-900 text-neutral-200 hover:bg-neutral-700 hover:text-white"
+              : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900"
+          }`}
+        >
+          {format.label}
+        </a>
+      ))}
     </span>
   );
 }
@@ -284,41 +339,54 @@ export default function SpecTable({
               and emails could not be started at all. */}
           <AddItem projectId={projectId} runId={runId} categories={categories} onAdded={load} />
         </div>
+          {/* ---- THREE OUTPUTS, AND A FORMAT IS NOT ONE OF THEM ------------
+              Asked for directly on 2026-09-18, on sight of five buttons in a
+              row: "surely we only should have three". There ARE three — the
+              spec upload, the quote and the costing block — and the row was
+              showing a FORMAT (.csv) and a VERIFICATION TOOL (Check sheet) as
+              their peers, which made five things that look equally like
+              deliverables and are not.
+
+              So each output is one segmented control: its name, then the
+              formats it comes in. A format sits inside the thing it is a
+              format of, and cannot be mistaken for a fourth output. The check
+              sheet moves below, labelled with what it is for — it produces no
+              deliverable, it is how the spec upload gets accepted against the
+              pack. */}
         {records.length > 0 && (
-          <div className="flex items-center gap-2">
-            {/* Anchors, because the browser has to fetch the file — but they
-                produce a document, so they look like the actions they are. */}
-            <a href={exportHref} className={buttonClass("primary")}>
-              Export this run (.xlsx)
-            </a>
-            <a href={`${exportHref}&format=csv`} className={buttonClass("secondary")}>
-              .csv
-            </a>
-            <a
-              href={`/api/projects/${projectId}/export/check-sheet?runId=${runId}`}
-              className={buttonClass("secondary")}
-            >
-              Check sheet
-            </a>
-            {/* THE QUOTE LINES, which are not the BWS file. Eight of Matthew's
-                twelve columns; the four this app cannot fill are named below
-                rather than left as gaps somebody prices off. */}
-            <a
-              href={`/api/projects/${projectId}/export/quote?runId=${runId}`}
-              className={buttonClass("secondary")}
-            >
-              Quote lines
-            </a>
-            {/* THE COSTING SHEET'S ITEM BLOCK — columns A to J, to paste into
-                the estimating template. Everything right of J is the
-                estimator's own, and the file says so on its own second sheet
-                rather than only here. */}
-            <a
-              href={`/api/projects/${projectId}/export/costing?runId=${runId}`}
-              className={buttonClass("secondary")}
-            >
-              Costing block
-            </a>
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Output
+                name="Spec upload"
+                emphasis
+                formats={[
+                  { label: ".xlsx", href: exportHref },
+                  // Tim's grid importer takes the csv, so this is not a
+                  // lesser format — it is the one BWS actually reads.
+                  { label: ".csv", href: `${exportHref}&format=csv` },
+                ]}
+              />
+              <Output
+                name="Quote lines"
+                formats={[{ label: ".csv", href: `/api/projects/${projectId}/export/quote?runId=${runId}` }]}
+              />
+              <Output
+                name="Costing block"
+                formats={[
+                  { label: ".xlsx", href: `/api/projects/${projectId}/export/costing?runId=${runId}` },
+                  { label: ".csv", href: `/api/projects/${projectId}/export/costing?runId=${runId}&format=csv` },
+                ]}
+              />
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+              <span>Checking the spec upload against the pack:</span>
+              <a
+                href={`/api/projects/${projectId}/export/check-sheet?runId=${runId}`}
+                className={buttonClass("quiet", "xs")}
+              >
+                Check sheet
+              </a>
+            </div>
           </div>
         )}
       </div>
@@ -609,33 +677,59 @@ export default function SpecTable({
                           from the same `gateStatus` — a table that disagreed
                           with the screen it links to would be worse than no
                           column. */}
-                      {(["TG0", "TG1"] as const).map((gate) => (
-                        <td key={gate} className="px-3 py-2 tabular-nums">
-                          {record.gates === null ? (
-                            <span className="text-neutral-400" title={NO_MATRIX_CATEGORY_EXPLANATION}>
-                              —
-                            </span>
-                          ) : record.gates[gate] > 0 ? (
-                            /* THE COUNT IS A LINK TO WHAT IT COUNTS. Asked for
-                               on 2026-09-18 — "when it goes red three, I should
-                               be able to click on that and it takes me to the
-                               three things that are needed". The record screen's
-                               gate panel is where they are named, with whose
-                               problem each one is. */
-                            <Link
-                              href={`/dashboard/records/${record.id}#gates`}
-                              className="font-medium text-red-700 no-underline hover:underline"
-                              title={`${record.gates[gate]} outstanding at ${gate} — open the record to see which`}
-                            >
-                              {record.gates[gate]}
-                            </Link>
-                          ) : (
-                            <span className="text-green-700" title={`${gate} is satisfied`}>
-                              ✓
-                            </span>
-                          )}
-                        </td>
-                      ))}
+                      {(["TG0", "TG1"] as const).map((gate) => {
+                        const entry = record.gates?.[gate] ?? null;
+                        /* THE GATES BUILD ON EACH OTHER, so a tick here means
+                           "this gate AND every gate before it". A column that
+                           ticked TG1 over an outstanding TGQ would say a record
+                           is at production lock over a price nobody could
+                           quote — and it did, until 2026-09-18. */
+                        const waitingFor = entry?.blockedBy[0] ?? null;
+                        return (
+                          <td key={gate} className="px-3 py-2 tabular-nums">
+                            {entry === null ? (
+                              <span className="text-neutral-400" title={NO_MATRIX_CATEGORY_EXPLANATION}>
+                                —
+                              </span>
+                            ) : entry.satisfied ? (
+                              <span className="text-green-700" title={`${gate} is satisfied`}>
+                                ✓
+                              </span>
+                            ) : (
+                              /* THE COUNT IS A LINK TO WHAT IT COUNTS. Asked
+                                 for on 2026-09-18 — "when it goes red three, I
+                                 should be able to click on that and it takes me
+                                 to the three things that are needed". The
+                                 record screen's gate panel is where they are
+                                 named, with whose problem each one is.
+
+                                 SLATE, not red, where an earlier gate comes
+                                 first: the count is true, and it is not work
+                                 anybody can start today. The number still
+                                 shows, so the column never says less than it
+                                 used to. */
+                              <Link
+                                href={`/dashboard/records/${record.id}#gates`}
+                                className={`font-medium no-underline hover:underline ${
+                                  waitingFor ? "text-slate-500" : "text-red-700"
+                                }`}
+                                title={
+                                  waitingFor
+                                    ? `${gate} has not been reached — ${GATE_SHORT_LABELS[waitingFor]} comes first. ${entry.outstanding} of ${gate}'s own fields outstanding.`
+                                    : `${entry.outstanding} outstanding at ${gate} — open the record to see which`
+                                }
+                              >
+                                {entry.outstanding}
+                                {waitingFor && (
+                                  <span className="ml-1 text-xs font-normal">
+                                    after {GATE_SHORT_LABELS[waitingFor]}
+                                  </span>
+                                )}
+                              </Link>
+                            )}
+                          </td>
+                        );
+                      })}
                       <td className="px-3 py-2">
                         <Captured
                           settled={n(record.spec_settled) + n(record.ready_settled)}
@@ -684,10 +778,11 @@ export default function SpecTable({
         of the document at the page a value came from.
       </p>
       <p className="mt-2 text-xs text-neutral-500">
-        The export is always every record in scope — a BWS import replaces the fields it is given, so a partial file
-            would erase what it left out. It carries no job number: it is a file to read, not to import. The check sheet
-            is the same data one line per field, naming the document and page each value came from, for reading against
-            the pack.
+        <strong>Spec upload</strong> is always every record in scope — a BWS import replaces the fields it is
+            given, so a partial file would erase what it left out. It carries no job number: it is a file to read,
+            not to import. The <strong>check sheet</strong> is not a fourth output: it is the same data one line per
+            field, naming the document and page each value came from, with the verdict column left empty for whoever
+            reads it against the pack.
           </p>
         </>
       )}
