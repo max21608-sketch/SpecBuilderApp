@@ -10,12 +10,23 @@
 //
 // Downloading the .eml records nothing. "Confirm sent" is a separate,
 // explicit act, and it is refused if anything the email described has changed.
+//
+// EVERY CONTROL HERE IS A `Button`, and the one that is an anchor says why.
+// The .eml is fetched by the browser, so it has to stay an `<a href>`, which is
+// what `buttonClass` exists for; everything else changes something and looks
+// like it. Before this it was eleven hand-rolled `<button>`s in four sizes, and
+// "I've sent this" — the one act in this app that records a communication —
+// was the same weight as Cancel.
 import { Fragment, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import Link from "next/link";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import { TIER_LABELS } from "@/lib/tgq";
-import Button from "@/components/ui/Button";
+import Button, { buttonClass } from "@/components/ui/Button";
+import Card, { CardHeadingNote } from "@/components/ui/Card";
+import Chip from "@/components/ui/Chip";
+import Note from "@/components/ui/Note";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
 
 export type DraftItem = {
   recordId: string;
@@ -179,35 +190,69 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
     });
   }
 
-  const border = sent
-    ? "border-neutral-200 bg-neutral-50"
-    : voided
-      ? "border-neutral-200 bg-neutral-50"
-      : noRecipient
-        ? "border-red-400 bg-red-50"
-        : "border-neutral-300";
-
   return (
-    <div className={`border rounded-lg p-4 ${border}`}>
-      {/* ---- header ---------------------------------------------------- */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="font-medium text-neutral-900">{draft.contact_name}</p>
-          <div className="text-sm text-neutral-600">
+    <Card
+      title={
+        <>
+          {draft.contact_name}
+          {/* The card heading is uppercase and tracked; a chip inside it is a
+              VALUE, so it keeps its own case. */}
+          <CardHeadingNote>
+          {sent ? (
+            <Chip tone="good">
+              Sent{draft.sent_at ? ` ${new Date(draft.sent_at).toLocaleDateString("en-GB")}` : ""}
+              {draft.sent_by ? ` by ${draft.sent_by}` : ""}
+            </Chip>
+          ) : voided ? (
+            <Chip>Send confirmation withdrawn</Chip>
+          ) : (
+            <Chip>
+              {draft.items.length} question{draft.items.length === 1 ? "" : "s"}
+            </Chip>
+          )}
+          </CardHeadingNote>
+          {draft.manually_edited_at && (
+            <CardHeadingNote>
+              <Chip tone="warn">
+                Edited {new Date(draft.manually_edited_at).toLocaleDateString("en-GB")}
+                {draft.manually_edited_by ? ` by ${draft.manually_edited_by}` : ""}
+              </Chip>
+            </CardHeadingNote>
+          )}
+        </>
+      }
+      actions={
+        // AN ANCHOR, because the browser fetches the file. `buttonClass` is
+        // what lets it look like the action it is without pretending to be a
+        // `<button>`.
+        <a
+          href={`/api/drafts/${draft.id}/eml?version=${draft.version}`}
+          onClick={() => setDownloadedVersion(draft.version)}
+          className={buttonClass("secondary", "xs")}
+        >
+          Open in Outlook (.eml)
+        </a>
+      }
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 text-sm">
+          <p className="text-neutral-700">
             {draft.recipient_email ? (
               <>To: {draft.recipient_email}</>
             ) : addingEmail ? (
-              <span className="flex items-center gap-2">
+              <span className="flex flex-wrap items-center gap-2">
                 <input
                   type="email"
                   autoFocus
                   value={emailValue}
                   onChange={(e) => setEmailValue(e.target.value)}
                   placeholder="designer@example.com"
-                  className="border border-neutral-300 rounded px-2 py-0.5 text-sm"
+                  aria-label="Their email address"
+                  className="rounded border border-neutral-300 px-2 py-0.5 text-sm"
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="xs"
                   disabled={busy || !emailValue.trim()}
                   onClick={async () => {
                     const ok = await post(`/api/drafts/${draft.id}/set-recipient`, {
@@ -219,17 +264,12 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                       setEmailValue("");
                     }
                   }}
-                  className="px-2 py-0.5 rounded bg-neutral-900 text-white text-xs disabled:opacity-50"
                 >
                   {busy ? "Saving…" : "Save"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAddingEmail(false)}
-                  className="px-2 py-0.5 rounded border border-neutral-300 text-xs"
-                >
+                </Button>
+                <Button variant="quiet" size="xs" onClick={() => setAddingEmail(false)}>
                   Cancel
-                </button>
+                </Button>
               </span>
             ) : (
               <span className="text-red-700">
@@ -237,7 +277,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                 {editable && (
                   <>
                     {" — "}
-                    <Button size="xs" variant="quiet" onClick={() => setAddingEmail(true)}>
+                    <Button size="xs" variant="secondary" onClick={() => setAddingEmail(true)}>
                       Add one now
                     </Button>{" "}
                     <span className="text-neutral-500">(also saves to the contact if it is blank)</span>
@@ -245,48 +285,31 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                 )}
               </span>
             )}
-          </div>
+          </p>
+          {/* A DRAFT WITH NO Cc IS A CHASE NOBODY ELSE CAN SEE, so the empty
+              case stays in words rather than rendering as a blank. */}
           <p className="text-xs text-neutral-500">
             Cc: {draft.cc_email ?? <span className="text-amber-700">none — no project inbox set</span>}
           </p>
-          <p className="text-sm text-neutral-700 mt-1">{draft.subject}</p>
-        </div>
-
-        <div className="text-right shrink-0 text-xs">
-          <p
-            className={
-              sent ? "text-green-700 font-medium" : voided ? "text-neutral-500" : "text-neutral-500"
-            }
-          >
-            {sent
-              ? `Sent${draft.sent_at ? ` ${new Date(draft.sent_at).toLocaleString()}` : ""}${draft.sent_by ? ` by ${draft.sent_by}` : ""}`
-              : voided
-                ? "Send confirmation withdrawn"
-                : `${draft.items.length} question${draft.items.length === 1 ? "" : "s"}`}
-          </p>
-          {voided && draft.void_reason && <p className="text-neutral-500 mt-0.5">{draft.void_reason}</p>}
-          {draft.manually_edited_at && (
-            <p className="text-amber-700 mt-0.5">
-              Edited {new Date(draft.manually_edited_at).toLocaleString()}
-              {draft.manually_edited_by ? ` by ${draft.manually_edited_by}` : ""}
-            </p>
-          )}
+          <p className="mt-1 text-sm text-neutral-700">{draft.subject}</p>
         </div>
       </div>
 
+      {voided && draft.void_reason && <p className="mt-1 text-xs text-neutral-500">{draft.void_reason}</p>}
+
       {/* ---- staleness -------------------------------------------------- */}
       {editable && draft.staleCount > 0 && (
-        <p className="mt-2 text-sm text-amber-800">
-          {draft.staleCount} question{draft.staleCount === 1 ? "" : "s"} changed since this was written —
-          regenerate so the email describes the current picture.
-        </p>
+        <Note tone="warn">
+          {draft.staleCount} question{draft.staleCount === 1 ? "" : "s"} changed since this was written — regenerate
+          so the email describes the current picture.
+        </Note>
       )}
 
       {error && (
-        <div className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+        <Note tone="danger">
           {error}
           {diff && diff.length > 0 && (
-            <ul className="mt-1 list-disc list-inside">
+            <ul className="mt-1 list-inside list-disc">
               {diff.map((row, index) => (
                 <li key={index}>
                   <span className="font-medium">{row.recordLabel}</span> {row.prompt}
@@ -295,132 +318,118 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
               ))}
             </ul>
           )}
-        </div>
+        </Note>
       )}
 
       {/* ---- covered questions ------------------------------------------ */}
-      <div className="mt-3 overflow-x-auto border border-neutral-200 rounded bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-neutral-50 text-neutral-600">
+      <div className="mt-3 rounded-[10px] border border-neutral-200 bg-white">
+        <Table scroll>
+          <thead>
             <tr>
-              <th className="text-left font-medium px-3 py-1.5">Record</th>
-              <th className="text-left font-medium px-3 py-1.5">Question</th>
-              <th className="text-left font-medium px-3 py-1.5">BWS field</th>
-              <th className="text-left font-medium px-3 py-1.5">Asked as</th>
-              <th className="text-left font-medium px-3 py-1.5"> </th>
+              <Th className="w-[18%]">Record</Th>
+              <Th>Question</Th>
+              <Th className="w-[16%]">BWS field</Th>
+              <Th className="w-[16%]">Asked as</Th>
+              <Th className="w-[20%]" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-neutral-100">
+          <tbody>
             {rows.map(({ item, startsTier }) => (
               <Fragment key={`${item.recordId}:${item.requirementId}`}>
-              {startsTier && (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className={`px-3 py-1 text-xs font-medium ${
-                      startsTier === "to_quote" ? "text-red-800 bg-red-50" : "text-neutral-600 bg-neutral-50"
-                    }`}
-                  >
-                    {TIER_LABELS[startsTier]}
-                  </td>
-                </tr>
-              )}
-              <tr className={item.staleReasons.length ? "bg-amber-50" : undefined}>
-                <td className="px-3 py-1.5 text-neutral-500 tabular-nums whitespace-nowrap">
-                  <Link href={`/dashboard/records/${item.recordId}`} className="hover:underline">
-                    {item.recordLabel}
-                  </Link>{" "}
-                  {item.refs && <span className="text-neutral-900">{item.refs}</span>}
-                </td>
-                <td className="px-3 py-1.5">{item.prompt}</td>
-                <td className="px-3 py-1.5 text-neutral-600">{item.fieldLabel?.trim() ?? "—"}</td>
-                <td className="px-3 py-1.5 text-neutral-600">{item.currentValueText ?? "—"}</td>
-                <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                  {item.staleReasons.length > 0 && (
-                    <span className="text-xs text-amber-800 mr-2">
-                      {item.staleReasons.map((reason) => STALE_TEXT[reason] ?? reason).join(", ")}
-                    </span>
-                  )}
-                  {item.tierChanged && item.staleReasons.length === 0 && (
-                    <span className="text-xs text-amber-700 mr-2">
-                      {item.tier === "to_quote" ? "no longer blocking the quote" : "now blocking the quote"} —
-                      regenerate to re-order
-                    </span>
-                  )}
-                  {editable && (
-                    <Button size="xs" variant="quiet" disabled={busy} onClick={() => void removeQuestion(item)}>
-                      Remove
-                    </Button>
-                  )}
-                </td>
-              </tr>
+                {startsTier && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className={`border-b border-neutral-200 px-4 py-1 text-[11px] font-semibold uppercase tracking-wider ${
+                        startsTier === "to_quote" ? "bg-red-50 text-red-800" : "bg-neutral-50 text-neutral-500"
+                      }`}
+                    >
+                      {startsTier === "to_quote" ? "TGQ — needed before we can quote" : TIER_LABELS[startsTier]}
+                    </td>
+                  </tr>
+                )}
+                <Tr tone={item.staleReasons.length ? "warn" : "plain"}>
+                  <Td>
+                    <Link
+                      href={`/dashboard/records/${item.recordId}`}
+                      className="font-mono text-blue-700 no-underline hover:underline"
+                    >
+                      {item.recordLabel}
+                    </Link>{" "}
+                    {item.refs && <span className="font-mono text-neutral-900">{item.refs}</span>}
+                  </Td>
+                  <Td>{item.prompt}</Td>
+                  <Td muted>{item.fieldLabel?.trim() ?? "—"}</Td>
+                  <Td muted>{item.currentValueText ?? "—"}</Td>
+                  <Td className="text-right">
+                    {item.staleReasons.length > 0 && (
+                      <Chip tone="warn" className="mr-2">
+                        {item.staleReasons.map((reason) => STALE_TEXT[reason] ?? reason).join(", ")}
+                      </Chip>
+                    )}
+                    {/* ADVISORY, never a blocker: a question moving between the
+                        two halves is a reading of the gate model, not a claim
+                        about the answer. */}
+                    {item.tierChanged && item.staleReasons.length === 0 && (
+                      <Chip tone="warn" className="mr-2">
+                        {item.tier === "to_quote" ? "no longer blocking the quote" : "now blocking the quote"} —
+                        regenerate to re-order
+                      </Chip>
+                    )}
+                    {editable && (
+                      <Button size="xs" variant="quiet" disabled={busy} onClick={() => void removeQuestion(item)}>
+                        Remove
+                      </Button>
+                    )}
+                  </Td>
+                </Tr>
               </Fragment>
             ))}
           </tbody>
-        </table>
+        </Table>
       </div>
 
       {/* ---- the email --------------------------------------------------- */}
-      <div className="mt-3 border border-neutral-200 rounded bg-white">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-neutral-100">
+      <div className="mt-3 rounded-[10px] border border-neutral-200 bg-white">
+        <div className="flex flex-wrap items-center gap-2 border-b border-neutral-100 px-3 py-2">
           {editable && !editing && (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="px-2 py-1 rounded text-xs border border-neutral-300 hover:bg-neutral-100"
-            >
+            <Button size="xs" variant="secondary" onClick={() => setEditing(true)}>
               Edit wording
-            </button>
+            </Button>
           )}
           {editable && editing && (
-            <span className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void saveEdit()}
-                className="px-2 py-1 rounded text-xs bg-neutral-900 text-white disabled:opacity-50"
-              >
+            <span className="flex flex-wrap items-center gap-2">
+              <Button size="xs" variant="primary" disabled={busy} onClick={() => void saveEdit()}>
                 {busy ? "Saving…" : "Save"}
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={cancelEdit}
-                className="px-2 py-1 rounded text-xs border border-neutral-300"
-              >
+              </Button>
+              <Button size="xs" variant="quiet" disabled={busy} onClick={cancelEdit}>
                 Cancel
-              </button>
+              </Button>
+              {/* The question table is GENERATED from the coverage rows, which
+                  is what makes the body and the coverage provably the same
+                  set. There is no whole-body editor and there must not be. */}
               <span className="text-xs text-neutral-500">
                 The question table is generated — edit the questions above.
               </span>
             </span>
           )}
-          <span className="ml-auto">
-            <a
-              href={`/api/drafts/${draft.id}/eml?version=${draft.version}`}
-              onClick={() => setDownloadedVersion(draft.version)}
-              className="px-2 py-1 rounded text-xs border border-neutral-300 hover:bg-neutral-100 text-neutral-700"
-            >
-              Open in Outlook (.eml)
-            </a>
-          </span>
         </div>
 
         {editing ? (
-          <div className="p-3 space-y-2">
+          <div className="space-y-2 p-3">
             <label className="block text-xs text-neutral-500">Opening</label>
             <textarea
               value={intro}
               onChange={(e) => setIntro(e.target.value)}
               rows={5}
-              className="w-full border border-neutral-300 rounded px-2 py-1 text-sm"
+              className="w-full rounded border border-neutral-300 px-2 py-1 text-sm"
             />
             <label className="block text-xs text-neutral-500">Closing</label>
             <textarea
               value={closing}
               onChange={(e) => setClosing(e.target.value)}
               rows={2}
-              className="w-full border border-neutral-300 rounded px-2 py-1 text-sm"
+              className="w-full rounded border border-neutral-300 px-2 py-1 text-sm"
             />
           </div>
         ) : (
@@ -432,14 +441,14 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
       </div>
 
       {/* ---- the gate ---------------------------------------------------- */}
-      <div className="flex items-center gap-2 mt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         {editable && !confirming && (
-          <span className="ml-auto flex items-center gap-2">
+          <span className="ml-auto flex flex-wrap items-center gap-2">
             {downloadedVersion !== draft.version && (
               <span className="text-xs text-neutral-500">Open it in Outlook before confirming.</span>
             )}
-            <button
-              type="button"
+            <Button
+              variant="primary"
               disabled={busy || noRecipient || downloadedVersion !== draft.version}
               onClick={() => setConfirming(true)}
               title={
@@ -449,18 +458,18 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                     ? "Download this version first"
                     : undefined
               }
-              className="px-3 py-1.5 rounded text-sm bg-neutral-900 text-white disabled:opacity-40"
             >
               I&rsquo;ve sent this
-            </button>
+            </Button>
           </span>
         )}
         {editable && confirming && (
-          <span className="ml-auto flex items-center gap-2 text-sm">
+          <span className="ml-auto flex flex-wrap items-center gap-2 text-sm">
             Record that you sent these {draft.items.length} question
             {draft.items.length === 1 ? "" : "s"} to {draft.recipient_email}?
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="xs"
               disabled={busy}
               onClick={async () => {
                 const ok = await post(`/api/drafts/${draft.id}/confirm-sent`, {
@@ -469,41 +478,33 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                 });
                 if (ok) setConfirming(false);
               }}
-              className="px-2 py-1 rounded bg-neutral-900 text-white disabled:opacity-50"
             >
               {busy ? "Recording…" : "Yes, I sent it"}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setConfirming(false)}
-              className="px-2 py-1 rounded border border-neutral-300"
-            >
+            </Button>
+            <Button variant="quiet" size="xs" disabled={busy} onClick={() => setConfirming(false)}>
               Cancel
-            </button>
+            </Button>
           </span>
         )}
 
         {sent && !undoing && (
-          <button
-            type="button"
-            onClick={() => setUndoing(true)}
-            className="ml-auto px-2 py-1 rounded text-sm border border-neutral-300 hover:bg-neutral-100"
-          >
+          <Button variant="danger" size="sm" className="ml-auto" onClick={() => setUndoing(true)}>
             Undo send confirmation
-          </button>
+          </Button>
         )}
         {sent && undoing && (
-          <span className="ml-auto flex items-center gap-2 text-sm">
+          <span className="ml-auto flex flex-wrap items-center gap-2 text-sm">
             <span className="text-neutral-600">This does not recall the email.</span>
             <input
               value={undoReason}
               onChange={(e) => setUndoReason(e.target.value)}
               placeholder="Why? (optional)"
-              className="border border-neutral-300 rounded px-2 py-1 text-sm"
+              aria-label="Why the send confirmation is being withdrawn"
+              className="rounded border border-neutral-300 px-2 py-1 text-sm"
             />
-            <button
-              type="button"
+            <Button
+              variant="danger"
+              size="xs"
               disabled={busy}
               onClick={async () => {
                 const ok = await post(`/api/drafts/${draft.id}/undo-confirm`, {
@@ -515,21 +516,15 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                   setUndoReason("");
                 }
               }}
-              className="px-2 py-1 rounded bg-neutral-900 text-white disabled:opacity-50"
             >
               {busy ? "Withdrawing…" : "Withdraw"}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setUndoing(false)}
-              className="px-2 py-1 rounded border border-neutral-300"
-            >
+            </Button>
+            <Button variant="quiet" size="xs" disabled={busy} onClick={() => setUndoing(false)}>
               Cancel
-            </button>
+            </Button>
           </span>
         )}
       </div>
-    </div>
+    </Card>
   );
 }

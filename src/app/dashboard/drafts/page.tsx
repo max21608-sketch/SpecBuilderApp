@@ -41,7 +41,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import StatTile from "@/components/ui/StatTile";
 import ChaseDraftCard, { type Draft } from "@/components/drafts/ChaseDraftCard";
-import ChaseQuestionTable, { type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
+import ChaseQuestionTable, { type LevelSuggestion, type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
 import ContactsPanel from "@/components/projects/ContactsPanel";
 import {
   ITEM_LEVELS,
@@ -52,6 +52,13 @@ import {
 import { type QuestionTier } from "@/lib/tgq";
 import Button from "@/components/ui/Button";
 import PageBody from "@/components/ui/PageBody";
+import PageHeader from "@/components/ui/PageHeader";
+import Tabs from "@/components/ui/Tabs";
+import Card from "@/components/ui/Card";
+import Note from "@/components/ui/Note";
+import Chip from "@/components/ui/Chip";
+import SuggestButton from "@/components/ui/SuggestButton";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
 
 type Contact = {
   id: string;
@@ -143,8 +150,23 @@ type Payload = {
 
 const key = (recordId: string, requirementId: string) => `${recordId}:${requirementId}`;
 
+/**
+ * The contact tab for records with nobody to ask.
+ *
+ * They are not a group in the inventory — `splitByContact` puts a record with
+ * no designer, or a designer code no contact carries, into `blocked` — so
+ * their questions cannot be listed beside the others. The tab is still worth
+ * its place: a chase screen that showed only what CAN be asked would hide the
+ * reason 31 questions are not being asked at all.
+ */
+const NOBODY = "__nobody__";
+
+/** Blocked because there is nobody to ask, as opposed to having no level. */
+const isContactBlocker = (reason: string) => reason !== "no level on the record";
+
 function DraftsView() {
-  const projectId = useSearchParams().get("projectId");
+  const params = useSearchParams();
+  const projectId = params.get("projectId");
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -153,6 +175,24 @@ function DraftsView() {
   const [settingLevel, setSettingLevel] = useState<string | null>(null);
   const [discard, setDiscard] = useState<{ id: string; contact_name: string; version: number }[] | null>(null);
   const [conflict, setConflict] = useState<unknown[] | null>(null);
+  /**
+   * THE THREE FILTERS THE PAGE OWNS, because the controls for them are up here.
+   *
+   * The contact strip is the header band's `Tabs` — a chase is written to ONE
+   * person, so "what do I owe Hayley" is this screen's primary axis. The tier
+   * and the waiting toggle are the tiles, because a `StatTile` IS a filter.
+   * The table holds the rest and applies all of them the same way: they narrow
+   * what is LISTED and never what is ticked.
+   */
+  // ARRIVING ON ONE PERSON. The project's Contacts table links "Draft a chase"
+  // straight to that contact, so the tab it names opens selected. Read ONCE,
+  // as the initial value rather than on every render: after that the strip is
+  // the truth, and re-reading it would drag somebody back to the contact in
+  // the URL every time they pressed another tab.
+  const [contactId, setContactId] = useState(() => params.get("contactId") ?? "");
+  const [tier, setTier] = useState<"all" | QuestionTier>("all");
+  const [includeWaiting, setIncludeWaiting] = useState(false);
+  const [acceptingLevels, setAcceptingLevels] = useState(false);
   // The default selection is computed ONCE. After that a reload intersects the
   // user's choices with what is still selectable, so acting on a card does not
   // silently re-tick what they unticked.
@@ -265,6 +305,68 @@ function DraftsView() {
     }
   }
 
+  /**
+   * Sets EVERY level-less record to one level.
+   *
+   * A select that writes the moment it changes, which the suggestion rule
+   * forbids — but the rule is about AGREEING WITH A VALUE THE APP IS SHOWING:
+   * a select pre-filled with "Simple" fires no change event when somebody
+   * chooses Simple, so the one action recording their agreement does nothing.
+   * This select shows no value and asserts nothing; picking one is the
+   * person's own statement about all n records, and it starts empty so the
+   * change always fires.
+   *
+   * One request per record, because there is no bulk route for a level a
+   * person CHOSE — only for accepting what the app suggested. Sequential, so a
+   * refusal stops the rest rather than firing 59 writes at a stale version.
+   */
+  async function setAllLevels(level: string) {
+    if (!level || !data) return;
+    setAcceptingLevels(true);
+    setError(null);
+    try {
+      let failure: string | null = null;
+      for (const record of data.inventory.levelless) {
+        const res = await apiFetch(`/api/records/${record.recordId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ level, version: record.version }),
+        });
+        if (!res.ok) {
+          failure = `${record.recordLabel}: ${res.error}`;
+          break;
+        }
+      }
+      await reloadThen(failure);
+    } finally {
+      setAcceptingLevels(false);
+    }
+  }
+
+  /**
+   * Accepts every level this app suggested, under ONE change set.
+   *
+   * `acceptSuggestedLevels` writes only what is already suggested and never
+   * revisits a decided level, so the button can only file what the screen was
+   * showing. 59 records must not mean 59 visits.
+   */
+  async function acceptSuggestedLevels() {
+    if (!projectId) return;
+    setAcceptingLevels(true);
+    setError(null);
+    try {
+      const res = await apiFetch<{ accepted?: number }>(`/api/projects/${projectId}/levels/accept`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      await reloadThen(res.ok ? null : res.error);
+      if (res.ok) setNotice(`${res.data.accepted ?? 0} suggested level${res.data.accepted === 1 ? "" : "s"} accepted.`);
+    } finally {
+      setAcceptingLevels(false);
+    }
+  }
+
   async function generate(acknowledge: { id: string; version: number }[] = []) {
     if (!data || !projectId) return;
     setGenerating(true);
@@ -321,8 +423,20 @@ function DraftsView() {
     }
   }
 
-  if (error && !data) return <p className="text-sm text-red-700">{error}</p>;
-  if (!data) return <Spinner label="Loading chase emails" />;
+  if (error && !data) {
+    return (
+      <PageBody width="wide">
+        <Note tone="danger">{error}</Note>
+      </PageBody>
+    );
+  }
+  if (!data) {
+    return (
+      <PageBody width="wide">
+        <Spinner label="Loading chase emails" />
+      </PageBody>
+    );
+  }
 
   const { inventory, project } = data;
 
@@ -341,262 +455,381 @@ function DraftsView() {
   })();
   const activeDrafts = data.drafts.filter((d) => d.status === "draft");
 
+  /**
+   * The contact tab actually on screen.
+   *
+   * A `contactId` from the URL may name somebody who has nothing outstanding
+   * on this project, or nobody at all. That falls back to Everyone SILENTLY:
+   * the alternative is an empty table under a tab that is not in the strip,
+   * which reads as a project with no questions on it.
+   */
+  const contactTab =
+    contactId === NOBODY || inventory.groups.some((group) => group.contact.id === contactId) ? contactId : "";
+
+  /** Records nobody can be asked about, as opposed to records with no level. */
+  const nobody = inventory.blocked.filter((row) => isContactBlocker(row.reason));
+  const nobodyQuestions = nobody.reduce((sum, row) => sum + row.questionCount, 0);
+
+  /** What the app guessed each level-less line is, keyed the way the table asks. */
+  const levelSuggestions: Record<string, LevelSuggestion> = {};
+  for (const row of inventory.levelless) {
+    if (row.suggested) {
+      levelSuggestions[row.recordId] = { level: row.suggested, reason: row.suggestedReason };
+    }
+  }
+  const suggestedLevels = inventory.levelless.filter((row) => row.suggested).length;
+
   return (
     <>
-      <p className="mt-1 text-sm text-neutral-600">
-        {project.bws_project_number} {project.name}
-      </p>
-
-      {/* THE FOUR NUMBERS, AS TILES RATHER THAN A SENTENCE.
-          ==================================================================
-          They were a run-on line of four figures separated by middots, which
-          reads as one statement rather than four things in different states —
-          and the one that matters most, TGQ, had no more weight than the one
-          that matters least.
-
-          They do NOT filter this screen. The chase screen's own rule is that a
-          filter narrows what is LISTED and never what is ASKED, and its
-          filters already live above the table with a footer saying how many
-          ticked questions they hide. A second, separate filtering mechanism up
-          here would be a second place for that rule to be got wrong. These are
-          read-outs; the controls are below. */}
-      <div className="mt-3 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-        <StatTile
-          label="TGQ"
-          tone="danger"
-          value={inventory.totals.toQuote}
-          meaning="blocking a quotation"
-        />
-        <StatTile
-          label="Also outstanding"
-          tone="warn"
-          value={inventory.totals.later}
-          meaning="not holding up the quote"
-        />
-        <StatTile
-          label="Awaiting a reply"
-          tone="info"
-          value={inventory.totals.waiting}
-          meaning="asked, nothing back"
-        />
-        {/* THE UNIT ON SCREEN. The table below is one row per furniture line,
-            not one per question, so the count that says how big the job is is a
-            count of LINES. How many have nothing left is the second half of it:
-            a line with nothing outstanding contributes no row, and "11 lines"
-            over eight visible rows is a question about the data. */}
-        <StatTile
-          label="Furniture lines"
-          value={lineTotals.lines}
-          meaning={
-            lineTotals.settled > 0
-              ? `${lineTotals.settled} with nothing outstanding`
-              : "every one has something outstanding"
-          }
-        />
-      </div>
-
-      <p className="mt-1 text-xs text-neutral-500">
-        Cc:{" "}
-        {project.shared_inbox ? (
-          project.shared_inbox
-        ) : (
-          <span className="text-amber-800">no project inbox set — drafts will have no Cc</span>
-        )}
-      </p>
-
-      {error && (
-        <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
-          {error}
-          {conflict && conflict.length > 0 && (
-            <ul className="mt-1 list-disc list-inside">
-              {conflict.slice(0, 10).map((row, index) => {
-                const r = row as { recordLabel?: string | null; prompt?: string | null; reason?: string; why?: string };
-                return (
-                  <li key={index}>
-                    {r.recordLabel ? <span className="font-medium">{r.recordLabel}</span> : null}
-                    {r.prompt ? ` — “${r.prompt}”` : ""} {r.reason ?? r.why ?? ""}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {notice && (
-        <p className="mt-3 text-sm text-green-800 bg-green-50 border border-green-200 rounded px-3 py-2">{notice}</p>
-      )}
-
-      {discard && (
-        <div className="mt-3 border border-amber-300 bg-amber-50 rounded p-3 text-sm text-amber-900">
-          <p className="mb-2">
-            Regenerating will discard the edits on{" "}
-            <span className="font-medium">{discard.map((d) => d.contact_name).join(", ")}</span>. Those drafts
-            will be rebuilt from the current spec data.
-          </p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={generating}
-              onClick={() => generate(discard.map((d) => ({ id: d.id, version: d.version })))}
-              className="text-sm px-2 py-1 rounded bg-neutral-900 text-white disabled:opacity-50"
+      {/* WHERE YOU ARE, WHAT THIS IS, AND WHAT YOU CAME TO DO. The crumb goes
+          back to the project, because a chase is always about one project and
+          the screen is reached from it. */}
+      <PageHeader
+        crumbs={[{ label: `${project.bws_project_number} — ${project.name}`, href: `/dashboard/projects/${project.id}` }]}
+        title="Chase what is missing"
+        subtitle="Drafts only. Nothing is sent from this app — you send it from your own Outlook."
+        actions={
+          <>
+            {/* A question already asked is EXCLUDED by default, and this is how
+                you see them. Not a link: it changes what you are looking at. */}
+            <Button
+              variant="secondary"
+              aria-pressed={includeWaiting}
+              onClick={() => setIncludeWaiting((on) => !on)}
+              className={includeWaiting ? "border-blue-300 bg-blue-50 text-blue-800" : ""}
             >
-              Yes, discard and regenerate
-            </button>
-            <button
-              type="button"
-              disabled={generating}
-              onClick={() => setDiscard(null)}
-              className="text-sm px-2 py-1 rounded border border-amber-400"
+              Waiting on a reply
+              <span className="ml-1.5 rounded-full bg-neutral-100 px-1.5 py-px text-[11px] tabular-nums text-neutral-600">
+                {inventory.totals.waiting}
+              </span>
+            </Button>
+            <Button
+              variant="primary"
+              disabled={generating || selected.size === 0}
+              title={selected.size === 0 ? "Tick at least one question below" : undefined}
+              onClick={() => void generate()}
             >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      <ContactsPanel
-        projectId={project.id}
-        contacts={data.contacts}
-        suggestedCodes={inventory.suggestedCodes}
-        onChanged={() => void load()}
+              {generating ? "Drafting…" : `Draft the email · ${selected.size} question${selected.size === 1 ? "" : "s"}`}
+            </Button>
+          </>
+        }
+        tabs={
+          <Tabs
+            label="Who to chase"
+            value={contactTab}
+            onChange={setContactId}
+            items={[
+              { id: "", label: "Everyone", count: tableQuestions.length },
+              ...inventory.groups.map((group) => ({
+                id: group.contact.id,
+                label: group.contact.name,
+                count: group.questions.length,
+              })),
+              {
+                id: NOBODY,
+                label: "Nobody assigned",
+                count: nobodyQuestions,
+                tone: "warn" as const,
+                hidden: nobody.length === 0,
+              },
+            ]}
+          />
+        }
       />
 
-      {/* ---- levels, first, because they gate everything below ------------ */}
-      {inventory.levelless.length > 0 && (
-        <div className="mt-4 border border-amber-300 bg-amber-50 rounded p-3">
-          <p className="text-sm font-medium text-amber-900">
-            {inventory.levelless.length} record{inventory.levelless.length === 1 ? " has" : "s have"} no level
-          </p>
-          <p className="mt-0.5 text-xs text-amber-800">
-            A level says how much has to be known before the item can be priced, so until one is set nothing on
-            the record can be sorted into what blocks a quote and what does not. Set them here.
-          </p>
-          <ul className="mt-2 space-y-1">
-            {inventory.levelless.map((row) => (
-              <li key={row.recordId} className="flex flex-wrap items-center gap-2 text-sm text-amber-900">
-                <Link href={`/dashboard/records/${row.recordId}`} className="underline tabular-nums">
-                  {row.recordLabel}
-                </Link>
-                <span className="text-amber-800">{row.itemDescription}</span>
-                {/* WHAT THE APP WOULD SAY, and what it read to say it. The
-                    picker is pre-filled with the guess so agreeing is one
-                    click — but it is still a click, and until it happens the
-                    record counts as having no level. */}
-                {row.suggested && (
-                  <>
-                    <span className="text-xs text-amber-800" title={row.suggestedReason ?? undefined}>
-                      suggested: {row.suggested}
-                      {row.suggestedReason && <> — {row.suggestedReason}</>}
-                    </span>
-                    {/* Its own button: a select pre-filled with the guess fires
-                        no change event when somebody picks the guess, so
-                        agreeing would silently do nothing. */}
-                    <Button
-                      size="xs"
-                      variant="secondary"
-                      disabled={settingLevel === row.recordId}
-                      onClick={() => void setLevel(row, row.suggested ?? "")}
-                    >
-                      Accept
-                    </Button>
-                  </>
-                )}
-                <select
-                  defaultValue=""
-                  disabled={settingLevel === row.recordId}
-                  onChange={(event) => void setLevel(row, event.target.value)}
-                  className="ml-auto border border-amber-400 rounded px-2 py-0.5 text-sm bg-white disabled:opacity-50"
+      <PageBody width="wide">
+        {error && (
+          <Note tone="danger">
+            {error}
+            {conflict && conflict.length > 0 && (
+              <ul className="mt-1 list-inside list-disc">
+                {conflict.slice(0, 10).map((row, index) => {
+                  const r = row as { recordLabel?: string | null; prompt?: string | null; reason?: string; why?: string };
+                  return (
+                    <li key={index}>
+                      {r.recordLabel ? <span className="font-medium">{r.recordLabel}</span> : null}
+                      {r.prompt ? ` — “${r.prompt}”` : ""} {r.reason ?? r.why ?? ""}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Note>
+        )}
+        {notice && <Note tone="good">{notice}</Note>}
+
+        {discard && (
+          <Note
+            tone="warn"
+            title="Regenerating will discard the edits on"
+            actions={
+              <>
+                <Button
+                  variant="danger"
+                  size="xs"
+                  disabled={generating}
+                  onClick={() => generate(discard.map((d) => ({ id: d.id, version: d.version })))}
                 >
-                  <option value="">— set level —</option>
+                  Yes, discard and regenerate
+                </Button>
+                <Button variant="quiet" size="xs" disabled={generating} onClick={() => setDiscard(null)}>
+                  Cancel
+                </Button>
+              </>
+            }
+          >
+            {discard.map((d) => d.contact_name).join(", ")}. Those drafts will be rebuilt from the current spec data.
+          </Note>
+        )}
+
+        {/* ---- levels, first, because they gate everything below ------------
+            RED, because a record with no level cannot be tiered and therefore
+            cannot be chased at all — it blocks the quotation, which is what red
+            means here. */}
+        {inventory.levelless.length > 0 && (
+          <Note
+            tone="danger"
+            title={`${inventory.levelless.length} item${inventory.levelless.length === 1 ? " has" : "s have"} no level,`}
+            actions={
+              <>
+                {/* A SELECT THAT WRITES ON CHANGE, which is allowed here and is
+                    not allowed for a suggestion: it shows no value and asserts
+                    nothing, so choosing one is the person's own statement about
+                    all of them. The trap it avoids by starting empty is that a
+                    pre-filled select fires no change event when somebody picks
+                    the value it already shows. */}
+                <select
+                  value=""
+                  disabled={acceptingLevels}
+                  aria-label="Set every level-less item to one level"
+                  onChange={(event) => void setAllLevels(event.target.value)}
+                  className="rounded border border-red-300 bg-white px-2 py-1 text-xs disabled:opacity-50"
+                >
+                  <option value="">Set all {inventory.levelless.length} to…</option>
                   {ITEM_LEVELS.map((level) => (
                     <option key={level} value={level}>
                       {ITEM_LEVEL_LABELS[level]}
                     </option>
                   ))}
                 </select>
-              </li>
-            ))}
-          </ul>
+                {suggestedLevels > 0 && (
+                  <SuggestButton
+                    value={`Accept the ${suggestedLevels} suggested`}
+                    evidence="each was guessed from the bill's own words, and all of them file under one change"
+                    busy={acceptingLevels}
+                    onAccept={() => void acceptSuggestedLevels()}
+                  />
+                )}
+              </>
+            }
+          >
+            so nothing on them can be tiered and they cannot be chased.{" "}
+            {suggestedLevels > 0
+              ? `${suggestedLevels} ${suggestedLevels === 1 ? "has" : "have"} a suggestion.`
+              : "None of them has a suggestion, so each is a decision on its own record."}
+          </Note>
+        )}
+
+        {/* THE FOUR NUMBERS, AS TILES — AND EACH ONE IS A FILTER.
+            ==================================================================
+            A tile opens the list already narrowed to what it counts, and the
+            filter it set is repeated as a removable chip in the row above the
+            table, because a filter you cannot see is a filter you forget you
+            set. What a tile must never do is change what is ASKED: the ticks
+            are the truth, and the footer says in words how many ticked
+            questions the filters are hiding. */}
+        <div className="mt-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          <StatTile
+            label="TGQ"
+            tone="danger"
+            value={inventory.totals.toQuote}
+            meaning="blocking a quotation"
+            action={tier === "to_quote" ? "showing these" : "show these"}
+            onPress={() => setTier(tier === "to_quote" ? "all" : "to_quote")}
+            active={tier === "to_quote"}
+          />
+          <StatTile
+            label="Also outstanding"
+            tone="warn"
+            value={inventory.totals.later}
+            meaning="not holding up the quote"
+            action={tier === "later" ? "showing these" : "show these"}
+            onPress={() => setTier(tier === "later" ? "all" : "later")}
+            active={tier === "later"}
+          />
+          <StatTile
+            label="Waiting on a reply"
+            tone="info"
+            value={inventory.totals.waiting}
+            meaning="asked, nothing back"
+            action={includeWaiting ? "hide them again" : "include them"}
+            onPress={() => setIncludeWaiting((on) => !on)}
+            active={includeWaiting}
+          />
+          {/* THE UNIT ON SCREEN. The table below is one row per furniture line,
+              not one per question, so the count that says how big the job is is
+              a count of LINES. How many have nothing left is the second half of
+              it: a line with nothing outstanding contributes no row, and
+              "11 lines" over eight visible rows is a question about the data. */}
+          <StatTile
+            label="Furniture lines"
+            value={lineTotals.lines}
+            meaning={
+              lineTotals.settled > 0
+                ? `${lineTotals.settled} with nothing outstanding`
+                : "every one has something outstanding"
+            }
+            action={tier !== "all" || includeWaiting ? "show all" : undefined}
+            onPress={
+              tier !== "all" || includeWaiting
+                ? () => {
+                    setTier("all");
+                    setIncludeWaiting(false);
+                  }
+                : undefined
+            }
+          />
         </div>
-      )}
 
-      {/* ---- other blockers ----------------------------------------------- */}
-      {(inventory.blocked.length > 0 || inventory.uncategorised.length > 0 || inventory.unauthored.length > 0) && (
-        <div className="mt-4 border border-amber-200 bg-amber-50 rounded p-3">
-          <p className="text-sm font-medium text-amber-900 mb-1">
-            Cannot be chased ({inventory.blocked.length + inventory.uncategorised.length + inventory.unauthored.length})
-          </p>
-          <ul className="text-sm text-amber-900 space-y-0.5">
-            {inventory.blocked.map((row) => (
-              <li key={row.recordId}>
-                <Link href={`/dashboard/records/${row.recordId}`} className="underline">
-                  {row.recordLabel}
-                </Link>{" "}
-                {row.itemDescription} — {row.reason}
-                {row.designer ? ` (${row.designer})` : ""} · {row.questionCount} question
-                {row.questionCount === 1 ? "" : "s"}
-              </li>
-            ))}
-            {inventory.uncategorised.map((row) => (
-              <li key={row.recordId}>
-                <Link href={`/dashboard/records/${row.recordId}`} className="underline">
-                  {row.recordLabel}
-                </Link>{" "}
-                {row.itemDescription} — no category, so there is no checklist to measure it against
-              </li>
-            ))}
-            {inventory.unauthored.map((row) => (
-              <li key={String(row.id)}>
-                <Link href={`/dashboard/records/${String(row.id)}`} className="underline">
-                  {String(row.bws_project_number)}-{String(row.record_no).padStart(3, "0")}
-                </Link>{" "}
-                {String(row.item_description)} — {String(row.category_name)} has no requirements authored yet
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-amber-800">
-            A record with nobody to ask needs a contact — add one above.
-          </p>
-        </div>
-      )}
-
-      {/* ---- what to ask, by furniture line ------------------------------- */}
-      <ChaseQuestionTable
-        questions={tableQuestions}
-        selected={selected}
-        onToggle={toggle}
-        onToggleMany={toggleMany}
-        generating={generating}
-        onGenerate={() => void generate()}
-      />
-
-      {/* ---- drafts ------------------------------------------------------- */}
-      <h2 className="mt-8 text-sm font-semibold text-neutral-800">
-        Drafts {activeDrafts.length > 0 && <span className="text-neutral-500">({activeDrafts.length} ready)</span>}
-      </h2>
-      {data.drafts.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-600">
-          No drafts yet. Choose questions above and click Generate drafts.
+        {/* A DRAFT WITH NO Cc IS A CHASE NOBODY ELSE CAN SEE. Said in words, not
+            hidden in a tip: an unset inbox and a set one render identically
+            otherwise. */}
+        <p className="mt-2 text-xs text-neutral-500">
+          Cc:{" "}
+          {project.shared_inbox ? (
+            project.shared_inbox
+          ) : (
+            <span className="text-amber-800">no project inbox set — drafts will have no Cc</span>
+          )}
         </p>
-      ) : (
-        <div className="mt-3 space-y-4">
-          {data.drafts.map((draft) => (
-            <ChaseDraftCard key={draft.id} draft={draft} onChanged={() => void load()} />
-          ))}
-        </div>
-      )}
+
+        <ContactsPanel
+          projectId={project.id}
+          contacts={data.contacts}
+          suggestedCodes={inventory.suggestedCodes}
+          onChanged={() => void load()}
+        />
+
+        {contactTab === NOBODY ? (
+          /* NOBODY TO ASK. These records have questions and no route to a
+             person, so they are not in the table above at any filter — the tab
+             exists so they are not invisible either. */
+          <Card
+            flush
+            title={
+              <>
+                Nobody assigned
+                <span className="font-medium normal-case tracking-normal text-neutral-500">
+                  {" "}· {nobodyQuestions} question{nobodyQuestions === 1 ? "" : "s"} with no route to a person
+                </span>
+              </>
+            }
+          >
+            <Table>
+              <thead>
+                <tr>
+                  <Th className="w-[16%]">Record</Th>
+                  <Th>Item</Th>
+                  <Th className="w-[34%]">Why nobody can be asked</Th>
+                  <Th num className="w-[12%]">Questions</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {nobody.map((row) => (
+                  <Tr key={row.recordId}>
+                    <Td>
+                      <Link
+                        href={`/dashboard/records/${row.recordId}`}
+                        className="font-mono text-blue-700 no-underline hover:underline"
+                      >
+                        {row.recordLabel}
+                      </Link>
+                    </Td>
+                    <Td>{row.itemDescription}</Td>
+                    <Td>
+                      <Chip tone="warn">{row.reason}</Chip>
+                      {row.designer && <span className="ml-2 text-neutral-500">designer code {row.designer}</span>}
+                    </Td>
+                    <Td num>{row.questionCount}</Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+          </Card>
+        ) : (
+          /* ---- what to ask, by furniture line ------------------------------ */
+          <ChaseQuestionTable
+            questions={tableQuestions}
+            selected={selected}
+            onToggle={toggle}
+            onToggleMany={toggleMany}
+            generating={generating}
+            onGenerate={() => void generate()}
+            contactId={contactTab}
+            tier={tier}
+            onTier={setTier}
+            includeWaiting={includeWaiting}
+            onIncludeWaiting={setIncludeWaiting}
+            levelSuggestions={levelSuggestions}
+            onAcceptLevel={(recordId) => {
+              const row = inventory.levelless.find((entry) => entry.recordId === recordId);
+              if (row?.suggested) void setLevel(row, row.suggested);
+            }}
+            acceptingLevel={settingLevel}
+          />
+        )}
+
+        {/* ---- the blockers that are not about a contact -------------------- */}
+        {(inventory.uncategorised.length > 0 || inventory.unauthored.length > 0) && (
+          <Note tone="warn" title="Cannot be chased at all:">
+            <ul className="mt-1 space-y-0.5">
+              {inventory.uncategorised.map((row) => (
+                <li key={row.recordId}>
+                  <Link href={`/dashboard/records/${row.recordId}`} className="underline">
+                    {row.recordLabel}
+                  </Link>{" "}
+                  {row.itemDescription} — no category, so there is no checklist to measure it against
+                </li>
+              ))}
+              {inventory.unauthored.map((row) => (
+                <li key={String(row.id)}>
+                  <Link href={`/dashboard/records/${String(row.id)}`} className="underline">
+                    {String(row.bws_project_number)}-{String(row.record_no).padStart(3, "0")}
+                  </Link>{" "}
+                  {String(row.item_description)} — {String(row.category_name)} has no requirements authored yet
+                </li>
+              ))}
+            </ul>
+          </Note>
+        )}
+
+        {/* ---- drafts ------------------------------------------------------- */}
+        <h2 className="mt-8 text-th font-bold uppercase tracking-wider text-neutral-500">
+          Drafts
+          {activeDrafts.length > 0 && (
+            <span className="font-medium normal-case tracking-normal"> · {activeDrafts.length} ready to send</span>
+          )}
+        </h2>
+        {data.drafts.length === 0 ? (
+          <p className="mt-2 text-sm text-neutral-600">
+            No drafts yet. Tick the questions to ask above, then press Draft it.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {data.drafts.map((draft) => (
+              <ChaseDraftCard key={draft.id} draft={draft} onChanged={() => void load()} />
+            ))}
+          </div>
+        )}
+      </PageBody>
     </>
   );
 }
 
 export default function DraftsPage() {
   return (
-    <PageBody width="wide">
-      <h1 className="text-xl font-semibold text-neutral-900">Chase emails</h1>
-      <Suspense fallback={<Spinner label="Loading" />}>
-        <DraftsView />
-      </Suspense>
-    </PageBody>
+    <Suspense fallback={<PageBody width="wide"><Spinner label="Loading" /></PageBody>}>
+      <DraftsView />
+    </Suspense>
   );
 }

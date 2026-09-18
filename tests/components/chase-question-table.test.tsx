@@ -76,6 +76,15 @@ function Harness({ questions }: { questions: TableQuestion[] }) {
 
 const line = () => screen.getByText("Desk chair").closest("tr")!;
 
+/**
+ * A finish option's row.
+ *
+ * `S-301 A` is two nodes now, because the LETTER is coloured the way the
+ * drawings review colours it — A is always sky — so the name is matched by its
+ * title rather than by its text.
+ */
+const optionRow = (name: string) => screen.getByTitle(name).closest("tr")!;
+
 describe("the furniture line is the row", () => {
   it("shows one row per line, with no questions until it is opened", async () => {
     render(<Harness questions={[question(), question(), question()]} />);
@@ -133,10 +142,10 @@ describe("finish options", () => {
 
   it("nests them under their bill line, named as they are said out loud", async () => {
     render(<Harness questions={withOptions()} />);
-    expect(screen.queryByText("S-301 A")).toBeNull();
+    expect(screen.queryByTitle("S-301 A")).toBeNull();
     await userEvent.click(screen.getByText("Desk chair"));
-    expect(screen.getByText("S-301 A")).toBeTruthy();
-    expect(screen.getByText("S-301 B")).toBeTruthy();
+    expect(screen.getByTitle("S-301 A")).toBeTruthy();
+    expect(screen.getByTitle("S-301 B")).toBeTruthy();
   });
 
   it("says the bill line is a heading, and never apportions its quantity", async () => {
@@ -149,11 +158,12 @@ describe("finish options", () => {
   it("ticks one finish option without ticking the other", async () => {
     render(<Harness questions={withOptions()} />);
     await userEvent.click(screen.getByText("Desk chair"));
-    const optionA = screen.getByText("S-301 A").closest("tr")!;
+    const optionA = optionRow("S-301 A");
     await userEvent.click(within(optionA).getByRole("checkbox"));
-    // A's question only — B's is untouched, and the button says what it would
-    // produce rather than leaving the count to be inferred.
-    expect(screen.getByRole("button", { name: "Generate 1 draft (1 question)" })).toBeTruthy();
+    // A's question only — B's is untouched, and the footer says what would be
+    // produced rather than leaving the count to be inferred.
+    expect(screen.getByText(/1 question ticked/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Draft it · 1 draft" })).toBeTruthy();
   });
 });
 
@@ -173,7 +183,7 @@ describe("a filter narrows what is listed, never what is asked", () => {
     await userEvent.click(screen.getByText("Desk chair"));
     await userEvent.click(within(line()).getByRole("checkbox"));
     await userEvent.type(screen.getByPlaceholderText(/Search a code/), "stitching");
-    expect(screen.getByText(/hidden by the filters/)).toBeTruthy();
+    expect(screen.getByText(/hidden by your filters/)).toBeTruthy();
     expect(screen.getByText(/will still be asked/)).toBeTruthy();
   });
 
@@ -193,6 +203,52 @@ describe("a filter narrows what is listed, never what is asked", () => {
   });
 });
 
+// ===========================================================================
+// THE FOLD IS NOT A FILTER
+//
+// A hero sofa has 37 outstanding questions and opening it filled the screen.
+// The first few are listed and the rest are one click away — but they stay
+// ticked, stay counted in the line's own totals and stay in the draft, which
+// is the distinction a filter makes in words in the footer and this one makes
+// by leaving everything alone.
+// ===========================================================================
+describe("a long line is folded", () => {
+  const many = () => [
+    question({ prompt: "COM 1" }),
+    question({ prompt: "COM 2" }),
+    question({ prompt: "COM 3" }),
+    question({ prompt: "Stitching spec" }),
+    question({ prompt: "Delivery date", tier: "later" }),
+  ];
+
+  it("lists the first few and counts the rest", async () => {
+    render(<Harness questions={many()} />);
+    await userEvent.click(screen.getByText("Desk chair"));
+    expect(screen.getByText("COM 1")).toBeTruthy();
+    expect(screen.queryByText("Stitching spec")).toBeNull();
+    // One more TGQ and the later one, which sorts below it.
+    expect(screen.getByRole("button", { name: "1 more TGQ · 1 also outstanding" })).toBeTruthy();
+  });
+
+  it("keeps the folded questions ticked and counted", async () => {
+    render(<Harness questions={many()} />);
+    await userEvent.click(screen.getByText("Desk chair"));
+    await userEvent.click(within(line()).getByRole("checkbox"));
+    // All five, not the three on screen, and the line's own counts are intact.
+    expect(screen.getByText(/5 questions ticked/)).toBeTruthy();
+    expect(within(line()).getByText("4")).toBeTruthy();
+    // And nothing is claimed to be hidden by a filter, because none is set.
+    expect(screen.queryByText(/hidden by your filters/)).toBeNull();
+  });
+
+  it("opens the rest on one click", async () => {
+    render(<Harness questions={many()} />);
+    await userEvent.click(screen.getByText("Desk chair"));
+    await userEvent.click(screen.getByRole("button", { name: "1 more TGQ · 1 also outstanding" }));
+    expect(screen.getByText("Stitching spec")).toBeTruthy();
+  });
+});
+
 describe("what would be generated", () => {
   it("counts the recipients, not just the questions", async () => {
     render(
@@ -205,6 +261,6 @@ describe("what would be generated", () => {
     );
     await userEvent.click(screen.getByText("Select everything shown"));
     expect(screen.getByText(/2 recipients/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Generate 2 drafts/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Draft it · 2 drafts" })).toBeTruthy();
   });
 });
