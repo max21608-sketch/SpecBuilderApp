@@ -130,7 +130,15 @@ Four things a plan has to settle rather than assume:
 
 ### The item picture does not line up with the card beside it
 
-**Status: open.** Seen on the record screen (screenshot),
+**Status: FIXED, 2026-09-18**, by the record screen's rebuild against
+`#record-screen`. The picture is no longer a track
+beside `RecordDetails`; it HEADS its own sticky column on the Specs tab, and
+the left column now starts with a `Card`. Both columns therefore begin with a
+box at the same top edge, which is what `items-start` needed and did not have.
+The 3D view sitting off-centre in its own crop is untouched, as the entry says
+it should be.
+
+Seen on the record screen (screenshot),
 `DEMO-TEST-01-006 · Armchair, lounge @ suite living area`.
 
 The picture panel's top edge sits **higher than everything in the left column**

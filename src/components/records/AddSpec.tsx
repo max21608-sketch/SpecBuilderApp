@@ -25,12 +25,29 @@ export default function AddSpec({
   recordId,
   specFields,
   onAdded,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   recordId: string;
   specFields: SpecField[];
   onAdded: () => void | Promise<void>;
+  /**
+   * CONTROLLED WHEN GIVEN, and then this component renders NO trigger of its
+   * own. The record screen's "Add a spec by hand" is a page-level action and
+   * lives in the header band with the rest of them; the form it opens belongs
+   * beside the specs it is adding to. Two buttons for one action is how a
+   * reader comes to believe they do different things.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const controlled = controlledOpen !== undefined;
+  const open = controlled ? controlledOpen : ownOpen;
+  const setOpen = (next: boolean) => {
+    if (!controlled) setOwnOpen(next);
+    onOpenChange?.(next);
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -80,6 +97,7 @@ export default function AddSpec({
   }
 
   if (!open) {
+    if (controlled) return null;
     return (
       <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
         Add a spec by hand

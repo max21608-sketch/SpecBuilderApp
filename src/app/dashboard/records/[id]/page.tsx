@@ -11,7 +11,20 @@
 //
 // A question with no answer row still appears, as `missing` — that half of the
 // screen is driven by the requirement list, not by the answers that exist.
-import { Suspense, useCallback, useEffect, useState } from "react";
+//
+// ============================================================================
+// THE IDENTITY IS THE HEADER AND THE PICTURE, AND NEITHER IS IN A TAB.
+//
+// CLAUDE.md's rule for this screen is that what tells you WHICH item you are
+// looking at stays above the tab content. In this layout the description is
+// the `h1` and the picture heads the Specs tab's own sticky column, which is
+// where a reader looks while checking a value against a page — and which also
+// closes the alignment finding of 2026-09-18: the picture used to be a grid
+// track beside `RecordDetails`, whose own heading began lower than the box did,
+// so `items-start` aligned two things that did not start in the same place.
+// Now both columns begin with a box at the same top edge.
+// ============================================================================
+import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
@@ -19,6 +32,7 @@ import Spinner from "@/components/ui/Spinner";
 import {
   ANSWER_STATES,
   ANSWER_STATE_LABELS,
+  ANSWER_STATE_TONE,
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
   type AnswerState,
@@ -37,18 +51,28 @@ import { unallocatedQty, variantName } from "@/lib/record-variants";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
-import Button from "@/components/ui/Button";
+import Button, { buttonClass } from "@/components/ui/Button";
 import GatePanel from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
 import AnswerValue from "@/components/records/AnswerValue";
+import { dimensionProvenance } from "@/components/records/dimension-provenance";
 import type { Palette } from "@/lib/palettes";
 import { GATES, type Gate, type GateStatus } from "@/lib/gates";
+import type { GateField } from "@/lib/gates";
 import PageBody from "@/components/ui/PageBody";
+import PageHeader from "@/components/ui/PageHeader";
+import Card, { CardHeadingNote } from "@/components/ui/Card";
+import Chip from "@/components/ui/Chip";
+import Note from "@/components/ui/Note";
+import Tip from "@/components/ui/Tip";
+import SuggestButton from "@/components/ui/SuggestButton";
+import { Table, Th, Td, Tr, GroupRow } from "@/components/ui/Table";
+import { TONE } from "@/components/ui/tone";
 import Tabs from "@/components/ui/Tabs";
 import { useUrlTab } from "@/lib/use-url-tab";
 
-type Answer = {
+export type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
   tgq_levels: string[] | null;
   field_name: string | null; json_id: number | null; field_category: string | null;
@@ -100,11 +124,14 @@ type RetiredAttribute = Attribute & {
   superseded_by_id: string | null;
 };
 
+/** Who owes us the unanswered questions, resolved from the BOQ's designer code. */
+export type DesignerContact = { id: string; name: string; email: string | null; role: string | null; designer_code: string };
+
 /** The four jobs this screen does, one tab each. */
 const RECORD_TABS = ["specs", "checklist", "gates", "versions"] as const;
 type RecordTab = (typeof RECORD_TABS)[number];
 
-type Payload = {
+export type Payload = {
   record: SpecRecord;
   refs: { ref_system: string; ref_value: string }[];
   attributes: Attribute[];
@@ -127,13 +154,40 @@ type Payload = {
    * Set does not survive JSON; the screen rebuilds them.
    */
   tgqMatrix: { fields: number[]; localKeys: string[] } | null;
+  /**
+   * Which questions have already been ASKED and not answered, keyed by
+   * `questionKey(recordId, requirementId, 0)` — derived, never stored.
+   */
+  waiting: Record<string, { draftId: string; sentAt: string | null; contactName: string }>;
+  designerContact: DesignerContact | null;
+  designerContactAmbiguous: boolean;
+  /** `toQuote`/`alsoOutstanding` are NULL where the record has no level. A dash, never a zero. */
+  quoteReadiness: {
+    toQuote: number | null;
+    alsoOutstanding: number | null;
+    outstanding: number;
+    settled: number;
+    notApplicable: number;
+    noLevel: boolean;
+  };
+  /** Matthew's matrix rows for this category. Null where his matrix does not reach it. */
+  matrixFields: (Omit<GateField, "capture" | "gate" | "valueType"> & {
+    gate: Gate;
+    capture: GateField["capture"];
+    valueType: GateField["valueType"];
+  })[] | null;
 };
 
-const STATE_CLASS: Record<AnswerState, string> = {
-  confirmed: "text-green-700 border-green-300 bg-green-50",
-  tbc: "text-amber-800 border-amber-300 bg-amber-50",
-  missing: "text-red-700 border-red-300 bg-red-50",
-  na: "text-neutral-600 border-neutral-300 bg-neutral-50",
+/**
+ * Half a sentence on a group of captured specs, where the group carries a rule.
+ *
+ * On the heading rather than in a doc: "why is Dimension 5 a note and not a
+ * height?" is a question somebody asks while looking at the row, and the
+ * answer is the rule `normaliseDimensionSlot` follows.
+ */
+const GROUP_RULE: Partial<Record<AttributeGroup, string>> = {
+  dimension: "— the ones that compose the cell above",
+  note: "— kept with their own label, never folded into a slot",
 };
 
 function RecordView() {
@@ -152,9 +206,6 @@ function RecordView() {
    * Collapsing was the wrong fix: a thing you have to expand every time is a
    * thing people stop opening. They are four different jobs done at four
    * different moments, and a tab each is how you get to the one you came for.
-   * The identity above them — the picture, the description, the category and
-   * the level — stays on every tab, because it is what tells you which item
-   * you are looking at.
    */
   const [tab, setTab] = useUrlTab<RecordTab>({
     fallback: "specs",
@@ -177,6 +228,9 @@ function RecordView() {
   const [retireReason, setRetireReason] = useState("");
   const [retireBusy, setRetireBusy] = useState(false);
   const [showRetired, setShowRetired] = useState(false);
+  // The header's "Add a spec by hand" opens the form beside the specs it adds
+  // to. One action, one button: the page-level action lives in the band.
+  const [addingSpec, setAddingSpec] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
@@ -332,8 +386,8 @@ function RecordView() {
     }
   }
 
-  if (error && !data) return <p className="text-sm text-red-700">{error}</p>;
-  if (!data) return <Spinner label="Loading record" />;
+  if (error && !data) return <PageBody><Note tone="danger">{error}</Note></PageBody>;
+  if (!data) return <PageBody><Spinner label="Loading record" /></PageBody>;
 
   const { record, refs, answers, attributes, categories } = data;
 
@@ -350,21 +404,13 @@ function RecordView() {
   const billQty = billLine?.qty ?? null;
   const unallocated = unallocatedQty(billQty, variants.map((member) => member.qty));
 
-  // One implementation of the tier, shared with the drafts screen, the export
-  // counts and the email. Matthew's matrix decides it where he has written one
-  // for this category and the 0019 placeholder where he has not — the server
-  // sends which applies as DATA (`tgqMatrix`, null for an uncovered category)
-  // rather than sending a verdict, so this screen and the chase inventory run
-  // the same function over the same inputs.
-  //
-  // A record with no level still gets null under the FALLBACK, and no badge —
-  // the app does not decide what kind of item this is. Under his matrix the
-  // tier needs no level, because his matrix has no level column.
-  const recordLevel = normaliseItemLevel(record.level);
-  // Not memoised: this sits after the loading guard, and a hook below an early
-  // return is a hook that does not run in the same order every render. The
-  // sets are at most a few dozen entries and are rebuilt per render, which is
-  // nothing beside the table this screen already renders.
+  const recordLabel = `${record.bws_project_number}-${String(record.record_no).padStart(3, "0")}`;
+  const runHref = `/dashboard/projects/${record.project_id}?tab=${record.run_id}`;
+  const level = normaliseItemLevel(record.level);
+  const readiness = data.quoteReadiness ?? {
+    toQuote: null, alsoOutstanding: null, outstanding: 0, settled: 0, notApplicable: 0, noLevel: true,
+  };
+
   /**
    * The counts the tabs carry.
    *
@@ -389,51 +435,48 @@ function RecordView() {
       ? "good"
       : "warn";
 
-  const tgqMatrix = data.tgqMatrix
-    ? {
-        fields: new Set<number>(data.tgqMatrix.fields),
-        localKeys: new Set<string>(data.tgqMatrix.localKeys),
-      }
-    : null;
-  const tierOf = (answer: Answer) =>
-    questionTierOrNull(
-      {
-        tgqLevels: answer.tgq_levels ?? [],
-        jsonId: answer.json_id,
-        localKey: answer.local_key,
-      },
-      recordLevel,
-      tgqMatrix,
-    );
   // Older responses have no `retiredAttributes`; a screen that assumed the key
   // exists would crash on the first record loaded from a cached payload.
   const retiredAttributes = data.retiredAttributes ?? [];
+  const slotted = attributes.filter(
+    (attribute) => attribute.attr_group === "dimension" && attribute.dimension_slot,
+  );
   const dimensionCell = composeDimensionCell(
-    attributes
-      .filter((attribute) => attribute.attr_group === "dimension" && attribute.dimension_slot)
-      .map((attribute) => ({
-        slot: attribute.dimension_slot as DimensionSlot,
-        value: attribute.value,
-        unit: (attribute.unit ?? null) as AttributeUnit | null,
-        state: attribute.state,
-        sortOrder: attribute.sort_order,
-      })),
+    slotted.map((attribute) => ({
+      slot: attribute.dimension_slot as DimensionSlot,
+      value: attribute.value,
+      unit: (attribute.unit ?? null) as AttributeUnit | null,
+      state: attribute.state,
+      sortOrder: attribute.sort_order,
+    })),
+  );
+  const provenance = dimensionProvenance(
+    slotted.map((attribute) => ({
+      unit: attribute.unit,
+      sourceFilename: attribute.source_filename,
+      sourcePage: attribute.source_page,
+    })),
   );
   const byGroup = ATTRIBUTE_GROUPS.map((group) => ({
     group,
     rows: attributes.filter((attribute) => attribute.attr_group === group),
   })).filter((entry) => entry.rows.length > 0);
+
+  // ---- the checklist, until the next commit rebuilds it --------------------
   const sections = answers.reduce<Map<string, Answer[]>>((map, answer) => {
     const key = answer.section ?? "Other";
     map.set(key, [...(map.get(key) ?? []), answer]);
     return map;
   }, new Map());
-
-  // ---- which palette a question offers -------------------------------------
-  //
-  // The link is Matthew's matrix, which is what says "Stitching spec is one of
-  // these three" — so it is looked up by the BWS field the question points at,
-  // or by the local key on the six questions that have no BWS field at all.
+  const tgqMatrix = data.tgqMatrix
+    ? { fields: new Set<number>(data.tgqMatrix.fields), localKeys: new Set<string>(data.tgqMatrix.localKeys) }
+    : null;
+  const tierOf = (answer: Answer) =>
+    questionTierOrNull(
+      { tgqLevels: answer.tgq_levels ?? [], jsonId: answer.json_id, localKey: answer.local_key },
+      level,
+      tgqMatrix,
+    );
   const palettesByKey = new Map((data.palettes ?? []).map((row) => [row.key, {
     key: row.key,
     name: row.name,
@@ -455,534 +498,675 @@ function RecordView() {
       (answer.json_id !== null ? paletteKeyByField.get(answer.json_id) : undefined);
     return key ? (palettesByKey.get(key) ?? null) : null;
   };
+  // How many distinct pages the captured specs came off, for the card heading.
+  const pageCount = new Set(
+    attributes
+      .filter((attribute) => attribute.source_run_id)
+      .map((attribute) => `${attribute.source_run_id}:${attribute.source_page ?? ""}`),
+  ).size;
+  /** The drawing set most of this item's specs came off — where its crop is chosen. */
+  const drawingRunId =
+    attributes.find((attribute) => attribute.source_document_kind === "shop_drawings" && attribute.source_run_id)
+      ?.source_run_id ?? null;
+
+  const specSource = (attribute: { source_run_id: string | null; source_page: number | null; source_filename: string | null }) =>
+    attribute.source_run_id ? (
+      // NO PAGE MEANS NO LINK TO A PAGE. A hand-typed spec carries neither,
+      // deliberately, and a link opening a document at page 1 to stand in
+      // would be a false provenance rather than a missing one.
+      <a
+        href={`/api/imports/${attribute.source_run_id}/source${attribute.source_page ? `#page=${attribute.source_page}` : ""}`}
+        target="_blank"
+        rel="noreferrer"
+        className="underline hover:text-neutral-900"
+      >
+        {attribute.source_filename ?? "source"}
+        {attribute.source_page ? ` p${attribute.source_page}` : ""}
+      </a>
+    ) : (
+      <span className="text-neutral-400">typed by hand</span>
+    );
+
+  // ---- the header's subtitle, which is a row of places to go ---------------
+  //
+  // Everything in it either is a link or is a chip saying what is not set.
+  // A client ref, a run, a category and a level are all things somebody wants
+  // to jump from rather than read, and a figure that makes you go and find the
+  // screen it belongs to is the thing the design language exists to stop.
+  const subtitle = (
+    <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+      <Link href={runHref} className="font-mono text-neutral-700 underline hover:text-neutral-900">
+        {parentRefs || "no client ref"}
+      </Link>
+      <span aria-hidden>·</span>
+      <Link href={runHref} className="underline hover:text-neutral-900">{record.run_name}</Link>
+      {record.area && <><span aria-hidden>·</span><span>{record.area}</span></>}
+      <span aria-hidden>·</span>
+      {record.qty !== null ? (
+        <span>qty {record.qty}</span>
+      ) : record.parent_id ? (
+        // 0024: a configuration carries no quantity, because the bill says 45
+        // and never says how many are fabric A. Stated, never divided.
+        <Chip tone="warn">qty not set</Chip>
+      ) : (
+        <span className="text-neutral-400">no qty</span>
+      )}
+      {record.source_line_no && <><span aria-hidden>·</span><span>BOQ row {record.source_line_no}</span></>}
+      <span aria-hidden>·</span>
+      {record.category_name ? (
+        <Link href={runHref} className="underline hover:text-neutral-900">{record.category_name}</Link>
+      ) : (
+        <Chip tone="warn">no category</Chip>
+      )}
+      <span aria-hidden>·</span>
+      {level ? (
+        <Chip>{ITEM_LEVEL_LABELS[level]}</Chip>
+      ) : record.level_suggested ? (
+        <SuggestButton
+          value={
+            normaliseItemLevel(record.level_suggested)
+              ? ITEM_LEVEL_LABELS[normaliseItemLevel(record.level_suggested)!]
+              : record.level_suggested
+          }
+          evidence={record.level_suggested_reason ?? "guessed at intake"}
+          busy={savingLevel}
+          onAccept={() => void setLevel(record.level_suggested ?? "")}
+        />
+      ) : (
+        <Chip tone="warn">no level</Chip>
+      )}
+      {data.designerContact && (
+        <>
+          <span aria-hidden>·</span>
+          <span>
+            designer{" "}
+            <Link
+              href={`/dashboard/projects/${record.project_id}?tab=overview`}
+              className="underline hover:text-neutral-900"
+            >
+              {data.designerContact.designer_code} — {data.designerContact.name}
+            </Link>
+          </span>
+        </>
+      )}
+      {!data.designerContact && record.designer && (
+        <><span aria-hidden>·</span><span>designer {record.designer}</span></>
+      )}
+    </span>
+  );
+
+  /** The category and level selects, shown inside `RecordDetails`' Edit state. */
+  const classification = (
+    <div className="flex flex-wrap items-center gap-3">
+      <label className="text-xs text-neutral-600">
+        Category
+        <select
+          value={record.category_id ?? ""}
+          disabled={savingCategory}
+          onChange={(event) => void setCategory(event.target.value)}
+          className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
+        >
+          <option value="">— not chosen —</option>
+          {categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.family === "upholstery" ? "Uph" : "Cab"} · {category.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {/* NOT PRE-FILLED WITH THE SUGGESTION. A select showing "Simple" fires no
+          change event when somebody picks Simple, so the one action a reader
+          would take to agree would do nothing at all. Agreeing is the dashed
+          blue button in the header, which carries its evidence. */}
+      <label className="text-xs text-neutral-600">
+        Level
+        <select
+          value={record.level ?? ""}
+          disabled={savingLevel}
+          onChange={(event) => void setLevel(event.target.value)}
+          className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
+        >
+          <option value="">— not set —</option>
+          {ITEM_LEVELS.map((value) => (
+            <option key={value} value={value}>
+              {ITEM_LEVEL_LABELS[value]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {!record.category_id && (
+        <span className="text-xs text-neutral-500">
+          No checklist yet — choosing a category adds its questions.
+        </span>
+      )}
+      {record.category_id && !record.level && !record.level_suggested && (
+        <span className="text-xs text-amber-800">{NO_LEVEL_EXPLANATION}</span>
+      )}
+    </div>
+  );
+
+  const chaseHref = `/dashboard/drafts?projectId=${record.project_id}`;
 
   return (
-    <PageBody>
-      {/* Back to the run this record is ON, not to the project's first one. A
-          record's number is project-wide, so the same code appears on the
-          mock-up run and the main run, and landing on the wrong tab means
-          hunting for the row you just left. */}
-      <Link
-        href={`/dashboard/projects/${record.project_id}?tab=${record.run_id}`}
-        className="text-sm text-neutral-600 underline"
-      >
-        ← {record.bws_project_number} · {record.run_name}
-      </Link>
-
-      <h1 className="mt-2 text-xl font-semibold text-neutral-900">
-        {record.bws_project_number}-{String(record.record_no).padStart(3, "0")}
-        {/* THE NAME A PERSON USES. A configuration's own record number is the
-            next free one in the project and says nothing about what it belongs
-            to; `S-201 A` is how it gets said out loud. */}
-        {record.variant_label && (
-          <span className="ml-2 rounded border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-sm font-medium text-neutral-700">
-            {variantName(parentRefs, record.variant_label, "")}
-          </span>
-        )}{" "}
-        · {record.item_description}
-      </h1>
-      <p className="mt-1 text-sm text-neutral-600">
-        {refs.length > 0 ? refs.map((ref) => ref.ref_value).join(", ") : "No client ref"}
-        {" · "}{record.run_name}
-        {record.area && <> · {record.area}</>}
-        {record.qty !== null && <> · qty {record.qty}</>}
-        {record.source_line_no && <> · BOQ row {record.source_line_no}</>}
-      </p>
-
-      {/* ======================================================================
-          THE FAMILY, IN WHICHEVER DIRECTION THIS RECORD SITS IN IT.
-          A bill line drawn in two fabrics is a HEADING: its configurations are
-          what the export ships, so the row has to say so or it reads as an item
-          nobody has specced. A configuration has to name the bill line it came
-          from, because its record number does not.
-          ====================================================================== */}
-      {(variants.length > 0 || record.parent_id) && (
-        <div className="mt-3 rounded-lg border border-neutral-200 bg-white px-4 py-3">
-          {record.parent_id ? (
-            <p className="text-sm text-neutral-700">
-              Configuration {record.variant_label} of{" "}
-              <Link href={`/dashboard/records/${record.parent_id}`} className="underline hover:text-neutral-900">
-                {parentRefs || "the bill line"}
+    <>
+      <PageHeader
+        // Back to the run this record is ON, not to the project's first one. A
+        // record's number is project-wide, so the same code appears on the
+        // mock-up run and the main run, and landing on the wrong tab means
+        // hunting for the row you just left.
+        crumbs={[{ label: `${record.bws_project_number} · ${record.run_name}`, href: runHref }]}
+        title={`${recordLabel} · ${record.item_description}`}
+        titleAside={
+          // THE NAME A PERSON USES. A configuration's own record number is the
+          // next free one in the project and says nothing about what it belongs
+          // to; `S-201 A` is how it gets said out loud.
+          record.variant_label ? <Chip mono>{variantName(parentRefs, record.variant_label, "")}</Chip> : undefined
+        }
+        subtitle={subtitle}
+        actions={
+          <>
+            <Button
+              onClick={() => {
+                setTab("specs");
+                setAddingSpec(true);
+              }}
+            >
+              Add a spec by hand
+            </Button>
+            {readiness.toQuote !== null && readiness.toQuote > 0 && (
+              <Link href={chaseHref} className={buttonClass("primary", "sm")}>
+                Chase the {readiness.toQuote}
               </Link>
-              , which the bill lists once
-              {billQty !== null && <> at {billQty} off</>}. This configuration is what BWS receives.
-            </p>
-          ) : (
-            <p className="text-sm text-neutral-700">
-              The bill lists this once{record.qty !== null && <> at {record.qty} off</>}, and the drawings show it in{" "}
-              {variants.length} configurations. <strong className="font-medium">They are what the export carries</strong>
-              , not this line.
-            </p>
-          )}
-          <ul className="mt-2 divide-y divide-neutral-100 border-t border-neutral-100">
-            {variants.map((member) => (
-              <li key={member.id} className="flex flex-wrap items-baseline gap-x-3 py-1.5 text-sm">
-                <span className="w-24 shrink-0 font-medium text-neutral-900">
-                  {variantName(parentRefs, member.variant_label, `#${member.record_no}`)}
-                </span>
-                <span className="flex-1 min-w-[8rem] text-neutral-600">
-                  {Number(member.attribute_count) > 0
-                    ? `${member.attribute_count} specs captured`
-                    : "nothing captured yet"}
-                </span>
-                <span className="text-neutral-700 tabular-nums">
-                  {member.qty === null ? <span className="text-amber-800">qty not set</span> : `qty ${member.qty}`}
-                </span>
-                {member.id === record.id ? (
-                  <span className="text-xs text-neutral-400">you are here</span>
-                ) : (
-                  <Link href={`/dashboard/records/${member.id}`} className="text-xs underline hover:text-neutral-900">
-                    open
-                  </Link>
-                )}
-              </li>
-            ))}
-          </ul>
-          {/* The bill's quantity is not apportioned by anything: splitting it
-              has a price attached. So the gap is stated, never divided. */}
-          {unallocated !== null && unallocated !== 0 && (
-            <p className="mt-2 text-xs text-amber-800">
-              {unallocated} of the bill&rsquo;s {billQty} is not allocated to a configuration. Set a quantity on each
-              before anybody quotes it.
-            </p>
-          )}
-        </div>
-      )}
-
-      {error && <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
-
-      {pendingReason && (
-        <ReasonPrompt
-          pending={pendingReason}
-          projectId={record.project_id}
-          onCancel={() => setPendingReason(null)}
-          onSubmit={saveWithReason}
-        />
-      )}
-
-      {/* THE PICTURE IS A COLUMN, NEVER A FLOAT.
-          ==================================================================
-          It was `float-right` on a div sitting between the configurations
-          panel and the details form, so it floated over WHATEVER rendered
-          next — which is the details card — and landed clipped across the top
-          of it, overlapping the Description and Qty fields. Found in the
-          browser on 2026-09-18; a float has no relationship with the box it
-          lands on, so nothing about the card could have prevented it.
-
-          It is a real grid column instead, and STICKY: recognising the item is
-          the reason the picture is there at all, so it should stay beside you
-          while the spec table scrolls rather than leaving the screen. It
-          collapses above the content on a narrow viewport, where a 176px
-          sidebar beside a table is unreadable anyway.
-
-          Rendered from a crop somebody confirmed off the drawings; `hasImage`
-          goes false on a 404, and the column then disappears rather than the
-          layout keeping a hole for it. */}
-      <div
-        className={`mt-6 grid items-start gap-4 ${hasImage ? "lg:grid-cols-[minmax(0,1fr)_11rem]" : "grid-cols-1"}`}
-      >
-        <div className="min-w-0">
-          {/* What the documents actually said. */}
-          {/* THE BILL'S OWN WORDS, AND THE TWO FREE-TEXT COLUMNS (0028). The
-              description was not editable at all until now, so a typo in a bill
-              line was permanent, and there was nowhere to write down what the
-              structured fields cannot hold — which is what Matthew asked for. */}
-          <RecordDetails recordId={record.id} record={record} onSaved={load} />
-        </div>
-
-        {/* `w-44` on the box itself, not only on the grid track: below `lg` the
-            grid is one column and the track is the full page width, so without
-            it an A3 drawing crop renders as a full-width hero image above the
-            specs. */}
-        {hasImage && (
-          <div className="w-44 lg:w-auto lg:sticky lg:top-4 border border-neutral-200 rounded-lg bg-white p-2">
-            {/* eslint-disable-next-line @next/next/no-img-element --
-                an authenticated same-origin route that streams from private blob
-                storage; next/image cannot fetch it with the session cookie. */}
-            <img
-              src={`/api/records/${record.id}/image`}
-              alt={`${record.item_description}`}
-              onError={() => setHasImage(false)}
-              className="w-full h-auto rounded"
-            />
-            <p className="mt-1 text-center text-xs text-neutral-500">From the drawings</p>
-          </div>
-        )}
-      </div>
-
-      {/* CATEGORY AND LEVEL SIT ABOVE THE TABS, because they govern two of
-          them. The category is what creates the questions at all; the level is
-          what decides which of them block a quote under the fallback half of
-          TGQ, and which BWS boilerplate the item is priced against. Putting
-          them inside the checklist tab would hide the reason the gates tab is
-          empty. */}
-      <div className="mt-6 flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3">
-        <label className="text-sm text-neutral-600">
-          Category
-          <select
-            value={record.category_id ?? ""}
-            disabled={savingCategory}
-            onChange={(event) => void setCategory(event.target.value)}
-            className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
-          >
-            <option value="">— not chosen —</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.family === "upholstery" ? "Uph" : "Cab"} · {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {/* The LEVEL decides which of those questions hold up a quote. This app
-            GUESSES one at intake and shows it here pre-selected, but the guess
-            is never the answer: until somebody picks, no question on this
-            record carries a tier and a chase for it is blocked. Choosing the
-            suggested value is what accepts it. */}
-        <label className="text-sm text-neutral-600">
-          Level
-          <select
-            // NOT pre-filled with the suggestion. A select showing "Simple"
-            // fires no change event when somebody picks Simple, so the one
-            // action a reader would take to agree would do nothing at all.
-            // Agreeing has its own button below.
-            value={record.level ?? ""}
-            disabled={savingLevel}
-            onChange={(event) => void setLevel(event.target.value)}
-            className="ml-2 border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
-          >
-            <option value="">— not set —</option>
-            {ITEM_LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {ITEM_LEVEL_LABELS[level]}
-              </option>
-            ))}
-          </select>
-        </label>
-        {!record.category_id && (
-          <span className="text-xs text-neutral-500">
-            No checklist yet — choosing a category adds its questions. This is a later stage than intake.
-          </span>
-        )}
-        {record.category_id && !record.level && (
-          <span className="text-xs text-amber-800">
-            {record.level_suggested ? (
-              <>
-                Suggested: {normaliseItemLevel(record.level_suggested)
-                  ? ITEM_LEVEL_LABELS[normaliseItemLevel(record.level_suggested)!]
-                  : record.level_suggested}
-                {record.level_suggested_reason && <> — {record.level_suggested_reason}</>}. Nothing on this record is
-                tiered until you agree.{" "}
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  disabled={savingLevel}
-                  onClick={() => void setLevel(record.level_suggested ?? "")}
-                >
-                  Accept it
-                </Button>
-              </>
-            ) : (
-              NO_LEVEL_EXPLANATION
             )}
-          </span>
-        )}
-      </div>
-
-      {/* THE TABS. Counts on every one, so you can see where the work is
-          before clicking — the same reason the project's run tabs carry them. */}
-      <Tabs
-        className="mt-6"
-        label="What to do with this record"
-        value={tab}
-        onChange={setTab}
-        items={[
-          // A count is null where a number would be a LIE, not merely absent.
-          // Versions is not loaded until its tab is opened, so a figure there
-          // would either be wrong or force a query nobody asked for; and the
-          // Gates count is null where Matthew's matrix does not reach the
-          // category, because `0 of 3` there says the record fails three gates
-          // it does not have.
-          { id: "specs", label: "Specs captured", count: attributes.length === 0 ? null : attributes.length },
-          {
-            id: "checklist",
-            label: "Checklist",
-            count: answers.length === 0 ? null : `${outstandingCount} of ${answers.length}`,
-            tone: outstandingCount > 0 ? "warn" : "good",
-          },
-          { id: "gates", label: "Gates", count: gateSummaryLabel, tone: gateTone },
-          { id: "versions", label: "Versions", count: null },
-        ]}
+          </>
+        }
+        tabs={
+          <Tabs
+            label="What to do with this record"
+            value={tab}
+            onChange={setTab}
+            items={[
+              // A count is null where a number would be a LIE, not merely
+              // absent. Versions is not loaded until its tab is opened, so a
+              // figure there would either be wrong or force a query nobody
+              // asked for; and the Gates count is null where Matthew's matrix
+              // does not reach the category, because `0 of 3` there says the
+              // record fails three gates it does not have.
+              { id: "specs", label: "Specs captured", count: attributes.length === 0 ? null : attributes.length },
+              {
+                id: "checklist",
+                label: "Checklist",
+                count: answers.length === 0 ? null : `${outstandingCount} / ${answers.length}`,
+                tone: outstandingCount > 0 ? "warn" : "good",
+              },
+              { id: "gates", label: "Gates", count: gateSummaryLabel, tone: gateTone },
+              { id: "versions", label: "Versions", count: null },
+            ]}
+          />
+        }
       />
+      <PageBody>
+        {error && <Note tone="danger">{error}</Note>}
 
-      {tab === "specs" && (
-      <>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">Specs captured</h2>
-        {/* The counterpart to confirming a drawing card. `record_attributes` is
-            requirement-free on purpose; this is the only way to record a
-            statement no document made. */}
-        <AddSpec recordId={record.id} specFields={data.specFields ?? []} onAdded={load} />
-      </div>
+        {pendingReason && (
+          <ReasonPrompt
+            pending={pendingReason}
+            projectId={record.project_id}
+            onCancel={() => setPendingReason(null)}
+            onSubmit={saveWithReason}
+          />
+        )}
 
-      {/* What BWS field 3 will receive, composed by the same function the
-          export calls. The rows below keep each figure's ORIGINAL value and
-          unit, which is what makes a converted W1900 checkable against a page
-          that says 190. */}
-      {dimensionCell.text && (
-        <div className="mt-3 border border-neutral-200 rounded-lg bg-white px-4 py-3">
-          <p className="text-xs uppercase tracking-wide text-neutral-500">Dimensions, as BWS will receive them</p>
-          <p className="font-mono text-sm text-neutral-900">{dimensionCell.text}</p>
-          {dimensionCell.problems.map((problem, index) => (
-            <p key={index} className="mt-0.5 text-xs text-amber-700">
-              {problem.message}
-            </p>
-          ))}
-        </div>
-      )}
-      {attributes.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-600">
-          Nothing captured for this item yet. Upload the shop drawings for this pack and review them — a drawing
-          confirmed against this code writes here.
-        </p>
-      ) : (
-        byGroup.map(({ group, rows }) => (
-          <section key={group} className="mt-3">
-            <h3 className="text-xs font-medium text-neutral-500">{ATTRIBUTE_GROUP_LABELS[group]}</h3>
-            <ul className="mt-1 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
-              {rows.map((attribute) => (
-                <li key={attribute.id} className="px-4 py-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                  <span className="text-neutral-500 w-40 shrink-0">{attribute.label}</span>
-                  <span className="text-neutral-900 flex-1 min-w-[10rem]">
-                    {attribute.state === "tbc" && !attribute.value ? (
-                      <span className="text-amber-800">TBC</span>
-                    ) : (
-                      <>
-                        {/* A note is routinely a page of general conditions in
-                            one row: clamped, and read back out of the
-                            drawing's capitals. Both are display only — see
-                            src/lib/shout.ts. */}
-                        {attribute.value && <SpecValue text={attribute.value} />}
-                        {attribute.unit && <span className="text-neutral-500">{attribute.unit}</span>}
-                        {attribute.state === "tbc" && <span className="ml-1 text-amber-800">TBC</span>}
-                      </>
-                    )}
-                    {/* THE RETURN LINE (0029). Shown on its own line and in
-                        its own colour, because the whole point of holding it
-                        apart is that a reader can tell the spec from where it
-                        goes — which the exported cell, joined with a hyphen,
-                        cannot. */}
-                    {attribute.qualifier && (
-                      <span className="block text-xs text-neutral-500">{attribute.qualifier}</span>
-                    )}
-                    {/* A LINKED finish is a link to the library, because the
-                        library is what the export renders and what a
-                        correction has to be made in. An unlinked code is still
-                        just what the page said. */}
-                    {attribute.finish_id ? (
-                      <Link
-                        href={`/dashboard/projects/${record.project_id}?tab=finishes`}
-                        className="ml-2 text-xs text-neutral-500 underline hover:text-neutral-900"
-                        title={
-                          attribute.finish_description
-                            ? `The library says: ${attribute.finish_description}`
-                            : "In the finishes library, with nothing recorded about it yet"
-                        }
-                      >
-                        {attribute.finish_code ?? attribute.material_code}
-                        {attribute.finish_state === "tbc" && <span className="text-amber-800"> TBC</span>}
-                      </Link>
-                    ) : (
-                      attribute.material_code && (
-                        <span className="ml-2 text-xs text-neutral-500">code {attribute.material_code}</span>
-                      )
+        {tab === "specs" && (
+          <div className="grid items-start gap-4 min-[820px]:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="min-w-0">
+              {addingSpec && (
+                <div className="mb-4">
+                  <AddSpec
+                    recordId={record.id}
+                    specFields={data.specFields ?? []}
+                    onAdded={load}
+                    open
+                    onOpenChange={setAddingSpec}
+                  />
+                </div>
+              )}
+
+              {/* What BWS field 3 will receive, composed by the same function
+                  the export calls. The rows below keep each figure's ORIGINAL
+                  value and unit, which is what makes a converted W1900
+                  checkable against a page that says 190. */}
+              {dimensionCell.text && (
+                <Card title="Dimensions, as BWS will receive them" className="mt-0">
+                  <p className="font-mono text-base leading-6 tracking-[0.01em] text-neutral-900">
+                    {dimensionCell.text}
+                  </p>
+                  {provenance && <p className="mt-1.5 text-xs text-neutral-500">{provenance}</p>}
+                  {dimensionCell.problems.map((problem, index) => (
+                    <Note key={index} tone="warn">
+                      {problem.message}
+                    </Note>
+                  ))}
+                </Card>
+              )}
+
+              {attributes.length === 0 ? (
+                <Card title="Specs captured" className={dimensionCell.text ? "" : "mt-0"}>
+                  <p className="text-sm text-neutral-600">
+                    Nothing captured for this item yet. Upload the shop drawings for this pack and review them — a
+                    drawing confirmed against this code writes here.
+                  </p>
+                </Card>
+              ) : (
+                <Card
+                  title="Specs captured"
+                  className={dimensionCell.text ? "" : "mt-0"}
+                  actions={
+                    <CardHeadingNote>
+                      {attributes.length} row{attributes.length === 1 ? "" : "s"} ·{" "}
+                      {pageCount === 0
+                        ? "none off a document"
+                        : `${pageCount} page${pageCount === 1 ? "" : "s"}`}
+                    </CardHeadingNote>
+                  }
+                  flush
+                >
+                  <Table>
+                    <thead>
+                      <tr>
+                        <Th className="w-[24%]">Label</Th>
+                        <Th className="w-[28%]">Value</Th>
+                        <Th className="w-[22%]">BWS field</Th>
+                        <Th className="w-[16%]">Source</Th>
+                        <Th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {byGroup.map(({ group, rows }) => (
+                        <Fragment key={group}>
+                          <GroupRow span={5} aside={GROUP_RULE[group]}>
+                            {ATTRIBUTE_GROUP_LABELS[group]}
+                          </GroupRow>
+                          {rows.map((attribute) => (
+                            <Tr key={attribute.id}>
+                              <Td>{attribute.label}</Td>
+                              <Td>
+                                {attribute.state === "tbc" && !attribute.value ? (
+                                  <Chip tone="warn">TBC</Chip>
+                                ) : (
+                                  <span className="text-neutral-900">
+                                    {/* A note is routinely a page of general
+                                        conditions in one row: clamped, and read
+                                        back out of the drawing's capitals. Both
+                                        are display only — see src/lib/shout.ts. */}
+                                    {attribute.value && <SpecValue text={attribute.value} />}
+                                    {attribute.unit && <span className="text-neutral-500">{attribute.unit}</span>}
+                                    {attribute.state === "tbc" && (
+                                      <span className="ml-1.5 align-middle"><Chip tone="warn">TBC</Chip></span>
+                                    )}
+                                  </span>
+                                )}
+                                {/* THE RETURN LINE (0029). Its own line, in its
+                                    own colour, because the whole point of
+                                    holding it apart is that a reader can tell
+                                    the spec from where it goes — which the
+                                    exported cell, joined with a hyphen, cannot. */}
+                                {attribute.qualifier && (
+                                  <span className="mt-0.5 block text-xs text-neutral-500">{attribute.qualifier}</span>
+                                )}
+                                {/* A LINKED finish is a link to the library,
+                                    because the library is what the export
+                                    renders and what a correction has to be made
+                                    in. An unlinked code is still just what the
+                                    page said. */}
+                                {attribute.finish_id ? (
+                                  <Link
+                                    href={`/dashboard/projects/${record.project_id}?tab=finishes`}
+                                    className="ml-1.5 inline-block align-middle"
+                                    title={
+                                      attribute.finish_description
+                                        ? `The library says: ${attribute.finish_description}`
+                                        : "In the finishes library, with nothing recorded about it yet"
+                                    }
+                                  >
+                                    <Chip mono tone={attribute.finish_state === "tbc" ? "warn" : "plain"}>
+                                      {attribute.finish_code ?? attribute.material_code}
+                                      {attribute.finish_state === "tbc" ? " TBC" : ""}
+                                    </Chip>
+                                  </Link>
+                                ) : (
+                                  attribute.material_code && (
+                                    <span className="ml-1.5 inline-block align-middle">
+                                      <Chip mono>{attribute.material_code}</Chip>
+                                    </span>
+                                  )
+                                )}
+                              </Td>
+                              <Td muted>
+                                {attribute.field_name ? (
+                                  <>
+                                    {attribute.json_id ? `${attribute.json_id} · ` : ""}
+                                    {attribute.field_name.trim()}
+                                    {attribute.dimension_slot ? ` (${attribute.dimension_slot})` : ""}
+                                  </>
+                                ) : attribute.dimension_slot ? (
+                                  `3 · Dimensions (${attribute.dimension_slot})`
+                                ) : (
+                                  "—"
+                                )}
+                              </Td>
+                              <Td muted>{specSource(attribute)}</Td>
+                              <Td className="text-right">
+                                {/* Kept, never deleted — the row stays as
+                                    evidence that a document said this, with who
+                                    took it off and why. */}
+                                <Button
+                                  variant="quiet"
+                                  size="xs"
+                                  title="Take this spec off the item"
+                                  onClick={() => {
+                                    setRetiring(attribute);
+                                    setRetireReason("");
+                                  }}
+                                >
+                                  Retire
+                                </Button>
+                              </Td>
+                            </Tr>
+                          ))}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </Table>
+                </Card>
+              )}
+
+              {retiring && (
+                <Note
+                  tone="danger"
+                  title={`Take “${retiring.label}${retiring.value ? `: ${retiring.value}` : ""}” off this item?`}
+                >
+                  <span className="block">
+                    It is kept as a record that the document said it, and stops counting towards the checklist and
+                    the export. Any checklist answer it filled is recomposed from what is left, or put back to
+                    missing.
+                  </span>
+                  <input
+                    value={retireReason}
+                    autoFocus
+                    onChange={(event) => setRetireReason(event.target.value)}
+                    placeholder="Superseded by the Rev B drawing issued 14 Sep"
+                    className="mt-2 w-full rounded border border-red-300 bg-white px-2 py-1 text-sm"
+                  />
+                  <span className="mt-2 flex items-center gap-2">
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={!retireReason.trim() || retireBusy}
+                      onClick={() => void retire()}
+                    >
+                      {retireBusy ? "Retiring…" : "Retire it"}
+                    </Button>
+                    <Button variant="quiet" size="sm" onClick={() => setRetiring(null)}>
+                      Keep it
+                    </Button>
+                  </span>
+                </Note>
+              )}
+
+              {/* Kept, never deleted, and never silently. A retired spec that
+                  could not be seen would make "retire" a delete with extra
+                  steps. */}
+              {retiredAttributes.length > 0 && (
+                <div className="mt-3">
+                  <Button variant="quiet" size="xs" onClick={() => setShowRetired((value) => !value)}>
+                    {showRetired ? "▾" : "▸"} {retiredAttributes.length} retired spec
+                    {retiredAttributes.length === 1 ? "" : "s"}
+                  </Button>
+                  {showRetired && (
+                    <ul className="mt-1 divide-y divide-neutral-200 rounded-[10px] border border-neutral-200 bg-neutral-50">
+                      {retiredAttributes.map((attribute) => (
+                        <li key={attribute.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm">
+                          <span className="w-40 shrink-0 text-neutral-400 line-through">{attribute.label}</span>
+                          <span className="min-w-[10rem] flex-1 text-neutral-400 line-through">
+                            {attribute.value}
+                            {attribute.unit}
+                          </span>
+                          <span className="text-xs text-neutral-400">
+                            retired{attribute.retired_by ? ` by ${attribute.retired_by}` : ""}
+                          </span>
+                          {attribute.superseded_by_id ? (
+                            // Replaced by a later drawing. Putting it back would
+                            // leave the item holding both, with nothing to say
+                            // which is current — so the button is not offered.
+                            <span className="text-xs text-neutral-500">replaced by a later drawing</span>
+                          ) : (
+                            <Button size="xs" disabled={retireBusy} onClick={() => void restore(attribute)}>
+                              Put back
+                            </Button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {/* THE BILL'S OWN WORDS, AND THE TWO FREE-TEXT COLUMNS (0028).
+                  Last, because the specs are what you came to read and this is
+                  filled in once. */}
+              <RecordDetails
+                recordId={record.id}
+                record={record}
+                onSaved={load}
+                classification={classification}
+              />
+            </div>
+
+            {/* THE STICKY SIDEBAR. Recognising the item is the reason the
+                picture is there at all, so it stays beside you while the spec
+                table scrolls. It heads its own column, which is what makes the
+                two columns start on the same line. */}
+            <div className="min-[820px]:sticky min-[820px]:top-4">
+              {hasImage && (
+                <div className="rounded-[10px] border border-neutral-200 bg-white p-2.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element --
+                      an authenticated same-origin route that streams from
+                      private blob storage; next/image cannot fetch it with the
+                      session cookie. */}
+                  <img
+                    src={`/api/records/${record.id}/image`}
+                    alt={record.item_description}
+                    onError={() => setHasImage(false)}
+                    className="h-auto w-full rounded"
+                  />
+                  <p className="mt-1.5 text-center text-[11.5px] text-neutral-500">
+                    Cropped off the drawings
+                  </p>
+                  {drawingRunId && (
+                    <Link
+                      href={`/dashboard/imports/${drawingRunId}`}
+                      title="Opens the drawing set this item's specs came off, where the crop is chosen"
+                      className={buttonClass("quiet", "xs", "mt-1.5 w-full")}
+                    >
+                      Change crop
+                    </Link>
+                  )}
+                </div>
+              )}
+
+              <Card title="Quote readiness" className={hasImage ? "" : "mt-0"}>
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className={`text-2xl font-semibold tabular-nums ${
+                      readiness.toQuote === null ? TONE.plain.text : TONE.danger.text
+                    }`}
+                  >
+                    {readiness.toQuote ?? "—"}
+                  </span>
+                  <span className="text-neutral-500">
+                    TGQ
+                    {readiness.noLevel && (
+                      <Tip>
+                        This item has no level, and the fallback model needs one to say which questions block a
+                        quote. A guess here would make the record look urgent or quotable, and only a person can
+                        decide which.
+                      </Tip>
                     )}
                   </span>
-                  {attribute.field_name && (
-                    <span className="text-xs text-neutral-500 w-44 shrink-0">BWS: {attribute.field_name.trim()}</span>
-                  )}
-                  {attribute.source_run_id && (
-                    <a
-                      href={`/api/imports/${attribute.source_run_id}/source${attribute.source_page ? `#page=${attribute.source_page}` : ""}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-neutral-500 underline hover:text-neutral-900"
+                </div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className={`text-[17px] font-semibold tabular-nums ${TONE.warn.text}`}>
+                    {readiness.alsoOutstanding ?? readiness.outstanding}
+                  </span>
+                  <span className="text-neutral-500">
+                    {readiness.alsoOutstanding === null ? "outstanding, untiered" : "also outstanding"}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className={`text-[17px] font-semibold tabular-nums ${TONE.good.text}`}>
+                    {readiness.settled}
+                  </span>
+                  <span className="text-neutral-500">settled</span>
+                </div>
+                {readiness.toQuote !== null && readiness.toQuote > 0 && (
+                  <Link href={chaseHref} className={buttonClass("secondary", "sm", "mt-3 w-full")}>
+                    Chase the {readiness.toQuote}
+                  </Link>
+                )}
+              </Card>
+
+              {/* ==========================================================
+                  THE FAMILY, IN WHICHEVER DIRECTION THIS RECORD SITS IN IT.
+                  A bill line drawn in two fabrics is a HEADING: its
+                  configurations are what the export ships, so the card has to
+                  say so or the line reads as an item nobody has specced. A
+                  configuration has to name the bill line it came from, because
+                  its record number does not.
+                  ========================================================== */}
+              <Card title="Configurations">
+                {record.parent_id ? (
+                  <p className="text-[12.5px] text-neutral-700">
+                    Configuration {record.variant_label} of{" "}
+                    <Link href={`/dashboard/records/${record.parent_id}`} className="underline hover:text-neutral-900">
+                      {parentRefs || "the bill line"}
+                    </Link>
+                    , which the bill lists once
+                    {billQty !== null && <> at {billQty} off</>}. This configuration is what BWS receives.
+                  </p>
+                ) : variants.length > 0 ? (
+                  <>
+                    <p className="text-[12.5px] text-neutral-700">
+                      The bill lists this once{record.qty !== null && <> at {record.qty} off</>}, and the drawings
+                      show it in {variants.length} configurations.{" "}
+                      <strong className="font-medium">They are what the export carries</strong>, not this line.
+                    </p>
+                    <ul className="mt-2 divide-y divide-neutral-100 border-t border-neutral-100">
+                      {variants.map((member) => (
+                        <li key={member.id} className="py-1.5 text-[12.5px]">
+                          <span className="font-medium text-neutral-900">
+                            {variantName(parentRefs, member.variant_label, `#${member.record_no}`)}
+                          </span>
+                          {member.id === record.id ? (
+                            <span className="ml-2 text-neutral-400">you are here</span>
+                          ) : (
+                            <Link
+                              href={`/dashboard/records/${member.id}`}
+                              className="ml-2 underline hover:text-neutral-900"
+                            >
+                              open
+                            </Link>
+                          )}
+                          <span className="mt-0.5 block text-neutral-500">
+                            {Number(member.attribute_count) > 0
+                              ? `${member.attribute_count} specs captured`
+                              : "nothing captured yet"}
+                            {" · "}
+                            {member.qty === null ? (
+                              <span className={TONE.warn.text}>quantity not allocated</span>
+                            ) : (
+                              `qty ${member.qty}`
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {/* The bill's quantity is not apportioned by anything:
+                        splitting it has a price attached. So the gap is stated,
+                        never divided. */}
+                    {unallocated !== null && unallocated !== 0 && (
+                      <p className={`mt-2 text-xs ${TONE.warn.text}`}>
+                        {unallocated} of the bill&rsquo;s {billQty} is not allocated to a configuration.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[12.5px] text-neutral-500">
+                    This bill line is not split.
+                    {record.qty !== null && <> Its {record.qty} are one item.</>}
+                  </p>
+                )}
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* REBUILT IN THE NEXT COMMIT. Untouched here so that the header and
+            the Specs tab can be read, and refused, on their own. */}
+        {tab === "checklist" && [...sections.entries()].map(([section, rows]) => (
+          <section key={section} className="mt-6">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">{section}</h2>
+            <ul className="mt-2 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
+              {rows.map((answer) => (
+                <li key={answer.requirement_id} className="px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-neutral-900">{answer.prompt}</p>
+                      {answer.field_name && (
+                        <p className="text-xs text-neutral-500">
+                          BWS: {answer.field_name.trim()} ({answer.json_id})
+                        </p>
+                      )}
+                      {tierOf(answer) === "to_quote" && <Chip tone="danger">{TIER_LABELS.to_quote}</Chip>}
+                    </div>
+                    <Chip tone={ANSWER_STATE_TONE[answer.state]}>{ANSWER_STATE_LABELS[answer.state]}</Chip>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <AnswerValue
+                      palette={paletteFor(answer)}
+                      value={answer.value}
+                      disabled={savingId === answer.answer_id}
+                      inputKey={`${answer.answer_id}:${answer.version}:${historyKey}`}
+                      onCommit={(next) => void save(answer, next, next ? "confirmed" : "missing")}
+                    />
+                    <select
+                      value={answer.state}
+                      disabled={savingId === answer.answer_id}
+                      onChange={(e) => void save(answer, answer.value ?? "", e.target.value as AnswerState)}
+                      className="rounded border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
                     >
-                      {attribute.source_filename ?? "source"}
-                      {attribute.source_page ? ` p${attribute.source_page}` : ""}
-                    </a>
-                  )}
-                  {/* Kept, never deleted — the row stays as evidence that a
-                      document said this, with who took it off and why. */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRetiring(attribute);
-                      setRetireReason("");
-                    }}
-                    className="text-xs text-neutral-400 hover:text-red-700"
-                    title="Take this spec off the item"
-                  >
-                    retire
-                  </button>
+                      {ANSWER_STATES.map((state) => (
+                        <option key={state} value={state}>{ANSWER_STATE_LABELS[state]}</option>
+                      ))}
+                    </select>
+                  </div>
                 </li>
               ))}
             </ul>
           </section>
-        ))
-      )}
+        ))}
 
-      {retiring && (
-        <div className="mt-3 border border-red-300 bg-red-50 rounded-lg px-4 py-3">
-          <p className="text-sm font-medium text-red-900">
-            Take “{retiring.label}{retiring.value ? `: ${retiring.value}` : ""}” off this item?
-          </p>
-          <p className="mt-0.5 text-xs text-red-800">
-            It is kept as a record that the document said it, and stops counting towards the checklist and the export.
-            Any checklist answer it filled is recomposed from what is left, or put back to missing.
-          </p>
-          <input
-            value={retireReason}
-            autoFocus
-            onChange={(event) => setRetireReason(event.target.value)}
-            placeholder="Superseded by the Rev B drawing issued 14 Sep"
-            className="mt-2 w-full border border-red-300 rounded px-2 py-1 text-sm bg-white"
-          />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void retire()}
-              disabled={!retireReason.trim() || retireBusy}
-              className="border border-red-400 bg-white rounded px-3 py-1 text-sm hover:bg-red-100 disabled:opacity-50"
-            >
-              {retireBusy ? "Retiring…" : "Retire it"}
-            </button>
-            <button type="button" onClick={() => setRetiring(null)} className="text-sm text-red-800 hover:text-red-950">
-              Keep it
-            </button>
-          </div>
-        </div>
-      )}
+        {/* MATTHEW'S MATRIX, and what each gate still wants. Its own tab rather
+            than a panel above the 43-question checklist: the checklist is the
+            full cheat sheet and always was, and this is the part somebody has
+            to act on before the next milestone. */}
+        {tab === "gates" && <GatePanel gates={data.gates} />}
 
-      {/* Kept, never deleted, and never silently. A retired spec that could
-          not be seen would make "retire" a delete with extra steps. */}
-      {retiredAttributes.length > 0 && (
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => setShowRetired((value) => !value)}
-            className="text-xs text-neutral-500 hover:text-neutral-900"
-          >
-            {showRetired ? "▾" : "▸"} {retiredAttributes.length} retired spec
-            {retiredAttributes.length === 1 ? "" : "s"}
-          </button>
-          {showRetired && (
-            <ul className="mt-1 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-neutral-50">
-              {retiredAttributes.map((attribute) => (
-                <li key={attribute.id} className="px-4 py-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                  <span className="text-neutral-400 w-40 shrink-0 line-through">{attribute.label}</span>
-                  <span className="text-neutral-400 flex-1 min-w-[10rem] line-through">
-                    {attribute.value}
-                    {attribute.unit}
-                  </span>
-                  <span className="text-xs text-neutral-400">
-                    retired{attribute.retired_by ? ` by ${attribute.retired_by}` : ""}
-                    {attribute.retired_at ? ` on ${new Date(attribute.retired_at).toLocaleDateString()}` : ""}
-                  </span>
-                  {attribute.superseded_by_id ? (
-                    // Replaced by a later drawing. Putting it back would leave
-                    // the item holding both, with nothing to say which is
-                    // current — so the button is not offered at all.
-                    <span className="text-xs text-neutral-500">replaced by a later drawing</span>
-                  ) : (
-                    <Button
-                      size="xs"
-                      disabled={retireBusy}
-                      onClick={() => void restore(attribute)}
-                    >
-                      Put back
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      </>
-      )}
-
-      {tab === "checklist" && [...sections.entries()].map(([section, rows]) => (
-        <section key={section} className="mt-6">
-          <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">{section}</h2>
-          <ul className="mt-2 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
-            {rows.map((answer) => (
-              <li key={answer.requirement_id} className="px-4 py-3">
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-neutral-900">{answer.prompt}</p>
-                    {answer.field_name && (
-                      <p className="text-xs text-neutral-500">
-                        BWS: {answer.field_name.trim()} ({answer.json_id})
-                      </p>
-                    )}
-                    {answer.help_text && <p className="text-xs text-neutral-400 mt-0.5">{answer.help_text}</p>}
-                    {tierOf(answer) === "to_quote" && (
-                      <p className="mt-1 inline-block text-xs px-2 py-0.5 rounded border text-red-700 border-red-300 bg-red-50">
-                        {TIER_LABELS.to_quote}
-                      </p>
-                    )}
-                  </div>
-                  <span className={`shrink-0 text-xs px-2 py-0.5 rounded border ${STATE_CLASS[answer.state]}`}>
-                    {ANSWER_STATE_LABELS[answer.state]}
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center gap-2">
-                  {/* A DROPDOWN ONLY WHERE THIS APP HOLDS THE LIST. Five of
-                      Matthew's eleven palettes are BWS-owned and we have none
-                      of them; those stay free text and say so, because an
-                      empty select reads as broken. The control is re-keyed on
-                      every reload so it always shows what the SERVER holds. */}
-                  <AnswerValue
-                    palette={paletteFor(answer)}
-                    value={answer.value}
-                    disabled={savingId === answer.answer_id}
-                    inputKey={`${answer.answer_id}:${answer.version}:${historyKey}`}
-                    onCommit={(next) => void save(answer, next, next ? "confirmed" : "missing")}
-                  />
-                  <select
-                    value={answer.state}
-                    disabled={savingId === answer.answer_id}
-                    onChange={(e) => void save(answer, answer.value ?? "", e.target.value as AnswerState)}
-                    className="border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
-                  >
-                    {ANSWER_STATES.map((state) => (
-                      <option key={state} value={state}>{ANSWER_STATE_LABELS[state]}</option>
-                    ))}
-                  </select>
-                </div>
-                {answer.confirmed_by && (
-                  <p className="mt-1 text-xs text-neutral-400">
-                    Confirmed by {answer.confirmed_by}
-                    {answer.confirmed_at ? ` on ${new Date(answer.confirmed_at).toLocaleDateString()}` : ""}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-
-      {/* NOT COLLAPSED ANY MORE. It was behind a toggle because it sat under
-          four screens of checklist; on its own tab it can simply be the page. */}
-      {tab === "versions" && <RecordHistory recordId={record.id} reloadKey={historyKey} />}
-
-      {/* MATTHEW'S MATRIX, and what each gate still wants. Its own tab rather
-          than a panel above the 43-question checklist: the checklist is the
-          full cheat sheet and always was, and this is the part somebody has to
-          act on before the next milestone. */}
-      {tab === "gates" && <GatePanel gates={data.gates} />}
-    </PageBody>
+        {/* NOT COLLAPSED ANY MORE. It was behind a toggle because it sat under
+            four screens of checklist; on its own tab it can simply be the page. */}
+        {tab === "versions" && <RecordHistory recordId={record.id} reloadKey={historyKey} />}
+      </PageBody>
+    </>
   );
 }
 

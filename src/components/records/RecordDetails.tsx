@@ -31,6 +31,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
+import Tip from "@/components/ui/Tip";
 
 type Details = {
   item_description: string;
@@ -64,7 +66,7 @@ const formOf = (record: Details): Form => ({
 function Read({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
   return (
     <div className={wide ? "col-span-2 sm:col-span-4" : ""}>
-      <dt className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{label}</dt>
+      <dt className="text-th font-semibold uppercase tracking-wider text-neutral-500">{label}</dt>
       <dd className="mt-0.5 text-neutral-900">{children}</dd>
     </div>
   );
@@ -79,10 +81,22 @@ export default function RecordDetails({
   recordId,
   record,
   onSaved,
+  classification,
 }: {
   recordId: string;
   record: Details;
   onSaved: () => void | Promise<void>;
+  /**
+   * The CATEGORY and LEVEL selects, rendered inside the Edit state.
+   *
+   * They are not part of this form and must not be: each is its own decision
+   * with its own change-set kind, and `PATCH /api/records/[id]` takes one or
+   * the other per request precisely so two changes cannot share one reason.
+   * They live in here because the header shows them as facts about the item,
+   * and the place you go to change a fact about the item is Edit — otherwise
+   * the two selects are a third panel on a screen that already has four tabs.
+   */
+  classification?: React.ReactNode;
 }) {
   const server = useMemo(() => formOf(record), [record]);
   const [form, setForm] = useState<Form>(server);
@@ -142,10 +156,10 @@ export default function RecordDetails({
   }
 
   return (
-    <section className="mt-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">This item</h2>
-        <span className="flex-1" />
+    <Card
+      title="This item"
+      actions={
+        <>
         {/* FILLED IN ONCE, THEN READ. Six inputs and two paragraphs of help,
             above the tabs, on every visit to every record — so the tabs
             themselves started below the fold. It reads as a summary until
@@ -162,14 +176,16 @@ export default function RecordDetails({
             Edit
           </Button>
         )}
-      </div>
-      {error && <p className="mt-2 text-xs text-red-700 border border-red-200 bg-red-50 rounded px-2 py-1">{error}</p>}
+        </>
+      }
+    >
+      {error && <p className="mb-2 text-xs text-red-700 border border-red-200 bg-red-50 rounded px-2 py-1">{error}</p>}
 
       {!editing && (
-        <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border border-neutral-200 bg-white px-4 py-3 text-sm sm:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
           <Read label="Description">{form.itemDescription || <Blank />}</Read>
           <Read label="Area or room">{form.area || <Blank />}</Read>
-          <Read label="Qty">{form.qty || <Blank />}</Read>
+          <Read label="Quantity">{form.qty || <Blank />}</Read>
           <Read label="Designer">{form.designer || <Blank />}</Read>
           <Read label="For the quote" wide>
             {form.specDescription ? (
@@ -188,7 +204,7 @@ export default function RecordDetails({
         </dl>
       )}
 
-      <div className={`mt-2 rounded-lg border border-neutral-200 bg-white p-4 space-y-4 ${editing ? "" : "hidden"}`}>
+      <div className={`space-y-4 ${editing ? "" : "hidden"}`}>
         <div className="flex flex-wrap gap-4">
           <label className="text-xs text-neutral-600">
             Description
@@ -287,7 +303,25 @@ export default function RecordDetails({
             {dirty.length > 0 ? "Discard changes" : "Close"}
           </Button>
         </div>
+
+        {/* CATEGORY AND LEVEL, BELOW THE SAVE AND OUTSIDE IT.
+            Each writes on its own, under its own change-set kind, because the
+            PATCH route takes one decision per request — so they sit under a
+            rule with their own sentence rather than above the Save button,
+            where they would read as part of what Save writes. */}
+        {classification && (
+          <div className="border-t border-neutral-200 pt-3">
+            <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">
+              What kind of item it is
+              <Tip>
+                Each of these saves on its own, not with the Save above: the category creates the checklist and the
+                level decides which of its questions hold up a quote, so each is recorded as its own change.
+              </Tip>
+            </p>
+            <div className="mt-2">{classification}</div>
+          </div>
+        )}
       </div>
-    </section>
+    </Card>
   );
 }

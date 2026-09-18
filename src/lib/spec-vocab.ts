@@ -27,6 +27,29 @@ export const ANSWER_STATE_LABELS: Record<AnswerState, string> = {
   na: "N/A",
 };
 
+/**
+ * What COLOUR each state is, decided once, beside the label.
+ *
+ * Four maps of these class strings had accumulated across the record screen,
+ * the spec table, the gate panel and the diff table, and they disagreed: one
+ * painted `missing` red and another grey, which is the difference between "do
+ * something about this" and "nothing to see". The tone vocabulary settles it —
+ * amber NEEDS A PERSON, and both TBC and Missing do, which is exactly why they
+ * are two states and not one.
+ *
+ * `missing` is `plain` rather than red: red is reserved for what blocks money
+ * going out, and whether an unanswered question does that is the TIER's
+ * business (`questionTier`), not the state's. A checklist painted red on every
+ * unlooked-at row teaches somebody to ignore red, which is the one colour that
+ * must never be ignored.
+ */
+export const ANSWER_STATE_TONE: Record<AnswerState, "good" | "warn" | "plain"> = {
+  confirmed: "good",
+  tbc: "warn",
+  missing: "plain",
+  na: "plain",
+};
+
 /** Whether a requirement's answer belongs in a BWS spec column, or nowhere. */
 export const REQUIREMENT_KINDS = ["spec_field", "readiness"] as const;
 export type RequirementKind = (typeof REQUIREMENT_KINDS)[number];
