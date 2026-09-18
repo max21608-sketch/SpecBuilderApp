@@ -2503,6 +2503,7 @@ in the UK.
 | Accepting the export against the pack: the check sheet and its verdicts | `docs/plans/export-verification.md` |
 | Accepting the DRAWINGS REVIEW against the pack: the per-card checklist | `docs/plans/intake-review-verification.md` |
 | Releases, dated decisions, what is still open | `docs/plans/README.md` |
+| Things seen wrong in use and not yet fixed, dated | `docs/plans/found-in-use.md` |
 | Migrations, seeds, backups, restores | `db/README.md` |
 | Chassis provenance and how to start another app | `docs/kit/` |
 
