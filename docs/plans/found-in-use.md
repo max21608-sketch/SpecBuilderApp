@@ -22,6 +22,32 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-18
 
+### The item picture does not line up with the card beside it
+
+**Status: open.** Seen on the record screen (screenshot),
+`DEMO-TEST-01-006 · Armchair, lounge @ suite living area`.
+
+The picture panel's top edge sits **higher than everything in the left column**
+— above the details card AND above the `THIS ITEM` heading itself — so the two
+columns of the grid visibly do not start on the same line. The `Edit` button,
+which is on the card, ends up level with the middle of the picture rather than
+with anything in the picture's own box.
+
+**This is not the float bug coming back**, and whoever picks it up should not
+start by re-doing that fix. The picture was `float-right` and landed clipped
+across the top of the details card; it was made a real sticky grid column
+earlier the SAME DAY (2026-09-18, the long comment above the grid in
+`src/app/dashboard/records/[id]/page.tsx:606`). The grid already carries
+`items-start`. What is left is that the left column's own top — the `THIS ITEM`
+label inside `RecordDetails` — is not where the right column's box top is, so
+`items-start` aligns two things that do not begin at the same place.
+
+**One thing to check with Max before fixing**: "misaligned" may also be about
+the CROP rather than the column. The 3D view in the screenshot is off-centre in
+its box, with a sliver of the neighbouring view still showing down the left
+edge. That would be a confirmed crop being what it is rather than a layout
+fault, and a different job.
+
 ### A gate's count folds "nowhere to record it" into "outstanding"
 
 **Status: open.** Seen on a record screen (screenshot), Armchair, lounge @ suite
