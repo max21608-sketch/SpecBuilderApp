@@ -21,6 +21,8 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import Button, { buttonClass } from "@/components/ui/Button";
+import Tip from "@/components/ui/Tip";
+import StatTile from "@/components/ui/StatTile";
 import { unallocatedQty } from "@/lib/record-variants";
 import { NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
 import AddItem from "@/components/records/AddItem";
@@ -77,18 +79,47 @@ const DOTS: Record<RecordUrgency, string> = {
   overdue: "bg-red-600 ring-2 ring-red-300",
 };
 
-function Counts({ settled, tbc, missing, total }: { settled: number; tbc: number; missing: number; total: number }) {
+/**
+ * How much of this record's checklist is answered, as one bar.
+ *
+ * It replaced two columns — Spec fields and Readiness — each showing a
+ * settled/TBC/missing triple. Six numbers per row, twelve on the widest
+ * screen, and none of them answers the question somebody scanning the table is
+ * asking, which is "how far along is this one". The split still exists and
+ * still matters, and it is one click away on the record itself.
+ *
+ * Green is settled, amber is TBC — an ANSWER, and a different thing from
+ * nobody having looked, which is the bar's remaining width.
+ */
+function Captured({
+  settled,
+  tbc,
+  total,
+}: {
+  settled: number;
+  tbc: number;
+  total: number;
+}) {
   if (total === 0) return <span className="text-neutral-400">—</span>;
+  const pct = (n: number) => `${Math.round((n / total) * 100)}%`;
   return (
-    <span className="tabular-nums">
-      <span className="text-green-700">{settled}</span>
-      <span className="text-neutral-400"> / </span>
-      <span className={tbc > 0 ? "text-amber-700 font-medium" : "text-neutral-400"}>{tbc}</span>
-      <span className="text-neutral-400"> / </span>
-      <span className={missing > 0 ? "text-red-700 font-medium" : "text-neutral-400"}>{missing}</span>
+    <span
+      className="flex min-w-[6.5rem] items-center gap-2"
+      title={`${settled} settled, ${tbc} TBC, ${total - settled - tbc} nobody has looked at, of ${total}`}
+    >
+      <span className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-200">
+        <span className="block bg-green-600" style={{ width: pct(settled) }} />
+        <span className="block bg-amber-400" style={{ width: pct(tbc) }} />
+      </span>
+      <span className="shrink-0 tabular-nums text-xs text-neutral-500">
+        {settled}/{total}
+      </span>
     </span>
   );
 }
+
+/** What the tiles above the table can narrow it to. Null lists everything. */
+type Focus = null | "tgq" | "outstanding" | "no_category" | "no_level" | "quotable";
 
 export default function SpecTable({
   projectId,
@@ -106,6 +137,15 @@ export default function SpecTable({
   // the file.
   const [showRetired, setShowRetired] = useState(false);
   const [acceptingLevels, setAcceptingLevels] = useState(false);
+  /**
+   * WHICH TILE IS PRESSED, and therefore what the table lists.
+   *
+   * A FILTER NARROWS WHAT IS LISTED AND NOTHING ELSE. The counts on every tile
+   * stay the RUN'S OWN whatever is selected — the chase screen's rule, and the
+   * reason somebody cannot narrow this screen until a run looks finished. The
+   * footer says how many rows are hidden.
+   */
+  const [focus, setFocus] = useState<Focus>(null);
   const [categories, setCategories] = useState<{ id: string; family: string; name: string }[]>([]);
 
   const load = useCallback(async () => {
@@ -165,6 +205,54 @@ export default function SpecTable({
   // somebody does, every one of them is unquotable-by-unknown rather than
   // unquotable-by-answer, which is not the same thing and reads the same.
   const suggestedLevels = records.filter((record) => !record.level && record.level_suggested).length;
+
+  /**
+   * The run's own numbers, for the tiles.
+   *
+   * Computed over ALL records, never over the filtered list — narrowing the
+   * screen must not be able to make a run look finished. The same rule the
+   * chase screen states about its line counts.
+   */
+  const tally = {
+    toQuote: records.reduce((sum, record) => sum + (record.to_quote_outstanding ?? 0), 0),
+    toQuoteItems: records.filter((record) => (record.to_quote_outstanding ?? 0) > 0).length,
+    alsoOutstanding: records.reduce(
+      (sum, record) =>
+        sum +
+        Math.max(
+          0,
+          n(record.spec_tbc) +
+            n(record.spec_missing) +
+            n(record.ready_tbc) +
+            n(record.ready_missing) -
+            (record.to_quote_outstanding ?? 0),
+        ),
+      0,
+    ),
+    noCategory: records.filter((record) => !record.category_name).length,
+    noLevel: records.filter((record) => !record.level).length,
+    configurations: records.filter((record) => record.variant_label).length,
+  };
+
+  /** What the table lists. The tiles narrow this and nothing else. */
+  const shown = records.filter((record) => {
+    switch (focus) {
+      case "tgq":
+        return (record.to_quote_outstanding ?? 0) > 0;
+      case "outstanding":
+        return (
+          n(record.spec_tbc) + n(record.spec_missing) + n(record.ready_tbc) + n(record.ready_missing) > 0
+        );
+      case "no_category":
+        return !record.category_name;
+      case "no_level":
+        return !record.level;
+      case "quotable":
+        return record.to_quote_outstanding === 0;
+      default:
+        return true;
+    }
+  });
 
   // The export URL is a plain link, never apiFetch: the helper always reads the
   // body as text, and a workbook is bytes.
@@ -235,7 +323,7 @@ export default function SpecTable({
           <span>
             {suggestedLevels} record{suggestedLevels === 1 ? "" : "s"} carr{suggestedLevels === 1 ? "ies" : "y"} a
             level this app guessed from the bill and the drawings. Nothing is sorted into what blocks a quote until
-            you agree with it — each one shows its reading in the Needed to quote column.
+            you agree with it — each one shows its reading in the TGQ column.
           </span>
           <Button
             size="xs"
@@ -245,6 +333,67 @@ export default function SpecTable({
           >
             {acceptingLevels ? "Accepting…" : `Accept all ${suggestedLevels}`}
           </Button>
+        </div>
+      )}
+
+      {/* THE RUN'S NUMBERS, AND EACH ONE NARROWS THE TABLE.
+          ==================================================================
+          Asked for on 2026-09-18: "those boxes at the top, if we click on
+          those then that could filter them". Pressing a tile lists only the
+          records it counts; pressing it again lists everything. The tile that
+          is on is outlined, and the footer under the table says in words how
+          many rows are hidden — a filter you cannot see is a filter you forget
+          you set, and this table is the one people judge a run by.
+
+          The counts NEVER change with the filter. They are the run's own, so
+          narrowing the screen can never make a run look finished. */}
+      {records.length > 0 && (
+        <div className="mt-3 grid grid-cols-2 gap-2.5 lg:grid-cols-5">
+          <StatTile
+            label="Line items"
+            value={records.length}
+            meaning={tally.configurations > 0 ? `${tally.configurations} configurations` : "no configurations"}
+            action={focus === null ? undefined : "show all"}
+            href={focus === null ? undefined : "#"}
+            onPress={() => setFocus(null)}
+            active={focus === null}
+          />
+          <StatTile
+            label="TGQ"
+            tone="danger"
+            value={tally.toQuote}
+            meaning={`across ${tally.toQuoteItems} item${tally.toQuoteItems === 1 ? "" : "s"}`}
+            action="show only these"
+            onPress={() => setFocus(focus === "tgq" ? null : "tgq")}
+            active={focus === "tgq"}
+          />
+          <StatTile
+            label="Also outstanding"
+            tone="warn"
+            value={tally.alsoOutstanding}
+            meaning="not blocking a quote"
+            action="show only these"
+            onPress={() => setFocus(focus === "outstanding" ? null : "outstanding")}
+            active={focus === "outstanding"}
+          />
+          <StatTile
+            label="No category"
+            tone={tally.noCategory > 0 ? "warn" : "plain"}
+            value={tally.noCategory}
+            meaning="no questions at all"
+            action="show only these"
+            onPress={() => setFocus(focus === "no_category" ? null : "no_category")}
+            active={focus === "no_category"}
+          />
+          <StatTile
+            label="No level"
+            tone={tally.noLevel > 0 ? "warn" : "plain"}
+            value={tally.noLevel}
+            meaning={suggestedLevels > 0 ? `${suggestedLevels} with a suggestion` : "nothing suggested"}
+            action="show only these"
+            onPress={() => setFocus(focus === "no_level" ? null : "no_level")}
+            active={focus === "no_level"}
+          />
         </div>
       )}
 
@@ -282,15 +431,26 @@ export default function SpecTable({
                   <th className="text-left font-medium px-3 py-2">Qty</th>
                   <th className="text-left font-medium px-3 py-2">Specs captured</th>
                   <th className="text-left font-medium px-3 py-2">Category</th>
-                  <th className="text-left font-medium px-3 py-2">Needed to quote</th>
+                  <th className="text-left font-medium px-3 py-2 whitespace-nowrap">
+                    TGQ
+                    <Tip>
+                      Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for this
+                      category, the older per-level model where he has not.
+                    </Tip>
+                  </th>
                   <th className="text-left font-medium px-3 py-2">TG0</th>
                   <th className="text-left font-medium px-3 py-2">TG1</th>
-                  <th className="text-left font-medium px-3 py-2">Spec fields</th>
-                  <th className="text-left font-medium px-3 py-2">Readiness</th>
+                  <th className="text-left font-medium px-3 py-2 whitespace-nowrap">
+                    Captured
+                    <Tip>
+                      How much of the checklist is answered — green settled, amber TBC. The split between spec
+                      fields and readiness questions is on the record itself.
+                    </Tip>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200">
-                {records.map((record) => {
+                {shown.map((record) => {
                   const outstanding =
                     n(record.spec_tbc) + n(record.spec_missing) + n(record.ready_tbc) + n(record.ready_missing);
                   const anyMissing = n(record.spec_missing) + n(record.ready_missing) > 0;
@@ -405,8 +565,14 @@ export default function SpecTable({
                             {record.level_suggested ? `${record.level_suggested}?` : "Set level"}
                           </Link>
                         ) : record.to_quote_outstanding > 0 ? (
-                          <span className="text-red-700 font-medium">
-                            {record.to_quote_outstanding}
+                          <span>
+                            <Link
+                              href={`/dashboard/records/${record.id}`}
+                              className="font-medium text-red-700 no-underline hover:underline"
+                              title="Open the record to see which questions"
+                            >
+                              {record.to_quote_outstanding}
+                            </Link>
                             {record.to_quote_waiting > 0 && (
                               <span className="ml-1 text-xs text-blue-700 font-normal">
                                 ({record.to_quote_waiting} asked)
@@ -430,26 +596,31 @@ export default function SpecTable({
                               —
                             </span>
                           ) : record.gates[gate] > 0 ? (
-                            <span className="text-red-700 font-medium">{record.gates[gate]}</span>
+                            /* THE COUNT IS A LINK TO WHAT IT COUNTS. Asked for
+                               on 2026-09-18 — "when it goes red three, I should
+                               be able to click on that and it takes me to the
+                               three things that are needed". The record screen's
+                               gate panel is where they are named, with whose
+                               problem each one is. */
+                            <Link
+                              href={`/dashboard/records/${record.id}#gates`}
+                              className="font-medium text-red-700 no-underline hover:underline"
+                              title={`${record.gates[gate]} outstanding at ${gate} — open the record to see which`}
+                            >
+                              {record.gates[gate]}
+                            </Link>
                           ) : (
-                            <span className="text-green-700">✓</span>
+                            <span className="text-green-700" title={`${gate} is satisfied`}>
+                              ✓
+                            </span>
                           )}
                         </td>
                       ))}
                       <td className="px-3 py-2">
-                        <Counts
-                          settled={n(record.spec_settled)}
-                          tbc={n(record.spec_tbc)}
-                          missing={n(record.spec_missing)}
-                          total={n(record.spec_total)}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <Counts
-                          settled={n(record.ready_settled)}
-                          tbc={n(record.ready_tbc)}
-                          missing={n(record.ready_missing)}
-                          total={n(record.ready_total)}
+                        <Captured
+                          settled={n(record.spec_settled) + n(record.ready_settled)}
+                          tbc={n(record.spec_tbc) + n(record.ready_tbc)}
+                          total={n(record.spec_total) + n(record.ready_total)}
                         />
                       </td>
                     </tr>
@@ -458,6 +629,24 @@ export default function SpecTable({
               </tbody>
             </table>
           </div>
+
+          {/* A FILTER YOU CANNOT SEE IS A FILTER YOU FORGET YOU SET. Said in
+              words, with the way out beside it, and only when the list was
+              actually narrowed — printing "0 hidden" on every visit teaches
+              people to ignore the one time it matters. */}
+          {focus !== null && (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-neutral-700">
+              <span>
+                Showing {shown.length} of {records.length} item{records.length === 1 ? "" : "s"}.{" "}
+                <span className="text-neutral-500">
+                  {records.length - shown.length} hidden by the tile you have selected.
+                </span>
+              </span>
+              <Button size="xs" variant="quiet" onClick={() => setFocus(null)}>
+                Show all {records.length}
+              </Button>
+            </p>
+          )}
           {/* THE STANDING EXPLANATION GOES LAST. It is a permanent caveat about
               a file, not news about this run, and at the top it pushed the
               records themselves below the fold on every visit. */}

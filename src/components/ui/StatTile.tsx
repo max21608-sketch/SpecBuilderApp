@@ -45,6 +45,7 @@ export default function StatTile({
   meaning,
   action,
   href,
+  onPress,
   tone = "plain",
   active = false,
 }: {
@@ -52,10 +53,19 @@ export default function StatTile({
   value: string | number;
   /** The one line under the number. What it counts, not what to do about it. */
   meaning?: string;
-  /** What pressing it does, in the reader's words. Only shown when there is an href. */
+  /** What pressing it does, in the reader's words. Shown only when it is pressable. */
   action?: string;
   /** Null, not just absent, so a caller with nothing to link to says so. */
   href?: string | null;
+  /**
+   * Narrow the list on THIS page instead of going to another one.
+   *
+   * A tile is either a link somewhere or a filter here, never both — so this
+   * renders a `<button>`, because `Button.tsx`'s rule cuts both ways and
+   * something that changes what you are looking at is not navigation. Takes
+   * precedence over `href` if both are somehow given.
+   */
+  onPress?: () => void;
   tone?: StatTone;
   /** True when the list below is already filtered to this tile. */
   active?: boolean;
@@ -69,7 +79,7 @@ export default function StatTile({
         {typeof value === "number" ? value.toLocaleString() : value}
       </span>
       {meaning && <span className="mt-0.5 block text-xs text-neutral-500">{meaning}</span>}
-      {href && action && <span className="mt-1.5 block text-xs text-blue-700">{action} →</span>}
+      {action && (href || onPress) && <span className="mt-1.5 block text-xs text-blue-700">{action} →</span>}
     </>
   );
 
@@ -77,6 +87,13 @@ export default function StatTile({
     active ? "border-neutral-900 ring-1 ring-neutral-900" : "border-neutral-200"
   }`;
 
+  if (onPress) {
+    return (
+      <button type="button" onClick={onPress} aria-pressed={active} className={`${shell} block w-full text-left transition-shadow hover:border-neutral-300 hover:shadow-sm`}>
+        {body}
+      </button>
+    );
+  }
   if (!href) return <div className={shell}>{body}</div>;
   return (
     <Link href={href} className={`${shell} block no-underline transition-shadow hover:border-neutral-300 hover:shadow-sm`}>
