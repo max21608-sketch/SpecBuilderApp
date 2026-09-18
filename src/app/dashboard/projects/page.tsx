@@ -20,6 +20,9 @@ import StatTile from "@/components/ui/StatTile";
 import PageBody from "@/components/ui/PageBody";
 import Tabs from "@/components/ui/Tabs";
 import { useUrlTab } from "@/lib/use-url-tab";
+import { formatDay } from "@/lib/format-day";
+import PageHeader from "@/components/ui/PageHeader";
+import { Table, Th, Td, Tr } from "@/components/ui/Table";
 
 type Project = {
   id: string;
@@ -50,22 +53,6 @@ const TAB_LABELS: Record<StateTab, string> = {
   archived: "Archived",
   all: "All",
 };
-
-/**
- * A calendar day as a person writes it — `14 Oct 2026`, never `2026-10-14`.
- *
- * Built from the STRING's own parts, never from a `Date`. These are `date`
- * columns; both drivers parse one into local midnight and any date maths on it
- * renders the day before in British Summer Time. The TOE-dates rule, applied
- * to formatting rather than to comparison.
- */
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"];
-function formatDay(day: string): string {
-  const [year, month, date] = day.split("-");
-  const index = Number(month) - 1;
-  if (!year || !date || Number.isNaN(index) || !MONTHS[index]) return day;
-  return `${Number(date)} ${MONTHS[index]} ${year}`;
-}
 
 /**
  * The specs-agreed-by date, and whether it has passed.
@@ -231,37 +218,40 @@ function ProjectsView() {
   }, [shown]);
 
   return (
-    <PageBody>
-      <div className="flex flex-wrap items-start gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-neutral-900">Projects</h1>
-          <p className="mt-0.5 text-sm text-neutral-600">
-            Everything in the spec builder, and what each one is waiting on.
-          </p>
-        </div>
-        <span className="flex-1" />
-        {/* COLLAPSED. It stays ABOVE the list when open, for the reason it was
-            moved here — on a new deployment adding a project is the first thing
-            anybody does, and it used to be below however many projects already
-            existed. But on a deployment that HAS projects it is a form of three
-            inputs in front of the work, every visit. */}
-        <Button variant={adding ? "secondary" : "primary"} onClick={() => setAdding((open) => !open)}>
-          {adding ? "Cancel" : "Add a project"}
-        </Button>
-      </div>
+    <>
+      {/* THE FIRST ADOPTER OF `PageHeader`. Where you are, what this is, and
+          what you came to do — in that order, in the band, at 1100 wide
+          whatever the body under it does.
 
-      {/* STATE IS A TAB, NOT A CHECKBOX. Archived was opt-in through a tick box
-          beside the search, which hid Completed entirely — it had nowhere to be.
-          Every project is loaded whatever the tab, because a tab's count cannot
-          be derived from the rows you are already looking at. */}
-      <Tabs
-        className="mt-4"
-        label="Project state"
-        value={tab}
-        onChange={setTab}
-        items={STATE_TABS.map((name) => ({ id: name, label: TAB_LABELS[name], count: tabCounts[name] }))}
+          STATE IS A TAB, NOT A CHECKBOX, and it belongs to the page's identity
+          rather than its content, which is why it is in the band. Archived used
+          to be opt-in through a tick box beside the search, which hid Completed
+          entirely — it had nowhere to be. Every project is loaded whatever the
+          tab, because a tab's count cannot be derived from the rows you are
+          already looking at. */}
+      <PageHeader
+        title="Projects"
+        subtitle="Everything in the spec builder, and what each one is waiting on."
+        actions={
+          // COLLAPSED. It stays ABOVE the list when open, for the reason it was
+          // moved here — on a new deployment adding a project is the first
+          // thing anybody does, and it used to be below however many projects
+          // already existed. But on a deployment that HAS projects it is a form
+          // of three inputs in front of the work, every visit.
+          <Button variant={adding ? "secondary" : "primary"} onClick={() => setAdding((open) => !open)}>
+            {adding ? "Cancel" : "Add a project"}
+          </Button>
+        }
+        tabs={
+          <Tabs
+            label="Project state"
+            value={tab}
+            onChange={setTab}
+            items={STATE_TABS.map((name) => ({ id: name, label: TAB_LABELS[name], count: tabCounts[name] }))}
+          />
+        }
       />
-
+      <PageBody>
       {error && (
         <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
       )}
@@ -368,45 +358,48 @@ function ProjectsView() {
               : `Nothing ${TAB_LABELS[tab].toLowerCase()}. Try another tab, or add a project.`}
         </p>
       ) : (
-        <div className="mt-4 border border-neutral-200 rounded-lg bg-white overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-neutral-50 text-left text-neutral-600">
+        /* NOT `overflow-hidden`, which is the rounding-versus-a-row trade
+           `Table.tsx` records: it makes the wrapper the sticky scroll container
+           and the header then covers a row nobody would know to look for. */
+        <div className="mt-4 rounded-[10px] border border-neutral-200 bg-white">
+          <Table>
+            <thead>
               <tr>
-                <th className="px-4 py-2 font-medium w-[11%]">Number</th>
-                <th className="px-4 py-2 font-medium w-[23%]">Project</th>
-                <th className="px-4 py-2 font-medium w-[14%]">Client</th>
-                <th className="px-4 py-2 font-medium text-right w-[8%]">Items</th>
-                <th className="px-4 py-2 font-medium text-right w-[11%]">
+                <Th className="w-[11%]">Number</Th>
+                <Th className="w-[23%]">Project</Th>
+                <Th className="w-[14%]">Client</Th>
+                <Th num className="w-[8%]">Items</Th>
+                <Th num className="w-[11%]">
                   TGQ
                   <Tip>
                     Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for the
                     category, the older per-level model where he has not.
                   </Tip>
-                </th>
-                <th className="px-4 py-2 font-medium w-[15%]">
+                </Th>
+                <Th className="w-[15%]">
                   Specs agreed by
                   <Tip>The gate before drawings can be issued, and the date Overdue is measured against.</Tip>
-                </th>
-                <th className="px-4 py-2 font-medium w-[10%]">State</th>
-                <th className="px-4 py-2" />
+                </Th>
+                <Th className="w-[10%]">State</Th>
+                <Th />
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-200">
+            <tbody>
               {(shown ?? []).map((project) => (
-                <tr key={project.id} className={project.status === "archived" ? "bg-neutral-50" : ""}>
+                <Tr key={project.id} className={project.status === "archived" ? "bg-neutral-50" : ""}>
                   {/* THE NUMBER IS ITS OWN COLUMN, and monospace. It is what
                       people say out loud and what every export is labelled
                       with, and a number glued to a name with an em dash is a
                       column you cannot scan. */}
-                  <td className="px-4 py-3 align-top">
+                  <Td>
                     <Link
                       href={`/dashboard/projects/${project.id}`}
                       className="font-mono text-[13px] font-semibold text-blue-700 no-underline hover:underline"
                     >
                       {project.bws_project_number}
                     </Link>
-                  </td>
-                  <td className="px-4 py-3 align-top">
+                  </Td>
+                  <Td>
                     <Link
                       href={`/dashboard/projects/${project.id}`}
                       className="text-blue-700 no-underline hover:underline"
@@ -430,24 +423,24 @@ function ProjectsView() {
                         <> · archived {formatDay(String(project.archived_at).slice(0, 10))}</>
                       )}
                     </p>
-                  </td>
-                  <td className="px-4 py-3 align-top text-neutral-700">
+                  </Td>
+                  <Td className="text-neutral-700">
                     {project.client ?? <span className="text-neutral-400">none recorded</span>}
-                  </td>
+                  </Td>
                   {/* THE EXPORT'S SCOPE, not every row in spec_records. The raw
                       count includes split bill lines (which are headings, and
                       whose configurations are what ships) and retired records,
                       so it read 52 beside a TGQ figure computed over 45. Two
                       numbers on one row describing different sets of records is
                       the check sheet's own failure mode. */}
-                  <td className="px-4 py-3 align-top text-right tabular-nums text-neutral-700">
+                  <Td num className="text-neutral-700">
                     {(project.summary ?? EMPTY_SUMMARY).records}
-                  </td>
+                  </Td>
                   {/* THE NUMBER THAT DECIDES WHAT YOU DO TODAY, and the reason
                       this screen is a table at all. Red because it blocks money
                       going out, and a link rather than a figure, because
                       reading it is never the end of the errand. */}
-                  <td className="px-4 py-3 align-top text-right">
+                  <Td num>
                     {(project.summary ?? EMPTY_SUMMARY).records === 0 ? (
                       <span className="text-neutral-400">—</span>
                     ) : (project.summary ?? EMPTY_SUMMARY).toQuote === 0 ? (
@@ -460,15 +453,15 @@ function ProjectsView() {
                         {(project.summary ?? EMPTY_SUMMARY).toQuote.toLocaleString()}
                       </Link>
                     )}
-                  </td>
+                  </Td>
                   {/* OVERDUE IS STATED, NEVER WORKED OUT BY THE READER — and a
                       project with NO programme says so, because an empty
                       programme rendering as healthy is the error worth
                       preventing. */}
-                  <td className="px-4 py-3 align-top text-xs">
+                  <Td className="text-xs">
                     <Programme day={project.specs_agreed_by} />
-                  </td>
-                  <td className="px-4 py-3 align-top">
+                  </Td>
+                  <Td>
                     {/* COMPLETED arrives on its own, so the pill has to be
                         able to say what is still outstanding under ACTIVE. */}
                     <Pill
@@ -477,14 +470,14 @@ function ProjectsView() {
                     >
                       {PROJECT_STATE_LABELS[project.state]}
                     </Pill>
-                  </td>
+                  </Td>
                   {/* THE TWO THINGS YOU LEAVE THIS SCREEN TO DO, quiet: the
                       project's NAME is the way in, and two filled buttons a row
                       compete with it for the eye. `quiet` is the per-row variant
                       for exactly this — bordered on hover, still a hit area.
                       Spec table is gone from here because the name goes there
                       anyway; Export is the one thing the name does NOT reach. */}
-                  <td className="px-4 py-3 align-top">
+                  <Td>
                     <div className="flex flex-col items-end gap-0.5">
                       <Link
                         href={`/dashboard/drafts?projectId=${project.id}`}
@@ -499,14 +492,15 @@ function ProjectsView() {
                         Export
                       </a>
                     </div>
-                  </td>
-                </tr>
+                  </Td>
+                </Tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       )}
     </PageBody>
+    </>
   );
 }
 

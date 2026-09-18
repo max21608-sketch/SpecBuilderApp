@@ -18,6 +18,12 @@
 // `buttonClass` exists for the cases that MUST stay an anchor — a download is
 // an `<a href>` because the browser has to fetch it — so they can look like
 // what they are without pretending to be a `<button>`.
+//
+// THE FOUR VARIANTS GRADE A CONSEQUENCE, WHICH IS WHY THERE IS NO FIFTH. A
+// suggestion the app has worked out is not a fifth consequence — it is a
+// different kind of thing, and its rule is that it never appears without the
+// evidence it was read from. That is `SuggestButton.tsx`: a variant could be
+// used with no evidence beside it, a component with a required prop cannot.
 // ============================================================================
 import type { ComponentProps } from "react";
 
