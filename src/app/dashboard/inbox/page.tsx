@@ -20,6 +20,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import { intakeStatusLabel } from "@/lib/intake-status";
+import PageBody from "@/components/ui/PageBody";
 
 type Message = {
   id: string;

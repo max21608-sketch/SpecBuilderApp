@@ -44,6 +44,7 @@ import AddSpec from "@/components/records/AddSpec";
 import AnswerValue from "@/components/records/AnswerValue";
 import type { Palette } from "@/lib/palettes";
 import { GATES, type Gate, type GateStatus } from "@/lib/gates";
+import PageBody from "@/components/ui/PageBody";
 
 type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;

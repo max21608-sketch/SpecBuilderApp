@@ -51,6 +51,7 @@ import {
 } from "@/lib/spec-vocab";
 import { type QuestionTier } from "@/lib/tgq";
 import Button from "@/components/ui/Button";
+import PageBody from "@/components/ui/PageBody";
 
 type Contact = {
   id: string;

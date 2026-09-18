@@ -10,6 +10,7 @@
 // wrong database looks perfectly healthy from every other angle.
 import { getSessionUser } from "@/lib/session";
 import { getEnvironment } from "@/lib/env";
+import PageBody from "@/components/ui/PageBody";
 
 export const dynamic = "force-dynamic";
 

@@ -17,6 +17,7 @@ import { daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
 import Tip from "@/components/ui/Tip";
 import Pill from "@/components/ui/Pill";
 import StatTile from "@/components/ui/StatTile";
+import PageBody from "@/components/ui/PageBody";
 
 type Project = {
   id: string;

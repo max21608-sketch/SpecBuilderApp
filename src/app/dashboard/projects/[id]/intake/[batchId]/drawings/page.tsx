@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import PackDrawingsReview from "@/components/imports/PackDrawingsReview";
 import Spinner from "@/components/ui/Spinner";
+import PageBody from "@/components/ui/PageBody";
 
 export default function PackDrawingsPage({
   params,

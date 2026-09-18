@@ -53,6 +53,7 @@ import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary";
 import StatTile from "@/components/ui/StatTile";
 import Tip from "@/components/ui/Tip";
 import Pill from "@/components/ui/Pill";
+import PageBody from "@/components/ui/PageBody";
 
 type Project = {
   id: string;
@@ -622,8 +623,18 @@ function ProjectOverview() {
     }
   }
 
-  if (error && !project) return <p className="max-w-4xl mx-auto text-sm text-red-700">{error}</p>;
-  if (!project || !form) return <div className="max-w-4xl mx-auto"><Spinner label="Loading project" /></div>;
+  if (error && !project)
+    return (
+      <PageBody>
+        <p className="text-sm text-red-700">{error}</p>
+      </PageBody>
+    );
+  if (!project || !form)
+    return (
+      <PageBody>
+        <Spinner label="Loading project" />
+      </PageBody>
+    );
 
   const flaggedCount = notes.filter((note) => note.flagged).length;
   const allNotesOpen = notes.length > 0 && notes.every((note) => openNotes.has(note.id));

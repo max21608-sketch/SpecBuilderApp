@@ -19,6 +19,7 @@ import Tip from "@/components/ui/Tip";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { intakeStatusLabel, isIntakeRunWorking } from "@/lib/intake-status";
+import PageBody from "@/components/ui/PageBody";
 
 type Run = {
   id: string;
