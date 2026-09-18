@@ -8,12 +8,14 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import {
   completionSentence,
   PROJECT_STATE_LABELS,
+  PROJECT_STATE_TONE,
   type ProjectCompletion,
   type ProjectState,
 } from "@/lib/project-completion";
 import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary";
 import { daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
 import Tip from "@/components/ui/Tip";
+import Pill from "@/components/ui/Pill";
 import StatTile from "@/components/ui/StatTile";
 
 type Project = {
@@ -34,20 +36,6 @@ type Project = {
   /** The same numbers the project page shows. See src/lib/project-summary.ts. */
   summary: ProjectSummary;
   state: ProjectState;
-};
-
-/**
- * ACTIVE sky, COMPLETED green, ARCHIVED grey.
- *
- * Green is SETTLED in this app's colour language, everywhere — a confirmed
- * answer, a satisfied gate, a finished review. So green belongs to COMPLETED
- * and not to ACTIVE, which is merely where most projects live. They were the
- * other way round.
- */
-const STATE_PILL: Record<ProjectState, string> = {
-  active: "bg-sky-50 text-sky-700 border-sky-200",
-  completed: "bg-green-50 text-green-700 border-green-200",
-  archived: "bg-neutral-100 text-neutral-600 border-neutral-300",
 };
 
 /** The tabs across the top. `all` is every project whatever its state. */
@@ -486,14 +474,14 @@ export default function ProjectsPage() {
                     <Programme day={project.specs_agreed_by} />
                   </td>
                   <td className="px-4 py-3 align-top">
-                    <span
-                      className={`inline-block text-[11px] tracking-wide px-2 py-0.5 rounded border ${STATE_PILL[project.state]}`}
-                      // COMPLETED arrives on its own, so the pill has to be
-                      // able to say what is still outstanding under ACTIVE.
+                    {/* COMPLETED arrives on its own, so the pill has to be
+                        able to say what is still outstanding under ACTIVE. */}
+                    <Pill
+                      tone={PROJECT_STATE_TONE[project.state]}
                       title={completionSentence(project.completion) ?? "Every question on every record is settled."}
                     >
                       {PROJECT_STATE_LABELS[project.state]}
-                    </span>
+                    </Pill>
                   </td>
                   {/* THE TWO THINGS YOU LEAVE THIS SCREEN TO DO, quiet: the
                       project's NAME is the way in, and two filled buttons a row

@@ -71,6 +71,23 @@ export const PROJECT_STATE_LABELS: Record<ProjectState, string> = {
   active: "ACTIVE",
 };
 
+/**
+ * Which colour each state wears, decided ONCE beside the labels.
+ *
+ * Green is SETTLED in this app's colour language, everywhere — a confirmed
+ * answer, a satisfied gate, a finished review — so it belongs to COMPLETED.
+ * ACTIVE is merely where most projects live, and gets the working-state sky.
+ * The list and the project page each held their own copy of this map and had
+ * them the other way round from each other, under a comment claiming parity.
+ * A `Tone` name rather than a class string, so the pill component owns the
+ * shades and this file owns only the meaning.
+ */
+export const PROJECT_STATE_TONE: Record<ProjectState, "live" | "good" | "plain"> = {
+  active: "live",
+  completed: "good",
+  archived: "plain",
+};
+
 export function projectState(status: string | null | undefined, completion: ProjectCompletion | null): ProjectState {
   // Archived wins: a project put away is put away whether or not its
   // specifications were ever finished, and saying COMPLETED over it would

@@ -9,7 +9,9 @@
 // the list already narrowed to what the tile counts. A figure with nowhere to
 // go makes somebody leave the screen and find the list themselves.
 //
-// `tone` is the house reading and nothing else may use these colours:
+// `tone` is the house reading, held once in `tone.ts` and shared with Chip,
+// Pill and Note so a tile and the row it filters cannot disagree about what
+// red means:
 //   danger  blocks money going out
 //   warn    needs a person; not an error
 //   good    settled
@@ -20,24 +22,10 @@
 // because a link that goes nowhere is worse than text.
 // ============================================================================
 import Link from "next/link";
+import { TONE, type Tone } from "./tone";
 
-export type StatTone = "plain" | "danger" | "warn" | "good" | "info";
-
-const EDGE: Record<StatTone, string> = {
-  plain: "before:bg-neutral-300",
-  danger: "before:bg-red-600",
-  warn: "before:bg-amber-500",
-  good: "before:bg-green-600",
-  info: "before:bg-blue-600",
-};
-
-const VALUE: Record<StatTone, string> = {
-  plain: "text-neutral-900",
-  danger: "text-red-700",
-  warn: "text-amber-700",
-  good: "text-green-700",
-  info: "text-blue-700",
-};
+/** Kept as a name so existing callers read unchanged; it IS the house tone. */
+export type StatTone = Tone;
 
 export default function StatTile({
   label,
@@ -75,7 +63,7 @@ export default function StatTile({
       <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{label}</span>
       {/* Grouped, always. `1899` and `1,899` are the same number and only one
           of them is read at a glance. */}
-      <span className={`mt-0.5 block text-2xl font-semibold leading-tight tracking-tight tabular-nums ${VALUE[tone]}`}>
+      <span className={`mt-0.5 block text-2xl font-semibold leading-tight tracking-tight tabular-nums ${TONE[tone].text}`}>
         {typeof value === "number" ? value.toLocaleString() : value}
       </span>
       {meaning && <span className="mt-0.5 block text-xs text-neutral-500">{meaning}</span>}
@@ -83,7 +71,7 @@ export default function StatTile({
     </>
   );
 
-  const shell = `relative overflow-hidden rounded-lg border bg-white px-3.5 py-3 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:content-[''] ${EDGE[tone]} ${
+  const shell = `relative overflow-hidden rounded-[10px] border bg-white px-3.5 py-3 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:content-[''] ${TONE[tone].edge} ${
     active ? "border-neutral-900 ring-1 ring-neutral-900" : "border-neutral-200"
   }`;
 

@@ -45,12 +45,14 @@ import {
   completionSentence,
   EMPTY_COMPLETION,
   PROJECT_STATE_LABELS,
+  PROJECT_STATE_TONE,
   type ProjectCompletion,
   type ProjectState,
 } from "@/lib/project-completion";
 import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary";
 import StatTile from "@/components/ui/StatTile";
 import Tip from "@/components/ui/Tip";
+import Pill from "@/components/ui/Pill";
 
 type Project = {
   id: string;
@@ -113,13 +115,6 @@ type ProjectNote = {
   source_page: number | null;
   source_filename: string | null;
   version: number;
-};
-
-/** ACTIVE green, COMPLETED blue, ARCHIVED grey — the same three as the list. */
-const STATE_PILL: Record<ProjectState, string> = {
-  active: "bg-green-100 text-green-800 border-green-200",
-  completed: "bg-sky-100 text-sky-800 border-sky-200",
-  archived: "bg-neutral-100 text-neutral-600 border-neutral-300",
 };
 
 /**
@@ -802,12 +797,12 @@ function ProjectOverview() {
             COMPLETED arrives on its own when every question on every record is
             settled. The title says why, because a badge nobody can explain is
             a badge nobody believes. */}
-        <span
-          className={`text-[11px] tracking-wide px-2 py-0.5 rounded border ${STATE_PILL[state]}`}
+        <Pill
+          tone={PROJECT_STATE_TONE[state]}
           title={completionSentence(completion) ?? "Every question on every record is settled."}
         >
           {PROJECT_STATE_LABELS[state]}
-        </span>
+        </Pill>
         <span className="ml-auto text-xs">
           {dirty ? (
             <span className="text-amber-800">Unsaved changes</span>

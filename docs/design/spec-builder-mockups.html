@@ -1,0 +1,2056 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{
+  --ink:#171717; --ink-2:#404040; --ink-3:#737373; --ink-4:#a3a3a3;
+  --line:#e5e5e5; --line-2:#d4d4d4; --bg:#fafaf9; --card:#fff;
+  --red:#b91c1c; --red-bg:#fef2f2; --red-line:#fecaca;
+  --amber:#a16207; --amber-bg:#fffbeb; --amber-line:#fde68a;
+  --green:#15803d; --green-bg:#f0fdf4; --green-line:#bbf7d0;
+  --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-line:#bfdbfe;
+  --sky:#0369a1; --sky-bg:#f0f9ff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+a{color:inherit}
+.wrap{max-width:1100px;margin:0 auto;padding:0 20px 64px}
+
+/* ---- app chrome ---- */
+.topbar{background:var(--ink);color:#fff;padding:9px 20px;display:flex;align-items:center;gap:18px;font-size:13px}
+.topbar .brand{font-weight:600}
+.topbar .env{background:#facc15;color:#000;font-size:10px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px}
+.topbar nav{display:flex;gap:4px;margin-left:8px}
+.topbar nav a{padding:4px 10px;border-radius:5px;color:#d4d4d4;text-decoration:none}
+.topbar nav a.on{background:#ffffff1f;color:#fff}
+.topbar .sp{flex:1}
+
+/* ---- page header ---- */
+.phead{background:var(--card);border-bottom:1px solid var(--line);padding:16px 0 0}
+.phead .row{max-width:1100px;margin:0 auto;padding:0 20px;display:flex;align-items:flex-start;gap:14px}
+.crumb{font-size:12px;color:var(--ink-3);text-decoration:none}
+h1{font-size:20px;font-weight:650;margin:2px 0 0;letter-spacing:-.01em}
+.sub{font-size:12.5px;color:var(--ink-3);margin:3px 0 0}
+.phead .acts{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+/* ---- tabs ---- */
+.tabs{max-width:1100px;margin:14px auto 0;padding:0 20px;display:flex;gap:2px}
+.tab{padding:8px 13px;font-size:13px;color:var(--ink-3);text-decoration:none;border-bottom:2px solid transparent;display:flex;gap:6px;align-items:center}
+.tab.on{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+.tab .n{font-size:11px;color:var(--ink-4);background:#f5f5f4;border-radius:9px;padding:1px 6px}
+
+/* ---- buttons ---- */
+.btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;padding:6px 12px;border-radius:6px;
+  border:1px solid var(--line-2);background:#fff;color:var(--ink);cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{background:#fafafa}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+.btn.sm{padding:3px 9px;font-size:12px}
+.btn.quiet{border-color:transparent;background:transparent;color:var(--ink-2)}
+.btn.quiet:hover{border-color:var(--line-2);background:#fff}
+.btn.suggest{border-style:dashed;border-color:#93c5fd;background:var(--blue-bg);color:var(--blue)}
+
+/* ---- pills / chips ---- */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.05em;
+  padding:3px 8px;border-radius:20px;border:1px solid}
+.pill.active{color:var(--sky);background:var(--sky-bg);border-color:var(--blue-line)}
+.pill.done{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 8px;border-radius:5px;
+  border:1px solid var(--line);background:#fafafa;color:var(--ink-2);white-space:nowrap}
+.chip.red{color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
+.chip.amber{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
+.chip.green{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
+.chip.blue{color:var(--blue);background:var(--blue-bg);border-color:var(--blue-line)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+
+/* ---- cards ---- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:16px}
+.card > h2{font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);
+  margin:0;padding:13px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.card > h2 .sp{flex:1}
+.card .body{padding:16px}
+.card .body.flush{padding:0}
+
+/* ---- stat strip ---- */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:16px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:relative;overflow:hidden}
+.stat .k{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3)}
+.stat .v{font-size:26px;font-weight:650;letter-spacing:-.02em;margin-top:3px;line-height:1.1}
+.stat .m{font-size:11.5px;color:var(--ink-3);margin-top:3px}
+.stat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line-2)}
+.stat.red::before{background:var(--red)}   .stat.red .v{color:var(--red)}
+.stat.amber::before{background:#d97706}    .stat.amber .v{color:var(--amber)}
+.stat.green::before{background:var(--green)} .stat.green .v{color:var(--green)}
+.stat.blue::before{background:var(--blue)}
+
+/* ---- tables ---- */
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
+  text-align:left;padding:9px 16px;border-bottom:1px solid var(--line);background:#fcfcfc}
+td{padding:11px 16px;border-bottom:1px solid #f0f0ef;vertical-align:top;font-size:13px}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#fcfcfc}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.grp td{background:#fafafa;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:7px 16px}
+
+/* ---- notes / banners ---- */
+.note{border:1px solid;border-radius:8px;padding:10px 13px;font-size:12.5px;margin-top:12px}
+.note.amber{background:var(--amber-bg);border-color:var(--amber-line);color:#78350f}
+.note.green{background:var(--green-bg);border-color:var(--green-line);color:#14532d}
+.note.blue{background:var(--blue-bg);border-color:var(--blue-line);color:#1e3a8a}
+.muted{color:var(--ink-3);font-size:12px}
+
+/* ---- annotation ---- */
+.ann{margin:26px 0 0;border-left:3px solid var(--blue);background:#fff;padding:10px 14px;font-size:12.5px;color:var(--ink-2);border-radius:0 8px 8px 0}
+.ann b{color:var(--ink);font-weight:650}
+.ann ul{margin:6px 0 0;padding-left:18px}
+.ann li{margin:3px 0}
+.legend{font-size:11.5px;color:var(--ink-3);margin-top:10px;display:flex;gap:14px;flex-wrap:wrap}
+h3.sec{font-size:13px;font-weight:650;margin:26px 0 0;display:flex;align-items:center;gap:8px}
+h3.sec .c{font-size:11.5px;color:var(--ink-3);font-weight:500}
+input.fake,select.fake{font:inherit;font-size:13px;padding:5px 9px;border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--ink)}
+input.fake::placeholder{color:var(--ink-4)}
+</style>
+<style>
+/* ---- hover help, instead of a paragraph ---- */
+.tip{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;
+  border:1px solid var(--line-2);color:var(--ink-4);font-size:9.5px;font-weight:700;cursor:help;position:relative;
+  vertical-align:middle;margin-left:4px;flex:none}
+.tip:hover{border-color:var(--ink-3);color:var(--ink-2)}
+.tip .t{display:none;position:absolute;left:50%;transform:translateX(-50%);bottom:calc(100% + 7px);width:250px;
+  background:var(--ink);color:#fff;font-size:11.5px;font-weight:400;line-height:1.45;padding:7px 9px;border-radius:6px;
+  text-align:left;z-index:30;box-shadow:0 4px 14px #0003}
+.tip:hover .t{display:block}
+
+/* ---- a tile you can press ---- */
+.stat.click{cursor:pointer;transition:border-color .12s,box-shadow .12s}
+.stat.click:hover{border-color:var(--line-2);box-shadow:0 1px 4px #00000012}
+.stat.click .act{font-size:11px;margin-top:6px;color:var(--blue);display:flex;align-items:center;gap:3px}
+.stat.on{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+
+/* everything actionable is a link, and looks like one */
+.lk{color:var(--blue);text-decoration:none;border-bottom:1px solid #bfdbfe}
+.lk:hover{border-bottom-color:var(--blue)}
+td .lk,li .lk{font-size:inherit}
+
+/* ---- history timeline ---- */
+.tl{position:relative;padding-left:0}
+.verbar{display:flex;align-items:center;gap:10px;background:var(--green-bg);border-top:1px solid var(--green-line);
+  border-bottom:1px solid var(--green-line);padding:9px 16px;margin:0}
+.verbar .n{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--green);
+  background:#fff;border:1px solid var(--green-line);border-radius:20px;padding:2px 9px}
+.verbar .ttl{font-weight:650;font-size:13px;color:#14532d}
+.verbar .mt{margin-left:auto;font-size:11.5px;color:#3f6212}
+.datebar{display:flex;align-items:center;gap:10px;background:#f5f3ff;border-top:1px solid #ddd6fe;border-bottom:1px solid #ddd6fe;padding:8px 16px}
+.datebar .n{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6d28d9;background:#fff;border:1px solid #ddd6fe;border-radius:20px;padding:2px 9px}
+.chg{display:flex;gap:10px;padding:9px 16px;border-bottom:1px solid #f0f0ef;font-size:13px;align-items:flex-start}
+.chg .when{margin-left:auto;text-align:right;color:var(--ink-3);font-size:11.5px;white-space:nowrap}
+
+/* ---- checklist rows ---- */
+.q{display:grid;grid-template-columns:1fr 240px 96px 90px;gap:12px;padding:9px 16px;border-bottom:1px solid #f0f0ef;align-items:center;font-size:13px}
+.q:hover{background:#fcfcfc}
+.q .qp{display:flex;align-items:center;gap:7px}
+.state{font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;border:1px solid;text-align:center;display:inline-block}
+.s-conf{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
+.s-tbc{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
+.s-miss{color:var(--ink-3);background:#fafafa;border-color:var(--line)}
+.s-na{color:var(--ink-4);background:#fafafa;border-color:var(--line)}
+.tierdot{width:7px;height:7px;border-radius:50%;flex:none}
+.t-quote{background:var(--red)} .t-also{background:#d4d4d4}
+
+/* ---- gate board ---- */
+.gates{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.gate{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.gate .gh{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.gate .gh b{font-size:13px} .gate .gh .sp{flex:1}
+.gate.ok .gh{background:var(--green-bg);border-bottom-color:var(--green-line)}
+.gate.no .gh{background:var(--red-bg);border-bottom-color:var(--red-line)}
+.gate ul{margin:0;padding:0;list-style:none}
+.gate li{padding:8px 14px;border-bottom:1px solid #f4f4f3;font-size:12.5px;display:flex;gap:8px;align-items:flex-start}
+.gate li:last-child{border-bottom:0}
+.o{font-size:10px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:4px;border:1px solid;white-space:nowrap;flex:none;margin-top:1px}
+.o-block{color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
+.o-unk{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
+.o-una{color:#475569;background:#f8fafc;border-color:#cbd5e1;border-style:dashed}
+.o-ok{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
+.o-na{color:var(--ink-4);background:#fafafa;border-color:var(--line)}
+</style>
+<title>Spec Builder — approved mockups</title>
+<style>
+  body{padding-top:44px}
+  #idx{position:fixed;top:0;left:0;right:0;z-index:100;background:#111;color:#fff;
+       display:flex;gap:2px;align-items:center;padding:6px 10px;overflow-x:auto;
+       box-shadow:0 1px 6px #0004}
+  #idx .t{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+          color:#a3a3a3;padding-right:10px;white-space:nowrap}
+  #idx button{font:inherit;font-size:12.5px;color:#d4d4d4;background:transparent;border:0;
+              border-radius:5px;padding:5px 9px;cursor:pointer;white-space:nowrap}
+  #idx button:hover{background:#ffffff1a;color:#fff}
+  #idx button[aria-current]{background:#fff;color:#111;font-weight:600}
+  .screen-label{max-width:1100px;margin:0 auto;padding:14px 20px 0;font-size:12px;color:#737373}
+  .screen-label b{color:#171717;font-size:13px}
+  .screen[hidden]{display:none!important}
+  @media print{#idx{display:none}.screen[hidden]{display:block!important}}
+</style>
+<nav id="idx"><span class="t">Mockups</span><button type="button" data-go="design-language">Design language</button><button type="button" data-go="login">Sign in</button><button type="button" data-go="projects-list">Projects</button><button type="button" data-go="project-overview">Project overview</button><button type="button" data-go="spec-table">Spec table</button><button type="button" data-go="record-screen">Record · Specs</button><button type="button" data-go="record-checklist">Record · Checklist</button><button type="button" data-go="record-gates">Record · Gates</button><button type="button" data-go="record-versions">Record · Versions</button><button type="button" data-go="finishes-library">Finishes library</button><button type="button" data-go="chase">Chase</button><button type="button" data-go="inbox">Inbox</button><button type="button" data-go="intake-pack">Intake pack</button><button type="button" data-go="boq-review">BOQ review</button><button type="button" data-go="drawings-review">Drawings review</button><button type="button" data-go="email-review">Email review</button></nav>
+<section id="design-language" class="screen" hidden><div class="screen-label"><b>Design language</b> — The rules the rest of the app inherits</div><div class="topbar"><span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <span class="sp"></span><span style="color:#a3a3a3">design language · v2</span></div>
+<div class="wrap">
+  <h1 style="margin-top:22px">The rules the rest of the app inherits</h1>
+  <p class="sub" style="max-width:72ch">Nothing here is decoration. Each rule exists because a current screen makes a specific job harder — finding the blocking number, telling a guess from a decision, or getting from a number to the place you change it.</p>
+
+  <div class="card"><h2>1 · Everything actionable is a link, and there are several routes to each place</h2><div class="body">
+    <p style="margin:0">A count, an item code, a finish code, a filename, a designer, a date, a run name — all of them go somewhere. There is no cost to offering the same destination three times, and there is a real cost to a figure that makes somebody go and find the screen it belongs to.</p>
+    <p style="margin:10px 0 0"><b>A number that blocks something carries its fix beside it.</b> “312 needed to quote” is a link to the filtered table <i>and</i> has a <i>Chase them</i> button on the same row.</p>
+    <p style="margin:10px 0 0"><b>The cards on a project are also tabs.</b> Runs, Finishes, Documents and History are reachable from the tab bar and from the page, because which one you reach for depends on whether you already know where you are going.</p>
+  </div></div>
+
+  <div class="card"><h2>2 · A summary tile is a filter</h2><div class="body">
+    <p style="margin:0 0 12px">Pressing a tile opens the list already narrowed to it. The tile you are on is outlined, and the filter is repeated as a chip you can remove — a filter you cannot see is a filter you forget you set.</p>
+    <div class="stats" style="grid-template-columns:repeat(3,1fr);margin-top:0">
+      <a href="#" class="stat click red on" style="text-decoration:none;color:inherit"><div class="k">Needed to quote</div><div class="v">312</div><div class="m">across 38 items</div><div class="act">showing these →</div></a>
+      <a href="#" class="stat click amber" style="text-decoration:none;color:inherit"><div class="k">Also outstanding</div><div class="v">1,587</div><div class="m">not blocking a quote</div><div class="act">filter to these →</div></a>
+      <a href="#" class="stat click green" style="text-decoration:none;color:inherit"><div class="k">Settled</div><div class="v">641</div><div class="m">confirmed or N/A</div><div class="act">filter to these →</div></a>
+    </div>
+    <p class="muted" style="margin-top:10px">Rule that goes with it, carried over from the chase screen: <b>a filter narrows what is LISTED, never what is asked or what an edit touches.</b> The counts on a row stay the row&rsquo;s own, with “n shown” beside them only when the list was actually narrowed.</p>
+  </div></div>
+
+  <div class="card"><h2>3 · Do not explain in a paragraph what a hover can say</h2><div class="body">
+    <p style="margin:0">This is a tool for professionals who use it every day. A caption under every field is read once and then becomes noise that pushes the content down the page. Where a field genuinely carries a rule worth knowing, it gets a
+      <span class="tip">?<span class="t">A 14px circle. Hover shows one or two sentences. Never more — if it needs a paragraph it belongs in the docs, not on the screen.</span></span> beside its label.</p>
+    <p style="margin:10px 0 0"><b>What stays on the page in words:</b> anything that would otherwise be silently wrong. “No programme recorded — nothing can be flagged overdue” stays visible, because its absence looks identical to being on time.</p>
+  </div></div>
+
+  <div class="card"><h2>4 · Colour means one thing each</h2><div class="body">
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+      <div><span class="chip red"><span class="dot"></span>Red</span> <b>blocks money going out.</b> Needed to quote, a refused confirm, an export that would wipe fields.</div>
+      <div><span class="chip amber"><span class="dot"></span>Amber</span> <b>needs a person.</b> TBC, no category, no level, a held email. Not an error.</div>
+      <div><span class="chip blue"><span class="dot"></span>Blue</span> <b>the app is suggesting.</b> Always with its reason, always one click to accept.</div>
+      <div><span class="chip green"><span class="dot"></span>Green</span> <b>settled.</b> Confirmed, N/A, review complete, and a named baseline.</div>
+    </div>
+    <p class="muted" style="margin-top:12px">Slate-dashed keeps its own meaning from the gate panel — <b>nowhere to record it</b>, where the fix is a seed or a migration and not a question for the reader. It is deliberately not red, because putting it in the red list teaches somebody to ignore red.</p>
+  </div></div>
+
+  <div class="card"><h2>5 · A guess is one click from a decision, and never wears its authority</h2><div class="body">
+    <p style="margin:0 0 10px">Dashed blue, with the evidence beside it. Pressing it accepts. Where several can be accepted together there is one button for all of them, because 59 records must not mean 59 visits.</p>
+    <p style="margin:0"><button class="btn suggest sm">Timber?</button> <span class="muted" style="margin-left:6px">the code <span class="mono">WD</span> says so</span>
+      &nbsp;&nbsp;<button class="btn suggest sm">Accept 7 suggested levels</button></p>
+    <p class="muted" style="margin-top:11px"><b>Never a pre-selected dropdown.</b> A select already reading “Simple” fires no change event when somebody chooses Simple, so the one action recording their agreement would do nothing at all.</p>
+  </div></div>
+
+  <div class="card"><h2>6 · A version is not a change</h2><div class="body">
+    <p style="margin:0 0 11px">In any trail, an ordinary change is a row. A <b>baseline</b> — a point somebody named and can compare against — is a bar straight across, so you can see at a glance which changes fall inside it. <b>Key dates</b> sit in the same trail in violet, so the programme reads against the work.</p>
+    <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff">
+      <div class="verbar"><span class="n">Baseline</span><span class="ttl">Rev B issued to Maybourne</span><span class="mt">17 Sept · 45 items fixed</span></div>
+      <div class="chg"><span class="chip">Edited by hand</span><div><a class="lk" href="#">AP364c-021 · Sofa</a> — Width 760 → 790</div><div class="when">17 Sept, 18:34</div></div>
+      <div class="datebar"><span class="n">Key date</span><span style="font-weight:650;font-size:13px;color:#4c1d95">Complete specifications agreed by — 14 Oct 2026</span><span class="mt" style="color:#6d28d9">26 days away</span></div>
+      <div class="chg" style="border-bottom:0"><span class="chip blue">Email confirmed</span><div>Claire Beaumont, 15 Sept — 7 specs across 3 runs</div><div class="when">17 Sept, 11:02</div></div>
+    </div>
+  </div></div>
+
+  <div class="card"><h2>7 · Layout, type and rhythm</h2><div class="body">
+    <p style="margin:0 0 11px"><b>Three bands on every page:</b> identity bar (breadcrumb, name, status, page-level actions right-aligned) · tabs with counts · content, numbers first. Content is <b>1100px</b> centred; dense tables go full width. One rule everywhere — today it is <span class="mono">max-w-5xl</span> on some screens and full width on others.</p>
+    <p style="margin:0 0 11px"><b>A list of more than six things is a table.</b> Stacked bordered cards are for a single object you are ruling on. A list you are scanning gets aligned columns.</p>
+    <div style="display:grid;grid-template-columns:150px 1fr;gap:6px 14px;font-size:13px">
+      <div class="muted">Page title</div><div style="font-size:20px;font-weight:650">20px / 650</div>
+      <div class="muted">Card heading</div><div style="font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)">12px / 700 / uppercase</div>
+      <div class="muted">Body</div><div>14px — up from 13px, because this is read all day</div>
+      <div class="muted">Values and codes</div><div class="mono">monospace, always — W1900 x D790mm · UPH-07 · AP364c-021</div>
+      <div class="muted">Spacing</div><div>a 4px scale; cards 16px apart</div>
+    </div>
+  </div></div>
+
+  <div class="card"><h2>8 · A link goes somewhere; a button does something</h2><div class="body">
+    <p style="margin:0 0 10px">Unchanged from <span class="mono">Button.tsx</span> — four variants, plus the suggestion. What changes is that they are used consistently: today <i>Start a change</i>, which opens the trail everything else attaches to, renders fainter than the link beside it.</p>
+    <p style="margin:0"><button class="btn primary">Primary</button> <button class="btn">Secondary</button>
+      <button class="btn" style="color:var(--red);border-color:var(--red-line);background:var(--red-bg)">Danger</button>
+      <button class="btn quiet">Quiet</button> <button class="btn suggest">Suggested · one click</button></p>
+  </div></div>
+
+  <div class="ann"><b>The measure of it.</b> Not whether it looks modern — it is a B2B tool and functionality wins every argument. The test is whether the blocking number is the first thing you see on each page, whether a guess is still obviously a guess, and whether you can get from any number to the place you change it without going via a menu.</div>
+</div>
+</section>
+<section id="login" class="screen" hidden><div class="screen-label"><b>Sign in</b></div><style>body{background:#f5f5f4}</style>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px">
+  <div style="width:100%;max-width:370px">
+    <div style="text-align:center;margin-bottom:22px">
+      <div style="font-size:17px;font-weight:650">Project Spec Builder</div>
+      <div class="muted" style="margin-top:3px">Ben Whistler</div>
+    </div>
+    <div class="card" style="margin-top:0">
+      <div class="body" style="padding:22px">
+        <label style="display:block"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Email</span>
+          <input class="fake" style="width:100%;margin-top:4px" placeholder="you@benwhistler.com"></label>
+        <label style="display:block;margin-top:14px"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Password</span>
+          <input class="fake" type="password" style="width:100%;margin-top:4px" placeholder="••••••••"></label>
+        <button class="btn primary" style="width:100%;justify-content:center;margin-top:18px;padding:8px">Sign in</button>
+      </div>
+    </div>
+    <p class="muted" style="text-align:center;margin-top:14px;font-size:11.5px">
+      There is no self-signup. Ask an administrator for an account.</p>
+    <p style="text-align:center;margin-top:10px"><span class="env" style="background:#facc15;color:#000;font-size:10px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px">STAGING</span></p>
+  </div>
+</div>
+<div class="wrap"><div class="ann" style="max-width:640px;margin:0 auto 40px"><b>Notes</b>
+  <ul><li>Centred card instead of a form hanging off the top-left. Nothing else changes — same fields, same rules.</li>
+  <li>The environment badge is on the sign-in page too, because “which one am I on” is a question people get wrong before they log in, not after.</li></ul></div></div>
+</section>
+<section id="projects-list" class="screen" hidden><div class="screen-label"><b>Projects</b> — The list</div><div class="topbar">
+  <span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox <span style="background:#b91c1c;color:#fff;border-radius:9px;padding:0 5px;font-size:10px;margin-left:3px">3</span></a></nav>
+  <span class="sp"></span><a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a>
+</div>
+<div class="phead"><div class="row">
+  <div><h1>Projects</h1><p class="sub">Everything in the spec builder, and what each one is waiting on.</p></div>
+  <div class="acts"><button class="btn primary">Add a project</button></div>
+</div><div class="tabs">
+  <a class="tab on" href="#">Active <span class="n">7</span></a>
+  <a class="tab" href="#">Completed <span class="n">2</span></a>
+  <a class="tab" href="#">Archived <span class="n">4</span></a>
+  <a class="tab" href="#">All <span class="n">13</span></a>
+</div></div>
+<div class="wrap">
+  <div class="stats" style="grid-template-columns:repeat(4,1fr)">
+    <a class="stat click red" href="#" style="text-decoration:none;color:inherit"><div class="k">Needed to quote</div><div class="v">946</div><div class="m">across 5 projects</div><div class="act">show those projects →</div></a>
+    <a class="stat click amber" href="#" style="text-decoration:none;color:inherit"><div class="k">Overdue</div><div class="v">2</div><div class="m">past specs-agreed-by</div><div class="act">show them →</div></a>
+    <a class="stat click blue" href="#" style="text-decoration:none;color:inherit"><div class="k">Waiting on a reply</div><div class="v">18</div><div class="m">chases sent, nothing back</div><div class="act">show them →</div></a>
+    <a class="stat click" href="#" style="text-decoration:none;color:inherit"><div class="k">Unplaced mail</div><div class="v">3</div><div class="m">could not be auto-assigned</div><div class="act">open the inbox →</div></a>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
+    <input class="fake" style="width:300px" placeholder="Search a number, a name, or a client">
+    <span class="sp" style="flex:1"></span><span class="muted">7 projects</span>
+  </div>
+  <div class="card" style="margin-top:12px"><div class="body flush">
+    <table>
+      <thead><tr><th style="width:11%">Number</th><th style="width:23%">Project</th><th style="width:14%">Client</th>
+        <th class="num" style="width:8%">Items</th><th class="num" style="width:11%">To quote</th>
+        <th style="width:15%">Specs agreed by</th><th style="width:10%">State</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><a class="lk mono" href="#" style="font-weight:600">AP364c</a></td>
+            <td><a class="lk" href="#">pantherc</a><div class="muted">3 runs · 11 finishes</div></td>
+            <td>Maybourne</td><td class="num">45</td>
+            <td class="num"><a href="#" style="color:var(--red);font-weight:650;text-decoration:none">312</a></td>
+            <td>14 Oct 2026 <span class="chip amber">26 days</span></td>
+            <td><span class="pill active">ACTIVE</span></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Chase</a> <a class="btn quiet sm" href="#">Export</a></td></tr>
+        <tr><td><a class="lk mono" href="#" style="font-weight:600">P17231</a></td>
+            <td><a class="lk" href="#">Maybourne Paris</a><div class="muted">1 run · 24 finishes</div></td>
+            <td>Maybourne</td><td class="num">59</td>
+            <td class="num"><a href="#" style="color:var(--red);font-weight:650;text-decoration:none">418</a></td>
+            <td><span style="color:var(--red)">02 Sept 2026</span> <span class="chip red">16 days over</span></td>
+            <td><span class="pill active">ACTIVE</span></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Chase</a> <a class="btn quiet sm" href="#">Export</a></td></tr>
+        <tr><td><a class="lk mono" href="#" style="font-weight:600">AP401</a></td>
+            <td><a class="lk" href="#">Ashcombe House</a><div class="muted">2 runs · 8 finishes</div></td>
+            <td>Ashcombe Estates</td><td class="num">22</td>
+            <td class="num"><a href="#" style="color:var(--red);font-weight:650;text-decoration:none">96</a></td>
+            <td class="muted">no programme <span class="tip">?<span class="t">Nothing on this project can be flagged overdue until a date is set. That is not the same as being on time.</span></span></td>
+            <td><span class="pill active">ACTIVE</span></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Chase</a> <a class="btn quiet sm" href="#">Export</a></td></tr>
+        <tr><td><a class="lk mono" href="#" style="font-weight:600">P17088</a></td>
+            <td><a class="lk" href="#">Dorset Square</a><div class="muted">1 run · 6 finishes</div></td>
+            <td>Firmdale</td><td class="num">14</td>
+            <td class="num" style="color:var(--green);font-weight:650">0</td>
+            <td>30 Jun 2026</td>
+            <td><span class="pill done">COMPLETED</span></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Export</a></td></tr>
+      </tbody>
+    </table>
+  </div></div>
+  <div class="ann"><b>Notes</b><ul>
+    <li><b>To quote is a column and it is red.</b> It is the number that decides what you do today, and the list is sortable on it.</li>
+    <li><b>Overdue is stated against the date</b> rather than being something you work out. A project with no programme says so — an empty programme rendering as healthy is the error worth preventing.</li>
+    <li><b>Chase and Export are on the row.</b> The two things you leave this screen to do, without going via the project page.</li>
+    <li>State is a tab filter and a pill. COMPLETED is computed from the answers and nobody sets it.</li>
+  </ul></div>
+</div>
+</section>
+<section id="project-overview" class="screen" hidden><div class="screen-label"><b>Project overview</b> — One project, everything that is not a spec record</div><div class="topbar">
+  <span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav>
+  <span class="sp"></span><a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a>
+</div>
+
+<div class="phead">
+  <div class="row">
+    <div>
+      <a class="crumb" href="#">← Projects</a>
+      <h1>AP364c — pantherc <span class="pill active" style="vertical-align:middle;margin-left:6px">ACTIVE</span></h1>
+      <p class="sub">Maybourne · specs due <a class="lk" href="#">14 Oct</a> · 26 days</p>
+    </div>
+    <div class="acts">
+      <button class="btn">Start a change</button>
+      <a class="btn" href="#">Chase 312</a>
+      <a class="btn primary" href="#">Export for BWS</a>
+    </div>
+  </div>
+  <div class="tabs">
+    <a class="tab on" href="#">Overview</a>
+    <a class="tab" href="#">MUR <span class="n">8</span></a>
+    <a class="tab" href="#">MAIN RUN <span class="n">22</span></a>
+    <a class="tab" href="#">MAIN RUN - VE <span class="n">22</span></a>
+    <a class="tab" href="#">Finishes <span class="n">11</span></a>
+    <a class="tab" href="#">Documents <span class="n">12</span></a>
+    <a class="tab" href="#">History <span class="n">71</span></a>
+    <a class="tab" href="#">+ Add a run</a>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- ========== 1. DETAILS FIRST ========== -->
+  <div class="card" style="margin-top:16px">
+    <h2>Project <span class="sp"></span><button class="btn sm">Edit</button></h2>
+    <div class="body">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px 20px;font-size:13px">
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">BWS number</div>
+             <div class="mono" style="margin-top:2px;font-size:14px">AP364c</div></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Name</div>
+             <div style="margin-top:2px">pantherc</div></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Client</div>
+             <div style="margin-top:2px">Maybourne</div></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Shared inbox
+             <span class="tip">?<span class="t">Mail forwarded here is placed on this project automatically. Blank means none — mail will not route to it.</span></span></div>
+             <div style="margin-top:2px"><a class="lk mono" href="#">p17726@benwhistler.com</a> <span class="chip green" style="margin-left:4px">12 read</span></div></div>
+
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Drawing units
+             <span class="tip">?<span class="t">Used only where a page prints no unit and its own figures do not agree. A unit printed on the page always wins.</span></span></div>
+             <div style="margin-top:2px">Centimetres</div></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Order date</div>
+             <div style="margin-top:2px">01 Aug 2026</div></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Specs agreed by
+             <span class="tip">?<span class="t">The gate before drawings can be issued, and the date Overdue is measured against.</span></span></div>
+             <div style="margin-top:2px;font-weight:600">14 Oct 2026 <span class="chip amber" style="margin-left:3px">26 days</span></div></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Delivery</div>
+             <div style="margin-top:2px">12 Feb 2027</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 2. THE NUMBERS, PRESSABLE ========== -->
+  <div class="stats" style="margin-top:16px">
+    <a class="stat click" href="#" style="text-decoration:none;color:inherit"><div class="k">Line items</div><div class="v">45</div>
+      <div class="m">3 runs · 6 configurations</div><div class="act">see all 45 →</div></a>
+    <a class="stat click red" href="#" style="text-decoration:none;color:inherit"><div class="k">Needed to quote</div><div class="v">312</div>
+      <div class="m">across 38 items</div><div class="act">filter to these →</div></a>
+    <a class="stat click amber" href="#" style="text-decoration:none;color:inherit"><div class="k">Also outstanding</div><div class="v">1,587</div>
+      <div class="m">1,209 unlooked · 378 TBC</div><div class="act">filter to these →</div></a>
+    <a class="stat click green" href="#" style="text-decoration:none;color:inherit"><div class="k">Settled</div><div class="v">641</div>
+      <div class="m">confirmed or N/A</div><div class="act">filter to these →</div></a>
+    <a class="stat click blue" href="#" style="text-decoration:none;color:inherit"><div class="k">Finishes</div><div class="v">11</div>
+      <div class="m">4 codes not in the library</div><div class="act">open the library →</div></a>
+  </div>
+  <p class="muted" style="margin-top:7px">Pressing a tile opens the spec table already filtered to it.</p>
+
+  <div class="card">
+    <h2>Specifications
+      <span class="tip" style="margin-left:0">?<span class="t">Counted over what the export ships: active records on live runs, a split bill line counted through its configurations.</span></span>
+      <span class="sp"></span><a class="lk" href="#" style="font-size:12px">Spec table</a></h2>
+    <div class="body flush">
+      <table>
+        <tbody>
+          <tr>
+            <td style="width:26%"><a class="lk" href="#" style="font-weight:600">Needed to quote</a></td>
+            <td class="num" style="width:10%;font-weight:650;font-size:15px;color:var(--red)"><a href="#" style="color:inherit;text-decoration:none">312</a></td>
+            <td>Blocks a quotation at each item&rsquo;s level.</td>
+            <td style="width:24%;text-align:right"><a class="btn sm" href="#">Chase them</a> <a class="btn quiet sm" href="#">By contact</a></td>
+          </tr>
+          <tr>
+            <td><a class="lk" href="#" style="font-weight:600">No category</a></td>
+            <td class="num" style="font-weight:650;font-size:15px;color:var(--amber)"><a href="#" style="color:inherit;text-decoration:none">6</a></td>
+            <td>No questions at all, so they score zero outstanding.</td>
+            <td style="text-align:right"><a class="btn sm" href="#">Set the 6</a></td>
+          </tr>
+          <tr>
+            <td><a class="lk" href="#" style="font-weight:600">No level</a></td>
+            <td class="num" style="font-weight:650;font-size:15px;color:var(--amber)"><a href="#" style="color:inherit;text-decoration:none">9</a></td>
+            <td>Missing from the 312 above. 7 have a suggestion.</td>
+            <td style="text-align:right"><button class="btn suggest sm">Accept 7</button> <a class="btn quiet sm" href="#">Review</a></td>
+          </tr>
+          <tr>
+            <td><a class="lk" href="#" style="font-weight:600">Unresolved finish codes</a></td>
+            <td class="num" style="font-weight:650;font-size:15px;color:var(--amber)"><a href="#" style="color:inherit;text-decoration:none">4</a></td>
+            <td><a class="lk mono" href="#">CH-01.1</a> · <a class="lk mono" href="#">CLO003 A</a> · <a class="lk mono" href="#">UPH-07</a> · <a class="lk mono" href="#">WD-05</a></td>
+            <td style="text-align:right"><a class="btn sm" href="#">Bring them in</a></td>
+          </tr>
+          <tr>
+            <td><a class="lk" href="#" style="font-weight:600">Documents that failed to read</a></td>
+            <td class="num" style="font-weight:650;font-size:15px;color:var(--red)"><a href="#" style="color:inherit;text-decoration:none">1</a></td>
+            <td>The queue refused them. Everything else read itself on arrival.</td>
+            <td style="text-align:right"><a class="btn sm" href="#">Try again</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== 3. SOURCE DOCUMENTS, PACK → DOCUMENTS ========== -->
+  <div class="card">
+    <h2>Source documents
+      <span class="tip" style="margin-left:0">?<span class="t">Each file&rsquo;s kind is declared on upload — a BOQ and a schedule are both spreadsheets and the bytes cannot say which is which.</span></span>
+      <span class="sp"></span><button class="btn sm">Add documents</button></h2>
+    <div class="body flush">
+
+      <div style="padding:10px 16px;border-bottom:1px solid var(--line);background:#fcfcfc;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <b style="font-size:13px">11 documents</b>
+        <span class="muted">delivered 15 Sept · <span style="color:var(--blue)">1 still being read</span> · 9 ready to review</span>
+        <span class="sp" style="flex:1"></span>
+        <a class="btn primary sm" href="#">Review all 9 drawings together</a>
+        <a class="btn sm" href="#">Open the pack</a>
+      </div>
+      <table>
+        <tbody>
+          <tr><td style="width:46%"><a class="lk" href="#">AP364 - Apx 1a - SHOP DRAWINGS - SEATING.pdf</a><div class="muted">Shop drawings · 15 Sept, 09:12 · max.degroot</div></td>
+              <td style="width:16%"><span class="chip green">Review complete</span></td>
+              <td class="muted" style="width:22%">6 items · 240 specs applied</td>
+              <td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+          <tr><td><a class="lk" href="#">AP364 - Apx 2 - BOQ SEATING.xlsx</a><div class="muted">Bill of quantities · 15 Sept, 09:10 · max.degroot</div></td>
+              <td><span class="chip green">Review complete</span></td>
+              <td class="muted">3 runs · 45 records</td>
+              <td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+          <tr><td><a class="lk" href="#">SPEC-346 S-301 DESK CHAIR.pdf</a><div class="muted">Shop drawings · 15 Sept, 09:12 · max.degroot</div></td>
+              <td><span class="chip amber">12 to review</span></td>
+              <td class="muted">4 items staged</td>
+              <td style="text-align:right"><a class="btn sm" href="#">Review</a></td></tr>
+          <tr><td><a class="lk" href="#">SPEC-346 UP-101 HEADBOARD.pdf</a><div class="muted">Shop drawings · 15 Sept, 09:13 · max.degroot</div></td>
+              <td><span class="chip blue"><span class="dot"></span>Reading…</span></td>
+              <td class="muted">started 40s ago · nothing to do</td>
+              <td style="text-align:right"><span class="muted" style="font-size:11.5px">it will appear here</span></td></tr>
+          <tr><td><a class="lk" href="#">SPEC-346 S-203 ARMCHAIR.pdf</a><div class="muted">Shop drawings · 15 Sept, 09:13 · max.degroot</div></td>
+              <td><span class="chip red">Read failed</span></td>
+              <td class="muted">the queue refused it — rate limited</td>
+              <td style="text-align:right"><button class="btn sm">Try again</button></td></tr>
+        </tbody>
+      </table>
+      <div style="padding:8px 16px;border-bottom:1px solid var(--line)"><a class="lk" href="#" style="font-size:12px">7 more in this pack</a></div>
+
+      <div style="padding:10px 16px;border-bottom:1px solid var(--line);background:#fcfcfc;display:flex;align-items:center;gap:10px">
+        <b style="font-size:13px">1 document</b><span class="muted">delivered 17 Sept</span>
+        <span class="sp" style="flex:1"></span><a class="btn sm" href="#">Open the pack</a>
+      </div>
+      <table><tbody>
+        <tr><td style="width:46%"><a class="lk" href="#">Claire Beaumont — S-301 castors and timber.eml</a><div class="muted">Email · 17 Sept, 11:02</div></td>
+            <td style="width:16%"><span class="chip green">Review complete</span></td>
+            <td class="muted" style="width:22%">7 specs applied</td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+      </tbody></table>
+    </div>
+  </div>
+
+  <!-- ========== 4. CONTACTS ========== -->
+  <div class="card">
+    <h2>Contacts
+      <span class="tip" style="margin-left:0">?<span class="t">The designer code matches the BOQ&rsquo;s own wording, and is what ties a record&rsquo;s questions to a person.</span></span>
+      <span class="sp"></span><a class="lk" href="#" style="font-size:12px">Chase what is missing</a> <button class="btn sm">Add</button></h2>
+    <div class="body flush">
+      <table>
+        <thead><tr><th style="width:24%">Name</th><th style="width:26%">Email</th><th style="width:12%">Designer code</th><th style="width:18%">Capsule</th><th class="num">Owes us</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>Hayley Ross<div class="muted">PDS</div></td><td><a class="lk" href="#">hayley.ross@example.com</a></td>
+              <td><span class="chip mono">PDS</span></td><td><a class="lk" href="#">linked</a></td>
+              <td class="num"><a href="#" style="color:var(--red);font-weight:650;text-decoration:none">184</a><div class="muted">to quote</div></td>
+              <td style="text-align:right"><a class="btn sm" href="#">Draft a chase</a></td></tr>
+          <tr><td>Claire Beaumont</td><td><a class="lk" href="#">claire.beaumont@example.com</a></td>
+              <td><span class="chip mono">CB</span></td><td><span class="chip amber">not in Capsule</span></td>
+              <td class="num"><a href="#" style="color:var(--red);font-weight:650;text-decoration:none">128</a><div class="muted">to quote</div></td>
+              <td style="text-align:right"><a class="btn sm" href="#">Draft a chase</a></td></tr>
+          <tr><td colspan="6" style="background:#fcfcfc"><span class="chip blue">suggestion</span>
+              The BOQ uses the designer code <span class="mono">JGD</span> on 11 items and nobody here carries it.
+              <button class="btn suggest sm" style="margin-left:6px">Add a contact for JGD</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== 5. HISTORY, WITH VERSIONS MADE OBVIOUS ========== -->
+  <div class="card">
+    <h2>History <span class="sp"></span>
+      <button class="btn sm">Name this point</button><button class="btn sm">Compare two points</button>
+      <a class="lk" href="#" style="font-size:12px">All 71</a></h2>
+    <div class="body flush">
+      <div class="tl">
+        <div class="verbar"><span class="n">Baseline</span><span class="ttl">Rev B issued to Maybourne</span>
+          <span class="mt">17 Sept, 16:00 · max.degroot · 45 items fixed at this point</span>
+          <a class="btn sm" href="#" style="margin-left:10px">Compare to now</a></div>
+
+        <div class="chg"><span class="chip">Edited by hand</span>
+          <div><a class="lk" href="#">AP364c-021 · Sofa</a> — Width 760 → 790<div class="muted">“Rev B drawing, 14 Sept”</div></div>
+          <div class="when">17 Sept, 18:34<br>max.degroot</div></div>
+        <div class="chg"><span class="chip">Spec added by hand</span>
+          <div><a class="lk" href="#">AP364c-021 · Sofa</a> — Width 760</div>
+          <div class="when">17 Sept, 18:16<br>max.degroot</div></div>
+
+        <div class="datebar"><span class="n">Key date</span>
+          <span style="font-weight:650;font-size:13px;color:#4c1d95">Complete specifications agreed by — 14 Oct 2026</span>
+          <span class="mt" style="color:#6d28d9">26 days away · 312 still needed to quote</span></div>
+
+        <div class="chg"><span class="chip blue">Email confirmed</span>
+          <div>Claire Beaumont, 15 Sept — “S-301 desk chair, castors and timber”
+            <div class="muted">7 specs across 3 runs · <a class="lk" href="#">open the .eml</a></div></div>
+          <div class="when">17 Sept, 11:02<br>max.degroot</div></div>
+
+        <div class="verbar"><span class="n">Baseline</span><span class="ttl">Rev A — what we quoted</span>
+          <span class="mt">14 Sept, 10:20 · max.degroot · 43 items fixed at this point</span>
+          <a class="btn sm" href="#" style="margin-left:10px">Compare to now</a></div>
+
+        <div class="chg"><span class="chip">Drawings confirmed</span>
+          <div><a class="lk" href="#">Apx 1a — SHOP DRAWINGS</a><div class="muted">6 items · 240 specs · 3 runs</div></div>
+          <div class="when">14 Sept, 09:40<br>max.degroot</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>From the preamble <span class="sp"></span><span class="chip amber">3 flagged</span>
+      <button class="btn sm">Expand all</button></h2>
+    <div class="body"><p class="muted" style="margin:0">17 notes from <a class="lk" href="#">Apx 1b — FF&amp;E preamble</a>. Reference material; collapsed by default.</p></div>
+  </div>
+
+  <div class="ann">
+    <b>What changed since the last one</b>
+    <ul>
+      <li><b>Project details are first</b>, in four columns, read-only until you press Edit. The explanatory paragraphs are gone — where a field genuinely needs a caveat (drawing units, specs-agreed-by, shared inbox) it is a <span class="tip">?<span class="t">Like this. Hover it.</span></span> you hover.</li>
+      <li><b>Contacts and Source documents are back.</b> Documents keep the pack → files shape, with the pack header carrying “Review all 9 drawings together” and each file its own state and action. Contacts gained an <i>owes us</i> column, because the reason you open Contacts is to chase somebody.</li>
+      <li><b>Everything actionable is a link, and there are several routes to each place.</b> The tiles filter the spec table. Every count in the table is a link to the same place as the button beside it. Item codes, finish codes, filenames, dates and contact names all go somewhere. Runs, Finishes, Documents and History are now tabs as well as cards.</li>
+      <li><b>Documents read themselves.</b> Registration already dispatches the read in the background, so a file is <i>Reading…</i> and then ready — there is no "read it" button on the resting path. A manual retry appears only where the queue actually refused one, and that case is counted in the table above.</li>
+      <li><b>A version is a green bar across the whole trail</b>, with what it fixed and a Compare button; an ordinary change is a plain row. <b>Key dates sit in the trail too</b>, in violet, so the programme reads against the work rather than only in a field at the top.</li>
+    </ul>
+  </div>
+</div>
+</section>
+<section id="spec-table" class="screen" hidden><div class="screen-label"><b>Spec table</b> — One run's line items</div><style>
+.st td,.st th{padding:8px 10px;font-size:12.5px}
+.st .g{font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid;font-weight:600}
+.g-ok{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
+.g-no{color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
+.g-na{color:var(--ink-4);background:#fafafa;border-color:var(--line)}
+.bar{height:5px;border-radius:3px;background:#f0f0ef;overflow:hidden;display:flex;min-width:60px}
+.bar i{display:block;height:100%}
+</style>
+<div class="topbar"><span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav><span class="sp"></span>
+  <a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a></div>
+<div class="phead"><div class="row">
+  <div><a class="crumb" href="#">← Projects</a><h1>AP364c — pantherc <span class="pill active" style="vertical-align:middle;margin-left:6px">ACTIVE</span></h1>
+    <p class="sub">MAIN RUN · BOQ rev 0, 14-Sep-26 · 22 items · specs due <a class="lk" href="#">14 Oct</a></p></div>
+  <div class="acts"><button class="btn">Start a change</button><a class="btn" href="#">Chase 148</a><a class="btn primary" href="#">Export this run</a></div>
+</div><div class="tabs">
+  <a class="tab" href="#">Overview</a><a class="tab" href="#">MUR <span class="n">8</span></a>
+  <a class="tab on" href="#">MAIN RUN <span class="n">22</span></a><a class="tab" href="#">MAIN RUN - VE <span class="n">22</span></a>
+  <a class="tab" href="#">Finishes <span class="n">11</span></a><a class="tab" href="#">Documents <span class="n">12</span></a>
+  <a class="tab" href="#">History <span class="n">71</span></a>
+</div></div>
+<div class="wrap" style="max-width:1400px">
+  <div class="stats" style="grid-template-columns:repeat(5,1fr)">
+    <a class="stat click red on" href="#" style="text-decoration:none;color:inherit"><div class="k">Needed to quote</div><div class="v">148</div><div class="m">18 of 22 items</div><div class="act">showing these →</div></a>
+    <a class="stat click amber" href="#" style="text-decoration:none;color:inherit"><div class="k">Waiting on a reply</div><div class="v">31</div><div class="m">chased, nothing back</div><div class="act">filter →</div></a>
+    <a class="stat click amber" href="#" style="text-decoration:none;color:inherit"><div class="k">No category</div><div class="v">3</div><div class="m">no questions at all</div><div class="act">filter →</div></a>
+    <a class="stat click amber" href="#" style="text-decoration:none;color:inherit"><div class="k">No level</div><div class="v">5</div><div class="m">4 have a suggestion</div><div class="act">accept them →</div></a>
+    <a class="stat click green" href="#" style="text-decoration:none;color:inherit"><div class="k">Ready to quote</div><div class="v">4</div><div class="m">TGQ satisfied</div><div class="act">filter →</div></a>
+  </div>
+
+  <div class="note blue" style="display:flex;align-items:center;gap:10px">
+    <span><b>4 items have a suggested level</b> — 2 simple, 1 complex, 1 hero — read off the bill&rsquo;s own wording. Nothing on them is tiered until you agree.</span>
+    <span class="sp" style="flex:1"></span><button class="btn suggest sm">Accept all 4</button><button class="btn quiet sm">Review one by one</button>
+  </div>
+
+  <div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
+    <input class="fake" style="width:250px" placeholder="Search a code, an item, an area">
+    <select class="fake"><option>All categories</option></select>
+    <select class="fake"><option>All designers</option></select>
+    <span class="chip red" style="padding:5px 10px">Needed to quote ✕</span>
+    <span class="sp" style="flex:1"></span><span class="muted">18 of 22 shown</span>
+    <button class="btn quiet sm">Columns</button>
+  </div>
+
+  <div class="card" style="margin-top:12px"><div class="body flush" style="overflow-x:auto">
+    <table class="st">
+      <thead><tr>
+        <th>No.</th><th>Client ref</th><th>Item</th><th>Area</th><th class="num">Qty</th>
+        <th>Category</th><th>Level</th><th style="width:120px">Captured</th>
+        <th class="num">To quote</th><th class="num">Waiting</th><th>TG0</th><th>TG1</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><a class="lk mono" href="#">-014</a></td><td class="mono">S-100</td>
+            <td><a class="lk" href="#">Sofa</a></td><td>Rooms</td><td class="num">14</td>
+            <td><a class="lk" href="#">Sofas</a></td><td><span class="chip">hero</span></td>
+            <td><div class="bar"><i style="width:14%;background:var(--green)"></i><i style="width:16%;background:#fbbf24"></i></div>
+                <span class="muted" style="font-size:11px">6 of 43</span></td>
+            <td class="num"><a href="#" style="color:var(--red);font-weight:650;text-decoration:none">9</a></td>
+            <td class="num muted">3</td>
+            <td><span class="g g-ok">met</span></td><td><span class="g g-no">12</span></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+
+        <tr><td><a class="lk mono" href="#">-015</a></td><td class="mono">S-201</td>
+            <td><a class="lk" href="#">Armchair</a><div class="muted">2 configurations</div></td><td>Rooms</td><td class="num">45</td>
+            <td><a class="lk" href="#">Sofas</a></td><td><span class="chip">simple</span></td>
+            <td class="muted" style="font-size:11px">counted through its configurations</td>
+            <td class="num muted">—</td><td class="num muted">—</td><td></td><td></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+        <tr style="background:#fcfcfc"><td style="padding-left:26px"><a class="lk mono" href="#">-061</a></td>
+            <td class="mono muted">S-201 <b style="color:var(--sky)">A</b></td>
+            <td style="padding-left:14px"><a class="lk" href="#">Armchair (A)</a></td><td>Rooms</td>
+            <td class="num"><span class="chip amber">qty not set</span></td>
+            <td><a class="lk" href="#">Sofas</a></td><td><span class="chip">simple</span></td>
+            <td><div class="bar"><i style="width:9%;background:var(--green)"></i></div><span class="muted" style="font-size:11px">4 of 43</span></td>
+            <td class="num"><a href="#" style="color:var(--red);font-weight:650;text-decoration:none">11</a></td>
+            <td class="num muted">0</td><td><span class="g g-no">3</span></td><td><span class="g g-no">14</span></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+        <tr style="background:#fcfcfc"><td style="padding-left:26px"><a class="lk mono" href="#">-062</a></td>
+            <td class="mono muted">S-201 <b style="color:#7c3aed">B</b></td>
+            <td style="padding-left:14px"><a class="lk" href="#">Armchair (B)</a></td><td>Rooms</td>
+            <td class="num"><span class="chip amber">qty not set</span></td>
+            <td><a class="lk" href="#">Sofas</a></td><td><span class="chip">simple</span></td>
+            <td><div class="bar"><i style="width:9%;background:var(--green)"></i></div><span class="muted" style="font-size:11px">4 of 43</span></td>
+            <td class="num"><a href="#" style="color:var(--red);font-weight:650;text-decoration:none">11</a></td>
+            <td class="num muted">0</td><td><span class="g g-no">3</span></td><td><span class="g g-no">14</span></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+
+        <tr><td><a class="lk mono" href="#">-017</a></td><td class="mono">UP-101</td>
+            <td><a class="lk" href="#">Headboard</a></td><td>Suites</td><td class="num">32</td>
+            <td><span class="chip amber">not set</span></td><td><span class="chip amber">not set</span></td>
+            <td class="muted" style="font-size:11px">no questions yet</td>
+            <td class="num muted">—</td><td class="num muted">—</td><td></td><td></td>
+            <td style="text-align:right"><a class="btn sm" href="#">Set category</a></td></tr>
+
+        <tr><td><a class="lk mono" href="#">-018</a></td><td class="mono">S-402</td>
+            <td><a class="lk" href="#">Bench</a></td><td>Lobby</td><td class="num">6</td>
+            <td><a class="lk" href="#">Sofas</a></td>
+            <td><button class="btn suggest sm">complex?</button><div class="muted" style="font-size:10.5px;margin-top:2px">the bill says “brass frame”</div></td>
+            <td><div class="bar"><i style="width:12%;background:var(--green)"></i></div><span class="muted" style="font-size:11px">5 of 39</span></td>
+            <td class="num muted">— <span class="tip">?<span class="t">A level is what decides which questions block a quote. Until one is set, nothing on this record is tiered.</span></span></td>
+            <td class="num muted">0</td><td><span class="g g-no">6</span></td><td><span class="g g-no">17</span></td>
+            <td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+      </tbody>
+    </table>
+  </div></div>
+  <div class="ann"><b>Notes</b><ul>
+    <li><b>Twelve columns instead of thirteen, and the spend columns first.</b> Spec fields / Readiness split out into one <i>Captured</i> bar with the real number beside it — two raw fractions side by side told you less than one picture does.</li>
+    <li><b>A configuration is indented under its bill line</b>, with the letter coloured the way the review card colours it, and the bill line says its counts live in its children rather than showing zeros.</li>
+    <li><b>The level picker is inline where a suggestion exists</b> — one click, with the evidence under it — and the run-wide "accept all 4" is in a banner above. 22 items must not mean 22 visits.</li>
+    <li><b>A dash is never a zero.</b> An item with no level shows "—" for to-quote with a hover saying why, because 0 would read as ready.</li>
+  </ul></div>
+</div>
+</section>
+<section id="record-screen" class="screen" hidden><div class="screen-label"><b>Record · Specs</b> — What the documents said about one item</div><style>
+.two{display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start}
+.pic{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;position:sticky;top:16px}
+.pic .frame{background:#fafafa;border:1px solid var(--line);border-radius:6px;height:150px;display:flex;align-items:center;justify-content:center}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:5px 12px;font-size:13px}
+.kv dt{color:var(--ink-3);font-size:12px}
+.kv dd{margin:0}
+@media(max-width:820px){.two{grid-template-columns:1fr}.pic{position:static}}
+</style>
+<div class="topbar">
+  <span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav>
+  <span class="sp"></span><a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a>
+</div>
+
+<div class="phead">
+  <div class="row">
+    <div>
+      <a class="crumb" href="#">← AP364c · MAIN RUN - VE</a>
+      <h1>AP364c-021 · Sofa</h1>
+      <p class="sub"><span class="mono">S-100</span> · MAIN RUN - VE · Rooms · qty 14 · BOQ row 7 ·
+         <span class="chip">level: hero</span> <span class="chip green">category: Armchairs / benches / stools / sofas</span></p>
+    </div>
+    <div class="acts"><button class="btn">Add a spec by hand</button><button class="btn">History</button></div>
+  </div>
+  <div class="tabs">
+    <a class="tab on" href="#">Specs captured <span class="n">10</span></a>
+    <a class="tab" href="#">Checklist <span class="n">6 / 43</span></a>
+    <a class="tab" href="#">Gates</a>
+    <a class="tab" href="#">Versions <span class="n">4</span></a>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="two" style="margin-top:16px">
+    <div>
+
+      <div class="card" style="margin-top:0">
+        <h2>Dimensions, as BWS will receive them</h2>
+        <div class="body">
+          <p class="mono" style="font-size:16px;margin:0;letter-spacing:.01em">W1900 x D790 x H720 x SH440mm</p>
+          <p class="muted" style="margin:6px 0 0">Composed from 4 measured rows off <span class="mono">Apx 1a</span> p1, converted from centimetres printed on the page.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Specs captured <span class="sp"></span><span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">10 rows · 1 page</span></h2>
+        <div class="body flush">
+          <table>
+            <thead><tr><th style="width:26%">Label</th><th style="width:26%">Value</th><th style="width:24%">BWS field</th><th style="width:16%">Source</th><th></th></tr></thead>
+            <tbody>
+              <tr class="grp"><td colspan="5">Dimensions <span style="font-weight:400;text-transform:none;letter-spacing:0">— the four that compose the cell above</span></td></tr>
+              <tr><td>Width</td><td class="mono">190 cm</td><td class="muted">3 · Dimensions (W)</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+              <tr><td>Depth</td><td class="mono">79 cm</td><td class="muted">3 · Dimensions (D)</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+              <tr><td>Height</td><td class="mono">72 cm</td><td class="muted">3 · Dimensions (H)</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+              <tr><td>Seat height</td><td class="mono">44 cm</td><td class="muted">3 · Dimensions (SH)</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+              <tr class="grp"><td colspan="5">Materials and finishes</td></tr>
+              <tr><td>SOFA FEET</td><td>Dark tinted wood <span class="chip" style="margin-left:4px"><span class="mono">WD-01</span></span></td><td class="muted">Main timber finish</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+              <tr><td>SOFA <span class="chip blue" style="margin-left:4px">read as upholstery</span></td><td>Yarn Tessarae YC04158 - 01</td><td class="muted">COM 1</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+              <tr class="grp"><td colspan="5">Notes <span style="font-weight:400;text-transform:none;letter-spacing:0">— kept with their own label, never folded into a slot</span></td></tr>
+              <tr><td>Dimension 5</td><td class="mono">52 cm</td><td class="muted">—</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+              <tr><td>Dimension 7</td><td class="mono">10 cm</td><td class="muted">—</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+              <tr><td>Notes</td>
+                  <td>Room note: SOFA MUR 1 &amp; TYPO 5<br>Title block: Hotel Panter 75001 Paris, phase APS, 10/07/2026, scale 1/100, format A3
+                      <div style="margin-top:4px"><button class="btn quiet sm">As printed</button></div></td>
+                  <td class="muted">—</td><td><a href="#" class="muted">Apx 1a p1</a></td><td style="text-align:right"><button class="btn quiet sm">Retire</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>This item <span class="sp"></span><button class="btn sm">Edit</button></h2>
+        <div class="body">
+          <dl class="kv">
+            <dt>Description</dt><dd>Sofa</dd>
+            <dt>Area or room</dt><dd>Rooms</dd>
+            <dt>Quantity</dt><dd>14</dd>
+            <dt>Designer</dt><dd>PDS <span class="muted">— Hayley Ross</span></dd>
+            <dt>For the quote</dt><dd>Curved sofa with fixed back and seat. Recessed timber plinth.</dd>
+            <dt>Internal notes</dt><dd class="muted">none — never leaves this app</dd>
+          </dl>
+        </div>
+      </div>
+
+    </div>
+
+    <div>
+      <div class="pic">
+        <div class="frame"><span class="muted" style="font-size:11px">[ item crop ]</span></div>
+        <p class="muted" style="margin:7px 0 0;text-align:center;font-size:11.5px">From <span class="mono">Apx 1a</span> p1</p>
+        <div style="display:flex;gap:6px;margin-top:7px"><button class="btn quiet sm" style="flex:1">Change crop</button></div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <h2 style="padding:10px 13px">Quote readiness</h2>
+        <div class="body" style="padding:13px">
+          <div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:24px;font-weight:650;color:var(--red)">9</span><span class="muted">needed to quote</span></div>
+          <div style="display:flex;align-items:baseline;gap:7px;margin-top:5px"><span style="font-size:17px;font-weight:600;color:var(--amber)">28</span><span class="muted">also outstanding</span></div>
+          <div style="display:flex;align-items:baseline;gap:7px;margin-top:5px"><span style="font-size:17px;font-weight:600;color:var(--green)">6</span><span class="muted">settled</span></div>
+          <a class="btn sm" href="#" style="margin-top:11px;width:100%;justify-content:center">Chase the 9</a>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <h2 style="padding:10px 13px">Configurations</h2>
+        <div class="body" style="padding:13px;font-size:12.5px">
+          <p class="muted" style="margin:0">This bill line is not split. Its 14 are one item.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ann">
+    <b>What changed, and why</b>
+    <ul>
+      <li><b>The picture is a real column, not a float.</b> Today it is a <code>float-right</code> div sitting between the configurations panel and the details form (<code>records/[id]/page.tsx:489</code>), so it floats over whatever renders next and lands clipped on top of the “This item” card. It becomes a sticky sidebar that stays beside you as the spec table scrolls — which is what you want anyway, since recognising the item is the reason it is there.</li>
+      <li><b>Specs come before the form.</b> The form is filled in once; the specs are what you came to read. The description, room, quantity and designer read as a summary until you press Edit.</li>
+      <li><b>One table, grouped, with the source in its own column.</b> Group headings carry their rule in a half-sentence, so “why is Dimension 5 a note?” is answered on the page.</li>
+      <li><b>Quote readiness has a number on this screen.</b> There is nowhere today that tells you what this one item is short of before it can be priced.</li>
+    </ul>
+  </div>
+</div>
+</section>
+<section id="record-checklist" class="screen" hidden><div class="screen-label"><b>Record · Checklist</b> — The cheat sheet as questions</div><div class="topbar">
+  <span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav>
+  <span class="sp"></span><a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a>
+</div>
+<div class="phead">
+  <div class="row">
+    <div>
+      <a class="crumb" href="#">← AP364c · MAIN RUN - VE</a>
+      <h1>AP364c-021 · Sofa</h1>
+      <p class="sub"><a class="lk mono" href="#">S-100</a> · <a class="lk" href="#">MAIN RUN - VE</a> · Rooms · qty 14 · BOQ row 7 ·
+        <a class="lk" href="#">Armchairs / benches / stools / sofas</a> · <span class="chip">hero</span> ·
+        designer <a class="lk" href="#">PDS — Hayley Ross</a></p>
+    </div>
+    <div class="acts"><button class="btn">Add a spec by hand</button><a class="btn" href="#">Chase the 9</a></div>
+  </div>
+  <div class="tabs">
+    <a class="tab" href="#">Specs captured <span class="n">10</span></a>
+    <a class="tab on" href="#">Checklist <span class="n">43</span></a>
+    <a class="tab" href="#">Gates <span class="n">2 of 3</span></a>
+    <a class="tab" href="#">Versions <span class="n">4</span></a>
+  </div>
+</div>
+<div class="wrap">
+  <div class="stats" style="grid-template-columns:repeat(4,1fr)">
+    <a class="stat click red on" href="#" style="text-decoration:none;color:inherit"><div class="k">Needed to quote</div><div class="v">9</div>
+      <div class="m">blocks a price going out</div><div class="act">showing these →</div></a>
+    <a class="stat click amber" href="#" style="text-decoration:none;color:inherit"><div class="k">Also outstanding</div><div class="v">28</div>
+      <div class="m">21 unlooked · 7 TBC</div><div class="act">show these →</div></a>
+    <a class="stat click green" href="#" style="text-decoration:none;color:inherit"><div class="k">Settled</div><div class="v">6</div>
+      <div class="m">confirmed against a document</div><div class="act">show these →</div></a>
+    <a class="stat click" href="#" style="text-decoration:none;color:inherit"><div class="k">Not applicable</div><div class="v">0</div>
+      <div class="m">no question ruled out yet</div><div class="act">show these →</div></a>
+  </div>
+
+  <div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
+    <input class="fake" style="width:250px" placeholder="Search the questions">
+    <span class="chip red" style="padding:5px 10px">Needed to quote ✕</span>
+    <span class="sp" style="flex:1"></span>
+    <span class="muted">showing 9 of 43</span>
+    <a class="lk" href="#" style="font-size:12.5px">show all 43</a>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <h2>Dimensions and construction <span class="sp"></span><span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">3 of 9 here</span></h2>
+    <div class="body flush">
+      <div class="q" style="background:#fcfcfc;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)">
+        <div>Question</div><div>Answer</div><div style="text-align:center">State</div><div style="text-align:right">Source</div></div>
+
+      <div class="q">
+        <div class="qp"><span class="tierdot t-quote" title="needed to quote"></span>
+          <span>Dimensions <span class="tip">?<span class="t">BWS field 3. All five slots — W, D, H, SH, Dia — compose into this one cell.</span></span></span></div>
+        <div class="mono" style="font-size:12.5px">W1900 x D790 x H720 x SH440mm</div>
+        <div style="text-align:center"><span class="state s-conf">Confirmed</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">Apx 1a p1</a></div>
+      </div>
+
+      <div class="q">
+        <div class="qp"><span class="tierdot t-quote"></span><span>Seat upholstery build</span></div>
+        <div><select class="fake" style="width:100%"><option>— choose —</option><option>Loose cushion</option><option>Fixed seat</option><option>Other…</option></select>
+             <div class="muted" style="font-size:11px;margin-top:3px">From the BWS palette — <a class="lk" href="#">this app does not hold it</a></div></div>
+        <div style="text-align:center"><span class="state s-miss">Missing</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">Ask Hayley</a></div>
+      </div>
+
+      <div class="q">
+        <div class="qp"><span class="tierdot t-quote"></span><span>Stitching spec</span></div>
+        <div><input class="fake" style="width:100%" placeholder="Value"></div>
+        <div style="text-align:center"><span class="state s-tbc">TBC</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">chased 15 Sept</a></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Materials and fabrics <span class="sp"></span><span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">4 of 9 here</span></h2>
+    <div class="body flush">
+      <div class="q">
+        <div class="qp"><span class="tierdot t-quote"></span><span>COM 1</span></div>
+        <div>Yarn Tessarae YC04158 - 01 <a class="lk mono" href="#" style="font-size:11.5px">UPH-07</a>
+             <div class="muted" style="font-size:11px;margin-top:2px">Main &amp; self pipe</div></div>
+        <div style="text-align:center"><span class="state s-tbc">TBC</span>
+             <div class="muted" style="font-size:10.5px;margin-top:3px">the finish is TBC</div></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">Apx 1a p1</a></div>
+      </div>
+      <div class="q">
+        <div class="qp"><span class="tierdot t-quote"></span><span>Main timber finish</span></div>
+        <div>Dark tinted wood <a class="lk mono" href="#" style="font-size:11.5px">WD-01</a></div>
+        <div style="text-align:center"><span class="state s-conf">Confirmed</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">Apx 1a p1</a></div>
+      </div>
+      <div class="q">
+        <div class="qp"><span class="tierdot t-quote"></span><span>COM 2</span></div>
+        <div><input class="fake" style="width:100%" placeholder="Value"></div>
+        <div style="text-align:center"><span class="state s-miss">Missing</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">Ask Hayley</a></div>
+      </div>
+      <div class="q">
+        <div class="qp"><span class="tierdot t-quote"></span><span>Metal finish 1</span></div>
+        <div><input class="fake" style="width:100%" placeholder="Value">
+             <div class="muted" style="font-size:11px;margin-top:3px">From the BWS metal palette — <a class="lk" href="#">not held here</a></div></div>
+        <div style="text-align:center"><span class="state s-miss">Missing</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">Ask Hayley</a></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Commercial <span class="sp"></span><span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">2 of 9 here</span></h2>
+    <div class="body flush">
+      <div class="q"><div class="qp"><span class="tierdot t-quote"></span><span>Lead time agreed</span></div>
+        <div><input class="fake" style="width:100%" placeholder="Value"></div>
+        <div style="text-align:center"><span class="state s-miss">Missing</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">Ask Hayley</a></div></div>
+      <div class="q"><div class="qp"><span class="tierdot t-quote"></span><span>Assembly guide required</span></div>
+        <div><select class="fake" style="width:100%"><option>— choose —</option><option>Yes</option><option>No</option></select>
+             <div class="muted" style="font-size:11px;margin-top:3px">Matthew&rsquo;s sheet says No by default — <span class="tip">?<span class="t">A default preselects nothing and writes no answer. A gate passed by a default is a gate passed by nobody.</span></span></div></div>
+        <div style="text-align:center"><span class="state s-miss">Missing</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:11.5px">TG1 too</a></div></div>
+    </div>
+  </div>
+
+  <div class="ann"><b>Notes on this one</b>
+    <ul>
+      <li><b>Filtered to the 9 that block a quote by default</b>, because 43 rows with no sense of which matter when is what made the checklist unusable. The tile you are on is outlined; the filter chip says so in words and can be removed.</li>
+      <li><b>Every state is one of four and they never look alike</b> — Missing is “nobody has looked”, TBC is “a person said not yet”. A red dot on the left marks a to-quote question so the tier survives when you widen the filter.</li>
+      <li><b>The right column is the next action, not just provenance.</b> A settled answer links to the page it came from; an unanswered one links to the person who owes it, or says when it was last chased.</li>
+      <li><b>A palette this app does not hold says so in one line</b> and stays free text, rather than offering an empty dropdown.</li>
+    </ul></div>
+</div>
+</section>
+<section id="record-gates" class="screen" hidden><div class="screen-label"><b>Record · Gates</b> — TGQ, TG0, TG1</div><div class="topbar">
+  <span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav>
+  <span class="sp"></span><a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a>
+</div>
+<div class="phead">
+  <div class="row">
+    <div>
+      <a class="crumb" href="#">← AP364c · MAIN RUN - VE</a>
+      <h1>AP364c-021 · Sofa</h1>
+      <p class="sub"><a class="lk mono" href="#">S-100</a> · <a class="lk" href="#">MAIN RUN - VE</a> · Rooms · qty 14 · BOQ row 7 ·
+        <a class="lk" href="#">Armchairs / benches / stools / sofas</a> · <span class="chip">hero</span> ·
+        designer <a class="lk" href="#">PDS — Hayley Ross</a></p>
+    </div>
+    <div class="acts"><button class="btn">Add a spec by hand</button><a class="btn" href="#">Chase the 9</a></div>
+  </div>
+  <div class="tabs">
+    <a class="tab" href="#">Specs captured <span class="n">10</span></a>
+    <a class="tab" href="#">Checklist <span class="n">43</span></a>
+    <a class="tab on" href="#">Gates <span class="n">2 of 3</span></a>
+    <a class="tab" href="#">Versions <span class="n">4</span></a>
+  </div>
+</div>
+<div class="wrap">
+  <div class="gates" style="margin-top:16px">
+    <div class="gate no">
+      <div class="gh"><b>TGQ</b><span class="muted">enough to quote</span><span class="sp"></span><span class="chip red">9 outstanding</span></div>
+      <ul>
+        <li><span class="o o-block">Outstanding</span><a class="lk" href="#">Seat upholstery build</a></li>
+        <li><span class="o o-block">Outstanding</span><a class="lk" href="#">COM 2</a></li>
+        <li><span class="o o-block">Outstanding</span><a class="lk" href="#">Metal finish 1</a></li>
+        <li><span class="o o-unk">Cannot tell</span><div><a class="lk" href="#">Banquette fixing detail</a>
+            <div class="muted" style="font-size:11px">Applies only if <a class="lk" href="#">Fitted banquette</a> is Yes, and nobody has answered that.</div></div></li>
+        <li><span class="o o-una">Nowhere to record it</span><div><a class="lk" href="#">Castor specification</a>
+            <div class="muted" style="font-size:11px">The matrix wants it and this category&rsquo;s checklist cannot ask it. A seed, not a question for you.</div></div></li>
+        <li><span class="o o-ok">Settled</span>Dimensions (W) · (D) · (H) · (SH)</li>
+      </ul>
+      <div style="padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:7px">
+        <a class="btn primary sm" href="#" style="flex:1;justify-content:center">Chase the 3</a>
+        <a class="btn sm" href="#">Show all 14</a>
+      </div>
+    </div>
+
+    <div class="gate ok">
+      <div class="gh"><b>TG0</b><span class="muted">design intent</span><span class="sp"></span><span class="chip green">Settled</span></div>
+      <ul>
+        <li><span class="o o-ok">Settled</span>Dimensions — whole cell re-checked</li>
+        <li><span class="o o-ok">Settled</span>Main timber finish</li>
+        <li><span class="o o-na">N/A</span><div>Headboard fitted<div class="muted" style="font-size:11px">Not a question for this category.</div></div></li>
+      </ul>
+      <div style="padding:10px 14px;border-top:1px solid var(--line)"><a class="btn sm" href="#" style="width:100%;justify-content:center">Show all 11</a></div>
+    </div>
+
+    <div class="gate no">
+      <div class="gh"><b>TG1</b><span class="muted">production lock</span><span class="sp"></span><span class="chip red">12 outstanding</span></div>
+      <ul>
+        <li><span class="o o-block">Outstanding</span><a class="lk" href="#">Assembly guide required</a></li>
+        <li><span class="o o-block">Outstanding</span><a class="lk" href="#">Stitching spec</a></li>
+        <li><span class="o o-block">Outstanding</span><a class="lk" href="#">Leg fixing</a></li>
+        <li><span class="o o-ok">Settled</span>Dimensions</li>
+      </ul>
+      <div style="padding:10px 14px;border-top:1px solid var(--line)"><a class="btn sm" href="#" style="width:100%;justify-content:center">Show all 21</a></div>
+    </div>
+  </div>
+
+  <div class="note blue" style="margin-top:16px">
+    The same field legitimately sits at two gates — <a class="lk" href="#">Dimensions</a> is asked at TGQ as four slots and re-checked whole at TG1,
+    and <a class="lk" href="#">Assembly guide</a> is at TGQ and TG1. Answering it once satisfies both.
+  </div>
+
+  <div class="card">
+    <h2 style="cursor:pointer">▾ Why these questions <span class="sp"></span>
+      <span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">Matthew&rsquo;s matrix, 17 Sept · category <a class="lk" href="#">Sofas (S)</a> · 14 fields · collapsed by default</span></h2>
+    <div class="body flush">
+      <table>
+        <thead><tr><th style="width:26%">Field</th><th style="width:9%">BWS id</th><th style="width:14%">Gates</th><th style="width:16%">How it arrives</th><th style="width:20%">Palette</th><th>State</th></tr></thead>
+        <tbody>
+          <tr><td><a class="lk" href="#">Dimensions (W)</a></td><td class="mono muted">3</td>
+              <td><span class="chip">TGQ</span></td><td class="muted">measured</td><td class="muted">—</td>
+              <td><span class="state s-conf">Confirmed</span></td></tr>
+          <tr><td><a class="lk" href="#">Dimensions — whole cell</a></td><td class="mono muted">3</td>
+              <td><span class="chip">TG0</span> <span class="chip">TG1</span></td><td class="muted">confirm</td><td class="muted">—</td>
+              <td><span class="state s-conf">Confirmed</span></td></tr>
+          <tr><td><a class="lk" href="#">Main timber finish</a></td><td class="mono muted">44</td>
+              <td><span class="chip">TG0</span></td><td class="muted">question</td>
+              <td><span class="chip amber">BWS palette — not held here</span></td>
+              <td><span class="state s-conf">Confirmed</span></td></tr>
+          <tr><td><a class="lk" href="#">Seat upholstery build</a></td><td class="mono muted">51</td>
+              <td><span class="chip red">TGQ</span></td><td class="muted">question</td>
+              <td><span class="chip amber">BWS palette — not held here</span></td>
+              <td><span class="state s-miss">Missing</span></td></tr>
+          <tr><td><a class="lk" href="#">Environment</a></td><td class="mono muted">12</td>
+              <td><span class="chip red">TGQ</span></td><td class="muted">question</td>
+              <td>Indoor · Outdoor · Humid indoor · <span class="muted">Other…</span></td>
+              <td><span class="state s-miss">Missing</span></td></tr>
+          <tr><td>Castor specification</td><td class="mono muted">—</td>
+              <td><span class="chip">TGQ</span></td><td class="muted">question</td><td class="muted">—</td>
+              <td><span class="state" style="color:#475569;background:#f8fafc;border-color:#cbd5e1;border-style:dashed">No home</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="note amber">
+    <b>These answers are Max standing in for Matthew.</b> The category mapping and the TGQ set were settled on 17 Sept so the work could start,
+    and every one is still to be confirmed with him — <a class="lk" href="#">matrix-assumptions.md</a>. TG2 is not modelled and the cabinetry half of the matrix is not written.
+  </div>
+
+  <div class="ann"><b>Notes on this one</b>
+    <ul>
+      <li><b>Three boards, not a dropdown.</b> You can see at a glance that TG0 is settled and TGQ is not, which is the question the screen exists to answer.</li>
+      <li><b>The five outcomes keep their own colour and never fold together.</b> <span class="o o-unk">Cannot tell</span> is a conditional whose controller is unanswered — the row names the controller and links to it. <span class="o o-una">Nowhere to record it</span> is dashed slate, deliberately not red: the fix is a seed or a migration, and putting it in the red list teaches somebody to ignore red.</li>
+      <li><b>Each board's footer chases only what a person can actually answer</b> — 3, not 9.</li>
+      <li><b>The matrix is underneath, collapsed</b>, under the heading <i>Why these questions</i> — reference rather than work, but one click away, with the standing-in-for-Matthew warning attached to it rather than hidden in a doc.</li>
+    </ul></div>
+</div>
+</section>
+<section id="record-versions" class="screen" hidden><div class="screen-label"><b>Record · Versions</b> — What changed, and when</div><style>
+.dif{display:grid;grid-template-columns:200px 1fr 1fr;gap:0;font-size:12.5px}
+.dif > div{padding:7px 12px;border-bottom:1px solid #f0f0ef}
+.dif .hd{background:#fcfcfc;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.was{color:var(--ink-3);text-decoration:line-through;text-decoration-color:#fca5a5}
+.now{color:var(--ink);font-weight:500}
+.vrow{display:flex;align-items:center;gap:11px;padding:10px 16px;border-bottom:1px solid #f0f0ef;font-size:13px}
+.vn{font-family:ui-monospace,monospace;font-size:12px;font-weight:700;color:var(--ink-2);background:#f5f5f4;
+    border:1px solid var(--line);border-radius:6px;padding:3px 9px;flex:none;min-width:34px;text-align:center}
+.vrow.sel{background:#f8fafc;box-shadow:inset 3px 0 0 var(--ink)}
+.vrow .when{margin-left:auto;text-align:right;color:var(--ink-3);font-size:11.5px;white-space:nowrap}
+</style>
+<div class="topbar">
+  <span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav>
+  <span class="sp"></span><a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a>
+</div>
+<div class="phead">
+  <div class="row">
+    <div>
+      <a class="crumb" href="#">← AP364c · MAIN RUN - VE</a>
+      <h1>AP364c-021 · Sofa</h1>
+      <p class="sub"><a class="lk mono" href="#">S-100</a> · <a class="lk" href="#">MAIN RUN - VE</a> · Rooms · qty 14 · BOQ row 7 ·
+        <a class="lk" href="#">Armchairs / benches / stools / sofas</a> · <span class="chip">hero</span> ·
+        designer <a class="lk" href="#">PDS — Hayley Ross</a></p>
+    </div>
+    <div class="acts"><button class="btn">Add a spec by hand</button><a class="btn" href="#">Chase the 9</a></div>
+  </div>
+  <div class="tabs">
+    <a class="tab" href="#">Specs captured <span class="n">10</span></a>
+    <a class="tab" href="#">Checklist <span class="n">43</span></a>
+    <a class="tab" href="#">Gates <span class="n">2 of 3</span></a>
+    <a class="tab on" href="#">Versions <span class="n">4</span></a>
+  </div>
+</div>
+<div class="wrap">
+
+  <div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start;margin-top:16px">
+    <div>
+      <div class="card" style="margin-top:0">
+        <h2>What changed between v3 and v4 <span class="sp"></span>
+          <span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">2 changed · 1 added · 8 unchanged</span></h2>
+        <div class="body flush">
+          <div class="dif">
+            <div class="hd">Field</div><div class="hd">v3 — 15 Sept, 09:40</div><div class="hd">v4 — 17 Sept, 18:34 <span style="color:var(--green)">· current</span></div>
+
+            <div><b>Dimensions</b><div class="muted">BWS 3 · composed</div></div>
+            <div class="was mono">W1900 x D760 x H720 x SH440mm</div>
+            <div class="now mono">W1900 x D790 x H720 x SH440mm</div>
+
+            <div><b>Depth</b><div class="muted">slot D</div></div>
+            <div class="was mono">760 mm</div>
+            <div class="now mono">790 mm</div>
+
+            <div><b>Internal notes</b></div>
+            <div class="muted">—</div>
+            <div class="now">Hayley confirmed the plinth reveal on the call</div>
+
+            <div style="border-bottom:0"><span class="muted">8 unchanged</span></div>
+            <div colspan="2" style="grid-column:2/4;border-bottom:0"><a class="lk" href="#">show them</a></div>
+          </div>
+        </div>
+        <div style="padding:11px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center">
+          <span class="chip">Edited by hand</span>
+          <span class="muted">“Rev B drawing issued 14 Sept” — max.degroot</span>
+          <span class="sp" style="flex:1"></span>
+          <a class="lk" href="#" style="font-size:12px">See this change on the project</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>v4 as BWS would receive it <span class="sp"></span><span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">the export&rsquo;s own cells, as at that version</span></h2>
+        <div class="body flush">
+          <table><tbody>
+            <tr><td style="width:30%">Dimensions</td><td class="mono">W1900 x D790 x H720 x SH440mm</td></tr>
+            <tr><td>COM 1</td><td class="mono">UPH-07; Yarn Tessarae YC04158 - 01 — Main &amp; self pipe</td></tr>
+            <tr><td>Main timber finish</td><td class="mono">WD-01; Dark tinted wood</td></tr>
+            <tr><td>Name</td><td class="mono">Sofa</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card" style="margin-top:0">
+        <h2>Versions <span class="sp"></span><span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">compare any two</span></h2>
+        <div class="body flush">
+          <div class="verbar"><span class="n">Baseline</span><span class="ttl" style="font-size:12px">Rev B issued</span><span class="mt">17 Sept</span></div>
+
+          <div class="vrow sel"><span class="vn">v4</span>
+            <div><b>Edited by hand</b><div class="muted">2 changed · 1 added</div></div>
+            <div class="when">17 Sept, 18:34<br>max.degroot</div></div>
+          <div class="vrow sel"><span class="vn">v3</span>
+            <div><b>Drawings confirmed</b><div class="muted"><a class="lk" href="#">Apx 1a p1</a> · 6 added</div></div>
+            <div class="when">15 Sept, 09:40<br>max.degroot</div></div>
+
+          <div class="verbar"><span class="n">Baseline</span><span class="ttl" style="font-size:12px">Rev A — what we quoted</span><span class="mt">14 Sept</span></div>
+
+          <div class="vrow"><span class="vn">v2</span>
+            <div><b>Category set</b><div class="muted">Armchairs / benches / stools / sofas</div></div>
+            <div class="when">14 Sept, 10:02<br>max.degroot</div></div>
+          <div class="vrow"><span class="vn">v1</span>
+            <div><b>Bill of quantities imported</b><div class="muted"><a class="lk" href="#">Apx 2 — BOQ SEATING</a> row 7</div></div>
+            <div class="when">14 Sept, 09:20<br>max.degroot</div></div>
+        </div>
+        <div style="padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:7px;align-items:center">
+          <span class="muted">Comparing <b>v3 → v4</b></span><span class="sp" style="flex:1"></span>
+          <button class="btn sm">Reset</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="padding:10px 13px">Compare to a baseline</h2>
+        <div class="body" style="padding:13px">
+          <select class="fake" style="width:100%"><option>Rev A — what we quoted (14 Sept)</option><option>Rev B issued (17 Sept)</option></select>
+          <a class="btn sm" href="#" style="margin-top:8px;width:100%;justify-content:center">Compare to now</a>
+          <p class="muted" style="margin:9px 0 0;font-size:11.5px">A baseline fixes exactly which version of each item was in it, at the moment it was named.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ann"><b>Notes on this one</b>
+    <ul>
+      <li><b>A version and a baseline do not look alike.</b> Versions are numbered rows; a baseline is a green bar straight across the column with its name on it. Scrolling the list, you can see which versions fall inside Rev A and which came after — which is the only question anybody asks of it.</li>
+      <li><b>Two versions are selected, and the diff is the page.</b> Today you pick from two dropdowns and press Show; here clicking two rows is the comparison, with v3 → v4 selected by default because “what just changed” is the common case.</li>
+      <li><b>The diff runs over the atoms and recomposes both ends with today&rsquo;s rules</b> — so a change to the composer never shows as an edit on a record nobody touched. The stored cells are shown separately, under <i>as BWS would receive it</i>, which answers the different question: what did the file say that day.</li>
+      <li><b>Unchanged fields are counted, not listed</b>, but they are one click away — a diff that hides them entirely cannot prove nothing else moved.</li>
+    </ul></div>
+</div>
+</section>
+<section id="finishes-library" class="screen" hidden><div class="screen-label"><b>Finishes library</b> — One row per client finish code</div><style>
+.sw{width:34px;height:34px;border-radius:6px;border:1px dashed var(--line-2);background:#fafafa;
+    display:flex;align-items:center;justify-content:center;font-size:8.5px;color:var(--ink-4);text-align:center;line-height:1.1;flex:none}
+</style>
+<div class="topbar">
+  <span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav>
+  <span class="sp"></span><a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a>
+</div>
+
+<div class="phead">
+  <div class="row">
+    <div>
+      <a class="crumb" href="#">← Projects</a>
+      <h1>AP364c — pantherc <span class="pill active" style="vertical-align:middle;margin-left:6px">ACTIVE</span></h1>
+      <p class="sub">Every finish code this project&rsquo;s documents carry. Correcting one here corrects it on every linked item at once.</p>
+    </div>
+    <div class="acts"><button class="btn">Start a change</button><button class="btn">Set out the library</button></div>
+  </div>
+  <div class="tabs">
+    <a class="tab" href="#">Overview</a><a class="tab" href="#">MUR <span class="n">8</span></a>
+    <a class="tab" href="#">MAIN RUN <span class="n">22</span></a><a class="tab" href="#">MAIN RUN - VE <span class="n">22</span></a>
+    <a class="tab on" href="#">Finishes <span class="n">11</span></a><a class="tab" href="#">+ Add a run</a>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="note amber">
+    <b>4 codes on the drawings are not in the library yet</b>, so correcting them once is not possible:
+    <span class="mono">CH-01.1</span> (6 items) · <span class="mono">CLO003 A</span> (2) · <span class="mono">UPH-07</span> (3) · <span class="mono">WD-05</span> (3).
+    <button class="btn sm" style="margin-left:8px">Bring them in</button>
+  </div>
+
+  <div class="note blue">
+    <b>9 of 11 finishes have no kind</b>, and the kind is what the screens group and filter by.
+    7 can be read straight off the client&rsquo;s own code or its description — each is shown below as a suggestion with its reason.
+    <button class="btn sm" style="margin-left:8px;background:#fff">File all 7</button>
+    <span class="muted"> · nothing is filed without a click.</span>
+  </div>
+
+  <div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
+    <input class="fake" style="width:280px" placeholder="Search a code, a description, or an item">
+    <select class="fake"><option>All kinds (11)</option></select>
+    <select class="fake"><option>All runs</option></select>
+    <span class="sp" style="flex:1"></span>
+    <input class="fake" style="width:120px" placeholder="CH-01.1"><button class="btn">Add a finish</button>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <div class="body flush">
+      <table>
+        <thead><tr>
+          <th style="width:46px"></th><th style="width:13%">Code</th><th style="width:15%">Kind</th>
+          <th style="width:34%">Description</th><th style="width:10%">State</th><th class="num" style="width:11%">Used on</th><th></th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="sw">no<br>swatch</div></td>
+            <td class="mono" style="font-weight:600">WD-01</td>
+            <td><button class="btn suggest sm">Timber?</button>
+                <div class="muted" style="margin-top:4px;font-size:11px">“dark tinted wood” names a timber</div></td>
+            <td>Dark tinted wood</td>
+            <td><span class="chip amber">TBC</span></td>
+            <td class="num">8 items</td>
+            <td style="text-align:right"><button class="btn quiet sm">Edit</button></td>
+          </tr>
+          <tr>
+            <td><div class="sw">no<br>swatch</div></td>
+            <td class="mono" style="font-weight:600">WD-02</td>
+            <td><button class="btn suggest sm">Timber?</button>
+                <div class="muted" style="margin-top:4px;font-size:11px">the code <span class="mono">WD</span> says so</div></td>
+            <td class="muted">Nothing recorded yet</td>
+            <td><span class="chip amber">TBC</span></td>
+            <td class="num">2 items</td>
+            <td style="text-align:right"><button class="btn quiet sm">Edit</button></td>
+          </tr>
+          <tr>
+            <td><div class="sw">no<br>swatch</div></td>
+            <td class="mono" style="font-weight:600">WD-05</td>
+            <td><span class="chip">Timber</span><div class="muted" style="margin-top:4px;font-size:11px">filed by you</div></td>
+            <td>Ceruse finish oak</td>
+            <td><span class="chip amber">TBC</span></td>
+            <td class="num">5 items</td>
+            <td style="text-align:right"><button class="btn quiet sm">Edit</button></td>
+          </tr>
+          <tr>
+            <td><div class="sw">no<br>swatch</div></td>
+            <td class="mono" style="font-weight:600">MT-01</td>
+            <td><button class="btn suggest sm">Metal?</button>
+                <div class="muted" style="margin-top:4px;font-size:11px">the code <span class="mono">MT</span> says so</div></td>
+            <td class="muted">Nothing recorded yet</td>
+            <td><span class="chip amber">TBC</span></td>
+            <td class="num">8 items</td>
+            <td style="text-align:right"><button class="btn quiet sm">Edit</button></td>
+          </tr>
+          <tr>
+            <td><div class="sw">no<br>swatch</div></td>
+            <td class="mono" style="font-weight:600">UPH-07</td>
+            <td><button class="btn suggest sm">Fabric?</button>
+                <div class="muted" style="margin-top:4px;font-size:11px">the code <span class="mono">UPH</span> says so</div></td>
+            <td>Aissa Dione light beige triangle motif, Kolda</td>
+            <td><span class="chip amber">TBC</span></td>
+            <td class="num">9 items</td>
+            <td style="text-align:right"><button class="btn quiet sm">Edit</button></td>
+          </tr>
+          <tr>
+            <td><div class="sw">no<br>swatch</div></td>
+            <td class="mono" style="font-weight:600">CLO003 WD</td>
+            <td><button class="btn suggest sm">Timber?</button>
+                <div class="muted" style="margin-top:4px;font-size:11px">“dark tinted wood” names a timber</div></td>
+            <td>Dark tinted wood</td>
+            <td><span class="chip amber">TBC</span></td>
+            <td class="num">4 items</td>
+            <td style="text-align:right"><button class="btn quiet sm">Edit</button></td>
+          </tr>
+          <tr class="grp"><td colspan="7">Nothing to suggest — the code says nothing and no description has been recorded</td></tr>
+          <tr>
+            <td><div class="sw">no<br>swatch</div></td>
+            <td class="mono" style="font-weight:600">CH-01.1</td>
+            <td><select class="fake" style="width:100%"><option>Kind?</option></select>
+                <div class="muted" style="margin-top:4px;font-size:11px">no page says what <span class="mono">CH</span> means</div></td>
+            <td>Aissa Dione black/straw diamonds, raffia, Gorée</td>
+            <td><span class="chip amber">TBC</span></td>
+            <td class="num">2 items</td>
+            <td style="text-align:right"><button class="btn quiet sm">Edit</button></td>
+          </tr>
+          <tr>
+            <td><div class="sw">no<br>swatch</div></td>
+            <td class="mono" style="font-weight:600">CH-01.2</td>
+            <td><select class="fake" style="width:100%"><option>Kind?</option></select></td>
+            <td class="muted">Nothing recorded yet</td>
+            <td><span class="chip amber">TBC</span></td>
+            <td class="num">8 items</td>
+            <td style="text-align:right"><button class="btn quiet sm">Edit</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="ann">
+    <b>What changed, and why</b>
+    <ul>
+      <li><b>The kind is suggested from evidence the app already reads.</b> <code>classifyCallout</code> in the drawings pipeline already maps <span class="mono">WD</span>/<span class="mono">TIM</span> → timber, <span class="mono">MT</span> → metal, <span class="mono">UPH</span>/<span class="mono">FAB</span>/<span class="mono">COM</span> → fabric, and reads words like “wood”, “oak”, “boucle”. The library simply never asked it. Same function, so the two cannot drift apart.</li>
+      <li><b>Suggested, never written.</b> A dashed blue button with its reason beside it, exactly like a guessed dimension slot — one click to accept, or “file all 7”. A pre-selected dropdown would fire no change event when you pick the value it already shows, so agreeing with it would silently do nothing.</li>
+      <li><b>Where there is no evidence, it says so.</b> <span class="mono">CH</span> is deliberately unmapped because no page in the real set says what CH means. Those rows group at the bottom with the empty picker, rather than pretending the guess was considered and refused.</li>
+      <li><b>Rows, not cards.</b> Eleven finishes fit on one screen with the code, kind, description, state and use count all alignable down the page.</li>
+    </ul>
+  </div>
+</div>
+</section>
+<section id="chase" class="screen" hidden><div class="screen-label"><b>Chase</b> — What to ask, and who to ask</div><style>
+.line{border-bottom:1px solid var(--line)}
+.line .hd{display:grid;grid-template-columns:24px 22px 1fr 90px 90px 110px 110px 92px;gap:10px;align-items:center;padding:9px 14px;font-size:13px}
+.line .hd:hover{background:#fcfcfc}
+.opt{display:grid;grid-template-columns:24px 22px 1fr 90px 90px 110px 110px 92px;gap:10px;align-items:center;padding:8px 14px 8px 38px;background:#fcfcfc;border-top:1px solid #f0f0ef;font-size:12.5px}
+.qrow{display:grid;grid-template-columns:24px 1fr 130px 100px 110px;gap:10px;align-items:center;padding:7px 14px 7px 62px;border-top:1px solid #f4f4f3;font-size:12.5px;background:#fff}
+.hdr{display:grid;grid-template-columns:24px 22px 1fr 90px 90px 110px 110px 92px;gap:10px;padding:8px 14px;background:#fcfcfc;border-bottom:1px solid var(--line);
+  font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+</style>
+<div class="topbar"><span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav><span class="sp"></span>
+  <a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a></div>
+<div class="phead"><div class="row">
+  <div><a class="crumb" href="#">← AP364c — pantherc</a><h1>Chase what is missing</h1>
+    <p class="sub">Drafts only. Nothing is sent from this app — you send it from your own Outlook.</p></div>
+  <div class="acts"><a class="btn" href="#">Waiting on a reply <span class="n" style="margin-left:4px">31</span></a>
+    <button class="btn primary">Draft the email · 42 questions</button></div>
+</div><div class="tabs">
+  <a class="tab on" href="#">Hayley Ross <span class="n">184</span></a>
+  <a class="tab" href="#">Claire Beaumont <span class="n">128</span></a>
+  <a class="tab" href="#">Nobody assigned <span class="n">31</span></a>
+</div></div>
+<div class="wrap" style="max-width:1250px">
+  <div class="note red" style="background:var(--red-bg);border-color:var(--red-line);color:#7f1d1d;display:flex;align-items:center;gap:10px">
+    <span><b>5 items have no level</b>, so nothing on them can be tiered and they cannot be chased. 4 have a suggestion.</span>
+    <span class="sp" style="flex:1"></span>
+    <select class="fake"><option>Set all 5 to…</option></select>
+    <button class="btn suggest sm" style="background:#fff">Accept the 4 suggested</button>
+  </div>
+
+  <div class="stats" style="grid-template-columns:repeat(4,1fr)">
+    <a class="stat click red on" href="#" style="text-decoration:none;color:inherit"><div class="k">Needed to quote</div><div class="v">42</div><div class="m">ticked, will be in the email</div><div class="act">showing these →</div></a>
+    <a class="stat click amber" href="#" style="text-decoration:none;color:inherit"><div class="k">Also outstanding</div><div class="v">142</div><div class="m">under a grey heading</div><div class="act">add them →</div></a>
+    <a class="stat click blue" href="#" style="text-decoration:none;color:inherit"><div class="k">Awaiting a reply</div><div class="v">19</div><div class="m">already asked, excluded</div><div class="act">include them →</div></a>
+    <a class="stat click" href="#" style="text-decoration:none;color:inherit"><div class="k">Furniture lines</div><div class="v">11</div><div class="m">3 with nothing outstanding</div><div class="act">show all →</div></a>
+  </div>
+
+  <div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
+    <input class="fake" style="width:250px" placeholder="Search a code or an item">
+    <select class="fake"><option>All runs</option></select>
+    <span class="chip red" style="padding:5px 10px">Needed to quote ✕</span>
+    <span class="sp" style="flex:1"></span>
+    <span class="muted"><b>42 ticked</b> · 8 lines shown of 11</span>
+  </div>
+
+  <div class="card" style="margin-top:12px"><div class="body flush">
+    <div class="hdr"><div></div><div></div><div>Item</div><div class="num" style="text-align:right">Qty</div>
+      <div>Level</div><div style="text-align:right">To quote</div><div style="text-align:right">Also</div><div></div></div>
+
+    <div class="line">
+      <div class="hd"><input type="checkbox" checked><span class="muted">▾</span>
+        <div><a class="lk mono" href="#" style="font-weight:600">S-100</a> <a class="lk" href="#">Sofa</a>
+          <span class="muted"> · MAIN RUN · AP364c-014</span></div>
+        <div class="num" style="text-align:right">14</div>
+        <div><a class="lk" href="#">hero</a></div>
+        <div style="text-align:right;color:var(--red);font-weight:650">9</div>
+        <div style="text-align:right;color:var(--ink-3)">28</div>
+        <div style="text-align:right"><a class="btn quiet sm" href="#">Open</a></div></div>
+
+      <div class="qrow"><input type="checkbox" checked><div><span class="tierdot t-quote" style="display:inline-block;margin-right:6px"></span>Seat upholstery build</div>
+        <div><span class="state s-miss">Missing</span></div><div class="muted">never asked</div><div></div></div>
+      <div class="qrow"><input type="checkbox" checked><div><span class="tierdot t-quote" style="display:inline-block;margin-right:6px"></span>COM 2</div>
+        <div><span class="state s-miss">Missing</span></div><div class="muted">never asked</div><div></div></div>
+      <div class="qrow"><input type="checkbox"><div><span class="tierdot t-quote" style="display:inline-block;margin-right:6px"></span>Metal finish 1</div>
+        <div><span class="state s-tbc">TBC</span></div><div class="muted" style="color:var(--blue)">asked 15 Sept</div>
+        <div class="muted" style="font-size:11px">excluded — awaiting a reply</div></div>
+      <div class="qrow" style="color:var(--ink-3)"><div></div><div><a class="lk" href="#">6 more needed to quote</a> · 28 also outstanding</div><div></div><div></div><div></div></div>
+    </div>
+
+    <div class="line">
+      <div class="hd"><input type="checkbox" checked><span class="muted">▾</span>
+        <div><a class="lk mono" href="#" style="font-weight:600">S-201</a> <a class="lk" href="#">Armchair</a>
+          <span class="muted"> · MAIN RUN · AP364c-015</span>
+          <div class="muted" style="font-size:11.5px">2 finish options · 1 has nothing outstanding</div></div>
+        <div class="num" style="text-align:right">45</div>
+        <div><a class="lk" href="#">simple</a></div>
+        <div style="text-align:right;color:var(--red);font-weight:650">11</div>
+        <div style="text-align:right;color:var(--ink-3)">34</div>
+        <div style="text-align:right"><a class="btn quiet sm" href="#">Open</a></div></div>
+
+      <div class="opt"><input type="checkbox" checked><span class="muted">▾</span>
+        <div><span class="mono" style="font-weight:600">S-201 <b style="color:var(--sky)">A</b></span>
+          <span class="muted"> · quantity not allocated</span></div>
+        <div class="num" style="text-align:right">—</div><div></div>
+        <div style="text-align:right;color:var(--red);font-weight:650">11</div>
+        <div style="text-align:right;color:var(--ink-3)">34</div><div></div></div>
+      <div class="qrow"><input type="checkbox" checked><div><span class="tierdot t-quote" style="display:inline-block;margin-right:6px"></span>COM 1</div>
+        <div><span class="state s-tbc">TBC</span></div><div class="muted">never asked</div><div></div></div>
+      <div class="qrow" style="color:var(--ink-3)"><div></div><div><a class="lk" href="#">10 more needed to quote</a></div><div></div><div></div><div></div></div>
+
+      <div class="opt"><input type="checkbox"><span class="muted">▸</span>
+        <div><span class="mono" style="font-weight:600">S-201 <b style="color:#7c3aed">B</b></span>
+          <span class="muted"> · nothing outstanding</span></div>
+        <div class="num" style="text-align:right">—</div><div></div>
+        <div style="text-align:right;color:var(--green)">0</div><div style="text-align:right;color:var(--ink-3)">0</div><div></div></div>
+    </div>
+
+    <div class="line">
+      <div class="hd"><input type="checkbox"><span class="muted">▸</span>
+        <div><a class="lk mono" href="#" style="font-weight:600">S-402</a> <a class="lk" href="#">Bench</a>
+          <span class="muted"> · MAIN RUN · AP364c-018</span></div>
+        <div class="num" style="text-align:right">6</div>
+        <div><button class="btn suggest sm">complex?</button></div>
+        <div style="text-align:right" class="muted">—</div>
+        <div style="text-align:right" class="muted">39</div>
+        <div style="text-align:right"><a class="btn quiet sm" href="#">Open</a></div></div>
+    </div>
+  </div>
+  <div style="padding:11px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;background:#fcfcfc">
+    <span><b>42 questions ticked</b> across 8 items</span>
+    <span class="chip amber">3 ticked questions are hidden by your filters</span>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn">Preview the email</button><button class="btn primary">Draft it</button>
+  </div>
+  </div>
+
+  <div class="ann"><b>Notes</b><ul>
+    <li><b>Unchanged where it already works.</b> One row per furniture line, finish options nested inside, questions inside those — that structure was asked for and stays. What changes is the surface: aligned columns, a proper header row, and the totals in the same place on every level.</li>
+    <li><b>A filter narrows what is LISTED, never what is asked.</b> The footer says in words how many ticked questions the filters are hiding — that rule is load-bearing and is now stated on screen rather than implied.</li>
+    <li><b>The level blocker is a banner with the bulk fix in it</b>, and an inline suggestion button on the row itself. The level cell still links to the record in a new tab, because setting one is a decision taken there.</li>
+    <li><b>A finish option with nothing outstanding still appears</b>, collapsed and greyed — "2 finish options" beside a single visible one is a question about the data.</li>
+  </ul></div>
+</div>
+</section>
+<section id="inbox" class="screen" hidden><div class="screen-label"><b>Inbox</b> — Mail that has reached the app</div><div class="topbar">
+  <span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#">Projects</a><a href="#" class="on">Inbox</a></nav>
+  <span class="sp"></span><a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a>
+</div>
+
+<div class="phead">
+  <div class="row">
+    <div>
+      <h1>Inbox</h1>
+      <p class="sub">Mail forwarded from the project inboxes. An email the headers place on a project is assigned and read the moment it arrives — one charged model call each.</p>
+    </div>
+    <div class="acts"><button class="btn">Upload an .eml</button></div>
+  </div>
+  <div class="tabs">
+    <a class="tab on" href="#">To review <span class="n">12</span></a>
+    <a class="tab" href="#">Could not be placed <span class="n">3</span></a>
+    <a class="tab" href="#">Nothing to record <span class="n">6</span></a>
+    <a class="tab" href="#">Everything <span class="n">41</span></a>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="stats" style="grid-template-columns:repeat(4,1fr)">
+    <a href="#" style="text-decoration:none;color:inherit" class="stat click blue"><div class="k">Read, waiting for you</div><div class="v">12</div><div class="m">83 specs proposed</div><div class="act">open the list →</div></a>
+    <a href="#" style="text-decoration:none;color:inherit" class="stat click amber"><div class="k">Could not be placed</div><div class="v">3</div><div class="m">needs a person to say which project</div><div class="act">place them →</div></a>
+    <a href="#" style="text-decoration:none;color:inherit" class="stat click"><div class="k">Arrived today</div><div class="v">5</div><div class="m">all assigned automatically</div><div class="act">show today →</div></a>
+    <a href="#" style="text-decoration:none;color:inherit" class="stat click green"><div class="k">Ruled on this week</div><div class="v">26</div><div class="m">applied or dismissed</div><div class="act">show them →</div></a>
+  </div>
+
+  <h3 class="sec">Read and waiting for you <span class="c">· newest first · already on a project, already extracted</span></h3>
+  <div class="card" style="margin-top:8px">
+    <div class="body flush">
+      <table>
+        <thead><tr>
+          <th style="width:42%">Subject</th><th style="width:16%">Project</th><th style="width:18%">What it found</th>
+          <th style="width:14%">Arrived</th><th></th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td>
+              <a class="lk" href="#" style="font-weight:600;display:block;border:0">Ashcombe House — OT-401 bed end ottoman, fabric</a>
+              <div class="muted">Priya Raman &lt;priya.raman@example.com&gt;</div>
+              <div style="margin-top:5px"><span class="chip"><span class="dot" style="color:#0369a1"></span>auto · addressed to the project inbox</span></div>
+            </td>
+            <td><a href="#" style="font-weight:600;text-decoration:none">AP401</a><div class="muted">Ashcombe House</div></td>
+            <td><span class="chip blue">4 specs</span> <span class="chip">2 runs</span><div class="muted" style="margin-top:4px">1 changes a confirmed value</div></td>
+            <td class="muted">16 Sept, 10:00<div>2 days ago</div></td>
+            <td style="text-align:right"><a class="btn primary sm" href="#">Review</a></td>
+          </tr>
+          <tr>
+            <td>
+              <a class="lk" href="#" style="font-weight:600;display:block;border:0">RE: Panther — S-301 desk chair, castors and timber</a>
+              <div class="muted">Claire Beaumont &lt;claire.beaumont@example.com&gt;</div>
+              <div style="margin-top:5px"><span class="chip"><span class="dot" style="color:#0369a1"></span>auto · sender is a contact on one project</span> <span class="chip green">reply to a chase</span></div>
+            </td>
+            <td><a href="#" style="font-weight:600;text-decoration:none">AP364c</a><div class="muted">pantherc</div></td>
+            <td><span class="chip blue">7 specs</span> <span class="chip">3 runs</span></td>
+            <td class="muted">15 Sept, 17:24<div>3 days ago</div></td>
+            <td style="text-align:right"><a class="btn primary sm" href="#">Review</a></td>
+          </tr>
+          <tr>
+            <td>
+              <a class="lk" href="#" style="font-weight:600;display:block;border:0">AP364 Panther — revised finishes schedule (Rev C)</a>
+              <div class="muted">Claire Beaumont &lt;claire.beaumont@example.com&gt;</div>
+              <div style="margin-top:5px"><span class="chip"><span class="dot" style="color:#0369a1"></span>auto · sender is a contact on one project</span> <span class="chip">2 attachments</span></div>
+            </td>
+            <td><a href="#" style="font-weight:600;text-decoration:none">AP364c</a><div class="muted">pantherc</div></td>
+            <td><span class="chip blue">11 specs</span> <span class="chip">3 runs</span><div class="muted" style="margin-top:4px">4 change a confirmed value</div></td>
+            <td class="muted">14 Sept, 13:59<div>4 days ago</div></td>
+            <td style="text-align:right"><a class="btn primary sm" href="#">Review</a></td>
+          </tr>
+          <tr>
+            <td>
+              <a class="lk" href="#" style="font-weight:600;display:block;border:0">Lindow wool — lead times for the autumn</a>
+              <div class="muted">Elena Marchetti &lt;elena.marchetti@example.com&gt;</div>
+              <div style="margin-top:5px"><span class="chip"><span class="dot" style="color:#0369a1"></span>auto · sender is a contact on one project</span></div>
+            </td>
+            <td><a href="#" style="font-weight:600;text-decoration:none">AP364c</a><div class="muted">pantherc</div></td>
+            <td><span class="chip">nothing to record</span><div class="muted" style="margin-top:4px">read, found no specification</div></td>
+            <td class="muted">14 Sept, 12:00<div>4 days ago</div></td>
+            <td style="text-align:right"><a class="btn sm" href="#">Open</a> <button class="btn quiet sm">Dismiss</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:8px">8 more · <a href="#">show all 12</a></p>
+
+  <h3 class="sec" style="color:var(--amber)">Could not be placed <span class="c">· the headers name no project, or name two equally well</span></h3>
+  <div class="card" style="margin-top:8px;border-color:var(--amber-line)">
+    <div class="body flush">
+      <table>
+        <thead><tr><th style="width:44%">Subject</th><th style="width:30%">Why it is here</th><th style="width:26%">Put it on a project</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><a class="lk" href="#" style="font-weight:600;display:block;border:0">FW: client comments - armchairs</a>
+                <div class="muted">Tom Findlay &lt;tom.findlay@example.com&gt;<br>14 Sept, 18:45</div></td>
+            <td class="muted">No project inbox in the headers, no project number or code in the subject, and the sender is not a contact on exactly one project.</td>
+            <td><select class="fake" style="width:100%"><option>Choose a project…</option></select>
+                <div style="margin-top:6px;display:flex;gap:6px"><button class="btn primary sm">Assign &amp; read</button><button class="btn quiet sm">Not a spec</button></div>
+                <div class="muted" style="margin-top:5px">One charged model call.</div></td>
+          </tr>
+          <tr>
+            <td><a class="lk" href="#" style="font-weight:600;display:block;border:0">Fabric substitution — two projects affected</a>
+                <div class="muted">Dominic Searle &lt;dominic.searle@example.com&gt;<br>15 Sept, 17:00</div></td>
+            <td><span class="chip amber">two projects match equally</span>
+                <div class="muted" style="margin-top:5px">AP364c — subject names the code · AP401 — sender is a contact. Neither is stronger, so nothing was chosen.</div></td>
+            <td><select class="fake" style="width:100%"><option>AP364c — pantherc</option><option>AP401 — Ashcombe House</option></select>
+                <div style="margin-top:6px;display:flex;gap:6px"><button class="btn primary sm">Assign &amp; read</button><button class="btn quiet sm">Not a spec</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="ann">
+    <b>What changed, and why</b>
+    <ul>
+      <li><b>Assignment moved to arrival.</b> A confident routing signal now assigns and reads on the way in, so the default state of this screen is <i>read, waiting for you</i> — not a queue of buttons to press. The signal that placed it is still printed on every row, so a wrong placement is visible rather than hidden.</li>
+      <li><b>Held mail is the exception, not the page.</b> Three rows in an amber table under the main list, each carrying the reason and the picker. Ambiguous stays held: two projects matching equally well is a decision, and the row says which two.</li>
+      <li><b>Rows are a table, not stacked cards.</b> Seventeen cards is four screens of scrolling; seventeen rows is one. Scanning "which of these has 11 specs and 4 changes" is the actual job.</li>
+      <li><b>"What it found" earns its column.</b> An email that was read but produced nothing is a different thing from one waiting to be reviewed, and it now says so instead of looking identical.</li>
+    </ul>
+  </div>
+</div>
+</section>
+<section id="intake-pack" class="screen" hidden><div class="screen-label"><b>Intake pack</b> — One delivery of documents</div><style>.step{display:flex;gap:12px;align-items:flex-start;padding:13px 16px;border-bottom:1px solid var(--line)}
+.stepn{width:24px;height:24px;border-radius:50%;border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:var(--ink-3);flex:none;background:#fff}
+.step.done .stepn{background:var(--green-bg);border-color:var(--green-line);color:var(--green)}
+.step.now .stepn{background:var(--ink);border-color:var(--ink);color:#fff}</style>
+<div class="topbar"><span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav><span class="sp"></span>
+  <a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a></div>
+<div class="phead"><div class="row">
+  <div><a class="crumb" href="#">← AP364c — pantherc</a><h1>Pack delivered 15 Sept</h1>
+    <p class="sub">11 documents · uploaded by max.degroot · every specification document was read on arrival</p></div>
+  <div class="acts"><a class="btn" href="#">Add to this pack</a><a class="btn primary" href="#">Review all 9 drawings together</a></div>
+</div></div>
+<div class="wrap">
+  <div class="stats" style="grid-template-columns:repeat(4,1fr)">
+    <div class="stat green"><div class="k">Reviewed</div><div class="v">8</div><div class="m">240 specs applied</div></div>
+    <a class="stat click amber" href="#" style="text-decoration:none;color:inherit"><div class="k">Waiting for you</div><div class="v">1</div><div class="m">12 proposals staged</div><div class="act">review it →</div></a>
+    <div class="stat blue"><div class="k">Still reading</div><div class="v">1</div><div class="m">started 40s ago</div></div>
+    <a class="stat click red" href="#" style="text-decoration:none;color:inherit"><div class="k">Failed</div><div class="v">1</div><div class="m">the queue refused it</div><div class="act">try again →</div></a>
+  </div>
+
+  <div class="card">
+    <h2>The order these are read in <span class="tip" style="margin-left:0">?<span class="t">A drawing extracted before its bill is confirmed is fine — its targets resolve at review time, not at extraction.</span></span></h2>
+    <div class="body flush">
+      <div class="step done"><div class="stepn">✓</div>
+        <div style="flex:1"><b>The preamble</b> — the conditions the whole package is built under
+          <div class="muted">Not in this pack. <a class="lk" href="#">Add it</a> when it arrives.</div></div></div>
+      <div class="step done"><div class="stepn">✓</div>
+        <div style="flex:1"><b>The bill of quantities</b> — creates the records
+          <div class="muted"><a class="lk" href="#">Apx 2 — BOQ SEATING.xlsx</a> · 3 runs, 45 records · confirmed 15 Sept</div></div></div>
+      <div class="step now"><div class="stepn">3</div>
+        <div style="flex:1"><b>The drawings</b> — attach specs to those records
+          <div class="muted">9 documents · 8 reviewed, 1 waiting for you, 1 still reading</div></div>
+        <a class="btn primary sm" href="#">Review all 9 together</a></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Documents <span class="sp"></span><span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">11</span></h2>
+    <div class="body flush">
+      <table>
+        <thead><tr><th style="width:42%">File</th><th style="width:16%">Kind</th><th style="width:18%">State</th><th style="width:14%">What it produced</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><a class="lk" href="#">AP364 - Apx 2 - BOQ SEATING.xlsx</a><div class="muted">15 Sept, 09:10</div></td>
+              <td>Bill of quantities</td><td><span class="chip green">Review complete</span></td>
+              <td class="muted">3 runs · 45 records</td><td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+          <tr><td><a class="lk" href="#">AP364 - Apx 1a - SHOP DRAWINGS - SEATING.pdf</a><div class="muted">15 Sept, 09:12 · 11 pages</div></td>
+              <td>Shop drawings</td><td><span class="chip green">Review complete</span></td>
+              <td class="muted">6 items · 240 specs</td><td style="text-align:right"><a class="btn quiet sm" href="#">Open</a></td></tr>
+          <tr style="background:#fffdf5"><td><a class="lk" href="#">SPEC-346 S-301 DESK CHAIR.pdf</a><div class="muted">15 Sept, 09:12 · 1 page</div></td>
+              <td>Shop drawings</td><td><span class="chip amber">12 to review</span></td>
+              <td class="muted">4 items staged</td><td style="text-align:right"><a class="btn sm" href="#">Review</a></td></tr>
+          <tr><td><a class="lk" href="#">SPEC-346 UP-101 HEADBOARD.pdf</a><div class="muted">15 Sept, 09:13 · 1 page</div></td>
+              <td>Shop drawings</td><td><span class="chip blue"><span class="dot"></span>Reading…</span></td>
+              <td class="muted">started 40s ago</td><td style="text-align:right"><span class="muted" style="font-size:11.5px">nothing to do</span></td></tr>
+          <tr style="background:#fffbfb"><td><a class="lk" href="#">SPEC-346 S-203 ARMCHAIR.pdf</a><div class="muted">15 Sept, 09:13 · 1 page</div></td>
+              <td>Shop drawings</td><td><span class="chip red">Read failed</span>
+                  <div class="muted" style="font-size:11px;margin-top:3px">the queue refused it — rate limited</div></td>
+              <td class="muted">—</td>
+              <td style="text-align:right"><button class="btn sm">Try again</button>
+                  <div class="muted" style="font-size:10.5px;margin-top:3px">charges again</div></td></tr>
+        </tbody>
+      </table>
+      <div style="padding:9px 16px"><a class="lk" href="#" style="font-size:12px">6 more</a></div>
+    </div>
+  </div>
+  <div class="ann"><b>Notes</b><ul>
+    <li><b>The reading order is the page, because the order is not cosmetic</b> — the preamble sets the conditions, the bill creates the records, the drawings attach to them. It also makes an absent preamble visible instead of being something you had to know about.</li>
+    <li><b>No "Read all" button on the resting path.</b> Everything read itself on arrival; the only retry is on the one the queue refused, and it says it charges again.</li>
+    <li><b>Rows are coloured by what they want from you</b> — amber needs review, red needs a retry, blue is working.</li>
+  </ul></div>
+</div>
+</section>
+<section id="boq-review" class="screen" hidden><div class="screen-label"><b>BOQ review</b> — A bill, staged</div><style>.bq td,.bq th{padding:7px 9px;font-size:12.5px}</style>
+<div class="topbar"><span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav><span class="sp"></span>
+  <a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a></div>
+<div class="phead"><div class="row">
+  <div><a class="crumb" href="#">← Pack delivered 15 Sept</a><h1>Apx 2 — BOQ SEATING.xlsx</h1>
+    <p class="sub">Parsed by code, not by a model — nothing here was charged. 3 tabs · rev 0, 14-Sep-26 ·
+      <a class="lk" href="#">open the spreadsheet</a></p></div>
+  <div class="acts"><button class="btn primary">Confirm · creates 45 records on 3 runs</button></div>
+</div><div class="tabs">
+  <a class="tab on" href="#">MUR <span class="n">8</span></a>
+  <a class="tab" href="#">MAIN RUN <span class="n">22</span></a>
+  <a class="tab" href="#">MAIN RUN - VE <span class="n">22</span></a>
+  <a class="tab" href="#">Ignored tabs <span class="n">1</span></a>
+</div></div>
+<div class="wrap" style="max-width:1300px">
+  <div class="note blue"><b>A tab is a run, not a revision.</b> These three quote the same codes at different quantities and can all be live at once.
+    Untick a tab to leave it out — <span class="mono">SUMMARY</span> already is, because it has no header row.</div>
+
+  <div class="card">
+    <h2>This tab becomes a run <span class="sp"></span></h2>
+    <div class="body">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+        <label><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Run name</div>
+          <input class="fake" style="width:100%;margin-top:3px" value="MUR"></label>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Sheet</div>
+          <div class="mono" style="margin-top:6px">MUR</div></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Revision
+          <span class="tip">?<span class="t">Kept as text, exactly as the sheet printed it. Parsing “14-Sep-26” into a date is how a day goes missing.</span></span></div>
+          <div class="mono" style="margin-top:6px">0 · 14-Sep-26</div></div>
+        <div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">Header found on</div>
+          <div class="mono" style="margin-top:6px">row 12</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>8 lines <span class="sp"></span>
+      <span class="chip amber">2 need a level</span><span class="chip blue">6 have a suggested level</span>
+      <button class="btn suggest sm">Accept all 6</button></h2>
+    <div class="body flush" style="overflow-x:auto">
+      <table class="bq">
+        <thead><tr><th>Row</th><th>Client ref</th><th>Item</th><th>Area</th><th class="num">Qty</th><th>Designer</th><th style="width:150px">Level</th><th style="width:90px">Include</th></tr></thead>
+        <tbody>
+          <tr><td class="muted">13</td><td class="mono">S-100</td><td>Sofa</td><td>Rooms</td><td class="num">14</td><td class="mono">PDS</td>
+              <td><button class="btn suggest sm">hero?</button><div class="muted" style="font-size:10.5px;margin-top:2px">the bill says “hero piece”</div></td>
+              <td><input type="checkbox" checked></td></tr>
+          <tr><td class="muted">14</td><td class="mono">S-201</td><td>Armchair</td><td>Rooms</td><td class="num">45</td><td class="mono">PDS</td>
+              <td><button class="btn suggest sm">simple?</button><div class="muted" style="font-size:10.5px;margin-top:2px">nothing suggests otherwise</div></td>
+              <td><input type="checkbox" checked></td></tr>
+          <tr><td class="muted">15</td><td class="mono">S-402</td><td>Bench, brass frame</td><td>Lobby</td><td class="num">6</td><td class="mono">JGD</td>
+              <td><button class="btn suggest sm">complex?</button><div class="muted" style="font-size:10.5px;margin-top:2px">“brass frame” — metalwork</div></td>
+              <td><input type="checkbox" checked></td></tr>
+          <tr><td class="muted">16</td><td class="mono">UP-101</td><td>Headboard</td><td>Suites</td><td class="num">32</td><td class="mono">PDS</td>
+              <td><select class="fake" style="width:100%;padding:3px 7px"><option>— not set —</option></select>
+                  <div class="muted" style="font-size:10.5px;margin-top:2px">nothing to read it from</div></td>
+              <td><input type="checkbox" checked></td></tr>
+          <tr style="background:#fffbeb"><td class="muted">17</td><td class="mono">SX11A</td><td>Stool</td><td>Bar</td><td class="num">4</td><td class="mono">PDS</td>
+              <td><select class="fake" style="width:100%;padding:3px 7px"><option>— not set —</option></select></td>
+              <td><input type="checkbox" checked></td></tr>
+          <tr style="background:#fffbeb"><td class="muted">18</td><td class="mono">SX11A</td><td>Stool</td><td>Bar</td><td class="num">9</td><td class="mono">PDS</td>
+              <td><select class="fake" style="width:100%;padding:3px 7px"><option>— not set —</option></select></td>
+              <td><input type="checkbox" checked></td></tr>
+        </tbody>
+      </table>
+      <div style="padding:9px 14px;background:#fffbeb;border-top:1px solid var(--amber-line);font-size:12.5px;color:#78350f">
+        <b>Rows 17 and 18 carry the same client ref at different quantities.</b> That is normal — a ref is the client&rsquo;s key, not ours.
+        Both become records; each gets its own <span class="mono">record_no</span>.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Read off the rows above the header <span class="sp"></span>
+      <span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">kept on the run as text</span></h2>
+    <div class="body"><p class="muted" style="margin:0">
+      “Prices exclude delivery and installation. Lead time 14 weeks from signed approval. Revision 0 issued 14-Sep-26.”</p></div>
+  </div>
+
+  <div class="ann"><b>Notes</b><ul>
+    <li><b>The page says what it is doing before it does it.</b> One confirm creates 45 records on 3 runs, and the button says so.</li>
+    <li><b>A level is guessed per bill line and accepted a tab at a time</b>, which is where the guess is cheapest to check — you are looking at the words it was read from.</li>
+    <li><b>A duplicate client ref is highlighted and explained</b>, not treated as an error. It is the single most confusing thing in the real pilot bill.</li>
+    <li>Tabs across the top, because a tab is a sub-quote and the three are reviewed independently.</li>
+  </ul></div>
+</div>
+</section>
+<section id="drawings-review" class="screen" hidden><div class="screen-label"><b>Drawings review</b> — A drawing set, staged</div><style>
+.two{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+.pg{background:#fafafa;border:1px solid var(--line);border-radius:8px;height:210px;display:flex;align-items:center;justify-content:center;color:var(--ink-4);font-size:11px}
+.obs td{padding:7px 10px;font-size:12.5px}
+.obs th{padding:7px 10px}
+.guess{background:#fefce8}
+.cfg{border:1px solid var(--line);border-radius:8px;margin-top:10px;overflow:hidden}
+.cfg .ch{padding:8px 12px;font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+.cfg.a .ch{background:#f0f9ff;border-bottom:1px solid #bae6fd;color:#0369a1}
+.cfg.b .ch{background:#f5f3ff;border-bottom:1px solid #ddd6fe;color:#6d28d9}
+@media(max-width:860px){.two{grid-template-columns:1fr}}
+</style>
+<div class="topbar"><span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav><span class="sp"></span>
+  <a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a></div>
+<div class="phead"><div class="row">
+  <div><a class="crumb" href="#">← Pack delivered 15 Sept</a><h1>Apx 1a — SHOP DRAWINGS · SEATING</h1>
+    <p class="sub">11 pages · 6 items · read 15 Sept · <a class="lk" href="#">open the PDF</a></p></div>
+  <div class="acts"><a class="btn" href="#">Review all 9 drawings together</a></div>
+</div><div class="tabs">
+  <a class="tab on" href="#">To review <span class="n">4</span></a>
+  <a class="tab" href="#">Applied <span class="n">2</span></a>
+  <a class="tab" href="#">Ignored <span class="n">1</span></a>
+</div></div>
+<div class="wrap" style="max-width:1200px">
+  <div class="note blue" style="display:flex;align-items:center;gap:10px">
+    <span><b>Item 3 of 6</b> — S-201, drawn on pages 5 and 6 as two configurations.</span>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn quiet sm">◀ Previous</button><button class="btn quiet sm">Next ▶</button>
+  </div>
+
+  <div class="card">
+    <h2><span class="mono" style="font-size:13px;letter-spacing:0;text-transform:none">S-201</span>
+      <span style="letter-spacing:0;text-transform:none;font-weight:500;color:var(--ink)">Armchair</span>
+      <span class="chip" style="margin-left:4px">pages 5, 6</span>
+      <span class="chip blue">2 configurations</span>
+      <span class="sp"></span><button class="btn quiet sm">Ignore this item</button></h2>
+    <div class="body">
+      <div class="two">
+        <div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)">
+            Shared geometry <span style="font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink-3)">— both pages agree · an edit here writes to both</span></div>
+          <table class="obs" style="margin-top:6px;border:1px solid var(--line);border-radius:8px">
+            <thead><tr><th style="width:26%">Label</th><th style="width:16%">Figure</th><th style="width:14%">Unit</th><th style="width:18%">Slot</th><th>BWS field</th></tr></thead>
+            <tbody>
+              <tr class="guess"><td>OVERALL</td><td class="mono">660</td><td><select class="fake" style="padding:2px 6px"><option>mm</option></select></td>
+                  <td><select class="fake" style="padding:2px 6px"><option>W</option></select></td><td class="muted">3 · Dimensions</td></tr>
+              <tr class="guess"><td>OVERALL</td><td class="mono">685</td><td><select class="fake" style="padding:2px 6px"><option>mm</option></select></td>
+                  <td><select class="fake" style="padding:2px 6px"><option>D</option></select></td><td class="muted">3 · Dimensions</td></tr>
+              <tr class="guess"><td>OVERALL</td><td class="mono">680</td><td><select class="fake" style="padding:2px 6px"><option>mm</option></select></td>
+                  <td><select class="fake" style="padding:2px 6px"><option>H</option></select></td><td class="muted">3 · Dimensions</td></tr>
+              <tr class="guess"><td>FRONT</td><td class="mono">445</td><td><select class="fake" style="padding:2px 6px"><option>mm</option></select></td>
+                  <td><select class="fake" style="padding:2px 6px"><option>SH</option></select></td><td class="muted">3 · Dimensions</td></tr>
+            </tbody>
+          </table>
+          <p style="margin:7px 0 0;font-size:12px;background:#fefce8;border:1px solid #fde68a;border-radius:6px;padding:7px 10px;color:#78350f">
+            <b>Yellow rows are guesses.</b> The width, depth and height are each printed on three views and agree; the seat height is on the front elevation only and is the figure nearest 60% of the height. Confirm or correct them.</p>
+          <p class="mono" style="margin:9px 0 0;font-size:13px;background:#fafafa;border:1px solid var(--line);border-radius:6px;padding:8px 10px">
+            W660 x D685 x H680 x SH445mm</p>
+          <p class="muted" style="margin-top:5px;font-size:11.5px">Exactly what BWS field 3 will receive. <button class="btn quiet sm">Show the 32 folded rows</button></p>
+
+          <div class="cfg a">
+            <div class="ch"><span style="width:18px;height:18px;border-radius:4px;background:#0369a1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px">A</span>
+              S-201 A <span class="muted" style="font-weight:400">· page 5</span><span class="sp" style="flex:1"></span>
+              <button class="btn quiet sm">Ignore A</button></div>
+            <table class="obs"><tbody>
+              <tr><td style="width:26%">SEAT &amp; BACK</td><td>Aissa Dione light beige triangle motif, Kolda
+                  <span class="chip mono" style="margin-left:4px">UPH-07</span></td>
+                  <td style="width:22%" class="muted">COM 1</td>
+                  <td style="width:90px;text-align:right"><button class="btn quiet sm">Crop swatch</button></td></tr>
+              <tr><td>LEGS</td><td>Ceruse finish oak <span class="chip mono" style="margin-left:4px">WD-05</span></td>
+                  <td class="muted">Main timber finish</td><td style="text-align:right"><button class="btn quiet sm">Crop swatch</button></td></tr>
+            </tbody></table>
+          </div>
+          <div class="cfg b">
+            <div class="ch"><span style="width:18px;height:18px;border-radius:4px;background:#6d28d9;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px">B</span>
+              S-201 B <span class="muted" style="font-weight:400">· page 6</span><span class="sp" style="flex:1"></span>
+              <button class="btn quiet sm">Ignore B</button></div>
+            <table class="obs"><tbody>
+              <tr><td style="width:26%">SEAT &amp; BACK</td><td>Aissa Dione black/straw diamonds, raffia, Gorée
+                  <span class="chip mono" style="margin-left:4px">CH-01.1</span></td>
+                  <td style="width:22%" class="muted">COM 1</td>
+                  <td style="width:90px;text-align:right"><button class="btn quiet sm">Crop swatch</button></td></tr>
+            </tbody></table>
+          </div>
+        </div>
+
+        <div>
+          <div class="pg">[ page 5 ]</div>
+          <div style="display:flex;gap:6px;margin-top:6px"><button class="btn quiet sm" style="flex:1">page 5</button><button class="btn quiet sm" style="flex:1">page 6</button></div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:9px;margin-top:10px;background:#fff">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)">Item picture</div>
+            <div class="pg" style="height:96px;margin-top:6px">[ crop ]</div>
+            <p class="muted" style="margin:6px 0 0;font-size:11px">The whole page is proposed — this sheet reported no view regions.</p>
+            <div style="display:flex;gap:5px;margin-top:6px"><button class="btn quiet sm" style="flex:1">Drag a box</button><button class="btn quiet sm" style="flex:1">No picture</button></div>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:9px;margin-top:10px;background:#fff">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)">Applies to</div>
+            <label style="display:flex;gap:7px;align-items:center;margin-top:6px;font-size:12.5px"><input type="checkbox" checked> MUR</label>
+            <label style="display:flex;gap:7px;align-items:center;margin-top:4px;font-size:12.5px"><input type="checkbox" checked> MAIN RUN</label>
+            <label style="display:flex;gap:7px;align-items:center;margin-top:4px;font-size:12.5px"><input type="checkbox" checked> MAIN RUN - VE</label>
+            <p class="muted" style="margin:7px 0 0;font-size:11px">One drawing, three runs quoting the same code. Untick a run whose spec genuinely differs.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;background:#fcfcfc">
+      <span class="muted">Writes <b>7 specs</b> to <b>6 records</b> — 2 configurations × 3 runs</span>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn">Ignore the item</button><button class="btn primary">Confirm A and B</button>
+    </div>
+  </div>
+
+  <div class="ann"><b>Notes</b><ul>
+    <li><b>Structure unchanged</b> — one card per code, geometry once, each configuration's own finishes in its own coloured band, applies-to per code. That was asked for and it works.</li>
+    <li><b>Yellow means "this is a guess, confirm it" and the card says which guess.</b> The reason is in one sentence under the table rather than repeated on every row.</li>
+    <li><b>The composed cell is always on screen</b>, right under the figures it was built from, so a wrong unit is visible as the 4.5-metre seat height it would produce.</li>
+    <li><b>The page, the picture and the applies-to are a fixed sidebar</b>, so the drawing stays beside you while you scroll the rows. The footer states exactly what pressing Confirm writes.</li>
+  </ul></div>
+</div>
+</section>
+<section id="email-review" class="screen" hidden><div class="screen-label"><b>Email review</b> — An email, staged</div><style>
+.sr{border-bottom:1px solid var(--line)}
+.sr .hd{display:grid;grid-template-columns:24px 1fr 190px 150px 130px 100px;gap:10px;align-items:center;padding:10px 14px;font-size:13px}
+.sr .hd:hover{background:#fcfcfc}
+.srh{display:grid;grid-template-columns:24px 1fr 190px 150px 130px 100px;gap:10px;padding:8px 14px;background:#fcfcfc;border-bottom:1px solid var(--line);
+  font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.runp{padding:10px 14px 12px 48px;background:#fcfcfc;border-top:1px solid #f0f0ef;font-size:12.5px}
+.runrow{display:grid;grid-template-columns:150px 1fr 120px 90px;gap:10px;align-items:center;padding:6px 0}
+.quote{border-left:3px solid var(--line-2);padding:5px 0 5px 10px;color:var(--ink-2);font-style:italic;font-size:12px}
+</style>
+<div class="topbar"><span class="brand">Project Spec Builder</span><span class="env">STAGING</span>
+  <nav><a href="#" class="on">Projects</a><a href="#">Inbox</a></nav><span class="sp"></span>
+  <a href="#" style="color:#d4d4d4;text-decoration:none">Log out</a></div>
+<div class="phead"><div class="row">
+  <div><a class="crumb" href="#">← Inbox</a><h1>RE: Panther — S-301 desk chair, castors and timber</h1>
+    <p class="sub">Claire Beaumont &lt;claire.beaumont@example.com&gt; · 15 Sept, 17:24 ·
+      on <a class="lk" href="#">AP364c — pantherc</a> <span class="chip blue">auto · sender is a contact</span> ·
+      <a class="lk" href="#">open the .eml</a></p></div>
+  <div class="acts"><button class="btn">Re-match <span class="muted" style="font-weight:400">· free</span></button></div>
+</div><div class="tabs">
+  <a class="tab on" href="#">To review <span class="n">7</span></a>
+  <a class="tab" href="#">Applied <span class="n">0</span></a>
+  <a class="tab" href="#">Ignored <span class="n">0</span></a>
+  <a class="tab" href="#">The message</a>
+</div></div>
+<div class="wrap" style="max-width:1250px">
+  <div class="note blue">
+    <b>7 specifications, each landing on 3 runs.</b> <span class="mono">S-301</span> is on MUR, MAIN RUN and MAIN RUN - VE —
+    one record per run is a fan-out and all three are written together. Untick a run whose spec genuinely differs.
+  </div>
+
+  <div class="card"><div class="body flush">
+    <div class="srh"><div></div><div>What the email says</div><div>Lands on</div><div>Value</div><div>Does what</div><div></div></div>
+
+    <div class="sr">
+      <div class="hd"><input type="checkbox" checked>
+        <div><b>Overall — W660 x D685 x H680mm</b>
+          <div class="quote" style="margin-top:4px">“Overall for the desk chair is W660 x D685 x H680mm, confirmed against the Rev B drawing.”</div></div>
+        <div>Dimensions <span class="chip">W</span><span class="chip">D</span><span class="chip">H</span>
+          <div class="muted" style="font-size:11px">3 slots · 3 proposals</div></div>
+        <div class="mono">660 · 685 · 680 mm</div>
+        <div><span class="chip green">Provides</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:12px">3 runs ▾</a></div></div>
+      <div class="runp">
+        <div class="runrow"><b>MUR</b><span><a class="lk" href="#">AP364c-008 · Desk chair</a></span><span class="muted">was empty</span><span style="text-align:right"><input type="checkbox" checked></span></div>
+        <div class="runrow"><b>MAIN RUN</b><span><a class="lk" href="#">AP364c-031 · Desk chair</a></span><span class="muted">was empty</span><span style="text-align:right"><input type="checkbox" checked></span></div>
+        <div class="runrow"><b>MAIN RUN - VE</b><span><a class="lk" href="#">AP364c-052 · Desk chair</a></span><span class="muted">was empty</span><span style="text-align:right"><input type="checkbox" checked></span></div>
+      </div>
+    </div>
+
+    <div class="sr">
+      <div class="hd"><input type="checkbox" checked>
+        <div><b>Seat height — 445mm</b>
+          <div class="quote" style="margin-top:4px">“Seat height 445mm (measured to top of cushion, compressed).”</div>
+          <div class="muted" style="font-size:11px;margin-top:3px">The qualifier is kept as a note — “445” alone does not say what it measures.</div></div>
+        <div>Dimensions <span class="chip">SH</span></div>
+        <div class="mono">445 mm</div>
+        <div><span class="chip amber">Changes</span><div class="muted" style="font-size:11px">was 430mm</div></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:12px">3 runs ▾</a></div></div>
+      <div class="runp">
+        <div style="background:#fffbeb;border:1px solid var(--amber-line);border-radius:6px;padding:9px 11px;color:#78350f">
+          <b>This replaces a confirmed value on all three runs.</b> 430mm, confirmed 15 Sept off <a class="lk" href="#">Apx 1a p8</a>.
+          <label style="display:flex;gap:7px;align-items:center;margin-top:7px"><input type="checkbox"> I have checked the email and this is the value that should stand.</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="sr">
+      <div class="hd"><input type="checkbox" checked>
+        <div><b>Timber (legs and front rail) — Ceruse finish oak</b>
+          <div class="quote" style="margin-top:4px">“Legs and front rail in ceruse finish oak, WD-05 as the schedule.”</div></div>
+        <div>Main timber finish <span class="chip mono">WD-05</span></div>
+        <div>Ceruse finish oak</div>
+        <div><span class="chip green">Confirms</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:12px">3 runs ▾</a></div></div>
+    </div>
+
+    <div class="sr">
+      <div class="hd"><input type="checkbox" checked>
+        <div><b>Fabric (A configuration) — Kolda</b>
+          <div class="quote" style="margin-top:4px">“Fabric for the A configuration is UPH-07, Kolda.”</div></div>
+        <div>COM 1 <span class="chip mono">UPH-07</span></div>
+        <div>Aissa Dione, Kolda</div>
+        <div><span class="chip" style="background:#fefce8;border-color:#fde68a;color:#78350f">Configuration A</span></div>
+        <div style="text-align:right"><a class="lk" href="#" style="font-size:12px">3 runs ▾</a></div></div>
+      <div class="runp"><div style="background:#fefce8;border:1px solid #fde68a;border-radius:6px;padding:9px 11px;color:#78350f">
+        <b>The email names a configuration and this item has none.</b> Detected, never resolved — a configuration carries no client ref
+        and may not exist. It will be written to the bill line as it stands. <span class="muted">(Still an open decision — see the note below.)</span></div></div>
+    </div>
+
+    <div class="sr">
+      <div class="hd"><input type="checkbox">
+        <div><b>Arm height — 520mm</b></div>
+        <div><span class="chip amber">Not placed</span>
+          <div class="muted" style="font-size:11px">not one of the five slots, no finish code, no question asks it</div></div>
+        <div class="mono muted">520 mm</div>
+        <div class="muted">—</div>
+        <div style="text-align:right"><select class="fake" style="padding:2px 6px;font-size:11.5px"><option>Place it…</option></select></div></div>
+    </div>
+  </div>
+  <div style="padding:12px 16px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;background:#fcfcfc">
+    <span class="muted"><b>6 of 7 ticked</b> · writes 16 specs across 3 records</span>
+    <span class="chip red">1 needs your acknowledgement before it can commit</span>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn">Ignore the rest</button><button class="btn primary" style="opacity:.5">Confirm</button>
+  </div>
+  </div>
+
+  <div class="ann"><b>Notes</b><ul>
+    <li><b>One row per spec, the runs inside it</b> — that structure was asked for and stays. What changes is that the row now has real columns, so <i>what it says / where it lands / what it does</i> line up down the page.</li>
+    <li><b>The sentence it was read from is the provenance.</b> An email has no page to turn to, so the quoted line is what makes a proposal checkable — it belongs on the row, not behind a disclosure.</li>
+    <li><b>The overwrite acknowledgement is on the row, not in a banner at the top.</b> A 400 at the top of the page is nowhere near the row it is about. The Confirm button is disabled and the footer names what is blocking it.</li>
+    <li><b>Re-match says it is free</b>, because every other button on this screen spends money.</li>
+    <li><b>Still open, and shown as open:</b> what to do when an email states a fabric for a configuration that does not exist. That is a decision for you, not a default.</li>
+  </ul></div>
+</div>
+</section>
+<script>
+  var idx = document.getElementById('idx');
+  function go(slug, push){
+    document.querySelectorAll('.screen').forEach(function(s){ s.hidden = s.id !== slug; });
+    idx.querySelectorAll('button').forEach(function(b){
+      if (b.dataset.go === slug) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
+    });
+    if (push) history.replaceState(null, '', '#' + slug);
+    window.scrollTo(0, 0);
+  }
+  idx.addEventListener('click', function(e){
+    var b = e.target.closest('button[data-go]');
+    if (b) go(b.dataset.go, true);
+  });
+  var first = document.querySelector('.screen').id;
+  go((location.hash || '').replace('#','') || first, false);
+</script>
