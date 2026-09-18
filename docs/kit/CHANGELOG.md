@@ -4,6 +4,22 @@ Dated entries whenever a kit rule, template or chassis file changes. Record the
 reason, not just the change — the reason is what tells a future reader whether
 it still applies.
 
+## 2026-09-18 — a `new-screen` skill, and `verify` checks for the chip
+
+The design language was written down (`docs/design-language.md`) and a skill
+added for the procedure of building or restyling a screen to it —
+`.claude/skills/new-screen/SKILL.md`, mirrored to `.agents/skills/`. It exists
+because the first attempt at the approved mock-ups was "inspired by" them and
+Max found the two not like for like; a procedure that ends with "put it beside
+the mock-up tab" is what makes that fault a checklist item rather than a
+discovery.
+
+`verify/SKILL.md` used to tell a verifier to look for "the staging banner".
+There is no banner any more (the entry below), so a verifier following the old
+line would have reported a missing marker on every page. It now names the chip
+and the design-page comparison. A stale skill is followed confidently, which is
+worse than an absent one.
+
 ## 2026-09-18 — the environment banner becomes a chip in the top bar
 
 `house/conventions.md` §2 said "a persistent banner". It now says "an

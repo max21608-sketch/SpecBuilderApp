@@ -2437,6 +2437,66 @@ answer is unknown: that rule is about spec VALUES, which get exported and quoted
 against. A picture is an aid to recognising an item, and the reviewer is looking
 straight at it.
 
+### Every screen is three bands, and the primitives are the language
+
+`docs/design-language.md`, `docs/design/spec-builder-mockups.html`,
+`src/components/ui/` (`tone.ts`, `PageHeader`, `PageBody`, `Tabs`, `Card`,
+`Table`, `Chip`, `Pill`, `Note`, `SuggestButton`), `src/lib/use-url-tab.ts`,
+`/dashboard/design`, the `new-screen` skill
+
+Max drew sixteen mock-ups on 2026-09-18 and signed them off, and the first
+attempt at building them treated the file as a direction: tiles were
+substituted wherever the approved one needed data that was not already loaded,
+and the two were not like for like when he put them side by side (`17ff4e0`).
+Every screen was then rebuilt to the file, and the rules it carries were
+written down so the next screen does not have to rediscover them.
+
+- **The mock-up file wins.** It is committed at `docs/design/` and is the
+  acceptance artefact; `docs/design-language.md` says why each rule exists and
+  `/dashboard/design` renders the primitives with the rule beside each. Where
+  a built screen and the file disagree, the screen is wrong — the named
+  deviations (TGQ for "Needed to quote", two widths, the three outputs in the
+  header, the code's letter palette, no Columns chooser) are listed in the doc.
+- **Colour is a meaning and lives in ONE file.** `tone.ts` holds eight tones
+  as COMPLETE literal class strings — Tailwind's JIT purges anything it cannot
+  read in source, so `bg-${tone}-700` renders unstyled with no error, and
+  `tests/lib/tone.test.ts` guards it. Green is settled EVERYWHERE, which is
+  why it belongs to COMPLETED and not ACTIVE: two screens had that inverted
+  under a comment claiming they matched, and `PROJECT_STATE_TONE` beside the
+  label is what stopped a screen picking its own. Yellow (a guess, a whole
+  row) and amber (needs a person) are different and a row can be both; slate
+  dashed (nowhere to record it) is deliberately never red.
+- **Three bands, two widths.** `PageHeader` is the one `h1`, ALWAYS 1100px
+  wide; `PageBody` is `std` or `wide`. The header row wraps and the title has
+  a floor (`min-w-[18rem]`): with `shrink-0` on the actions the project name
+  became an 80px column beside the export cluster.
+- **A tab strip anything links INTO lives in the URL** (`useUrlTab`); one
+  nested in a review component keeps `useState`. The hook never writes on
+  read — while runs are loading the fallback renders and `?tab=<runId>` is
+  left alone, or the record screen's back link would be destroyed by the page
+  it points at.
+- **A suggestion is a component with a REQUIRED evidence prop, not a fifth
+  `Button` variant.** The four variants grade an action's consequence; a
+  `SuggestButton` could otherwise be used with no evidence beside it, which is
+  a guess accepted blind.
+- **Every number the mock-up shows comes from the loader that already computes
+  it.** `loadOutstanding` + `groupByContact` for Owes us, `waitingByQuestion`
+  for "chased 15 Sept", `describeChange` for the inbox's "n change a confirmed
+  value", `gatesForRecord` for the matrix table — never a SQL re-expression,
+  which is how two screens came to disagree about TGQ. Where the data does not
+  exist the element is omitted and the gap is written down, never replaced
+  with a number that happened to be free.
+- **The environment marker is a chip, not a banner**, at Max's decision, and
+  `house/conventions.md` §2 was changed to say so rather than departed from.
+  `EnvironmentChip` is a server component passed INTO `NavShell`, because a
+  client fetch fails toward hiding it on exactly the deployment that matters.
+
+The DOM rules a restyle breaks silently are collected in the doc: a spanning
+panel is its own `<tr>`, no `overflow-hidden` on a sticky-header table
+wrapper, `clampText` not CSS `line-clamp`, `onCropped` in a ref, the record
+picture a grid track. **Human acceptance is outstanding on every screen** until
+Max has put each beside its mock-up tab.
+
 ## Load-bearing files
 
 Read these before changing the behaviour they govern, and do not duplicate
@@ -2488,6 +2548,7 @@ in the UK.
 | Incident triage, recovery, rollback | `docs/recovery.md` |
 | External integrations: scope, setup, activation | `docs/integration.md` |
 | The BWS field grid: blocks, order, and how each field is written | `docs/bws-spec-grid.md` |
+| The design language: the eight rules, the tones, the primitives, the DOM traps | `docs/design-language.md` (and `/dashboard/design`) |
 | Accepting the export against the pack: the check sheet and its verdicts | `docs/plans/export-verification.md` |
 | Accepting the DRAWINGS REVIEW against the pack: the per-card checklist | `docs/plans/intake-review-verification.md` |
 | Releases, dated decisions, what is still open | `docs/plans/README.md` |
@@ -2498,7 +2559,7 @@ in the UK.
 Task procedures live in `.claude/skills/`, mirrored to `.agents/skills/` — keep
 the copies identical: `verify`, `new-migration`, `ship-to-staging`,
 `queue-backed-job`, `extraction-pipeline`, `review-and-confirm`,
-`email-draft-and-send-gate`, `external-vocabulary-sync`. If a skill goes stale,
+`email-draft-and-send-gate`, `external-vocabulary-sync`, `new-screen`. If a skill goes stale,
 fix it here and add a dated entry to `docs/kit/CHANGELOG.md` — a stale skill is
 followed confidently, which is worse than an absent one.
 
@@ -2865,6 +2926,30 @@ other staged runs are untouched and still version 1, which is what versioning th
 staged shape is for. **Not accepted by Max**, and the intake classification path
 has never been driven with real files.
 
+**Built 2026-09-18, the app is what was signed off — the design language.**
+Max drew sixteen mock-ups (`docs/design/spec-builder-mockups.html`) and the
+whole app was rebuilt to them in one day: a dark top bar with the environment
+chip and an unplaced-mail bubble, a header band and URL-backed tabs on every
+screen, two content widths, one tone vocabulary, and the screens themselves —
+sign-in, projects list, project overview, spec table, the record's four tabs,
+finishes library, chase, inbox, intake pack, BOQ review, drawings review,
+email review — each built to its tab of the file. Five loaders were added so
+every number the mock-ups show is real (Owes us, per-question waiting, quote
+readiness, the gate matrix rows, what an email found), each calling the single
+implementation that already existed. The rules are in
+`docs/design-language.md`, rendered at `/dashboard/design`, and the procedure
+is the `new-screen` skill. Found and fixed on the way: the two inverted
+`STATE_PILL` maps, the title squeezed by the export cluster, a held inbox row
+printing "specs" with no number, "n days ago" counting hours, a filename
+wrapping a row to six lines, an email review labelling a fabric "Dimensions",
+and both open `found-in-use.md` entries on the record screen. **Not built:**
+the spec table's Columns chooser, per-spec ticks on the email review (a confirm
+is per RECORD and refuses a subset), "Bring them in" on the finishes page
+(`createFinish` links nothing), a chase email preview, and a configuration's
+quantity. **Verified in the browser against the sandbox DEMO-TEST-01 by the
+agents that built each screen and by a walk of the projects list, overview,
+run tab and record tabs; not accepted by Max on any screen.**
+
 **Outstanding — judgement, not code.**
 
 - **Nobody has used any of this.** The four checks pass with the database tier
@@ -2967,8 +3052,9 @@ that must pass in BOTH directions.
 **The chase screen is grouped by furniture line (2026-09-17).** One row per
 BOQ item, collapsed, in a table, with its finish options nested under it and a
 search and filters above — see the load-bearing section. The screen is full
-width; every OTHER dashboard screen is still `max-w-5xl mx-auto`, which Max
-asked to change app-wide and which has NOT been done. **Verified by the four
+width; as of 2026-09-18 every dashboard screen is one of TWO widths through
+`PageBody` (1100px, or 1400px for a dense table) — see
+`docs/design-language.md`. **Verified by the four
 checks and by 20 new tests across the pure and component tiers; nobody has
 looked at it against real data.**
 

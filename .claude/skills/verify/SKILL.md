@@ -61,7 +61,14 @@ repo dependency, and neither belongs in one.
 - The happy path.
 - **At least one failure path.** Malformed input, a 500, a concurrent edit.
   Error paths are where the "busy state stuck forever" bugs live.
-- The staging banner and `[STAGING]` title are present on non-production.
+- The environment chip (yellow `STAGING` / `DEV`) is in the dark top bar on
+  every dashboard page and under the sign-in card, and `[STAGING]` is in the
+  title, on non-production. There is no full-width banner any more (2026-09-18,
+  Max's decision against the approved mock-ups); a screen without the chip is
+  a screen whose layout dropped it.
+- The screen matches its tab in `docs/design/spec-builder-mockups.html` like
+  for like — same bands, same tiles, same columns. "Inspired by" is the fault
+  that cost the first attempt (`17ff4e0`). See the `new-screen` skill.
 - `/api/auth/me` reports the environment you think you are in.
 
 ## The drawings review has its own procedure

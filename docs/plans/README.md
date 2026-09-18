@@ -1333,3 +1333,91 @@ session had no signed-in browser to drive.
   is the obvious next step and is not built.
 - **No finish option exists in the sandbox**, so the nested level has been
   exercised by tests and by a mock-up, never against real data.
+
+## 2026-09-18 — the app is what was signed off: the design language
+
+Max drew sixteen mock-ups of the app (`docs/design/spec-builder-mockups.html`,
+committed the same day so the acceptance artefact outlives a scratchpad) and
+asked for them to be built, the rest of the app brought onto the same
+language, and the language recorded. Three earlier commits that day
+(`17ff4e0`, `2f8ab4a`, `1d5cb0c`) had rebuilt eight of the screens' CONTENT
+against the same file and touched no shared chrome; none of them was recorded
+here, so this entry covers them too.
+
+**Decisions taken by Max in the planning session:** the environment banner
+becomes a chip in the top bar, as drawn, and `house/conventions.md` §2 is
+changed rather than departed from (the fabric-ordering app still carries the
+banner and is NOT reached by this); every data-backed element in the mock-ups
+is built with its loader rather than omitted or substituted; the language is
+recorded three ways — `docs/design-language.md`, the `new-screen` skill, and a
+live `/dashboard/design` page rendering the real primitives.
+
+**Built, one commit per piece, the four checks green at each:**
+
+- The shell: a dark top bar with the brand, the `EnvironmentChip` (a server
+  component passed INTO `NavShell`, so it fails toward showing), the two nav
+  items with a red bubble of unplaced mail (`GET /api/email-messages/count`),
+  Log out; `<main>` owns no width. Sign-in is a centred card with the chip
+  under it.
+- The primitives in `src/components/ui/`: `tone.ts` (eight tones as literal
+  class strings, purge-guarded by `tests/lib/tone.test.ts`), `Chip`, `Pill`,
+  `Note`, `PageHeader`, `PageBody` (1100 / 1400), `Tabs` + `useUrlTab`,
+  `Card`, `Table`, `SuggestButton`; `StatTile` rewired onto the tones;
+  `formatDay` shared; 14px body and four named sizes set once. The two
+  inverted `STATE_PILL` maps are gone — `PROJECT_STATE_TONE` sits beside the
+  label.
+- Every screen in the file, to its tab: projects list, project overview (details
+  grid, five tiles, the Specifications table with Unresolved finish codes and
+  Documents that failed to read, Source documents as pack + files, Contacts with
+  Owes us, History with baseline and key-date bars), spec table (`wide`, per-run
+  subtitle and actions, inline `SuggestButton` levels), the record's four tabs
+  (sticky picture and Quote readiness sidebar; a checklist opening on the TGQ
+  filter with a Source column that is the next action; three gate boards
+  splitting "n to answer" from "n nowhere to record"; versions chosen by
+  clicking two rows with baseline bars between them and the stored cells
+  beside the atom diff), finishes library as a table, chase with contact tabs
+  and `?contactId=`, inbox as tabs and tables with "what it found", intake pack,
+  BOQ review, email review as a four-column grid, drawings review with a sticky
+  sidebar. `/dashboard` redirects to the projects list.
+- Five loaders, each calling the single implementation that already existed:
+  `waiting` / `designerContact` / `quoteReadiness` / `matrixFields` on the
+  record payload; `contactsOutstanding` (three buckets — a record with a
+  contact but no level is its own column) / `unlinkedFinishCodes` /
+  `failedDocuments` on the project payload; `found` / `chaseReply` /
+  `arrivedToday` / `ruledThisWeek` on the inbox; `baselines` on the record
+  history. Db-tier tests for each.
+- The record: `docs/design-language.md`, a load-bearing section in CLAUDE.md,
+  the `new-screen` skill (mirrored), the `verify` skill corrected from banner
+  to chip, `/dashboard/design`, and this entry.
+
+**Found on the way and fixed:** the title squeezed to an 80px column by the
+export cluster; a held inbox row printing "specs" with no number; "n days ago"
+counting hours; a filename wrapping a row to six lines; the email review
+labelling a fabric "Dimensions · COM 3"; a drawings card with only row-level
+blockers showing an empty sentence; both open `found-in-use.md` entries on the
+record screen.
+
+**Deliberately not built, each with its reason in `docs/design-language.md`:**
+the Columns chooser, per-spec ticks on the email review, "Bring them in" on the
+finishes page, a chase email preview, a configuration's quantity.
+
+### Verified
+
+By the agent that built each screen, in a browser against the sandbox
+DEMO-TEST-01 (read only, nothing confirmed or written), and by a second walk of
+the sign-in page, projects list, overview, a run tab and all four record tabs.
+`960 passed | 283 skipped` at the last full run; lint, typecheck and build
+green in an isolated worktree — a `next build` in the working directory
+clobbers the `.next` a dev server is using, and did, three times.
+
+### Still open
+
+- **Not accepted by Max on any screen.** Acceptance is each screen beside its
+  mock-up tab.
+- Seven db-tier tests fail on the sandbox for reasons that predate this work
+  (`chase-drafts` ×3, `intake-routes` ×3, `project-overview` ×1 — confirmed
+  failing at `b3a5f95`); they need re-reading against the TGQ-matrix change of
+  18 Sept, not against this.
+- `spec_description` / `internal_notes` are not record atoms, so a hand edit
+  of either is a version with an empty diff.
+- The fabric-ordering app still carries the banner this app dropped.
