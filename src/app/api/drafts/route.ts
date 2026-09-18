@@ -33,6 +33,7 @@ import {
   type ProjectContact,
 } from "@/lib/chase-drafts";
 import { isQuestionTier } from "@/lib/tgq";
+import { loadProjectSummary } from "@/lib/project-summary";
 
 export const dynamic = "force-dynamic";
 
@@ -75,10 +76,11 @@ export async function GET(request: Request): Promise<Response> {
       row.capsule_synced_at === null || row.capsule_synced_at === undefined ? null : String(row.capsule_synced_at),
   }));
 
-  const [outstanding, uncategorised, sentCoverage] = await Promise.all([
+  const [outstanding, uncategorised, sentCoverage, summary] = await Promise.all([
     loadOutstanding(projectId),
     loadUncategorisedRecords(projectId),
     loadSentCoverage(projectId),
+    loadProjectSummary(projectId),
   ]);
 
   const waiting = waitingByQuestion(outstanding, sentCoverage);
@@ -216,6 +218,11 @@ export async function GET(request: Request): Promise<Response> {
     contacts,
     drafts,
     inventory: {
+      // HOW MANY FURNITURE LINES THIS PROJECT HAS, in the export's scope — the
+      // same count the overview's Line items tile shows, so the two screens
+      // cannot report different sizes for one project. Questions alone cannot
+      // give it: a line with nothing outstanding contributes none.
+      lineCount: summary.records,
       // Grouped by the contact each record's designer resolves to.
       groups: groups.map((group) => ({
         contact: group.contact,

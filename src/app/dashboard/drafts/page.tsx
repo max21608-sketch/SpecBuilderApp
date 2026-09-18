@@ -114,6 +114,8 @@ type Levelless = {
 
 type Inventory = {
   groups: { contact: Contact; questions: Question[] }[];
+  /** Furniture lines in the export's scope — the overview's Line items count. */
+  lineCount: number | null;
   blocked: Blocked[];
   suggestedCodes: string[];
   uncategorised: { recordId: string; recordLabel: string; itemDescription: string }[];
@@ -322,6 +324,20 @@ function DraftsView() {
   if (!data) return <Spinner label="Loading chase emails" />;
 
   const { inventory, project } = data;
+
+  /**
+   * How many furniture LINES this project has, and how many are done.
+   *
+   * Counted over every record the inventory knows about, not over the
+   * questions: a line with nothing outstanding contributes no question and
+   * would be invisible in a question count, which is exactly the line the
+   * second half of this tile is about.
+   */
+  const lineTotals = (() => {
+    const withWork = new Set(inventory.groups.flatMap((group) => group.questions.map((q) => q.recordId)));
+    const settled = inventory.lineCount == null ? 0 : Math.max(0, inventory.lineCount - withWork.size);
+    return { lines: inventory.lineCount ?? withWork.size, settled };
+  })();
   const activeDrafts = data.drafts.filter((d) => d.status === "draft");
 
   return (
@@ -362,14 +378,18 @@ function DraftsView() {
           value={inventory.totals.waiting}
           meaning="asked, nothing back"
         />
+        {/* THE UNIT ON SCREEN. The table below is one row per furniture line,
+            not one per question, so the count that says how big the job is is a
+            count of LINES. How many have nothing left is the second half of it:
+            a line with nothing outstanding contributes no row, and "11 lines"
+            over eight visible rows is a question about the data. */}
         <StatTile
-          label="Cannot be chased"
-          tone={inventory.totals.blockedRecords > 0 ? "warn" : "plain"}
-          value={inventory.totals.blockedRecords}
+          label="Furniture lines"
+          value={lineTotals.lines}
           meaning={
-            inventory.totals.blockedRecords > 0
-              ? "no level or no category"
-              : "every record can be chased"
+            lineTotals.settled > 0
+              ? `${lineTotals.settled} with nothing outstanding`
+              : "every one has something outstanding"
           }
         />
       </div>

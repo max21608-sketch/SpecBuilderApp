@@ -174,7 +174,7 @@ function Output({
 }
 
 /** What the tiles above the table can narrow it to. Null lists everything. */
-type Focus = null | "tgq" | "outstanding" | "no_category" | "no_level" | "quotable";
+type Focus = null | "tgq" | "waiting" | "no_category" | "no_level" | "quotable";
 
 export default function SpecTable({
   projectId,
@@ -271,22 +271,14 @@ export default function SpecTable({
   const tally = {
     toQuote: records.reduce((sum, record) => sum + (record.to_quote_outstanding ?? 0), 0),
     toQuoteItems: records.filter((record) => (record.to_quote_outstanding ?? 0) > 0).length,
-    alsoOutstanding: records.reduce(
-      (sum, record) =>
-        sum +
-        Math.max(
-          0,
-          n(record.spec_tbc) +
-            n(record.spec_missing) +
-            n(record.ready_tbc) +
-            n(record.ready_missing) -
-            (record.to_quote_outstanding ?? 0),
-        ),
-      0,
-    ),
+    waiting: records.reduce((sum, record) => sum + (record.waiting ?? 0), 0),
     noCategory: records.filter((record) => !record.category_name).length,
     noLevel: records.filter((record) => !record.level).length,
-    configurations: records.filter((record) => record.variant_label).length,
+    // TGQ SATISFIED, which is a smaller claim than "nothing outstanding" and
+    // the only one this screen can make. A record with no level is out: nothing
+    // on it is tiered under the fallback half of TGQ, so calling it ready would
+    // be a reading of silence.
+    readyToQuote: records.filter((record) => record.to_quote_outstanding === 0).length,
   };
 
   /** What the table lists. The tiles narrow this and nothing else. */
@@ -294,10 +286,8 @@ export default function SpecTable({
     switch (focus) {
       case "tgq":
         return (record.to_quote_outstanding ?? 0) > 0;
-      case "outstanding":
-        return (
-          n(record.spec_tbc) + n(record.spec_missing) + n(record.ready_tbc) + n(record.ready_missing) > 0
-        );
+      case "waiting":
+        return (record.waiting ?? 0) > 0;
       case "no_category":
         return !record.category_name;
       case "no_level":
@@ -428,38 +418,29 @@ export default function SpecTable({
       {records.length > 0 && (
         <div className="mt-3 grid grid-cols-2 gap-2.5 lg:grid-cols-5">
           <StatTile
-            label="Line items"
-            value={records.length}
-            meaning={tally.configurations > 0 ? `${tally.configurations} configurations` : "no configurations"}
-            action={focus === null ? undefined : "show all"}
-            href={focus === null ? undefined : "#"}
-            onPress={() => setFocus(null)}
-            active={focus === null}
-          />
-          <StatTile
             label="TGQ"
             tone="danger"
             value={tally.toQuote}
-            meaning={`across ${tally.toQuoteItems} item${tally.toQuoteItems === 1 ? "" : "s"}`}
-            action="show only these"
+            meaning={`${tally.toQuoteItems} of ${records.length} item${records.length === 1 ? "" : "s"}`}
+            action={focus === "tgq" ? "showing these" : "show only these"}
             onPress={() => setFocus(focus === "tgq" ? null : "tgq")}
             active={focus === "tgq"}
           />
           <StatTile
-            label="Also outstanding"
+            label="Waiting on a reply"
             tone="warn"
-            value={tally.alsoOutstanding}
-            meaning="not blocking a quote"
-            action="show only these"
-            onPress={() => setFocus(focus === "outstanding" ? null : "outstanding")}
-            active={focus === "outstanding"}
+            value={tally.waiting}
+            meaning="chased, nothing back"
+            action="filter"
+            onPress={() => setFocus(focus === "waiting" ? null : "waiting")}
+            active={focus === "waiting"}
           />
           <StatTile
             label="No category"
             tone={tally.noCategory > 0 ? "warn" : "plain"}
             value={tally.noCategory}
             meaning="no questions at all"
-            action="show only these"
+            action="filter"
             onPress={() => setFocus(focus === "no_category" ? null : "no_category")}
             active={focus === "no_category"}
           />
@@ -467,10 +448,23 @@ export default function SpecTable({
             label="No level"
             tone={tally.noLevel > 0 ? "warn" : "plain"}
             value={tally.noLevel}
-            meaning={suggestedLevels > 0 ? `${suggestedLevels} with a suggestion` : "nothing suggested"}
-            action="show only these"
+            meaning={suggestedLevels > 0 ? `${suggestedLevels} have a suggestion` : "nothing suggested"}
+            action="filter"
             onPress={() => setFocus(focus === "no_level" ? null : "no_level")}
             active={focus === "no_level"}
+          />
+          {/* READY TO QUOTE is not "nothing outstanding": it is TGQ satisfied,
+              which is a smaller claim and the only one this screen can make.
+              A record with no level is NOT counted — nothing on it is tiered
+              under the fallback, so "ready" would be a reading of silence. */}
+          <StatTile
+            label="Ready to quote"
+            tone="good"
+            value={tally.readyToQuote}
+            meaning="TGQ satisfied"
+            action="filter"
+            onPress={() => setFocus(focus === "quotable" ? null : "quotable")}
+            active={focus === "quotable"}
           />
         </div>
       )}

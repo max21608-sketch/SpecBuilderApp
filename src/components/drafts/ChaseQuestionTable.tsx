@@ -119,9 +119,15 @@ export default function ChaseQuestionTable({
   const lines = useMemo(() => groupIntoLines(questions), [questions]);
 
   const contacts = useMemo(() => {
-    const byId = new Map<string, string>();
-    for (const question of questions) byId.set(question.contactId, question.contactName);
-    return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    const byId = new Map<string, { name: string; count: number }>();
+    for (const question of questions) {
+      const held = byId.get(question.contactId);
+      if (held) held.count += 1;
+      else byId.set(question.contactId, { name: question.contactName, count: 1 });
+    }
+    return [...byId.entries()]
+      .map(([id, entry]) => ({ id, name: entry.name, count: entry.count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [questions]);
 
   const runs = useMemo(() => {
@@ -248,20 +254,44 @@ export default function ChaseQuestionTable({
           </div>
         </div>
 
+        {/* THE RECIPIENT IS THE PRIMARY AXIS, NOT A DROPDOWN.
+            ==============================================================
+            A chase is written to ONE person, so the question a reader is
+            holding is "what do I owe Hayley" — and that was the fifth control
+            in a row of filters. It is a tab bar, with each recipient's own
+            outstanding count on it, so the size of each conversation is
+            visible before clicking.
+
+            It is still the SAME `filters.contactId` the dropdown set, which is
+            what keeps the rule intact: a filter narrows what is LISTED, never
+            what is ASKED. Tick questions for Hayley, switch to Claire, and the
+            footer says how many ticked questions are hidden — they are still in
+            the draft. */}
+        {contacts.length > 1 && (
+          <div className="mt-2 flex flex-wrap gap-0.5 border-b border-neutral-200">
+            {[{ id: "", name: "Everyone", count: questions.length }, ...contacts].map((contact) => (
+              <button
+                key={contact.id || "all"}
+                type="button"
+                onClick={() => setFilters((prev) => ({ ...prev, contactId: contact.id }))}
+                aria-current={filters.contactId === contact.id ? "page" : undefined}
+                className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
+                  filters.contactId === contact.id
+                    ? "border-neutral-900 font-semibold text-neutral-900"
+                    : "border-transparent text-neutral-500 hover:text-neutral-800"
+                }`}
+              >
+                {contact.name}
+                <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
+                  {contact.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-700">
           <span className="text-neutral-500">Filter</span>
-          <select
-            value={filters.contactId}
-            onChange={(event) => setFilters((prev) => ({ ...prev, contactId: event.target.value }))}
-            className="border border-neutral-300 rounded px-2 py-1 bg-white"
-          >
-            <option value="">Any contact</option>
-            {contacts.map((contact) => (
-              <option key={contact.id} value={contact.id}>
-                {contact.name}
-              </option>
-            ))}
-          </select>
           <select
             value={filters.runId}
             onChange={(event) => setFilters((prev) => ({ ...prev, runId: event.target.value }))}

@@ -314,7 +314,7 @@ export default function ProjectsPage() {
       {(projects ?? []).length > 0 && (
         <div className="mt-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
           <StatTile
-            label="Needed to quote"
+            label="TGQ"
             tone={totals.toQuote > 0 ? "danger" : "good"}
             value={totals.toQuote}
             meaning={`across ${totals.withWork} project${totals.withWork === 1 ? "" : "s"}`}
@@ -394,9 +394,9 @@ export default function ProjectsPage() {
                 <th className="px-4 py-2 font-medium w-[14%]">Client</th>
                 <th className="px-4 py-2 font-medium text-right w-[8%]">Items</th>
                 <th className="px-4 py-2 font-medium text-right w-[11%]">
-                  To quote
+                  TGQ
                   <Tip>
-                    TGQ — questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for the
+                    Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for the
                     category, the older per-level model where he has not.
                   </Tip>
                 </th>

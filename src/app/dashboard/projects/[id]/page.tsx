@@ -444,11 +444,12 @@ function ProjectOverview() {
       setTab(wantedTab);
       return;
     }
-    // Old links said ?tab=history. History is on the Overview now, so that is
-    // where they land rather than on an empty screen.
-    if (wantedTab === "history") {
+    // ?tab=history and ?tab=documents are real tabs again (2026-09-18), so an
+    // old link lands where its name says rather than being redirected to the
+    // Overview — which is where they went while the two were cards only.
+    if (wantedTab === "history" || wantedTab === "documents") {
       tabPreselected.current = true;
-      setTab("overview");
+      setTab(wantedTab);
       return;
     }
     if (runs.length === 0) return;
@@ -659,6 +660,135 @@ function ProjectOverview() {
     className: "w-full border border-neutral-300 rounded px-3 py-2 text-sm",
   });
 
+  /**
+   * THE TWO CARDS THAT ARE ALSO TABS.
+   *
+   * Held in a variable and rendered twice — once on the Overview where they
+   * have always been, once on their own tab — so the two can never drift into
+   * showing different things. A second copy of a hundred lines of JSX is how a
+   * tab starts saying something the card does not.
+   */
+  const historyCard = (
+    <Card title="Versions and history">
+      <ProjectHistory projectId={project.id} specsAgreedBy={project.specs_agreed_by} />
+    </Card>
+  );
+  const documentsCard = (
+    <Card title="Source documents">
+    <p className="mt-1 text-xs text-neutral-500">
+      Drop the whole tender pack in at once — the bill of quantities, the drawings, and the preamble if there is
+      one. Each file&rsquo;s kind is declared, because a BOQ and a schedule are both spreadsheets and the bytes
+      cannot say which is which.
+    </p>
+    <IntakeBatchUpload projectId={project.id} onUploaded={() => void load()} />
+    {/* GROUPED BY PACK, and each pack links to its own screen.
+        A delivery's runs used to be listed flat, so the two screens that
+        read a whole pack -- the pack screen with its Read all, and the
+        combined drawings review, which is the ONLY place a record described
+        by two documents is named -- were reachable solely from the redirect
+        that fires once after upload. Navigate away and there was no route
+        back to either except browser history. */}
+    {documents === null ? (
+      <div className="mt-3"><Spinner label="Loading documents" /></div>
+    ) : packs.length === 0 ? (
+      <p className="mt-2 text-sm text-neutral-600">
+        Nothing imported yet. Start with the bill of quantities — it creates this project&rsquo;s spec records.
+      </p>
+    ) : (
+      packs.map((pack) => {
+        const drawings = pack.runs.filter((run) => run.document_kind === "shop_drawings");
+        const unread = pack.runs.filter((run) => run.status === "pending" || run.status === "failed");
+        return (
+          <div key={pack.id ?? "unpacked"} className="mt-3 border border-neutral-200 rounded-lg bg-white">
+            <div className="px-4 py-2 border-b border-neutral-200 bg-neutral-50 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <p className="text-sm font-medium text-neutral-900">
+                {pack.id
+                  ? (pack.label ?? `${pack.runs.length} document${pack.runs.length === 1 ? "" : "s"}`)
+                  : "Not part of a pack"}
+              </p>
+              {/* The count is NOT repeated here: a pack's default label is
+                  already "10 documents", and the two together read as
+                  twenty. */}
+              <p className="text-xs text-neutral-500">
+                {pack.id ? (
+                  <>
+                    delivered {new Date(pack.createdAt).toLocaleDateString("en-GB")}
+                    {unread.length > 0 && <> · {unread.length} not read yet</>}
+                  </>
+                ) : (
+                  <>Uploaded before deliveries were grouped. Nothing is wrong with them.</>
+                )}
+              </p>
+              {pack.id && (
+                <span className="ml-auto flex flex-wrap items-center gap-2">
+                  {/* Only when there is more than one, because the combined
+                      screen exists for what can only be seen ACROSS
+                      documents. One drawing has nothing to compare. */}
+                  {drawings.length > 1 && (
+                    <Link
+                      href={`/dashboard/projects/${project.id}/intake/${pack.id}/drawings`}
+                      className="text-sm px-3 py-1 rounded bg-neutral-900 text-white hover:bg-neutral-700"
+                    >
+                      Review all {drawings.length} drawings together
+                    </Link>
+                  )}
+                  <Link
+                    href={`/dashboard/projects/${project.id}/intake/${pack.id}`}
+                    className="text-sm px-3 py-1 rounded border border-neutral-300 hover:bg-neutral-100"
+                  >
+                    Open the pack
+                  </Link>
+                </span>
+              )}
+            </div>
+            <ul className="divide-y divide-neutral-200">
+              {pack.runs.map((run) => (
+                <li key={run.id} className="px-4 py-3 flex items-center gap-4 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-neutral-900">
+                      {run.filename ?? "Unnamed file"}
+                      <span className="text-neutral-500">
+                        {" · "}
+                        {(run.document_kind && KIND_LABELS[run.document_kind]) ?? SOURCE_LABELS[run.source_kind] ?? run.source_kind}
+                      </span>
+                    </p>
+                    <p className="text-xs text-neutral-500">
+                      {new Date(run.created_at).toLocaleString("en-GB")}
+                      {run.created_by ? ` · ${run.created_by}` : ""}
+                      {run.source_preserved ? "" : " · original not kept"}
+                    </p>
+                    {run.status === "failed" && run.error && (
+                      <p className="mt-1 text-xs text-red-700">{run.error}</p>
+                    )}
+                  </div>
+                  <span
+                    className={`shrink-0 text-xs px-2 py-0.5 rounded border ${
+                      run.status === "failed"
+                        ? "text-red-800 border-red-300 bg-red-50"
+                        : run.status === "confirmed"
+                          ? "text-green-800 border-green-300 bg-green-50"
+                          : "text-neutral-700 border-neutral-300 bg-neutral-50"
+                    }`}
+                  >
+                    {intakeStatusLabel(run.status)}
+                  </span>
+                  <Link
+                    href={`/dashboard/imports/${run.id}`}
+                    className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
+                  >
+                    Open
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })
+    )}
+
+    </Card>
+  );
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex flex-wrap items-baseline gap-3">
@@ -756,6 +886,46 @@ function ProjectOverview() {
           }`}
         >
           Finishes
+        </button>
+        {/* DOCUMENTS AND HISTORY ARE TABS TOO.
+            ==============================================================
+            Both were cards on the Overview, which means both disappeared the
+            moment anybody clicked a run — the same reason Finishes became a tab
+            on 2026-09-17. "Which documents have we had" and "what changed last
+            week" are asked from anywhere on a project, not only while looking
+            at the overview.
+
+            The CARDS stay on the Overview as well. A tab and a card are two
+            ways to the same place, which costs nothing and is the point:
+            reaching for a tab or scrolling to a card depends on whether you
+            already know where you are going. Both render the SAME JSX, held in
+            one variable, so they cannot drift. */}
+        <button
+          type="button"
+          onClick={() => setTab("documents")}
+          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
+            tab === "documents"
+              ? "border-neutral-900 text-neutral-900 font-medium"
+              : "border-transparent text-neutral-500 hover:text-neutral-800"
+          }`}
+        >
+          Documents
+          {(documents?.length ?? 0) > 0 && (
+            <span className="ml-1.5 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
+              {documents?.length}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("history")}
+          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
+            tab === "history"
+              ? "border-neutral-900 text-neutral-900 font-medium"
+              : "border-transparent text-neutral-500 hover:text-neutral-800"
+          }`}
+        >
+          History
         </button>
         {/* A RUN WITH NO BILL BEHIND IT (0028). Matthew: "a large number of
             new projects ... coming into the TG0 stage" — and until now a
@@ -861,6 +1031,10 @@ function ProjectOverview() {
           </section>
         ) : null,
       )}
+
+      {/* Each on its own tab, the same JSX the Overview renders. */}
+      {tab === "documents" && documentsCard}
+      {tab === "history" && historyCard}
 
       <div className={tab === "overview" ? "" : "hidden"}>
 
@@ -1285,9 +1459,7 @@ function ProjectOverview() {
       {/* VERSIONS, ON THE PAGE. It was a tab, and a tab is a place you have to
           decide to go to — whereas "what did this look like last week" is a
           question asked while looking at the thing. */}
-      <Card title="Versions and history">
-        <ProjectHistory projectId={project.id} specsAgreedBy={project.specs_agreed_by} />
-      </Card>
+      {historyCard}
 
       <Card
         title="Contacts"
@@ -1318,119 +1490,7 @@ function ProjectOverview() {
         )}
       </Card>
 
-      <Card title="Source documents">
-      <p className="mt-1 text-xs text-neutral-500">
-        Drop the whole tender pack in at once — the bill of quantities, the drawings, and the preamble if there is
-        one. Each file&rsquo;s kind is declared, because a BOQ and a schedule are both spreadsheets and the bytes
-        cannot say which is which.
-      </p>
-      <IntakeBatchUpload projectId={project.id} onUploaded={() => void load()} />
-      {/* GROUPED BY PACK, and each pack links to its own screen.
-          A delivery's runs used to be listed flat, so the two screens that
-          read a whole pack -- the pack screen with its Read all, and the
-          combined drawings review, which is the ONLY place a record described
-          by two documents is named -- were reachable solely from the redirect
-          that fires once after upload. Navigate away and there was no route
-          back to either except browser history. */}
-      {documents === null ? (
-        <div className="mt-3"><Spinner label="Loading documents" /></div>
-      ) : packs.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-600">
-          Nothing imported yet. Start with the bill of quantities — it creates this project&rsquo;s spec records.
-        </p>
-      ) : (
-        packs.map((pack) => {
-          const drawings = pack.runs.filter((run) => run.document_kind === "shop_drawings");
-          const unread = pack.runs.filter((run) => run.status === "pending" || run.status === "failed");
-          return (
-            <div key={pack.id ?? "unpacked"} className="mt-3 border border-neutral-200 rounded-lg bg-white">
-              <div className="px-4 py-2 border-b border-neutral-200 bg-neutral-50 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <p className="text-sm font-medium text-neutral-900">
-                  {pack.id
-                    ? (pack.label ?? `${pack.runs.length} document${pack.runs.length === 1 ? "" : "s"}`)
-                    : "Not part of a pack"}
-                </p>
-                {/* The count is NOT repeated here: a pack's default label is
-                    already "10 documents", and the two together read as
-                    twenty. */}
-                <p className="text-xs text-neutral-500">
-                  {pack.id ? (
-                    <>
-                      delivered {new Date(pack.createdAt).toLocaleDateString("en-GB")}
-                      {unread.length > 0 && <> · {unread.length} not read yet</>}
-                    </>
-                  ) : (
-                    <>Uploaded before deliveries were grouped. Nothing is wrong with them.</>
-                  )}
-                </p>
-                {pack.id && (
-                  <span className="ml-auto flex flex-wrap items-center gap-2">
-                    {/* Only when there is more than one, because the combined
-                        screen exists for what can only be seen ACROSS
-                        documents. One drawing has nothing to compare. */}
-                    {drawings.length > 1 && (
-                      <Link
-                        href={`/dashboard/projects/${project.id}/intake/${pack.id}/drawings`}
-                        className="text-sm px-3 py-1 rounded bg-neutral-900 text-white hover:bg-neutral-700"
-                      >
-                        Review all {drawings.length} drawings together
-                      </Link>
-                    )}
-                    <Link
-                      href={`/dashboard/projects/${project.id}/intake/${pack.id}`}
-                      className="text-sm px-3 py-1 rounded border border-neutral-300 hover:bg-neutral-100"
-                    >
-                      Open the pack
-                    </Link>
-                  </span>
-                )}
-              </div>
-              <ul className="divide-y divide-neutral-200">
-                {pack.runs.map((run) => (
-                  <li key={run.id} className="px-4 py-3 flex items-center gap-4 text-sm">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-neutral-900">
-                        {run.filename ?? "Unnamed file"}
-                        <span className="text-neutral-500">
-                          {" · "}
-                          {(run.document_kind && KIND_LABELS[run.document_kind]) ?? SOURCE_LABELS[run.source_kind] ?? run.source_kind}
-                        </span>
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        {new Date(run.created_at).toLocaleString("en-GB")}
-                        {run.created_by ? ` · ${run.created_by}` : ""}
-                        {run.source_preserved ? "" : " · original not kept"}
-                      </p>
-                      {run.status === "failed" && run.error && (
-                        <p className="mt-1 text-xs text-red-700">{run.error}</p>
-                      )}
-                    </div>
-                    <span
-                      className={`shrink-0 text-xs px-2 py-0.5 rounded border ${
-                        run.status === "failed"
-                          ? "text-red-800 border-red-300 bg-red-50"
-                          : run.status === "confirmed"
-                            ? "text-green-800 border-green-300 bg-green-50"
-                            : "text-neutral-700 border-neutral-300 bg-neutral-50"
-                      }`}
-                    >
-                      {intakeStatusLabel(run.status)}
-                    </span>
-                    <Link
-                      href={`/dashboard/imports/${run.id}`}
-                      className="shrink-0 text-sm px-3 py-1.5 rounded border border-neutral-300 hover:bg-neutral-100"
-                    >
-                      Open
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })
-      )}
-
-      </Card>
+      {documentsCard}
 
       {/* What the preamble said the whole package is built under. LAST on this
           screen, because it is reference material: a reader scrolls to it when
