@@ -422,7 +422,7 @@ export default function ChaseQuestionTable({
           ) : (
             <>
               <span className="font-medium text-neutral-900">{selectedQuestions.length}</span> questions ·{" "}
-              {selectedToQuote} needed to quote · across{" "}
+              {selectedToQuote} TGQ · across{" "}
               <span className="font-medium text-neutral-900">{selectedLines}</span> furniture line
               {selectedLines === 1 ? "" : "s"} · {recipients.length} recipient
               {recipients.length === 1 ? "" : "s"}{" "}

@@ -207,7 +207,24 @@ export async function GET(request: Request): Promise<Response> {
         // null, not 0, where the record has no level: "nothing is blocking the
         // quote" and "nobody has said what kind of item this is" are different
         // answers and the table prints them differently.
-        to_quote_outstanding: row.level === null || row.level === undefined ? null : (counts?.toQuote ?? 0),
+        // NULL, NOT 0, in two different cases, and the table prints them
+        // differently because they are different answers:
+        //
+        //   no level      nobody has said what kind of item this is, so
+        //                 nothing on it is tiered under the fallback half of
+        //                 TGQ.
+        //   a SPLIT LINE  it is a heading. Its configurations are what the
+        //                 export ships and what carries the questions, so
+        //                 `loadOutstanding` does not count it at all — and
+        //                 without this it would come back 0 and render as
+        //                 "Can quote", which is a claim about a record that
+        //                 will never reach BWS.
+        to_quote_outstanding:
+          Number(row.variant_count ?? 0) > 0
+            ? null
+            : row.level === null || row.level === undefined
+              ? null
+              : (counts?.toQuote ?? 0),
         to_quote_waiting: counts?.toQuoteWaiting ?? 0,
       };
     }),

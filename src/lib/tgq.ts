@@ -25,8 +25,23 @@ export type QuestionTier = "to_quote" | "later";
 
 export const QUESTION_TIERS = ["to_quote", "later"] as const;
 
+/**
+ * What a tier is called ON SCREEN.
+ *
+ * TGQ, not "needed to quote". Settled with Max on 2026-09-18: they are the
+ * same question, and two names for it is how a reader comes to believe they
+ * are two measurements — which is exactly what had happened, with the spec
+ * table and the record's own gate panel reporting different figures under
+ * different names.
+ *
+ * `TIER_EMAIL_HEADINGS` below is deliberately NOT renamed. TGQ is this
+ * business's word and a designer at another firm has never heard it; an email
+ * saying "TGQ" in its red banner would be asking somebody to answer a question
+ * they cannot read. The email says what it means in plain words, and the app
+ * uses the term the people who work in it use.
+ */
 export const TIER_LABELS: Record<QuestionTier, string> = {
-  to_quote: "Needed to quote",
+  to_quote: "TGQ",
   later: "Also outstanding",
 };
 

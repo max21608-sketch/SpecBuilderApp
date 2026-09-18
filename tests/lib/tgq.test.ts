@@ -1,6 +1,6 @@
 // Which questions hold up a quote. Pure, so this runs in CI without a database.
 import { describe, expect, it } from "vitest";
-import { questionTier, questionTierOrNull, TIER_LABELS } from "@/lib/tgq";
+import { questionTier, questionTierOrNull, TIER_EMAIL_HEADINGS, TIER_LABELS } from "@/lib/tgq";
 import { ITEM_LEVELS, normaliseItemLevel } from "@/lib/spec-vocab";
 
 const all = { tgqLevels: ["simple", "complex", "hero"] };
@@ -68,9 +68,18 @@ describe("normaliseItemLevel", () => {
 });
 
 describe("TIER_LABELS", () => {
-  it("names both halves the way the screens and the email do", () => {
-    expect(TIER_LABELS.to_quote).toBe("Needed to quote");
+  it("names the halves TGQ on screen and in plain words in the email", () => {
+    // TGQ on screen, settled 2026-09-18: two names for one question is how a
+    // reader comes to believe they are two measurements.
+    expect(TIER_LABELS.to_quote).toBe("TGQ");
     expect(TIER_LABELS.later).toBe("Also outstanding");
+
+    // And NOT in the email. TGQ is this business's word; a designer at another
+    // firm has never heard it, and a red banner saying "TGQ" asks somebody to
+    // answer a question they cannot read.
+    expect(TIER_EMAIL_HEADINGS.to_quote).toBe("Needed before we can quote");
+    expect(TIER_EMAIL_HEADINGS.to_quote).not.toContain("TGQ");
+    expect(TIER_EMAIL_HEADINGS.later).not.toContain("TGQ");
   });
 });
 

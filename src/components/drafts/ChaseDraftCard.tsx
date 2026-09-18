@@ -343,7 +343,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                   )}
                   {item.tierChanged && item.staleReasons.length === 0 && (
                     <span className="text-xs text-amber-700 mr-2">
-                      {item.tier === "to_quote" ? "no longer blocking the quote" : "now needed to quote"} —
+                      {item.tier === "to_quote" ? "no longer blocking the quote" : "now blocking the quote"} —
                       regenerate to re-order
                     </span>
                   )}

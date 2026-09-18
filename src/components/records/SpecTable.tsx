@@ -558,7 +558,17 @@ export default function SpecTable({
                         )}
                       </td>
                       <td className="px-3 py-2 tabular-nums">
-                        {record.to_quote_outstanding === null ? (
+                        {/* A SPLIT LINE IS A HEADING. It is neither "0, can
+                            quote" nor "nobody has set a level" — its questions
+                            live on its configurations, which are the rows
+                            indented under it. Said before the level case,
+                            because a split line may also have no level and the
+                            heading is the more useful answer. */}
+                        {n(record.variant_count) > 0 ? (
+                          <span className="text-neutral-400" title="Counted on its configurations, which are what the export ships.">
+                            through its {n(record.variant_count)}
+                          </span>
+                        ) : record.to_quote_outstanding === null ? (
                           <Link
                             href={`/dashboard/records/${record.id}`}
                             className="text-amber-800 underline hover:text-amber-900"

@@ -508,6 +508,27 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
     where r.project_id = ${projectId}
       and r.status = 'active'
       and run.status = 'active'
+      -- A SPLIT BILL LINE IS A HEADING, AND ITS QUESTIONS ARE NOBODY'S TO
+      -- ANSWER. Its configurations are what the export ships (0024), so a
+      -- question on the parent is a question about a record that will never
+      -- reach BWS -- and chasing a designer for it asks them to decide
+      -- something that does not exist.
+      --
+      -- Found on 2026-09-18 by the two screens disagreeing: the overview
+      -- reported 167 to quote on the sandbox Panther project and this one
+      -- reported 202, because loadProjectSummary carries this predicate and
+      -- this query did not. That is the disagreement the check sheet exists to
+      -- prevent, between two screens rather than between two files.
+      --
+      -- The predicate is loadExportScope's, word for word: a correlated
+      -- not-exists on an ACTIVE configuration, never a stored has-been-split
+      -- flag. Retire both configurations and the line is an item again, still
+      -- on the bill, and chaseable. (No backticks in here: one closes the
+      -- tagged template.)
+      and not exists (
+        select 1 from spec_records v
+        where v.parent_id = r.id and v.status = 'active'
+      )
       and coalesce(a.state, 'missing') in ('missing', 'tbc')
     -- Bill order, with each line's finish options directly under it. Ordering
     -- on the parent ID instead would put the groups in uuid order, which is no
