@@ -30,6 +30,8 @@ export type EmailMessage = {
   chase_recipient_name: string | null;
   chase_question_count: string | number | null;
   triage: string;
+  /** Plain text only. The HTML body is never sent to a screen — see the route. */
+  body_text?: string | null;
   version: number;
 };
 

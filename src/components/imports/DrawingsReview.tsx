@@ -141,8 +141,15 @@ export default function DrawingsReview({ importId }: { importId: string }) {
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [showApplied, setShowApplied] = useState(false);
-  const [showIgnored, setShowIgnored] = useState(false);
+  /**
+   * WHICH TAB. Applied and Ignored were collapsible panels under the cards, so
+   * on a pack with six items they sat below six full-height review cards and
+   * were reached by scrolling past everything still to do. They are three
+   * states of the same set of observations, and a tab each is how you get to
+   * the one you want — with its count on it, so an empty Ignored says so
+   * without being opened.
+   */
+  const [reviewTab, setReviewTab] = useState<"pending" | "applied" | "ignored">("pending");
 
   // Server-acked state is held separately from what the reviewer is typing, so
   // a reload cannot wipe an unsaved edit and an autosave cannot fight the input.
@@ -480,6 +487,12 @@ export default function DrawingsReview({ importId }: { importId: string }) {
     (total, item) => total + item.observations.filter((o) => o.reviewStatus === "ignored").length,
     0,
   );
+  // The tab counts what a person still has to rule on: OBSERVATIONS, the same
+  // unit the other two tabs count, so the three add up to the whole document.
+  const pendingCount = staged.items.reduce(
+    (total, item) => total + item.observations.filter((o) => o.reviewStatus === "pending").length,
+    0,
+  );
   const reviewComplete = pendingItems.length === 0;
   // Grouped into cards: one per code, one per page for a code drawn once.
   const cards = configurationCards(staged.items, byItem).filter(cardHasPending);
@@ -575,12 +588,37 @@ export default function DrawingsReview({ importId }: { importId: string }) {
         </div>
       )}
 
+      <div className="mt-4 flex flex-wrap gap-0.5 border-b border-neutral-200">
+        {([
+          ["pending", "To review", pendingCount],
+          ["applied", "Applied", appliedCount],
+          ["ignored", "Ignored", ignoredCount],
+        ] as const).map(([name, label, count]) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setReviewTab(name)}
+            aria-current={reviewTab === name ? "page" : undefined}
+            className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
+              reviewTab === name
+                ? "border-neutral-900 font-semibold text-neutral-900"
+                : "border-transparent text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            {label}
+            <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
+              {count}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* ONE CARD PER CODE. A code drawn on several pages is one item in
           several configurations -- same chair, different fabric -- and it is
           shown as one card with a chip per configuration, the geometry once
           and each configuration's own finishes below. A code drawn once is a
           plain card, unchanged. See src/lib/configuration-cards.ts. */}
-      <div className="mt-4 space-y-4">
+      <div className={`mt-4 space-y-4 ${reviewTab === "pending" ? "" : "hidden"}`}>
         {cards.map((card) =>
           card.kind === "single" ? (
             <ItemCard
@@ -625,16 +663,18 @@ export default function DrawingsReview({ importId }: { importId: string }) {
 
       <CollapsedList
         title="Ignored"
-        open={showIgnored}
-        onToggle={() => setShowIgnored((value) => !value)}
+        open={reviewTab === "ignored"}
+        onToggle={() => setReviewTab(reviewTab === "ignored" ? "pending" : "ignored")}
+        hideWhenClosed
         items={staged.items}
         status="ignored"
         onRestore={(item, observation) => void review(item, [observation], "restore")}
       />
       <CollapsedList
         title="Applied"
-        open={showApplied}
-        onToggle={() => setShowApplied((value) => !value)}
+        open={reviewTab === "applied"}
+        onToggle={() => setReviewTab(reviewTab === "applied" ? "pending" : "applied")}
+        hideWhenClosed
         items={staged.items}
         status="applied"
       />
@@ -667,6 +707,7 @@ function CollapsedList({
   items,
   status,
   onRestore,
+  hideWhenClosed,
 }: {
   title: string;
   open: boolean;
@@ -674,10 +715,14 @@ function CollapsedList({
   items: DrawingItem[];
   status: "ignored" | "applied";
   onRestore?: (item: DrawingItem, observation: DrawingObservation) => void;
+  /** It is a TAB BODY now, so a closed one renders nothing rather than a header. */
+  hideWhenClosed?: boolean;
 }) {
   const rows = items.flatMap((item) =>
     item.observations.filter((o) => o.reviewStatus === status).map((observation) => ({ item, observation })),
   );
+
+  if (hideWhenClosed && !open) return null;
 
   return (
     <Disclosure title={title} count={rows.length} open={open} onToggle={onToggle}>

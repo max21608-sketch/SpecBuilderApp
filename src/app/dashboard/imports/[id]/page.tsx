@@ -119,6 +119,8 @@ export default function ReviewImportPage() {
   const [, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Which sheet is shown. A BOQ tab is a sub-quote, so a tab each. */
+  const [sheetTab, setSheetTab] = useState(0);
   const [blocked, setBlocked] = useState<{ lineNo: number; code: string | null }[]>([]);
 
   // `quiet` skips the loading state. The spec-document view re-reads every
@@ -312,7 +314,43 @@ export default function ReviewImportPage() {
         </div>
       )}
 
+      {/* ONE TAB PER SHEET. A BOQ TAB IS A SUB-QUOTE.
+          ==================================================================
+          The sheets were stacked, so a three-tab bill was three full review
+          tables on one page and the only way to compare MUR's line 14 with the
+          VE's was to scroll between them. They are sub-quotes — the same codes
+          at different quantities — which is the reason they are runs and not
+          revisions, and the client, the quote and the job already think of them
+          as tabs.
+
+          An IGNORED sheet keeps its tab rather than disappearing: dismissing it
+          is a decision somebody took and has to be able to undo, and a sheet
+          that vanished on being ignored would leave no way back. */}
+      {sheets.length > 1 && (
+        <div className="mt-6 flex flex-wrap gap-0.5 border-b border-neutral-200">
+          {sheets.map((sheet, index) => (
+            <button
+              key={sheet.sheetName + String(index)}
+              type="button"
+              onClick={() => setSheetTab(index)}
+              aria-current={sheetTab === index ? "page" : undefined}
+              className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
+                sheetTab === index
+                  ? "border-neutral-900 font-semibold text-neutral-900"
+                  : "border-transparent text-neutral-500 hover:text-neutral-800"
+              } ${sheet.ignored ? "line-through opacity-60" : ""}`}
+            >
+              {sheet.proposedRunName || sheet.sheetName}
+              <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
+                {sheet.lines.filter((line) => !line.ignored).length}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {sheets.map((sheet, sheetIndex) => {
+        if (sheets.length > 1 && sheetIndex !== sheetTab) return null;
         const reconciliation = data.reconciliation[sheetIndex] ?? null;
         const pairingFor = (index: number) => reconciliation?.lines.find((line) => line.index === index) ?? null;
         return (

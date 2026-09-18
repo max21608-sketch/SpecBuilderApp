@@ -96,6 +96,7 @@ export default function SpecDocumentReview({
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [tab, setTab] = useState<"pending" | "applied" | "ignored" | "message">("pending");
   // Acknowledged server state per proposal, held apart from what is being typed.
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Record<string, Dirty>>({});
@@ -311,6 +312,14 @@ export default function SpecDocumentReview({
 
   // ---- the grid ------------------------------------------------------------
 
+  /**
+   * WHICH TAB. Applied and Ignored were `<details>` blocks below the review
+   * table, so on a seven-row email they sat under the whole table and were
+   * reached by scrolling past everything still to do. And the MESSAGE itself —
+   * the thing every value on this screen was read out of — had nowhere at all:
+   * the header strip names the sender and the subject and nothing showed the
+   * text. Four states of one document, a tab each.
+   */
   const sections = {
     pending: proposals.filter((p) => classifyProposal(p) === "pending"),
     ambiguous: proposals.filter((p) => classifyProposal(p) === "ambiguous"),
@@ -458,6 +467,61 @@ export default function SpecDocumentReview({
           {run.parsed.documentNotes}
         </p>
       )}
+
+      <div className="mt-4 flex flex-wrap gap-0.5 border-b border-neutral-200">
+        {([
+          ["pending", "To review", sections.pending.length],
+          ["applied", "Applied", sections.applied.length],
+          ["ignored", "Ignored", sections.ignored.length],
+          ["message", data.message ? "The message" : "The document", null],
+        ] as const).map(([name, label, count]) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setTab(name)}
+            aria-current={tab === name ? "page" : undefined}
+            className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
+              tab === name
+                ? "border-neutral-900 font-semibold text-neutral-900"
+                : "border-transparent text-neutral-500 hover:text-neutral-800"
+            }`}
+          >
+            {label}
+            {count !== null && count > 0 && (
+              <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* THE MESSAGE ITSELF, which had nowhere on this screen.
+          ==============================================================
+          Every value here was read out of it, and `quotedText` on each row is a
+          sentence out of it — but the whole text was only ever reachable by
+          downloading the .eml. The body is rendered as PLAIN TEXT and never as
+          HTML: an .eml body is markup a stranger wrote, which is why both
+          routes that serve one set `content-disposition: attachment` and
+          `nosniff`. Quoted history is kept and marked rather than stripped,
+          because a reply quotes the question it answers. */}
+      {tab === "message" && (
+        <div className="mt-4 rounded-lg border border-neutral-200 bg-white p-4">
+          {data.message?.body_text ? (
+            <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap font-sans text-sm text-neutral-800">
+              {data.message.body_text}
+            </pre>
+          ) : (
+            <p className="text-sm text-neutral-600">
+              No plain-text body was recorded for this document.{" "}
+              <a href={`/api/imports/${run.id}/source`} target="_blank" rel="noreferrer" className="underline">
+                Open the source document
+              </a>{" "}
+              instead — it downloads rather than rendering, because its markup is not ours.
+            </p>
+          )}
+        </div>
+      )}
       {run.status === "confirmed" && (
         // Never "complete": nothing is left to REVIEW, which is not the same as
         // every answer being settled.
@@ -501,6 +565,7 @@ export default function SpecDocumentReview({
         </div>
       )}
 
+      {tab === "pending" && (
       <SpecReviewTable
         rows={rows}
         all={proposals}
@@ -528,6 +593,7 @@ export default function SpecDocumentReview({
           });
         }}
       />
+      )}
 
       {commits.length > 0 && (
         <div className="mt-4 border border-neutral-200 rounded-lg bg-white px-4 py-3 flex flex-wrap items-center gap-3">
@@ -557,12 +623,12 @@ export default function SpecDocumentReview({
         </div>
       )}
 
-      {sections.ignored.length > 0 && (
-        <details className="mt-6 border border-neutral-200 rounded-lg bg-white">
-          <summary className="px-4 py-2 text-sm font-medium text-neutral-800 cursor-pointer">
-            Ignored ({sections.ignored.length})
-          </summary>
-          <ul className="border-t border-neutral-100 divide-y divide-neutral-100">
+      {tab === "ignored" && (
+        <div className="mt-4 border border-neutral-200 rounded-lg bg-white">
+          {sections.ignored.length === 0 && (
+            <p className="px-4 py-6 text-sm text-neutral-500">Nothing has been ignored on this document.</p>
+          )}
+          <ul className="divide-y divide-neutral-100">
             {sections.ignored.map((proposal) => (
               <li key={proposal.id} className="px-4 py-2 flex items-center gap-3 text-sm">
                 <span className="flex-1 text-neutral-600">
@@ -584,15 +650,15 @@ export default function SpecDocumentReview({
               </li>
             ))}
           </ul>
-        </details>
+        </div>
       )}
 
-      {sections.applied.length > 0 && (
-        <details className="mt-4 border border-neutral-200 rounded-lg bg-white">
-          <summary className="px-4 py-2 text-sm font-medium text-neutral-800 cursor-pointer">
-            Applied ({sections.applied.length})
-          </summary>
-          <ul className="border-t border-neutral-100 divide-y divide-neutral-100 text-sm">
+      {tab === "applied" && (
+        <div className="mt-4 border border-neutral-200 rounded-lg bg-white">
+          {sections.applied.length === 0 && (
+            <p className="px-4 py-6 text-sm text-neutral-500">Nothing has been applied from this document yet.</p>
+          )}
+          <ul className="divide-y divide-neutral-100 text-sm">
             {sections.applied.map((proposal) => (
               <li key={proposal.id} className="px-4 py-2 text-neutral-600">
                 {proposal.target?.recordLabel} · {proposal.target?.requirementPrompt} →{" "}
@@ -601,7 +667,7 @@ export default function SpecDocumentReview({
               </li>
             ))}
           </ul>
-        </details>
+        </div>
       )}
 
       {/* The diagnostic fallback. It should always be empty; if it is not, a

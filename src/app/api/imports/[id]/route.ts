@@ -473,6 +473,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
             select em.id, em.from_addr, em.from_name, em.subject, em.received_at,
                    em.to_addrs, em.cc_addrs, em.attachments_meta, em.has_attachments,
                    em.routing_reason, em.chase_match, em.triage, em.version,
+                   -- The PLAIN TEXT body, for the screen's own message tab. The
+                   -- html body is deliberately not selected: it is markup a
+                   -- stranger wrote, and the two routes that serve the raw .eml
+                   -- both force a download for that reason.
+                   em.body_text,
                    d.subject as chase_subject, d.sent_at as chase_sent_at,
                    d.recipient_name as chase_recipient_name,
                    (select count(*) from email_draft_items i where i.draft_id = d.id) as chase_question_count
