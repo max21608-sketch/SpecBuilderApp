@@ -273,10 +273,9 @@ function ProjectsView() {
           <input value={client} onChange={(e) => setClient(e.target.value)} placeholder="Client (optional)"
                  className="border border-neutral-300 rounded px-3 py-2 text-sm" />
         </div>
-        <button type="submit" disabled={saving}
-                className="mt-3 text-sm px-3 py-1.5 rounded bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-50">
+        <Button type="submit" variant="primary" disabled={saving} className="mt-3">
           {saving ? "Adding…" : "Add project"}
-        </button>
+        </Button>
       </form>
 
       {/* TOTALS ACROSS WHAT IS LISTED, computed from the rows already loaded —

@@ -438,9 +438,9 @@ export default function ContactsPanel({
             {partyId !== null && (
               <p className="mb-2 text-xs text-green-800">
                 Linked to Capsule. The name and organisation come from there and are read again on save.{" "}
-                <button type="button" onClick={() => setPartyId(null)} className="underline hover:text-green-900">
+                <Button size="xs" variant="quiet" onClick={() => setPartyId(null)}>
                   Add by hand instead
-                </button>
+                </Button>
               </p>
             )}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
