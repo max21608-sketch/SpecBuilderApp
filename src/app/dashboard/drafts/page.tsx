@@ -39,6 +39,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
+import StatTile from "@/components/ui/StatTile";
 import ChaseDraftCard, { type Draft } from "@/components/drafts/ChaseDraftCard";
 import ChaseQuestionTable, { type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
 import ContactsPanel from "@/components/projects/ContactsPanel";
@@ -326,18 +327,52 @@ function DraftsView() {
   return (
     <>
       <p className="mt-1 text-sm text-neutral-600">
-        {project.bws_project_number} {project.name} ·{" "}
-        <span className="text-red-700 font-medium">{inventory.totals.toQuote}</span> needed to quote ·{" "}
-        <span className="text-neutral-900 font-medium">{inventory.totals.later}</span> also outstanding ·{" "}
-        <span className="text-blue-700 font-medium">{inventory.totals.waiting}</span> awaiting a reply
-        {inventory.totals.blockedRecords > 0 && (
-          <>
-            {" · "}
-            <span className="text-amber-800 font-medium">{inventory.totals.blockedRecords}</span> record
-            {inventory.totals.blockedRecords === 1 ? "" : "s"} that cannot be chased
-          </>
-        )}
+        {project.bws_project_number} {project.name}
       </p>
+
+      {/* THE FOUR NUMBERS, AS TILES RATHER THAN A SENTENCE.
+          ==================================================================
+          They were a run-on line of four figures separated by middots, which
+          reads as one statement rather than four things in different states —
+          and the one that matters most, TGQ, had no more weight than the one
+          that matters least.
+
+          They do NOT filter this screen. The chase screen's own rule is that a
+          filter narrows what is LISTED and never what is ASKED, and its
+          filters already live above the table with a footer saying how many
+          ticked questions they hide. A second, separate filtering mechanism up
+          here would be a second place for that rule to be got wrong. These are
+          read-outs; the controls are below. */}
+      <div className="mt-3 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        <StatTile
+          label="TGQ"
+          tone="danger"
+          value={inventory.totals.toQuote}
+          meaning="blocking a quotation"
+        />
+        <StatTile
+          label="Also outstanding"
+          tone="warn"
+          value={inventory.totals.later}
+          meaning="not holding up the quote"
+        />
+        <StatTile
+          label="Awaiting a reply"
+          tone="info"
+          value={inventory.totals.waiting}
+          meaning="asked, nothing back"
+        />
+        <StatTile
+          label="Cannot be chased"
+          tone={inventory.totals.blockedRecords > 0 ? "warn" : "plain"}
+          value={inventory.totals.blockedRecords}
+          meaning={
+            inventory.totals.blockedRecords > 0
+              ? "no level or no category"
+              : "every record can be chased"
+          }
+        />
+      </div>
 
       <p className="mt-1 text-xs text-neutral-500">
         Cc:{" "}
