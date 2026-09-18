@@ -59,6 +59,7 @@ import {
 import { BulkUnit, type ItemResolution } from "@/components/imports/DrawingItemCard";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
+import Tip from "@/components/ui/Tip";
 import type { CroppedImage } from "@/lib/pdf-crop";
 
 /**
@@ -483,7 +484,10 @@ export default function ConfigurationCard({
               )}
 
               <div className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
-                <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">BWS Dimensions</p>
+                <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">
+                  BWS Dimensions
+                  <Tip>Exactly what BWS field 3 will receive, composed the way the export composes it.</Tip>
+                </p>
                 {dimensionCell.text ? (
                   <p className="font-mono text-[13px] text-neutral-900">{dimensionCell.text}</p>
                 ) : (
@@ -497,7 +501,6 @@ export default function ConfigurationCard({
                     {problem.message}
                   </p>
                 ))}
-                <p className="mt-1 text-[11px] text-neutral-500">Exactly what BWS field 3 will receive.</p>
               </div>
             </>
           )}

@@ -649,19 +649,18 @@ export function RunTargets({
               </p>
               <div className="mt-1 flex flex-wrap gap-2">
                 {/* Candidates, never a pre-selected guess. */}
+                {/* `primary` is the CHOSEN one, not the recommended one:
+                    nothing is pre-selected here, so at most one of them is
+                    filled in at a time and it is the reviewer's own pick. */}
                 {run.candidates.map((candidate) => (
-                  <button
+                  <Button
                     key={candidate.id}
-                    type="button"
+                    size="xs"
+                    variant={ticked.has(candidate.id) ? "primary" : "secondary"}
                     onClick={() => onToggle(candidate.id, true)}
-                    className={`text-xs px-2 py-1 rounded border ${
-                      ticked.has(candidate.id)
-                        ? "border-neutral-900 bg-neutral-900 text-white"
-                        : "border-neutral-300 hover:bg-neutral-50"
-                    }`}
                   >
                     {candidate.label} · {candidate.itemDescription}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>

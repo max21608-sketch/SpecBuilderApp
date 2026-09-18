@@ -59,6 +59,7 @@ import {
 import type { CroppedImage } from "@/lib/pdf-crop";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
+import Tip from "@/components/ui/Tip";
 
 // Re-exported from where they now live, so the screens keep one import.
 export type { Occupant, RecordChoice, RunResolution, SpecField } from "@/components/imports/ObservationRows";
@@ -456,7 +457,10 @@ export default function ItemCard({
               when empty — a card with no line at all reads as one with nothing
               to say about its size, which is the opposite of the truth. */}
           <div className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
-            <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">BWS Dimensions</p>
+            <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">
+              BWS Dimensions
+              <Tip>Exactly what BWS field 3 will receive, composed the way the export composes it.</Tip>
+            </p>
             {dimensionCell.text ? (
               <p className="font-mono text-[13px] text-neutral-900">{dimensionCell.text}</p>
             ) : (
@@ -470,7 +474,6 @@ export default function ItemCard({
                 {problem.message}
               </p>
             ))}
-            <p className="mt-1 text-[11px] text-neutral-500">Exactly what BWS field 3 will receive.</p>
           </div>
         </div>
 

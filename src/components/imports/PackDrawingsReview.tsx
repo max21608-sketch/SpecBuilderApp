@@ -29,6 +29,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import PageBody from "@/components/ui/PageBody";
 import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
+import Tip from "@/components/ui/Tip";
 import Note from "@/components/ui/Note";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
@@ -638,6 +639,9 @@ export default function PackDrawingsReview({
               <span className="font-medium normal-case tracking-normal text-neutral-500">
                 usually the package conditions every specification sheet repeats
               </span>
+              <Tip>
+                Ignoring one here ignores every copy, and every copy can be restored on its own document.
+              </Tip>
             </>
           }
         >
@@ -672,9 +676,6 @@ export default function PackDrawingsReview({
               ))}
             </tbody>
           </Table>
-          <p className="px-4 py-2.5 text-xs text-neutral-500">
-            Ignoring one here ignores every copy, and every copy can be restored on its own document.
-          </p>
         </Card>
       )}
 

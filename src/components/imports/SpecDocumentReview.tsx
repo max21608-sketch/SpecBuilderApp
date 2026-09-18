@@ -52,9 +52,9 @@ import type { Tone } from "@/components/ui/tone";
 import {
   ANSWER_STATES,
   ANSWER_STATE_LABELS,
+  ANSWER_STATE_TONE,
   ATTRIBUTE_UNITS,
   DOCUMENT_KIND_LABELS,
-  type AnswerState,
   type DocumentKind,
 } from "@/lib/spec-vocab";
 
@@ -82,12 +82,11 @@ export type Registers = { records: RecordEntry[]; requirements: RequirementEntry
 // Reused from the BOQ review, so one word means one thing on both screens.
 const MATCH_LABEL = { confident: "matched", ambiguous: "several possible", none: "no match" } as const;
 
-const STATE_CLASS: Record<AnswerState, string> = {
-  confirmed: "text-green-700 border-green-300 bg-green-50",
-  tbc: "text-amber-800 border-amber-300 bg-amber-50",
-  missing: "text-red-700 border-red-300 bg-red-50",
-  na: "text-neutral-600 border-neutral-300 bg-neutral-50",
-};
+// The answer state's colour comes from `ANSWER_STATE_TONE`, decided once beside
+// the label. The map that used to live here painted `missing` RED, which is the
+// disagreement that map exists to settle: red is what blocks money going out,
+// and whether an unanswered question does that is the TIER's business, not the
+// state's.
 
 type Dirty = { value: string; seq: number };
 
@@ -800,9 +799,7 @@ function ProposalRow({
       <div className="mt-2 grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_auto] gap-2 items-start">
         <label className="text-xs text-neutral-500">
           Question
-          <span className="ml-2 text-xs px-1.5 py-0.5 rounded border border-neutral-300 bg-neutral-50 text-neutral-600">
-            {MATCH_LABEL[matchStatus]}
-          </span>
+          <Chip className="ml-2">{MATCH_LABEL[matchStatus]}</Chip>
           <select
             value={proposal.requirementId ?? ""}
             disabled={busy !== null}
@@ -822,23 +819,23 @@ function ProposalRow({
             <span className="mt-1 block text-xs text-amber-800">
               ambiguous match —{" "}
               {proposal.requirementCandidates.map((candidate) => (
-                <button
+                <Button
                   key={candidate.id}
-                  type="button"
+                  size="xs"
+                  className="mr-1"
                   onClick={() => onChange(proposal, { requirementId: candidate.id })}
-                  className="mr-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 hover:bg-amber-200"
                 >
                   {candidate.label}
-                </button>
+                </Button>
               ))}
             </span>
           )}
           {proposal.target && (
             <span className="mt-1 block text-xs text-neutral-500">
               currently{" "}
-              <span className={`px-1.5 py-0.5 rounded border ${STATE_CLASS[proposal.target.answerState ?? "missing"]}`}>
+              <Chip tone={ANSWER_STATE_TONE[proposal.target.answerState ?? "missing"]}>
                 {ANSWER_STATE_LABELS[proposal.target.answerState ?? "missing"]}
-              </span>{" "}
+              </Chip>{" "}
               {proposal.target.answerValue ? `“${proposal.target.answerValue}”` : ""}
             </span>
           )}
@@ -884,14 +881,9 @@ function ProposalRow({
         </label>
 
         <div className="flex flex-col gap-1">
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => void onIgnore(proposal)}
-            className="text-sm px-2 py-1 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
-          >
+          <Button variant="quiet" size="xs" disabled={busy !== null} onClick={() => void onIgnore(proposal)}>
             Ignore
-          </button>
+          </Button>
           {blockers.some((blocker) => blocker.code === "overwrite") && (
             <label className="text-xs text-amber-900 flex items-start gap-1 max-w-[14rem]">
               <input
@@ -1174,10 +1166,14 @@ function SpecRowView({
         </div>
 
         <div className="text-right">
+          {/* A disclosure toggle, so it stays a bare button and carries no
+              colour of its own. It was blue, which in the tone language means
+              "the app is suggesting something" — opening a row suggests
+              nothing. */}
           <button
             type="button"
             onClick={() => onToggleExpand(row.key)}
-            className="text-xs text-blue-700 hover:underline"
+            className="text-xs text-neutral-600 hover:text-neutral-900"
           >
             {row.placedCount > 0
               ? `${row.distinctRuns.length} ${row.distinctRuns.length === 1 ? "run" : "runs"}`
@@ -1297,9 +1293,10 @@ function DimensionRow({
   return (
     <div className="px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs px-1.5 py-0.5 rounded border border-sky-300 bg-sky-50 text-sky-800 font-medium">
+        {/* Sky is the ordinary working state: a slot the email named outright. */}
+        <Chip tone="live" mono>
           {dimension.slot}
-        </span>
+        </Chip>
         <span className="text-neutral-900">
           {dimension.tbc ? "TBC" : (dimension.figure ?? "—")}
           {dimension.unit ?? ""}
@@ -1307,9 +1304,7 @@ function DimensionRow({
         {dimension.slotSuggested && (
           // The same yellow a guessed slot gets everywhere else: this one came
           // from printed ORDER, not from a prefix the document stated.
-          <span className="text-xs px-1.5 py-0.5 rounded border border-yellow-300 bg-yellow-100/70 text-yellow-900">
-            read from the printed order — check it
-          </span>
+          <Chip tone="guess">read from the printed order — check it</Chip>
         )}
         {dimension.unitSource === "reviewer" && <span className="text-xs text-neutral-500">unit set by hand</span>}
 
@@ -1332,14 +1327,9 @@ function DimensionRow({
           </select>
         </label>
 
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={() => void onIgnore()}
-          className="text-sm px-2 py-1 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
-        >
+        <Button variant="quiet" size="xs" disabled={busy !== null} onClick={() => void onIgnore()}>
           Ignore
-        </button>
+        </Button>
       </div>
 
       {dimension.qualifier && (
@@ -1415,6 +1405,11 @@ function FinishRow({
   return (
     <div className="px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
+        {/* Violet on purpose, and NOT a tone: the configuration letters carry
+            their own palette on this screen (`CONFIGURATION_COLOURS` — A sky, B
+            emerald, C violet) and a finish's BWS slot is read beside them, so
+            it keeps that palette rather than borrowing one of the eight
+            meanings. Do not invent a violet tone for it. */}
         <span className="text-xs px-1.5 py-0.5 rounded border border-violet-300 bg-violet-50 text-violet-800 font-medium">
           {finish.specFieldName ?? "no BWS field"}
         </span>
@@ -1422,14 +1417,15 @@ function FinishRow({
         <span className="text-neutral-800">{finish.tbc ? "TBC" : (finish.value ?? "—")}</span>
         {finish.reason && <span className="text-xs text-neutral-500">{finish.reason}</span>}
 
-        <button
-          type="button"
+        <Button
+          variant="quiet"
+          size="xs"
+          className="ml-auto"
           disabled={busy !== null}
           onClick={() => void onIgnore()}
-          className="ml-auto text-sm px-2 py-1 rounded border border-neutral-300 hover:bg-neutral-100 disabled:opacity-50"
         >
           Ignore
-        </button>
+        </Button>
       </div>
 
       {!finish.specFieldId && (

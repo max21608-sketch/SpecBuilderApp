@@ -38,14 +38,18 @@ export default function Disclosure({
 
   return (
     <div className={className}>
+      {/* The one bare <button> the button rule allows: the whole strip IS the
+          control, the glyph says which way it goes, and it carries no colour or
+          border of its own — so it cannot be mistaken for one of the four
+          variants, which grade a consequence. Opening a list has none. */}
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
         className={
           tone === "loud"
-            ? "text-sm font-medium text-neutral-800 hover:text-neutral-900"
-            : "text-sm text-neutral-600 hover:text-neutral-900"
+            ? "text-cell font-medium text-neutral-800 hover:text-neutral-900"
+            : "text-cell text-neutral-600 hover:text-neutral-900"
         }
       >
         {open ? "▾" : "▸"} {title}
@@ -56,9 +60,18 @@ export default function Disclosure({
   );
 }
 
-/** The bordered list the originals all used inside the panel. */
+/** The bordered list the originals all used inside the panel.
+ *
+ *  The rule is drawn on each ROW rather than by `divide-y` on the list, which
+ *  is the same rule the drawings table learned: a row that later grows a panel
+ *  of its own gets a divider between the value and its own panel, and nobody
+ *  reading `divide-y` on the container can see that coming. The rows are the
+ *  caller's `<li>`s, so the selector reaches them from here and the callers
+ *  stay unchanged. */
 export function DisclosureList({ children }: { children: React.ReactNode }) {
   return (
-    <ul className="mt-2 divide-y divide-neutral-100 border border-neutral-200 rounded bg-white">{children}</ul>
+    <ul className="mt-2 rounded-[10px] border border-neutral-200 bg-white [&>li]:border-b [&>li]:border-neutral-100 [&>li:last-child]:border-b-0">
+      {children}
+    </ul>
   );
 }

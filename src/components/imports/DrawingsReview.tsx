@@ -816,13 +816,9 @@ function CollapsedList({
                 {(observation.applied?.attributeIds.length ?? 0) === 1 ? "" : "s"}
               </span>
             ) : (
-              <button
-                type="button"
-                onClick={() => onRestore?.(item, observation)}
-                className="text-xs text-neutral-500 hover:text-neutral-900"
-              >
+              <Button size="xs" variant="quiet" onClick={() => onRestore?.(item, observation)}>
                 Restore
-              </button>
+              </Button>
             )}
           </li>
         ))}

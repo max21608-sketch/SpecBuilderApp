@@ -31,6 +31,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cropPdfRegion, type CroppedImage } from "@/lib/pdf-crop";
 import PageCropper from "@/components/imports/PageCropper";
+import Button from "@/components/ui/Button";
 import type { ItemView } from "@/lib/drawing-document";
 
 /**
@@ -253,30 +254,23 @@ export default function ItemImagePicker({
             {[...views, ...(fallback ? [fallback] : [])]
               .filter((view) => !sameView(view, chosen))
               .map((view, index) => (
-                <button
+                <Button
                   key={`${view.viewType}-${view.page}-${index}`}
-                  type="button"
+                  size="xs"
                   onClick={() => setChosen(view)}
-                  className="text-xs px-2 py-0.5 rounded border border-neutral-300 text-neutral-700 hover:bg-neutral-50"
                 >
                   {sameView(view, fallback) ? "Use the whole page" : `Use ${(VIEW_LABELS[view.viewType] ?? "view").toLowerCase()}`}
-                </button>
+                </Button>
               ))}
-            <button
-              type="button"
-              onClick={() => void startCropping()}
-              className="text-xs px-2 py-0.5 rounded border border-neutral-300 text-neutral-700 hover:bg-neutral-50"
-            >
+            <Button size="xs" onClick={() => void startCropping()}>
               {chosen ? "Drag a box instead" : "Drag a box"}
-            </button>
+            </Button>
             {chosen && (
-              <button
-                type="button"
-                onClick={() => setChosen(null)}
-                className="text-xs px-2 py-0.5 rounded border border-neutral-300 text-neutral-500 hover:bg-neutral-50"
-              >
+              // Quiet, because it clears rather than chooses — and it is not a
+              // one-way door: the whole page is offered straight back above.
+              <Button size="xs" variant="quiet" onClick={() => setChosen(null)}>
                 No picture
-              </button>
+              </Button>
             )}
           </div>
 
