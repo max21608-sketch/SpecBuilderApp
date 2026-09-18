@@ -20,6 +20,8 @@ import { loadProjectSummary } from "@/lib/project-summary";
 import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
 import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
+import { groupByContact, loadOutstanding, type ProjectContact } from "@/lib/chase-drafts";
+import { loadUnlinkedFinishCodes } from "@/lib/finishes";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -166,6 +168,80 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // the export's scope. They share that scope and nothing else.
   const summary = await loadProjectSummary(id);
 
+  // ---- who owes us what ----------------------------------------------------
+  //
+  // The Contacts table's "Owes us" column. It is the CHASE SCREEN'S OWN
+  // grouping: `loadOutstanding` tiers every question through `questionTier`,
+  // and `groupByContact` decides which contact each record's free-text designer
+  // resolves to. Both are called here rather than reproduced, so this column
+  // and the chase screen cannot report different numbers for one contact —
+  // which is what would happen the moment a second copy of `designerKey`'s
+  // folding, or of the split-line predicate, drifted by a character.
+  //
+  // THREE BUCKETS, BECAUSE TWO WOULD NOT ADD UP. `groupByContact` also holds
+  // back a record with no LEVEL, which belongs to a contact and still cannot be
+  // chased; folding those into `unassigned` would say nobody owns them, and
+  // dropping them would leave the table short of the project's own total. The
+  // bucket a question falls in is read off `blocked`'s own reason, never
+  // re-decided here.
+  const contactRows = await sql`
+    select id, name, email, organisation, role, designer_code, version
+    from project_contacts where project_id = ${id} order by role, name
+  `;
+  const contacts: ProjectContact[] = contactRows.map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+    email: row.email === null || row.email === undefined ? null : String(row.email),
+    organisation: row.organisation === null || row.organisation === undefined ? null : String(row.organisation),
+    role: String(row.role) as ProjectContact["role"],
+    designerCode: row.designer_code === null || row.designer_code === undefined ? null : String(row.designer_code),
+    version: Number(row.version),
+  }));
+  const outstanding = await loadOutstanding(id);
+  const { groups, blocked } = groupByContact(outstanding, contacts);
+
+  // A tier of null is its own count. `questionTierOrNull` refuses to pick a
+  // reading where the fallback model has no level, so adding those into either
+  // column would be this route answering a question only a person can.
+  const tally = (questions: { tier: string | null }[]) => ({
+    toQuote: questions.filter((q) => q.tier === "to_quote").length,
+    alsoOutstanding: questions.filter((q) => q.tier === "later").length,
+    noTier: questions.filter((q) => q.tier === null).length,
+  });
+  const recordsWithNoContact = new Set(
+    blocked.filter((row) => row.reason !== "no level on the record").map((row) => row.recordId),
+  );
+  const recordsWithNoLevel = new Set(
+    blocked.filter((row) => row.reason === "no level on the record").map((row) => row.recordId),
+  );
+  const contactsOutstanding = {
+    byContact: groups.map((group) => ({
+      contactId: group.contact.id,
+      contactName: group.contact.name,
+      ...tally(group.questions),
+    })),
+    unassigned: {
+      ...tally(outstanding.filter((question) => recordsWithNoContact.has(question.recordId))),
+      records: blocked.filter((row) => row.reason !== "no level on the record").length,
+    },
+    noLevel: {
+      ...tally(outstanding.filter((question) => recordsWithNoLevel.has(question.recordId))),
+      records: recordsWithNoLevel.size,
+    },
+  };
+
+  // The finishes library's own list, from the library's own function. Named
+  // rather than counted, because an unlinked code is a job and a number is a
+  // notification.
+  const unlinkedFinishCodes = await loadUnlinkedFinishCodes(sql, id);
+
+  // A document that could not be read is the one intake state where nothing
+  // else happens until somebody presses Retry. Counted in TS over the rows
+  // ALREADY LOADED, so the number and the list under it are the same set: the
+  // documents query is capped at 50, and a `count(*)` over every run would name
+  // failures the screen cannot show, which is a number nobody can act on.
+  const failedDocuments = documents.filter((row) => String(row.status) === "failed").length;
+
   const record = rows[0] as Record<string, unknown>;
   return json({
     ok: true,
@@ -181,6 +257,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     documents,
     runs,
     notes,
+    contactsOutstanding,
+    unlinkedFinishCodes,
+    failedDocuments,
   });
 }
 

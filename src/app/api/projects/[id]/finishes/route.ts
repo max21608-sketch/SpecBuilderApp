@@ -10,7 +10,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { openChangeSet } from "@/lib/change-sets";
 import { createFinish } from "@/lib/finish-edit";
-import { FINISH_KINDS } from "@/lib/finishes";
+import { FINISH_KINDS, loadUnlinkedFinishCodes } from "@/lib/finishes";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -65,22 +65,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     order by run.sort_order, run.created_at
   `;
 
-  // Codes the drawings carry that are NOT in the library. Named rather than
-  // counted: an unlinked code is a finish nobody can correct once, which is
-  // the whole point of the register.
-  const unlinked = await sql`
-    select upper(btrim(a.material_code)) as code, count(distinct a.record_id)::int as records
-    from record_attributes a
-    join spec_records r on r.id = a.record_id
-    where r.project_id = ${id}
-      and a.status = 'active'
-      and r.status = 'active'
-      and a.material_code is not null
-      and btrim(a.material_code) <> ''
-      and a.finish_id is null
-    group by upper(btrim(a.material_code))
-    order by 1
-  `;
+  // Codes the drawings carry that are NOT in the library. The project overview
+  // reports the same list, so the query lives in `finishes.ts` and both screens
+  // call it — two copies is how the overview comes to say two where the library
+  // shows three.
+  const unlinked = await loadUnlinkedFinishCodes(sql, id);
 
   return json({
     ok: true,
