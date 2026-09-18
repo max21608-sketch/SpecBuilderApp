@@ -40,6 +40,7 @@ import {
 } from "@/lib/spec-document";
 import { commitGroups, groupIntoSpecRows, type SpecRow } from "@/lib/spec-review-rows";
 import type { ChangeDescription } from "@/lib/spec-change";
+import Tabs from "@/components/ui/Tabs";
 import {
   ANSWER_STATES,
   ANSWER_STATE_LABELS,
@@ -468,33 +469,21 @@ export default function SpecDocumentReview({
         </p>
       )}
 
-      <div className="mt-4 flex flex-wrap gap-0.5 border-b border-neutral-200">
-        {([
-          ["pending", "To review", sections.pending.length],
-          ["applied", "Applied", sections.applied.length],
-          ["ignored", "Ignored", sections.ignored.length],
-          ["message", data.message ? "The message" : "The document", null],
-        ] as const).map(([name, label, count]) => (
-          <button
-            key={name}
-            type="button"
-            onClick={() => setTab(name)}
-            aria-current={tab === name ? "page" : undefined}
-            className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
-              tab === name
-                ? "border-neutral-900 font-semibold text-neutral-900"
-                : "border-transparent text-neutral-500 hover:text-neutral-800"
-            }`}
-          >
-            {label}
-            {count !== null && count > 0 && (
-              <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
-                {count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      {/* `useState`, not the URL: this strip is nested inside a review
+          component, nothing links into it, and a `?tab=` would be a second
+          address for a screen that already has one. */}
+      <Tabs
+        className="mt-4"
+        label="Proposals in this document"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { id: "pending", label: "To review", count: sections.pending.length || null },
+          { id: "applied", label: "Applied", count: sections.applied.length || null },
+          { id: "ignored", label: "Ignored", count: sections.ignored.length || null },
+          { id: "message", label: data.message ? "The message" : "The document", count: null },
+        ]}
+      />
 
       {/* THE MESSAGE ITSELF, which had nowhere on this screen.
           ==============================================================

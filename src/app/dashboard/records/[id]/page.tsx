@@ -11,7 +11,7 @@
 //
 // A question with no answer row still appears, as `missing` — that half of the
 // screen is driven by the requirement list, not by the answers that exist.
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
@@ -45,6 +45,8 @@ import AnswerValue from "@/components/records/AnswerValue";
 import type { Palette } from "@/lib/palettes";
 import { GATES, type Gate, type GateStatus } from "@/lib/gates";
 import PageBody from "@/components/ui/PageBody";
+import Tabs from "@/components/ui/Tabs";
+import { useUrlTab } from "@/lib/use-url-tab";
 
 type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
@@ -98,59 +100,9 @@ type RetiredAttribute = Attribute & {
   superseded_by_id: string | null;
 };
 
-/**
- * One tab, with the count that says whether there is anything behind it.
- *
- * A button, not a link: it changes what you are looking at on this page, which
- * is not navigation — `Button.tsx`'s rule. The count is a string rather than a
- * number because two of the four say something more useful than a total
- * ("37 of 43", "2 of 3"), and null where a count would be a lie: the version
- * list is not loaded until its tab is opened, so a number there would either
- * be wrong or force a query nobody asked for.
- */
-function RecordTabButton({
-  tab,
-  current,
-  onSelect,
-  count,
-  tone = "plain",
-  children,
-}: {
-  tab: RecordTab;
-  current: RecordTab;
-  onSelect: (tab: RecordTab) => void;
-  count: string | number | null;
-  tone?: "plain" | "warn" | "good";
-  children: React.ReactNode;
-}) {
-  const on = current === tab;
-  const countClass =
-    tone === "warn"
-      ? "bg-amber-100 text-amber-800"
-      : tone === "good"
-        ? "bg-green-100 text-green-800"
-        : "bg-neutral-100 text-neutral-500";
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(tab)}
-      aria-current={on ? "page" : undefined}
-      className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
-        on
-          ? "border-neutral-900 font-semibold text-neutral-900"
-          : "border-transparent text-neutral-500 hover:text-neutral-800"
-      }`}
-    >
-      {children}
-      {count !== null && count !== 0 && (
-        <span className={`rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${countClass}`}>{count}</span>
-      )}
-    </button>
-  );
-}
-
 /** The four jobs this screen does, one tab each. */
-type RecordTab = "specs" | "checklist" | "gates" | "versions";
+const RECORD_TABS = ["specs", "checklist", "gates", "versions"] as const;
+type RecordTab = (typeof RECORD_TABS)[number];
 
 type Payload = {
   record: SpecRecord;
@@ -184,7 +136,7 @@ const STATE_CLASS: Record<AnswerState, string> = {
   na: "text-neutral-600 border-neutral-300 bg-neutral-50",
 };
 
-export default function RecordPage() {
+function RecordView() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -204,7 +156,10 @@ export default function RecordPage() {
    * the level — stays on every tab, because it is what tells you which item
    * you are looking at.
    */
-  const [tab, setTab] = useState<RecordTab>("specs");
+  const [tab, setTab] = useUrlTab<RecordTab>({
+    fallback: "specs",
+    resolve: (raw) => (RECORD_TABS.includes(raw as RecordTab) ? (raw as RecordTab) : null),
+  });
   // Optimistic: the image is requested, and the 404 for a record that has none
   // turns it off. Asking first would be a second round trip on every record to
   // learn something the image request itself reports.
@@ -735,26 +690,29 @@ export default function RecordPage() {
 
       {/* THE TABS. Counts on every one, so you can see where the work is
           before clicking — the same reason the project's run tabs carry them. */}
-      <div className="mt-6 flex flex-wrap gap-0.5 border-b border-neutral-200">
-        <RecordTabButton tab="specs" current={tab} onSelect={setTab} count={attributes.length}>
-          Specs captured
-        </RecordTabButton>
-        <RecordTabButton
-          tab="checklist"
-          current={tab}
-          onSelect={setTab}
-          count={answers.length === 0 ? null : `${outstandingCount} of ${answers.length}`}
-          tone={outstandingCount > 0 ? "warn" : "good"}
-        >
-          Checklist
-        </RecordTabButton>
-        <RecordTabButton tab="gates" current={tab} onSelect={setTab} count={gateSummaryLabel} tone={gateTone}>
-          Gates
-        </RecordTabButton>
-        <RecordTabButton tab="versions" current={tab} onSelect={setTab} count={null}>
-          Versions
-        </RecordTabButton>
-      </div>
+      <Tabs
+        className="mt-6"
+        label="What to do with this record"
+        value={tab}
+        onChange={setTab}
+        items={[
+          // A count is null where a number would be a LIE, not merely absent.
+          // Versions is not loaded until its tab is opened, so a figure there
+          // would either be wrong or force a query nobody asked for; and the
+          // Gates count is null where Matthew's matrix does not reach the
+          // category, because `0 of 3` there says the record fails three gates
+          // it does not have.
+          { id: "specs", label: "Specs captured", count: attributes.length === 0 ? null : attributes.length },
+          {
+            id: "checklist",
+            label: "Checklist",
+            count: answers.length === 0 ? null : `${outstandingCount} of ${answers.length}`,
+            tone: outstandingCount > 0 ? "warn" : "good",
+          },
+          { id: "gates", label: "Gates", count: gateSummaryLabel, tone: gateTone },
+          { id: "versions", label: "Versions", count: null },
+        ]}
+      />
 
       {tab === "specs" && (
       <>
@@ -1025,5 +983,15 @@ export default function RecordPage() {
           act on before the next milestone. */}
       {tab === "gates" && <GatePanel gates={data.gates} />}
     </PageBody>
+  );
+}
+
+// `useUrlTab` reads `useSearchParams`, which Next requires to sit under a
+// Suspense boundary.
+export default function RecordPage() {
+  return (
+    <Suspense fallback={<PageBody><Spinner label="Loading the record" /></PageBody>}>
+      <RecordView />
+    </Suspense>
   );
 }

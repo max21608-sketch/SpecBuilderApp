@@ -703,7 +703,7 @@ export default function SpecTable({
                                  shows, so the column never says less than it
                                  used to. */
                               <Link
-                                href={`/dashboard/records/${record.id}#gates`}
+                                href={`/dashboard/records/${record.id}?tab=gates`}
                                 className={`font-medium no-underline hover:underline ${
                                   waitingFor ? "text-slate-500" : "text-red-700"
                                 }`}

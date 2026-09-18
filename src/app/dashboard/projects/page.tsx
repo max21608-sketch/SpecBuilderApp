@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -18,6 +18,8 @@ import Tip from "@/components/ui/Tip";
 import Pill from "@/components/ui/Pill";
 import StatTile from "@/components/ui/StatTile";
 import PageBody from "@/components/ui/PageBody";
+import Tabs from "@/components/ui/Tabs";
+import { useUrlTab } from "@/lib/use-url-tab";
 
 type Project = {
   id: string;
@@ -111,7 +113,9 @@ function Programme({ day }: { day: string | null }) {
   );
 }
 
-export default function ProjectsPage() {
+const STATE_TABS = ["active", "completed", "archived", "all"] as const;
+
+function ProjectsView() {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [number, setNumber] = useState("");
@@ -122,12 +126,15 @@ export default function ProjectsPage() {
   const [adding, setAdding] = useState(false);
   const [unplacedMail, setUnplacedMail] = useState(0);
   /**
-   * WHICH TAB. Active by default — the point of archiving is that a finished
-   * project stops being in the way — but every project is LOADED whatever the
-   * tab, because the tabs carry counts and a count of what you are not looking
-   * at cannot be derived from the rows you are.
+   * WHICH TAB, IN THE URL. Active by default — the point of archiving is that a
+   * finished project stops being in the way — but every project is LOADED
+   * whatever the tab, because the tabs carry counts and a count of what you are
+   * not looking at cannot be derived from the rows you are.
    */
-  const [tab, setTab] = useState<StateTab>("active");
+  const [tab, setTab] = useUrlTab<StateTab>({
+    fallback: "active",
+    resolve: (raw) => (STATE_TABS.includes(raw as StateTab) ? (raw as StateTab) : null),
+  });
   /** Which tile is pressed, if any. Narrows the list and nothing else. */
   const [focus, setFocus] = useState<null | "to_quote" | "overdue" | "waiting">(null);
 
@@ -247,26 +254,13 @@ export default function ProjectsPage() {
           beside the search, which hid Completed entirely — it had nowhere to be.
           Every project is loaded whatever the tab, because a tab's count cannot
           be derived from the rows you are already looking at. */}
-      <div className="mt-4 flex flex-wrap gap-0.5 border-b border-neutral-200">
-        {(["active", "completed", "archived", "all"] as const).map((name) => (
-          <button
-            key={name}
-            type="button"
-            onClick={() => setTab(name)}
-            aria-current={tab === name ? "page" : undefined}
-            className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
-              tab === name
-                ? "border-neutral-900 font-semibold text-neutral-900"
-                : "border-transparent text-neutral-500 hover:text-neutral-800"
-            }`}
-          >
-            {TAB_LABELS[name]}
-            <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
-              {tabCounts[name]}
-            </span>
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="mt-4"
+        label="Project state"
+        value={tab}
+        onChange={setTab}
+        items={STATE_TABS.map((name) => ({ id: name, label: TAB_LABELS[name], count: tabCounts[name] }))}
+      />
 
       {error && (
         <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
@@ -513,5 +507,16 @@ export default function ProjectsPage() {
         </div>
       )}
     </PageBody>
+  );
+}
+
+// `useUrlTab` reads `useSearchParams`, which Next requires to sit under a
+// Suspense boundary or the whole route opts out of static rendering with a
+// build warning.
+export default function ProjectsPage() {
+  return (
+    <Suspense fallback={<PageBody><Spinner label="Loading projects" /></PageBody>}>
+      <ProjectsView />
+    </Suspense>
   );
 }

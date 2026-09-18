@@ -18,6 +18,7 @@ import PreambleReview from "@/components/imports/PreambleReview";
 import Button from "@/components/ui/Button";
 import { ITEM_LEVELS, ITEM_LEVEL_LABELS } from "@/lib/spec-vocab";
 import PageBody from "@/components/ui/PageBody";
+import Tabs from "@/components/ui/Tabs";
 
 type Line = {
   replaces?: { recordId: string; recordVersion: number } | null;
@@ -328,26 +329,21 @@ export default function ReviewImportPage() {
           is a decision somebody took and has to be able to undo, and a sheet
           that vanished on being ignored would leave no way back. */}
       {sheets.length > 1 && (
-        <div className="mt-6 flex flex-wrap gap-0.5 border-b border-neutral-200">
-          {sheets.map((sheet, index) => (
-            <button
-              key={sheet.sheetName + String(index)}
-              type="button"
-              onClick={() => setSheetTab(index)}
-              aria-current={sheetTab === index ? "page" : undefined}
-              className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
-                sheetTab === index
-                  ? "border-neutral-900 font-semibold text-neutral-900"
-                  : "border-transparent text-neutral-500 hover:text-neutral-800"
-              } ${sheet.ignored ? "line-through opacity-60" : ""}`}
-            >
-              {sheet.proposedRunName || sheet.sheetName}
-              <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
-                {sheet.lines.filter((line) => !line.ignored).length}
-              </span>
-            </button>
-          ))}
-        </div>
+        // `useState`, not the URL: nothing links to a sheet of a staged bill,
+        // and a `?tab=` here would be a second address for a screen that
+        // already has one.
+        <Tabs
+          className="mt-6"
+          label="Sheets in this bill"
+          value={String(sheetTab)}
+          onChange={(id) => setSheetTab(Number(id))}
+          items={sheets.map((sheet, index) => ({
+            id: String(index),
+            label: sheet.proposedRunName || sheet.sheetName,
+            count: sheet.lines.filter((line) => !line.ignored).length,
+            muted: sheet.ignored,
+          }))}
+        />
       )}
 
       {sheets.map((sheet, sheetIndex) => {

@@ -35,6 +35,7 @@ import Link from "next/link";
 import Button from "@/components/ui/Button";
 import { ANSWER_STATE_LABELS, ITEM_LEVEL_LABELS, type AnswerState, type ItemLevel } from "@/lib/spec-vocab";
 import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
+import Tabs from "@/components/ui/Tabs";
 import {
   allQuestions,
   countOutstanding,
@@ -268,26 +269,19 @@ export default function ChaseQuestionTable({
             footer says how many ticked questions are hidden — they are still in
             the draft. */}
         {contacts.length > 1 && (
-          <div className="mt-2 flex flex-wrap gap-0.5 border-b border-neutral-200">
-            {[{ id: "", name: "Everyone", count: questions.length }, ...contacts].map((contact) => (
-              <button
-                key={contact.id || "all"}
-                type="button"
-                onClick={() => setFilters((prev) => ({ ...prev, contactId: contact.id }))}
-                aria-current={filters.contactId === contact.id ? "page" : undefined}
-                className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${
-                  filters.contactId === contact.id
-                    ? "border-neutral-900 font-semibold text-neutral-900"
-                    : "border-transparent text-neutral-500 hover:text-neutral-800"
-                }`}
-              >
-                {contact.name}
-                <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
-                  {contact.count}
-                </span>
-              </button>
-            ))}
-          </div>
+          // `useState`, not the URL: it is a filter inside a review component,
+          // and the chase screen's own address is `?projectId=`.
+          <Tabs
+            className="mt-2"
+            label="Who to chase"
+            value={filters.contactId}
+            onChange={(contactId) => setFilters((prev) => ({ ...prev, contactId }))}
+            items={[{ id: "", name: "Everyone", count: questions.length }, ...contacts].map((contact) => ({
+              id: contact.id,
+              label: contact.name,
+              count: contact.count,
+            }))}
+          />
         )}
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-700">

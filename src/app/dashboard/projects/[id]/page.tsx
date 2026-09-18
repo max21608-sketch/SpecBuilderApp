@@ -18,9 +18,9 @@
 // see which was which; a tab each is how the client, the quote and the job
 // already think about them. Overview holds everything that is true of the
 // project as a whole.
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact } from "@/components/projects/ContactsPanel";
@@ -54,6 +54,8 @@ import StatTile from "@/components/ui/StatTile";
 import Tip from "@/components/ui/Tip";
 import Pill from "@/components/ui/Pill";
 import PageBody from "@/components/ui/PageBody";
+import Tabs from "@/components/ui/Tabs";
+import { useUrlTab } from "@/lib/use-url-tab";
 
 type Project = {
   id: string;
@@ -274,10 +276,6 @@ function formOf(project: Project): Form {
 
 function ProjectOverview() {
   const projectId = String(useParams().id ?? "");
-  // "?tab=spec" is how the projects list offers the spec table as a destination
-  // of its own. It selects the FIRST run, because there is no merged view to
-  // send anybody to.
-  const wantedTab = useSearchParams().get("tab");
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<DocumentRun[] | null>(null);
   const [runs, setRuns] = useState<SpecRun[]>([]);
@@ -285,13 +283,39 @@ function ProjectOverview() {
   // Collapsed by default. A real preamble states thirty things, each a
   // paragraph, and all of them expanded is why this section could not be read.
   const [openNotes, setOpenNotes] = useState<Set<string>>(new Set());
-  const [tab, setTab] = useState<string>("overview");
+  /**
+   * WHICH TAB, AND IT LIVES IN THE URL.
+   *
+   * It used to live in `useState`, filled ONCE from `?tab=` by a `tabPreselected`
+   * ref on the first render that had runs. Three things then disagreed with the
+   * screen: reload gave you the tab named in the URL rather than the one you
+   * were on, Back walked out of the project instead of between its tabs, and a
+   * link pasted into Teams opened the tab the sender had LEFT.
+   *
+   * `resolve` carries the aliases, and returning null is what makes the deep
+   * link survive: while the runs are still loading a run id resolves to
+   * nothing, Overview renders, and the URL is left alone until the data
+   * arrives. Correcting it there would destroy the link a quarter of a second
+   * before it became valid.
+   *
+   * "?tab=spec" is how the projects list offers the spec table as a destination
+   * of its own; it takes the FIRST run, because there is no merged view to send
+   * anybody to. `finishes`, `history` and `documents` answer for themselves and
+   * BEFORE the runs arrive, so the old /finishes redirect lands immediately.
+   */
+  const [tab, setTab] = useUrlTab<string>({
+    fallback: "overview",
+    resolve: (raw) => {
+      if (!raw) return null;
+      if (raw === "finishes" || raw === "history" || raw === "documents" || raw === "overview") return raw;
+      if (runs.length === 0) return null;
+      if (raw === "spec") return runs[0]?.id ?? null;
+      return runs.some((run) => run.id === raw) ? raw : null;
+    },
+  });
   const [retiringRun, setRetiringRun] = useState<string | null>(null);
   const [retireRunReason, setRetireRunReason] = useState("");
   const [retiringBusy, setRetiringBusy] = useState(false);
-  // Once only, and only before anybody has clicked: re-running it would drag a
-  // reader back to the first run every time the project reloaded.
-  const tabPreselected = useRef(false);
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [suggestedCodes, setSuggestedCodes] = useState<string[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -429,36 +453,6 @@ function ProjectOverview() {
     void loadContacts();
     void loadCodes();
   }, [projectId, load, loadContacts, loadCodes]);
-
-  useEffect(() => {
-    if (tabPreselected.current || !wantedTab) return;
-    // The two project-wide tabs answer for themselves, and BEFORE the runs
-    // arrive: gating them on `runs.length` would leave the old /finishes URL
-    // landing on Overview for as long as the first request took.
-    if (wantedTab === "finishes") {
-      tabPreselected.current = true;
-      setTab(wantedTab);
-      return;
-    }
-    // ?tab=history and ?tab=documents are real tabs again (2026-09-18), so an
-    // old link lands where its name says rather than being redirected to the
-    // Overview — which is where they went while the two were cards only.
-    if (wantedTab === "history" || wantedTab === "documents") {
-      tabPreselected.current = true;
-      setTab(wantedTab);
-      return;
-    }
-    if (runs.length === 0) return;
-    // A run id sends you to that exact run -- the record screen's back link
-    // uses it, because a record number is project-wide and the same code sits
-    // on more than one tab. "spec" just means "the spec table", so it takes
-    // the first run. An id for a run this project does not have falls through
-    // to Overview rather than showing an empty tab nobody selected.
-    const wanted = wantedTab === "spec" ? runs[0] : runs.find((run) => run.id === wantedTab);
-    if (!wanted) return;
-    tabPreselected.current = true;
-    setTab(wanted.id);
-  }, [wantedTab, runs]);
 
   // Runs grouped into the packs they arrived in, newest first, each pack's own
   // runs oldest first so they read in the order the work happens.
@@ -849,106 +843,43 @@ function ProjectOverview() {
       )}
 
       {/* One tab per RUN. The same item code appears in several of them at
-          different quantities, which is the whole reason they are separate. */}
-      <nav className="mt-4 flex flex-wrap gap-1 border-b border-neutral-200">
-        <button
-          type="button"
-          onClick={() => setTab("overview")}
-          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
-            tab === "overview"
-              ? "border-neutral-900 text-neutral-900 font-medium"
-              : "border-transparent text-neutral-500 hover:text-neutral-800"
-          }`}
-        >
-          Overview
-        </button>
-        {runs.map((run) => (
-          <button
-            key={run.id}
-            type="button"
-            onClick={() => setTab(run.id)}
-            className={`px-3 py-2 text-sm -mb-px border-b-2 ${
-              tab === run.id
-                ? "border-neutral-900 text-neutral-900 font-medium"
-                : "border-transparent text-neutral-500 hover:text-neutral-800"
-            }`}
-          >
-            {run.name}
-            <span className="ml-1 text-xs text-neutral-400">{run.record_count}</span>
-          </button>
-        ))}
-        {/* PROJECT-WIDE, like History and unlike a run: the same finish code is
-            quoted on the mock-up, the main run and the VE, and correcting it
-            corrects all of them. It was a grey line on the Overview tab, which
-            meant it disappeared the moment anybody clicked a run — the tab is
-            where a person looks for it. */}
-        <button
-          type="button"
-          onClick={() => setTab("finishes")}
-          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
-            tab === "finishes"
-              ? "border-neutral-900 text-neutral-900 font-medium"
-              : "border-transparent text-neutral-500 hover:text-neutral-800"
-          }`}
-        >
-          Finishes
-        </button>
-        {/* DOCUMENTS AND HISTORY ARE TABS TOO.
-            ==============================================================
-            Both were cards on the Overview, which means both disappeared the
-            moment anybody clicked a run — the same reason Finishes became a tab
-            on 2026-09-17. "Which documents have we had" and "what changed last
-            week" are asked from anywhere on a project, not only while looking
-            at the overview.
+          different quantities, which is the whole reason they are separate.
 
-            The CARDS stay on the Overview as well. A tab and a card are two
-            ways to the same place, which costs nothing and is the point:
-            reaching for a tab or scrolling to a card depends on whether you
-            already know where you are going. Both render the SAME JSX, held in
-            one variable, so they cannot drift. */}
-        <button
-          type="button"
-          onClick={() => setTab("documents")}
-          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
-            tab === "documents"
-              ? "border-neutral-900 text-neutral-900 font-medium"
-              : "border-transparent text-neutral-500 hover:text-neutral-800"
-          }`}
-        >
-          Documents
-          {(documents?.length ?? 0) > 0 && (
-            <span className="ml-1.5 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-500">
-              {documents?.length}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("history")}
-          className={`px-3 py-2 text-sm -mb-px border-b-2 ${
-            tab === "history"
-              ? "border-neutral-900 text-neutral-900 font-medium"
-              : "border-transparent text-neutral-500 hover:text-neutral-800"
-          }`}
-        >
-          History
-        </button>
-        {/* A RUN WITH NO BILL BEHIND IT (0028). Matthew: "a large number of
-            new projects ... coming into the TG0 stage" — and until now a
-            project could only be started by uploading a BOQ spreadsheet. */}
-        <AddRun
-          projectId={project.id}
-          onAdded={async (runId) => {
-            await load();
-            setTab(runId);
-          }}
-        />
-        {/* THERE IS NO HISTORY TAB. Versions, baselines and the change trail
-            are on the Overview itself (2026-09-17): a version is the answer to
-            "what did this project look like on the 14th", which is a question
-            somebody asks WHILE looking at the project, not a place they set
-            out for. */}
-      </nav>
+          DOCUMENTS AND HISTORY ARE TABS TOO, and their CARDS stay on the
+          Overview as well. A tab and a card are two ways to the same place,
+          which costs nothing and is the point: which one you reach for depends
+          on whether you already know where you are going. Both render the SAME
+          JSX, held in one variable, so they cannot drift.
+
+          FINISHES IS PROJECT-WIDE, like History and unlike a run: the same
+          finish code is quoted on the mock-up, the main run and the VE, and
+          correcting it corrects all of them.
+
+          `AddRun` is the strip's trailing slot — a run with no bill behind it
+          (0028), because until it existed a project could only be started by
+          uploading a BOQ spreadsheet. */}
+      <Tabs
+        className="mt-4"
+        label="Project sections"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { id: "overview", label: "Overview", count: null },
+          ...runs.map((run) => ({ id: run.id, label: run.name, count: Number(run.record_count) })),
+          { id: "finishes", label: "Finishes", count: null },
+          { id: "documents", label: "Documents", count: documents?.length ? documents.length : null },
+          { id: "history", label: "History", count: null },
+        ]}
+        trailing={
+          <AddRun
+            projectId={project.id}
+            onAdded={async (runId) => {
+              await load();
+              setTab(runId);
+            }}
+          />
+        }
+      />
 
       {/* On every tab, because a person starts a change and then goes looking
           for the item it applies to. */}
