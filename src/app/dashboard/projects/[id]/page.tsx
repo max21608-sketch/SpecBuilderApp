@@ -48,6 +48,9 @@ import {
   type ProjectCompletion,
   type ProjectState,
 } from "@/lib/project-completion";
+import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary";
+import StatTile from "@/components/ui/StatTile";
+import Tip from "@/components/ui/Tip";
 
 type Project = {
   id: string;
@@ -124,6 +127,99 @@ const STATE_PILL: Record<ProjectState, string> = {
  * heading over a list, so scrolling it read as one continuous document rather
  * than as a set of things you can deal with separately.
  */
+/**
+ * One field of the project summary: a small label, the value, an optional tip.
+ *
+ * Deliberately not a `<dl>`: the grid is four across and a definition list
+ * would need every term and every description to be siblings, which puts the
+ * layout in the CSS and the meaning nowhere.
+ */
+function Detail({
+  label,
+  tip,
+  children,
+}: {
+  label: string;
+  tip?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+        {label}
+        {tip && <Tip>{tip}</Tip>}
+      </div>
+      <div className="mt-0.5 truncate text-sm text-neutral-900">{children}</div>
+    </div>
+  );
+}
+
+/** A value nobody has set. Grey and in words, never an empty cell. */
+function Unset({ children }: { children: React.ReactNode }) {
+  return <span className="text-neutral-400">{children}</span>;
+}
+
+/**
+ * One line of the Specifications card: a count, what it means, and the control
+ * that acts on it.
+ *
+ * THE FIGURE AND ITS FIX TRAVEL TOGETHER. A number with no action beside it
+ * makes somebody go and find the screen it belongs to, which is the whole
+ * complaint about this page — and the count itself is the link, so there are
+ * two ways to the same place rather than one.
+ */
+function SummaryRow({
+  label,
+  count,
+  meaning,
+  tone,
+  actionLabel,
+  actionHref,
+}: {
+  label: string;
+  count: number;
+  meaning: string;
+  tone: "danger" | "warn" | "info";
+  actionLabel?: string;
+  actionHref?: string | null;
+}) {
+  const colour =
+    tone === "danger" ? "text-red-700" : tone === "warn" ? "text-amber-700" : "text-blue-700";
+  return (
+    <tr>
+      <td className="px-3 py-2.5 align-top">
+        {actionHref ? (
+          <Link href={actionHref} className="font-medium text-neutral-900 underline hover:text-neutral-600">
+            {label}
+          </Link>
+        ) : (
+          <span className="font-medium text-neutral-900">{label}</span>
+        )}
+      </td>
+      <td className={`px-3 py-2.5 text-right align-top text-base font-semibold tabular-nums ${colour}`}>
+        {actionHref ? (
+          <Link href={actionHref} className="no-underline hover:underline">
+            {count.toLocaleString()}
+          </Link>
+        ) : (
+          count.toLocaleString()
+        )}
+      </td>
+      <td className="px-3 py-2.5 align-top text-neutral-600">{meaning}</td>
+      <td className="px-3 py-2.5 text-right align-top">
+        {actionLabel && actionHref && (
+          <Link
+            href={actionHref}
+            className="inline-flex items-center rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-700 no-underline hover:bg-neutral-50"
+          >
+            {actionLabel}
+          </Link>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 function Card({
   title,
   aside,
@@ -209,12 +305,26 @@ function ProjectOverview() {
   // Derived on the server and re-read on every load, because it changes when
   // an answer changes rather than when the project row does.
   const [completion, setCompletion] = useState<ProjectCompletion>(EMPTY_COMPLETION);
+  // What the project is SHORT of, as opposed to whether it is finished. Same
+  // scope, different question — see src/lib/project-summary.ts.
+  const [summary, setSummary] = useState<ProjectSummary>(EMPTY_SUMMARY);
   const [state, setState] = useState<ProjectState>("active");
+  /**
+   * The details form is filled in ONCE and then read.
+   *
+   * It used to be the first and largest thing on this screen, above everything
+   * a person actually comes here for. It reads as a summary until somebody
+   * presses Edit. Not a disclosure of the same markup: the summary is the
+   * compact grid below, and the form is the one that already existed, with its
+   * validation and its unsaved-changes warning untouched.
+   */
+  const [editingDetails, setEditingDetails] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiFetch<{
       project: Project;
       completion: ProjectCompletion;
+      summary: ProjectSummary;
       state: ProjectState;
       documents: DocumentRun[];
       runs: SpecRun[];
@@ -227,6 +337,7 @@ function ProjectOverview() {
     setError(null);
     setProject(res.data.project);
     setCompletion(res.data.completion ?? EMPTY_COMPLETION);
+    setSummary(res.data.summary ?? EMPTY_SUMMARY);
     setState(res.data.state ?? "active");
     setDocuments(res.data.documents);
     setRuns(res.data.runs ?? []);
@@ -507,6 +618,9 @@ function ProjectOverview() {
       setProject(res.data.project);
       setForm(formOf(res.data.project));
       setSaved(true);
+      // Back to the summary. The panel exists to be filled in and left, and
+      // staying in it after a save leaves nine inputs on screen saying nothing.
+      setEditingDetails(false);
     } finally {
       setSaving(false);
     }
@@ -525,6 +639,19 @@ function ProjectOverview() {
     specsAgreedBy: project.specs_agreed_by,
     deliveryDate: project.delivery_date,
   });
+
+  /**
+   * Where a "look at the records" control goes.
+   *
+   * The spec table REQUIRES a run — a screen that merged them listed three
+   * sub-quotes in one flat list and was deleted for it — so every link from
+   * this page lands on the first live run's tab, which is also what the BOQ
+   * confirm redirects to. Null when there is no run yet, and every caller then
+   * renders the figure without a link rather than a link that goes nowhere.
+   */
+  const firstRunHref = runs.length > 0 ? `/dashboard/projects/${project.id}?tab=${runs[0]!.id}` : null;
+  const firstPackHref =
+    packs.length > 0 && packs[0]!.id ? `/dashboard/projects/${project.id}/intake/${packs[0]!.id}` : null;
 
   const field = (key: keyof Form) => ({
     value: form[key],
@@ -736,7 +863,86 @@ function ProjectOverview() {
       )}
 
       <div className={tab === "overview" ? "" : "hidden"}>
-      <form onSubmit={save} className="mt-6 border border-neutral-200 rounded-lg bg-white p-4">
+
+      {/* ==================================================================
+          THE PROJECT, AS A SUMMARY. Filled in once, then read.
+
+          It was a form of nine inputs and three captions, first and largest on
+          the screen, above everything a person comes here for. The FORM is
+          unchanged and still below — with its validation, its date rules and
+          its unsaved-changes warning — it just does not open until somebody
+          asks for it.
+
+          The captions are gone. Where a field carries a rule worth knowing it
+          gets a `?` you hover; where its ABSENCE would look identical to being
+          fine it stays on the page in words, which is why the no-programme
+          notice is still printed and not a tip.
+          ================================================================== */}
+      {!editingDetails && (
+        <div className="mt-6 border border-neutral-200 rounded-lg bg-white">
+          <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500">Project</h2>
+            <span className="flex-1" />
+            <Button size="xs" onClick={() => setEditingDetails(true)}>
+              Edit
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 gap-x-5 gap-y-4 px-4 py-4 sm:grid-cols-4">
+            <Detail label="BWS number">
+              <span className="font-mono">{project.bws_project_number}</span>
+            </Detail>
+            <Detail label="Name">{project.name}</Detail>
+            <Detail label="Client">{project.client || <Unset>none recorded</Unset>}</Detail>
+            <Detail
+              label="Shared inbox"
+              tip="Mail forwarded here is placed on this project automatically. Blank means there is none, and mail will not route to it."
+            >
+              {project.shared_inbox ? (
+                <span className="font-mono text-xs">{project.shared_inbox}</span>
+              ) : (
+                <Unset>none</Unset>
+              )}
+            </Detail>
+            <Detail
+              label="Drawing units"
+              tip="Used only where a page prints no unit and its own figures do not agree. A unit printed on the page always wins."
+            >
+              {project.default_dimension_unit ? (
+                ATTRIBUTE_UNIT_LABELS[project.default_dimension_unit as keyof typeof ATTRIBUTE_UNIT_LABELS] ??
+                project.default_dimension_unit
+              ) : (
+                <Unset>not set — asked per dimension</Unset>
+              )}
+            </Detail>
+            <Detail label="Order date">{project.order_date ?? <Unset>not set</Unset>}</Detail>
+            <Detail
+              label={SPECS_AGREED_LABEL}
+              tip="The gate before drawings can be issued, and the date the spec table measures Overdue against."
+            >
+              {project.specs_agreed_by ? (
+                <span className="font-medium">{project.specs_agreed_by}</span>
+              ) : (
+                <Unset>not set</Unset>
+              )}
+            </Detail>
+            <Detail label="Delivery date">{project.delivery_date ?? <Unset>not set</Unset>}</Detail>
+          </div>
+          {/* NOT a tip. A project with no programme and a project on time look
+              identical otherwise, so this has to be readable without hovering
+              anything. */}
+          {!programme && (
+            <p className="mx-4 mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              No programme recorded. Nothing on this project can be flagged overdue until{" "}
+              {SPECS_AGREED_LABEL.toLowerCase()} holds a date — that is not the same as being on time.
+            </p>
+          )}
+        </div>
+      )}
+
+      <form
+        onSubmit={save}
+        className={`mt-6 border border-neutral-200 rounded-lg bg-white p-4 ${editingDetails ? "" : "hidden"}`}
+      >
         <h2 className="font-medium text-neutral-900">Details</h2>
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <label className="text-sm text-neutral-600">
@@ -860,6 +1066,19 @@ function ProjectOverview() {
           >
             {saving ? "Saving…" : "Save changes"}
           </button>
+          {/* DISCARDS NOTHING BY ITSELF — it closes the panel and puts the form
+              back to what the server holds, which is the only state the summary
+              can honestly render. `dirty` is what makes the difference visible
+              before it goes. */}
+          <Button
+            size="sm"
+            onClick={() => {
+              setForm(formOf(project));
+              setEditingDetails(false);
+            }}
+          >
+            {dirty ? "Discard changes" : "Close"}
+          </Button>
           {dirty && <span className="text-xs text-amber-800">Unsaved changes</span>}
           {!dirty && saved && <span className="text-xs text-green-700">Saved</span>}
         </div>
@@ -868,28 +1087,180 @@ function ProjectOverview() {
       {/* WHAT HAS BEEN SPECIFIED, and whether that is everything. The pill at
           the top of the page is derived from exactly these numbers, so the two
           cannot disagree about whether a project is finished. */}
-      <Card title="Specifications">
-        <p className="mt-1 text-sm text-neutral-700">
-          {completion.records === 0 ? (
-            <>Nothing imported yet. A bill of quantities is what creates this project&rsquo;s records.</>
-          ) : completion.complete ? (
-            <>
-              {completion.records === 1
-                ? "The one record is settled"
-                : `All ${completion.records} records are settled`}{" "}
-              — every question confirmed or marked not applicable. That is what COMPLETED means here, and it is worked out from the
-              answers rather than set by anybody.
-            </>
-          ) : (
-            <>
-              {completion.records} record{completion.records === 1 ? "" : "s"} in this project&rsquo;s export scope.{" "}
-              {completionSentence(completion)}
-            </>
-          )}
-        </p>
+      {/* ==================================================================
+          THE NUMBERS FIRST, AND EACH ONE PRESSABLE.
+
+          "45 records, 1,899 questions still missing or TBC" was one sentence
+          that answered neither question a KAM has — CAN I QUOTE THIS, and WHAT
+          IS STOPPING ME. The strip answers the first; the table under it
+          answers the second, one actionable row at a time, with the control
+          beside the figure rather than on a screen you have to go and find.
+          ================================================================== */}
+      {completion.records > 0 && (
+        <div className="mt-6 grid grid-cols-2 gap-2.5 lg:grid-cols-5">
+          <StatTile
+            label="Line items"
+            value={summary.records}
+            meaning={`${runs.length} run${runs.length === 1 ? "" : "s"}`}
+            href={firstRunHref}
+            action="see them all"
+          />
+          <StatTile
+            label="TGQ"
+            tone="danger"
+            value={summary.toQuote}
+            meaning={summary.tgqNarrowed ? "questions blocking a quote" : "every outstanding question — see below"}
+            href={firstRunHref}
+            action="open the spec table"
+          />
+          <StatTile
+            label="Also outstanding"
+            tone="warn"
+            value={summary.missing + summary.tbc}
+            meaning={`${summary.missing} unlooked · ${summary.tbc} TBC`}
+            href={firstRunHref}
+            action="open the spec table"
+          />
+          <StatTile label="Settled" tone="good" value={summary.settled} meaning="confirmed or N/A" />
+          <StatTile
+            label="Finishes"
+            tone="info"
+            value={summary.finishes}
+            meaning={
+              summary.finishesNoKind > 0 ? `${summary.finishesNoKind} with no kind` : "all filed under a kind"
+            }
+            href={`/dashboard/projects/${project.id}?tab=finishes`}
+            action="open the library"
+          />
+        </div>
+      )}
+
+      <Card
+        title="Specifications"
+        aside={
+          firstRunHref ? (
+            <Link href={firstRunHref} className="text-sm text-neutral-600 underline hover:text-neutral-900">
+              Open the spec table
+            </Link>
+          ) : undefined
+        }
+      >
+        {completion.records === 0 ? (
+          <p className="mt-1 text-sm text-neutral-700">
+            Nothing imported yet. A bill of quantities is what creates this project&rsquo;s records.
+          </p>
+        ) : completion.complete ? (
+          <p className="mt-1 text-sm text-neutral-700">
+            {completion.records === 1 ? "The one record is settled" : `All ${completion.records} records are settled`} —
+            every question confirmed or marked not applicable. That is what COMPLETED means here, and it is worked out
+            from the answers rather than set by anybody.
+          </p>
+        ) : (
+          <>
+            {/* THE TGQ SET HAS NEVER BEEN NARROWED, AND THE SCREEN SAYS SO.
+                `tgq_levels` is still at 0019's seeded default — all three
+                levels on all 728 questions — so "needed to quote" is
+                arithmetically the same number as "outstanding" and means
+                nothing. Printing it in red as though it were a measurement is
+                the confidently-wrong figure this app exists to avoid, so where
+                it is a placeholder it is labelled one. It corrects itself the
+                moment the workbook is re-seeded, with no code change. */}
+            {!summary.tgqNarrowed && summary.toQuote > 0 && (
+              <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <span className="font-medium">Every outstanding question still counts as blocking a quote.</span>{" "}
+                Matthew&rsquo;s TGQ workbook has not been applied, so all {summary.toQuote.toLocaleString()} are marked
+                as needed — which is today&rsquo;s position, not a measurement of this project. Applying it only ever
+                removes questions from that figure.
+              </p>
+            )}
+            <div className="mt-3 overflow-hidden rounded border border-neutral-200">
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-neutral-100">
+                  {/* TGQ, NOT "needed to quote". They are the same question —
+                      settled on 2026-09-18 — and two names for it is how a
+                      reader comes to believe they are two measurements. The
+                      plain-English gloss stays in the meaning column, where it
+                      explains rather than competes. */}
+                  <SummaryRow
+                    label="TGQ"
+                    tone="danger"
+                    count={summary.toQuote}
+                    meaning={
+                      summary.tgqNarrowed
+                        ? "Questions that block a quotation at each item's level."
+                        : "Placeholder — every outstanding question, as above."
+                    }
+                    actionLabel="Chase them"
+                    actionHref={`/dashboard/drafts?projectId=${project.id}`}
+                  />
+                  {summary.missing + summary.tbc > 0 && (
+                    <SummaryRow
+                      label="Also outstanding"
+                      tone="warn"
+                      count={summary.missing + summary.tbc}
+                      meaning={`${summary.missing} nobody has looked at, ${summary.tbc} answered TBC.`}
+                      actionLabel="Open the spec table"
+                      actionHref={firstRunHref}
+                    />
+                  )}
+                  {summary.uncategorised > 0 && (
+                    <SummaryRow
+                      label="No category"
+                      tone="warn"
+                      count={summary.uncategorised}
+                      meaning="No questions at all, so they score zero outstanding. Nobody has decided what to ask."
+                      actionLabel="Set them"
+                      actionHref={firstRunHref}
+                    />
+                  )}
+                  {summary.noLevel > 0 && (
+                    <SummaryRow
+                      label="No level"
+                      tone="warn"
+                      count={summary.noLevel}
+                      meaning={`Nothing on them is tiered, so they are missing from the figure above.${
+                        summary.levelSuggested > 0 ? ` ${summary.levelSuggested} have a suggestion waiting.` : ""
+                      }`}
+                      actionLabel="Open the spec table"
+                      actionHref={firstRunHref}
+                    />
+                  )}
+                  {summary.finishesNoKind > 0 && (
+                    <SummaryRow
+                      label="Finishes with no kind"
+                      tone="info"
+                      count={summary.finishesNoKind}
+                      meaning="The kind is what the screens group and filter by."
+                      actionLabel="Open the library"
+                      actionHref={`/dashboard/projects/${project.id}?tab=finishes`}
+                    />
+                  )}
+                  {summary.documentsFailed > 0 && (
+                    <SummaryRow
+                      label="Documents that failed to read"
+                      tone="danger"
+                      count={summary.documentsFailed}
+                      meaning="Everything else read itself on arrival. These need a retry, which charges again."
+                      actionLabel="Open the pack"
+                      actionHref={firstPackHref}
+                    />
+                  )}
+                  {summary.documentsReading > 0 && (
+                    <SummaryRow
+                      label="Still being read"
+                      tone="info"
+                      count={summary.documentsReading}
+                      meaning="Dispatched on arrival and running now. Nothing to do."
+                    />
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
         <p className="mt-2 text-xs text-neutral-500">
           Counted over the records the export ships: active records on live runs, and a bill line that has been split
-          into configurations is counted through those. Open a run tab above to see them one by one.
+          into configurations is counted through those.
         </p>
       </Card>
 
@@ -897,7 +1268,7 @@ function ProjectOverview() {
           decide to go to — whereas "what did this look like last week" is a
           question asked while looking at the thing. */}
       <Card title="Versions and history">
-        <ProjectHistory projectId={project.id} />
+        <ProjectHistory projectId={project.id} specsAgreedBy={project.specs_agreed_by} />
       </Card>
 
       <Card

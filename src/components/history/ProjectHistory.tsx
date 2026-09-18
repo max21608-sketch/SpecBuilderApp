@@ -13,6 +13,7 @@ import DiffTable from "@/components/history/DiffTable";
 import type { ProjectChange } from "@/lib/change-history";
 import type { ProjectComparison, RecordComparison } from "@/lib/baselines";
 import Button from "@/components/ui/Button";
+import { SPECS_AGREED_LABEL, daysUntilSpecsAgreed, todayLocal } from "@/lib/project-programme";
 
 type Payload = { changes: ProjectChange[] };
 
@@ -33,6 +34,17 @@ function when(iso: string): string {
  *  collapsed list never implies the trail is shorter than it is. */
 const RECENT_CHANGES = 5;
 
+/** Days from today to a `YYYY-MM-DD` day, compared as strings by the shared helper. */
+function daysUntil(day: string): number {
+  return daysUntilSpecsAgreed(day, todayLocal()) ?? 0;
+}
+
+function describeDays(days: number): string {
+  if (days < 0) return `${-days} day${days === -1 ? "" : "s"} ago — anything outstanding is overdue`;
+  if (days === 0) return "today";
+  return `${days} day${days === 1 ? "" : "s"} away`;
+}
+
 const CHANGE_CLASS: Record<RecordComparison["change"], string> = {
   added: "text-green-700 bg-green-50 border-green-200",
   removed: "text-red-700 bg-red-50 border-red-200",
@@ -40,7 +52,24 @@ const CHANGE_CLASS: Record<RecordComparison["change"], string> = {
   unchanged: "text-neutral-500 bg-neutral-50 border-neutral-200",
 };
 
-export default function ProjectHistory({ projectId, runId }: { projectId: string; runId?: string | null }) {
+export default function ProjectHistory({
+  projectId,
+  runId,
+  specsAgreedBy,
+}: {
+  projectId: string;
+  runId?: string | null;
+  /**
+   * The project's specs-agreed-by date, as a `YYYY-MM-DD` STRING.
+   *
+   * A string, never a Date: `projects.specs_agreed_by` is a `date` column and
+   * both drivers parse one into local midnight, which `toISOString()` then
+   * renders as the day before in British Summer Time. The whole TOE-dates rule
+   * (CLAUDE.md) is that these are calendar days compared as strings, and a
+   * component that took a Date here would be the place that quietly broke it.
+   */
+  specsAgreedBy?: string | null;
+}) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [from, setFrom] = useState("");
@@ -280,29 +309,103 @@ export default function ProjectHistory({ projectId, runId }: { projectId: string
         Everything that has happened
         {changes.length > 0 && <span className="ml-2 normal-case tracking-normal text-neutral-400">{changes.length}</span>}
       </h3>
+      {/* THE PROGRAMME BELONGS IN THE TRAIL, NOT ONLY IN A FIELD AT THE TOP.
+          ================================================================
+          Asked for on 2026-09-18, looking at the history: "I don't see any key
+          date." A trail of what has happened, with the date everything is
+          working towards recorded somewhere else entirely, makes the reader
+          hold the deadline in their head while they read.
+
+          It sits above the changes because it is the only entry here in the
+          FUTURE, and the list is newest first. Violet, so it reads as neither a
+          change (grey) nor a baseline (green) — it is not something somebody
+          did. When the date has passed it says so in red, which is the same
+          fact the spec table calls overdue. */}
+      {specsAgreedBy && (
+        <div
+          className={`mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg border px-4 py-2.5 text-sm ${
+            daysUntil(specsAgreedBy) < 0
+              ? "border-red-200 bg-red-50"
+              : "border-violet-200 bg-violet-50"
+          }`}
+        >
+          <span
+            className={`rounded-full border bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+              daysUntil(specsAgreedBy) < 0 ? "border-red-300 text-red-700" : "border-violet-300 text-violet-700"
+            }`}
+          >
+            Key date
+          </span>
+          <span className={daysUntil(specsAgreedBy) < 0 ? "font-semibold text-red-900" : "font-semibold text-violet-900"}>
+            {SPECS_AGREED_LABEL} — {specsAgreedBy}
+          </span>
+          <span className={`text-xs ${daysUntil(specsAgreedBy) < 0 ? "text-red-800" : "text-violet-800"}`}>
+            {describeDays(daysUntil(specsAgreedBy))}
+          </span>
+        </div>
+      )}
       {changes.length === 0 ? (
         <p className="mt-2 text-sm text-neutral-600">
           Nothing recorded yet. Changes start when a document is confirmed or somebody edits an item.
         </p>
       ) : (
         <ul className="mt-2 border border-neutral-200 rounded-lg divide-y divide-neutral-200 bg-white">
-          {visibleChanges.map((change) => (
-            <li key={change.id} className="px-4 py-2 text-sm">
+          {visibleChanges.map((change) => {
+            /* A BASELINE IS NOT A CHANGE, AND MUST NOT LOOK LIKE ONE.
+               ==========================================================
+               Asked for on 2026-09-18: "I want to make it quite clear when a
+               version has been created… they need to be quite distinctive
+               differences between just a normal change and a version change."
+
+               Everything in this list rendered identically, so a named point —
+               the thing you compare against, and the only row here anybody
+               reads deliberately — was a line of grey text among forty. It is
+               now a green bar straight across the list with its name at full
+               size, so scrolling tells you which changes fall inside Rev A and
+               which came after. That is the only question anybody asks of a
+               trail, and it was unanswerable by looking.
+
+               `label` is baseline-only by constraint (0012: "a baseline is
+               named, and nothing else is"), so `kind === "baseline"` and the
+               presence of a name are the same fact, and the row can lean on
+               either. */
+            const isBaseline = change.kind === "baseline";
+            return (
+            <li
+              key={change.id}
+              className={
+                isBaseline
+                  ? "px-4 py-2.5 text-sm bg-green-50 border-y border-green-200"
+                  : "px-4 py-2 text-sm"
+              }
+            >
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="text-neutral-900">{change.label ?? change.kindLabel}</span>
-                {change.label && <span className="text-xs text-neutral-500">{change.kindLabel}</span>}
-                <span className="text-xs text-neutral-500">{when(change.createdAt)}</span>
-                <span className="text-xs text-neutral-500">{change.actor}</span>
+                {isBaseline && (
+                  <span className="rounded-full border border-green-300 bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-green-700">
+                    Baseline
+                  </span>
+                )}
+                <span className={isBaseline ? "font-semibold text-green-900" : "text-neutral-900"}>
+                  {change.label ?? change.kindLabel}
+                </span>
+                {change.label && !isBaseline && <span className="text-xs text-neutral-500">{change.kindLabel}</span>}
+                <span className={`text-xs ${isBaseline ? "text-green-800" : "text-neutral-500"}`}>
+                  {when(change.createdAt)}
+                </span>
+                <span className={`text-xs ${isBaseline ? "text-green-800" : "text-neutral-500"}`}>{change.actor}</span>
                 {change.recordsChanged > 0 && (
-                  <span className="text-xs text-neutral-400">
+                  <span className={`text-xs ${isBaseline ? "text-green-800" : "text-neutral-400"}`}>
                     {change.recordsChanged} item{change.recordsChanged === 1 ? "" : "s"}
+                    {isBaseline && " fixed at this point"}
                   </span>
                 )}
                 {change.closedAt === null && (
                   <span className="text-xs text-blue-700 border border-blue-200 bg-blue-50 rounded px-1.5">open</span>
                 )}
               </div>
-              {change.reason && <p className="text-xs text-neutral-600">{change.reason}</p>}
+              {change.reason && (
+                <p className={`text-xs ${isBaseline ? "text-green-900" : "text-neutral-600"}`}>{change.reason}</p>
+              )}
               <div className="flex flex-wrap gap-x-4 text-xs">
                 {change.source && (
                   <a
@@ -321,7 +424,8 @@ export default function ProjectHistory({ projectId, runId }: { projectId: string
                 )}
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
       {/* Expanding shows the rest; it never loads anything, because the whole

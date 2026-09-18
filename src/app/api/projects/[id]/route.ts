@@ -16,6 +16,7 @@
 import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { EMPTY_COMPLETION, loadProjectCompletion, projectState } from "@/lib/project-completion";
+import { loadProjectSummary } from "@/lib/project-summary";
 import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
 import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
@@ -159,6 +160,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // see src/lib/project-completion.ts — and returned here so the pill on the
   // project page and the pill on the projects list can never disagree.
   const completion = (await loadProjectCompletion([id])).get(id) ?? EMPTY_COMPLETION;
+  // The overview's own numbers: what is blocking a quote, and what a person
+  // would press to fix it. A different question from `completion`, which
+  // answers only "is this finished" and whose clauses a db-tier test pins to
+  // the export's scope. They share that scope and nothing else.
+  const summary = await loadProjectSummary(id);
 
   const record = rows[0] as Record<string, unknown>;
   return json({
@@ -170,6 +176,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       delivery_date: asDate(record.delivery_date),
     },
     completion,
+    summary,
     state: projectState(String(record.status ?? "active"), completion),
     documents,
     runs,
