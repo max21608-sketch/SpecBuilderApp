@@ -29,6 +29,37 @@ type Line = {
   // decision the quote gate may read; see db/migrations/0025.
   level?: string | null; levelStatus?: string; levelReason?: string | null;
 };
+
+/**
+ * Client refs that appear on more than one ACTIVE line of one tab.
+ *
+ * Normalised the way `findRecordsByRef` matches — case and whitespace folded —
+ * rather than compared raw, or `S-100` and `s 100` would read as two different
+ * codes and the warning would miss the case it exists for.
+ *
+ * Ignored lines are out: a line somebody has already dismissed is not one of
+ * the two things that will exist afterwards.
+ */
+function duplicateCodes(sheet: { lines: Line[] }): string[] {
+  const seen = new Map<string, string[]>();
+  for (const line of sheet.lines) {
+    if (line.ignored || !line.code?.trim()) continue;
+    const key = line.code.trim().toUpperCase().replace(/\s+/g, " ");
+    seen.set(key, [...(seen.get(key) ?? []), line.code.trim()]);
+  }
+  return [...seen.entries()].filter(([, all]) => all.length > 1).map(([, all]) => all[0]!);
+}
+
+function isDuplicated(sheet: { lines: Line[] }, line: Line): boolean {
+  if (line.ignored || !line.code?.trim()) return false;
+  const key = line.code.trim().toUpperCase().replace(/\s+/g, " ");
+  return (
+    sheet.lines.filter(
+      (other) => !other.ignored && other.code?.trim().toUpperCase().replace(/\s+/g, " ") === key,
+    ).length > 1
+  );
+}
+
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
 type Sheet = {
   sheetName: string; proposedRunName: string; headerRow: number; skippedRows: number;
@@ -188,6 +219,16 @@ export default function ReviewImportPage() {
   const runs = data.runs.filter((projectRun) => projectRun.status === "active");
   const activeSheets = sheets.filter((sheet) => !sheet.ignored);
   const activeLines = activeSheets.flatMap((sheet) => sheet.lines.filter((line) => !line.ignored));
+  /**
+   * Is this bill REVISING a run, or creating one?
+   *
+   * The button has to say which, because they are not the same act at all: a
+   * revision writes the bill's own columns over records that already exist and
+   * keeps everything hanging off them, and retires the ones the revision no
+   * longer lists. "Confirm 57 lines" describes both equally and warns about
+   * neither.
+   */
+  const revising = Object.keys(data.reconciliation ?? {}).length > 0;
 
   // Four documents, four review screens, one route. Each staged shape is edited
   // by the screen that understands it; nothing shares a component with a shape
@@ -389,6 +430,26 @@ export default function ReviewImportPage() {
 
           {!sheet.ignored && (
             <div className="mt-2 overflow-x-auto border border-neutral-200 rounded-lg bg-white">
+              {/* THE SAME CLIENT REF ON TWO LINES IS NORMAL, AND IS THE MOST
+                  CONFUSING THING IN THE REAL PILOT BILL. `SX11A` appears twice
+                  in the P17231 BOQ at different quantities. A ref is the
+                  CLIENT'S key, not ours — which is exactly why records carry a
+                  surrogate id and a `record_no`, and why every ref lives in
+                  `spec_record_refs` rather than on the record. Both lines
+                  become records. Said here so nobody spends ten minutes
+                  deciding which one is the mistake. */}
+              {duplicateCodes(sheet).length > 0 && (
+                <p className="mx-3 mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <span className="font-medium">
+                    {duplicateCodes(sheet).length === 1
+                      ? "One client ref appears on more than one line"
+                      : `${duplicateCodes(sheet).length} client refs appear on more than one line`}
+                  </span>
+                  : {duplicateCodes(sheet).map((code) => code).join(", ")}. That is normal — a ref is the client&rsquo;s
+                  key, not ours, and the same code can be quoted twice at different quantities. Each line becomes its
+                  own record with its own number.
+                </p>
+              )}
               <table className="min-w-full text-sm">
                 <thead className="bg-neutral-50 text-neutral-600">
                   <tr>
@@ -405,9 +466,24 @@ export default function ReviewImportPage() {
                 </thead>
                 <tbody className="divide-y divide-neutral-200">
                   {sheet.lines.map((line) => (
-                    <tr key={line.index} className={line.ignored ? "opacity-40" : undefined}>
+                    <tr
+                      key={line.index}
+                      className={`${line.ignored ? "opacity-40" : ""} ${
+                        isDuplicated(sheet, line) ? "bg-amber-50/60" : ""
+                      }`.trim() || undefined}
+                    >
                       <td className="px-3 py-2 text-neutral-500">{line.lineNo}</td>
-                      <td className="px-3 py-2 font-medium text-neutral-900">{line.code ?? "—"}</td>
+                      <td className="px-3 py-2 font-medium text-neutral-900">
+                        {line.code ?? "—"}
+                        {isDuplicated(sheet, line) && (
+                          <span
+                            className="ml-1 rounded border border-amber-300 bg-white px-1 text-[10px] font-semibold text-amber-800"
+                            title="This client ref is on more than one line of this tab. Both become records."
+                          >
+                            ×2+
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         {line.itemDescription}
                         {line.productReference && <span className="text-neutral-500"> · {line.productReference}</span>}
@@ -554,7 +630,9 @@ export default function ReviewImportPage() {
         >
           {busy
             ? "Importing…"
-            : `Confirm ${activeLines.length} line${activeLines.length === 1 ? "" : "s"} in ${activeSheets.length} run${activeSheets.length === 1 ? "" : "s"}`}
+            : revising
+              ? `Confirm — updates this run from ${activeLines.length} line${activeLines.length === 1 ? "" : "s"}`
+              : `Confirm — creates ${activeLines.length} record${activeLines.length === 1 ? "" : "s"} on ${activeSheets.length} run${activeSheets.length === 1 ? "" : "s"}`}
         </button>
         <span className="text-sm text-neutral-500">
           A line with no category still imports — it simply has no checklist yet.
