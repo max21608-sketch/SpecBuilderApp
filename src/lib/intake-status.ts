@@ -1,3 +1,5 @@
+import type { Tone } from "@/components/ui/tone";
+
 // What an intake run's status is called on screen.
 //
 // ONE PLACE, because there were two and they had already drifted: `parsing`
@@ -17,6 +19,34 @@ export const INTAKE_STATUS_LABELS: Record<string, string> = {
   confirmed: "Review complete",
   failed: "Failed",
 };
+
+/**
+ * What each status WANTS from the reader, in the house colour language.
+ *
+ * Beside the labels rather than at the two screens that render them, for the
+ * reason the labels are here: the pack screen and the project overview each had
+ * their own ternary and the two disagreed — one painted `parsed` blue, the
+ * other amber — so the same row changed colour one click apart.
+ *
+ * `parsed` is AMBER because it is the one state that needs a person; `failed`
+ * is RED because the fix costs another charged model call; `queued`/`parsing`
+ * are BLUE because the app is doing something and nobody is wanted; `pending`
+ * is PLAIN, which is the honest reading of a document nobody has read and
+ * nothing is waiting on.
+ */
+export const INTAKE_STATUS_TONE: Record<string, Tone> = {
+  pending: "plain",
+  queued: "info",
+  parsing: "info",
+  parsed: "warn",
+  confirmed: "good",
+  failed: "danger",
+};
+
+/** The tone, or `plain` for a status this does not know — never a colour. */
+export function intakeStatusTone(status: string): Tone {
+  return INTAKE_STATUS_TONE[status] ?? "plain";
+}
 
 /** The label, or the raw status if the database grows one this does not know. */
 export function intakeStatusLabel(status: string): string {
