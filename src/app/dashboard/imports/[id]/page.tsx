@@ -237,30 +237,30 @@ export default function ReviewImportPage() {
   // it cannot display.
   if (run.document_kind === "shop_drawings") {
     return (
-      <div className="max-w-6xl mx-auto">
+      <PageBody width="wide">
         <h1 className="text-xl font-semibold text-neutral-900">
           Review drawings — {run.bws_project_number} {run.project_name}
         </h1>
         <DrawingsReview importId={run.id} />
-      </div>
+      </PageBody>
     );
   }
 
   if (run.document_kind === "preamble") {
     return (
-      <div className="max-w-6xl mx-auto">
+      <PageBody width="wide">
         <h1 className="text-xl font-semibold text-neutral-900">
           Review preamble — {run.bws_project_number} {run.project_name}
         </h1>
         <PreambleReview importId={run.id} />
-      </div>
+      </PageBody>
     );
   }
 
   if (run.source_kind === "spec_document") {
     if (!data.registers) return <Spinner label="Loading the document" />;
     return (
-      <div className="max-w-6xl mx-auto">
+      <PageBody width="wide">
         <h1 className="text-xl font-semibold text-neutral-900">
           Review {run.document_kind === "email" ? "email" : "document"} — {run.bws_project_number}{" "}
           {run.project_name}
@@ -270,12 +270,12 @@ export default function ReviewImportPage() {
           reload={() => load()}
           quietReload={() => load(true)}
         />
-      </div>
+      </PageBody>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <PageBody width="wide">
       <h1 className="text-xl font-semibold text-neutral-900">
         Review import — {run.bws_project_number} {run.project_name}
       </h1>
@@ -676,6 +676,6 @@ export default function ReviewImportPage() {
           A line with no category still imports — it simply has no checklist yet.
         </span>
       </div>
-    </div>
+    </PageBody>
   );
 }

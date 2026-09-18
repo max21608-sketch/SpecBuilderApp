@@ -691,7 +691,20 @@ export const RawCodeGroup = z.object({
   // title block -- so a single code cannot name the group, and asking for one
   // produced the compound string "S-200 / MLR 2 ARMCHAIR", which matched
   // neither page.
-  itemCodes: z.array(z.string().max(MAX_SHORT)).min(1).max(MAX_VIEW_REGIONS),
+  //
+  // A BARE STRING IS ACCEPTED, AND THAT IS NOT LENIENCE FOR ITS OWN SAKE. The
+  // strict version cost a charged call: the S-100 read returned
+  // `itemCodes: "S-100"`, the whole extraction failed validation with "Expected
+  // array, received string", and the run went terminal with nothing staged —
+  // over a grouping hint, on a document that had already been read and paid
+  // for. `.catch([])` behind it drops a group nothing can make sense of, which
+  // leaves the item whole and asks a person: the safe end of this question.
+  itemCodes: z
+    .preprocess(
+      (value) => (typeof value === "string" ? [value] : value),
+      z.array(z.string().max(MAX_SHORT)).min(1).max(MAX_VIEW_REGIONS),
+    )
+    .catch([]),
   pages: z.array(z.number().int().min(1).max(100_000)).max(MAX_VIEW_REGIONS).catch([]).default([]),
   relationship: z.enum(["one_item", "configurations", "unclear"]).catch("unclear").default("unclear"),
   // `.catch(null)` keeps a paid run alive when the evidence is malformed, and

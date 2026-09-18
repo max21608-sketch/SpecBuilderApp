@@ -68,19 +68,34 @@ export default function ItemImagePicker({
   itemPage,
   proposal,
   views,
+  sharesItsPage,
   onCropped,
 }: {
   importId: string;
   itemPage: number | null;
   proposal: ItemView | null | undefined;
   views: ItemView[];
+  /**
+   * Whether this item has the page to itself.
+   *
+   * IT IS NOT ONE ITEM PER PAGE. A sheet can carry three codes, and where the
+   * model reported no view region every one of them would propose the SAME
+   * whole page as its own picture — three records showing an identical picture
+   * of all three items. The whole-page proposal only makes sense when the page
+   * IS the drawing of this item, so it is withheld otherwise and the reviewer
+   * drags a box, which is the honest offer there.
+   *
+   * Optional and defaulting to alone: every existing caller renders one item
+   * per page, and this is the caller that knows.
+   */
+  sharesItsPage?: boolean;
   /** null means "this item gets no picture", which is a real answer. */
   onCropped: (image: CroppedImage | null) => void;
 }) {
   const sourceUrl = `/api/imports/${importId}/source`;
   // A reported view is always preferred to the page. The fallback only stands
-  // in where the model gave us nothing to prefer.
-  const fallback = !proposal && views.length === 0 ? wholePage(itemPage) : null;
+  // in where the model gave us nothing to prefer AND the page is this item's.
+  const fallback = !proposal && views.length === 0 && !sharesItsPage ? wholePage(itemPage) : null;
   const [chosen, setChosen] = useState<ItemView | null>(proposal ?? fallback);
   const [preview, setPreview] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);

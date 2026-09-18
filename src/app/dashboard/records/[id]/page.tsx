@@ -501,7 +501,7 @@ export default function RecordPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <PageBody>
       {/* Back to the run this record is ON, not to the project's first one. A
           record's number is project-wide, so the same code appears on the
           mock-up run and the main run, and landing on the wrong tab means
@@ -1023,6 +1023,6 @@ export default function RecordPage() {
           full cheat sheet and always was, and this is the part somebody has to
           act on before the next milestone. */}
       {tab === "gates" && <GatePanel gates={data.gates} />}
-    </div>
+    </PageBody>
   );
 }

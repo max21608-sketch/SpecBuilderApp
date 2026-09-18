@@ -106,7 +106,7 @@ export default function InboxPage() {
   const assigned = data.messages.filter((m) => m.routing_status === "assigned");
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <PageBody>
       <h1 className="text-xl font-semibold text-neutral-900">Inbox</h1>
       <p className="mt-1 text-sm text-neutral-600">
         Mail forwarded from the project inboxes. An email assigned to a project is read automatically — one charged
@@ -223,7 +223,7 @@ export default function InboxPage() {
           })}
         </ul>
       )}
-    </div>
+    </PageBody>
   );
 }
 

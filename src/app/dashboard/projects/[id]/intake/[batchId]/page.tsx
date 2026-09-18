@@ -180,7 +180,7 @@ export default function IntakeBatchPage({
   if (!batch && !error) return <Spinner label="Loading the pack" />;
 
   return (
-    <div className="py-6">
+    <PageBody>
       <div className="flex items-baseline justify-between gap-4">
         <h1 className="text-xl font-semibold text-neutral-900">Intake pack</h1>
         <Link href={`/dashboard/projects/${projectId}`} className="text-sm text-neutral-600 hover:text-neutral-900">
@@ -443,6 +443,6 @@ export default function IntakeBatchPage({
         Anything still saying <em>Not read yet</em> was uploaded before documents were read automatically, or its
         request never reached the queue. Reading it sends it to the model, and each send is charged.
       </p>
-    </div>
+    </PageBody>
   );
 }

@@ -32,7 +32,7 @@ import {
   type AttributeState,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
-import { isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
+import { foldableRow, isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
 import SwatchPicker from "@/components/imports/SwatchPicker";
 import Button from "@/components/ui/Button";
 import type { CroppedImage } from "@/lib/pdf-crop";
@@ -65,27 +65,6 @@ export type RowCallbacks = {
   onIgnore: (observation: DrawingObservation) => void;
   onSwatch: (observationId: string, image: CroppedImage | null) => void;
 };
-
-/**
- * A row the card should fold: something the page measured that is not one of
- * the item's overall dimensions.
- *
- * VERSION 2 STATES IT. `isOverall === false` is the model saying this figure is
- * a reveal, a radius, a rail, a gap — and it is set only on rows staged from a
- * page's DIMENSIONS, so a fabric callout or a paragraph of remarks has it
- * `undefined` and is never caught here.
- *
- * VERSION 1 FALLS BACK to the old test: does the value state a figure. That
- * test is why the Panther S-201 card sprawled — its sheet prints a dimensions
- * table whose `WIDTH SEAT`, `DEPTH BACK` and `HEIGHT BACK` rows are all `TBC`,
- * so they state no figure, were not "measurements", could not be folded, and
- * printed inline between the four that matter and the fabrics. A version 2 run
- * reports them as dimensions that are not overall, and they fold.
- */
-function foldableRow(o: DrawingObservation): boolean {
-  if (o.dimensionSlot) return false;
-  return o.isOverall === false || (o.isOverall === undefined && isMeasuredRow(o));
-}
 
 /** Split a card's pending rows into the ones that matter, the rest, and the fold. */
 export function orderRows(pending: DrawingObservation[]): {

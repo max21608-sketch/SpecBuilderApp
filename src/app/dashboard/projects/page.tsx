@@ -223,7 +223,7 @@ export default function ProjectsPage() {
   }, [shown]);
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <PageBody>
       <div className="flex flex-wrap items-start gap-3">
         <div>
           <h1 className="text-xl font-semibold text-neutral-900">Projects</h1>
@@ -511,6 +511,6 @@ export default function ProjectsPage() {
           </table>
         </div>
       )}
-    </div>
+    </PageBody>
   );
 }

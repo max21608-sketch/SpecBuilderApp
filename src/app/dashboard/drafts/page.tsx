@@ -591,11 +591,11 @@ function DraftsView() {
 
 export default function DraftsPage() {
   return (
-    <div className="px-1">
+    <PageBody width="wide">
       <h1 className="text-xl font-semibold text-neutral-900">Chase emails</h1>
       <Suspense fallback={<Spinner label="Loading" />}>
         <DraftsView />
       </Suspense>
-    </div>
+    </PageBody>
   );
 }

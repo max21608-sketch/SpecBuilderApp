@@ -785,7 +785,7 @@ function ProjectOverview() {
   );
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <PageBody>
       <div className="flex flex-wrap items-baseline gap-3">
         <Link href="/dashboard/projects" className="text-sm text-neutral-500 underline hover:text-neutral-800">
           &larr; Projects
@@ -1607,7 +1607,7 @@ function ProjectOverview() {
       </div>
       </Card>
       </div>
-    </div>
+    </PageBody>
   );
 }
 

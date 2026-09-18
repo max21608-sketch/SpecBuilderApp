@@ -256,6 +256,30 @@ export function isOverallRow(observation: DrawingObservation): boolean {
   return observation.isOverall ?? Boolean(observation.dimensionSlot);
 }
 
+/**
+ * A row the card folds: something the page measured that is not one of the
+ * item's overall dimensions — a reveal, a radius, a rail, a gap, an arm height.
+ *
+ * VERSION 2 STATES IT. `isOverall === false` is the model saying so, and it is
+ * set only on rows staged from a page's DIMENSIONS, so a fabric callout or a
+ * paragraph of remarks has it `undefined` and is never caught here.
+ *
+ * VERSION 1 FALLS BACK to the old test: does the value state a figure. That
+ * test is why the Panther S-201 card sprawled — its sheet prints a dimensions
+ * table whose `WIDTH SEAT`, `DEPTH BACK` and `HEIGHT BACK` rows are all `TBC`,
+ * so they state no figure, were not "measurements", could not be folded, and
+ * printed inline between the four that matter and the fabrics.
+ *
+ * HERE RATHER THAN IN THE COMPONENT so the screen and anything measuring the
+ * screen ask one function. `npm run measure:drawings` counts the sprawl, and a
+ * count taken with its own copy of this rule would report a card getting better
+ * while the card got worse.
+ */
+export function foldableRow(observation: DrawingObservation): boolean {
+  if (observation.dimensionSlot) return false;
+  return observation.isOverall === false || (observation.isOverall === undefined && isMeasuredRow(observation));
+}
+
 // ---- resolution ------------------------------------------------------------
 
 export type RunResolution =

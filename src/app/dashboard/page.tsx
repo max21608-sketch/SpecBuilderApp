@@ -18,7 +18,7 @@ export default async function DashboardPage() {
   const { appEnv, databaseEnvironment } = getEnvironment();
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-10">
+    <PageBody>
       <h1 className="text-xl font-semibold text-neutral-900">Project Spec Builder</h1>
       <p className="mt-2 text-sm text-neutral-600">
         Start from Projects: import a BOQ, work through the spec table, then export it in the BWS layout.
@@ -37,6 +37,6 @@ export default async function DashboardPage() {
           </div>
         ))}
       </dl>
-    </div>
+    </PageBody>
   );
 }

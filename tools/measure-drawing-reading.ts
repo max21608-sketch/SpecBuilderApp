@@ -33,6 +33,7 @@ import {
   assertStagedDrawings,
   groupItemsByCode,
   variantLettersByItem,
+  foldableRow,
   measuredRows,
   unitSourceOf,
   type DrawingItem,
@@ -123,14 +124,17 @@ const pending = (item: DrawingItem): DrawingObservation[] =>
   item.observations.filter((o) => o.reviewStatus === "pending");
 
 /**
- * A row the card prints inline that a reader would call a dimension: its label
- * is one the slot vocabulary or its near neighbours recognise, and it states no
- * figure -- so `isMeasuredRow` is false, the fold never catches it, and it sits
- * between the four that matter and the fabrics. The S-201 sprawl, counted.
+ * A row a reader would call a dimension that the card nonetheless prints
+ * INLINE, between the ones that matter and the fabrics. The S-201 sprawl,
+ * counted as the card actually renders it.
+ *
+ * `foldableRow` is the CARD'S OWN predicate, imported rather than restated: a
+ * count taken with its own copy of that rule would happily report a card
+ * getting better while the card got worse.
  */
 const DIMENSION_WORDS = ["width", "depth", "height", "seat", "back", "dia", "diameter", "length", "arm"];
 function unfoldableDimensionRow(o: DrawingObservation): boolean {
-  if (o.dimensionSlot) return false;
+  if (o.dimensionSlot || foldableRow(o)) return false;
   if (parseDimensionFigure(o.value ?? o.valueRaw).figure !== null) return false;
   const label = (o.labelRaw ?? "").toLowerCase();
   return label !== "" && DIMENSION_WORDS.some((word) => label.includes(word));

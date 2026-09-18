@@ -24,9 +24,9 @@ export default function PackDrawingsPage({
   if (!ids) return <Spinner label="Loading" />;
 
   return (
-    <div className="py-6">
+    <PageBody width="wide">
       <h1 className="text-xl font-semibold text-neutral-900">Drawings in this pack</h1>
       <PackDrawingsReview projectId={ids.id} batchId={ids.batchId} />
-    </div>
+    </PageBody>
   );
 }
