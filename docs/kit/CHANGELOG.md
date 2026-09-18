@@ -4,6 +4,29 @@ Dated entries whenever a kit rule, template or chassis file changes. Record the
 reason, not just the change — the reason is what tells a future reader whether
 it still applies.
 
+## 2026-09-18 — the environment banner becomes a chip in the top bar
+
+`house/conventions.md` §2 said "a persistent banner". It now says "an
+environment marker in the app chrome on every page including sign-in", because
+Max decided it against the approved mock-ups
+(`docs/design/spec-builder-mockups.html`): the full-width amber banner is gone
+and a yellow STAGING chip sits in the dark top bar, and on the sign-in page
+under the card.
+
+The rule it was protecting is unchanged and is the reason the wording was
+widened rather than dropped. The marker must be on EVERY page including
+sign-in — "which one am I on" is a question people get wrong before they log
+in, not after — and it must fail *toward* showing. `EnvironmentChip` is a
+server component reading `APP_ENV` directly for that second half, and it is
+passed INTO `NavShell` as an element because a client-side fetch would fail
+toward hiding it on exactly the deployment where hiding it matters.
+
+**This app is changed. The fabric-ordering app is NOT.** It is outside this
+repo, still carries the banner, and nothing here reaches it. Carrying the rule
+across is a separate decision for whoever next works on it; until then the two
+apps satisfy the same convention in two different shapes, which the widened
+wording now allows.
+
 ## 2026-09-13 — the kit is folded into the Spec Builder app
 
 This file now lives at `SpecBuilderApp/docs/kit/CHANGELOG.md`. See the README

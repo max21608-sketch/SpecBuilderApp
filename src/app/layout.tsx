@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { currentAppEnvIsProduction } from "@/lib/env";
-import EnvironmentBanner from "@/components/layout/EnvironmentBanner";
 
 // The [STAGING] suffix is not decoration. It is how someone with several tabs
 // open tells, from the tab title alone, which one is real before they type
@@ -19,7 +18,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       {/* The size, the colour and the ground are all in `globals.css`'s base
           layer now, so this element carries layout and nothing else. */}
       <body className="min-h-screen">
-        <EnvironmentBanner />
         {children}
       </body>
     </html>

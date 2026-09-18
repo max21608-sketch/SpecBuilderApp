@@ -26,9 +26,10 @@ with an `is_production` column, not one project with different env vars per
 branch.
 
 - Local development must never point at production.
-- Non-production is visually unmistakable: a persistent banner and a
-  `[STAGING]` page-title marker. The banner fails *toward* showing — an unset
-  `APP_ENV` shows it rather than hides it.
+- Non-production is visually unmistakable: an environment marker in the app
+  chrome on every page including sign-in, and a `[STAGING]` page-title marker.
+  The marker fails *toward* showing — an unset `APP_ENV` shows it rather than
+  hides it.
 - A runtime guard refuses to start when the declared app environment and the
   connected database environment disagree.
 - A safe environment-identity endpoint (`/api/auth/me`) lets anyone check what
