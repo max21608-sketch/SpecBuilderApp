@@ -24,8 +24,8 @@ function Swatch({ finishId, hasSwatch }: { finishId: string; hasSwatch: boolean 
   const [visible, setVisible] = useState(hasSwatch);
   if (!visible) {
     return (
-      <div className="w-14 h-14 shrink-0 rounded border border-dashed border-neutral-300 bg-neutral-50 flex items-center justify-center">
-        <span className="text-[10px] text-neutral-400 text-center leading-tight">no
+      <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md border border-dashed border-neutral-300 bg-neutral-50">
+        <span className="text-center text-[8.5px] leading-tight text-neutral-400">no
           <br />
           swatch
         </span>
@@ -40,7 +40,7 @@ function Swatch({ finishId, hasSwatch }: { finishId: string; hasSwatch: boolean 
       src={`/api/finishes/${finishId}/swatch`}
       alt=""
       onError={() => setVisible(false)}
-      className="w-14 h-14 shrink-0 rounded border border-neutral-200 object-cover"
+      className="h-[34px] w-[34px] shrink-0 rounded-md border border-neutral-200 object-cover"
     />
   );
 }

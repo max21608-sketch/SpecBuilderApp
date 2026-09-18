@@ -92,16 +92,29 @@ const PAYLOAD = {
   ],
 };
 
+/**
+ * The finish rows on screen, in order.
+ *
+ * The library is a `Table` rather than a bordered list, so a row is a `<tr>`
+ * carrying `data-finish` — the marker is there so an open expansion panel or
+ * edit panel, which are rows of their own, cannot be mistaken for a finish.
+ * The CODE is still a `span.font-mono` inside its cell, which is what makes a
+ * value checkable against a page, and what this test goes on pinning.
+ */
+function rows(): HTMLElement[] {
+  return screen.getAllByRole("row").filter((row) => row.hasAttribute("data-finish"));
+}
+
 /** The first finish row on screen. */
 function firstRow(): HTMLElement {
-  const row = screen.getAllByRole("listitem")[0];
+  const row = rows()[0];
   if (!row) throw new Error("No finish is listed");
   return row;
 }
 
 /** The finish codes currently listed, in order. */
 function codes(): string[] {
-  return screen.getAllByRole("listitem")
+  return rows()
     .map((row) => row.querySelector("span.font-mono")?.textContent?.trim() ?? "")
     .filter(Boolean);
 }
@@ -251,6 +264,32 @@ describe("the finishes library", () => {
     // is what the Edit panel collects.
     expect(screen.queryByLabelText("Kind of MOR005")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Kind of WD-05")).toBeInTheDocument();
+  });
+
+  // ==========================================================================
+  // A GUESS IS ONE CLICK FROM A DECISION, AND NEVER WEARS ITS AUTHORITY
+  //
+  // Where the app can read a kind off the client's own code it offers one with
+  // the evidence beside it. Where it cannot, the row says what it could not
+  // read — "no page says what CH means" — and groups at the bottom, rather
+  // than showing an empty control that looks like a question nobody answered.
+  // ==========================================================================
+  it("offers the kind it can read, with the evidence it read it from", async () => {
+    render(<FinishesLibrary projectId="proj-1" />);
+    await screen.findByText("MOR005");
+    // ST-11 carries no kind and no description, so nothing can be suggested.
+    expect(screen.getByText(/Nothing to suggest/)).toBeInTheDocument();
+    expect(screen.getByText(/no page says what ST means/)).toBeInTheDocument();
+  });
+
+  it("never pre-fills the kind picker with the kind the row already holds", async () => {
+    render(<FinishesLibrary projectId="proj-1" />);
+    await screen.findByText("WD-05");
+    // WD-05 is filed as a timber and still TBC, so it is correctable — but the
+    // control starts empty. A select already reading "Timber" fires no change
+    // event when somebody chooses Timber, which is the level picker's trap.
+    const picker = screen.getByLabelText("Kind of WD-05") as HTMLSelectElement;
+    expect(picker.value).toBe("");
   });
 
   it("says nothing matched rather than looking like an empty library", async () => {
