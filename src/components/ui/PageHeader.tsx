@@ -45,8 +45,15 @@ export default function PageHeader({
   return (
     <div className={`border-b border-neutral-200 bg-white pt-4 ${tabs ? "" : "pb-4"}`}>
       <div className="mx-auto max-w-[1100px] px-5">
-        <div className="flex items-start gap-3.5">
-          <div className="min-w-0">
+        {/* The row WRAPS and the title has a floor. With `shrink-0` on the
+            actions and `min-w-0` here, a long project name beside the export
+            cluster shrank to an 80px column and wrapped onto seven lines while
+            the buttons kept their width — the identity of the page was the
+            thing that gave way. Now the actions drop under the title when the
+            two cannot share the row, and the title never narrows below what a
+            name needs to be read. */}
+        <div className="flex flex-wrap items-start gap-x-3.5 gap-y-2">
+          <div className="min-w-[18rem] flex-1">
             {crumbs && crumbs.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
                 {crumbs.map((crumb, index) => (
@@ -70,7 +77,7 @@ export default function PageHeader({
             </h1>
             {subtitle && <p className="mt-0.5 text-[12.5px] text-neutral-500">{subtitle}</p>}
           </div>
-          {actions && <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+          {actions && <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{actions}</div>}
         </div>
         {tabs && <div className="mt-3.5">{tabs}</div>}
       </div>

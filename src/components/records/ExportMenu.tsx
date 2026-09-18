@@ -88,42 +88,48 @@ export default function ExportMenu({
   const scope = runId ? `?runId=${runId}` : "";
   const and = runId ? "&" : "?";
   return (
-    <div className="flex flex-col items-end gap-1.5">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Output
-          name="Spec upload"
-          emphasis
-          tip="Always every record in scope — a BWS import replaces the fields it is given, so a partial file would erase what it left out. It carries no job number: it is a file to read, not to import."
-          formats={[
-            { label: ".xlsx", href: `/api/projects/${projectId}/export${scope}` },
-            // Tim's grid importer takes the csv, so this is not a lesser
-            // format — it is the one BWS actually reads.
-            { label: ".csv", href: `/api/projects/${projectId}/export${scope}${and}format=csv` },
-          ]}
-        />
-        <Output
-          name="Quote lines"
-          tip="Eight of the twelve columns Matthew's quote sheet carries. The prices, the UUID and the image URL are blank because this app holds none of them, and the interliner, stone, mattress and delivery lines are not generated — the interliner quantity is the fabric metreage, which this app deliberately does not hold. A person adds those and prices the file."
-          formats={[{ label: ".csv", href: `/api/projects/${projectId}/export/quote${scope}` }]}
-        />
-        <Output
-          name="Costing block"
-          tip="Columns A–J of the estimating sheet — the item block, to paste into the template. Everything from K rightwards is the estimator's: three pricing blocks and the stone block, whose formulas and rates this app does not hold and will not reproduce. Tags carries the composed dimensions, from the same composer as the BWS file."
-          formats={[
-            { label: ".xlsx", href: `/api/projects/${projectId}/export/costing${scope}` },
-            { label: ".csv", href: `/api/projects/${projectId}/export/costing${scope}${and}format=csv` },
-          ]}
-        />
-      </div>
-      <div className="flex items-center gap-1.5 text-xs text-neutral-500">
-        <span>Checking the spec upload against the pack:</span>
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Output
+        name="Spec upload"
+        emphasis
+        tip="Always every record in scope — a BWS import replaces the fields it is given, so a partial file would erase what it left out. It carries no job number: it is a file to read, not to import."
+        formats={[
+          { label: ".xlsx", href: `/api/projects/${projectId}/export${scope}` },
+          // Tim's grid importer takes the csv, so this is not a lesser
+          // format — it is the one BWS actually reads.
+          { label: ".csv", href: `/api/projects/${projectId}/export${scope}${and}format=csv` },
+        ]}
+      />
+      <Output
+        name="Quote lines"
+        tip="Eight of the twelve columns Matthew's quote sheet carries. The prices, the UUID and the image URL are blank because this app holds none of them, and the interliner, stone, mattress and delivery lines are not generated — the interliner quantity is the fabric metreage, which this app deliberately does not hold. A person adds those and prices the file."
+        formats={[{ label: ".csv", href: `/api/projects/${projectId}/export/quote${scope}` }]}
+      />
+      <Output
+        name="Costing block"
+        tip="Columns A–J of the estimating sheet — the item block, to paste into the template. Everything from K rightwards is the estimator's: three pricing blocks and the stone block, whose formulas and rates this app does not hold and will not reproduce. Tags carries the composed dimensions, from the same composer as the BWS file."
+        formats={[
+          { label: ".xlsx", href: `/api/projects/${projectId}/export/costing${scope}` },
+          { label: ".csv", href: `/api/projects/${projectId}/export/costing${scope}${and}format=csv` },
+        ]}
+      />
+      {/* The check sheet is NOT a fourth output: it produces no deliverable, it
+          is how the spec upload gets accepted against the pack. Quiet, so it
+          reads as a tool beside the three files rather than as one of them,
+          and its purpose is a hover rather than a caption row — the caption
+          was what made the cluster too tall for a header band. */}
+      <span className="inline-flex items-center">
         <a
           href={`/api/projects/${projectId}/export/check-sheet${scope}`}
-          className={buttonClass("quiet", "xs", "no-underline")}
+          className={buttonClass("quiet", "sm", "no-underline")}
         >
           Check sheet
         </a>
-      </div>
+        <Tip>
+          For checking the spec upload against the pack, line by line: one row per record and field, naming the
+          document and page each value came from, with the verdict columns left empty for the reviewer.
+        </Tip>
+      </span>
     </div>
   );
 }

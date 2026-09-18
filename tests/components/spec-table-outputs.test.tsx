@@ -20,10 +20,16 @@ import ExportMenu from "@/components/records/ExportMenu";
 const PROJECT = "11111111-1111-1111-1111-111111111111";
 const RUN = "22222222-2222-2222-2222-222222222222";
 
-/** The block holding the download controls, found by its own standing label. */
+/**
+ * The block holding the download controls, found from the check sheet's own
+ * link. The cluster used to carry a caption row ("Checking the spec upload
+ * against the pack:") and the finder hung off it; the caption became a Tip
+ * when the cluster moved into the header band, where a second line made it
+ * too tall to sit beside a title.
+ */
 async function outputs(): Promise<HTMLElement> {
-  const label = await screen.findByText(/Checking the spec upload against the pack/i);
-  return label.closest("div")?.parentElement as HTMLElement;
+  const checkSheet = await screen.findByText("Check sheet");
+  return checkSheet.closest("div") as HTMLElement;
 }
 
 describe("the run's outputs", () => {
@@ -65,7 +71,9 @@ describe("the run's outputs", () => {
 
   it("keeps the check sheet out of the three and says what it is for", async () => {
     const block = await outputs();
-    expect(within(block).getByText(/Checking the spec upload against the pack/i)).toBeTruthy();
+    // Its purpose is a hover beside it, not a caption under it — and it is
+    // still there, because "Check sheet" alone reads as a fourth deliverable.
+    expect(within(block).getByTitle(/checking the spec upload against the pack/i)).toBeTruthy();
     const checkSheet = within(block).getByText("Check sheet");
     expect(checkSheet.getAttribute("href")).toBe(
       `/api/projects/${PROJECT}/export/check-sheet?runId=${RUN}`,
