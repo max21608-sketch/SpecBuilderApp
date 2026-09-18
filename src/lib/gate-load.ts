@@ -26,6 +26,7 @@
 // ============================================================================
 import type { SqlLike } from "@/lib/record-atoms";
 import type { AnswerState } from "@/lib/spec-vocab";
+import type { TgqMatrix } from "@/lib/tgq";
 import {
   gateStatus,
   GATES,
@@ -227,6 +228,54 @@ export function gateSummary(statuses: Record<Gate, GateStatus> | null): Record<G
   for (const gate of GATES) {
     const c = statuses[gate].counts;
     out[gate] = c.blocking + c.unknown + c.unanswerable;
+  }
+  return out;
+}
+
+/**
+ * Matthew's TGQ set, per cheat-sheet category.
+ *
+ * ==========================================================================
+ * THE DISCRIMINATOR IS PRESENCE IN THE MAP, NOT AN EMPTY SET.
+ *
+ * `questionTier` reads a category's absence as "he has not written this one,
+ * fall back to `tgq_levels`", and its presence as "this is the answer". An
+ * empty set returned for an unmapped category would compute as "nothing blocks
+ * a quote here", which is the confidently-wrong reading `gatesForRecord`
+ * already refuses by returning null. Same rule, and it has to hold in both
+ * places or the spec table and the gate panel disagree again.
+ *
+ * The join is `loadGateContext`'s, unchanged: the union rule, where our sheet
+ * receives a field if ANY of his categories mapped to it carries that field.
+ * Two copies of that join is how the TGQ column and the TGQ gate start
+ * answering differently — the whole defect this function exists to close.
+ *
+ * Every category in `spec_matrix_category_map` gets an entry even when his
+ * matrix puts nothing of its own at TGQ, because "he wrote this category and
+ * nothing in it blocks a quote" is a real answer and a different one from "he
+ * has not written it".
+ * ==========================================================================
+ */
+export async function loadTgqMatrices(exec: SqlLike): Promise<Map<string, TgqMatrix>> {
+  const rows = await exec`
+    select m.item_category_id,
+           f.json_id,
+           g.local_key,
+           g.gate
+      from spec_matrix_category_map m
+      left join spec_field_gates g
+        on g.applies_to && array[m.matrix_code] and g.gate = 'TGQ'
+      left join spec_fields f on f.id = g.spec_field_id
+  `;
+  const out = new Map<string, { fields: Set<number>; localKeys: Set<string> }>();
+  for (const row of rows) {
+    const key = String(row.item_category_id);
+    const entry = out.get(key) ?? { fields: new Set<number>(), localKeys: new Set<string>() };
+    // The left joins mean a mapped category with no TGQ row of its own still
+    // arrives here, with both columns null. That is what puts it in the map.
+    if (row.json_id !== null && row.json_id !== undefined) entry.fields.add(Number(row.json_id));
+    if (row.local_key !== null && row.local_key !== undefined) entry.localKeys.add(String(row.local_key));
+    out.set(key, entry);
   }
   return out;
 }

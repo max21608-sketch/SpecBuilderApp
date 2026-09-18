@@ -224,6 +224,53 @@ All of it on `staging`, none of it accepted by anybody.
   new, which it already holds and which repeat, and one confirm creates them.
 - **The gate model's TGQ half.** `tgq_levels` is untouched — see entry 2 above.
 
+## 2026-09-18 — TGQ now reads his matrix first, per category
+
+Max's decision, taken with the numbers in front of him. Until this date two
+models both answered "does this block a quote" and nothing reconciled them: the
+sandbox S-100 sofa read **48 needed to quote** in the spec table
+(`requirements.tgq_levels`) and **6 outstanding** in its own TGQ gate panel
+(`spec_field_gates`). Both were labelled TGQ-ish on screen.
+
+**What was decided.** For a category Matthew's written matrix covers, TGQ is
+computed from HIS matrix. For a category it does not cover, the old
+`tgq_levels` model continues, under the same name. One name, one number per
+record, and which model produced it is stated where it matters.
+
+**Why not simply switch everything to his matrix.** His matrix covers nine
+upholstered seating categories. The eight cabinetry sheets are not in it and
+the cabinetry half has not been written, so every cabinetry item would report
+zero blocking questions — not because it is ready but because nobody has
+written its rules. That is the confidently-wrong answer the gate model exists
+to prevent.
+
+**Why not re-seed `tgq_levels` from his matrix.** That is the genuinely clean
+end state — one model behind one number — and it is a seed plus a migration
+rather than application logic. It also moves every figure on every screen and
+would bake in the six assumptions in this file before Matthew has confirmed
+them. It stays the target, not the step taken.
+
+**What it changed, measured on the sandbox the same day.**
+
+| Project | Before | After | On his matrix | On the placeholder |
+|---|---|---|---|---|
+| AP364c (Panther) | 1,899 | **167** | 39 | 0 |
+| P17231 (Maybourne Paris) | — | **230** | 47 | 12 |
+| DEMO-TEST-01 | — | **61** | 18 | 11 |
+
+**What it does NOT change.** The TGQ workbook still has not been applied, so
+the placeholder half remains "everything blocks a quote". The cabinetry matrix
+still has not been written. The nine-to-seventeen category mapping is still
+this file's three judgement calls. When Matthew answers, the fallback half
+narrows and the caveat on the overview disappears on its own — it is seed data,
+and no code changes.
+
+**How to reverse it.** `questionTier` in `src/lib/tgq.ts` takes the matrix as
+its third argument and ignores it when null. Passing null from
+`loadOutstanding`, from the record route and from `project-summary.ts` restores
+the old behaviour exactly, and `tests/lib/tgq.test.ts` asserts that a call with
+no matrix is unchanged.
+
 ## How to check this file is still true
 
 ```bash

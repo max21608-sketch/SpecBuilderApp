@@ -17,7 +17,7 @@ import {
 } from "@/lib/record-category";
 import { ITEM_LEVELS } from "@/lib/spec-vocab";
 import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
-import { gatesForRecord, loadGateContext } from "@/lib/gate-load";
+import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
 
 export const dynamic = "force-dynamic";
 
@@ -157,6 +157,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     categoryId: record.category_id ? String(record.category_id) : null,
   });
 
+  // WHICH MODEL DECIDES THIS RECORD'S TGQ, sent as data rather than as a
+  // verdict, so the screen runs the same `questionTier` the chase inventory
+  // and the spec table run. Null means Matthew's matrix does not cover this
+  // category and the 0019 placeholder applies — the fallback, never "nothing
+  // blocks a quote". Serialised as arrays because a Set is not JSON.
+  const tgqMatrix = record.category_id
+    ? ((await loadTgqMatrices(sql)).get(String(record.category_id)) ?? null)
+    : null;
+
   // ---- the fabric split, in both directions -------------------------------
   //
   // A bill line needs its configurations listed, because they are what the
@@ -192,6 +201,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     paletteByQuestion,
     family,
     gates,
+    tgqMatrix: tgqMatrix
+      ? { fields: [...tgqMatrix.fields], localKeys: [...tgqMatrix.localKeys] }
+      : null,
   });
 }
 

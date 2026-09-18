@@ -20,7 +20,8 @@
 import { sql } from "@/lib/db";
 import type { Row } from "@/lib/db";
 import { type AnswerState, type ItemLevel, isSettled, normaliseItemLevel } from "@/lib/spec-vocab";
-import { questionTierOrNull, type QuestionTier } from "@/lib/tgq";
+import { questionTierOrNull, type QuestionTier, type TgqMatrix } from "@/lib/tgq";
+import { loadTgqMatrices } from "@/lib/gate-load";
 import type { ChaseGroup } from "@/lib/chase-template";
 
 /**
@@ -488,6 +489,10 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
       q.prompt,
       q.sort_order,
       q.tgq_levels,
+      -- The two ways a question reaches Matthew's matrix: the BWS field it
+      -- fills, and the local key a readiness question carries instead.
+      f.json_id       as field_json_id,
+      q.local_key,
       f.name          as field_label,
       a.id            as answer_id,
       a.version       as answer_version,
@@ -509,10 +514,14 @@ export async function loadOutstanding(projectId: string): Promise<OutstandingQue
     -- order at all -- the same rule as /api/records.
     order by group_no, r.parent_id nulls first, r.variant_label, q.sort_order
   `;
-  return rows.map(toOutstandingQuestion);
+  // ONE load for the whole project, then one lookup per row. The tier is
+  // computed here and nowhere else — the spec table, the chase screen, the
+  // generate and edit routes and the email template all read it off this.
+  const matrices = await loadTgqMatrices(sql);
+  return rows.map((row) => toOutstandingQuestion(row, matrices));
 }
 
-function toOutstandingQuestion(row: Row): OutstandingQuestion {
+function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): OutstandingQuestion {
   const recordNo = Number(row.record_no);
   const level = normaliseItemLevel(row.level);
   const tgqLevels = Array.isArray(row.tgq_levels) ? row.tgq_levels.map(String) : [];
@@ -530,7 +539,18 @@ function toOutstandingQuestion(row: Row): OutstandingQuestion {
     categoryName: row.category_name === null || row.category_name === undefined ? null : String(row.category_name),
     level,
     tgqLevels,
-    tier: questionTierOrNull({ tgqLevels }, level),
+    // His matrix where he wrote one for this category, the 0019 placeholder
+    // where he did not. Absent from the map is the discriminator, so a
+    // category he has never covered is NOT read as "nothing blocks a quote".
+    tier: questionTierOrNull(
+      {
+        tgqLevels,
+        jsonId: row.field_json_id === null || row.field_json_id === undefined ? null : Number(row.field_json_id),
+        localKey: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
+      },
+      level,
+      row.category_id ? (matrices.get(String(row.category_id)) ?? null) : null,
+    ),
     requirementId: String(row.requirement_id),
     requirementKind: String(row.requirement_kind) === "readiness" ? "readiness" : "spec_field",
     prompt: String(row.prompt ?? ""),
@@ -609,6 +629,10 @@ export async function loadQuestionsByKey(
       q.prompt,
       q.sort_order,
       q.tgq_levels,
+      -- The two ways a question reaches Matthew's matrix: the BWS field it
+      -- fills, and the local key a readiness question carries instead.
+      f.json_id       as field_json_id,
+      q.local_key,
       f.name          as field_label,
       a.id            as answer_id,
       a.version       as answer_version,
@@ -626,9 +650,13 @@ export async function loadQuestionsByKey(
     where r.id = any(${recordIds}::uuid[])
   `;
 
+  // Same single source for the tier as `loadOutstanding`. A second reading
+  // here is how a draft's coverage rows come to disagree with the screen that
+  // generated them about which half of the email a question belongs in.
+  const matrices = await loadTgqMatrices(sql);
   const byKey = new Map<string, OutstandingQuestion>();
   for (const row of rows) {
-    const question = toOutstandingQuestion(row);
+    const question = toOutstandingQuestion(row, matrices);
     byKey.set(questionKey(question.recordId, question.requirementId, 0), question);
   }
   return byKey;

@@ -2008,7 +2008,74 @@ A fabric lands in the group **Materials and fabrics**, not *Finishes*: `finish`
 is this app's word for timber and metal. The BWS field is the part that
 matters.
 
-### The overview's numbers are a second question, and TGQ is a placeholder
+### TGQ is one name over two models, and which applies is per category
+
+`src/lib/tgq.ts` (`questionTier`, `TgqMatrix`), `src/lib/gate-load.ts`
+(`loadTgqMatrices`), `src/lib/chase-drafts.ts` (`loadOutstanding`),
+`src/lib/project-summary.ts`, `docs/plans/matrix-assumptions.md`
+
+Two models answered "does this block a quote" and nothing reconciled them, so
+the same sofa read **48 needed to quote** in the spec table and **6 outstanding**
+in its own TGQ gate panel. Found on 2026-09-18 while wiring the overview's
+numbers; settled the same day.
+
+- **`spec_field_gates` (0026) is what Matthew actually WROTE** — 35 fields
+  across three gates for his nine seating categories. Where it covers a
+  category **it is the answer**, because it is the only written gate model that
+  exists.
+- **`requirements.tgq_levels` (0019) is the placeholder that predates it**, per
+  question and per level, still seeded with all three levels on all 728 rows. It
+  stays as the **fallback** for every category his matrix does not reach — the
+  eight cabinetry sheets, until he writes that half.
+- **Both are called TGQ on screen.** They are the same question, and two names
+  for it is how a reader comes to believe they are two measurements.
+
+Five things are load-bearing.
+
+- **Absence from the map is the discriminator, never an empty set.**
+  `loadTgqMatrices` returns a `Map` keyed on our category id; a category missing
+  from it means "he has not written this one, use the placeholder". A category
+  he DID write that happens to carry nothing at TGQ is **present with an empty
+  set**, because "nothing here blocks a quote" is a real answer and a different
+  one. Defaulting an unmapped category to the empty set would report every
+  cabinetry item quotable — not ready, unwritten — which is the
+  confidently-wrong failure `gatesForRecord` already refuses by returning null.
+- **A question reaches his matrix by BWS field OR by local key**, the two homes
+  `spec_field_gates_field_or_local` allows. The readiness questions
+  (`db/seed/0009`) are how the four id-less rows of his matrix are answerable at
+  all, so leaving `local_key` out would silently drop them from TGQ.
+- **A mapped category needs NO level.** His matrix has no level column, so
+  `questionTierOrNull` answers for a level-less record there and a chase for it
+  is no longer blocked for a reason that does not apply to it. The fallback still
+  refuses a null level, and the level still picks the BWS boilerplate — so the
+  spec table's "No level" row says what it is needed FOR rather than claiming it
+  is missing from the TGQ figure.
+- **One implementation, and the SQL copy is the risk.** `loadOutstanding` calls
+  `questionTier` once for the spec table, the chase screen, the generate and edit
+  routes and the email; the record screen is handed the matrix as DATA
+  (`tgqMatrix` on the record payload, null for an uncovered category) so it runs
+  the same function rather than being told a verdict. `project-summary.ts`
+  necessarily re-expresses the rule in SQL — the driver cannot share a fragment —
+  which is the `loadExportScope` situation again and needs the same guard.
+- **The join is `loadGateContext`'s, unchanged**: the union rule, where our
+  sheet receives a field if ANY of his categories mapped to it carries it. Two
+  copies of that join is how the TGQ column and the TGQ gate start disagreeing
+  again, which is the defect this closes.
+
+**Measured on the sandbox, 2026-09-18.** AP364c: 1,899 → **167** to quote, 39 of
+39 categorised records on his matrix, so no caveat is shown. P17231: **230**,
+with 47 on his matrix and **12 on the placeholder**, and the card says so in
+words. The counts the two models produce are still not directly comparable —
+the gate panel counts FIELDS and the checklist counts QUESTIONS, and a dimension
+is settled by its attribute rather than by the composed answer — but they are
+now the same model, in the same order of magnitude, and they move together.
+
+**STILL OPEN, and unchanged by this:** the TGQ workbook has never been applied,
+so the fallback half is still "everything blocks a quote". The cabinetry matrix
+has not been written. And the nine-categories-to-seventeen-sheets mapping is
+still Max standing in for Matthew — `docs/plans/matrix-assumptions.md`.
+
+### The overview's numbers are a second question
 
 `src/lib/project-summary.ts`, `src/components/ui/StatTile.tsx`,
 `src/components/ui/Tip.tsx`, `src/app/dashboard/projects/[id]/page.tsx`
@@ -2026,26 +2093,9 @@ beside the control that acts on it.
   duplicated for the reason completion duplicates it — the driver cannot share
   a SQL fragment. A summary describing a different set of records from the file
   is the check sheet's failure mode worn as a badge.
-- **TO QUOTE AND TGQ ARE TWO MODELS THAT DISAGREE, and the screen says so.**
-  `requirements.tgq_levels` (0019) drives the chase tiers, the email banner and
-  the spec table; `spec_field_gates` where gate = `TGQ` (0026) drives the record
-  screen's gate panel. Same question, two answers, and they will not agree until
-  Matthew's workbook comes back. Max's decision of 2026-09-18: **keep both, call
-  it TGQ on screen, and show the gap** rather than quietly picking one. Merging
-  them is a re-seed plus a migration, not a screen change, and it would move
-  every number on every screen before the assumptions behind it are confirmed.
-- **`tgqNarrowed` is why the red number is not a lie.** `tgq_levels` is seeded
-  with all three levels on all 728 rows, so on the sandbox Panther project
-  `toQuote` is 1,899 — *every* outstanding question — and the other two buckets
-  are zero. A red "1,899 needed to quote" over that is a default wearing the
-  clothes of a measurement. The flag asks the requirement matrix whether ANY row
-  has fewer than three levels; where none has, the card says in words that the
-  workbook has not been applied and that applying it only ever removes
-  questions. It corrects itself on the next re-seed with no code change.
-- **A record with no level contributes NOTHING to `toQuote`**, following
-  `questionTier`, which refuses a null level. That is why `noLevel` is printed
-  beside it: the first is the reason the second is an undercount, and a
-  to-quote figure with nine silent absentees is worse than no figure.
+- **TGQ IS HIS MATRIX WHERE HE WROTE ONE, AND THE PLACEHOLDER WHERE HE DID
+  NOT.** See the section below; the summary computes the identical rule in SQL
+  and `tests/db/project-summary.test.ts` is where that has to be held true.
 - **A tile is a filter and a link.** `StatTile` takes `href | null` — a tile
   with nothing to link to renders as a plain box, because a link that goes
   nowhere is worse than text. Every link off this page lands on the FIRST live

@@ -41,30 +41,112 @@ export function isQuestionTier(value: unknown): value is QuestionTier {
 }
 
 /**
+ * What Matthew's matrix says blocks a quote, for ONE category.
+ *
+ * Built from `spec_field_gates` rows at gate TGQ, mapped onto our cheat sheets
+ * through `spec_matrix_category_map`. A category he has not written is ABSENT
+ * from the map rather than present and empty — the `gatesForRecord` rule, and
+ * the reason `loadTgqMatrices` returns a Map: an empty set would compute as
+ * "nothing blocks a quote here" and report a cabinetry item quotable because
+ * nobody has written its rules.
+ */
+export type TgqMatrix = {
+  /** `spec_fields.json_id` values his matrix puts at TGQ for this category. */
+  fields: ReadonlySet<number>;
+  /** `requirements.local_key` values it puts at TGQ — the id-less questions. */
+  localKeys: ReadonlySet<string>;
+};
+
+/** A checklist question, as both models need to see it. */
+export type TgqRequirement = {
+  /** 0019's per-level seed. The fallback, and only the fallback. */
+  tgqLevels: readonly string[];
+  /** The BWS field this question fills, by json_id. Null for a readiness row. */
+  jsonId?: number | null;
+  /** Its app-local key, where `kind = 'readiness'` and BWS has no column. */
+  localKey?: string | null;
+};
+
+/**
  * Does this question have to be answered before this item can be priced?
  *
- * `tgqLevels` is seed data revised by re-seed (see db/seed/0003_requirements.sql
- * and docs/plans/tgq-for-matthew.md). An empty array is a question that never
- * blocks a quote at any level.
+ * ==========================================================================
+ * TWO MODELS, ONE ANSWER, AND WHICH ONE APPLIES DEPENDS ON THE CATEGORY.
+ *
+ * Settled with Max on 2026-09-18, after the overview made the disagreement
+ * impossible to ignore: the same sofa read "48 needed to quote" in the spec
+ * table and "6 outstanding" in its own TGQ gate panel, because two independent
+ * models were answering the same question.
+ *
+ *   `spec_field_gates` (0026) is what Matthew actually WROTE — 35 fields across
+ *   three gates for his nine seating categories. Where it covers a category it
+ *   is the answer, because it is the only written gate model that exists.
+ *
+ *   `requirements.tgq_levels` (0019) is the placeholder that predates it, per
+ *   question and per LEVEL, seeded with all three levels on all 728 rows. It
+ *   stays as the fallback for every category his matrix does not reach — the
+ *   eight cabinetry sheets, until he writes that half.
+ *
+ * Both are called TGQ on screen. They are the same question, and two names for
+ * it is how a reader comes to believe they are two measurements.
+ *
+ * ---- WHY THE FALLBACK IS NOT SIMPLY "NOTHING BLOCKS IT" ------------------
+ *
+ * Because that is the confidently-wrong answer the gate model exists to
+ * prevent. A cabinetry item reporting zero blocking questions would not be
+ * ready; it would be unwritten. The placeholder over-reports — everything
+ * counts — which is the safe direction to be wrong in, and the screens say so.
+ *
+ * ---- A MAPPED CATEGORY NEEDS NO LEVEL -----------------------------------
+ *
+ * His matrix is per CATEGORY and carries no level column, so where it applies
+ * the tier is knowable without one. `questionTierOrNull` therefore answers for
+ * a level-less record in a mapped category, and a chase for it is no longer
+ * blocked. The level is still a real decision and still required by the
+ * fallback — and still what the BWS boilerplate reads — so nothing else about
+ * it changes.
+ * ==========================================================================
  */
 export function questionTier(
-  requirement: { tgqLevels: readonly string[] },
+  requirement: TgqRequirement,
   level: ItemLevel,
+  matrix?: TgqMatrix | null,
 ): QuestionTier {
-  return requirement.tgqLevels.includes(level) ? "to_quote" : "later";
+  return tierFrom(requirement, level, matrix ?? null) ?? "later";
 }
 
 /**
  * The same decision where the level may be missing.
  *
- * Returns null rather than a tier, so a caller cannot accidentally treat
- * "nobody has said what kind of item this is" as an answer.
+ * Returns null only where the answer genuinely cannot be computed: the
+ * FALLBACK model with no level. A caller must not treat "nobody has said what
+ * kind of item this is" as an answer — "needed at any level" makes a
+ * level-less record look urgent and "needed at none" makes it look quotable,
+ * and both are the app answering a question only a person can.
  */
 export function questionTierOrNull(
-  requirement: { tgqLevels: readonly string[] },
+  requirement: TgqRequirement,
   level: ItemLevel | null,
+  matrix?: TgqMatrix | null,
 ): QuestionTier | null {
-  return level === null ? null : questionTier(requirement, level);
+  return tierFrom(requirement, level, matrix ?? null);
+}
+
+function tierFrom(
+  requirement: TgqRequirement,
+  level: ItemLevel | null,
+  matrix: TgqMatrix | null,
+): QuestionTier | null {
+  if (matrix) {
+    // HIS MATRIX, where he has written one. A question reaches it by the BWS
+    // field it fills, or by the local key a readiness question carries — the
+    // two homes `spec_field_gates` allows, by its own check constraint.
+    const byField = requirement.jsonId !== null && requirement.jsonId !== undefined && matrix.fields.has(requirement.jsonId);
+    const byKey = Boolean(requirement.localKey) && matrix.localKeys.has(requirement.localKey!);
+    return byField || byKey ? "to_quote" : "later";
+  }
+  if (level === null) return null;
+  return requirement.tgqLevels.includes(level) ? "to_quote" : "later";
 }
 
 /** What a screen says where a tier cannot be computed. */

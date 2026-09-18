@@ -75,24 +75,25 @@ export type ProjectSummary = {
   documentsReading: number;
   documentsFailed: number;
   /**
-   * Has ANYBODY narrowed the to-quote set yet?
+   * How many records in scope get their TGQ from MATTHEW'S MATRIX, and how many
+   * fall back to the 0019 placeholder.
    *
-   * False means `tgq_levels` is still at 0019's seeded default — all three
-   * levels on every one of the 728 questions, "everything required of
-   * everything" — so `toQuote` is arithmetically identical to the total
-   * outstanding and says nothing at all. On the sandbox Panther project on
-   * 2026-09-18 that is exactly the case: 1,899 outstanding, 1,899 to quote,
-   * nothing in the other two buckets.
+   * The two models are both called TGQ and only one of them is a measurement.
+   * Where his matrix covers the category, `toQuote` counts the fields he
+   * actually named. Where it does not — the eight cabinetry sheets, until he
+   * writes that half — it falls back to `tgq_levels`, which is still seeded
+   * with all three levels on all 728 questions, so every outstanding question
+   * on those records counts as blocking.
    *
-   * The screen MUST be able to tell those apart. A red "1,899 needed to quote"
-   * over a placeholder is the confidently-wrong number this whole app exists to
-   * avoid: it looks like a measurement and it is a default nobody has revised.
-   * So when this is false the card says so in words and links to the workbook
-   * that would fix it, rather than printing the figure as though it meant
-   * something. It becomes true the moment the TGQ workbook is re-seeded, with
-   * no code change — which is the point of it being seed data.
+   * The screen has to be able to say which. A project whose items are all in
+   * his matrix has a real number; one with cabinetry in it has a real number
+   * for part of itself and a placeholder for the rest, and printing the total
+   * in red without saying so is the confidently-wrong figure this app exists to
+   * avoid. Both of these go to zero effort when the cabinetry matrix arrives:
+   * it is a seed, and nothing here changes.
    */
-  tgqNarrowed: boolean;
+  tgqFromMatrix: number;
+  tgqFromFallback: number;
 };
 
 export const EMPTY_SUMMARY: ProjectSummary = {
@@ -108,7 +109,8 @@ export const EMPTY_SUMMARY: ProjectSummary = {
   finishesNoKind: 0,
   documentsReading: 0,
   documentsFailed: 0,
-  tgqNarrowed: false,
+  tgqFromMatrix: 0,
+  tgqFromFallback: 0,
 };
 
 export async function loadProjectSummary(projectId: string): Promise<ProjectSummary> {
@@ -128,16 +130,44 @@ export async function loadProjectSummary(projectId: string): Promise<ProjectSumm
           where v.parent_id = r.id and v.status = 'active'
         )
     ),
+    -- MATTHEW'S TGQ SET, per cheat-sheet category. The join is the union rule
+    -- loadGateContext uses: our sheet receives a field if ANY of his categories
+    -- mapped to it carries that field.
+    tgq_map as (
+      select m.item_category_id, f.json_id, g.local_key
+        from spec_matrix_category_map m
+        join spec_field_gates g on g.applies_to && array[m.matrix_code] and g.gate = 'TGQ'
+        left join spec_fields f on f.id = g.spec_field_id
+    ),
+    -- Which categories he has WRITTEN. Presence here is the discriminator, and
+    -- it is deliberately not "has a TGQ row": a category he covered where
+    -- nothing happens to be at TGQ is a real answer, and a different one from a
+    -- category he has never written.
+    mapped_cats as (select distinct item_category_id from spec_matrix_category_map),
     answers as (
       select s.id as record_id,
              s.level,
-             q.tgq_levels,
              -- No answer row at all is MISSING, not satisfied, which is why
              -- this drives off the requirements table with a left join.
              -- (No backticks in here: one closes the tagged template.)
-             coalesce(a.state, 'missing') as state
+             coalesce(a.state, 'missing') as state,
+             -- THE SAME RULE AS questionTier, IN SQL. His matrix where he wrote
+             -- one for the category, the 0019 placeholder where he did not --
+             -- never "nothing blocks a quote", which is what an unmapped
+             -- category would compute as if this defaulted to false.
+             case
+               when s.category_id in (select item_category_id from mapped_cats) then
+                 exists (
+                   select 1 from tgq_map t
+                    where t.item_category_id = s.category_id
+                      and (t.json_id = f.json_id or t.local_key = q.local_key)
+                 )
+               else
+                 s.level is not null and q.tgq_levels @> array[s.level]::text[]
+             end as to_quote
       from scoped s
       join requirements q on q.category_id = s.category_id
+      left join spec_fields f on f.id = q.spec_field_id
       left join spec_answers a
         on a.record_id = s.id and a.requirement_id = q.id and a.revision_no = 0
     )
@@ -146,19 +176,13 @@ export async function loadProjectSummary(projectId: string): Promise<ProjectSumm
       (select count(*)::int from scoped where category_id is null) as uncategorised,
       (select count(*)::int from scoped where level is null) as no_level,
       (select count(*)::int from scoped where level is null and level_suggested is not null) as level_suggested,
-      -- A record with NO level is absent from this count on purpose. Nothing on
-      -- it is tiered, and picking a reading is the app answering a question
-      -- only a person can.
-      (select count(*)::int from answers
-        where state in ('missing', 'tbc')
-          and level is not null
-          and tgq_levels @> array[level]::text[]) as to_quote,
-      (select count(*)::int from answers
-        where state = 'missing'
-          and not (level is not null and tgq_levels @> array[level]::text[])) as missing,
-      (select count(*)::int from answers
-        where state = 'tbc'
-          and not (level is not null and tgq_levels @> array[level]::text[])) as tbc,
+      -- Under the FALLBACK a record with no level is absent from this on
+      -- purpose: nothing on it is tiered and picking a reading is the app
+      -- answering a question only a person can. Under his matrix the tier needs
+      -- no level, because his matrix has no level column.
+      (select count(*)::int from answers where state in ('missing', 'tbc') and to_quote) as to_quote,
+      (select count(*)::int from answers where state = 'missing' and not to_quote) as missing,
+      (select count(*)::int from answers where state = 'tbc' and not to_quote) as tbc,
       (select count(*)::int from answers where state in ('confirmed', 'na')) as settled,
       (select count(*)::int from project_finishes
         where project_id = ${projectId} and status = 'active') as finishes,
@@ -171,13 +195,16 @@ export async function loadProjectSummary(projectId: string): Promise<ProjectSumm
         where project_id = ${projectId} and status in ('pending', 'parsing')) as documents_reading,
       (select count(*)::int from intake_runs
         where project_id = ${projectId} and status = 'failed') as documents_failed,
-      -- Has the TGQ workbook ever been applied? Asked of the whole requirement
-      -- matrix, not of this project: it is seed data and one answer serves
-      -- every project. Applying it only ever REMOVES entries, so any row with
-      -- fewer than three levels means somebody has been through it.
-      exists (
-        select 1 from requirements where coalesce(array_length(tgq_levels, 1), 0) < 3
-      ) as tgq_narrowed
+      -- Which model is deciding TGQ, counted over the records it decides for.
+      -- Uncategorised records are in NEITHER: they have no questions at all and
+      -- are reported on their own row, so counting them as "fallback" would
+      -- blame the gate model for something else entirely.
+      (select count(*)::int from scoped
+        where category_id is not null
+          and category_id in (select item_category_id from mapped_cats)) as tgq_from_matrix,
+      (select count(*)::int from scoped
+        where category_id is not null
+          and category_id not in (select item_category_id from mapped_cats)) as tgq_from_fallback
   `;
   const row = rows[0];
   if (!row) return EMPTY_SUMMARY;
@@ -194,6 +221,7 @@ export async function loadProjectSummary(projectId: string): Promise<ProjectSumm
     finishesNoKind: Number(row.finishes_no_kind ?? 0),
     documentsReading: Number(row.documents_reading ?? 0),
     documentsFailed: Number(row.documents_failed ?? 0),
-    tgqNarrowed: row.tgq_narrowed === true,
+    tgqFromMatrix: Number(row.tgq_from_matrix ?? 0),
+    tgqFromFallback: Number(row.tgq_from_fallback ?? 0),
   };
 }

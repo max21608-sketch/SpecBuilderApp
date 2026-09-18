@@ -1109,7 +1109,11 @@ function ProjectOverview() {
             label="TGQ"
             tone="danger"
             value={summary.toQuote}
-            meaning={summary.tgqNarrowed ? "questions blocking a quote" : "every outstanding question — see below"}
+            meaning={
+              summary.tgqFromFallback === 0
+                ? "questions blocking a quote"
+                : `${summary.tgqFromFallback} item${summary.tgqFromFallback === 1 ? "" : "s"} still on the placeholder`
+            }
             href={firstRunHref}
             action="open the spec table"
           />
@@ -1127,7 +1131,11 @@ function ProjectOverview() {
             tone="info"
             value={summary.finishes}
             meaning={
-              summary.finishesNoKind > 0 ? `${summary.finishesNoKind} with no kind` : "all filed under a kind"
+              summary.finishes === 0
+                ? "none in the library yet"
+                : summary.finishesNoKind > 0
+                  ? `${summary.finishesNoKind} with no kind`
+                  : "all filed under a kind"
             }
             href={`/dashboard/projects/${project.id}?tab=finishes`}
             action="open the library"
@@ -1165,12 +1173,14 @@ function ProjectOverview() {
                 the confidently-wrong figure this app exists to avoid, so where
                 it is a placeholder it is labelled one. It corrects itself the
                 moment the workbook is re-seeded, with no code change. */}
-            {!summary.tgqNarrowed && summary.toQuote > 0 && (
+            {summary.tgqFromFallback > 0 && (
               <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                <span className="font-medium">Every outstanding question still counts as blocking a quote.</span>{" "}
-                Matthew&rsquo;s TGQ workbook has not been applied, so all {summary.toQuote.toLocaleString()} are marked
-                as needed — which is today&rsquo;s position, not a measurement of this project. Applying it only ever
-                removes questions from that figure.
+                <span className="font-medium">
+                  {summary.tgqFromFallback} of these {summary.tgqFromMatrix + summary.tgqFromFallback} items are in a
+                  category Matthew has not written a gate model for
+                </span>
+                , so their TGQ is still the placeholder — every outstanding question on them counts as blocking. The
+                other {summary.tgqFromMatrix} use his matrix. The figure will only ever come down.
               </p>
             )}
             <div className="mt-3 overflow-hidden rounded border border-neutral-200">
@@ -1186,9 +1196,9 @@ function ProjectOverview() {
                     tone="danger"
                     count={summary.toQuote}
                     meaning={
-                      summary.tgqNarrowed
-                        ? "Questions that block a quotation at each item's level."
-                        : "Placeholder — every outstanding question, as above."
+                      summary.tgqFromFallback === 0
+                        ? "Questions Matthew's matrix says block a quotation."
+                        : `His matrix for ${summary.tgqFromMatrix} items, the placeholder for ${summary.tgqFromFallback}.`
                     }
                     actionLabel="Chase them"
                     actionHref={`/dashboard/drafts?projectId=${project.id}`}
@@ -1213,12 +1223,20 @@ function ProjectOverview() {
                       actionHref={firstRunHref}
                     />
                   )}
+                  {/* NOT "missing from the figure above" any more, and the
+                      distinction is the whole point of the hybrid: Matthew's
+                      matrix is per category and carries no level column, so a
+                      level-less record in a covered category is tiered perfectly
+                      well. The level still decides the placeholder half, and it
+                      still picks the BWS boilerplate. */}
                   {summary.noLevel > 0 && (
                     <SummaryRow
                       label="No level"
                       tone="warn"
                       count={summary.noLevel}
-                      meaning={`Nothing on them is tiered, so they are missing from the figure above.${
+                      meaning={`Needed by the ${
+                        summary.tgqFromFallback > 0 ? "placeholder half of TGQ and by the " : ""
+                      }BWS boilerplate. Matthew's matrix does not use it.${
                         summary.levelSuggested > 0 ? ` ${summary.levelSuggested} have a suggestion waiting.` : ""
                       }`}
                       actionLabel="Open the spec table"

@@ -112,6 +112,14 @@ type Payload = {
   family: FamilyMember[];
   /** Null where this record's category is not on Matthew's matrix. */
   gates: Record<Gate, GateStatus> | null;
+  /**
+   * Which model decides this record's TGQ, as data rather than as a verdict.
+   *
+   * Null where his matrix does not cover the category, which means the 0019
+   * placeholder applies — NOT that nothing blocks a quote. Arrays because a
+   * Set does not survive JSON; the screen rebuilds them.
+   */
+  tgqMatrix: { fields: number[]; localKeys: string[] } | null;
 };
 
 const STATE_CLASS: Record<AnswerState, string> = {
@@ -321,11 +329,36 @@ export default function RecordPage() {
   const unallocated = unallocatedQty(billQty, variants.map((member) => member.qty));
 
   // One implementation of the tier, shared with the drafts screen, the export
-  // counts and the email. A record with no level gets null here and no badge —
-  // the app does not decide what kind of item this is.
+  // counts and the email. Matthew's matrix decides it where he has written one
+  // for this category and the 0019 placeholder where he has not — the server
+  // sends which applies as DATA (`tgqMatrix`, null for an uncovered category)
+  // rather than sending a verdict, so this screen and the chase inventory run
+  // the same function over the same inputs.
+  //
+  // A record with no level still gets null under the FALLBACK, and no badge —
+  // the app does not decide what kind of item this is. Under his matrix the
+  // tier needs no level, because his matrix has no level column.
   const recordLevel = normaliseItemLevel(record.level);
+  // Not memoised: this sits after the loading guard, and a hook below an early
+  // return is a hook that does not run in the same order every render. The
+  // sets are at most a few dozen entries and are rebuilt per render, which is
+  // nothing beside the table this screen already renders.
+  const tgqMatrix = data.tgqMatrix
+    ? {
+        fields: new Set<number>(data.tgqMatrix.fields),
+        localKeys: new Set<string>(data.tgqMatrix.localKeys),
+      }
+    : null;
   const tierOf = (answer: Answer) =>
-    questionTierOrNull({ tgqLevels: answer.tgq_levels ?? [] }, recordLevel);
+    questionTierOrNull(
+      {
+        tgqLevels: answer.tgq_levels ?? [],
+        jsonId: answer.json_id,
+        localKey: answer.local_key,
+      },
+      recordLevel,
+      tgqMatrix,
+    );
   // Older responses have no `retiredAttributes`; a screen that assumed the key
   // exists would crash on the first record loaded from a cached payload.
   const retiredAttributes = data.retiredAttributes ?? [];

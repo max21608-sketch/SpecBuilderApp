@@ -73,3 +73,70 @@ describe("TIER_LABELS", () => {
     expect(TIER_LABELS.later).toBe("Also outstanding");
   });
 });
+
+describe("questionTier with Matthew's matrix", () => {
+  // His matrix puts these at TGQ for the seating categories, read off the
+  // sandbox on 2026-09-18: BWS fields 3, 6, 130, 191, 232 and four id-less
+  // questions that live on `requirements.local_key`.
+  const matrix = {
+    fields: new Set([3, 6, 130, 191, 232]),
+    localKeys: new Set(["product_code", "item_name", "designer_reference", "spec_notes"]),
+  };
+
+  it("uses HIS matrix where he wrote one, and ignores tgq_levels there", () => {
+    // `tgq_levels` still says all three levels — the 0019 placeholder — and is
+    // not consulted, which is the whole point.
+    const dimensions = { tgqLevels: ["simple", "complex", "hero"], jsonId: 3, localKey: null };
+    expect(questionTier(dimensions, "complex", matrix)).toBe("to_quote");
+
+    // A field the placeholder marks as blocking and HIS matrix does not.
+    const stitching = { tgqLevels: ["simple", "complex", "hero"], jsonId: 77, localKey: null };
+    expect(questionTier(stitching, "complex", matrix)).toBe("later");
+  });
+
+  it("reaches his matrix by local key as well as by BWS field", () => {
+    // `kind = 'readiness'` questions have no BWS column, which is what
+    // `requirements.local_key` is for (db/seed/0009).
+    const readiness = { tgqLevels: [], jsonId: null, localKey: "product_code" };
+    expect(questionTier(readiness, "simple", matrix)).toBe("to_quote");
+
+    const other = { tgqLevels: ["simple"], jsonId: null, localKey: "headboard_fitted" };
+    expect(questionTier(other, "simple", matrix)).toBe("later");
+  });
+
+  it("needs no level where his matrix applies", () => {
+    // His matrix is per CATEGORY and carries no level column, so a record
+    // nobody has levelled yet is still tiered — and a chase for it is no
+    // longer blocked for a reason that does not apply to it.
+    const dimensions = { tgqLevels: [], jsonId: 3, localKey: null };
+    expect(questionTierOrNull(dimensions, null, matrix)).toBe("to_quote");
+  });
+
+  it("falls back to tgq_levels for a category he has not written", () => {
+    // Null matrix is the discriminator, and it means "he has not covered this
+    // category" — NEVER "nothing blocks a quote here". A cabinetry item
+    // reporting zero blockers would not be ready, it would be unwritten.
+    const q = { tgqLevels: ["hero"], jsonId: 3, localKey: null };
+    expect(questionTier(q, "hero", null)).toBe("to_quote");
+    expect(questionTier(q, "simple", null)).toBe("later");
+    // And the fallback still refuses to answer without a level.
+    expect(questionTierOrNull(q, null, null)).toBeNull();
+  });
+
+  it("treats a covered category with nothing at TGQ as an answer, not a gap", () => {
+    // `loadTgqMatrices` puts every mapped category in the map even when none
+    // of its rows is at TGQ, because "he wrote this one and nothing in it
+    // blocks a quote" is a real statement.
+    const empty = { fields: new Set<number>(), localKeys: new Set<string>() };
+    const q = { tgqLevels: ["simple", "complex", "hero"], jsonId: 3, localKey: null };
+    expect(questionTier(q, "simple", empty)).toBe("later");
+  });
+
+  it("is unchanged when no matrix is passed at all", () => {
+    // Every existing caller that has not been given a matrix keeps the 0019
+    // behaviour, so adding the parameter changed nothing by itself.
+    const q = { tgqLevels: ["simple"] };
+    expect(questionTier(q, "simple")).toBe("to_quote");
+    expect(questionTier(q, "hero")).toBe("later");
+  });
+});
