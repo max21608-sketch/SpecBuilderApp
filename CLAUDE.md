@@ -2622,6 +2622,21 @@ person's job, not the tool's: do not crawl the wider tree for Panther documents.
 
 Never silently "clean up" an uncertain source value; retain or flag it.
 
+**SharePoint is an authorised source of real test data (Max, 2026-09-19):**
+*"whatever's on SharePoint, you can use — to tune extraction or to populate
+the database"*, fetched through the Microsoft connector without asking, READ
+ONLY, and never for the repo: a real document goes into the SANDBOX as a
+staged run inside a test project, and the fixture that holds the rule it
+exposed is written synthetic afterwards. A real pack is read ONCE — each
+specification document is a charged call — and reused as `__QA` copies and
+through the read-only dump/measure tools. Two prefixes, two fates:
+`__QA ` projects are swept by the cleanup scripts; **`TEST` projects stay**,
+named for what they exercised and when (`TEST: intake, 300-line bill
+(2026-09-24)`), left in a state worth demonstrating, and never matched by a
+sweep. Not excessively many. The Panther pilot stays curated regardless.
+`docs/plans/make-it-work-2026-09-19.md` §2.7 carries the reasoning.
+
+
 ## Current milestone and scope
 
 A stale status section is worse than none, because agents and people both make

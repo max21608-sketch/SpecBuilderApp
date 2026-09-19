@@ -41,8 +41,11 @@ simple as possible and as complex as necessary (§0.2); Fable orchestrates and
 Opus writes, two coders at once (§2); nothing is done until it is proven on the
 deployed build and written down (§7.1); every screen is checked visually at
 monitor size and with 300 lines before Max sees it, so his review is "does it
-feel right" and never "the table is compressed" (§7.4a); Matthew's findings
-become log entries, not fixes (§7.7).
+feel right" and never "the table is compressed" (§7.4a); real documents come
+off SharePoint, read-only and read once, into sandbox `TEST` projects that are
+named for what they exercised and left for demos, while the repo's fixtures
+stay synthetic (§2.7); Matthew's findings become log entries, not fixes
+(§7.7).
 
 **Effort, honestly.** Stage 1a is about eight coder-sessions and 1b about six,
 at two coders in parallel, so roughly a week of orchestration each if Claude
@@ -377,6 +380,67 @@ once, so no coder writes them and none is forgotten.
 | 2 | The chase section: the EMAIL is grouped by question × area and the SCREEN by item — the catchup's §5 already says the doc reads as though one answer covers both. The infill screen gets its own load-bearing section (§5.3's traps). The palettes section moves from "we have never had it" to the sync's date and the test that guards it |
 | 2 | **The hard approval gate on inbound email** is amended by Max, in words, in the same commit as 2.11 — or 2.11 does not land |
 | each | The *Current milestone* section: what shipped, what was verified, what is still not accepted. A stale status section is worse than none |
+| 0 | The *Reference material* section records the SharePoint authorisation and the `TEST` project convention (§2.7) — done with this plan, 2026-09-19 |
+
+### 2.7 Real data, and the projects left behind — authorised 2026-09-19
+
+Max: *"You have access using the Microsoft connector to all of the files on
+Ben Whistler, so you shouldn't be short of real data. I'm giving you
+authorisation to go and fetch that without having to ask me. Whatever's on
+SharePoint, you can use — to tune extraction or to populate the database."*
+And: *"I'd quite like to see your work live in some projects. There's no issue
+with you creating new projects and just leaving them there … name it with
+what it was you were testing."*
+
+This changes what the variance matrix (§6.10) is built from and what a QA run
+leaves behind. Five things hold, and they are traps rather than preferences:
+
+- **SharePoint is a READ.** The org rule is read-only for every company
+  system, and the connector's SharePoint tools are search and fetch. Nothing
+  is uploaded, moved, renamed or written back — a document is fetched to the
+  session scratchpad, uploaded into the app, and the scratchpad copy is
+  discarded.
+- **Real client material still never enters the repo.** `CLAUDE.md`'s rule is
+  unchanged: no fixture, no seed, no test file. The place real documents live
+  is the **sandbox database and its blob store**, as staged runs inside test
+  projects. `tests/fixtures/` stays synthetic, so a variance row has two
+  halves: a real document staged in the sandbox that shows the shape exists,
+  and a synthetic fixture in the repo that holds the rule. The real one is
+  where the finding comes from; the synthetic one is what stops it coming
+  back.
+- **Reading a real document spends money.** Registration dispatches a charged
+  model call per specification document (`CLAUDE.md`). A real pack is eleven
+  to thirty calls, and Claude usage headroom is already a constraint. So a
+  real pack is read **once**, for a named reason recorded on the project, and
+  the staged runs are then reused: `__QA` copies for anything that confirms,
+  `dump:drawings` and `measure:drawings` for anything that measures. Never
+  re-read a pack to check a code change that does not touch the prompt or the
+  tool schema — that is what versioning the staged shape is for.
+- **Two prefixes, two fates.** `__QA ` projects are working copies and are
+  swept by the cleanup scripts, as now. **`TEST` projects stay.** They are
+  named for what they exercised and when — *`TEST: intake, 300-line bill
+  (2026-09-24)`*, *`TEST: email review, three-run fan-out (2026-09-25)`* — and
+  the cleanup scripts must never match them. Max wants them to demo from, so
+  a `TEST` project is left in a state worth showing: reviewed, not
+  half-confirmed. Not every run leaves one; a run that found nothing new
+  leaves a `__QA` copy to be swept. *"Obviously don't include excessive
+  amounts."*
+- **The Panther pilot stays curated.** M8 step 4 is still judged against the
+  curated Panther folder, and *do not crawl the wider tree for Panther
+  documents* still holds for the pilot. The authorisation is for the variance
+  matrix and the test projects: other projects' bills, packs, schedules and
+  emails, chosen because their shape is one the demo never used. Stage 0.2's
+  answer — Matthew's first project — decides which shapes come first.
+
+**Where to look first**, from what the repo already knows: the P17231 tree
+(`docs/docs for building/P17231 SharePoint Index.md` maps it, with the
+conflicting copies named — those conflicts are themselves a variance case);
+the 300-line project Matthew mentioned (§3.2), once he names it; any project
+folder carrying a *Finishes Schedule* (item E of the catchup's asks — the
+document 3.6 needs to see before its schema is designed); and any saved
+client correspondence, for the email rows of §6.10.c. NDA-covered material
+stays in the UK region as everything in this app does; the sandbox is in
+London and so is the blob store.
 
 ---
 
@@ -1262,9 +1326,12 @@ is different, his wins.
 
 The user's brief, and the part of this plan that has no line in the catchup.
 The app has been tuned against one pack. The programme is a **variance
-matrix**: for each intake shape, a synthetic fixture (never a real client
+matrix**: for each intake shape, a **real document off SharePoint** staged in
+a sandbox `TEST` project (§2.7 — authorised, read-only, read once), a
+synthetic fixture in the repo that holds the rule (never a real client
 document — `CLAUDE.md`'s rule), the expected behaviour, and a test or a
-measured run. The rule for the expected behaviour column is always one of
+measured run. The real document is where each row's finding comes from; the
+fixture is what keeps it fixed. The rule for the expected behaviour column is always one of
 three words: **proceeds**, **flags** (with what the screen says), **refuses**
 (with what the screen says). A fourth outcome — a plausible wrong answer — is
 a defect wherever it is found.
@@ -1425,7 +1492,10 @@ Two additions this plan makes to the tiers:
 - **The fixture library**, `tests/fixtures/` — synthetic BOQs, PDFs and
   `.eml`s built by a script committed beside them (`tests/fixtures/build.mjs`),
   so a fixture is reproducible and provably not a client document. The
-  variance matrix's rows point at them.
+  variance matrix's rows point at them. A fixture is written **after** the
+  real document has shown the shape (§2.7), modelled on it, carrying none of
+  its content — the real one stays in the sandbox `TEST` project it was
+  staged in, which is where a reader goes to see the shape for real.
 
 ### 7.3 The measurement tools
 
@@ -1681,6 +1751,10 @@ of them is cheap now and expensive after Stage 2.
     (§7.4a): screenshots at 1920×1080 and 1440×900, the checklist answered in
     writing, and the 300-line fixture for every list screen. Max's review is
     "does it feel right" only. **Asked for by Max, 2026-09-19.**
+17. **SharePoint is the source of real test data, read-only and read once**,
+    staged into sandbox `TEST` projects that stay, named for what they
+    exercised; `__QA ` copies are swept; the repo's fixtures stay synthetic;
+    the Panther pilot stays curated (§2.7). **Authorised by Max, 2026-09-19.**
 
 ---
 
