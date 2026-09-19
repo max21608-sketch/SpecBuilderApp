@@ -39,8 +39,10 @@ this box is the reasoning; nothing below it changes this order.
 **Rules that hold throughout:** every item traces to a source line (§0.1); as
 simple as possible and as complex as necessary (§0.2); Fable orchestrates and
 Opus writes, two coders at once (§2); nothing is done until it is proven on the
-deployed build and written down (§7.1); Matthew's findings become log entries,
-not fixes (§7.7).
+deployed build and written down (§7.1); every screen is checked visually at
+monitor size and with 300 lines before Max sees it, so his review is "does it
+feel right" and never "the table is compressed" (§7.4a); Matthew's findings
+become log entries, not fixes (§7.7).
 
 **Effort, honestly.** Stage 1a is about eight coder-sessions and 1b about six,
 at two coders in parallel, so roughly a week of orchestration each if Claude
@@ -1400,6 +1402,7 @@ An item is done when Fable can write each of these as a fact:
 | **Variance** | each variance case is either tested or driven, and the behaviour is one of proceeds / flags / refuses |
 | **Findable** | the click count from the projects list, counted in a browser by someone who did not build it, **pressing each screen's primary action and reading no guidance** (§0.3); hesitations recorded as findings |
 | **Simplest** | the brief named the simplest version and either built it or named the trap it falls into (§0.2); a reviewer can point at the trap in the code |
+| **Looks right** | screenshotted at 1920×1080 and 1440×900, the §7.4a checklist answered in writing, and the 300-line fixture walked for every list screen touched — **by someone other than the coder, before Max sees it**. A layout fault Max reports is this row having been skipped |
 | **Failure path** | at least one failure exercised in the browser (a 409, a 500, a non-JSON response); the screen recovers |
 | **Deployed** | a Vercel deployment exists **for that SHA**, `Ready`, and the flow was driven on it — the six terms, stated |
 | **Recorded** | a dated line in `docs/plans/README.md` naming the item, the SHA and what was verified; the `found-in-use.md` entry marked FIXED with date and commit; `CLAUDE.md` amended where a load-bearing rule moved |
@@ -1489,6 +1492,77 @@ against pilot before a promotion. It is not a substitute for Matthew; it is
 the thing that catches the wall before he hits it. Its console/network failure
 collector is read at the end, every run — *a failed API call in this app
 usually renders as an empty list rather than an error*.
+
+### 7.4a Visual review, before it reaches Max
+
+Max, 2026-09-19: *"I shouldn't be having to say the table's not being shown on
+the page, it's getting compressed, or the image is overlapping with text.
+That's not what I'm here for. I'm here for seeing the end product and saying
+yeah, that works, or no, it just doesn't feel right."*
+
+So there are two reviews of every screen and they are not the same review.
+**Does it look right** is Fable's, done with screenshots before a change is
+reported. **Does it feel right** is Max's and Matthew's, and it is the only
+question they should be spending their time on. A layout fault that reaches
+Max is a failure of this step, whatever the tests said.
+
+**How it is done, for every item that touches a screen:**
+
+- **Screenshot every affected screen, full page, at the size it will be used
+  at.** The end user is on a standard monitor: **1920×1080 at 100%** is the
+  primary size, **1440×900** the second (a laptop beside the monitor). The
+  browser pane's default size is neither, and a screen that fits the pane and
+  not the monitor has not been checked. Screenshots go in the session
+  scratchpad, never the repo, and the report names each one.
+- **Walk the checklist against each screenshot**, and write the answer down
+  rather than glancing:
+  1. Is everything that should be on the page on the page — every table,
+     every tile, the header band, the tabs, the chip?
+  2. Is the primary action where §0.3 puts it, and visible **without
+     scrolling**?
+  3. Is anything overlapping, clipped, compressed to a column, or wrapped to
+     six lines? (The design-language doc lists the DOM traps that do this
+     silently: a spanning panel not in its own `<tr>`, `overflow-hidden` on a
+     sticky-header wrapper, CSS `line-clamp` on a block, a picture not in its
+     grid track.)
+  4. Do the two content widths hold — 1100px or 1400px, nothing in between —
+     and does the header title keep its floor beside the action cluster?
+  5. Does it match its tab in `docs/design/spec-builder-mockups.html` like for
+     like — same bands, same tiles, same columns — not "inspired by"?
+  6. Dark mode and the chip: is the environment marker present?
+- **Then the 300 test.** *"A lot of the demo data might have 15 lines. What
+  happens when it has 300?"* Every list screen — the phase table, the BOQ
+  review, the pack, the drawings review, the chase screen, the infill screen,
+  the finishes library, the inbox — is screenshotted again with a **300-line
+  fixture** loaded (a `__QA` project; `qa:demo` gains a `--lines=300` option so
+  the fixture is one command), and four things are checked that fifteen
+  lines can never show:
+  - **No action that a person needs lives only at the bottom.** Confirm,
+    Draft the email, Ignore all suggested, Export: each is in the header band
+    or sticky, reachable from row 1 and from row 300 without a scroll to find
+    it. A button at the foot of a 300-row table is a button nobody finds.
+  - **The header row and the filters stay put** while the table scrolls, and
+    the filters narrow what is listed without losing the selection or the
+    counts (the rule the chase screen already holds).
+  - **The page renders in under two seconds** and does not paginate silently.
+    If it needs paging or virtualisation, the screen says how many rows there
+    are and how many are shown, in words.
+  - **The summary line stays one line** — 300 documents on the pack screen is
+    the case 1.6 exists for.
+- **Fix before reporting.** A visual fault found here is fixed in the same
+  item, not filed. The report says the review was done, at which sizes, with
+  which fixture, and names the screenshots. If it was not done, the report
+  says so and the item is not done (§7.1, *Looks right*).
+
+**Who.** Fable, or an Opus verifier briefed with this section and the
+checklist, using the built-in browser at the two sizes. Never the coder who
+built the screen — the first eleven component tests found a defect the
+builder had not seen, and screenshots are the same principle.
+
+**What this does not replace.** The first-session script (§7.4) checks that
+the flow works; this checks that it looks right; Max checks that it feels
+right. Three reviews, three questions, and the third is the only one that
+needs a person.
 
 ### 7.5 The "does it make sense" review, after building
 
@@ -1603,6 +1677,10 @@ of them is cheap now and expensive after Stage 2.
 15. **The simplest version is the default** and complexity must name its trap
     (§0.2); **the next step is every screen's primary action**, never a line
     of text (§0.3).
+16. **Visual review is Fable's job and happens before Max sees a screen**
+    (§7.4a): screenshots at 1920×1080 and 1440×900, the checklist answered in
+    writing, and the 300-line fixture for every list screen. Max's review is
+    "does it feel right" only. **Asked for by Max, 2026-09-19.**
 
 ---
 
