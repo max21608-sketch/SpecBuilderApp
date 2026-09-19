@@ -4,6 +4,49 @@ Dated entries whenever a kit rule, template or chassis file changes. Record the
 reason, not just the change — the reason is what tells a future reader whether
 it still applies.
 
+## 2026-09-19 — a `meeting-recap` skill, and why it is mostly about the second pass
+
+Asked for after turning the 2h18m catchup of 2026-09-18 into
+`docs/plans/catchup-2026-09-18.md`: *"I'm going to be using this quite a bit,
+for this project and for others probably."*
+`.claude/skills/meeting-recap/SKILL.md`, mirrored to `.agents/skills/`, with
+`files/harvest-stream-transcript.js`.
+
+**It is a kit candidate, not yet a kit skill.** Every company that records
+meetings in Teams has this problem, and nothing in the procedure is specific to
+this app except the names of the files things land in — which the skill says
+explicitly. It should move to `kit/skills/` once it has been used a second time
+and the shape has survived contact with a different meeting. Recorded here so
+the decision is deliberate rather than forgotten.
+
+Four things in it were learned the hard way and are the reason it exists at all:
+
+- **The two cheap routes to a transcript both fail, and one fails silently.**
+  Graph returns `GraphAccessToTranscriptsDisabled` — a tenant policy, not a
+  scope, so there is nothing to fix. The player's own transcript file is
+  ENCRYPTED: the fetch returns 200 and 787KB of ciphertext, which is worse than
+  an error because the length looks right. What works is scraping the rendered
+  panel, and that panel is a virtualised Fluent `ms-List` where about 110 of
+  1,800 rows exist at a time — so a naive `innerText` grab returns the first two
+  minutes and looks like a complete transcript.
+- **The second pass is the skill.** The first write-up was thorough and still
+  missed four defects visible on screen, including the user hunting for a
+  control and not finding it, which was the most informative moment in the
+  meeting. It also recorded three facts too weakly. Max asked for one more pass
+  and it changed the document materially. The skill says not to skip it, in
+  those words.
+- **Check every claim against the repo, both directions.** In the same task an
+  answer given in good faith was contradicted by a colleague's own words already
+  transcribed into a seed file; a concept written up as "nothing models this"
+  turned out to be seeded field 192; and a change feared to be a model change
+  was a sort order. Two of nine answers changed on checking.
+- **Auditing the instruction files afterwards is half the value.** A meeting
+  that changes direction leaves lines in `CLAUDE.md` that are wrong, and a stale
+  instruction is followed confidently. Six were found, including one load-bearing
+  section that was correct about a screen and had become the exact wrong
+  instruction for an email, and one doc contradicting `CLAUDE.md` two days after
+  the thing it called "deliberately not built" was built.
+
 ## 2026-09-18 — a `new-screen` skill, and `verify` checks for the chip
 
 The design language was written down (`docs/design-language.md`) and a skill

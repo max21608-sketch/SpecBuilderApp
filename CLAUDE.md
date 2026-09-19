@@ -2590,7 +2590,8 @@ in the UK.
 Task procedures live in `.claude/skills/`, mirrored to `.agents/skills/` — keep
 the copies identical: `verify`, `new-migration`, `ship-to-staging`,
 `queue-backed-job`, `extraction-pipeline`, `review-and-confirm`,
-`email-draft-and-send-gate`, `external-vocabulary-sync`, `new-screen`. If a skill goes stale,
+`email-draft-and-send-gate`, `external-vocabulary-sync`, `new-screen`,
+`meeting-recap`. If a skill goes stale,
 fix it here and add a dated entry to `docs/kit/CHANGELOG.md` — a stale skill is
 followed confidently, which is worse than an absent one.
 
