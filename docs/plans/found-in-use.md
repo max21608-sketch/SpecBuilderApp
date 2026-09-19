@@ -318,6 +318,17 @@ tick in the sandbox is gone, correctly.
 
 Asked for directly on 2026-09-18: **build the Product code field in the app.**
 
+**2026-09-19, and this is now the live disagreement.** Max, answering for
+Matthew: *"I'm pretty sure that is the code on the client's spec document, on
+the BOQ document that they give."* **The seed says otherwise, in Matthew's own
+words** — `db/seed/0006_spec_field_gates.sql` row 1 is `capture = 'auto'` with
+his note *"Boilerplate derived automatically: if MF1 or MF2 is populated ->
+with-Metalwork variant; otherwise Simple"*. If Max's reading is taken, every
+record satisfies the row from `spec_record_refs.boq_code` while the BWS product
+code stays underivable — a gate reporting satisfied on a different fact from
+the one it names. **Do not build either reading until Matthew has been shown his
+own note.**
+
 Two things a later plan has to settle rather than assume, both already written
 down elsewhere:
 

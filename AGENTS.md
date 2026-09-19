@@ -10,6 +10,12 @@ their head and in spreadsheets today. Optimise for their vocabulary and their
 ability to review consequential actions. Never silently replace a human
 decision with automation.
 
+**It is at least TWO roles, not one** (2026-09-18). Matthew described the
+PROJECT MANAGER loading the pack and reviewing it, then taking the summary of
+what is outstanding **to the CAM**, and only then going to the client — and a
+chase that need not be external at all. A screen optimised for one person
+working alone is optimised for the wrong thing.
+
 Company-wide standards live in `house/`, copied in unchanged and **not restated
 here**. Read `house/conventions.md` before your first change in a session.
 
@@ -383,6 +389,15 @@ names them and `palette_raw` keeps his wording, so the gap is a recorded
 question rather than a forgotten one, and the screen says so in words instead
 of offering an empty dropdown. FMT-GEN-01 applies: never invent one.
 
+**They are obtainable as of 2026-09-18 and the gap should close.** Matthew
+showed where they live —
+`bws.whistlercloud.com/standard_specification_fields/<id>/edit`, the **Palette
+options** box, per field whose `Field type` is `palette`. There is no export, so
+it is a scrape. **Never take a field's *Values* page instead**: that is what
+people have TYPED (`self-piped`, thirteen times), and somebody had already been
+caught by it. Never-invent still stands — this is a read of BWS's own list, not
+a list we made up.
+
 ### The gates BUILD ON EACH OTHER, and only the chained reading is called satisfied
 
 `src/lib/gates.ts` (`GATES`, `chainGates`, `GateFieldsStatus`),
@@ -494,7 +509,14 @@ Three things carry it, and each is a trap rather than a preference:
   all 728 rows — today's position, everything required of everything — so
   applying the workbook only ever REMOVES entries, and it is a re-seed with no
   code change. An empty array is a question that never blocks a quote.
-- **A level is REQUIRED before anything is tiered.** `questionTier` does not
+- **A LEVEL NEVER HIDES A SPECIFICATION FIELD, and today none is hidden.**
+  Matthew, 2026-09-18: *"if it means that you're not gonna get offered the
+  specification field, then maybe that's not particularly useful to have."*
+  `tgq_levels` is read by `questionTier` and nowhere else that matters, and it
+  returns a BADGE — `to_quote` or `later` — so nothing filters by it. Keep it
+  that way: the agreed shape is show everything, sort the `later` ones down and
+  grey them, never remove one.
+- **A level is REQUIRED before anything is TIERED.** `questionTier` does not
   accept a null level, and `questionTierOrNull` returns null rather than
   picking a reading: "needed at any level" makes a level-less record look
   urgent and "needed at none" makes it look quotable, and both are the app
@@ -520,10 +542,19 @@ the record screen, the spec table and the template — the server reads the tier
 off the live row and a request that tries to SET one is a 400, because the tier
 decides what the email claims is blocking, and the client does not get to say.
 
-### The chase screen is a list of ITEMS, not a list of questions
+### The chase SCREEN is a list of ITEMS; the chase EMAIL is a list of QUESTIONS
 
 `src/lib/chase-grouping.ts`, `src/components/drafts/ChaseQuestionTable.tsx`,
-`src/lib/chase-drafts.ts` (`loadOutstanding`)
+`src/lib/chase-drafts.ts` (`loadOutstanding`), `src/lib/chase-template.ts`
+
+**The two halves are grouped differently and it is deliberate.** Everything
+below is about the SCREEN, and it is right: Matthew drove it without complaint
+on 2026-09-18. The EMAIL is the opposite, asked for twice in that meeting on
+Jay's behalf — *"we end up repeating the question on ten lines"*, and
+*"what you want to do is say, oh, for the dressing area, we don't have a
+metalwork finish"*. A person works item by item; a CLIENT answers question by
+question, by area. Building the email the way the screen is built is the defect
+being reported. Not built yet — `docs/plans/catchup-2026-09-18.md` §4.4.
 
 Asked for directly on 2026-09-17, on first sight of the screen with real data:
 "this is completely ridiculous, 822 to quote — we can't be showing all of
@@ -2594,7 +2625,13 @@ Never silently "clean up" an uncertain source value; retain or flag it.
 A stale status section is worse than none, because agents and people both make
 decisions from it. The full dated list is in `docs/plans/README.md`.
 
-### M8 — the Panther pass. This is the milestone; everything else waits.
+### M8 — the Panther pass. Still the milestone; the ORDER changed on 2026-09-18.
+
+**Read `docs/plans/catchup-2026-09-18.md` before planning against this
+section.** M8's four steps are unchanged and step 4 is still what "done" means.
+What changed is what comes first: Matthew is now using the app himself (D4), and
+he and Max agreed to stabilise rather than build (D5). Work that lets him get
+through a first session beats work that adds anything.
 
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
@@ -2675,9 +2712,15 @@ Four things it changed that a reader of this file would otherwise get wrong:
   adopted. `spec_records.level` STAYS: it picks the BWS boilerplate and it is
   still a person's decision, and 0025 already keeps the guess out of every
   gate's reach.
-- **Substrate is a concept nothing models.** A client says "oak" with no colour;
-  BWS free-texts `oak substrate` so the item can be priced before the finish is
-  agreed. Three questions have to be answered before it can be designed.
+- **Substrate is a concept nothing models — but its BWS FIELD ALREADY EXISTS.**
+  A client says "oak" with no colour; BWS free-texts `oak substrate` so the item
+  can be priced before the finish is agreed. `Substrate` is `json_id` 192,
+  column CF, section Finishing, and `docs/bws-spec-grid.md` puts it in the
+  CABINETRY block — so no new column is needed, only for it to be reachable on a
+  seating item. Max answered on Matthew's behalf 2026-09-19: it is **per ITEM**
+  (provisional) and a known substrate **satisfies** TGQ. That second half is a
+  gate CONDITIONAL, not a value, and which fields it releases is still his to
+  say.
 
 - **The app serves at least TWO ROLES, not one.** Matthew described the PROJECT
   MANAGER loading the pack and reviewing it, taking the outstanding summary to
@@ -3145,14 +3188,22 @@ and `SpecTable`, and a **Needed to quote** column sits beside them. `GET
 - **The gate model is SEEDED but its answers are Max standing in for Matthew.**
   Matthew's matrix arrived 2026-09-17 and is in as `spec_field_gates` (0026).
   Max answered the six open questions on Matthew's behalf on the same day so
-  the work could start, and **every one of them is still to be confirmed with
-  him** — read `docs/plans/matrix-assumptions.md`, which lists each assumption,
+  the work could start, and **nine more on 2026-09-19 after the catchup. Every
+  one of them is still to be confirmed with him** — read `docs/plans/matrix-assumptions.md`, which lists each assumption,
   what it changed, and how to reverse it. The two that would cost most if wrong
   are the category mapping (three judgement calls, two of which widen a
   question onto items he excluded) and whether his TGQ set means only fourteen
   fields block a quote. `required_at_gate` is still null on all 788 rows and
   stays that way; TG2 is still unmodelled, and the cabinetry half of his matrix
   has not been written yet.
+- **TGQ IS PARKED** (2026-09-19). Max, answering for Matthew: *"don't worry
+  about that, that's not an issue for now."* And Matthew explained on 2026-09-18
+  why the workbook never came back — *"I found it quite hard to go through it and
+  do like a tick box thing. I ended up basically typing sentences."* So
+  `requirements.tgq_levels` stays at 0019's seeded default, everything required
+  of everything, for every category his matrix does not reach; the next attempt
+  is a conversation transcribed into the matrix, not another workbook. The
+  paragraph below is the record of how it was designed, not a live task.
 - **TGQ is out with Matthew** (2026-09-16), as a spoken interview. Read
   `docs/plans/tgq-for-matthew.md` before acting on the answers. The 728
   requirement rows are only **62 distinct questions** — "Stitching spec" is on

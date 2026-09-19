@@ -279,6 +279,188 @@ its third argument and ignores it when null. Passing null from
 the old behaviour exactly, and `tests/lib/tgq.test.ts` asserts that a call with
 no matrix is unchanged.
 
+## 2026-09-19 — Max answered the catchup's nine questions on Matthew's behalf
+
+`docs/plans/catchup-2026-09-18.md` §7 put nine questions to Matthew. Max
+answered them the same day, **on the same basis as the rest of this file: every
+one is a stand-in and each is still to be checked with him.** Two of them are
+not assumptions at all — they are facts already in this repo that the answers
+confirmed or contradicted, and those are marked.
+
+### Q1 Levels — GREY OUT AND DEMOTE, and it is smaller than it sounded
+
+> *"I think you're right with not recording specs. So the grey out and demote is
+> probably enough."*
+
+**Checked, and the change is nearly nothing.** `tgq_levels` is read in exactly
+one place that matters — `questionTier` (`src/lib/tgq.ts:164`) — and it returns
+`to_quote` or `later`. It is a **badge**, not a filter. `RecordChecklist.tsx`
+passes it in to decide that badge and nothing else. **No specification field is
+hidden by level anywhere today**, so Sebastian's shape is most of the way built
+and what remains is sorting the `later` ones down and greying them.
+
+One thing the answer does not touch, deliberately: a **null** level still blocks
+a CHASE (`questionTier` refuses it, and a level-less record is a blocker on the
+drafts screen). That is about chasing, not recording, so it stands.
+
+**Reversing it:** presentation only. No seed, no migration.
+
+### Q2 The TGQ workbook — DEFERRED
+
+> *"Don't worry about that. That's not an issue for now."*
+
+So `requirements.tgq_levels` stays at 0019's seeded default — all three levels
+on all 728 rows, everything required of everything — for every category
+Matthew's matrix does not reach. §2 of this file already says applying the
+workbook only ever REMOVES entries, so waiting costs nothing but noise on the
+cabinetry half.
+
+### Q3 Product code — MAX'S ANSWER AND THE SEED DISAGREE, AND THE SEED IS MATTHEW
+
+> *"I'm pretty sure that is the code on the client's spec document, on the BOQ
+> document that they give."*
+
+**Do not build this yet.** Matthew's own words in his matrix say something
+different, and they are transcribed verbatim in `db/seed/0006_spec_field_gates.sql`
+at row 1:
+
+- `capture` is **`auto`**, not something a person types.
+- `palette_raw` is *"Selected from boilerplate list (BW-Sofa,Simple /
+  BW-Sofa,w-Metalwork / etc.)"*.
+- `notes` is *"Boilerplate derived automatically: if MF1 or MF2 is populated ->
+  with-Metalwork variant; otherwise Simple"*.
+
+That is the **BWS boilerplate product code** — Ben Whistler's own register, the
+45 codes in `bws_boilerplates` (0031) — and `pickBoilerplate` in
+`src/lib/quote-lines.ts` already derives it.
+
+**So the reason it reads `unanswerable` on all 179 records is not a missing
+field.** It is that the derivation is AMBIGUOUS: our
+`armchairs-benches-stools-sofas` is one cheat sheet receiving three of Matthew's
+nine codes, so `pickBoilerplate` correctly returns nothing rather than pricing a
+sofa against the armchair template. That is §3 of this file — the category
+mapping — showing up somewhere new.
+
+**What it costs to take Max's reading instead.** The client's own code is
+already held, as `spec_record_refs.boq_code`, so wiring it in is about ten
+lines — and every record would then satisfy that TGQ row **while the BWS product
+code stayed underivable**. A gate would report satisfied on a different fact
+from the one it names, which is the failure `gateStatus` refuses an empty field
+list to avoid.
+
+Both readings are cheap. Choosing the wrong one is not. **This is the first
+question to put to Matthew**, and it is worth showing him his own note when
+asking.
+
+### Q4 Substrate — (b) YES, (c) IT ALREADY EXISTS, (a) PROVISIONAL
+
+> *"(b) definitely yes, it does satisfy TGQ. (c) I believe it does have a BWS
+> code. (a) …it's going to be for the item, not the whole project. We may need
+> to come back to that."*
+
+**(c) is confirmed and better than expected. Substrate is already one of the 56
+BWS fields**: `json_id` 192, `column_letter` CF, section Finishing
+(`db/seed/0001_spec_fields.sql:79`), and `docs/bws-spec-grid.md` places it in
+the **Cabinetry** block, AG–AR. So no new column is needed anywhere. What is
+needed is for it to be **reachable on a seating item**, which today's grid
+blocks do not do — and the grid is a screen layout, never a filter, so a field
+outside a block still appears. Worth checking that it really does.
+
+**(a) per ITEM, recorded as provisional** — Max corrected himself twice and said
+to come back to it. The per-item reading is also the cheaper and more reversible
+one: it is a `record_attributes` row against field 192, which every existing
+composer, promoter and exporter already carries. Project-scoping it would mean a
+column on `project_finishes` and a second place a finish is described.
+
+**(b) is the expensive half and it is not yet designed.** "A known substrate
+satisfies TGQ" is a **conditional in the gate model**, not a value: it means a
+`TBC` Timber finish stops blocking TGQ when Substrate is confirmed.
+`spec_field_gates` already carries `conditional_on_key` / `conditional_on_value`
+and `gateStatus` already has an `unknown` outcome for a conditional whose
+controller is unanswered, so the machinery exists. What has to be decided is
+**which fields substrate releases** — all three timber finishes? metal too? —
+and that is a question for Matthew, not an implementation detail.
+
+### Q5 Areas — RELIABLE
+
+> *"Yes, the areas are reliable in the BOQ."*
+
+Unblocks grouping the chase email by area, and area as a filter. No curation
+step needed per project.
+
+### Q6 Versioning — V1 FIRST, AND THE NUMBER BELONGS TO THE PROJECT
+
+> *"For the client it should start at V1. Every time you make a small change
+> internally we'll version it 1.1, 1.2, 1.3, and then every time a document gets
+> issued to the client, the project moves from version one to version two."*
+
+Three things this settles, all of which the room left open:
+
+- **The first client-facing version is V1**, not V0. Matthew's *"it starts off
+  as version zero"* is not adopted.
+- **The number belongs to the PROJECT** — *"the project moves from version one
+  to version two"* — not to each record. The per-record `snapshot_no` stays what
+  it is: the internal count.
+- **Issuing bumps the major; sign-off does not.** Tony's *"when it's signed off
+  by the client it's V4"* would have been a second increment and is not adopted.
+
+**The consequence is that this is probably not a new numbering scheme at all.**
+A project-level issue counter over named baselines is what `baseline_members`
+(0013) already is, and it is already materialised under the project lock for
+exactly this reason — *"the newest version as at that date"* is wrong, because
+`created_at` is transaction start time. So: an issue is a baseline, the issue
+number is the count of them, and `<issue>.<internal>` is a display rule over two
+numbers the app already holds. Confirm that reading before building anything.
+
+### Q7 Palettes beyond the five — NOTED, COME BACK TO IT
+
+Which other fields are `palette` type, and whether any palette is closed, is
+unanswered. It does not block the sync: the BWS field index itself marks which
+fields are palettes (§3.32 of the catchup), so the scrape can discover them.
+What stays open is whether free text should ever be REFUSED, and until somebody
+says so the answer is no — "Other…" stays on every list, which is already the
+rule.
+
+### Q8 The overview tiles — THIS REPO'S JOB, NOT MATTHEW'S
+
+> *"Think about what could be some really useful information to display instead
+> of just displaying it for the sake of it."*
+
+Not a question for Matthew after all. A proposal has to come from here first,
+and the test is the one Max just set: a tile earns its place by being something
+somebody would act on, not by being a number that was easy to count.
+
+### Q9 The cabinetry matrix — WE ARE NOT MISSING IT; HE HAS NOT WRITTEN IT
+
+> *"Are you asking for it? Are we missing it? Is that the issue? … You could
+> probably draft one to go in its place for now."*
+
+**Nothing has been lost.** Matthew's workbook covers his **nine seating
+categories** (`S, A, DC, BS, B, D, O, BH, BQ`). Our 17 cheat sheets are 9
+upholstery and **8 cabinetry** — consoles/desks/dressing tables, dining tables,
+drinks cabinets/service stations, mirrors, shelves/bookcase,
+side/coffee/bedside tables, sideboards/dressers, wardrobes
+(`db/seed/0002_item_categories.sql`). Those eight are unmapped, so
+`gatesForRecord` returns **null** and a cabinetry record gets no gate view at
+all. That is deliberate: an empty field list computes as "nothing outstanding",
+and a record reported TG0-ready because nobody wrote its rules is the
+confidently-wrong failure the gate model exists to prevent.
+
+**A stand-in draft is feasible, and half of it already exists.** The cabinetry
+FIELD list is written down — `docs/bws-spec-grid.md`, block AG–AR: Substrate
+(192), Timber Finish 1 (4), Timber Finish 2 (31), Timber Finish 3 (143), Metal
+Finish 1 (5), Metal Finish 2 (35), Glass & Mirror Spec (15), Stone (147),
+Runners (10), Hinges (9), BW Supplied Hardware (75), Drawer liner (190). What
+does not exist is **which gate each sits at** and **which of the eight
+categories each applies to** — runners and hinges do not apply to a mirror.
+
+If it is drafted it must be seeded as visibly ours: a distinct `matrix_row`
+range so a re-issued workbook still diffs, and its own entry in this file. It
+is Stage 3 work in the catchup plan, and doing it ahead of Stage 1 would be
+choosing it over the work that lets Matthew use the app at all.
+
+---
+
 ## How to check this file is still true
 
 ```bash

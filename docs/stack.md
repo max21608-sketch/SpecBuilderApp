@@ -1,8 +1,9 @@
 # Stack — what runs where
 
 The Project Spec Builder is a Next.js app on Vercel with a Neon Postgres
-database in London, used by Ben Whistler's KAM and sales-support people to hold
-the specification record for a project from tender through to delivery. It is
+database in London, used by Ben Whistler's project managers, KAMs and
+sales-support people to hold the specification record for a project from tender
+through to delivery. It is
 small on purpose: the database is the product, and everything else is a way to
 read and write it safely.
 
@@ -87,11 +88,15 @@ down stops someone assuming a safety net that is not there.
 - **No document chunking.** One document is one request. Over the size or page
   limits it is rejected with a split-it instruction rather than silently read in
   halves — halves that would each be missing the other's context.
-- **No canonical materials register.** M2 preserves a material reference on the
-  answer as the document wrote it. `project_materials` is deliberately not
-  built: the same client code (`MOR005`) means different things on different
-  projects, and a register guessed from extraction output would be confidently
-  wrong. Resolving codes is deferred until extraction is producing them.
+- **~~No canonical materials register.~~ BUILT 2026-09-16 as `project_finishes`
+  (0018).** This bullet described `project_materials` as deliberately not built
+  until extraction was producing codes. That condition was met at M2 and the
+  register exists: project-scoped, because the same client code (`MOR005`) means
+  different things on different projects, keyed on `(project_id, code_norm)`,
+  edit-once-and-propagate, with a swatch. Kept here rather than deleted because
+  the REASON still governs anything like it. What remains unbuilt is a SUPPLIER
+  register — `project_finishes.supplier_raw` is free text, and the `_raw` suffix
+  is the marker that it is what a document said.
 - **Page anchoring is a URL fragment, not a viewer.** A source link carries
   `#page=N`, which Chromium and Firefox honour on an inline PDF and other
   viewers ignore. The app does not host a viewer of its own.
