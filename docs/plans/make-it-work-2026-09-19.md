@@ -2007,5 +2007,20 @@ ignores, so no `.gitignore` change was needed.
 - The two Neon dependencies `neon config init` added to `package.json` are
   uncommitted and Max's to keep or drop.
 
+**Later still, 2026-09-19: the Vercel project exists and two logins are on
+pilot.** Max created `spec-builder-pilot` at the console. Two users were
+created through `tools/create-user.mjs --yes-pilot` (the guard refused the
+first attempt without the flag, printing the host first — the script working
+as written): `matthew@benwhistler.com` (Matthew Lewis) and
+`demo@benwhistler.com` (Demo), both `editor`. Editor rather than admin because
+`WRITER_ROLES` treats them alike for every write and nothing in the app is
+admin-only yet — least privilege until something is. Passwords were generated
+once and handed to Max in the session, to be sent separately from the link;
+the same script upserts by email, so either can be reset with one command.
+The pilot URL is not yet known to this repo (the default `.vercel.app` slug
+does not resolve), so `/api/auth/me` on pilot and the PILOT chip are still
+unverified. 0.6 remains: the hand-over message is drafted above and waits for
+Stage 1a.
+
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*
