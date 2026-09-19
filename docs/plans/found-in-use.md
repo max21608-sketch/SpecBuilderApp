@@ -22,6 +22,77 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-18
 
+### Seen in the catchup demo of 2026-09-18 — eleven things, all small
+
+**Status: all open.** Found by driving the Panther pack live in front of
+Matthew, Sebastian, Steve and Tony. The full record of that call — what was
+said, by whom, with timestamps — is `docs/plans/catchup-2026-09-18.md`; this
+entry exists so the defects are in the place defects live, and nothing here
+plans a fix.
+
+Grouped because each is a line or two, not because they are one problem.
+
+1. **The header-row message names the wrong row.** The BOQ review said *"row 6
+   was skipped, header found on row 6"*. Matthew opened the workbook: products
+   start at row 7. The message is about the header and reads as an error about
+   the data. (12:39)
+2. **Packaging and delivery came through as records.** `PACK` and `DEL` lines
+   became furniture. Matthew confirmed outright they should not be there. Max:
+   *"probably a good test — how easy is it to ignore?"* Today it is a per-row
+   action with nothing suggesting it. (19:47)
+3. **The per-document banner stack does not scale.** White and yellow notices,
+   one per document on the pack screen. Max, unprompted: *"if you were doing a
+   larger order it would just stack up and you'd have like 300."* Matthew
+   checked they carried nothing needing review. (24:02)
+4. **The item picture crop failed on a real page.** *"The picture extract hasn't
+   worked very well this time. It's meant to just take a crop of the image, but
+   it hasn't."* Max drew the box by hand. The card offering the whole page and
+   *Drag a box* is what saved it, so the recovery path works — the extraction
+   did not. (28:02)
+5. **`TBC – <fabric>` puts the marker inside the value.** The sheet prints a
+   fabric *and* the word TBC; both landed in the value. Matthew: *"it shouldn't
+   really be in the name."* (31:01)
+6. **The swatch picker cannot reach the page the finishes are on.** *"It was on
+   the second page, and I've only got one page, so… I need to work on that."*
+   Real items are routinely drawn across two pages with the callouts on the
+   second, which Matthew confirmed is normal for this pack. (31:59)
+7. **The internal BWS field ordinal leaks to the screen.** `1 · COM 1` beside a
+   fabric, `3 ·` beside dimensions. Matthew spent about ninety seconds working
+   out whether the number was a BWS reference before Max said *"that's just an
+   internal app thing… I'll get it to hide it."* (36:43)
+8. **Project-level questions are asked inside every item's checklist.** TOE
+   agreement, sales folder and similar appear on each furniture line. Matthew:
+   *"you do that once for the project presumably?"* (40:22)
+9. **There is no visible route from a confirmed intake to reviewing each line.**
+   Matthew asked *"how do you get to this page? At what point in the workflow do
+   you come to this?"* and, when told email intake would handle it, correctly
+   pushed back: the intake may have missed a dimension, so there has to be a
+   pass where you confirm, deny and adjust — and know what is outstanding while
+   you do it. **The app can do all of this.** He could not find the way in.
+   (41:42–45:06)
+10. **The phase table shows a button where it should show what is missing.**
+    *"On this page, you can't see what's missing? There's a button to go and see
+    them, but you can't see it on this page."* Confirmed by Max. (50:44)
+11. **The chase draft preselects everything instead of the TGQ set.** Max named
+    it in the room: *"it hasn't automatically selected… it's still selecting all
+    of them, when in fact it should have just selected [the four]."* Red dot =
+    needed to quote, grey = also outstanding; the reading is right and the
+    default selection is not. (1:21:29)
+
+One thing that looked like a defect and is not: **"These pages do not agree"**
+fired because two pages state the same dimension in different units. Sebastian
+asked whether it could divide by ten; Max explained the drawings state no unit
+anywhere, so the app reasons about the range and flags every row it touched.
+Matthew accepted it. That is the unit-resolution rule working, in front of a
+user, and it should be left alone. (26:23)
+
+And one that is a gap rather than a fault: **Product code has nowhere to be
+recorded**, said out loud by Max to the person who wrote the requirement —
+*"I haven't included this in the app yet, so there's nowhere to record that."*
+It is already its own entry below. What changed is that Matthew has now seen
+it. (48:59)
+
+
 ### A level cannot be set or changed at the drawings stage
 
 **Status: open. A CHANGE ASKED FOR, and its first half is still to be

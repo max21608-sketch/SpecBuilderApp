@@ -2630,6 +2630,66 @@ Everything under *Explicitly excluded* stays excluded while this runs, including
 the gate model — a grid that is right is worth more than a gate over a grid that
 is not.
 
+**THE CATCHUP OF 2026-09-18 CHANGED THE ORDER, NOT THE MILESTONE.** Max
+demonstrated the whole app to Matthew, Sebastian, Steve and Tony for 2h18m —
+the first time anybody but Max has watched it run. Everything said, with
+timestamps, and the plan that follows, is
+**`docs/plans/catchup-2026-09-18.md`. Read it before planning anything.**
+The defects seen on screen are in `docs/plans/found-in-use.md`; the decisions
+are dated in `docs/plans/README.md`. Five things were settled in the room:
+
+- **"Run" becomes "phase"** on every screen and in every document, because that
+  is the BWS word. The table stays `spec_runs`.
+- **Versioning is two-part** — internal minor, client-facing major. V1.1, 1.2,
+  1.3 internally; issuing to the client makes it V2, then 2.1; reissue makes it
+  V3. Nothing is built; two questions are open first.
+- **Chasing at tender covers the TGQ set only.**
+- **Matthew runs a real intake himself**, on a smaller project, and sends back
+  screenshots with written explanations.
+- **STOP ADDING FEATURES; MAKE WHAT EXISTS WORK.** Max proposed it and Matthew
+  accepted it outright. The feature list from that meeting is long and
+  **Matthew explicitly does not want it built yet** — *"some of what I briefed
+  you to do is probably not quite on the money."* Work that makes his first
+  session survivable comes before anything new.
+
+Four things it changed that a reader of this file would otherwise get wrong:
+
+- **The five BWS-owned palettes are obtainable now.** Matthew showed the screen:
+  `bws.whistlercloud.com/standard_specification_fields/<id>/edit`, the **Palette
+  options** box, per field whose `Field type` is `palette`. **The trap is his
+  own**: a field's *Values* page is what people have typed (`self-piped`,
+  thirteen times), NOT the palette. Seeding from Values fills a controlled
+  vocabulary with other people's free text. Blocked on Max having a real BWS
+  account. BWS stays read-only; this is a read.
+- **Tim is building a NEW BWS spec importer** — specs plus free text, CSV as the
+  interchange, images by public URL. The complete-dataset rule exists because
+  the CURRENT importer replaces; whether the new one does is unknown. **Do not
+  move the export until Tim's column contract is in writing**, and item pictures
+  on a public URL is a decision about NDA-covered client material, not a config
+  change.
+- **A level must never constrain which specification fields are offered.**
+  Matthew doubts the app should work the level out at all; Sebastian's shape —
+  show everything, demote and grey what the level says is unlikely — was
+  adopted. `spec_records.level` STAYS: it picks the BWS boilerplate and it is
+  still a person's decision, and 0025 already keeps the guess out of every
+  gate's reach.
+- **Substrate is a concept nothing models.** A client says "oak" with no colour;
+  BWS free-texts `oak substrate` so the item can be priced before the finish is
+  agreed. Three questions have to be answered before it can be designed.
+
+Two endorsements, because they settle arguments this repo has had with itself.
+**Structured dimensions are right** — *"much more powerful having it as
+numbers"* — and what Matthew wants beside the five slots is a qualifier a PERSON
+types (`1250 (L-shaped return)`), not the slots removed. And **the project
+finishes library is exactly what he asked for**; he named the document that
+should fill it, a Finishes Schedule table, which costs a tool-schema change and
+therefore a re-read of every document already read.
+
+And one explanation for something that has been stuck: **the TGQ tick-box
+workbook is not how Matthew thinks** — *"I found it quite hard to do like a tick
+box thing. I ended up basically typing sentences."* The next attempt is a
+conversation transcribed into the matrix, not another workbook.
+
 **Shipped to staging:**
 
 - **M1 — the spec table and completion view** (2026-09-13). Migrations
@@ -3023,11 +3083,19 @@ run tab and record tabs; not accepted by Max on any screen.**
   the same sitting and the same person.
 
 **Explicitly excluded, so they are not built speculatively:** feeding preamble
-notes into later model calls; gap and completeness checking, and gates; a BWS *import* file carrying job numbers; PDF bills of
+notes into later model calls; a BWS *import* file carrying job numbers; PDF bills of
 quantities; images and scanned documents; splitting an oversize drawing set. M6
 VE rounds. Any write to BWS. Automatic email sending.
-SharePoint writes. BWS Messenger and Teams ingestion. The TOE calculator's own
-logic. The post-order/production flow.
+SharePoint writes (and SharePoint READS as an intake source, which Matthew asked
+about on 2026-09-18 without requesting). BWS Messenger and Teams ingestion. The
+post-order/production flow.
+
+**Two things left this list on 2026-09-18 and neither is next.** Gates are built
+and were demonstrated, so "gap and completeness checking, and gates" was stale.
+And **the TOE calculator's own logic is no longer excluded on principle** —
+Matthew named it as wanted (*"maybe even have the terms of engagement calculator
+in the app"*) as part of the app replacing specification development in BWS. It
+is his next-phase picture, not this one; do not start it.
 
 **Email intake (2026-09-16).** An email is a `document_kind`, staged, reviewed
 and confirmed like any other specification document, writing

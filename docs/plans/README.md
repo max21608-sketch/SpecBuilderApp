@@ -21,6 +21,81 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-18 — the catchup, and the first time anybody else watched it run
+
+Max demonstrated the whole app end to end to Matthew, Sebastian, Steve and Tony
+over 2h18m. **Everything said, with timestamps, and the plan that follows from
+it, is in `docs/plans/catchup-2026-09-18.md`.** Read that rather than this
+summary before acting on any of it.
+
+Five decisions were taken in the room:
+
+- **"Run" becomes "phase"**, because that is the BWS word (Matthew, 12:23).
+- **Versioning is two-part** — internal minor, client-facing major. V1.1, 1.2,
+  1.3 internally; issuing to the client makes it V2, then 2.1, 2.2; reissue
+  makes it V3. Sebastian proposed it, Tony endorsed it as the software
+  convention, Matthew agreed (1:17:19–1:20:28).
+- **Chasing at tender covers the TGQ set only** — *"we wouldn't have time to
+  nail it down that far before we got the quote out"* (Matthew, 1:20:55).
+- **Matthew runs a real intake himself**, on one of the new projects, not the
+  300-line one first. Max sends a login; Matthew sends back screenshots plus a
+  written explanation (1:34:22, 2:15:37).
+- **Stop adding features; make what exists work.** Max proposed it and Matthew
+  accepted it outright — *"don't feel like you need to get it all polished…
+  some of what I briefed you to do is probably not quite on the money"*
+  (1:41:25–1:43:15).
+
+The last one governs the order of everything else. **The feature list from this
+meeting is long and Matthew explicitly does not want it built yet.**
+
+Four things changed what is written down here, and they are argued out in the
+catchup document rather than repeated:
+
+- **The five BWS-owned palettes are now obtainable.** Matthew navigated to
+  `bws.whistlercloud.com/standard_specification_fields/<id>/edit` and showed the
+  **Palette options** box, per field where `Field type` is `palette` — timber
+  finish, stud spec and the rest, with their BWE codes. **The trap he drew
+  himself**: a field's *Values* page is what people have typed (`self-piped`,
+  thirteen times), not the palette. Seeding from Values would fill a controlled
+  vocabulary with other people's free text. Blocked on Max having a real BWS
+  account, which blocked him live in the meeting.
+- **Tim is building a new BWS spec importer** — *"specs plus free text and a
+  couple of other bits"*, CSV as the interchange, images referenced by public
+  URL. The complete-dataset rule exists because the current importer replaces;
+  whether the new one does is unknown. **The export must not move until Tim's
+  column contract is in writing**, and item pictures on a public URL is a
+  decision about NDA-covered material, not a configuration change.
+- **Levels must never constrain which specification fields are offered.**
+  Matthew: *"if it's not right, if it means you're not gonna get offered the
+  specification field, then maybe that's not particularly useful to have."*
+  Sebastian's shape — show everything, demote and grey what the level says is
+  unlikely — was adopted. `spec_records.level` stays: it picks the BWS
+  boilerplate and it is still a person's decision.
+- **Substrate is a new concept nothing models.** A client says "oak" without a
+  colour; BWS free-texts `oak substrate` so the item can be priced and
+  progressed before the finish is agreed. Matthew: *"it'd be good to be able to
+  have that as an option for finishes."* Three questions have to be answered
+  before it can be designed, and they are in the catchup document.
+
+Two endorsements worth recording, because they settle arguments this repo has
+had with itself:
+
+- **Structured dimensions are right** — *"I think it's much more powerful having
+  it as numbers. Absolutely."* BWS itself fell back to free text only because of
+  L-shaped and off-centre-U sofas, and what Matthew wants beside the five slots
+  is a **qualifier a person types** (`1250 (L-shaped return)`), not the slots
+  removed.
+- **The project finishes library is exactly what he asked for**, and he named
+  the document that should fill it: a Finishes Schedule table, `WD01` = oak,
+  stain brown, open grain. Loading it costs a tool-schema change and therefore a
+  re-read of every document already read — a decision with a number attached.
+
+And one explanation for something that has been stuck: **the TGQ tick-box
+workbook is not how Matthew thinks.** Unprompted, at 2:16:13 — *"I found it
+quite hard to go through it and do like a tick box thing. I ended up basically
+typing sentences."* That is why it has never come back, and the next attempt
+should be a conversation transcribed into the matrix, not another workbook.
+
 ## 2026-09-18 — the costing sheet, and a blocker that was never real
 
 Matthew sent the `skill.md` and its user guide (after an email saying he had
