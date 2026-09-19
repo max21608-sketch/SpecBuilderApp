@@ -1852,8 +1852,112 @@ of the 5s default against a remote database — a file-level `testTimeout` for
 `tests/db/` in `vitest.config.ts` would stop this recurring one test at a
 time, and belongs with 0.4.
 
-**Next in Stage 0:** 0.4, the `checks` script and the db-tier guard, on the
-same footing now the suite is green.
+**0.4 and 0.5 opened, 2026-09-19**, two coders in parallel, disjoint files:
+0.4 holds `package.json`, `vitest.config.ts` and the db-tier skip helper; 0.5
+holds `env.ts`, `script-env.mjs`, the chip, `.env.example`,
+`docs/environments.md` and the `verify` skill. The console half of 0.5 —
+the Vercel project, the Neon project, the blob store — is Max's, and the doc
+0.5 produces is the checklist for it.
+
+**0.6 drafted, 2026-09-19 — NOT SENT.** Sending waits for two things: the
+pilot link (0.5's console half) and Stage 1a closing (the plan's own rule —
+the link goes out when the first-session script runs clean on pilot, not
+before). The draft is here so it is ready that day. Max sends it from his own
+Outlook; there is no send path in this app and the org rule makes sending a
+write.
+
+> **Subject: Spec Builder — your login, and how to tell me what's wrong**
+>
+> Matthew,
+>
+> Here is the build for you to use: `<pilot URL>`. Your login is
+> `<email>`; I'll send the password separately. This build is yours: it
+> has its own database, nothing I push day to day reaches it, and I'll
+> tell you before anything on it changes. The chip in the top bar reads
+> **PILOT** so you can tell it apart from anything else I show you.
+>
+> As agreed on the 18th: start with `<the project you named>`, not the
+> 300-line one. Load the pack the way you would for real.
+>
+> When something is wrong, or you can't find the thing you want to do:
+> take a screenshot and write me a few sentences — what you were trying to
+> do, what you expected, what happened. Send them in a batch whenever suits
+> you; I won't fix them one at a time, I'll group them, so don't hold one
+> back because it seems small. "I couldn't find where to…" is the most
+> useful sentence you can send.
+>
+> Two things you'll notice that are deliberate: a level (simple / complex /
+> hero) is suggested and never set for you — it needs your click; and a
+> value read off a drawing shows the page it came from, so if a number
+> looks wrong, the page is one click away.
+>
+> Six short questions are attached — no rush, answer them alongside the
+> screenshots rather than before you start.
+>
+> Max
+
+The six questions are §11 of this plan (A–F); the catchup's §7 questions
+have Max's stand-in answers already and go in the same message only where
+one needs Matthew to overrule (Q3, product code, with his own note quoted).
+
+**0.4 and 0.5 landed, 2026-09-19** (`201a4b5`, `2e70220` on `staging`,
+cherry-picked from the two worktrees). Both reviewed against §2.3 before
+landing; neither widened scope.
+
+- **0.4:** `npm run checks` runs the four checks with the database tier
+  REQUIRED (`REQUIRE_DB_TESTS=1`). The twenty-five files that each declared
+  their own `describeIfDb` now import one (`tests/db/db-tier.ts`), which also
+  carries a 30s suite timeout for the db tier alone — pure and component keep
+  the 5s default and a test proved both directions. The refusal is one test
+  (`require-database.test.ts`), so a missing `DATABASE_URL` fails once rather
+  than twenty-six times. `.claude/worktrees/**` is now ESLint-ignored, because
+  a coder's worktree was 149 of this repo's lint errors for an hour.
+- **0.5:** `pilot` is a third `APP_ENV`/`DATABASE_ENVIRONMENT` pair, paired in
+  both directions; `--yes-pilot` mirrors `--yes-production` and does not cover
+  it; `qa-clean` now requires `sandbox` exactly (it refused `production` only,
+  and would have swept Matthew's data); the chip reads PILOT in the `live`
+  tone and the title marker comes from the same function;
+  `docs/environments.md` carries the pilot column, the console steps and the
+  promotion checklist; 18 new tests.
+
+**The console half of 0.5, as far as it went today.** Neon project
+`SpecBuilder Pilot` (`sweet-tree-21270018`, London) exists, its default branch
+named `production` by Neon. The Neon CLI is installed under `~/.npm-global`
+and linked in this directory; `neon.ts` is the two-line config Max gave;
+`neon deploy` reported no changes. `.env.pilot.local` holds the direct
+connection string, git-ignored. The `pilot` git branch exists on the remote at
+the `staging` tip of the time (`b0675eb`) and has NOT been fast-forwarded to
+the 0.5 code yet. Vercel project, blob store and environment variables are
+still Max's to create; migrations wait for that and for the storage decision
+below.
+
+**An incident on the way, reversed.** `neon link` pulled the pilot project's
+`DATABASE_URL` into `.env.local`, the sandbox env file, and said so in one
+INFO line. For six minutes every db run in this checkout pointed at the empty
+pilot database while still declaring `sandbox` — the exact declaration-not-
+probe trap of `house/conventions.md` §3. Restored from the sandbox project's
+own connection string (direct endpoint), verified by count (9 projects, 32
+migrations), both coders told to discard runs in the window. `neon deploy`
+has the same default and was run with `--no-env-pull`. Recorded in
+`docs/environments.md` by 0.5.
+
+**Stage 0 is NOT closed, and the reason is a Neon storage ceiling.** Both
+coders hit it independently at about 18:20: every write to the sandbox fails
+with *could not extend file because project size limit (512 MB) has been
+exceeded*. Measured: the database is 489 MB, `audit_log` is 460 MB of it, and
+343 MB of that is two QA actors (`__qa@example.test` 217 MB, `qa` 126 MB) —
+before-and-after JSON for test rows the cleanup deleted long ago, which the
+cleanup never touches because the table is append-only by trigger and
+`house/conventions.md` §12 says leave it alone. It grew 50–140 MB a day this
+week. **The close condition "db tier proven to have run" cannot be met until
+Max decides how to free the space**; the options are in `found-in-use.md`
+under 2026-09-19. The 0.4 commit's own db-tier proof is the coder's green
+run at 18:13, the last one with room; 0.5's is its 18:16 run.
+
+Left behind by the wall: the 0.5 coder's `qa-clean` attempt failed part way
+(it is not transactional), so one `__QA` project may be missing its drafts
+and contacts rows and still exist. Re-running the sweep once space is freed
+finishes it. Seven `__QA` projects are in the sandbox.
 
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*

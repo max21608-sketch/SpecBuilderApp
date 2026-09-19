@@ -22,6 +22,65 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-19
 
+### The sandbox database is full, and the audit log is why
+
+**Status: open — a decision for Max, not a code fix.** Found by both Stage 0
+coders independently at about 18:20: every write to the sandbox fails with
+*could not extend file because project size limit (512 MB) has been
+exceeded*. Reads still work. The database tier of the test suite cannot run
+until it is resolved, and neither can anything else that writes.
+
+Measured, read-only, at 18:30:
+
+| | |
+|---|---|
+| Database | 489 MB of a 512 MB project limit (Neon free tier) |
+| `audit_log` | **460 MB**, 527,834 rows, 8 days |
+| of which `__qa@example.test` | 217 MB |
+| of which `qa` | 126 MB |
+| of which demo/seed actors | 30 MB |
+| everything else in the database | 29 MB |
+| Growth | 13 MB (12 Sept) → 139 MB (16 Sept) → 54 MB (18 Sept) per day |
+
+So two thirds of the whole database is before-and-after JSON for test rows
+that the QA cleanup deleted long ago. The cleanup never touches `audit_log`
+**by design**: the table is append-only by trigger (`audit_log_no_delete`,
+`audit_log_no_update`) and `house/conventions.md` §12 says a QA run that
+deletes from it has broken the thing under test. That rule is right for a QA
+run and it is what filled the sandbox.
+
+**Cause, stated separately from the observation:** every db-tier test writes
+real rows through `write_audit()`, which stores whole-row JSON twice per
+change; `spec_answers` alone accounts for 267 MB of the log because a
+fixture creates and deletes hundreds of answers per run. Nothing removes them.
+
+**Options, each with its cost — Max decides:**
+
+1. **Raise the Neon plan** (Launch tier, 10 GB). Fastest; buys months; changes
+   nothing about the growth, and the pilot project will need headroom too.
+2. **A one-off, authorised purge of the QA actors' audit rows** — disable the
+   delete trigger inside one transaction, delete where `changed_by` is a QA
+   actor, re-enable, then let Neon vacuum. Frees ~340 MB. It is the one thing
+   §12 says never to do, so it needs Max's explicit yes in writing, a backup
+   first, and a dated line here saying it was done. It does not stop the
+   growth either.
+3. **Stop the tests filling the sandbox at all**: run the db tier against a
+   Neon BRANCH created per run and deleted after (branches are copy-on-write,
+   so a run's writes cost only their delta while the branch lives). The
+   durable fix, and the only one that keeps §12 intact; it belongs with the
+   `checks` script of Stage 0.4 and is a small item on its own. Does not free
+   today's 460 MB.
+
+The honest combination is probably 2 once, then 3 so it does not recur; 1 if
+Max would rather not touch the log at all. None of it should be done from a
+test or a script that runs unattended.
+
+**Also left by the wall:** the 0.5 coder's `db:qa-clean` attempt failed
+part way through (it is not transactional), so one `__QA` project may be
+missing its drafts and contacts rows and still exist; re-running the sweep
+once space is freed finishes it. And the seven `__QA` projects currently in
+the sandbox are a product of the same week.
+
 ### The projects list takes about two seconds to answer
 
 **Status: open. A performance finding, measured, not a fault in what it
