@@ -22,7 +22,7 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-18
 
-### Seen in the catchup demo of 2026-09-18 — eleven things, all small
+### Seen in the catchup demo of 2026-09-18 — fifteen things, all small
 
 **Status: all open.** Found by driving the Panther pack live in front of
 Matthew, Sebastian, Steve and Tony. The full record of that call — what was
@@ -40,40 +40,64 @@ Grouped because each is a line or two, not because they are one problem.
    became furniture. Matthew confirmed outright they should not be there. Max:
    *"probably a good test — how easy is it to ignore?"* Today it is a per-row
    action with nothing suggesting it. (19:47)
-3. **The per-document banner stack does not scale.** White and yellow notices,
+3. **The phase overview's tiles say nothing anybody acted on.** Max, unprompted:
+   *"just an overview of where it is, a few just little boxes. We can change
+   those to have something useful or meaningful in them."* Matthew read one
+   aloud — *"the 22 product categories"* — and immediately re-described the run
+   as *"sofas and armchairs, basically"*. Nobody said the number was wrong; a
+   tile that needs that much explaining is one nobody is reading. (19:15)
+4. **A pack document is ticked because it was OPENED, not checked.** Matthew:
+   *"so it's ticked because you've opened it."* Max: *"because I've reviewed it
+   now."* He let it go, but the pack's progress is therefore a record of what
+   somebody looked at. On a thirty-document pack that distinction matters.
+   (23:29)
+5. **The per-document banner stack does not scale.** White and yellow notices,
    one per document on the pack screen. Max, unprompted: *"if you were doing a
    larger order it would just stack up and you'd have like 300."* Matthew
    checked they carried nothing needing review. (24:02)
-4. **The item picture crop failed on a real page.** *"The picture extract hasn't
+6. **The item picture crop failed on a real page.** *"The picture extract hasn't
    worked very well this time. It's meant to just take a crop of the image, but
    it hasn't."* Max drew the box by hand. The card offering the whole page and
    *Drag a box* is what saved it, so the recovery path works — the extraction
    did not. (28:02)
-5. **`TBC – <fabric>` puts the marker inside the value.** The sheet prints a
+7. **`TBC – <fabric>` puts the marker inside the value.** The sheet prints a
    fabric *and* the word TBC; both landed in the value. Matthew: *"it shouldn't
    really be in the name."* (31:01)
-6. **The swatch picker cannot reach the page the finishes are on.** *"It was on
+8. **The swatch picker cannot reach the page the finishes are on.** *"It was on
    the second page, and I've only got one page, so… I need to work on that."*
-   Real items are routinely drawn across two pages with the callouts on the
-   second, which Matthew confirmed is normal for this pack. (31:59)
-7. **The internal BWS field ordinal leaks to the screen.** `1 · COM 1` beside a
+   Matthew confirmed two-page items are normal for this pack: *"you've got the
+   shop drawing and then with the finishes."* (31:59)
+9. **The internal BWS field ordinal leaks to the screen.** `1 · COM 1` beside a
    fabric, `3 ·` beside dimensions. Matthew spent about ninety seconds working
-   out whether the number was a BWS reference before Max said *"that's just an
+   out whether the number was a BWS reference — including a wrong guess,
+   *"it's the reference for the JSON file"* — before Max said *"that's just an
    internal app thing… I'll get it to hide it."* (36:43)
-8. **Project-level questions are asked inside every item's checklist.** TOE
-   agreement, sales folder and similar appear on each furniture line. Matthew:
-   *"you do that once for the project presumably?"* (40:22)
-9. **There is no visible route from a confirmed intake to reviewing each line.**
-   Matthew asked *"how do you get to this page? At what point in the workflow do
-   you come to this?"* and, when told email intake would handle it, correctly
-   pushed back: the intake may have missed a dimension, so there has to be a
-   pass where you confirm, deny and adjust — and know what is outstanding while
-   you do it. **The app can do all of this.** He could not find the way in.
-   (41:42–45:06)
-10. **The phase table shows a button where it should show what is missing.**
+10. **Project-level questions are asked inside every item's checklist.** TOE
+    agreement, sales folder and similar appear on each furniture line. Matthew:
+    *"you do that once for the project presumably?"* (40:22)
+11. **There is no visible route from a confirmed intake to reviewing each line.**
+    Matthew asked *"how do you get to this page? At what point in the workflow do
+    you come to this?"* and, when told email intake would handle it, correctly
+    pushed back: the intake may have missed a dimension, so there has to be a
+    pass where you confirm, deny and adjust — and know what is outstanding while
+    you do it. Max: *"sorry, I misunderstood that."* **The app can do all of
+    this.** He could not find the way in. (41:42–45:06)
+12. **The phase table shows a button where it should show what is missing.**
     *"On this page, you can't see what's missing? There's a button to go and see
     them, but you can't see it on this page."* Confirmed by Max. (50:44)
-11. **The chase draft preselects everything instead of the TGQ set.** Max named
+13. **Two counts differ by one on the same screen, unexplained.** The gate panel
+    read *"5 to answer"*; the button top right read *"Chase the 4"*. Sebastian
+    asked outright: *"top right-hand corner is 4. Is that something different?"*
+    It took Max a moment to work out why — Spec notes is a manual entry and is
+    not chased. The reason is right; the screen says none of it. (49:38–50:18)
+14. **A confirmed record's update path could not be found, and Matthew went
+    looking for it.** *"I remember seeing a page… where it kind of had confirm,
+    or you could update it. You could confirm that what was captured is correct,
+    or you could update it."* Max: *"I think it's kind of been locked down at
+    this point."* Immutability of an applied proposal is deliberate; the route
+    to changing a value on purpose is what is missing. Same failure as 11, one
+    step later. (51:08–51:58)
+15. **The chase draft preselects everything instead of the TGQ set.** Max named
     it in the room: *"it hasn't automatically selected… it's still selecting all
     of them, when in fact it should have just selected [the four]."* Red dot =
     needed to quote, grey = also outstanding; the reading is right and the
@@ -91,7 +115,6 @@ recorded**, said out loud by Max to the person who wrote the requirement —
 *"I haven't included this in the app yet, so there's nowhere to record that."*
 It is already its own entry below. What changed is that Matthew has now seen
 it. (48:59)
-
 
 ### A level cannot be set or changed at the drawings stage
 

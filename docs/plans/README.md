@@ -34,7 +34,10 @@ Five decisions were taken in the room:
 - **Versioning is two-part** — internal minor, client-facing major. V1.1, 1.2,
   1.3 internally; issuing to the client makes it V2, then 2.1, 2.2; reissue
   makes it V3. Sebastian proposed it, Tony endorsed it as the software
-  convention, Matthew agreed (1:17:19–1:20:28).
+  convention, Matthew agreed (1:17:19–1:20:28). **Three details were left
+  unsettled** and are in the catchup document: whether the client-facing number
+  belongs to the project or the record, whether a client *sign-off* bumps the
+  major as well as *issuing*, and whether the first issue is V0 or V1.
 - **Chasing at tender covers the TGQ set only** — *"we wouldn't have time to
   nail it down that far before we got the quote out"* (Matthew, 1:20:55).
 - **Matthew runs a real intake himself**, on one of the new projects, not the
@@ -54,11 +57,15 @@ catchup document rather than repeated:
 - **The five BWS-owned palettes are now obtainable.** Matthew navigated to
   `bws.whistlercloud.com/standard_specification_fields/<id>/edit` and showed the
   **Palette options** box, per field where `Field type` is `palette` — timber
-  finish, stud spec and the rest, with their BWE codes. **The trap he drew
+  finish, stud spec and the rest, with their BWE codes. There is no export
+  (*"I don't know how to get all of the options out on a download"*), so this is
+  a **scrape**, the way the BWS boilerplates were taken. **The trap he drew
   himself**: a field's *Values* page is what people have typed (`self-piped`,
-  thirteen times), not the palette. Seeding from Values would fill a controlled
-  vocabulary with other people's free text. Blocked on Max having a real BWS
-  account, which blocked him live in the meeting.
+  thirteen times), not the palette — and somebody on the call had already been
+  caught by it, having previously looked at the stud field and concluded the
+  label was wrong. Seeding from Values would fill a controlled vocabulary with
+  other people's free text. Blocked on Max having a real BWS account, which
+  blocked him live in the meeting.
 - **Tim is building a new BWS spec importer** — *"specs plus free text and a
   couple of other bits"*, CSV as the interchange, images referenced by public
   URL. The complete-dataset rule exists because the current importer replaces;
@@ -76,6 +83,14 @@ catchup document rather than repeated:
   progressed before the finish is agreed. Matthew: *"it'd be good to be able to
   have that as an option for finishes."* Three questions have to be answered
   before it can be designed, and they are in the catchup document.
+
+- **The app serves at least two roles, not one.** Matthew described the
+  **project manager** loading the pack and reviewing it, then taking the summary
+  of what is outstanding **to the CAM**, and only then going to the client. A
+  chase need not be external either — *"you can send it to the CAM or to sales
+  or to production; it doesn't have to be an external e-mail."* `CLAUDE.md` says
+  the primary user is the KAM / sales-support role, and that is now half the
+  picture.
 
 Two endorsements worth recording, because they settle arguments this repo has
 had with itself:

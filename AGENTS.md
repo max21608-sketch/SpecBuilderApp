@@ -2656,11 +2656,13 @@ Four things it changed that a reader of this file would otherwise get wrong:
 
 - **The five BWS-owned palettes are obtainable now.** Matthew showed the screen:
   `bws.whistlercloud.com/standard_specification_fields/<id>/edit`, the **Palette
-  options** box, per field whose `Field type` is `palette`. **The trap is his
+  options** box, per field whose `Field type` is `palette`. There is no export,
+  so it is a SCRAPE, the way the boilerplates were taken. **The trap is his
   own**: a field's *Values* page is what people have typed (`self-piped`,
-  thirteen times), NOT the palette. Seeding from Values fills a controlled
-  vocabulary with other people's free text. Blocked on Max having a real BWS
-  account. BWS stays read-only; this is a read.
+  thirteen times), NOT the palette — and somebody on the call had already drawn
+  a wrong conclusion from it. Seeding from Values fills a controlled vocabulary
+  with other people's free text. Blocked on Max having a real BWS account. BWS
+  stays read-only; this is a read.
 - **Tim is building a NEW BWS spec importer** — specs plus free text, CSV as the
   interchange, images by public URL. The complete-dataset rule exists because
   the CURRENT importer replaces; whether the new one does is unknown. **Do not
@@ -2676,6 +2678,12 @@ Four things it changed that a reader of this file would otherwise get wrong:
 - **Substrate is a concept nothing models.** A client says "oak" with no colour;
   BWS free-texts `oak substrate` so the item can be priced before the finish is
   agreed. Three questions have to be answered before it can be designed.
+
+- **The app serves at least TWO ROLES, not one.** Matthew described the PROJECT
+  MANAGER loading the pack and reviewing it, taking the outstanding summary to
+  the CAM, and only then going to the client — and a chase that need not be
+  external at all. The line above saying the primary user is the KAM /
+  sales-support role is half the picture.
 
 Two endorsements, because they settle arguments this repo has had with itself.
 **Structured dimensions are right** — *"much more powerful having it as
