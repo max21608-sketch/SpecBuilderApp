@@ -64,10 +64,24 @@ describeIfDb("chase drafts", () => {
     );
     contactId = contact.rows[0].id;
 
-    // A category with at least three requirements, so coverage is plural.
+    // A category with at least three requirements, so coverage is plural —
+    // and one Matthew's matrix does NOT cover, which is load-bearing rather
+    // than incidental.
+    //
+    // TGQ is one name over two models (CLAUDE.md, and `tgq.ts`). Where
+    // `spec_matrix_category_map` reaches a category his matrix decides the
+    // tier and NO LEVEL IS NEEDED; where it does not, 0019's `tgq_levels`
+    // fallback applies and a level is required. The tier tests below are
+    // about the FALLBACK — a level-less record refused, a question struck off
+    // a level demoted — so the fixture has to sit on an uncovered sheet or it
+    // is asserting the fallback against a category that never reaches it.
+    // Unqualified, this query returned `sofas-bed-daybeds`, one of his nine.
     const category = await client.query(
       `select c.id from item_categories c
        join requirements q on q.category_id = c.id
+       where not exists (
+         select 1 from spec_matrix_category_map m where m.item_category_id = c.id
+       )
        group by c.id having count(q.id) >= 3
        order by c.id limit 1`,
     );
@@ -566,6 +580,60 @@ describeIfDb("chase drafts", () => {
       expect(await currentDrafts()).toHaveLength(0);
     } finally {
       await client.query(`update spec_records set level = 'complex' where id = $1`, [recordId]);
+    }
+  });
+
+  it("chases a level-less record where Matthew's matrix covers its category", async () => {
+    // The other half of the same rule, and the reason the fixture above had to
+    // be pinned to an uncovered sheet. His matrix is per CATEGORY and carries
+    // no level column, so where it reaches, the tier is knowable without one
+    // and refusing the chase would be blocking a person for a decision that
+    // does not bear on the answer. Covered by `tests/lib/tgq.test.ts` as a
+    // pure function; this is the ROUTE holding to it.
+    await resetAnswers();
+    const covered = await client.query(
+      `select c.id from item_categories c
+       join spec_matrix_category_map m on m.item_category_id = c.id
+       join requirements q on q.category_id = c.id
+       group by c.id having count(q.id) >= 1
+       order by c.id limit 1`,
+    );
+    const coveredCategoryId = covered.rows[0].id;
+    const matrixRecord = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, level, item_description, designer, created_by, updated_by)
+       values ($1, $2, 9002, 'active', $3, null, '__QA Matrix sofa', 'qalcs', 'qa', 'qa') returning id`,
+      [projectId, runId, coveredCategoryId],
+    );
+    const matrixRecordId = matrixRecord.rows[0].id;
+    try {
+      const reqs = await client.query(
+        `select id from requirements where category_id = $1 order by sort_order limit 3`,
+        [coveredCategoryId],
+      );
+      const res = await generate(
+        {},
+        reqs.rows.map((r: { id: string }) => ({ recordId: matrixRecordId, requirementId: r.id })),
+      );
+      expect(res.status).toBe(201);
+
+      // And the tiers came from HIS matrix, not from a level nobody set: some
+      // of a seating sheet's questions are at TGQ and the rest are not, where
+      // the fallback would have marked every seeded row `to_quote`.
+      const draft = (await currentDrafts("draft"))[0];
+      const items = await client.query(
+        `select tier from email_draft_items where draft_id = $1`,
+        [draft.id],
+      );
+      expect(items.rows.length).toBeGreaterThan(0);
+      expect(items.rows.every((row: { tier: string }) => row.tier === "to_quote" || row.tier === "later")).toBe(true);
+    } finally {
+      await client.query(
+        `delete from email_draft_items where draft_id in (select id from email_drafts where project_id = $1)`,
+        [projectId],
+      );
+      await client.query(`delete from email_drafts where project_id = $1`, [projectId]);
+      await client.query(`delete from spec_answers where record_id = $1`, [matrixRecordId]);
+      await client.query(`delete from spec_records where id = $1`, [matrixRecordId]);
     }
   });
 

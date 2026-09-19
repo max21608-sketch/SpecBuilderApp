@@ -130,8 +130,42 @@ describeIfDb("intake routes", () => {
     return recordId;
   }
 
-  async function stageDrawingRun(itemCode: string, overrides: Parameters<typeof stageDrawings>[0][number]) {
-    const staged = stageDrawings([overrides], fields, "__QA drawings.pdf", null);
+  /** What the same pages would have staged as before the model was asked. */
+  function asVersion1(doc: ReturnType<typeof stageDrawings>): ReturnType<typeof stageDrawings> {
+    return {
+      ...doc,
+      schemaVersion: 1,
+      codeGroups: undefined,
+      items: doc.items.map((item) => ({
+        ...item,
+        observations: item.observations.map((observation) => {
+          const stripped = { ...observation };
+          delete stripped.isOverall;
+          delete stripped.slotReason;
+          return stripped;
+        }),
+      })),
+    };
+  }
+
+  /**
+   * A staged run, version 2 by default and version 1 on request.
+   *
+   * `stageDrawings` only ever emits version 2 — it is what the model was asked
+   * — so a test about the FROZEN read-time guessing pipeline has to say so and
+   * strip the per-row answers a version 1 run never carried. Inventing them is
+   * the inference layer version 2 removed; leaving them on a document labelled
+   * version 1 would be worse, because `wasReadByModel` reads `isOverall` off
+   * the rows and would report a guessing run as one the model had read.
+   */
+  async function stageDrawingRun(
+    itemCode: string,
+    overrides: Parameters<typeof stageDrawings>[0][number],
+    options: { asVersion1?: boolean } = {},
+  ) {
+    const staged = options.asVersion1
+      ? asVersion1(stageDrawings([overrides], fields, "__QA drawings.pdf", null))
+      : stageDrawings([overrides], fields, "__QA drawings.pdf", null);
     const run = await client.query(
       `insert into intake_runs (project_id, source_kind, document_kind, status, parsed, created_by, updated_by)
        values ($1, 'spec_document', 'shop_drawings', 'parsed', $2::jsonb, 'qa', 'qa') returning id, version`,
@@ -361,7 +395,13 @@ describeIfDb("intake routes", () => {
     });
     expect(res.status).toBe(200);
     expect((await dimensionsAnswer(recordId)).value).toBe("W1900 x H720mm");
-  });
+    // TWO full confirms through the real route, against a remote database —
+    // the bound the configuration tests below already carry, and for the same
+    // reason. It passed on 3.7s when this file ran alone and timed out on the
+    // 5s default in a full suite run, which is contention rather than a
+    // regression: a marginal bound that only fails when everything else is
+    // running is a red suite nobody can read.
+  }, 40_000);
 
   it("writes the attribute and no answer when the record has no category yet", async () => {
     const code = "__QAX174";
@@ -469,21 +509,33 @@ describeIfDb("intake routes", () => {
     // and the rule picked it again. The correction survived in the row and
     // vanished from the slot.
     // ========================================================================
+    // THIS IS A VERSION 1 RUN, DELIBERATELY. The view guess is the pipeline
+    // `assertStagedDrawings` runs on version 1 documents and on nothing else
+    // (2026-09-18): a version 2 run carries the model's own reading of which
+    // figure is the width, so there is no guess left to correct away. Version 1
+    // runs are FROZEN, not upgraded — nine of them are sitting in the sandbox
+    // unre-read — so the rule this test holds is still live for them, and
+    // staging through `stageDrawings` alone (which always emits version 2)
+    // would leave it holding nothing at all.
     const code = "__QAX160";
     await makeRecord(mainRunId, code, "__QA Armchair");
-    const { runId } = await stageDrawingRun(code, {
-      ...drawingItem(code),
-      dimensions: [
-        { labelRaw: "FRONT", valueRaw: "640" },
-        { labelRaw: "FRONT", valueRaw: "680" },
-        { labelRaw: "BACK", valueRaw: "640" },
-        { labelRaw: "SIDE", valueRaw: "680" },
-        { labelRaw: "SIDE", valueRaw: "685" },
-        { labelRaw: "TOP", valueRaw: "640" },
-        { labelRaw: "TOP", valueRaw: "685" },
-      ],
-      materials: [],
-    });
+    const { runId } = await stageDrawingRun(
+      code,
+      {
+        ...drawingItem(code),
+        dimensions: [
+          { labelRaw: "FRONT", valueRaw: "640" },
+          { labelRaw: "FRONT", valueRaw: "680" },
+          { labelRaw: "BACK", valueRaw: "640" },
+          { labelRaw: "SIDE", valueRaw: "680" },
+          { labelRaw: "SIDE", valueRaw: "685" },
+          { labelRaw: "TOP", valueRaw: "640" },
+          { labelRaw: "TOP", valueRaw: "685" },
+        ],
+        materials: [],
+      },
+      { asVersion1: true },
+    );
 
     const { GET, PATCH } = await import("@/app/api/imports/[id]/route");
     const before = await (await GET(new Request("http://x"), params(runId))).json();
@@ -1230,6 +1282,21 @@ describeIfDb("intake routes", () => {
       fields,
       "__QA two pages.pdf",
       null,
+      null,
+      // A PAGE COUNT IS NOT EVIDENCE OF A SPLIT (2026-09-18). Lettering takes
+      // the bill line out of the export and ships each letter to BWS as its
+      // own job, so only the MODEL saying `configurations` does it. Two pages
+      // of one code with no answer is `one_item` by default and writes to the
+      // bill line — which is what this fixture used to be, and what made the
+      // second page collide with the first rather than split.
+      [
+        {
+          itemCodes: ["__QA S-201"],
+          pages: [5, 6],
+          relationship: "configurations",
+          evidence: "__QA each page names a different fabric against the same armchair",
+        },
+      ],
     );
     const run = await client.query(
       `insert into intake_runs (project_id, source_kind, document_kind, status, parsed, created_by, updated_by)
@@ -1320,7 +1387,10 @@ describeIfDb("intake routes", () => {
     });
     expect(res.status).toBe(200);
 
-    // Now the same code arrives on two pages, which would split it.
+    // Now the same code arrives on two pages AND the model says they are
+    // configurations, which is what would split it. Without that answer the
+    // two pages are one item and both write to the bill line, so the confirm
+    // is refused by the occupancy blocker instead and this guard never runs.
     const staged = stageDrawings(
       [
         { ...drawingItem("__QA S-900"), page: 2 },
@@ -1329,6 +1399,15 @@ describeIfDb("intake routes", () => {
       fields,
       "__QA split later.pdf",
       null,
+      null,
+      [
+        {
+          itemCodes: ["__QA S-900"],
+          pages: [2, 3],
+          relationship: "configurations",
+          evidence: "__QA two configurations of one armchair",
+        },
+      ],
     );
     const run = await client.query(
       `insert into intake_runs (project_id, source_kind, document_kind, status, parsed, created_by, updated_by)

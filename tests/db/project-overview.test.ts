@@ -303,6 +303,28 @@ describeIfDb("project overview", () => {
   });
 
   it("hides an archived project from the list unless it is asked for", async () => {
+    // ========================================================================
+    // A STOPGAP TIMEOUT OVER A MEASURED SLOW ROUTE, 2026-09-19. Not a logic
+    // failure, and not a lock.
+    //
+    // MEASURED against the sandbox (6 active projects, 9 with archived,
+    // 11,673 spec_answers): `GET /api/projects` takes **1.5–2.1s per call**,
+    // repeatably. This test makes FOUR of them plus two PATCHes, so it needs
+    // about eight seconds and the 5s default cuts it off — and the PATCH it
+    // had in flight then lands AFTER the test is torn down and bumps the
+    // project's version, which is what was failing "refuses an empty change"
+    // further down this file with an off-by-one version.
+    //
+    // It is NOT an N+1: the route already batches every loader over the whole
+    // page (one completion query, one summaries query, one `loadOutstanding`),
+    // and its own header says what the real fix is — "if this list ever gets
+    // long that is the thing to make lazy". `loadOutstanding` returns every
+    // outstanding question across every project on the page, and the Waiting
+    // count cannot be a SQL count without a second copy of the staleness rule.
+    // Making it lazy changes what the list loads and belongs in a briefed item,
+    // not in a test fix. Raising the bound is what keeps the suite honest until
+    // then; it does not make the route acceptable.
+    // ========================================================================
     const { PATCH } = await import("@/app/api/projects/[id]/route");
     const { GET } = await import("@/app/api/projects/route");
     const ids = async (url: string) =>
@@ -316,7 +338,7 @@ describeIfDb("project overview", () => {
 
     await PATCH(patch({ status: "active", version: (await stored()).version }), params(projectId));
     expect(await ids("http://localhost/api/projects")).toContain(projectId);
-  });
+  }, 30_000);
 
   it("refuses an unknown field, and writes nothing", async () => {
     const { PATCH } = await import("@/app/api/projects/[id]/route");
