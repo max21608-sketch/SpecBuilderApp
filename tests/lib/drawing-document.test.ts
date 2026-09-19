@@ -8,6 +8,7 @@ import {
   targetRecordIds,
   suggestUnit,
   suggestAttributeState,
+  splitTbcMarker,
   suggestSpecField,
   classifyGroup,
   drawingItemBlockers,
@@ -1016,6 +1017,213 @@ describe("suggestAttributeState on the specification sheets' wording", () => {
     const result = suggestAttributeState("Oak, finish to be confirmed");
     expect(result.state).toBeNull();
     expect(result.reason).toMatch(/Choose which this is/);
+  });
+});
+
+// ============================================================================
+// THE MARKER IS A STATE; THE FABRIC IS THE VALUE.
+//
+// The specification sheet prints the word TBC beside a fabric it names, and
+// both halves landed in the value. Every case below is the same question asked
+// of a different shape: is this a marker sitting beside a value, or is it part
+// of what the page said? Only a separator, at an edge, answers it.
+// ============================================================================
+describe("splitTbcMarker", () => {
+  it("takes a leading marker off and keeps the fabric", () => {
+    expect(splitTbcMarker("TBC – Yarn Collective Tessarae")).toMatchObject({
+      tbc: true,
+      value: "Yarn Collective Tessarae",
+    });
+  });
+
+  it("consumes only the FIRST separator, because the rest is the reference", () => {
+    // The " - 01" belongs to the fabric's own code. A rule that cut at every
+    // separator would hand back "Yarn Collective Tessarae YC04158".
+    expect(splitTbcMarker("TBC - Yarn Collective Tessarae YC04158 - 01")).toMatchObject({
+      tbc: true,
+      value: "Yarn Collective Tessarae YC04158 - 01",
+    });
+  });
+
+  it("takes a trailing marker off, bracketed or separated", () => {
+    expect(splitTbcMarker("Yarn Collective (TBC)")).toMatchObject({ tbc: true, value: "Yarn Collective" });
+    expect(splitTbcMarker("Yarn Collective – TBC")).toMatchObject({ tbc: true, value: "Yarn Collective" });
+    expect(splitTbcMarker("(TBC) Yarn Collective")).toMatchObject({ tbc: true, value: "Yarn Collective" });
+  });
+
+  it("reads the long form, which the token list already carries", () => {
+    expect(splitTbcMarker("To be confirmed - oak")).toMatchObject({ tbc: true, value: "oak" });
+  });
+
+  it("has no remainder when the marker is the whole value", () => {
+    // The caller decides what to keep: `suggestAttributeState` keeps the page's
+    // own word, which is the behaviour that has always been there.
+    expect(splitTbcMarker("TBC")).toEqual({ value: null, tbc: true, reason: null });
+    expect(splitTbcMarker("T.B.C.")).toEqual({ value: null, tbc: true, reason: null });
+  });
+
+  it("LEAVES A MARKER IN THE MIDDLE ALONE", () => {
+    // "Yarn Collective" reads as a real fabric, is not one, and nothing
+    // downstream would question it. The value stays whole and the reviewer is
+    // asked — which is what `suggestAttributeState` does with it.
+    expect(splitTbcMarker("Yarn TBC Collective")).toEqual({
+      value: "Yarn TBC Collective",
+      tbc: false,
+      reason: null,
+    });
+  });
+
+  it("LEAVES A BARE SPACE ALONE, in both directions", () => {
+    // `TBC by DLA Projects` is a real BWS Routing value and "by" is not a
+    // separator. `Dark tinted wood TBC` states a value AND says it is not
+    // settled, and neither code nor model gets to decide which won.
+    expect(splitTbcMarker("TBC by DLA Projects")).toMatchObject({ tbc: false, value: "TBC by DLA Projects" });
+    expect(splitTbcMarker("Dark tinted wood TBC")).toMatchObject({ tbc: false, value: "Dark tinted wood TBC" });
+  });
+
+  it("does not read a value's own punctuation as a marker", () => {
+    expect(splitTbcMarker("Yarn Tessarae YC04158 - 01")).toMatchObject({ tbc: false });
+    expect(splitTbcMarker("Oak, finish to be confirmed")).toMatchObject({ tbc: false });
+  });
+
+  it("READS A COLON AS A LABEL, so a trailing marker after one is the VALUE", () => {
+    // The Panther sheets stamp every general-conditions line with its field.
+    // Taking "SUPPLIER: TO BID" as a trailing marker keeps the HEADING and
+    // throws the value away — found by the note-block test, which reads this
+    // row as a Supplier line whose value is TO BID.
+    expect(splitTbcMarker("SUPPLIER: TO BID")).toMatchObject({ tbc: false, value: "SUPPLIER: TO BID" });
+    // The mirror image is a marker, because a colon puts the value on the right.
+    expect(splitTbcMarker("TBC: Yarn Collective")).toMatchObject({ tbc: true, value: "Yarn Collective" });
+  });
+});
+
+describe("suggestAttributeState and a marker at the edge of a value", () => {
+  it("records the marker as the state and the fabric as the value", () => {
+    const result = suggestAttributeState("TBC – Yarn Collective Tessarae");
+    expect(result.state).toBe("tbc");
+    expect(result.value).toBe("Yarn Collective Tessarae");
+    expect(result.reason).toMatch(/marker is recorded as the state/i);
+  });
+
+  it("keeps the page's own word where the marker is the whole value", () => {
+    // Unchanged by the split, deliberately: "PIPING  TBC" has nothing else to
+    // say and the export renders the marker once either way.
+    expect(suggestAttributeState("TBC")).toEqual({ state: "tbc", value: "TBC", reason: null });
+  });
+
+  it("still asks about a marker a separator does not bind", () => {
+    expect(suggestAttributeState("Dark tinted wood TBC")).toMatchObject({
+      state: null,
+      value: "Dark tinted wood TBC",
+    });
+    expect(suggestAttributeState("TBC by DLA Projects")).toMatchObject({
+      state: null,
+      value: "TBC by DLA Projects",
+    });
+    expect(suggestAttributeState("Yarn TBC Collective")).toMatchObject({ state: null });
+  });
+
+  it("stages the clean value off a fresh read", () => {
+    const doc = stageDrawings(
+      [rawItem({ materials: [{ labelRaw: "SOFA", valueRaw: "TBC – Yarn Collective Tessarae", materialCodeRaw: "UPH-07" }] })],
+      FIELDS,
+      "S-100.pdf",
+      null,
+    );
+    const observation = doc.items[0]!.observations[0]!;
+    expect(observation.value).toBe("Yarn Collective Tessarae");
+    expect(observation.state).toBe("tbc");
+    // What the page said is never lost: the card prints it under the box.
+    expect(observation.valueRaw).toBe("TBC – Yarn Collective Tessarae");
+  });
+});
+
+describe("taking an edge TBC marker off a pack already staged", () => {
+  // The Panther pack was eleven charged calls. A rule that could only reach a
+  // re-read would cost money to fix, so this runs on READ — same discipline as
+  // the callout upgrade, and never written back.
+  const staged = (observation: Record<string, unknown>) => ({
+    schemaVersion: 2,
+    kind: "shop_drawings",
+    filename: "S-100.pdf",
+    documentNotes: null,
+    items: [
+      {
+        id: "item-1",
+        version: 1,
+        page: 1,
+        itemCodeRaw: "S-100",
+        itemNameRaw: "Sofa",
+        confidence: "high",
+        targets: null,
+        observations: [
+          {
+            id: "obs-1",
+            version: 1,
+            attrGroup: "material",
+            labelRaw: "SOFA",
+            valueRaw: "TBC – Yarn Collective Tessarae",
+            materialCodeRaw: "UPH-07",
+            value: "TBC – Yarn Collective Tessarae",
+            unit: null,
+            unitSuggested: false,
+            specFieldId: "f-com1",
+            state: null,
+            stateReason: "The drawing gives a value and also marks it TBC. Choose which this is.",
+            reviewStatus: "pending",
+            reviewedAt: null,
+            reviewedBy: null,
+            applied: null,
+            ...observation,
+          },
+        ],
+      },
+    ],
+  });
+
+  const first = (doc: unknown) => assertStagedDrawings(doc, FIELDS).items[0]!.observations[0]!;
+
+  it("splits the marker out and keeps the row's id", () => {
+    const observation = first(staged({}));
+    expect(observation.id).toBe("obs-1");
+    expect(observation.value).toBe("Yarn Collective Tessarae");
+    expect(observation.state).toBe("tbc");
+    expect(observation.valueRaw).toBe("TBC – Yarn Collective Tessarae");
+  });
+
+  it("leaves the state alone where it was already TBC", () => {
+    const observation = first(staged({ state: "tbc" }));
+    expect(observation.state).toBe("tbc");
+    expect(observation.value).toBe("Yarn Collective Tessarae");
+  });
+
+  it("never second-guesses a row somebody has edited", () => {
+    expect(first(staged({ version: 2 })).value).toBe("TBC – Yarn Collective Tessarae");
+    expect(first(staged({ reviewStatus: "applied" })).value).toBe("TBC – Yarn Collective Tessarae");
+    expect(first(staged({ reviewStatus: "ignored" })).value).toBe("TBC – Yarn Collective Tessarae");
+  });
+
+  it("leaves a dimension's figure alone", () => {
+    // `composeDimensionCell` reads the marker back out of "1520 TBC" itself.
+    // Nothing is hidden inside a name there, and a second rewrite of that
+    // string is a second place to get it wrong.
+    const observation = first(
+      staged({ attrGroup: "dimension", dimensionSlot: "W", value: "TBC - 1520", valueRaw: "TBC - 1520", unit: "mm" }),
+    );
+    expect(observation.value).toBe("TBC - 1520");
+  });
+
+  it("leaves a merged note block alone", () => {
+    // The edges of a BLOCK are not the edges of any statement in it.
+    const block = "TBC – supplier to be appointed\nSubmit shop drawings for review";
+    const observation = first(staged({ attrGroup: "note", labelRaw: "Remarks", value: block, valueRaw: block, specFieldId: null }));
+    expect(observation.value).toBe(block);
+  });
+
+  it("leaves a value with no edge marker exactly as it is", () => {
+    const observation = first(staged({ value: "Yarn Tessarae YC04158 - 01", valueRaw: "Yarn Tessarae YC04158 - 01", state: "confirmed" }));
+    expect(observation.value).toBe("Yarn Tessarae YC04158 - 01");
+    expect(observation.state).toBe("confirmed");
   });
 });
 

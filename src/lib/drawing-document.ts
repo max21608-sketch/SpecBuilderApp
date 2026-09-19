@@ -542,6 +542,151 @@ export type AttributeStateSuggestion = {
   reason: string | null;
 };
 
+/** What `splitTbcMarker` read: the value with the marker taken off, and whether it found one. */
+export type TbcSplit = { value: string | null; tbc: boolean; reason: string | null };
+
+/**
+ * The punctuation a page puts BETWEEN a marker and the thing it marks.
+ *
+ * Exactly the four the plan names, and no more. A separator this list does not
+ * carry (an em dash, a comma) simply does not fire, and the value falls through
+ * to the reviewer question it gets today — a flag, never a wrong answer. Adding
+ * one is a deliberate edit, because every character here decides where somebody
+ * else's wording is allowed to be cut.
+ */
+const TBC_SEPARATORS = ["-", "–", ":", "/"];
+
+/**
+ * A COLON BINDS A LEADING MARKER ONLY, and that asymmetry is a defect this
+ * caught rather than a preference.
+ *
+ * A colon is this app's own LABEL separator — `splitNotePrefix` reads it that
+ * way, because the Panther sheets stamp every line of their general conditions
+ * with its field. So in `A: B`, B is the value: `TBC: Yarn Collective` puts the
+ * marker in the label position and the fabric in the value, and
+ * `SUPPLIER: TO BID` puts the FIELD in the label position and the marker in the
+ * value. Treating the second as a trailing marker keeps `SUPPLIER` — a heading
+ * with its value thrown away — where the right reading is the one already in
+ * the file: a note whose whole value is the marker.
+ */
+const TBC_SEPARATORS_TRAILING = TBC_SEPARATORS.filter((separator) => separator !== ":");
+
+const BRACKET_PAIRS: [string, string][] = [
+  ["(", ")"],
+  ["[", "]"],
+];
+
+const TBC_MARKER_REASON =
+  "The drawing writes TBC beside this value. The marker is recorded as the state; the value is what the drawing said beside it.";
+
+function isTbcToken(raw: string): boolean {
+  return TBC_TOKENS.includes(normaliseName(raw));
+}
+
+function firstSeparator(text: string): number {
+  let found = -1;
+  for (const separator of TBC_SEPARATORS) {
+    const index = text.indexOf(separator);
+    if (index !== -1 && (found === -1 || index < found)) found = index;
+  }
+  return found;
+}
+
+function lastSeparator(text: string): number {
+  let found = -1;
+  for (const separator of TBC_SEPARATORS_TRAILING) {
+    const index = text.lastIndexOf(separator);
+    if (index > found) found = index;
+  }
+  return found;
+}
+
+/** `TBC – Yarn Collective` and `(TBC) Yarn Collective` → the remainder, or null if nothing was taken. */
+function stripLeadingMarker(value: string): string | null {
+  for (const [open, close] of BRACKET_PAIRS) {
+    if (!value.startsWith(open)) continue;
+    const end = value.indexOf(close);
+    if (end === -1) continue;
+    if (!isTbcToken(value.slice(1, end))) continue;
+    const rest = value.slice(end + 1).trim();
+    // "(TBC) - Oak" as well as "(TBC) Oak": the bracket already delimits the
+    // marker, so a separator after it is punctuation rather than structure.
+    const separator = firstSeparator(rest);
+    return separator === 0 ? rest.slice(1).trim() : rest;
+  }
+  // THE FIRST SEPARATOR ONLY. `TBC - Yarn Collective Tessarae YC04158 - 01`
+  // keeps its inner " - 01", because that hyphen is part of the fabric's own
+  // reference and the page wrote it.
+  const index = firstSeparator(value);
+  if (index === -1) return null;
+  if (!isTbcToken(value.slice(0, index))) return null;
+  return value.slice(index + 1).trim();
+}
+
+/** `Yarn Collective – TBC` and `Yarn Collective (TBC)` → what is left, or null. */
+function stripTrailingMarker(value: string): string | null {
+  for (const [open, close] of BRACKET_PAIRS) {
+    if (!value.endsWith(close)) continue;
+    const start = value.lastIndexOf(open);
+    if (start === -1) continue;
+    if (!isTbcToken(value.slice(start + 1, value.length - 1))) continue;
+    // A separator abutting the bracket is punctuation, not structure: the
+    // bracket already delimited the marker. The full set applies here, colon
+    // included, because nothing is being decided by it.
+    const head = value.slice(0, start).trim();
+    return TBC_SEPARATORS.includes(head.slice(-1)) ? head.slice(0, -1).trim() : head;
+  }
+  const index = lastSeparator(value);
+  if (index === -1) return null;
+  if (!isTbcToken(value.slice(index + 1))) return null;
+  return value.slice(0, index).trim();
+}
+
+/**
+ * THE MARKER IS A STATE; THE FABRIC IS THE VALUE.
+ *
+ * The Panther S-100 sheet prints `TBC – Yarn Collective Tessarae YC04158 - 01`,
+ * and both halves landed in the value: the record then read the word TBC inside
+ * the name of a fabric, and the export appended a second one. Matthew, on
+ * seeing it: *"it shouldn't really be in the name."*
+ *
+ * So a marker at an EDGE, bound by a separator or by its own brackets, is taken
+ * off and returned as `tbc`. Three rules, and each is the trap rather than a
+ * preference:
+ *
+ *   * LEADING OR TRAILING ONLY. `Yarn TBC Collective` is not a marker beside a
+ *     value, and stripping it produces `Yarn Collective` — a fabric that reads
+ *     as real, is not, and nothing downstream would question. It is left whole
+ *     and `suggestAttributeState` goes on asking the reviewer which it is.
+ *   * SEPARATOR-BOUND ONLY. `TBC by DLA Projects` is a real BWS Routing value,
+ *     and `by` is not a separator; `Dark tinted wood TBC` states a value AND
+ *     says it is not settled, which is the existing reviewer question and stays
+ *     one. A bare space is not enough to say the page meant two things.
+ *   * THE WHOLE VALUE BEING THE TOKEN IS NOT A SPLIT. `TBC` alone has no
+ *     remainder, so `value` comes back null and the caller decides what to keep
+ *     — `suggestAttributeState` keeps the page's own word, as it always has.
+ *
+ * Pure, and read by both halves of the pipeline: staging, so a fresh read
+ * stages the state and the clean value, and `upgradeTbcMarkers` at read time,
+ * so a pack already read gains it with no second model call. `valueRaw` is
+ * never touched, and the review card already prints "drawing said: …" beneath
+ * any value that differs from it, so the page's exact wording stays on screen.
+ */
+export function splitTbcMarker(valueRaw: string | null): TbcSplit {
+  const value = (valueRaw ?? "").trim();
+  if (value === "") return { value: null, tbc: false, reason: null };
+  if (isTbcToken(value)) return { value: null, tbc: true, reason: null };
+
+  const leading = stripLeadingMarker(value);
+  const afterLeading = leading ?? value;
+  const trailing = stripTrailingMarker(afterLeading);
+  if (leading === null && trailing === null) return { value, tbc: false, reason: null };
+
+  const remainder = (trailing ?? afterLeading).trim();
+  if (remainder === "" || isTbcToken(remainder)) return { value: null, tbc: true, reason: TBC_MARKER_REASON };
+  return { value: remainder, tbc: true, reason: TBC_MARKER_REASON };
+}
+
 /**
  * Two states only. An attribute exists because the drawing said something, so
  * `missing` cannot arise; `na` is a cheat-sheet answer this table has no
@@ -557,10 +702,23 @@ export function suggestAttributeState(valueRaw: string | null): AttributeStateSu
   }
 
   const norm = normaliseName(value);
+  // THE WHOLE VALUE IS THE MARKER, and the page's own word is kept as the
+  // value — "PIPING  TBC", "SUPPLIER  TO BID". `splitTbcMarker` would return a
+  // null remainder here, which is the same reading said a different way; this
+  // branch stays first so the value a reviewer sees is unchanged by the split.
   if (TBC_TOKENS.includes(norm)) return { state: "tbc", value, reason: null };
 
+  // A MARKER AT AN EDGE IS DECIDED, NOT ASKED. `TBC – Yarn Collective Tessarae`
+  // is one statement in two parts, and the separator is the page saying so, so
+  // the state takes the marker and the value keeps the fabric. Called FIRST of
+  // the two TBC branches, because the branch below reads a token ANYWHERE and
+  // would otherwise ask the reviewer a question the separator already answers.
+  const split = splitTbcMarker(value);
+  if (split.tbc) return { state: "tbc", value: split.value, reason: split.reason };
+
   // "Dark tinted wood TBC" states a value AND says it is not settled. Neither
-  // this code nor the model decides which one won.
+  // this code nor the model decides which one won. A bare space is deliberately
+  // NOT a separator above: this is the reading that would be destroyed.
   //
   // `containsPhrase`, not a word-set test: the multi-word tokens ("to be
   // confirmed") could never match a single-word lookup, so "Oak, finish to be
@@ -1750,8 +1908,63 @@ export function assertStagedDrawings(parsed: unknown, fields?: SpecFieldEntry[])
   if (!doc || typeof doc !== "object" || doc.kind !== "shop_drawings" || !Array.isArray(doc.items)) {
     throw new Error("This run was not staged as shop drawings. Upload the drawings again.");
   }
-  const upgraded = upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []);
+  const upgraded = upgradeTbcMarkers(upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []));
   return upgraded.schemaVersion === 2 ? upgraded : applyViewGuesses(upgraded);
+}
+
+/**
+ * Take an edge TBC marker out of a value on a pack that was staged before
+ * `splitTbcMarker` existed.
+ *
+ * Same discipline as `upgradeCalloutGuesses`, and for the same reason: the
+ * eleven-document Panther pack has already been read and each document was a
+ * charged call. A rule that can only reach a re-read is a rule that costs money
+ * to fix, so this runs on READ and is NEVER WRITTEN BACK — every reader
+ * computes the same answer from the same staged JSON, which is all the screen,
+ * the autosave and the confirm route need in order to agree. Ids are untouched.
+ *
+ * A ROW A PERSON HAS TOUCHED IS NEVER SECOND-GUESSED: `version === 1` says
+ * nobody has, and only `pending` rows are in scope.
+ *
+ * TWO EXCLUSIONS, both traps rather than tidiness:
+ *
+ *   * A DIMENSION IS LEFT ALONE. `composeDimensionCell` reads the marker back
+ *     out of the figure itself (`parseDimensionFigure`'s `tbcInline`), which is
+ *     what lets "1520 TBC" compose as `W1520 TBC`. Nothing there is hidden
+ *     inside a fabric's name, so there is nothing to recover and a second
+ *     rewrite of that string is a second place to get it wrong.
+ *   * A MULTI-LINE VALUE IS LEFT ALONE. That is a merged note block, and the
+ *     edges of a BLOCK are not the edges of any statement in it: the first
+ *     line's opening word and the last line's closing word have nothing to do
+ *     with each other. `mergeNoteBlocks` joined rows without editing a word,
+ *     and this must not be what starts editing them.
+ *
+ * The state is set from the marker whatever it was before, which is the one
+ * case the item names outright: a row already at `tbc` carrying the word keeps
+ * its state and loses the word.
+ */
+function upgradeTbcMarkers(doc: StagedDrawings): StagedDrawings {
+  let anyTouched = false;
+  const items = doc.items.map((item) => {
+    let touched = false;
+    const observations = item.observations.map((observation) => {
+      if (observation.reviewStatus !== "pending") return observation;
+      if (observation.version !== 1) return observation;
+      if (observation.attrGroup === "dimension") return observation;
+      const value = observation.value;
+      if (!value || value.includes("\n")) return observation;
+
+      const split = splitTbcMarker(value);
+      if (!split.tbc || split.value === null || split.value === value) return observation;
+
+      touched = true;
+      return { ...observation, value: split.value, state: "tbc" as AttributeState, stateReason: split.reason };
+    });
+    if (!touched) return item;
+    anyTouched = true;
+    return { ...item, observations };
+  });
+  return anyTouched ? { ...doc, items } : doc;
 }
 
 /**

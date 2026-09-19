@@ -227,6 +227,34 @@ describe("composeRow", () => {
     );
   });
 
+  it("marks it once from the STATE, now the marker is out of the value", () => {
+    // `splitTbcMarker` takes an edge marker off at staging and at read time, so
+    // a freshly staged fabric reaches the file as the fabric plus one marker --
+    // and the word is no longer inside the name of the cloth. Both halves of
+    // MENTIONS_TBC still have to hold, because a value staged before that
+    // change, or one a reviewer typed, still carries the word.
+    expect(renderAttributeValue({ value: "Example Collective Fabric AB01234 - 01", unit: null, state: "tbc" })).toBe(
+      "Example Collective Fabric AB01234 - 01 TBC",
+    );
+
+    // Through a LINKED FINISH, which is what a drawings confirm creates from
+    // the same value: one marker, from the weaker of the two states.
+    const finish = {
+      id: "fin-1",
+      code: "UPH-07",
+      codeNorm: "uph-07",
+      kind: null,
+      description: "Example Collective Fabric AB01234 - 01",
+      supplierRaw: null,
+      reference: null,
+      colour: null,
+      state: "tbc" as const,
+    };
+    expect(renderAttributeValue({ value: "anything", unit: null, state: "confirmed", finish })).toBe(
+      "UPH-07; Example Collective Fabric AB01234 - 01 TBC",
+    );
+  });
+
   it("falls back to a confirmed cheat-sheet answer where no attribute claims the field", () => {
     const answers = [{ recordId: "rec-1", specFieldJsonId: 4, value: "Oiled oak", qualifier: null }];
     const row = composeRow(scope({ answers }), record(), [], answers);
