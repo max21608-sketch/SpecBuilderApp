@@ -11,7 +11,8 @@
 //
 // A sequential narrative would not have caught it. These run on INDEPENDENT
 // connections, started before either finishes, so the database is what decides.
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -24,7 +25,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const post = (body: unknown) =>

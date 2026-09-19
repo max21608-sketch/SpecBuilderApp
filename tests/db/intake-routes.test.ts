@@ -5,7 +5,8 @@
 //
 // Every row is prefixed `__QA ` and deleted in FK-safe order. audit_log is left
 // alone: it is append-only by design.
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
 import { stagePreamble } from "@/lib/preamble-document";
@@ -21,7 +22,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const post = (body: unknown) =>
@@ -401,6 +401,10 @@ describeIfDb("intake routes", () => {
     // 5s default in a full suite run, which is contention rather than a
     // regression: a marginal bound that only fails when everything else is
     // running is a red suite nobody can read.
+    //
+    // KEPT after the tier gained its own 30s (`tests/db/db-tier.ts`), because
+    // 40s is longer than 30s: dropping it would be tightening this test under
+    // cover of a change that loosened everything else.
   }, 40_000);
 
   it("writes the attribute and no answer when the record has no category yet", async () => {

@@ -20,7 +20,8 @@
 // EVERY CONSTANT VALUE MUST BE ALLOWED — plus a report of the other direction.
 //
 // Skips silently without DATABASE_URL. Creates nothing.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import {
   ANSWER_SOURCES,
@@ -38,7 +39,6 @@ import { CHANGE_SET_KINDS } from "@/lib/change-sets";
 import { FINISH_KINDS } from "@/lib/finishes";
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 /** Constant, and the CHECK that has to allow every one of its values. */
 const VOCABULARIES: {

@@ -14,7 +14,8 @@
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone — it
 // is append-only by design and a cleanup that deletes from it has broken the
 // thing under test.
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -27,7 +28,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 function post(body: unknown): Request {
   return new Request("http://localhost/test", {

@@ -6,11 +6,11 @@
 // Every row it creates is prefixed `__QA ` and deleted in FK-safe order.
 // audit_log is deliberately left alone: it is append-only by design, and a
 // cleanup that deletes from it has broken the thing under test.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 describeIfDb("0002 spec model", () => {
   const client = new pg.Client({ connectionString: databaseUrl });

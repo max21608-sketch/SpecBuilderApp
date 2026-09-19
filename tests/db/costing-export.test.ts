@@ -15,7 +15,8 @@
 // that no pure test can exercise.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
 
@@ -29,7 +30,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 

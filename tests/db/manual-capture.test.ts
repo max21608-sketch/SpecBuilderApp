@@ -11,13 +11,13 @@
 // name. All four are facts about the database.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { createAttribute, createRecord, createRun, editRecordDetails } from "@/lib/manual-capture";
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 describeIfDb("adding things by hand", () => {
   // Each case opens several transactions against a remote database, and the

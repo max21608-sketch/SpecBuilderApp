@@ -7,7 +7,8 @@
 // change_sets and record_snapshots ARE cleaned up, because unlike audit_log
 // they are scoped to a project this test created and would otherwise leave a
 // project's whole trail behind.
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 
 // The history route is behind a session like every other read. Nothing else in
@@ -22,7 +23,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 /** The tables whose every audited write must belong to a change set. */
 const SPEC_CONTENT_TABLES = ["spec_records", "spec_answers", "record_attributes", "spec_record_refs"];

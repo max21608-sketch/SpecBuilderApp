@@ -12,13 +12,13 @@
 // ships is the check sheet's own failure mode, worn as a badge.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { EMPTY_COMPLETION, loadProjectCompletion } from "@/lib/project-completion";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 describeIfDb("project completion", () => {
   const client = new pg.Client({ connectionString: databaseUrl });

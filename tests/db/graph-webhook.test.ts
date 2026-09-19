@@ -5,7 +5,8 @@
 // The queue is stubbed, so nothing is published and no model call can follow.
 // What is under test is the gate: a disabled deployment, the validation
 // handshake, and every way a body can fail to authenticate.
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { clientStateHash } from "@/lib/graph-subscriptions";
 
@@ -21,7 +22,6 @@ vi.mock("@/lib/extraction-queue", async (importOriginal) => {
 });
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const SECRET = "__qa-client-state";
 const MAILBOX = "__qa-inbox@example.test";

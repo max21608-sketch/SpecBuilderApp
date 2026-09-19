@@ -9,11 +9,11 @@
 // Skipped when DATABASE_URL is unset. That is correct for CI, but it means a
 // green run here proves nothing unless you set it. Run it against a sandbox
 // branch before trusting a schema change.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const FOUNDATION_TABLES = [
   "users", "attachments", "messages", "status_history", "notes",

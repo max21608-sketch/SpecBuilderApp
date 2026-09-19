@@ -10,7 +10,8 @@
 // that an unplaced email writes NOTHING to any spec table.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe.
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { resolveProposals } from "@/lib/spec-document";
 import { PROPOSAL_SCHEMA_VERSION } from "@/lib/spec-document";
@@ -25,7 +26,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 function patch(body: unknown): Request {

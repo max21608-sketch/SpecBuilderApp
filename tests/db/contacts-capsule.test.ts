@@ -5,7 +5,8 @@
 // The claim worth proving: with no token, a LINKED contact is refused and
 // NOTHING is written, while a manual one still succeeds. Capsule must gate the
 // link and never gate the ability to record somebody to chase.
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -18,7 +19,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 function post(body: unknown): Request {

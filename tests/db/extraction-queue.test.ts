@@ -11,7 +11,8 @@
 // is the only way to prove the release path.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { CLAIM_EXPIRY_SECONDS, MAX_CLAIMS_PER_ATTEMPT } from "@/lib/extraction-claim";
@@ -99,7 +100,6 @@ vi.mock("@/lib/extraction-queue", async (importOriginal) => {
 });
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const post = (body: unknown) =>

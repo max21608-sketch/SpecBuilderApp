@@ -9,14 +9,14 @@
 // level — all three are facts about the database, not about a function.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { acceptSuggestedLevels, setRecordLevel } from "@/lib/record-category";
 import { ensureVariant } from "@/lib/variant-create";
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 describeIfDb("item level suggestions", () => {
   const client = new pg.Client({ connectionString: databaseUrl });

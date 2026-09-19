@@ -10,7 +10,8 @@
 // route, and a pure test of validateProgramme cannot see it.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -23,7 +24,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 
@@ -304,8 +304,7 @@ describeIfDb("project overview", () => {
 
   it("hides an archived project from the list unless it is asked for", async () => {
     // ========================================================================
-    // A STOPGAP TIMEOUT OVER A MEASURED SLOW ROUTE, 2026-09-19. Not a logic
-    // failure, and not a lock.
+    // A MEASURED SLOW ROUTE, 2026-09-19. Not a logic failure, and not a lock.
     //
     // MEASURED against the sandbox (6 active projects, 9 with archived,
     // 11,673 spec_answers): `GET /api/projects` takes **1.5–2.1s per call**,
@@ -322,8 +321,15 @@ describeIfDb("project overview", () => {
     // outstanding question across every project on the page, and the Waiting
     // count cannot be a SQL count without a second copy of the staleness rule.
     // Making it lazy changes what the list loads and belongs in a briefed item,
-    // not in a test fix. Raising the bound is what keeps the suite honest until
-    // then; it does not make the route acceptable.
+    // not in a test fix. Room to run is what keeps the suite honest until then;
+    // it does not make the route acceptable.
+    //
+    // The per-test 30s bound this carried is GONE, and nothing about the
+    // measurement changed with it: `describeIfDb` gives the whole tier the same
+    // 30s (`tests/db/db-tier.ts`), for the same reason, so the bound here was
+    // saying twice what the suite now says once. The eight seconds this needs
+    // still need to be written down somewhere a reader will find them, which is
+    // why the measurement above stays.
     // ========================================================================
     const { PATCH } = await import("@/app/api/projects/[id]/route");
     const { GET } = await import("@/app/api/projects/route");
@@ -338,7 +344,7 @@ describeIfDb("project overview", () => {
 
     await PATCH(patch({ status: "active", version: (await stored()).version }), params(projectId));
     expect(await ids("http://localhost/api/projects")).toContain(projectId);
-  }, 30_000);
+  });
 
   it("refuses an unknown field, and writes nothing", async () => {
     const { PATCH } = await import("@/app/api/projects/[id]/route");

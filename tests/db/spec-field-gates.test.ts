@@ -7,11 +7,11 @@
 // This test creates NOTHING. It reads seed data, so there is nothing to clean
 // up — which is the point: every assertion here is about what a re-seed would
 // break, and a re-seed is how this model is meant to change.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 describeIfDb("the seeded gate overlay", () => {
   const client = new pg.Client({ connectionString: databaseUrl });

@@ -22,12 +22,12 @@
 // line with no live variants is still a line on the bill, and a file that
 // omitted it would wipe every BWS field it holds.
 // ============================================================================
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
 
 const databaseUrl = process.env.DATABASE_URL;
-const describeIfDb = databaseUrl ? describe : describe.skip;
 
 describeIfDb("a split bill line in the export scope", () => {
   const client = new pg.Client({ connectionString: databaseUrl });
