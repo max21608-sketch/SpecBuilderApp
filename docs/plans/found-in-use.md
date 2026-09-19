@@ -22,6 +22,36 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-19
 
+### Two tests fail under the full concurrent run and pass alone
+
+**Status: open. An observation from Stage 1a's first full `npm run checks`
+against the sandbox, 2026-09-19, not a fault in what either test covers.**
+With the database tier required, **2 failed · 1,280 passed · 1 skipped**; both
+files then passed on their own, first attempt, and neither touches anything
+the commit under test (`d853976`, the drawings pipeline's TBC marker) changed.
+
+1. `tests/components/record-history.test.tsx` › *counts what did not move, and
+   keeps it one click away* — `findByRole` timed out looking for the
+   "unchanged — show them" button. Alone: 7 passed in 295ms. The component
+   tier's default `findBy*` wait is 1s, and under a full run jsdom shares the
+   machine with the db tier's setup (48s of it in this run).
+2. `tests/db/boq-concurrency.test.ts` › *allocates distinct record numbers for
+   two simultaneous imports* — one of the two concurrent confirms answered
+   **503** where 200 was expected. Alone: 7 passed, that test in 4.9s. Under the
+   full run the sandbox is also serving every other db-tier file's writes, so a
+   lock wait on the project row is the likely reading; which guard returns the
+   503 is worth naming before anything is changed.
+
+**Cause stated separately from the observation:** both look like contention in
+a full run against a remote database, the same shape as the Stage 0 timeouts
+(`make-it-work-2026-09-19.md`, Stage 0 brief, rows 7–8 and the last). The
+plan's rule stands — a red test is run alone first, and a green run alone is
+not a licence to raise a bound without measuring. This entry exists so the
+next full run that shows the same two names is recognised rather than
+re-diagnosed. If a third run shows them, item 0.7 (a throwaway Neon branch per
+run) is the durable fix for the second; the first wants its wait raised
+deliberately, with the reason beside it.
+
 ### A misconfigured deployment renders its sign-in page and dies at the first query
 
 **Status: open. Seen on the first pilot deployment, 2026-09-19 evening.**
