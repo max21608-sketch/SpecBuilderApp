@@ -41,7 +41,7 @@
 import pg from "pg";
 import { applyAnswerFills, planAnswerFills, type PromotableAttribute } from "../src/lib/promote-answers";
 
-const DATABASE_ENVIRONMENTS = ["sandbox", "production"];
+const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -71,6 +71,14 @@ console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${host})`);
 const apply = process.argv.includes("--apply");
 if (environment === "production" && !process.argv.includes("--yes-production")) {
   console.error("Refusing to run against the production database without --yes-production.");
+  process.exit(1);
+}
+// Pilot is Matthew's own data, not a database anybody can re-seed, so it is
+// guarded the same way and by its OWN flag (db/script-env.mjs carries the
+// reasoning). A flag standing for "any protected environment" would let
+// somebody who meant one reach the other.
+if (environment === "pilot" && !process.argv.includes("--yes-pilot")) {
+  console.error("Refusing to run against the pilot database without --yes-pilot.");
   process.exit(1);
 }
 const projectArg = process.argv.find((arg) => arg.startsWith("--project="))?.split("=")[1] ?? null;

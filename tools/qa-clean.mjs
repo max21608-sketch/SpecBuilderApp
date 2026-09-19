@@ -19,8 +19,14 @@ if (!databaseUrl) {
   process.exit(1);
 }
 const environment = process.env.DATABASE_ENVIRONMENT ?? "";
-if (environment === "production") {
-  console.error("Refusing to sweep the production database.");
+// A DENYLIST WOULD HAVE MISSED PILOT. This read `=== "production"` when pilot
+// arrived (2026-09-19), so the one script whose whole job is to DELETE rows
+// would have swept Matthew's database on a mistyped --env-file — and there is
+// no --yes-pilot escape hatch here, because a sweep has no reason to run
+// anywhere but sandbox. `src/middleware.ts` learned the same lesson: an
+// allowlist fails closed, a denylist fails open on the value nobody added.
+if (environment !== "sandbox") {
+  console.error(`DATABASE_ENVIRONMENT is "${environment}". This sweep only ever runs against sandbox.`);
   process.exit(1);
 }
 console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${new URL(databaseUrl).host})`);

@@ -8,7 +8,27 @@
 // DATABASE_ENVIRONMENT is a declaration, not a probe: it says which database
 // the operator BELIEVES DATABASE_URL points at. It cannot verify that. Printing
 // the resolved host alongside it is what lets a human catch a mismatch.
-const DATABASE_ENVIRONMENTS = ["sandbox", "production"];
+//
+// PILOT IS GUARDED THE SAME WAY, AND FOR THE SAME REASON (2026-09-19, plan
+// 1.16). It holds Matthew's own work, not test data somebody can re-seed, and
+// the accident is exactly the one --yes-production was written for: a local
+// `npm run db:migrate` with a mistyped --env-file, run while switching between
+// sandbox and pilot in one sitting, lands on his data. So pilot names its own
+// env file and its own flag:
+//
+//   node --env-file=.env.pilot db/run-migrations.mjs --yes-pilot
+//
+// Production's flag does NOT cover pilot and pilot's does not cover
+// production: a flag that stood for "any protected environment" would let
+// somebody who meant one reach the other.
+const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
+
+// environment -> the flag that has to be typed before anything is written.
+// Sandbox has none: it is the one that exists to be thrown away.
+const GUARDED = {
+  production: "--yes-production",
+  pilot: "--yes-pilot",
+};
 
 export function requireScriptEnvironment(scriptName) {
   const databaseUrl = process.env.DATABASE_URL;
@@ -35,8 +55,9 @@ export function requireScriptEnvironment(scriptName) {
 
   console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${host})`);
 
-  if (environment === "production" && !process.argv.includes("--yes-production")) {
-    console.error("Refusing to run against the production database without --yes-production.");
+  const flag = GUARDED[environment];
+  if (flag && !process.argv.includes(flag)) {
+    console.error(`Refusing to run against the ${environment} database without ${flag}.`);
     process.exit(1);
   }
 

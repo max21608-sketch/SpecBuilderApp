@@ -116,6 +116,18 @@ page-level actions right-aligned) · tabs with counts · content, numbers first.
 
 - The **top bar** is dark and full-width, with the brand, the environment chip,
   the two nav items (Inbox carrying a red bubble of unplaced mail) and Log out.
+- **The environment chip says which BUILD, and the colour is the fast half of
+  that.** `STAGING` and `DEV` are the mock-up's solid yellow, verbatim. `PILOT`
+  — Matthew's stable build, added 2026-09-19 — is `TONE.live.bubble`, SKY, the
+  ordinary working state, and it is a tone rather than a literal for the
+  purge reason every colour in this app is: a class string Tailwind's JIT
+  cannot read renders as nothing, and an unstyled chip says nothing at all.
+  The reason the colours differ is not decoration: Matthew reports by
+  screenshot, staging moves hourly and pilot does not, and two chips reading
+  the same word send somebody hunting a defect in code that is not running.
+  The tab title carries the same word — `[PILOT]`, `[STAGING]`, `[DEV]` — from
+  the SAME function (`currentEnvLabel`), because a tab and a chip naming two
+  builds is worse than either alone.
 - The **header band** (`PageHeader`) is white, full-bleed, and its row is
   ALWAYS 1100px centred — the mock-up's own `.phead .row` is fixed at 1100 even
   on screens whose content is wider. It holds the ONE `h1` on the page.
@@ -170,7 +182,7 @@ All in `src/components/ui/`. Reach for these before writing a class string.
 | `Tip` | one or two sentences on hover | a sentence whose absence would mislead |
 | `SuggestButton` | an app guess, its evidence, one click to accept | anything without evidence |
 | `Button` / `buttonClass` | every action; `buttonClass` for downloads | colour through `className` |
-| `EnvironmentChip` (`components/layout/`) | the environment marker, server-rendered so it fails toward SHOWING | a client fetch, which fails toward hiding |
+| `EnvironmentChip` (`components/layout/`) | the environment marker, server-rendered so it fails toward SHOWING; yellow STAGING/DEV, sky PILOT | a client fetch, which fails toward hiding; a colour picked outside `tone.ts` |
 
 ## DOM rules a restyle breaks silently
 

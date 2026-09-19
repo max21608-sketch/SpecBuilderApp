@@ -39,7 +39,7 @@ import { composeDimensionCell } from "../src/lib/dimensions";
 import type { DimensionSlot } from "../src/lib/spec-vocab";
 import { sql } from "../src/lib/db";
 
-const DATABASE_ENVIRONMENTS = ["sandbox", "production"];
+const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
 const ACTOR = "system:reread-drawings";
 
 function arg(name: string): string | null {
@@ -69,6 +69,14 @@ if (!DATABASE_ENVIRONMENTS.includes(environment)) {
 }
 if (environment === "production" && !process.argv.includes("--yes-production")) {
   console.error("Refusing to re-read against production without --yes-production.");
+  process.exit(1);
+}
+// Pilot is Matthew's own data, not a database anybody can re-seed, and this
+// script SPENDS MONEY as well as writing. Its own flag, for the reason
+// db/script-env.mjs gives: a flag standing for "any protected environment"
+// would let somebody who meant one reach the other.
+if (environment === "pilot" && !process.argv.includes("--yes-pilot")) {
+  console.error("Refusing to re-read against the pilot database without --yes-pilot.");
   process.exit(1);
 }
 let host = "unknown host";

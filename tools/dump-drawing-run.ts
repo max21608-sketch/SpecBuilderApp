@@ -49,7 +49,7 @@ import { unitSourceOf } from "../src/lib/drawing-document";
 import { loadDrawingContext } from "../src/lib/drawing-resolution";
 import { sql } from "../src/lib/db";
 
-const DATABASE_ENVIRONMENTS = ["sandbox", "production"];
+const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
 
 function arg(name: string): string | null {
   const prefix = `--${name}=`;

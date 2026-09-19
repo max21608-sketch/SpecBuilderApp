@@ -45,7 +45,7 @@ import { parseDimensionFigure } from "../src/lib/dimensions";
 import { normaliseDimensionSlot } from "../src/lib/spec-vocab";
 import { sql } from "../src/lib/db";
 
-const DATABASE_ENVIRONMENTS = ["sandbox", "production"];
+const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
 
 function arg(name: string): string | null {
   const prefix = `--${name}=`;

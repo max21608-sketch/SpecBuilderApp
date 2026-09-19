@@ -49,7 +49,7 @@ import { readFinish } from "@/lib/spec-finishes";
 import { matchName, scoreMatch, wordSet, type MatchCandidate } from "@/lib/matching";
 
 // Kept in step with tools/dump-drawing-run.ts, which declares it the same way.
-const DATABASE_ENVIRONMENTS = ["sandbox", "production"];
+const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
