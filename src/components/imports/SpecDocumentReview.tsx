@@ -560,15 +560,15 @@ export default function SpecDocumentReview({
           tone="info"
           title={`${rows.length} ${rows.length === 1 ? "specification" : "specifications"}, each landing on ${
             runsWritten || 1
-          } ${runsWritten === 1 ? "run" : "runs"}.`}
+          } ${runsWritten === 1 ? "phase" : "phases"}.`}
         >
           {rows[0]?.distinctRuns.length ? (
             <>
-              A code on {rows[0].distinctRuns.map((entry) => entry.runName ?? "no run").join(", ")} is one record per
-              run — a fan-out, written together. Untick a run whose spec genuinely differs.
+              A code on {rows[0].distinctRuns.map((entry) => entry.runName ?? "no phase").join(", ")} is one record per
+              phase — a fan-out, written together. Untick a phase whose spec genuinely differs.
             </>
           ) : (
-            <>One record per run is a fan-out, and all of them are written together.</>
+            <>One record per phase is a fan-out, and all of them are written together.</>
           )}
         </Note>
       )}
@@ -659,7 +659,7 @@ export default function SpecDocumentReview({
                   {pendingPlaced} {pendingPlaced === 1 ? "spec" : "specs"}
                 </b>{" "}
                 · writes to {commits.length} {commits.length === 1 ? "record" : "records"} across{" "}
-                {runsWritten || 1} {runsWritten === 1 ? "run" : "runs"}
+                {runsWritten || 1} {runsWritten === 1 ? "phase" : "phases"}
               </span>
               {commitBlockers.length > 0 && (
                 <Chip tone="danger">
@@ -1150,7 +1150,7 @@ function SpecRowView({
           {row.varies && (
             // Never averaged. One row genuinely being several decisions is the
             // case most worth saying out loud.
-            <p className="mt-1 text-xs text-amber-800">The runs do not agree — open the row.</p>
+            <p className="mt-1 text-xs text-amber-800">The phases do not agree — open the row.</p>
           )}
         </div>
 
@@ -1176,7 +1176,7 @@ function SpecRowView({
             className="text-xs text-neutral-600 hover:text-neutral-900"
           >
             {row.placedCount > 0
-              ? `${row.distinctRuns.length} ${row.distinctRuns.length === 1 ? "run" : "runs"}`
+              ? `${row.distinctRuns.length} ${row.distinctRuns.length === 1 ? "phase" : "phases"}`
               : "open"}{" "}
             {isOpen ? "▴" : "▾"}
           </button>
@@ -1207,7 +1207,7 @@ function SpecRowView({
               return (
                 <div key={proposal.id} className="rounded border border-neutral-200 bg-white">
                   <p className="px-3 pt-2 text-th uppercase tracking-wider text-neutral-500">
-                    {proposal.runName ?? "No run"}
+                    {proposal.runName ?? "No phase"}
                     {proposal.target ? ` · ${proposal.target.recordLabel}` : ""}
                   </p>
                   {proposal.finish ? (

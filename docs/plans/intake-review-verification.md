@@ -72,7 +72,7 @@ Read it against the page the card links to. One line per card.
 | 7 | **The fold.** `Other dimensions (N) — show` with N matching the dump's `fold`, and nothing folded when nothing is placed | a card showing a toggle and no rows |
 | 8 | **Shared geometry, once.** One table for the card, not one per configuration. An edit to it reaches every configuration's page | the same width appearing N times; an edit that moves one page only |
 | 9 | **Configuration sections.** One per page, colour-banded, each holding ITS fabric, ITS picture, ITS swatch controls | two configurations showing the same fabric |
-| 10 | **Applies to.** One set for the card. A run the configurations disagree about is indeterminate and says so | per-page ticks that can drift apart |
+| 10 | **Applies to.** One set for the card. A phase the configurations disagree about is indeterminate and says so | per-page ticks that can drift apart |
 | 11 | **Confirm.** One button naming the code and the count; disabled while ANY configuration is blocked, with the reason and the letter in words | enabled while one configuration cannot commit |
 | 12 | **A failure path.** Force a refusal (edit a row's version underneath) and confirm: the banner survives the reload and names what was written, what was refused and what was not attempted | the card looks as though the click did not register |
 

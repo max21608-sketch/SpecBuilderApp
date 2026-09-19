@@ -567,7 +567,7 @@ function MessageRow({
                 {message.found?.proposals} spec{message.found?.proposals === 1 ? "" : "s"}
               </Chip>
               <Chip>
-                {message.found?.runs} run{message.found?.runs === 1 ? "" : "s"}
+                {message.found?.runs} phase{message.found?.runs === 1 ? "" : "s"}
               </Chip>
             </span>
             {/* A `changes` needs an overwrite acknowledgement and a `withdraws`

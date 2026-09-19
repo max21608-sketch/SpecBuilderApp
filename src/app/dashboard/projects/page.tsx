@@ -405,7 +405,7 @@ function ProjectsView() {
                     >
                       {project.name}
                     </Link>
-                    {/* What the project IS MADE OF, under its name. A run count
+                    {/* What the project IS MADE OF, under its name. A phase count
                         is the first thing that tells you whether a bill has
                         been through at all. */}
                     <p className="text-xs text-neutral-500">
@@ -413,7 +413,7 @@ function ProjectsView() {
                         "nothing imported yet"
                       ) : (
                         <>
-                          {project.run_count} run{Number(project.run_count) === 1 ? "" : "s"} ·{" "}
+                          {project.run_count} phase{Number(project.run_count) === 1 ? "" : "s"} ·{" "}
                           {(project.summary ?? EMPTY_SUMMARY).finishes} finish
                           {(project.summary ?? EMPTY_SUMMARY).finishes === 1 ? "" : "es"}
                         </>

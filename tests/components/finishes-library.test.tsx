@@ -3,10 +3,10 @@
 // ============================================================================
 // THE RULE WORTH A TEST
 //
-// A run filter narrows which finishes are LISTED. It must never narrow what an
-// edit is claimed to touch: a finish is project-scoped, so correcting one while
-// looking at a single run still corrects it on every run that quotes it. The
-// used-on count therefore stays the TOTAL with the run's share beside it, and
+// A phase filter narrows which finishes are LISTED. It must never narrow what
+// an edit is claimed to touch: a finish is project-scoped, so correcting one
+// while looking at a single phase still corrects it on every phase that quotes
+// it. The used-on count stays the TOTAL with the phase's share beside it, and
 // the edit panel goes on quoting the total. Showing the filtered number as
 // though it were the blast radius is how somebody changes a confirmed fabric
 // believing it reaches one item when it reaches three.
@@ -175,47 +175,47 @@ describe("the finishes library", () => {
     expect(codes()).toEqual(["ST-11"]);
   });
 
-  it("filters by run, listing only the finishes that run uses", async () => {
+  it("filters by phase, listing only the finishes that phase uses", async () => {
     const user = userEvent.setup();
     render(<FinishesLibrary projectId="proj-1" />);
     await screen.findByText("MOR005");
 
-    await user.selectOptions(screen.getByLabelText("Filter by run"), RUN_VE);
-    // WD-05 is on the main run only; ST-11 is on nothing.
+    await user.selectOptions(screen.getByLabelText("Filter by phase"), RUN_VE);
+    // WD-05 is on the main phase only; ST-11 is on nothing.
     expect(codes()).toEqual(["MOR005"]);
   });
 
-  it("keeps the used-on count at the TOTAL when a run is filtered", async () => {
+  it("keeps the used-on count at the TOTAL when a phase is filtered", async () => {
     const user = userEvent.setup();
     render(<FinishesLibrary projectId="proj-1" />);
     await screen.findByText("MOR005");
 
-    await user.selectOptions(screen.getByLabelText("Filter by run"), RUN_VE);
+    await user.selectOptions(screen.getByLabelText("Filter by phase"), RUN_VE);
     const row = firstRow();
-    // Three items in total, one of them on the run being looked at.
+    // Three items in total, one of them on the phase being looked at.
     expect(within(row).getByRole("button", { name: /used on 3 items/ })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: /1 on MAIN RUN - VE/ })).toBeInTheDocument();
   });
 
-  it("says in words that an edit still reaches the other runs", async () => {
+  it("says in words that an edit still reaches the other phases", async () => {
     const user = userEvent.setup();
     render(<FinishesLibrary projectId="proj-1" />);
     await screen.findByText("MOR005");
 
-    await user.selectOptions(screen.getByLabelText("Filter by run"), RUN_VE);
-    expect(screen.getByText(/editing one still changes it on every run that uses it/i)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Filter by phase"), RUN_VE);
+    expect(screen.getByText(/editing one still changes it on every phase that uses it/i)).toBeInTheDocument();
 
     await user.click(within(firstRow()).getByRole("button", { name: "Edit" }));
     expect(screen.getByText(/all 3 linked items/)).toBeInTheDocument();
-    expect(screen.getByText(/on every run, not only the one being shown/)).toBeInTheDocument();
+    expect(screen.getByText(/on every phase, not only the one being shown/)).toBeInTheDocument();
   });
 
-  it("expands to every use, including the runs the filter is hiding", async () => {
+  it("expands to every use, including the phases the filter is hiding", async () => {
     const user = userEvent.setup();
     render(<FinishesLibrary projectId="proj-1" />);
     await screen.findByText("MOR005");
 
-    await user.selectOptions(screen.getByLabelText("Filter by run"), RUN_VE);
+    await user.selectOptions(screen.getByLabelText("Filter by phase"), RUN_VE);
     await user.click(screen.getByRole("button", { name: /used on 3 items/ }));
     expect(screen.getByText("AP364-001")).toBeInTheDocument();
     expect(screen.getByText("AP364-003")).toBeInTheDocument();

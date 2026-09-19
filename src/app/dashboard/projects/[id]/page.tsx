@@ -945,7 +945,7 @@ function ProjectOverview() {
                         : isIntakeRunWorking(run.status) || run.status === "pending"
                           ? `started ${new Date(run.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · nothing to do`
                           : madeRuns > 0
-                            ? `${madeRuns} run${madeRuns === 1 ? "" : "s"} · ${madeRecords} record${madeRecords === 1 ? "" : "s"}`
+                            ? `${madeRuns} phase${madeRuns === 1 ? "" : "s"} · ${madeRecords} record${madeRecords === 1 ? "" : "s"}`
                             : specs > 0
                               ? `${specs} spec${specs === 1 ? "" : "s"} applied`
                               : run.status === "parsed"
@@ -1178,7 +1178,7 @@ function ProjectOverview() {
                 </p>
               )}
 
-              {/* Retiring a run takes a whole sub-quote out of the tabs and out
+              {/* Retiring a phase takes a whole sub-quote out of the tabs and out
                   of the export. Every record on it goes with it, and both can be
                   brought back — but the reason is required, because whoever
                   finds the gap later needs to know why it is there. */}
@@ -1187,7 +1187,7 @@ function ProjectOverview() {
                   <p className="text-sm font-medium text-red-900">Retire “{run.name}”?</p>
                   <p className="mt-0.5 text-xs text-red-800">
                     Its {run.record_count} record{Number(run.record_count) === 1 ? "" : "s"} stop being live: they
-                    leave this project&rsquo;s export and its tabs. Nothing is deleted, and the run can be brought
+                    leave this project&rsquo;s export and its tabs. Nothing is deleted, and the phase can be brought
                     back. A BWS job already created from one of these records is NOT removed by its absence from the
                     export — check those by hand.
                   </p>
@@ -1205,7 +1205,7 @@ function ProjectOverview() {
                       disabled={!retireRunReason.trim() || retiringBusy}
                       onClick={() => void retireRun(run.id)}
                     >
-                      {retiringBusy ? "Retiring…" : "Retire the run"}
+                      {retiringBusy ? "Retiring…" : "Retire the phase"}
                     </Button>
                     <Button variant="quiet" size="sm" onClick={() => setRetiringRun(null)}>
                       Keep it
@@ -1222,7 +1222,7 @@ function ProjectOverview() {
                     setRetireRunReason("");
                   }}
                 >
-                  Retire this run
+                  Retire this phase
                 </Button>
               )}
             </section>
@@ -1488,7 +1488,7 @@ function ProjectOverview() {
                 <StatTile
                   label="Line items"
                   value={summary.records}
-                  meaning={`${runs.length} run${runs.length === 1 ? "" : "s"}`}
+                  meaning={`${runs.length} phase${runs.length === 1 ? "" : "s"}`}
                   href={firstRunHref}
                   action="see them all"
                 />
@@ -1541,7 +1541,7 @@ function ProjectOverview() {
               <>
                 Specifications
                 <Tip>
-                  Counted over what the export ships: active records on live runs, a split bill line counted through
+                  Counted over what the export ships: active records on live phases, a split bill line counted through
                   its configurations.
                 </Tip>
               </>

@@ -118,7 +118,7 @@ describe("the inbox", () => {
     render(<InboxPage />);
     await screen.findByText("AC-101 lounge armchair, revised specification");
     expect(screen.getByText("4 specs")).toBeInTheDocument();
-    expect(screen.getByText("2 runs")).toBeInTheDocument();
+    expect(screen.getByText("2 phases")).toBeInTheDocument();
     expect(screen.getByText(/1 changes a confirmed value/)).toBeInTheDocument();
     // An email that produced nothing is NOT in the list of things waiting for a
     // person: it is a different outcome and it has its own tab.

@@ -22,14 +22,14 @@ number to the place you change it without going via a menu.**
 
 ### 1. Everything actionable is a link, and there are several routes to each place
 
-A count, an item code, a finish code, a filename, a designer, a date, a run
+A count, an item code, a finish code, a filename, a designer, a date, a phase
 name — all of them go somewhere. There is no cost to offering the same
 destination three times and a real cost to a figure that makes somebody go and
 find the screen it belongs to.
 
 A number that blocks something carries its fix beside it: "312 TGQ" is a link
 to the filtered table AND has a *Chase them* button on the same row. The cards
-on a project are also tabs — Runs, Finishes, Documents and History are
+on a project are also tabs — Phases, Finishes, Documents and History are
 reachable from the bar and from the page, because which one you reach for
 depends on whether you already know where you are going.
 
@@ -226,8 +226,8 @@ Collected from CLAUDE.md so they are in one place. Each has bitten once.
   behaviour; a real feature, still open.
 - **No per-spec tick boxes on the email review.** The confirm route takes ONE
   record and all of its pending proposals and refuses a subset, and a row's
-  runs are shared with other rows — a per-row tick cannot become a per-record
-  one. The footer says what Confirm WILL write and a red chip names what
+  phases are shared with other rows — a per-row tick cannot become a
+  per-record one. The footer says what Confirm WILL write and a red chip names what
   blocks it.
 - **No "Bring them in" on the finishes library.** `createFinish` writes the
   library row and links nothing, so the button would appear to work. The note

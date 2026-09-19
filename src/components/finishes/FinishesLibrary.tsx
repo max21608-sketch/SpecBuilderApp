@@ -669,10 +669,10 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
                   />
                 </label>
               </div>
-              {/* The TOTAL again, whatever the run filter says. */}
+              {/* The TOTAL again, whatever the phase filter says. */}
               <p className="mt-2 text-xs text-neutral-500">
                 Saving changes what all {uses} linked item{uses === 1 ? "" : "s"} show and export
-                {runFilter ? ", on every run, not only the one being shown" : ""}. An answer somebody typed by hand
+                {runFilter ? ", on every phase, not only the one being shown" : ""}. An answer somebody typed by hand
                 stays theirs and will be named.
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -788,9 +788,9 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
           value={runFilter}
           onChange={(event) => setRunFilter(event.target.value)}
           className="rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
-          aria-label="Filter by run"
+          aria-label="Filter by phase"
         >
-          <option value="">All runs</option>
+          <option value="">All phases</option>
           {data.runs.map((run) => (
             <option key={run.id} value={run.id}>
               {run.name} ({runCounts.get(run.id) ?? 0})
@@ -830,7 +830,7 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
       {runFilter && (
         <p className="mt-2 text-xs text-neutral-500">
           Showing the finishes used on <span className="text-neutral-700">{runName}</span>. A finish belongs to the
-          project, not to a run — editing one still changes it on every run that uses it.
+          project, not to a phase — editing one still changes it on every phase that uses it.
         </p>
       )}
 

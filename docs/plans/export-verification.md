@@ -24,7 +24,8 @@ empty for the reviewer.
 
 ## Producing it
 
-On a run's spec table, beside *Export this run*: **Check sheet**. Or directly:
+On a phase's spec table, beside *Export this phase*: **Check sheet**. Or
+directly:
 
 ```bash
 curl -b sb_session=... "$BASE/api/projects/$PROJECT/export/check-sheet?runId=$RUN" -o check-sheet.xlsx
@@ -68,8 +69,8 @@ different states in `spec_answers`.
 
 ## How to work through it
 
-A Panther run is around 4,800 lines. The sheet does not make that smaller — it
-makes it possible. Record by record is the order that works, because that is
+A Panther phase is around 4,800 lines. The sheet does not make that smaller —
+it makes it possible. Record by record is the order that works, because that is
 how the pack is organised:
 
 1. Filter **Record** to one item. That is about 82 lines, one screen.
@@ -104,7 +105,7 @@ reading.
 holds real values from real drawings, and the rule is that the schema gets
 committed and never a row. Keep it with the pack — `/Reference/` and
 `docs/docs for building/` are both gitignored — named
-`<project> - <run> - export check - YYYY-MM-DD.xlsx`.
+`<project> - <phase> - export check - YYYY-MM-DD.xlsx`.
 
 What comes back into the repo is the **finding**, not the value:
 

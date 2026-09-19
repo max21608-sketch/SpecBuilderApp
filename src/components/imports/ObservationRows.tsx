@@ -489,7 +489,7 @@ export function ReplacePanel({
               (entry) => entry.recordId === recordId && entry.attributeId === occupant.attributeId,
             );
             const runName =
-              runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ?? "this run";
+              runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ?? "this phase";
             return (
               <label key={recordId} className="mt-1 flex items-start gap-2 text-amber-900">
                 <input
@@ -619,8 +619,8 @@ export function RunTargets({
                 </select>
               </label>
               <p className="mt-1 text-xs text-neutral-500">
-                This picks one record only. A code that genuinely belongs to several runs is better fixed by correcting
-                the bill&rsquo;s code, so the fan-out happens on its own.
+                This picks one record only. A code that genuinely belongs to several phases is better fixed by
+                correcting the bill&rsquo;s code, so the fan-out happens on its own.
               </p>
             </div>
           )}

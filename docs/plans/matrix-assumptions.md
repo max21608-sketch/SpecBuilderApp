@@ -162,7 +162,7 @@ All of it on `staging`, none of it accepted by anybody.
 | Stage | What | Migrations / seeds |
 |---|---|---|
 | 1 | **The gate model**, as a seeded overlay keyed on the BWS field. TGQ / TG0 / TG1 on the record screen and the spec table. | `0026`, `0027`, seeds `0005`–`0007` |
-| 2 | **Creating things by hand** — a run, an item, a spec value — plus the two free-text columns and an editable bill line. | `0028` |
+| 2 | **Creating things by hand** — a phase, an item, a spec value — plus the two free-text columns and an editable bill line. | `0028` |
 | 3 | **The qualifier**, the "return line". Stored apart, written inline into the file. | `0029` |
 | 4 | **Palettes and the conditional fields.** Six lists seeded, five recorded empty. | `0030`, seeds `0008`–`0009` |
 | 5 | **The quote CSV** and the BWS boilerplate register. Eight of twelve columns. | `0031`, seed `0010` |

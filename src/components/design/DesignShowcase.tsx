@@ -36,7 +36,7 @@ export default function DesignShowcase() {
     <>
       <Card title="1 · Everything actionable is a link, and a number that blocks something carries its fix beside it">
         <p>
-          A count, an item code, a finish code, a filename, a designer, a date, a run name — all of them go
+          A count, an item code, a finish code, a filename, a designer, a date, a phase name — all of them go
           somewhere. <span className="text-red-700 font-semibold">312</span> TGQ is a link to the filtered table{" "}
           <em>and</em> has <a className={buttonClass("secondary", "xs")} href="#">Chase them</a> on the same row.
         </p>

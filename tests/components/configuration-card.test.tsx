@@ -225,7 +225,7 @@ describe("when the pages do not agree on the size", () => {
 });
 
 describe("applies to, across configurations", () => {
-  it("flags a run the configurations disagree about", () => {
+  it("flags a phase the configurations disagree about", () => {
     resetIds();
     const pages = [page("a", 5, "Woven raffia", "S-201"), page("b", 6, "Pale linen", "S-201")];
     renderConfigurations(
@@ -235,10 +235,10 @@ describe("applies to, across configurations", () => {
         ["b", resolution({ id: "b", variantLabel: "B", targets: ["rec-main"] })],
       ]),
     );
-    expect(screen.getByText(/do not currently agree about which runs they apply to/)).toBeInTheDocument();
+    expect(screen.getByText(/do not currently agree about which phases they apply to/)).toBeInTheDocument();
   });
 
-  it("ticks a run every configuration applies to", () => {
+  it("ticks a phase every configuration applies to", () => {
     renderConfigurations(twoPages());
     const boxes = screen.getAllByRole("checkbox");
     expect(boxes.every((box) => (box as HTMLInputElement).checked)).toBe(true);

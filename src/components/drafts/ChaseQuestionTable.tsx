@@ -293,10 +293,10 @@ export default function ChaseQuestionTable({
         <select
           value={filters.runId}
           onChange={(event) => setFilters((prev) => ({ ...prev, runId: event.target.value }))}
-          aria-label="Filter by run"
+          aria-label="Filter by phase"
           className="rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
         >
-          <option value="">All runs</option>
+          <option value="">All phases</option>
           {runs.map((run) => (
             <option key={run.id} value={run.id}>
               {run.name}

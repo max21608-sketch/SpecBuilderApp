@@ -569,8 +569,8 @@ export default function ConfigurationCard({
             note={
               mixed.size > 0 ? (
                 <p className="mt-1 text-xs text-amber-800">
-                  The configurations do not currently agree about which runs they apply to. Tick or untick to settle it
-                  — a run that quotes this line quotes every configuration of it.
+                  The configurations do not currently agree about which phases they apply to. Tick or untick to settle
+                  it — a phase that quotes this line quotes every configuration of it.
                 </p>
               ) : undefined
             }

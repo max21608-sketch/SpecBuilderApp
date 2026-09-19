@@ -492,8 +492,8 @@ export default function ReviewImportPage() {
             {busy
               ? "Importing…"
               : revising
-                ? `Confirm · updates this run from ${activeLines.length} line${activeLines.length === 1 ? "" : "s"}`
-                : `Confirm · creates ${activeLines.length} record${activeLines.length === 1 ? "" : "s"} on ${activeSheets.length} run${activeSheets.length === 1 ? "" : "s"}`}
+                ? `Confirm · updates this phase from ${activeLines.length} line${activeLines.length === 1 ? "" : "s"}`
+                : `Confirm · creates ${activeLines.length} record${activeLines.length === 1 ? "" : "s"} on ${activeSheets.length} phase${activeSheets.length === 1 ? "" : "s"}`}
           </Button>
         }
         tabs={
@@ -524,10 +524,10 @@ export default function ReviewImportPage() {
       />
 
       <PageBody width="wide">
-        {/* A TAB IS A RUN, NOT A REVISION. Three tabs quote the same codes at
+        {/* A TAB IS A PHASE, NOT A REVISION. Three tabs quote the same codes at
             different quantities and can all be live at once, which is why they
             become `spec_runs` rows rather than versions of one. */}
-        <Note tone="info" title="A tab is a run, not a revision.">
+        <Note tone="info" title="A tab is a phase, not a revision.">
           {sheets.length > 1 ? "These" : "This"} quote the same codes at different quantities and can all be live at
           once. Drop a tab to leave it out
           {ignoredSheets.length > 0 ? (
@@ -584,7 +584,7 @@ export default function ReviewImportPage() {
           return (
             <div key={sheet.sheetName + String(sheetIndex)} className={sheet.ignored ? "opacity-60" : undefined}>
               <Card
-                title="This tab becomes a run"
+                title="This tab becomes a phase"
                 actions={
                   <Button
                     size="xs"
@@ -598,7 +598,7 @@ export default function ReviewImportPage() {
                 <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
                   <label className="block">
                     <span className="block text-th font-semibold uppercase tracking-wider text-neutral-500">
-                      Run name
+                      Phase name
                     </span>
                     <input
                       defaultValue={sheet.proposedRunName}
@@ -638,7 +638,7 @@ export default function ReviewImportPage() {
                       onChange={(event) => void setSheet(sheetIndex, { replacesRunId: event.target.value || null })}
                       className="ml-2 rounded border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
                     >
-                      <option value="">a new run</option>
+                      <option value="">a new phase</option>
                       {runs.map((projectRun) => (
                         <option key={projectRun.id} value={projectRun.id}>
                           a revision of “{projectRun.name}” ({projectRun.record_count} items
@@ -739,7 +739,7 @@ export default function ReviewImportPage() {
                         <Th>Area</Th>
                         <Th num>Qty</Th>
                         <Th>Designer</Th>
-                        {reconciliation && <Th>Against the run</Th>}
+                        {reconciliation && <Th>Against the phase</Th>}
                         <Th>
                           Category
                           <Tip>A line with no category still imports — it simply has no checklist yet.</Tip>
@@ -921,7 +921,7 @@ export default function ReviewImportPage() {
                   title={
                     <>
                       Read off the rows above the header
-                      <CardHeadingNote>kept on the run as text</CardHeadingNote>
+                      <CardHeadingNote>kept on the phase as text</CardHeadingNote>
                     </>
                   }
                 >

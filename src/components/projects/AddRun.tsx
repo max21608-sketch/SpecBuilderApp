@@ -1,13 +1,13 @@
 "use client";
 // Adding a sub-quote with no bill behind it.
 //
-// A run is a SCOPE, not a spreadsheet tab — `spec_runs.source_import_id` has
+// A phase is a SCOPE, not a spreadsheet tab — `spec_runs.source_import_id` has
 // been nullable since 0007 for exactly this reason, and nothing used it until
-// 0028. Every run in the app came from a BOQ confirm, so a project whose
+// 0028. Every phase in the app came from a BOQ confirm, so a project whose
 // documents are drawings and emails had nowhere to put an item.
 //
-// It sits in the tab bar because that is where the runs are, and the reason a
-// person wants one is that the run they need is not in the row.
+// It sits in the tab bar because that is where the phases are, and the reason
+// a person wants one is that the phase they need is not in the row.
 import { useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
@@ -27,7 +27,7 @@ export default function AddRun({
   async function submit() {
     const trimmed = name.trim();
     if (!trimmed) {
-      setError("A run needs a name.");
+      setError("A phase needs a name.");
       return;
     }
     setSaving(true);
@@ -60,7 +60,7 @@ export default function AddRun({
         onClick={() => setOpen(true)}
         className="px-3 py-2 text-sm -mb-px border-b-2 border-transparent text-neutral-500 hover:text-neutral-800"
       >
-        + Add a run
+        + Add a phase
       </button>
     );
   }

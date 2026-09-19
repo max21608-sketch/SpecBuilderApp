@@ -432,8 +432,8 @@ leaves behind. Five things hold, and they are traps rather than preferences:
 - **Two prefixes, two fates.** `__QA ` projects are working copies and are
   swept by the cleanup scripts, as now. **`TEST` projects stay.** They are
   named for what they exercised and when — *`TEST: intake, 300-line bill
-  (2026-09-24)`*, *`TEST: email review, three-run fan-out (2026-09-25)`* — and
-  the cleanup scripts must never match them. Max wants them to demo from, so
+  (2026-09-24)`*, *`TEST: email review, three-phase fan-out (2026-09-25)`* —
+  and the cleanup scripts must never match them. Max wants them to demo from, so
   a `TEST` project is left in a state worth showing: reviewed, not
   half-confirmed. Not every run leaves one; a run that found nothing new
   leaves a `__QA` copy to be swept. *"Obviously don't include excessive

@@ -551,7 +551,7 @@ export default function SpecTable({
               has to be able to find it. */}
           {retiredCount > 0 && (
             <p className="mt-2 text-xs text-neutral-500">
-              {retiredCount} retired record{retiredCount === 1 ? "" : "s"} on this run — out of the export.{" "}
+              {retiredCount} retired record{retiredCount === 1 ? "" : "s"} on this phase — out of the export.{" "}
               <Button size="xs" variant="quiet" onClick={() => setShowRetired((value) => !value)}>
                 {showRetired ? "hide them" : "show them"}
               </Button>
