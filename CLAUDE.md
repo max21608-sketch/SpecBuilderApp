@@ -5,16 +5,27 @@ tender/BOQ stage and survives to delivery. It replaces re-keying the same facts
 between BOQ → costing sheet → Word → the BWS quote freetext → BWS job spec
 fields, where every hop loses provenance and invites divergence.
 
-The primary user is the KAM / sales-support role who holds this knowledge in
-their head and in spreadsheets today. Optimise for their vocabulary and their
-ability to review consequential actions. Never silently replace a human
-decision with automation.
+The users are **at least TWO roles, not one** (2026-09-18). The PROJECT
+MANAGER loads the pack and reviews it, then takes the summary of what is
+outstanding **to the CAM**, who fills in what they know, and only then does
+anybody go to the client — a chase need not be external at all. Until that
+day this file named one primary user, the KAM / sales-support role who holds
+this knowledge in their head and in spreadsheets; that person is still the
+one whose vocabulary the screens use and whose ability to review consequential
+actions they are built for. A screen optimised for one person working alone is
+optimised for the wrong thing. Never silently replace a human decision with
+automation.
 
-**It is at least TWO roles, not one** (2026-09-18). Matthew described the
-PROJECT MANAGER loading the pack and reviewing it, then taking the summary of
-what is outstanding **to the CAM**, and only then going to the client — and a
-chase that need not be external at all. A screen optimised for one person
-working alone is optimised for the wrong thing.
+**Vocabulary: a sub-quote is a PHASE** (2026-09-19, Stage 1a — "Can we change
+run to phase? Because that matches BWS"). On every screen and in every
+document a BOQ tab is a *phase*. Three things keep the old word, deliberately:
+the table `spec_runs` and its `run_id`; `runId` as the API word, the query
+parameter and the `?tab=<runId>` link, because every link written before that
+day points at one; and `intake_runs`, which is a DOCUMENT READ and was never a
+phase — a screen describing one says *read* or *document*, never *phase*.
+`tests/lib/vocabulary-guard.test.ts` reads the screen sources and fails on the
+old word outside its allowlist. Where a load-bearing section below says "run"
+it predates the rename and means phase, unless it says intake or document.
 
 Company-wide standards live in `house/`, copied in unchanged and **not restated
 here**. Read `house/conventions.md` before your first change in a session.
@@ -105,9 +116,10 @@ Each of these is a trap, not a preference.
   read `spec_answers.state`, never the presence of a string. `NAME_DENYLIST` in
   `src/lib/matching.ts` also contains `"tbc"`; that is entity-name matching and
   a different meaning. Do not merge them.
-- **A BOQ tab is a RUN, not a revision.** `MUR`, `MAIN RUN` and a
-  value-engineered run quote the SAME codes at DIFFERENT quantities and can all
-  be live at once, so they are `spec_runs` rows with their own records —
+- **A BOQ tab is a PHASE (a `spec_runs` row), not a revision.** `MUR`, `MAIN
+  RUN` and a value-engineered phase quote the SAME codes at DIFFERENT
+  quantities and can all be live at once, so they are `spec_runs` rows with
+  their own records —
   never `spec_answers.revision_no`, which is for a VE alternative to one
   ANSWER (M6). `spec_records.run_id` is `not null`: a record on no run is on no
   tab and in no export scope.
@@ -173,7 +185,7 @@ reasoning.
 | Table | Notes |
 |---|---|
 | `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox |
-| `spec_runs` | A sub-quote, normally one BOQ tab. Name (editable), `source_sheet`, `boq_revision`/`boq_date` (**text**), `header_notes`. Retired, never deleted; two runs may share a name |
+| `spec_runs` | A PHASE: a sub-quote, normally one BOQ tab. "Phase" is the word on screen (2026-09-19); the table keeps its name. Name (editable), `source_sheet`, `boq_revision`/`boq_date` (**text**), `header_notes`. Retired, never deleted; two phases may share a name |
 | `project_contacts` | Who to ask. `designer_code` joins `spec_records.designer`; `capsule_party_id` is the modelled person (0022), optional and flagged when absent |
 | `spec_records` | One per BOQ line. `level` (`simple`/`complex`/`hero`, nullable, a person's decision beside the category — nothing infers it, and `level_suggested` (0025) is where a guess goes instead, where no gate can read it). `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
 | `record_attributes` | What a document SAID about an item: group, label, value, `unit` (dimensions only), the client's own `material_code`, `spec_field_id`, `state` (`confirmed`/`tbc`), source run and page. Multi-valued, requirement-free |
@@ -2554,13 +2566,21 @@ their responsibilities elsewhere without a deliberate architecture decision.
 
 ## Stack
 
-Next.js 15 (App Router), React 19, Tailwind 3 on Vercel (`spec-builder-app`,
-functions pinned to `lhr1`; a second project `spec-builder-pilot` serves the
-`pilot` branch — Matthew's stable build with its own Neon project and blob
-store, `APP_ENV=pilot`, NOT production; `docs/environments.md`); Neon Postgres in London, forward-only numbered SQL
-in `db/migrations/` with a `schema_migrations` ledger; own users table with
-scrypt hashes and a `jose` JWT in the `sb_session` cookie; Vercel Blob, private,
-client-direct upload; Vitest.
+Next.js 15 (App Router), React 19, Tailwind 3 on Vercel, functions pinned to
+`lhr1`; Neon Postgres in London, forward-only numbered SQL in `db/migrations/`
+with a `schema_migrations` ledger; own users table with scrypt hashes and a
+`jose` JWT in the `sb_session` cookie; Vercel Blob, private, client-direct
+upload; Vitest.
+
+**Three environments, physically separate** (`docs/environments.md`):
+**staging** — Vercel `spec-builder-app`, the sandbox Neon project, deployed
+from the `staging` branch on every push; **pilot** — Vercel
+`spec-builder-pilot`, its own Neon project `SpecBuilder Pilot` and its own
+blob store, `APP_ENV=pilot`, deployed from the `pilot` branch which only ever
+fast-forwards to a commit already on `staging`, by Max, through the promotion
+checklist — Matthew's stable build and NOT production; **production** — does
+not exist yet. Local development points at the sandbox and never at either of
+the others.
 
 **Active integrations:** Anthropic (M2 extraction) — a key is set in Vercel
 staging and verified calls have been billed, including one against an email.
