@@ -2584,6 +2584,7 @@ in the UK.
 | Accepting the DRAWINGS REVIEW against the pack: the per-card checklist | `docs/plans/intake-review-verification.md` |
 | Releases, dated decisions, what is still open | `docs/plans/README.md` |
 | Things seen wrong in use and not yet fixed, dated | `docs/plans/found-in-use.md` |
+| The stabilisation plan after the catchup: stages, the editing model, the variance matrix, the definition of done | `docs/plans/make-it-work-2026-09-19.md` |
 | Migrations, seeds, backups, restores | `db/README.md` |
 | Chassis provenance and how to start another app | `docs/kit/` |
 
