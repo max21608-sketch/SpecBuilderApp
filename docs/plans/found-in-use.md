@@ -22,6 +22,39 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-19
 
+### A misconfigured deployment renders its sign-in page and dies at the first query
+
+**Status: open. Seen on the first pilot deployment, 2026-09-19 evening.**
+The pilot build at `spec-builder-app-4g38.vercel.app` served `/login` with the
+title `[PILOT]` and the PILOT chip (200), answered `/api/auth/me` with a clean
+401, redirected `/` to login — and returned a bodyless **500** on
+`POST /api/auth/login` with a deliberately wrong password, where staging
+returns 401. The same pooled string connects from a laptop through the app's
+own driver.
+
+**What that shape means.** `src/lib/env.ts`'s header says the environment
+pair is enforced "from middleware.ts and db.ts at request time". `grep` says
+`src/middleware.ts` never imports it. So `APP_ENV` is read non-throwingly for
+the title and chip, the session check runs without touching the database, and
+the pair (`APP_ENV` against `DATABASE_ENVIRONMENT`) is checked only when
+`db.ts` is first called — which on a fresh deployment is the login POST. A
+deployment with `APP_ENV=pilot` and `DATABASE_ENVIRONMENT=sandbox` therefore
+looks healthy on every page a signed-out person can reach and fails at the
+first thing they do. The `[PILOT]` title is not proof the pair is right; only
+a signed-in `/api/auth/me` is.
+
+**Cause of tonight's 500, stated separately:** not yet read from Vercel's
+runtime logs, which are the definitive evidence. Consistent with either
+`DATABASE_ENVIRONMENT` not being `pilot` on the project, or `DATABASE_URL`
+absent or pasted with quotes. The message the guard throws names which.
+
+**Two things a fix should do, neither done:** make the doc match the code
+(either enforce the pair in middleware, so a mismatch fails on the sign-in
+page, or correct the comment); and make the 500 carry its reason to the
+response as a sentence on non-production builds, because a blank 500 at
+sign-in sent a person to look at the database string when the database was
+fine.
+
 ### The sandbox database is full, and the audit log is why
 
 **Status: open — a decision for Max, not a code fix.** Found by both Stage 0
