@@ -22,6 +22,35 @@ Where an item is cited as `FIU n` it is finding *n* of the 2026-09-18 entry in
 
 ---
 
+## The plan on one page
+
+For the reader who needs the order and not the argument. Everything below
+this box is the reasoning; nothing below it changes this order.
+
+| Stage | What | Done when |
+|---|---|---|
+| **0 — unblock** | BWS account for Max · Matthew's first project named · the 7 red db tests fixed · the db tier proven to run · the pilot environment | suite green with the db tier on; pilot answers `/api/auth/me` with its own name |
+| **1a — before the hand-over** | rename run → phase · header-row message · hide the ordinal · explain the two counts · a route from intake to each line to what is missing · the phase table shows *what* is missing · **the correction verb** · chase preselects TGQ · `TBC –` becomes a state · pilot | the first-session script runs clean on pilot; Matthew has the link. **Then stop and wait for his screenshots** |
+| **1b — first promotion after** | non-furniture lines suggested · pack summary line · pack review states · picture crop measured then fixed · swatch reaches page 2 · level set on the drawing | same script; promoted to pilot deliberately, once |
+| **2 — while he uses it** | infill screen for meetings · area filter · chase EMAIL by question × area · dimension qualifier · outstanding-by-question · project-wide questions folded, then answered once · palettes (when the account exists) · tiles proposal · the variance matrix, row by row · the rate cap · auto-assign (gate amendment) | each item meets §7.1 on the deployed SHA; §7.5 review for the design-first ones |
+| **3 — needs an answer** | versioning · substrate · product code · export (Tim's contract) · public pictures · finishes-schedule read · SharePoint · TOE · level grey-out | not started until the named person has answered |
+| **After** | the first production version | planned then, not now |
+
+**Rules that hold throughout:** every item traces to a source line (§0.1); as
+simple as possible and as complex as necessary (§0.2); Fable orchestrates and
+Opus writes, two coders at once (§2); nothing is done until it is proven on the
+deployed build and written down (§7.1); Matthew's findings become log entries,
+not fixes (§7.7).
+
+**Effort, honestly.** Stage 1a is about eight coder-sessions and 1b about six,
+at two coders in parallel, so roughly a week of orchestration each if Claude
+usage headroom allows two coders every day — which it has not always. Stage 2
+is larger than 1a and 1b together and is deliberately not estimated as a
+whole: it is built one item at a time, in the order Matthew's first session
+makes right.
+
+---
+
 ## 0. The thesis, and what "works" means here
 
 The catchup showed an app that demonstrates well and could not be driven by
@@ -45,7 +74,12 @@ plan has to state how it satisfies each one before it is called done**:
    one outcome that is never acceptable (house §5).
 3. **A person can find it.** Somebody who is not Max, starting from the
    projects list, reaches the control in the number of clicks the item
-   states, without being told where it is.
+   states, without being told where it is. Max, 2026-09-19: *"if the user can
+   think of the next step, they can just instantly find a button and move
+   on."* So the test is not that a route exists but that **the layout is the
+   workflow**: the next step is the screen's primary action, in the place the
+   design language puts a primary action, and a sentence of guidance at the
+   foot of a page does not satisfy it. §0.3.
 4. **It is proven on the deployed build, not in the working tree.** Verified
    in a browser against the staging SHA, with the failure path exercised,
    and the result written down in the six terms of `house/deployment.md`.
@@ -81,6 +115,96 @@ Three places this plan itself was trimmed to hold the rule:
 At each stage close (§7.6) the first check is this one: re-read the stage
 table against the catchup's §6 and this section, and strike anything that
 crept in without a source.
+
+### 0.2 As simple as possible, and as complex as necessary
+
+Max, 2026-09-19: *"This is inherently a complex app. There's no getting around
+that. But let's try and make it as simple as possible."*
+
+The app's complexity is real and most of it is load-bearing: the gate chain,
+the single composer, the change sets, the unit-resolution order each exist
+because a simpler version produced a confident wrong answer, and `CLAUDE.md`
+names the trap beside each. That is *necessary* complexity, and this plan
+does not touch it. What the rule is for is everything else — the second
+screen where one would do, the new table where a column would do, the third
+state where two are derivable, the new tool where an existing one could be
+extended.
+
+So the test, applied to every item before it is briefed and written into the
+brief (§2.2):
+
+> **Name the simplest version that meets the definition of done. Build that,
+> unless you can name the trap it falls into.** A trap is a concrete wrong
+> answer somebody would act on — not "it might be nice to", not "we will
+> probably need". If the trap cannot be named, the simpler version is the
+> right one.
+
+Where this pass applied it to the plan itself:
+
+- **1.7** has two derivable review states, not three, because "opened" is
+  recorded nowhere and a third state would be invented.
+- **1.11** is one function deciding the next step, rendered as each screen's
+  **primary action** — not four screens each deciding what comes next, and
+  not a line of text (§0.3).
+- **1.16** is the smallest environment that satisfies "stable, with its own
+  data": one new Vercel project, one new Neon project, one new `APP_ENV`
+  value. Nothing else about the model changes.
+- **2.3** works without opening a change; opening one is offered, not
+  required. A screen that demands ceremony before the first edit is a screen
+  people stop opening.
+- **2.8** builds the fold first and the answer-once fan-out **only if Matthew
+  asks again** after seeing the fold.
+- **7.3** extends the three measurement tools that exist and adds one, rather
+  than adding three.
+- **7.4** runs on a copy of a staged pack and never calls the model, so the
+  release gate costs nothing to run twice.
+- **§9** is a pointer.
+
+And where complexity stays, named: the correction verb (1.13) is a
+supersession and not an in-place edit, because an in-place edit leaves a row
+citing a page that does not say what the row says; the infill and chase
+screens are two screens sharing one loader, because a tick box and an edit box
+on the same row is a screen that does not know what it is for; the two chase
+counts (1.4) stay two numbers, because making them agree would mean chasing
+somebody about a field only we can fill in.
+
+### 0.3 The layout is the workflow
+
+Max, 2026-09-19: *"someone who didn't design the app needs to be able to use
+it … it shouldn't be a case of just writing a piece of text somewhere at the
+bottom of the page. It should be intuitive. The button layout should match the
+workflow — you're on one page, you go to the next page, or there's an option,
+and if the user can think of the next step, they can just instantly find a
+button and move on."*
+
+This is what §3.19 and §3.22 were: the app could do both things and the
+controls were not where the work was. Four rules follow, and every item that
+touches a screen is judged against them in review (§2.3):
+
+- **Each screen has one primary action, and it is the next step in the
+  workflow.** `docs/design-language.md` already allows one `primary` button
+  per group; this makes it *mean* something — the primary is what a person
+  does next, decided by the same function everywhere (1.11). A screen whose
+  primary action is not its next step has its layout wrong, whatever else it
+  says.
+- **A control lives beside the thing it acts on.** Correct lives beside the
+  value (1.13), the level control beside the level (1.15), the swatch beside
+  the finish (1.10), the missing fields inside the row that is missing them
+  (1.12). Never on a separate page a person has to know exists.
+- **Guidance text is a last resort, and never a substitute.** A sentence that
+  explains where the button is means the button is in the wrong place. Where
+  the plan says a screen "says in words" (1.4, 1.7), it is explaining a
+  *number* or a *state*, not a route.
+- **The order of screens is the order of the work.** Upload → bill review →
+  pack → drawings review → phase table → record → chase. Each screen's
+  primary action lands on the next one in that list, and its header carries
+  the way back. A person should never need the browser's back button to
+  continue.
+
+The test for a screen, in review: hand it to the verifier agent (or to Max)
+with the task named and no route given — *"correct the width on the sofa"* —
+and count the clicks and the hesitations. The item's DoD states the click
+count; the hesitations are the finding.
 
 ### The two roles
 
@@ -173,11 +297,14 @@ the unit of accountability, and a brief missing a heading is not sent.
    in the item. Every item below lists them.
 3. **What to build** — the item's design decision, taken already, in §3–§6.
    The coder does not re-open it; if it is wrong they say so and stop.
-4. **The variance cases** — the inputs it must survive, and what it does with
+4. **The simplest version, and the trap it would fall into** — §0.2. If the
+   brief cannot name the trap, the brief describes the simplest version and
+   nothing more.
+5. **The variance cases** — the inputs it must survive, and what it does with
    each.
-5. **The tests** — tier, file, and what each asserts. Named in the item.
-6. **The DoD** — §7.1, plus the item's own click count and observable.
-7. **What not to touch** — usually `CLAUDE.md`, migrations, the export.
+6. **The tests** — tier, file, and what each asserts. Named in the item.
+7. **The DoD** — §7.1, plus the item's own click count and observable.
+8. **What not to touch** — usually `CLAUDE.md`, migrations, the export.
 
 ### 2.3 The review
 
@@ -202,6 +329,53 @@ are we trying to do? How are we going to achieve it? Okay, let's do it in this
 way. And then review: does it make sense?"* The review after building is
 §7.5.
 
+### 2.5 Why there is no plan per stage — decided 2026-09-19
+
+Max asked whether each stage should have an agent produce its own plan and
+then implement it, given how much is here. **No**, for three reasons, and the
+third is the one that decides it.
+
+- **A plan written by the agent that implements it is the agent agreeing with
+  itself.** The check this plan builds in (§2.3, §7.1) works because the
+  brief is written by one party and the work judged by another. Collapsing
+  them removes the only review that does not depend on a test.
+- **Two plans for one thing drift apart**, and this repo has already paid for
+  that once: `matrix-assumptions.md` recorded the costing sheet as blocked on
+  pricing, the skill it cited generated no price, and the wrong blocker stood
+  for days because two documents described one task.
+- **The unit that needs planning is the item, not the stage**, and the item's
+  plan is its brief (§2.2), which this file already carries in outline for
+  every item. A stage is a *schedule* of items, and scheduling is Fable's job,
+  not a document's.
+
+What replaces a per-stage plan is a **stage brief**, one page, appended to this
+file at the start of each stage by Fable: the items in the order they will be
+briefed, which coder holds which workstream, which files each may touch (so
+two coders never meet in one file — Workstream B and C both want the
+drawings card, and the stage brief says who has it when), which migrations are
+in the stage and who owns `db:migrate`, and what the stage's close looks like.
+Nothing in it re-decides an item.
+
+The one exception is the four **design-first** items (§2.4). For each, Fable
+writes the design into §5 or §6 of this file — the correction verb and the
+infill screen are already there — Max reads it, and only then is it briefed.
+A coder who finds the design wrong stops and says so rather than planning
+around it.
+
+### 2.6 What `CLAUDE.md` changes, per stage
+
+`CLAUDE.md`/`AGENTS.md` belong to Fable alone. So the changes are listed here,
+once, so no coder writes them and none is forgotten.
+
+| Stage | Change |
+|---|---|
+| 1a | "run" → "phase" in the vocabulary, with the note that the table is still `spec_runs` and `runId` still the API word. The *primary user* line becomes the two roles (§0). The editing section gains the **correction** verb beside retire and type-by-hand, and the load-bearing paragraph on why it keeps the page |
+| 1a | `docs/environments.md` gains the pilot column and the promotion checklist; `CLAUDE.md`'s Stack section names three environments |
+| 1b | The level section records that a level can be set on the drawings card, on a click, one change set per phase |
+| 2 | The chase section: the EMAIL is grouped by question × area and the SCREEN by item — the catchup's §5 already says the doc reads as though one answer covers both. The infill screen gets its own load-bearing section (§5.3's traps). The palettes section moves from "we have never had it" to the sync's date and the test that guards it |
+| 2 | **The hard approval gate on inbound email** is amended by Max, in words, in the same commit as 2.11 — or 2.11 does not land |
+| each | The *Current milestone* section: what shipped, what was verified, what is still not accepted. A stale status section is worse than none |
+
 ---
 
 ## 3. Stage 0 — unblock and stop the bleeding
@@ -212,7 +386,7 @@ session and before any coder is briefed.
 | # | Action | Owner | Blocked on |
 |---|---|---|---|
 | 0.1 | **A real BWS account for Max.** Blocks every palette task (§4.8) and blocked him live | Steve / Matthew | — |
-| 0.2 | **Confirm which project Matthew starts on** and get its pack (§7 item F). One or two new projects, not the 300-line one | Matthew / Max | — |
+| 0.2 | **Confirm which project Matthew starts on** and get its pack (the catchup's §7, item F). One or two new projects, not the 300-line one. **This also sets the order of the variance matrix** (§6.10) | Matthew / Max | — |
 | 0.3 | **Fix the seven red db-tier tests.** They predate the design-language work and were left. A suite that is already red cannot report a new red, and Stage 1 lands on top of it. Read each against the TGQ-matrix change of 2026-09-18 (README) before assuming the test is wrong — the code may be | Fable → one Opus coder | sandbox |
 | 0.4 | **Make the db tier's skip visible.** `npm test` is green with 283 skipped when `DATABASE_URL` is unset, and nothing says so. Add a `checks` script that runs all four, and a guard: when `REQUIRE_DB_TESTS=1` the db tier fails rather than skips. Every stage close runs `checks` with the guard on | Opus coder | — |
 | 0.5 | **The pilot environment** — item 1.11 below, moved here because it gates handing over a link | Max + one Opus coder | Vercel + Neon access |
@@ -230,6 +404,20 @@ The test for inclusion is the catchup's: *would Matthew hit this in his first
 session?* Every item here was hit in the demo. They are grouped into
 workstreams so that two coders can hold two streams without touching the same
 files.
+
+**Stage 1 is split in two, because sixteen items before a hand-over is a
+hand-over that keeps slipping.** D4 wants Matthew using it; every week he is
+not is a week of findings we do not have. So the split is walls versus
+friction: a *wall* is something that stops him or corrupts what he records; a
+*friction* is something he would screenshot and carry on past.
+
+| | Items | Why here |
+|---|---|---|
+| **1a — before the hand-over** | 1.1, 1.2, 1.3, 1.4, 1.8, 1.11, 1.12, 1.13, 1.14, 1.16 | 1.11 and 1.13 are the two walls the demo exposed. 1.14 is the 199-question draft he would send. 1.8 puts TBC *into a value that reaches the export*, which is corruption not friction. 1.16 is the prerequisite. 1.1–1.4 and 1.12 are cheap and he asked for them by name |
+| **1b — first promotion after** | 1.5, 1.6, 1.7, 1.9, 1.10, 1.15 | Each is friction he can work around: ignore a line by hand, scroll past banners, draw the crop box, crop the swatch from the record. 1.9 needs a measurement first and may need a re-read, which should not gate the hand-over |
+
+1b is promoted to pilot **once**, deliberately, after the script runs clean —
+not item by item, or the pilot stops being the stable build Tony asked for.
 
 Each item states: what was seen · what to build · files · variance cases ·
 tests · DoD observable. Sizes are S (an hour's brief), M (a session), L (more
@@ -531,40 +719,42 @@ page.
 **Seen:** *"How do you get to this page? At what point in the workflow do you
 come to this?"* The app can do all of it; Matthew could not find the way in.
 
-**Build — a next step on every terminal screen, and one place that lists the
-work.**
+**Build — one function decides the next step; every screen renders it as its
+primary action (§0.3).** Not a line of text, anywhere.
 
-- **The BOQ confirm's success state** already lands on the project's phase
-  tabs. It should say, in words, what to do next: *"14 items on MAIN RUN.
-  Next: read the drawings (n waiting) → review each item → chase what is
-  missing"*, each a link.
-- **The drawings review's *Review complete* box** links to *Open the phase
-  table* (exists) and gains *"n items still missing a to-quote spec — review
-  them"*, linking to the phase table filtered to those items.
-- **The phase table** is the place a PM works line by line. Its rows already
-  carry the counts; item 1.12 makes them say *which*. Each row's item name is
-  the link to the record, and the record's Specs tab is where a value is
-  corrected (1.13).
-- **The project overview** gets one *What to do next* line under the tiles,
-  computed from the same loaders the tiles use: documents unread → items
-  uncategorised → items with to-quote gaps → questions waiting on a reply. The
-  first non-zero one is the next step, and it links.
-
-Nothing new is computed. `loadProjectSummary`, `loadOutstanding` and the
-intake status labels already hold every number; this is where they are shown
-and what they link to.
+- **`nextStep(project)`**, pure, in `src/lib/next-step.ts`, over the numbers
+  `loadProjectSummary`, `loadOutstanding` and the intake status labels already
+  hold: documents waiting to be read → a document that failed → items with no
+  category → items with to-quote gaps → questions waiting on a reply → ready
+  to export. The first that applies is the next step, with its count and its
+  destination. Nothing new is computed; one place decides.
+- **Each screen's PRIMARY button is that step**, in the header band where the
+  design language puts a primary action. On the project overview it is the
+  header's primary. On the BOQ confirm's success state and on the drawings
+  review's *Review complete* box, the existing *Open the phase table* becomes
+  the primary and reads what it leads to (*"Review 14 items — 5 missing a
+  to-quote spec"*). On the phase table, the row is the workflow: the item
+  name opens the record and 1.12 puts the missing fields inside the row.
+- **Every screen carries the way back** in its header, so the browser's back
+  button is never the route to continuing.
+- **No "what to do next" sentence.** Where the earlier draft of this item had
+  one, the button replaced it. If a screen still needs a sentence to explain
+  its primary action, the primary action is wrong.
 
 **Variance:** a project with no documents yet (next step: upload); a project
 whose only phase is confirmed and fully specified (next step: export, and the
 completion pill shows); a project with a failed document read (next step:
 retry it, and it links to the pack).
 
-**Tests:** component — the *What to do next* line's precedence, with a
-fixture per state; a pure test for the precedence function.
+**Tests:** pure — `nextStep`'s precedence, one fixture per state and one
+where nothing applies; component — the header's primary action on the
+overview, the BOQ success state and the *Review complete* box each render the
+step `nextStep` returns and nothing else as primary.
 
 **DoD:** from the projects list, a person who has never seen the app reaches
-"this item is missing its seat height" in ≤ 4 clicks: project → phase tab →
-item → checklist; and every terminal screen names the next screen.
+"this item is missing its seat height" in ≤ 4 clicks — project → phase tab →
+item → checklist — **by pressing the primary action each time**, without
+reading any guidance; the verifier records hesitations (§0.3).
 
 #### 1.12 The phase table shows *what* is missing, not a button — §3.21, FIU 12 · **M**
 
@@ -734,10 +924,14 @@ reads PILOT; a migration applied to pilot is in its `schema_migrations`;
 
 ### Stage 1 close
 
-Stage 1 is done when all sixteen items meet §7.1, the walkthrough script (§7.4)
+**1a closes** when its ten items meet §7.1, the walkthrough script (§7.4)
 runs clean on staging and then on pilot, `CLAUDE.md` says "phase" and carries
 the correction verb in the editing section (§5), and Matthew has the link.
-**Then stop building and wait for his screenshots.**
+**Then stop building and wait for his screenshots.** 1b starts only after
+the link is sent, and **1b closes** with one promotion to pilot after the same
+script runs clean again. Anything Matthew reports in between is a
+`found-in-use.md` entry, grouped into 1b or Stage 2 at that close — never
+fixed straight from the message (§7.7).
 
 ---
 
@@ -798,12 +992,16 @@ client, capturing as they go. The infill screen is Max's proposal — *"a page
 quite similar to [the chase screen], but instead of a tick box there's an edit
 box"* — and the meeting is what gives it its shape:
 
-- **It starts by opening a change**, named for the occasion — *"Handover call
+- **It offers to open a change**, named for the occasion — *"Handover call
   with Hayley, 2026-09-22"* — using `changeSetForEdit`'s existing rule of at
-  most one open change per actor per project. Every value typed during the
-  meeting attaches to it, so the history reads *"12 values recorded on the
+  most one open change per actor per project. Every value typed while it is
+  open attaches to it, so the history reads *"12 values recorded on the
   handover call"* rather than twelve rows reading "update". The evidence slot
-  takes a calendar invite or a note afterwards.
+  takes a calendar invite or a note afterwards. **It is offered, not
+  required** (§0.2): the first edit works without it, and a value that
+  overrides a settled answer still asks for its reason as everywhere else. A
+  screen that demands ceremony before the first edit is a screen people stop
+  opening.
 - **It lists what is outstanding**, from `loadOutstanding`, grouped as the
   chase screen groups — by furniture line, collapsed, finish options nested —
   because that is the order a client walks a bill in. With **area** as a
@@ -881,6 +1079,7 @@ coders take one stream each.
 | 2.10 | The robustness programme | user's brief | L, ongoing | — | §6.10 |
 | 2.11 | Auto-assign a confidently routed email | FIU (change asked for) | M | a rate cap (2.10.f); Max amending the gate in `CLAUDE.md` | **yes** |
 | 2.12 | The progress tracker | `docs/plans/progress-tracker.md` | L | Stage 1; its own plan | already written, another session's |
+| 2.13 | **Ask Tony for the typical-dimensions reference** — not code. A per-family range of what normal looks like, used as a **flag** ("this sofa would be 8m wide") and never a value | §4.15 | — | Tony's knowledge-base proposal | no — an email, and a note in `CLAUDE.md`'s unit-resolution section when it arrives, saying it is a fifth signal that never fills a slot |
 
 ### 6.1 Sync the BWS palettes — §4.8
 
@@ -1020,9 +1219,10 @@ seventeen cheat sheets and is asked inside every item.
   already exists. Fold the project-wide section on the checklist under one
   heading, collapsed, reading *"Project-wide — the same answer applies to every
   item"*. Nothing about the data changes.
-- **Step 2 (Stage 2):** a **Project questions** panel on the project overview
-  that answers each project-wide question **once and writes it to every
-  in-scope record's answer row** in one change set (`project_answer_set`), as
+- **Step 2 (Stage 2, and only if Matthew asks again after seeing step 1 —
+  §0.2):** a **Project questions** panel on the project overview that answers
+  each project-wide question **once and writes it to every in-scope record's
+  answer row** in one change set (`project_answer_set`), as
   `source_kind = 'manual'`. Fan-out, not a new table: the BWS export is per
   job and these may be BWS job fields, so the per-record row has to exist
   anyway, and a `project_answers` table would be a second place an export
@@ -1030,7 +1230,9 @@ seventeen cheat sheets and is asked inside every item.
   line) gets the project's current answer at creation, flagged *from the
   project*. **Which questions are project-wide is seed data**, a
   `scope = 'project'` column on `requirements` seeded from the section, and
-  Matthew confirms the list (§7).
+  Matthew confirms the list (§11 A). The trap step 1 alone falls into, which
+  is what would justify step 2: a 300-line project answering "TOE agreement"
+  three hundred times.
 
 **Variance:** a project-wide answer that one item genuinely differs on (the
 item's own row can still be edited and shows *differs from the project*);
@@ -1196,7 +1398,8 @@ An item is done when Fable can write each of these as a fact:
 | **Built** | the diff does what the item says and nothing else (§2.3) |
 | **Tested** | the tests the brief named exist and pass; the db tier **ran** (0.4) |
 | **Variance** | each variance case is either tested or driven, and the behaviour is one of proceeds / flags / refuses |
-| **Findable** | the click count from the projects list, counted in a browser by someone who did not build it |
+| **Findable** | the click count from the projects list, counted in a browser by someone who did not build it, **pressing each screen's primary action and reading no guidance** (§0.3); hesitations recorded as findings |
+| **Simplest** | the brief named the simplest version and either built it or named the trap it falls into (§0.2); a reviewer can point at the trap in the code |
 | **Failure path** | at least one failure exercised in the browser (a 409, a 500, a non-JSON response); the screen recovers |
 | **Deployed** | a Vercel deployment exists **for that SHA**, `Ready`, and the flow was driven on it — the six terms, stated |
 | **Recorded** | a dated line in `docs/plans/README.md` naming the item, the SHA and what was verified; the `found-in-use.md` entry marked FIXED with date and commit; `CLAUDE.md` amended where a load-bearing rule moved |
@@ -1225,17 +1428,20 @@ Two additions this plan makes to the tiers:
 
 `measure:drawings`, `dump:drawings` and `vocab:gap` are the pattern: read
 only, calling the app's own functions, printing a number that can be re-run.
-A sentence in a document cannot be re-run. Extend the pattern to:
+A sentence in a document cannot be re-run. Extend what exists rather than
+adding beside it (§0.2):
 
-- **`measure:intake`** — per staged BOQ: header row, items, non-furniture
-  suggestions, codes that collide, areas found. Run before and after 1.2 and
-  1.5.
-- **`measure:pictures`** (1.9) — view regions reported, in bounds, per
-  template.
-- **`measure:outstanding`** — per project: to-quote questions, by the matrix
-  and by the fallback, per record and per question. This is the number 1.12,
-  2.3, 2.7 and the tiles all show; if it moves when a screen changes, a
-  screen has grown a second implementation.
+- **`measure:drawings` gains view regions** (1.9) — reported, in bounds, per
+  template — as new columns in the same report, because the pack it measures
+  is the same pack.
+- **`dump:drawings` gains the BOQ** — `--import=<id>` prints what a staged
+  bill reduces to: header row, items, non-furniture suggestions, colliding
+  codes, areas. Run before and after 1.2 and 1.5.
+- **One new tool, `measure:outstanding`** — per project: to-quote questions,
+  by the matrix and by the fallback, per record and per question. It earns
+  its place because it is the number 1.12, 2.3, 2.7 and the tiles all show,
+  and if it moves when a screen changes, a screen has grown a second
+  implementation. Nothing existing measures it.
 
 Every measurement's before and after goes in the commit message of the change
 that moved it.
@@ -1246,7 +1452,14 @@ The `verify` skill has the pieces (`playwright-session.mjs`, the cleanup
 script) and no script that walks the app the way a user will. Write one,
 under `.claude/skills/verify/files/first-session.mjs` (Playwright stays out
 of `package.json`, as the skill insists), that does **exactly what Matthew will
-do in his first session**, against a `__QA` copy:
+do in his first session**, against a `__QA` copy.
+
+**It never calls the model** (§0.2). Steps 3–4 upload a synthetic bill, which
+is parsed by code and costs nothing. Steps 5–9 run on a `__QA` copy of an
+already-staged pack — the sandbox Panther runs, or `qa:demo`'s project — so
+the drawings review, the confirm and the record all exercise real staged JSON
+without a charged read. The script refuses to upload a specification document
+and says why; a release gate that costs money is a release gate people skip.
 
 1. Sign in; check the chip and `/api/auth/me`.
 2. Create a project; set the client and the programme dates.
@@ -1379,9 +1592,17 @@ of them is cheap now and expensive after Stage 2.
 10. **The level control on drawings writes only on a person's click** and the
     BOQ guess stops firing on suggested non-furniture lines (1.15).
 11. **The first-session script is the release gate** for staging → pilot
-    (§7.4).
+    (§7.4), and it never calls the model.
 12. **Sizes and order in §4 and §6**; two coders at once; Fable does not write
     application code.
+13. **No plan per stage** — a one-page stage brief appended here, and a design
+    note in §5/§6 for the four design-first items (§2.5). **Agreed by Max,
+    2026-09-19.**
+14. **Stage 1 is split into 1a and 1b** on walls versus friction, and 1b is
+    promoted to pilot once, not item by item (§4).
+15. **The simplest version is the default** and complexity must name its trap
+    (§0.2); **the next step is every screen's primary action**, never a line
+    of text (§0.3).
 
 ---
 
