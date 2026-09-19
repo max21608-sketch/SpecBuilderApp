@@ -274,6 +274,13 @@ manual model-verification test, gated on `VERIFY_MODEL=1` because it spends
 money. No application code changed to get there; the Stage 0 brief at the end
 of this file says what each of the eight was.
 
+**Re-measured at Stage 0 close (`ded4dcf`, evening of 2026-09-19):**
+`npm run checks` — lint 0 errors, typecheck clean, **1,262 passed · 1 skipped
+· 0 failed** with the db tier required, build clean. The 19 new tests are
+0.4's guard and 0.5's environment and chip tests. Between the two
+measurements the sandbox hit Neon's 512 MB ceiling and Max raised the plan;
+the audit log's growth is item 0.7.
+
 ---
 
 ## 2. How the work is run
@@ -463,6 +470,7 @@ session and before any coder is briefed.
 | 0.4 | **Make the db tier's skip visible.** `npm test` is green with 283 skipped when `DATABASE_URL` is unset, and nothing says so. Add a `checks` script that runs all four, and a guard: when `REQUIRE_DB_TESTS=1` the db tier fails rather than skips. Every stage close runs `checks` with the guard on | Opus coder | — |
 | 0.5 | **The pilot environment** — item 1.11 below, moved here because it gates handing over a link | Max + one Opus coder | Vercel + Neon access |
 | 0.6 | **Send Matthew the link and a login** to the pilot build, with the one-paragraph "how to report" (screenshot + written explanation, §3.37) | Max | 0.5, Stage 1 |
+| 0.7 | **Run the db tier against a throwaway Neon branch per run**, created before and deleted after, so test audit rows never land in the sandbox. Added 2026-09-19 after the sandbox hit its 512 MB ceiling on a week of test runs (`found-in-use.md`, option 3). The trap the extra moving part prevents is measured, not guessed: 50–140 MB of append-only audit JSON a day, on a table the cleanup must never touch. Belongs with `checks`; not started | Opus coder | 0.4 (landed) |
 
 Stage 0 is done when: the suite is green with the db tier proven to have run,
 the pilot build answers `/api/auth/me` with its own environment, and Matthew
@@ -1958,6 +1966,46 @@ Left behind by the wall: the 0.5 coder's `qa-clean` attempt failed part way
 (it is not transactional), so one `__QA` project may be missing its drafts
 and contacts rows and still exist. Re-running the sweep once space is freed
 finishes it. Seven `__QA` projects are in the sandbox.
+
+**Stage 0 CLOSED, 2026-09-19, later the same evening.** Max raised the Neon
+plan (option 1 in `found-in-use.md`); nothing was deleted from the audit log.
+The seven `__QA` leftovers were swept with `db:qa-clean` (which has no dry-run
+mode and applies on the first run — worth knowing). Then `npm run checks`,
+the new script, with the database tier REQUIRED:
+
+| Check | Result |
+|---|---|
+| lint | 0 errors, the 2 pre-existing warnings |
+| typecheck | clean |
+| test, db tier on and required | **1,262 passed · 1 skipped · 0 failed** |
+| build | clean |
+
+Against Stage 0's own close condition: suite green with the db tier proven
+to have run — yes; pilot answers `/api/auth/me` with its own name — **not
+yet**, the Vercel project does not exist; Matthew has a login he has not used
+— **not yet**, no user is created on pilot (Max creates it, because it needs a
+password and Matthew's address). Those two are the remaining console half of
+0.5 and 0.6, and neither is code.
+
+**Pilot, as left tonight.** `pilot` fast-forwarded to `ded4dcf`, the `staging`
+tip, so its first deployment will start. The pilot database has all 32
+migrations and 10 seed files applied, 797 requirements, 56 spec fields, 0
+projects, 0 users — seeds only, as the rule says. The doc's env-file name was
+corrected to `.env.pilot.local`, the name the `.env*.local` pattern already
+ignores, so no `.gitignore` change was needed.
+
+**Still open from Stage 0, carried into the plan rather than lost:**
+
+- The sandbox will fill again at 50–140 MB a day of test audit rows. Option
+  3 (run the db tier against a throwaway Neon branch per run) is the durable
+  fix and is added as **item 0.7**, not started: it belongs with `checks`,
+  and a plan of ~500 MB headroom a week is a plan with a date on it.
+- The projects list at ~2s per call (`found-in-use.md`), unchanged.
+- The chase draft's `[STAGING]` prefix and redirect will read `[STAGING]` on a
+  pilot draft (0.5 coder's observation); the safety holds, the word is wrong.
+  A Stage 1b line item, cheap.
+- The two Neon dependencies `neon config init` added to `package.json` are
+  uncommitted and Max's to keep or drop.
 
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*

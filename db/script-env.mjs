@@ -16,7 +16,7 @@
 // sandbox and pilot in one sitting, lands on his data. So pilot names its own
 // env file and its own flag:
 //
-//   node --env-file=.env.pilot db/run-migrations.mjs --yes-pilot
+//   node --env-file=.env.pilot.local db/run-migrations.mjs --yes-pilot
 //
 // Production's flag does NOT cover pilot and pilot's does not cover
 // production: a flag that stood for "any protected environment" would let

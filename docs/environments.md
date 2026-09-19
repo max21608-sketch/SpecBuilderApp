@@ -90,11 +90,11 @@ refuses.
 Run these in order. Nothing here is automatic.
 
 1. **Back up the pilot database.**
-   `node --env-file=.env.pilot db/backup.mjs --yes-pilot`
+   `node --env-file=.env.pilot.local db/backup.mjs --yes-pilot`
    Read the `Target: DATABASE_ENVIRONMENT=pilot (<host>)` line it prints before
    it acts. The declaration is not a probe — the host is what you check.
 2. **Apply any pending migrations to pilot, BEFORE the code that needs them.**
-   `node --env-file=.env.pilot db/run-migrations.mjs --yes-pilot`
+   `node --env-file=.env.pilot.local db/run-migrations.mjs --yes-pilot`
    It prints one line per file — `Applying …` or `Skipping … (already
    applied)` — and a total. **Read that total.** `Applied 0 migration(s); N
    already present` with `N` equal to the number of files in `db/migrations/`
@@ -194,9 +194,9 @@ undelivered.
 
 **First run**, once the project deploys and `/api/auth/me` answers:
 
-1. `node --env-file=.env.pilot db/run-migrations.mjs --yes-pilot`
-2. `node --env-file=.env.pilot db/run-seed.mjs --yes-pilot`
-3. `node --env-file=.env.pilot tools/create-user.mjs --yes-pilot` — there is no
+1. `node --env-file=.env.pilot.local db/run-migrations.mjs --yes-pilot`
+2. `node --env-file=.env.pilot.local db/run-seed.mjs --yes-pilot`
+3. `node --env-file=.env.pilot.local tools/create-user.mjs --yes-pilot` — there is no
    self-signup, so Matthew's account is created here.
 
 Three things to say plainly, because each has a tempting wrong version:

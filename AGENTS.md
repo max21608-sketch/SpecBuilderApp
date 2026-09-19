@@ -31,10 +31,11 @@ one agent.
 | Command | Notes |
 |---|---|
 | `npm test` · `npm run typecheck` · `npm run lint` · `npm run build` | the four checks |
+| `npm run checks` | all four in sequence with the DATABASE TIER REQUIRED (`REQUIRE_DB_TESTS=1`): a missing `DATABASE_URL` fails once, in words, instead of skipping 283 tests behind a green summary. Ends with `next build`, which clobbers a running dev server's `.next` — it says so first |
 | `npm run db:migrate` | applies every pending file in sorted order, ledger-backed |
 | `npm run db:seed` | re-seeds the requirement matrix and vocabularies |
 | `npm run db:backup` · `npm run db:restore` | backups write **outside** the repo by default |
-| | every `db:*` script loads `.env.local` if present, prints the resolved host, and refuses production without `--yes-production`. Production names its own env file: `node --env-file=.env.production db/run-migrations.mjs --yes-production` |
+| | every `db:*` script loads `.env.local` if present, prints the resolved host, and refuses production without `--yes-production` and PILOT without `--yes-pilot` — the flags are separate on purpose. Each names its own env file: `node --env-file=.env.production db/run-migrations.mjs --yes-production`, `node --env-file=.env.pilot.local db/run-migrations.mjs --yes-pilot` |
 | `npm run db:backfill-answers` | one-off: fills checklist answers from attributes confirmed before promotion existed. Dry run unless `--apply`; safe to re-run |
 | `npm run db:backfill-snapshots` | one-off: gives every record that predates 0012 a version 1 under a `history_begins` change. Dry run unless `--apply`; safe to re-run |
 | `npm run db:backfill-finishes` | one-off: builds each project's finishes library from the codes its drawings carry, and links them. Dry run unless `--apply`; safe to re-run. Leaves a code whose items disagree blank, and names it |
@@ -2554,7 +2555,9 @@ their responsibilities elsewhere without a deliberate architecture decision.
 ## Stack
 
 Next.js 15 (App Router), React 19, Tailwind 3 on Vercel (`spec-builder-app`,
-functions pinned to `lhr1`); Neon Postgres in London, forward-only numbered SQL
+functions pinned to `lhr1`; a second project `spec-builder-pilot` serves the
+`pilot` branch — Matthew's stable build with its own Neon project and blob
+store, `APP_ENV=pilot`, NOT production; `docs/environments.md`); Neon Postgres in London, forward-only numbered SQL
 in `db/migrations/` with a `schema_migrations` ledger; own users table with
 scrypt hashes and a `jose` JWT in the `sb_session` cookie; Vercel Blob, private,
 client-direct upload; Vitest.
