@@ -20,6 +20,39 @@ mark it FIXED with the date and the commit.
 
 ---
 
+## 2026-09-19
+
+### The projects list takes about two seconds to answer
+
+**Status: open. A performance finding, measured, not a fault in what it
+shows.** Found while fixing the red db-tier tests (plan Stage 0.3): the test
+*hides an archived project from the list unless it is asked for* timed out at
+the 5s default, and the timeout was corrupting the test after it.
+
+Measured against the sandbox — 6 active projects, 9 including archived,
+11,673 `spec_answers` rows: `GET /api/projects` takes **1.5–2.1 seconds per
+call**, repeatably. On the projects list screen that is the wait before the
+table appears, every time.
+
+**It is NOT an N+1.** `src/app/api/projects/route.ts` already batches every
+loader over the whole page — one completion query, one summaries query, one
+`loadOutstanding`. Its own header names the cause and the fix: `loadOutstanding`
+returns every outstanding QUESTION across every project on the page, so the
+list is loading the chase inventory of the whole business to print one Waiting
+count per row, and "if this list ever gets long that is the thing to make
+lazy". The Waiting count cannot become a SQL count without a second copy of
+the staleness rule (`canonicalJson` over the context snapshot), which is the
+`chased_at` trap.
+
+Nine projects is not long. The plan's 300 test (`make-it-work-2026-09-19.md`
+§7.4a) asks what happens at scale, and this is the first screen with a
+measured answer. The test bound was raised to 30s as a documented stopgap
+(`tests/db/project-overview.test.ts`); the route is unchanged.
+
+**Cause named separately from the observation:** the loader, per the route's
+own comment. Not verified by profiling the query itself — the time was
+measured at the route.
+
 ## 2026-09-18
 
 ### Seen in the catchup demo of 2026-09-18 — fifteen things, all small

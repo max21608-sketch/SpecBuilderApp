@@ -268,6 +268,12 @@ Every one of these is in the area Stage 1 lands on (chase defaults, the
 drawings confirm, the projects list). Landing on a red suite is how the next
 regression goes unnoticed, which is why 0.3 is Stage 0 and not a tidy-up.
 
+**Re-measured 2026-09-19 after 0.3 (`a96e44f`):** `npm test` with the db
+tier on — **1,243 passed · 1 skipped · 0 failed**. The one skipped is the
+manual model-verification test, gated on `VERIFY_MODEL=1` because it spends
+money. No application code changed to get there; the Stage 0 brief at the end
+of this file says what each of the eight was.
+
 ---
 
 ## 2. How the work is run
@@ -1795,6 +1801,59 @@ Ask them in the same message as the screenshots come back, not before.
 - **Human acceptance is outstanding on every screen**, and will be until
   Matthew's screenshots arrive. That is the whole point of Stage 1 closing
   with a hand-over and not with a commit.
+
+---
+
+## Stage briefs
+
+Appended at the start of each stage (§2.5). A stage brief schedules; it does
+not re-decide an item.
+
+### Stage 0 brief — opened 2026-09-19
+
+Max: *"let's start Stage 0, fix the seven red tests."*
+
+| | |
+|---|---|
+| **Order** | 0.3 first (the red tests), then 0.4 (the `checks` script and the db-tier guard), then 0.5 (the pilot environment, which needs Max at the Vercel and Neon consoles). 0.1, 0.2 and 0.6 are not code and run alongside |
+| **Coders** | One Opus coder on 0.3, in a worktree; 0.4 follows on the same branch once 0.3 is green, because the guard is only worth adding to a suite that passes |
+| **Files** | 0.3 touches `tests/db/chase-drafts.test.ts`, `tests/db/intake-routes.test.ts`, `tests/db/project-overview.test.ts`, and whatever guard or query in `src/lib` a real defect turns out to live in. 0.4 touches `package.json` and one file under `tests/setup/` or `tests/db/` |
+| **Migrations** | none expected. If 0.3 needs one, it stops and says so — a red test is not a reason to change the schema |
+| **`db:migrate` / sandbox** | Fable. No coder runs it |
+| **Re-measured today** | the three red files re-run before briefing: **8 failed, 66 passed** — one more than the baseline. `project-overview` › *refuses an empty change* fails with the record's version moved (17 where 16 expected), most likely contamination from the timed-out test before it; the brief tells the coder to run it alone first |
+| **Readings given to the coder** | the three `chase-drafts` failures are probably stale tests describing the level-based fallback for a category the matrix now covers; the two `intake-routes` fixture failures probably predate `schemaVersion: 2`; the split-guard message is probably a real guard-order defect; the timeout may be a real performance finding for the projects list. Each is a hypothesis in the brief, to be verified by reading before acting, and the trap named: *make the assertion match whatever the code does now* |
+| **Close** | full suite green with the db tier proven to have run; typecheck, lint and build clean in the worktree; commits cherry-picked onto `staging` by Fable and pushed; §1.1 re-measured; this brief updated with what each of the eight turned out to be |
+
+**0.3 closed, 2026-09-19.** One Opus coder, one worktree, one commit
+(`a96e44f` on `staging`, cherry-picked from the worktree branch). **No
+application code changed.** Every one of the eight was a fixture describing
+the world before a design decision, or a timeout measured rather than assumed:
+
+| # | Test | Was | Rule it now holds |
+|---|---|---|---|
+| 1–3 | `chase-drafts` tier tests | **stale fixture** — its category query took the first sheet with three questions and got `sofas-bed-daybeds`, one of Matthew's nine, which since 2026-09-18 needs no level. Now pinned to a sheet his matrix does not cover | 0019's fallback: where the matrix does not reach, a level is required and `tgq_levels` decides |
+| new | *chases a level-less record where Matthew's matrix covers its category* | **added** — nothing at the route tier held the other half | a mapped category needs no level; the tier comes from his matrix |
+| 4 | *keeps a corrected figure in its slot* | **stale fixture** — `stageDrawings` only emits `schemaVersion: 2`, so a test about the FROZEN v1 guess pipeline was holding nothing. An `asVersion1` helper strips the model's answers rather than relabelling | the v1 read-time pipeline does not re-guess a correction away; still live for nine unre-read runs in the sandbox |
+| 5, 6 | the two configuration tests | **stale fixtures** — two pages of one code no longer letter anything without the model's `configurations` answer, so both pages wrote to the bill line and collided. The fixtures now carry the answer | a page count is not evidence of a split; `ensureVariant`'s guard fires once a split is attempted |
+| 6 | the guard-order reading in the brief | **wrong, and the coder said so** — `ensureVariant` already runs before the occupancy read; the occupancy message was the correct refusal of a *different* request | — |
+| 7 | *hides an archived project* | **performance finding**, measured: `GET /api/projects` takes 1.5–2.1s per call against 6 active / 9 total projects and 11,673 answers, and the test makes four calls (9.3s). Not an N+1; the route's own header names the fix (make `loadOutstanding` lazy). Bound raised to 30s **as a documented stopgap**; logged in `found-in-use.md` | unchanged |
+| 8 | *refuses an empty change* | **contamination** — test 7's in-flight PATCH landed after teardown and bumped the version. Passed alone; fixing 7 fixed it | unchanged |
+| + | *RECOMPOSES its own answer as later slots arrive* | surfaced in the full run only: 3.7s alone, timed out at 5s under contention. Given the 40s the configuration tests beside it carry | unchanged |
+
+Proven on `staging` by Fable, not by the coder's report: **1,243 passed · 1
+skipped · 0 failed**, db tier on. Typecheck and lint clean (the two
+pre-existing warnings are in the meeting-recap skill's harvester). Build clean
+in the worktree. Deployment state: **pushed** once this brief is committed;
+documentation and tests only, so no deployment matters.
+
+Two observations out of scope, recorded and not fixed: the slow projects list
+(now in `found-in-use.md`), and that several db-tier tests sit within a second
+of the 5s default against a remote database — a file-level `testTimeout` for
+`tests/db/` in `vitest.config.ts` would stop this recurring one test at a
+time, and belongs with 0.4.
+
+**Next in Stage 0:** 0.4, the `checks` script and the db-tier guard, on the
+same footing now the suite is green.
 
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*
