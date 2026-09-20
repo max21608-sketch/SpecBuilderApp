@@ -7,7 +7,13 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PackSummary from "@/components/imports/PackSummary";
-import { packTally } from "@/lib/intake-status";
+import DocumentState from "@/components/imports/DocumentState";
+import {
+  documentReviewTone,
+  hasPendingReview,
+  isReviewComplete,
+  packTally,
+} from "@/lib/intake-status";
 
 /** n documents in one state, as the pack payload carries them. */
 const runs = (spec: Record<string, number>) =>
@@ -117,5 +123,75 @@ describe("packTally is the one reading behind the line and the tiles", () => {
 
   it("counts queued and parsing as one state, because neither wants anybody", () => {
     expect(packTally(runs({ queued: 2, parsing: 3 })).reading).toBe(5);
+  });
+
+  it("does not count a confirmed document with proposals pending as reviewed", () => {
+    const tally = packTally([{ status: "confirmed", pendingReview: 12 }, { status: "confirmed" }]);
+    expect(tally.reviewed).toBe(1);
+    expect(tally.toReview).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1.7 — "so it's ticked because you've opened it" (found-in-use 4).
+//
+// OPENED IS RECORDED NOWHERE. Verified in the source before building this: the
+// GET at src/app/api/imports/[id]/route.ts writes nothing, and no review screen
+// writes until somebody applies or ignores something. So two derivable states
+// and a count, and the app does not invent a third.
+// ---------------------------------------------------------------------------
+
+describe("a document's own state", () => {
+  it("SAYS HOW MANY are left rather than just Ready to review", () => {
+    render(<DocumentState run={{ status: "parsed", pendingReview: 12 }} />);
+    expect(screen.getByText("12 to review")).toBeInTheDocument();
+    expect(screen.queryByText("Ready to review")).not.toBeInTheDocument();
+  });
+
+  it("never shows Review complete beside a document with proposals pending", () => {
+    // The DoD, as a structural guarantee rather than a comment: the count wins
+    // over the status, so a contradiction reads as work and not as a tick.
+    render(<DocumentState run={{ status: "confirmed", pendingReview: 6 }} />);
+    expect(screen.getByText("6 to review")).toBeInTheDocument();
+    expect(screen.queryByText("Review complete")).not.toBeInTheDocument();
+    expect(isReviewComplete({ status: "confirmed", pendingReview: 6 })).toBe(false);
+  });
+
+  it("VARIANCE: a document confirmed with every proposal IGNORED is Review complete", () => {
+    // Ignoring is a decision. `confirmed` means nothing is pending — applied or
+    // ruled out — so there is no count to print and the tick is earned.
+    render(<DocumentState run={{ status: "confirmed", pendingReview: 0 }} />);
+    expect(screen.getByText("Review complete")).toBeInTheDocument();
+    expect(isReviewComplete({ status: "confirmed", pendingReview: 0 })).toBe(true);
+  });
+
+  it("VARIANCE: a document whose read FAILED keeps its own state", () => {
+    render(<DocumentState run={{ status: "failed", pendingReview: 4, error: "the queue refused it" }} />);
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    // A re-read replaces the staged JSON, so a leftover count describes
+    // proposals about to stop existing.
+    expect(screen.queryByText("4 to review")).not.toBeInTheDocument();
+    expect(screen.getByText("the queue refused it")).toBeInTheDocument();
+  });
+
+  it("says nothing about a count while the document is being read", () => {
+    render(<DocumentState run={{ status: "parsing", pendingReview: 9 }} />);
+    expect(screen.getByText("Reading")).toBeInTheDocument();
+    expect(screen.queryByText("9 to review")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the status where the payload carries no count at all", () => {
+    // A bill has no per-line review status — its whole review is one confirm —
+    // and an ABSENT count is not zero.
+    render(<DocumentState run={{ status: "parsed" }} />);
+    expect(screen.getByText("Ready to review")).toBeInTheDocument();
+    expect(hasPendingReview({ status: "parsed" })).toBe(false);
+  });
+
+  it("is amber wherever anything is outstanding, whatever the status says", () => {
+    const { container } = render(<DocumentState run={{ status: "confirmed", pendingReview: 2 }} />);
+    expect(container.textContent).toContain("2 to review");
+    expect(documentReviewTone({ status: "confirmed", pendingReview: 2 })).toBe("warn");
+    expect(documentReviewTone({ status: "confirmed" })).toBe("good");
   });
 });

@@ -23,6 +23,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const project = await sql`select id from projects where id = ${id}`;
   if (!project[0]) return json({ ok: false, error: "No such project." }, 404);
 
+  // HOW MANY PROPOSALS ARE STILL PENDING, counted here so the pack screen can
+  // stop ticking a document because somebody opened it (found-in-use 4).
+  //
+  // Three staged shapes carry a reviewStatus and they are named rather than
+  // searched: items[].observations[] (src/lib/drawing-document.ts), lines[]
+  // (src/lib/spec-document.ts, which is also an email) and notes[]
+  // (src/lib/preamble-document.ts). A recursive jsonpath would need no shape
+  // knowledge and would also silently mean whatever it meant; a named path is
+  // readable, and a fourth shape reads as zero rather than as a wrong number.
+  //
+  // A BILL has no per-line review status -- its whole review is one confirm --
+  // so it counts zero and the screen falls back to the status label.
+  //
+  // It is a COUNT, never the staged blob: the pack screen polls every three
+  // seconds while anything is in flight, and a drawings run's parsed JSON is
+  // megabytes.
   const batches = await sql`
     select b.id, b.label, b.created_at, b.created_by,
            coalesce(
@@ -33,7 +49,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                        'status', r.status,
                        'error', r.error,
                        'filename', a.filename,
-                       'createdAt', r.created_at
+                       'createdAt', r.created_at,
+                       'pendingReview', jsonb_array_length(
+                            jsonb_path_query_array(coalesce(r.parsed, '{}'::jsonb),
+                              '$.items[*].observations[*] ? (@.reviewStatus == "pending")')
+                         || jsonb_path_query_array(coalesce(r.parsed, '{}'::jsonb),
+                              '$.lines[*] ? (@.reviewStatus == "pending")')
+                         || jsonb_path_query_array(coalesce(r.parsed, '{}'::jsonb),
+                              '$.notes[*] ? (@.reviewStatus == "pending")')
+                       )
                      ) order by
                        -- Read order, not upload order: the preamble gives the
                        -- context, the bill creates the records, the drawings

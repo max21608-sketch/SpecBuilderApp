@@ -652,6 +652,97 @@ describeIfDb("intake routes", () => {
     await client.query(`delete from intake_batches where id = $1`, [batchId]);
   });
 
+  it("tells the pack screen how many proposals each document still has pending", async () => {
+    // THE WRITE-SIDE HALF OF 1.7. The pack screen ticks a document off its
+    // status; "so it's ticked because you've opened it" (found-in-use 4) is
+    // what that reads like when the count is missing, and the count has to come
+    // out of the staged JSON without shipping it — the pack screen polls every
+    // three seconds and a drawings run's JSON is megabytes.
+    //
+    // This is also the only thing that proves the jsonpath: three staged shapes
+    // carry a reviewStatus and the route names all three.
+    const code = "__QAX140";
+    await makeRecord(mainRunId, code, "__QA Pending console");
+    const batch = await client.query(
+      `insert into intake_batches (project_id, label, created_by, updated_by)
+       values ($1, '__QA pending pack', 'qa', 'qa') returning id`, [projectId]);
+    const batchId = batch.rows[0].id;
+
+    const insert = async (kind: string | null, sourceKind: string, status: string, parsed: unknown) =>
+      (await client.query(
+        `insert into intake_runs (project_id, batch_id, source_kind, document_kind, status, parsed, created_by, updated_by)
+         values ($1,$2,$3,$4,$5,$6::jsonb,'qa','qa') returning id`,
+        [projectId, batchId, sourceKind, kind, status, JSON.stringify(parsed)],
+      )).rows[0].id;
+
+    // A drawings run: items[].observations[].
+    const drawings = stageDrawings([drawingItem(code)], fields, "__QA pending.pdf", null);
+    const observations = drawings.items[0]?.observations ?? [];
+    expect(observations.length).toBeGreaterThan(1);
+    const drawingsRunId = await insert("shop_drawings", "spec_document", "parsed", drawings);
+
+    // The same set with everything ruled on: applied and ignored are BOTH
+    // decisions, so a run confirmed with every proposal IGNORED has nothing
+    // pending and earns its tick.
+    const allRuled = {
+      ...drawings,
+      items: drawings.items.map((item, index) => ({
+        ...item,
+        observations: item.observations.map((observation, i) => ({
+          ...observation,
+          reviewStatus: i % 2 === 0 ? "ignored" : "applied",
+        })),
+        id: `${item.id}${index}`,
+      })),
+    };
+    const ruledRunId = await insert("shop_drawings", "spec_document", "confirmed", allRuled);
+
+    // A preamble: notes[]. Two pending, one already applied.
+    const preambleRunId = await insert("preamble", "spec_document", "parsed", {
+      schemaVersion: 1,
+      notes: [
+        { id: "n1", reviewStatus: "pending" },
+        { id: "n2", reviewStatus: "pending" },
+        { id: "n3", reviewStatus: "applied" },
+      ],
+    });
+
+    // A spec document or email: lines[]. One pending.
+    const emailRunId = await insert("email", "spec_document", "parsed", {
+      schemaVersion: 1,
+      lines: [
+        { id: "l1", reviewStatus: "pending" },
+        { id: "l2", reviewStatus: "ignored" },
+      ],
+    });
+
+    // A BILL has no per-line review status — its whole review is one confirm —
+    // so it counts zero and the screen falls back to the status label.
+    const billRunId = await insert(null, "boq_xlsx", "parsed", {
+      schemaVersion: 3,
+      filename: "__QA bill.xlsx",
+      sheets: [{ sheetName: "A", lines: [{ index: 0, ignored: false }] }],
+    });
+
+    const { GET } = await import("@/app/api/projects/[id]/batches/route");
+    const res = await GET(new Request("http://localhost/test"), { params: Promise.resolve({ id: projectId }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const pack = body.batches.find((row: { id: string }) => row.id === batchId);
+    const pending = Object.fromEntries(
+      pack.runs.map((run: { id: string; pendingReview: number }) => [run.id, run.pendingReview]),
+    );
+
+    expect(pending[drawingsRunId]).toBe(observations.length);
+    expect(pending[ruledRunId]).toBe(0);
+    expect(pending[preambleRunId]).toBe(2);
+    expect(pending[emailRunId]).toBe(1);
+    expect(pending[billRunId]).toBe(0);
+
+    await client.query(`delete from intake_runs where batch_id = $1`, [batchId]);
+    await client.query(`delete from intake_batches where id = $1`, [batchId]);
+  });
+
   it("refuses a pack from another project", async () => {
     // Scoped from the batch's own row, so a batch id from elsewhere 404s rather
     // than leaking that project's drawings.

@@ -16,15 +16,15 @@ import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
 import StatTile from "@/components/ui/StatTile";
 import Tip from "@/components/ui/Tip";
-import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import PageHeader from "@/components/ui/PageHeader";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
-import { intakeStatusLabel, intakeStatusTone, isIntakeRunWorking, packTally } from "@/lib/intake-status";
+import { hasPendingReview, isIntakeRunWorking, isReviewComplete, packTally } from "@/lib/intake-status";
 import PackSummary from "@/components/imports/PackSummary";
+import DocumentState from "@/components/imports/DocumentState";
 import { formatDay } from "@/lib/format-day";
 import PageBody from "@/components/ui/PageBody";
 
@@ -36,6 +36,12 @@ type Run = {
   error: string | null;
   filename: string | null;
   createdAt: string;
+  /**
+   * How many proposals on this document are still pending — from the staged
+   * JSON, counted by the batches route. ABSENT is not zero: a payload that does
+   * not carry one must not read as a finished review.
+   */
+  pendingReview?: number | null;
 };
 
 type Batch = { id: string; label: string | null; created_at: string; created_by: string | null; runs: Run[] };
@@ -114,12 +120,18 @@ function kindLabel(run: Run): string {
  *
  * "Nothing to do" is PRINTED rather than left blank: a document being read
  * needs nobody, and an empty cell there reads as a row somebody forgot.
+ *
+ * It reads the PENDING COUNT before the status, for the reason
+ * `documentReviewLabel` does: "review complete" beside outstanding proposals is
+ * the tick Matthew read off this screen (found-in-use 4), and a status alone
+ * cannot tell a document somebody finished from one they opened and left.
  */
-function produced(status: string): string {
-  if (isIntakeRunWorking(status)) return "nothing to do";
-  if (status === "failed") return "a retry charges again";
-  if (status === "confirmed") return "review complete";
-  if (status === "parsed") return "waiting for you";
+function produced(run: Run): string {
+  if (isIntakeRunWorking(run.status)) return "nothing to do";
+  if (run.status === "failed") return "a retry charges again";
+  if (hasPendingReview(run)) return "waiting for you";
+  if (run.status === "confirmed") return "review complete";
+  if (run.status === "parsed") return "waiting for you";
   return "—";
 }
 
@@ -246,10 +258,14 @@ export default function IntakeBatchPage({
   // bill.
   const drawingState = packTally(drawingRuns);
 
+  // A STAGE IS TICKED ONLY WHERE EVERY DOCUMENT IN IT IS REVIEWED AND HAS
+  // NOTHING LEFT PENDING. `isReviewComplete` is both halves: the status alone
+  // is the tick found-in-use 4 is about, and an empty pending list alone is
+  // true of a document nobody has read.
   const stepDone = {
     preamble: packSteps.preamble.length > 0,
-    bill: packSteps.bill.length > 0 && packSteps.bill.every((run) => run.status === "confirmed"),
-    drawings: drawingRuns.length > 0 && drawingRuns.every((run) => run.status === "confirmed"),
+    bill: packSteps.bill.length > 0 && packSteps.bill.every(isReviewComplete),
+    drawings: drawingRuns.length > 0 && drawingRuns.every(isReviewComplete),
   };
   // The stage the pack is on: the first that has documents and is not finished.
   const currentStep = !stepDone.bill && packSteps.bill.length > 0
@@ -482,7 +498,13 @@ export default function IntakeBatchPage({
                   // nothing should not compete with the two that do.
                   <Tr
                     key={run.id}
-                    tone={run.status === "failed" ? "danger" : run.status === "parsed" ? "warn" : "plain"}
+                    tone={
+                      run.status === "failed"
+                        ? "danger"
+                        : run.status === "parsed" || hasPendingReview(run)
+                          ? "warn"
+                          : "plain"
+                    }
                   >
                     <Td>
                       <Link href={`/dashboard/imports/${run.id}`} className="text-blue-700 no-underline hover:underline">
@@ -494,16 +516,10 @@ export default function IntakeBatchPage({
                     </Td>
                     <Td>{kindLabel(run)}</Td>
                     <Td>
-                      <Chip tone={intakeStatusTone(run.status)} dot={working && !dispatchUncertain}>
-                        {intakeStatusLabel(run.status)}
-                      </Chip>
-                      {/* The failure's own words, under the chip. "Failed" says
-                          a retry is wanted; only the message says whether the
-                          retry has any chance of behaving differently. */}
-                      {run.error && <span className="mt-1 block text-xs text-neutral-500">{run.error}</span>}
+                      <DocumentState run={run} uncertain={dispatchUncertain} />
                     </Td>
                     <Td muted className="text-xs">
-                      {produced(run.status)}
+                      {produced(run)}
                     </Td>
                     <Td>
                       <div className="flex items-start justify-end gap-2">
@@ -536,9 +552,13 @@ export default function IntakeBatchPage({
                         ) : (
                           <Link
                             href={`/dashboard/imports/${run.id}`}
-                            className={buttonClass(run.status === "parsed" ? "secondary" : "quiet", "xs", "no-underline")}
+                            className={buttonClass(
+                              run.status === "parsed" || hasPendingReview(run) ? "secondary" : "quiet",
+                              "xs",
+                              "no-underline",
+                            )}
                           >
-                            {run.status === "parsed" ? "Review" : "Open"}
+                            {run.status === "parsed" || hasPendingReview(run) ? "Review" : "Open"}
                           </Link>
                         )}
                       </div>
