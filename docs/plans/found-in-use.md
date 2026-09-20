@@ -328,7 +328,33 @@ Grouped because each is a line or two, not because they are one problem.
     on load and again when the contact changes; a filter never touches the
     ticks. Verified on the sandbox: Draft the email · 70, footer "70 to-quote
     questions preselected · 113 also outstanding". One observation left open
-    below.
+    below. **FIXED 2026-09-20, `e0254fb`** (Stage 1a item 1.11): one pure
+    `nextStep` decides the next step from the numbers the loaders already hold
+    — upload → reading → retry a failed read → review the bill → review the
+    staged documents → categorise → review to-quote gaps → export — and every
+    screen's PRIMARY button is that step: the overview header, the *Review
+    complete* box on both drawings screens, the BOQ's confirmed state. Driven
+    on the sandbox: AP364e's primary reads "Review 9 documents" (its drawings
+    are staged and unreviewed); AP364c's reads "Categorise 6 items" and from
+    the projects list the route project → primary → item → Checklist is four
+    presses. Two judgements recorded: the review-documents step was not in the
+    plan's list and is the §0.3 order applied; the label counts questions, not
+    items, because that is what the summary holds. **FIXED 2026-09-20, `77895e4`** (Stage 1a item 1.12): the *Needed to
+    quote* count is a disclosure; expanded, it lists the record's own missing
+    to-quote fields by name, grouped by section, six at a time, each a link to
+    that question on the checklist. The list comes out of the same loop that
+    makes the count (`?withToQuote=1`, asked for on the first expand), so the
+    two cannot disagree. Driven on AP364c's phase tab: the headboard's 5 opens
+    into Access, Dimensions, Outdoor, Assy guide required, Headboard fitted?. **FIXED 2026-09-20, `51f7bb8` + migration `0033`** (Stage 1a item 1.13,
+    design §5.2 of the plan): the CORRECTION verb. Beside every active spec on
+    the record's Specs tab, *Correct* opens an inline editor pre-filled with
+    the value; *Save the correction* retires the old row with
+    `superseded_by_id` pointing at a new row that KEEPS the source run and
+    page, under one `attribute_correct` change set (reason required, as
+    retire), recomposes the checklist and snapshots the record. Driven on the
+    demo sofa: two clicks, `W1820 x …` → `W1830 x …`, Versions v10 "1 changed ·
+    1 added · 1 removed · 60 unchanged · Spec corrected". The old row sits under
+    *show retired*, naming the value that replaced it.
 
 One thing that looked like a defect and is not: **"These pages do not agree"**
 fired because two pages state the same dimension in different units. Sebastian
