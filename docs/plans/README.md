@@ -112,6 +112,14 @@ Max's: apply 0033 to pilot, promote by the checklist, run the script on pilot,
 send the 0.6 message. The close's per-row evidence is in the plan's stage
 brief.
 
+**The gate with every check on, 2026-09-20 14:35.** The verifier's `2be632b`
+turned the skips for 1.5, 1.6, 1.7, 1.13, 1.15 and the 409 row-unfreeze into
+live checks; one of them read the wrong page (`c46fe95`, the walk returns to
+the phase tab first). Run against the `da863b7` deployment: **PASS 29 · FAIL 0
+· SKIP 2** — the two skips are the item picture and the swatch, which a clone
+cannot render because the PDF stays under the source project's blob prefix.
+Stage 1b's release gate is therefore the script, not only the browser walks.
+
 **Promoted to pilot, 2026-09-20 13:15, at Max's instruction ("apply to
 pilot").** Steps 1–3 of `docs/environments.md`'s checklist, done by Fable:
 pilot backed up (`spec-builder-pilot-2026-09-20T13-11-40-147Z.sql`, outside
