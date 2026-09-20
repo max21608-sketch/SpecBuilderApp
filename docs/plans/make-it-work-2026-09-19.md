@@ -2042,5 +2042,33 @@ Max: *"ok lets go with stage 1a."* Ten items: 1.1, 1.2, 1.3, 1.4, 1.8, 1.11,
 | **Grey zone, ruled now** | An `intake_runs` row is a DOCUMENT READ, not a phase. Where a screen says "run" meaning that (the pack screen's "this run failed", "Read all"), the word is *read* or *document*, never *phase*. Coder A lists every such string in the commit body; anything not on the list that the guard's allowlist admits is a review question |
 | **Close** | the ten items each have §7.1's rows written as facts against the deployed SHA; `first-session.mjs` runs clean on staging, then on pilot after one promotion by the `docs/environments.md` checklist; `CLAUDE.md` says "phase" and carries the correction verb; the 0.6 message goes with the pilot link, sent by Max. **Then stop and wait for screenshots** |
 
+**Stage 1a, as of 2026-09-20 midday.** All ten items are built, checked with
+the database tier required, driven in the browser on the sandbox and on
+`staging` (`docs/plans/README.md`, 2026-09-20, has the per-item evidence).
+Three things stand between this and the close: the first-session script and
+the 300-line fixture (the verifier, in progress), the pilot's console half
+(Max), and the hand-over message (Max, §0.6). Migration 0033 is applied to
+the sandbox and NOT yet to pilot — it goes on the promotion checklist.
+
+### Stage 1b brief — opened 2026-09-20
+
+Max, 2026-09-20: *"keep going until you have completed the whole of stage
+1."* The plan had 1b waiting for Matthew's first screenshots; that wait is
+lifted by that instruction, and 1b is built on `staging` in the same way as
+1a. The promotion to pilot stays ONE deliberate step by Max, after the
+first-session script runs clean on staging. Six items: 1.5, 1.6, 1.7, 1.9,
+1.10, 1.15.
+
+| | |
+|---|---|
+| **Order** | Two coders, disjoint files. **Coder B (intake screens):** 1.5 → 1.6 → 1.7, one commit each — the BOQ review, then the pack screen twice. **Coder D (the drawings card):** 1.10 → 1.15 → 1.9 — the swatch page selector, then the level control, then the crop INVESTIGATION, which stops at a measurement and a conclusion where the fix is the prompt (a re-read is charged and lands with the finishes-schedule schema change, not here) |
+| **Files — B** | new `src/lib/non-furniture-guess.ts` + test; `src/lib/boq-import.ts` (the staged line gains `nonFurnitureSuggested`, read-time computed for old runs); `src/app/dashboard/imports/[id]/page.tsx`; `src/lib/level-guess.ts` (`guessLevelFromBill` does not fire on a suggested non-furniture line); `src/app/dashboard/projects/[id]/intake/[batchId]/page.tsx` and a new `src/components/imports/PackSummary.tsx` if the page is not testable as a component; new `tests/components/intake-pack.test.tsx`; the BOQ confirm db test gains the ignore/restore case |
+| **Files — D** | `src/components/imports/SwatchPicker.tsx`, `DrawingItemCard.tsx`, `ConfigurationCard.tsx`, `ItemImagePicker.tsx`, `src/lib/pdf-crop.ts`, `src/lib/level-guess.ts` (reading `guessLevelFromAttributes` only), the levels route under `src/app/api/projects/[id]/levels/`, `tools/measure-drawing-reading.ts` + a pure view-region helper; new `tests/components/swatch-picker.test.tsx`, `tests/lib/pdf-crop.test.ts`. **Never** the extraction prompt or tool schema (`anthropic.ts`, `extraction-schema.ts`) |
+| **Nobody's** | `CLAUDE.md`/`AGENTS.md`, the export, `confirm-drawings.ts`'s confirm request shape (a level is not part of what a card confirms), migrations |
+| **Migrations** | none expected. 1.15 writes `spec_records.level` through the existing levels route |
+| **Measurement** | `npm run measure:drawings` before and after 1.9, run by Fable against the sandbox's staged runs; the numbers go in the commit body. 1.9 may CONCLUDE rather than fix |
+| **Fable's own** | the four checks with the db tier required before every cherry-pick, each gated on its own exit code (the 1.4 push went out on the build's code alone — never again); the browser walk of each DoD on the sandbox; `found-in-use.md` findings 2, 4, 5, 6, 8 and the level entry marked FIXED with commits; the dated README lines; the `CLAUDE.md` level section gains "a level can be set on the drawings card, on a click, one change set per phase" (§2.6, 1b) |
+| **Close** | the six items each have §7.1's rows written as facts against the deployed SHA; the first-session script runs clean on staging with every 1a and 1b assertion un-skipped; `found-in-use.md` swept. Then ONE promotion to pilot by the `docs/environments.md` checklist — Max's step — and the 0.6 message |
+
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*
