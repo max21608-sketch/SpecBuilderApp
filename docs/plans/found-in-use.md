@@ -409,7 +409,22 @@ Grouped because each is a line or two, not because they are one problem.
    page the finish was read from, one `PageCropper`, and the crop's payload
    carries the page it was cropped FROM. Driven on the sandbox S-100 card.
    Observation left: `attachments` has no source-page column, so a
-   drawings-confirmed swatch records its page in the filename only.
+   drawings-confirmed swatch records its page in the filename only. **INVESTIGATED 2026-09-20, `7b9ee6e` (Stage 1b item 1.9) — the fix
+   is the PROMPT, deferred to the finishes-schedule re-read.** `measure:drawings`
+   now counts item pictures: across the sandbox's 33 runs and 100 items, 162
+   regions were reported and every one is usable (in bounds, not inverted,
+   above the cropper's 2% floor, on its own page); 0 faulty. The crop is
+   exonerated. The 42 items with NO region split two ways: the same `Apx 1a`
+   file read twice, one read reporting 46 regions and the other none
+   (read-to-read variance), and two SPEC-346 sheets (S-100, S-201) silent in
+   every one of their eight reads (a property of those pages). Neither is a
+   coordinate bug and neither is fixable in code; a stronger ask for the
+   largest pictorial view's box is a prompt change and costs a charged re-read
+   of every document, so it lands with the finishes-schedule schema change,
+   once. Until then the whole-page proposal with *Drag a box* is the designed
+   path, and it is what saved the demo. Still to look at with a person: a
+   region that is in bounds but TRANSPOSED on a landscape sheet, which no
+   measurement can see.
 
 One thing that looked like a defect and is not: **"These pages do not agree"**
 fired because two pages state the same dimension in different units. Sebastian
