@@ -3188,9 +3188,14 @@ first-session script (`.claude/skills/verify/files/first-session.mjs`, the
 release gate that never calls the model) ran against the `b76cfb0` deployment
 on 2026-09-20: 20 pass, 0 fail, 8 skipped by design — so **Stage 1a is
 closed on staging**. Remaining and Max's: 0033 onto pilot, the promotion, the
-script on pilot, the hand-over message. Stage 1b is being built on `staging`
-at Max's instruction of 2026-09-20; its drawings items (1.10, 1.15, the 1.9
-measurement and conclusion) are deployed at `b76cfb0`.
+script on pilot, the hand-over message. **Stage 1b is built and
+deployed at `da863b7`**, at Max's instruction of 2026-09-20: packaging lines
+suggested for ignoring, one summary line on the pack, a document's state as a
+pending count, the swatch reaching page 2, a level set on the drawings card,
+and the crop investigation concluding that the prompt is the fix (deferred to
+the finishes-schedule re-read). Not accepted by anybody. The whole of Stage 1
+is therefore on staging; the pilot promotion (0033 first), the script on
+pilot and the hand-over message are Max's.
 
 **Outstanding — judgement, not code.**
 
