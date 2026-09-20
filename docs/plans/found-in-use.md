@@ -24,6 +24,14 @@ mark it FIXED with the date and the commit.
 
 ### Two dark controls on the drawings review and the BOQ review
 
+### The two dark controls on the review screens — FIXED same day
+
+`9b626eb`: the next-step action renders only in the *Review complete* state on
+both drawings screens, and the BOQ review's confirmed box no longer draws a
+disabled Confirm in the primary's fill. The pack screen's duplicated
+"Review all 9 drawings together" (header and card) is item 1.6's territory.
+
+
 **Status: open — seen in the §7.4a screenshots of the `3b6d9db` deployment,
 2026-09-20, at both 1920×1080 and 1440×900.** On a drawings review that is
 still being reviewed, the page carries the card's `Confirm S-100 (2
@@ -396,7 +404,12 @@ Grouped because each is a line or two, not because they are one problem.
     retire), recomposes the checklist and snapshots the record. Driven on the
     demo sofa: two clicks, `W1820 x …` → `W1830 x …`, Versions v10 "1 changed ·
     1 added · 1 removed · 60 unchanged · Spec corrected". The old row sits under
-    *show retired*, naming the value that replaced it.
+    *show retired*, naming the value that replaced it. **FIXED 2026-09-20, `36dbed5`** (Stage 1b item 1.10): the picker offers
+   every page of the item — "Crop from: page 1 · page 2" — defaulting to the
+   page the finish was read from, one `PageCropper`, and the crop's payload
+   carries the page it was cropped FROM. Driven on the sandbox S-100 card.
+   Observation left: `attachments` has no source-page column, so a
+   drawings-confirmed swatch records its page in the filename only.
 
 One thing that looked like a defect and is not: **"These pages do not agree"**
 fired because two pages state the same dimension in different units. Sebastian
@@ -412,6 +425,16 @@ It is already its own entry below. What changed is that Matthew has now seen
 it. (48:59)
 
 ### A level cannot be set or changed at the drawings stage
+
+**FIXED 2026-09-20, `941573d`** (Stage 1b item 1.15): a LEVEL panel on the
+item card and the configuration card — the suggestion and its reason as a
+`SuggestButton`, "Change…" opening three BUTTONS (never a pre-filled select),
+one `level_set` change set per click through the existing levels route
+(which now also takes `recordIds` + `level`), "sets the level on 3 records"
+for a fan-out, and the confirm request untouched. Driven on the sandbox
+S-100 card, where the level is already decided on 3 of 3 and the panel says
+so. The level GUESS rules are still this repo's judgement and Matthew has not
+seen them.
 
 **Status: open. A CHANGE ASKED FOR, and its first half is still to be
 confirmed by Max** — "I'm going to check up on this, but I'm pretty sure".
