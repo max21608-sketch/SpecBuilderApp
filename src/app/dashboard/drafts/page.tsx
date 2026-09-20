@@ -51,7 +51,7 @@ import {
 } from "@/lib/spec-vocab";
 import { type QuestionTier } from "@/lib/tgq";
 import { defaultSelection, selectionKey, selectionSummary } from "@/lib/chase-selection";
-import Button from "@/components/ui/Button";
+import Button, { buttonClass } from "@/components/ui/Button";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
 import Tabs from "@/components/ui/Tabs";
@@ -541,6 +541,16 @@ function DraftsView() {
         subtitle="Drafts only. Nothing is sent from this app — you send it from your own Outlook."
         actions={
           <>
+            {/* THE OTHER HALF OF THE SAME LIST. A chase asks the client; the
+                infill screen records what somebody here already knows, and a
+                question answered there is one this screen stops listing. A
+                LINK, because it goes somewhere. */}
+            <Link
+              href={`/dashboard/projects/${project.id}/infill`}
+              className={buttonClass("secondary", "sm", "no-underline")}
+            >
+              Fill in ourselves
+            </Link>
             {/* A question already asked is EXCLUDED by default, and this is how
                 you see them. Not a link: it changes what you are looking at. */}
             <Button

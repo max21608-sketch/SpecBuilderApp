@@ -42,6 +42,8 @@ function question(overrides: Partial<OutstandingQuestion> = {}): OutstandingQues
     section: "Dimensions",
     sortOrder: 10,
     fieldLabel: "Dimensions",
+    jsonId: 3,
+    localKey: null,
     answerId: "ans-1",
     answerVersion: 2,
     state: "tbc",

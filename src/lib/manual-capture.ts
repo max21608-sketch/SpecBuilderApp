@@ -27,7 +27,7 @@
 // worse than the gap, because the gap is the truth and the invention is not.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { openChangeSet } from "@/lib/change-sets";
+import { findOpenChangeSet, openChangeSet, publishChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
 import { guessLevelFromBill } from "@/lib/level-guess";
@@ -314,12 +314,31 @@ export async function createAttribute(txn: TxnSql, input: CreateAttributeInput):
     }
   }
 
-  const changeSetId = await openChangeSet(txn, {
-    projectId: String(record.project_id),
-    kind: "attribute_create",
-    actor: input.actor,
-    reason: `${label}${value ? `: ${value}` : ""}`.slice(0, 200),
-  });
+  // IT JOINS THE CHANGE THE PERSON ALREADY OPENED, if they have one.
+  //
+  // Every other write a person makes does this — an answer edit, a category, a
+  // level, a correction, a retire — through `changeSetForEdit`. This one did
+  // not, and a screen that records a dozen values in a meeting is where that
+  // shows: twelve answers filed under "Handover call with Hayley" and every
+  // typed DIMENSION filed on its own beside them, because a dimension is
+  // written as an attribute rather than as an answer. The trail then reads as
+  // though the call and the measurements were different occasions.
+  //
+  // Not `changeSetForEdit`: that opens its own change whenever a reason is
+  // supplied, and the reason here is the app's own description of the row
+  // ("Width: 840"), which is worth keeping on a standalone capture and is not
+  // a person's statement about why. So the open change wins where there is
+  // one, and the description stands where there is not.
+  const openChange = await findOpenChangeSet(txn, String(record.project_id), input.actor);
+  if (openChange) await publishChangeSet(txn, openChange);
+  const changeSetId =
+    openChange ??
+    (await openChangeSet(txn, {
+      projectId: String(record.project_id),
+      kind: "attribute_create",
+      actor: input.actor,
+      reason: `${label}${value ? `: ${value}` : ""}`.slice(0, 200),
+    }));
 
   const order = await txn`
     select coalesce(max(sort_order), 0) as last from record_attributes where record_id = ${input.recordId}

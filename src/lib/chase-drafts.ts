@@ -68,6 +68,22 @@ export type OutstandingQuestion = {
   section: string | null;
   sortOrder: number;
   fieldLabel: string | null;
+  /**
+   * The BWS field this question fills, and the local key a readiness question
+   * carries instead. Both were already selected — `questionTierOrNull` reads
+   * them — and were thrown away after the tier was computed.
+   *
+   * The infill screen needs them for the two things that decide how a gap is
+   * FILLED rather than which half of an email it lands in: json_id 3 is the
+   * composed dimensions cell, which is written as an attribute and never as an
+   * answer, and the palette a question offers is looked up by field or by
+   * local key exactly as the record screen looks it up.
+   *
+   * Safe to add: `contextSnapshot` is built field by field, so a column here
+   * cannot make a sent draft read as stale.
+   */
+  jsonId: number | null;
+  localKey: string | null;
   answerId: string | null;
   answerVersion: number | null;
   state: AnswerState;
@@ -471,10 +487,45 @@ export function groupByContact(
  * snapshot that no SQL expression can reproduce. Calling this once per project
  * would be two queries per row; taking an array makes it two queries for the
  * page, over the SAME rule the chase screen runs.
+ *
+ * ---- AND A SCOPE, FOR THE SCREENS THAT CANNOT SHIP THE WHOLE THING --------
+ *
+ * Measured on the sandbox 300-line project (`npm run measure:outstanding`,
+ * 2026-09-20): 19,582 outstanding questions, 1,045 ms, and **18,976 KB** of
+ * JSON if a route sends them all. The infill screen draws 407 collapsed lines
+ * and opens one at a time, so it summarises the whole load server-side and
+ * then re-reads ONE line's questions when somebody opens it.
+ *
+ * The scope is a WHERE clause on this query and not a second query, because
+ * the predicates above it — the active record, the active phase, the split
+ * bill line that is a heading — are the ones two screens have already
+ * disagreed over. A second loader is how that happens a third time.
  */
-export async function loadOutstanding(project: string | string[]): Promise<OutstandingQuestion[]> {
+export type OutstandingScope = {
+  /**
+   * Furniture lines: a record, or any finish option under it. Keyed the way
+   * `groupIntoLines` keys a line, so "open this line" is one parameter.
+   */
+  lineIds?: string[];
+  requirementIds?: string[];
+};
+
+export async function loadOutstanding(
+  project: string | string[],
+  scope?: OutstandingScope,
+): Promise<OutstandingQuestion[]> {
   const projectIds = Array.isArray(project) ? project : [project];
   if (projectIds.length === 0) return [];
+  // An ABSENT scope is everything; an EMPTY one is nothing, and the difference
+  // matters — a caller that filtered its own list down to none must not be
+  // handed the project. The flags are computed here so the SQL below binds a
+  // boolean rather than testing an array for null, which Postgres reads as
+  // unknown and silently drops every row.
+  const lineIds = scope?.lineIds ?? null;
+  const requirementIds = scope?.requirementIds ?? null;
+  if (lineIds?.length === 0 || requirementIds?.length === 0) return [];
+  const allLines = lineIds === null;
+  const allRequirements = requirementIds === null;
   const rows = await sql`
     select
       r.project_id,
@@ -552,6 +603,11 @@ export async function loadOutstanding(project: string | string[]): Promise<Outst
         where v.parent_id = r.id and v.status = 'active'
       )
       and coalesce(a.state, 'missing') in ('missing', 'tbc')
+      -- THE SCOPE. Absent means everything, and the boolean is what says so:
+      -- comparing an array against null inside the predicate would make the
+      -- whole clause unknown and return no rows at all.
+      and (${allLines}::boolean or coalesce(r.parent_id, r.id) = any(${lineIds ?? []}::uuid[]))
+      and (${allRequirements}::boolean or q.id = any(${requirementIds ?? []}::uuid[]))
     -- Bill order, with each line's finish options directly under it. Ordering
     -- on the parent ID instead would put the groups in uuid order, which is no
     -- order at all -- the same rule as /api/records.
@@ -601,6 +657,8 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): Outs
     section: row.section === null || row.section === undefined ? null : String(row.section),
     sortOrder: Number(row.sort_order ?? 0),
     fieldLabel: row.field_label === null || row.field_label === undefined ? null : String(row.field_label),
+    jsonId: row.field_json_id === null || row.field_json_id === undefined ? null : Number(row.field_json_id),
+    localKey: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
     answerId: row.answer_id === null || row.answer_id === undefined ? null : String(row.answer_id),
     answerVersion: row.answer_version === null || row.answer_version === undefined ? null : Number(row.answer_version),
     state: String(row.state) as AnswerState,
@@ -716,10 +774,10 @@ export async function loadQuestionsByKey(
  * backwards.
  */
 export async function loadUncategorisedRecords(projectId: string): Promise<
-  { recordId: string; recordLabel: string; itemDescription: string }[]
+  { recordId: string; recordLabel: string; itemDescription: string; version: number }[]
 > {
   const rows = await sql`
-    select r.id, r.record_no, r.item_description, p.bws_project_number
+    select r.id, r.record_no, r.item_description, r.version, p.bws_project_number
     from spec_records r
     join projects p on p.id = r.project_id
     where r.project_id = ${projectId} and r.status = 'active' and r.category_id is null
@@ -729,6 +787,9 @@ export async function loadUncategorisedRecords(projectId: string): Promise<
     recordId: String(row.id),
     recordLabel: recordLabel(String(row.bws_project_number), Number(row.record_no)),
     itemDescription: String(row.item_description ?? ""),
+    // The optimistic lock, so a category can be SET from a list rather than
+    // only from the record screen. The chase screen ignores it and links out.
+    version: Number(row.version),
   }));
 }
 

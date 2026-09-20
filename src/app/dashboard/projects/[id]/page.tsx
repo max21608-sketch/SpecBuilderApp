@@ -761,6 +761,7 @@ function ProjectOverview() {
   const firstPackHref =
     packs.length > 0 && packs[0]!.id ? `/dashboard/projects/${project.id}/intake/${packs[0]!.id}` : null;
   const chaseHref = `/dashboard/drafts?projectId=${project.id}`;
+  const infillHref = `/dashboard/projects/${project.id}/infill`;
   const finishesHref = `/dashboard/projects/${project.id}?tab=finishes`;
 
   const activeRun = runs.find((run) => run.id === tab) ?? null;
@@ -1112,6 +1113,15 @@ function ProjectOverview() {
         actions={
           <>
             <OpenChangeBar projectId={project.id} onChanged={() => void load()} />
+            {/* FILL IN WHAT WE KNOW, BESIDE THE CHASE. The two are the same
+                list with different controls on it — one records what somebody
+                in this building already knows, the other asks the client for
+                what is left — so they sit together and in that order. */}
+            {summary.records > 0 && (
+              <Link href={infillHref} className={buttonClass("secondary", "sm", "no-underline")}>
+                Fill in ourselves
+              </Link>
+            )}
             {/* CHASE IS SECONDARY, AND IT GOES WHEN IT IS THE STEP. Two
                 controls in one band leading to the same screen, one of them
                 emphasised, reads as two different jobs. */}
