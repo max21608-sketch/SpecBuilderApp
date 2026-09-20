@@ -58,14 +58,39 @@ import { isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
 export type SwatchCrop = {
   observationId: string;
   pathname: string;
+  /**
+   * The page the crop was TAKEN FROM, which on a two-page item need not be the
+   * page the row was read from — the chip is printed where it is printed. It is
+   * what names the stored file, so a swatch stays checkable against a page
+   * somebody can open, which is the whole reason the standalone swatch route
+   * refuses an upload that does not say where it came from.
+   */
+  page?: number | null;
   filename?: string | null;
   width?: number | null;
   height?: number | null;
   size?: number | null;
 };
+
 import { createFinish } from "@/lib/finish-edit";
 import { ensureVariant } from "@/lib/variant-create";
 import { snapshotRecords } from "@/lib/record-snapshot";
+
+/**
+ * What a stored swatch is CALLED, which is the only place its page survives.
+ *
+ * `attachments` has no source column and this is not the migration that adds
+ * one, so the page goes in the filename — where the finishes screen already
+ * shows it and where a person checking a chip against the drawing can read it.
+ * The client sends a uuid; a name saying which page the picture came off is
+ * worth more than an observation id nobody can look up.
+ */
+function swatchFilename(swatch: SwatchCrop): string {
+  if (typeof swatch.page === "number" && Number.isInteger(swatch.page) && swatch.page > 0) {
+    return `swatch-page-${swatch.page}.png`;
+  }
+  return swatch.filename ?? "swatch.png";
+}
 
 export type ObservationRef = { id: string; version: number };
 
@@ -540,7 +565,7 @@ export async function confirmDrawingItem(
          image_width, image_height, uploaded_by)
       values
         ('project_finishes', ${finishId}, 'finish_swatch', ${pathname},
-         ${swatch.filename ?? "swatch.png"}, 'image/png', ${swatch.size ?? null},
+         ${swatchFilename(swatch)}, 'image/png', ${swatch.size ?? null},
          ${swatch.width ?? null}, ${swatch.height ?? null}, ${actor})
     `;
   }

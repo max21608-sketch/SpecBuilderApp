@@ -64,7 +64,8 @@ export type RowWarning = { code: string; message: string; observationId: string 
 export type RowCallbacks = {
   onChange: (observation: DrawingObservation, changes: Record<string, unknown>) => void;
   onIgnore: (observation: DrawingObservation) => void;
-  onSwatch: (observationId: string, image: CroppedImage | null) => void;
+  /** The PAGE is the one the crop was taken from, which may not be the row's own. */
+  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
 };
 
 /** Split a card's pending rows into the ones that matter, the rest, and the fold. */
@@ -174,6 +175,7 @@ export function OtherDimensionsToggle({
 export function ObservationRow({
   observation,
   page,
+  itemPages,
   importId,
   specFields,
   drafts,
@@ -185,6 +187,13 @@ export function ObservationRow({
 }: {
   observation: DrawingObservation;
   page: number | null;
+  /**
+   * Every page of the ITEM this row belongs to, so a swatch printed on the
+   * other page of a two-page item can be cropped without leaving the card.
+   * Optional: a caller that knows only this row's page still works, and the
+   * picker then offers no selector.
+   */
+  itemPages?: readonly number[];
   importId: string;
   specFields: SpecField[];
   drafts: Record<string, Partial<DrawingObservation>>;
@@ -302,9 +311,10 @@ export function ObservationRow({
             <SwatchPicker
               importId={importId}
               page={page}
+              pages={itemPages}
               code={observation.materialCodeRaw}
               disabled={busy}
-              onCropped={(image) => callbacks.onSwatch(observation.id, image)}
+              onCropped={(image, croppedPage) => callbacks.onSwatch(observation.id, image, croppedPage)}
             />
           </>
         )}

@@ -74,6 +74,11 @@ const ConfirmBody = z
           .object({
             observationId: z.string().min(1),
             pathname: z.string().min(1).max(1024),
+            // WHICH PAGE THE CROP CAME OFF. An item is often two pages and the
+            // chip is printed on whichever one prints it, so this is the
+            // reviewer's own selection rather than the card's page — and it is
+            // what makes the stored picture checkable against a page.
+            page: z.number().int().positive().max(10_000).nullable().optional(),
             filename: z.string().max(300).nullable().optional(),
             width: z.number().int().positive().max(20_000).nullable().optional(),
             height: z.number().int().positive().max(20_000).nullable().optional(),

@@ -121,6 +121,7 @@ export function BulkUnit({
 
 export default function ItemCard({
   item,
+  pages,
   importId,
   resolution,
   specFields,
@@ -136,6 +137,13 @@ export default function ItemCard({
   onSwatch,
 }: {
   item: DrawingItem;
+  /**
+   * Every page of this item, for the swatch picker. A code drawn once is one
+   * page; the model's own code group can still name a second one that staged
+   * no observations — the finishes sheet whose chips are printed and whose
+   * figures are not. Optional, so a caller with only the item still renders.
+   */
+  pages?: readonly number[];
   importId: string;
   resolution: ItemResolution | undefined;
   specFields: SpecField[];
@@ -150,8 +158,10 @@ export default function ItemCard({
   /** The crop this card currently holds, remembered by the screen until confirm. */
   onImage: (itemId: string, image: CroppedImage | null) => void;
   /** The swatch chip a reviewer cropped for a finish row, by observation id.
-   *  Held by the screen and uploaded at confirm, like the item picture. */
-  onSwatch: (observationId: string, image: CroppedImage | null) => void;
+   *  Held by the screen and uploaded at confirm, like the item picture. The
+   *  page is the one the crop was taken FROM, which on a two-page item need
+   *  not be the page the row was read from. */
+  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
 }) {
   const pending = item.observations.filter((o) => o.reviewStatus === "pending");
 
@@ -405,6 +415,7 @@ export default function ItemCard({
                           <ObservationRow
                             observation={observation}
                             page={item.page}
+                            itemPages={pages}
                             importId={importId}
                             specFields={specFields}
                             drafts={drafts}

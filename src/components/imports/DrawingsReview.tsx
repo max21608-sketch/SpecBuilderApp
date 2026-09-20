@@ -142,17 +142,30 @@ export default function DrawingsReview({
    * store, and the `project_finishes` row a swatch attaches to does not exist
    * until the confirm creates it.
    */
-  const swatches = useRef<Map<string, CroppedImage | null>>(new Map());
-  const rememberSwatch = useCallback((observationId: string, image: CroppedImage | null) => {
-    swatches.current.set(observationId, image);
+  const swatches = useRef<Map<string, { image: CroppedImage; page: number | null } | null>>(new Map());
+  // THE PAGE IS THE ONE THAT WAS CROPPED, not the card's. A two-page item
+  // prints its chips on whichever page prints them, and a swatch citing the
+  // page the row was read from would be a false provenance rather than a
+  // missing one.
+  const rememberSwatch = useCallback((observationId: string, image: CroppedImage | null, page: number | null) => {
+    swatches.current.set(observationId, image ? { image, page } : null);
   }, []);
 
   /** The crops for the rows being confirmed, uploaded together. */
   async function uploadSwatches(observationIds: string[], projectId: string) {
-    const out: { observationId: string; pathname: string; filename: string; width: number; height: number; size: number }[] = [];
+    const out: {
+      observationId: string;
+      pathname: string;
+      filename: string;
+      width: number;
+      height: number;
+      size: number;
+      page: number | null;
+    }[] = [];
     for (const observationId of observationIds) {
-      const image = swatches.current.get(observationId);
-      if (!image) continue;
+      const crop = swatches.current.get(observationId);
+      if (!crop) continue;
+      const { image, page } = crop;
       const blob = await upload(
         `${projectUploadPrefix(projectId)}finish-swatches/${observationId}-${Date.now()}.png`,
         image.blob,
@@ -165,6 +178,7 @@ export default function DrawingsReview({
         width: image.width,
         height: image.height,
         size: image.blob.size,
+        page,
       });
     }
     return out;
@@ -715,6 +729,7 @@ export default function DrawingsReview({
             {card.kind === "single" ? (
               <ItemCard
                 item={card.item}
+                pages={card.pages}
                 importId={importId}
                 resolution={byItem.get(card.item.id)}
                 specFields={specFields}

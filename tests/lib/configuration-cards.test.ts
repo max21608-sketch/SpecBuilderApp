@@ -3,7 +3,7 @@
 // with invented codes and materials. No client document content is in this
 // repo.
 import { describe, expect, it } from "vitest";
-import { cardHasPending, compareGeometry, configurationCards, sharedTargets } from "@/lib/configuration-cards";
+import { cardHasPending, compareGeometry, configurationCards, pagesOfCard, sharedTargets } from "@/lib/configuration-cards";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 
 let counter = 0;
@@ -186,5 +186,45 @@ describe("sharedTargets", () => {
     const { ticked, mixed } = sharedTargets(card.members);
     expect([...ticked]).toEqual(["rec-main"]);
     expect([...mixed]).toEqual(["rec-ve"]);
+  });
+});
+
+/**
+ * Every page of one item — what the swatch picker may crop from.
+ *
+ * The finish chip is printed on whichever page prints it, and on this set that
+ * is routinely the SECOND one: a shop drawing, then the finishes sheet.
+ */
+describe("pagesOfCard", () => {
+  const doc = (pages: unknown[]) => ({
+    schemaVersion: 2 as const,
+    codeGroups: [
+      {
+        itemCodes: ["S-201"],
+        pages: pages as number[],
+        relationship: "configurations" as const,
+        evidence: null,
+      },
+    ],
+  });
+
+  it("unions the staged pages with the pages the model says carry the code", () => {
+    // Page 7 staged nothing a reviewer has to rule on — it is the finishes
+    // sheet — and it is exactly the page a swatch has to be cropped from.
+    expect(pagesOfCard([pageOf("a", 5, "Raffia"), pageOf("b", 6, "Linen")], doc([5, 6, 7]))).toEqual([5, 6, 7]);
+  });
+
+  it("is the item's own page where the run predates code groups", () => {
+    expect(pagesOfCard([pageOf("a", 5, "Raffia")])).toEqual([5]);
+  });
+
+  it("drops a page a staged group does not state as a whole number", () => {
+    // Staged JSON is data from the past: `assertStagedDrawings` casts rather
+    // than validates, and a button for page "two" cannot render anything.
+    expect(pagesOfCard([pageOf("a", 5, "Raffia")], doc([5, "two", 0, null, 6.5, 8]))).toEqual([5, 8]);
+  });
+
+  it("is empty for an item whose page is unknown", () => {
+    expect(pagesOfCard([item({ id: "z", page: null, itemCodeRaw: "S-999" })])).toEqual([]);
   });
 });

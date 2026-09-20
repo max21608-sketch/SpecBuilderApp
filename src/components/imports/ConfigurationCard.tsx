@@ -107,7 +107,8 @@ export type ConfigurationCardProps = {
     entries: { label: string; item: DrawingItem; observations: DrawingObservation[] }[],
   ) => Promise<void>;
   onImage: (itemId: string, image: CroppedImage | null) => void;
-  onSwatch: (observationId: string, image: CroppedImage | null) => void;
+  /** The page is the one the crop was taken FROM — the card covers several. */
+  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
 };
 
 export default function ConfigurationCard({
@@ -423,6 +424,7 @@ export default function ConfigurationCard({
                               <ObservationRow
                                 observation={leaderRow}
                                 page={leader?.item.page ?? null}
+                                itemPages={card.pages}
                                 importId={leader ? pageImportId(leader.item.id) : importId}
                                 specFields={specFields}
                                 drafts={drafts}
@@ -722,7 +724,7 @@ function ConfigurationSection({
   onSaveObservation: (item: DrawingItem, observation: DrawingObservation, changes: Record<string, unknown>) => Promise<void>;
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
   onImage: (itemId: string, image: CroppedImage | null) => void;
-  onSwatch: (observationId: string, image: CroppedImage | null) => void;
+  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
 }) {
   const colour = colourFor(member.letter);
   const [armed, setArmed] = useState(false);
@@ -806,6 +808,7 @@ function ConfigurationSection({
                   <ObservationRow
                     observation={observation}
                     page={member.item.page}
+                    itemPages={card.pages}
                     importId={importId}
                     specFields={specFields}
                     drafts={drafts}

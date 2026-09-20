@@ -93,7 +93,7 @@ export type GeometryComparison =
   | { status: "disagree"; differences: GeometryDifference[] };
 
 export type ReviewCard<R> =
-  | { kind: "single"; id: string; page: number | null; item: DrawingItem }
+  | { kind: "single"; id: string; page: number | null; pages: number[]; item: DrawingItem }
   | {
       kind: "configurations";
       id: string;
@@ -130,9 +130,41 @@ export type ReviewCard<R> =
       codeRaw: string;
       name: string | null;
       page: number | null;
+      /** Every page this item is drawn on — see `pagesOfCard`. */
+      pages: number[];
       members: ConfigurationMember<R>[];
       geometry: GeometryComparison;
     };
+
+/**
+ * Every page of one item, in order.
+ *
+ * TWO SOURCES, UNIONED, because they answer the question differently and both
+ * are true. The staged ITEMS say which pages produced observations; the
+ * model's own CODE GROUP says which pages carry the code, including one that
+ * staged nothing a reviewer has to rule on — a finishes sheet whose chips are
+ * printed and whose figures are not. A swatch is cropped off whichever of them
+ * prints the chip, so the picker has to offer both.
+ *
+ * DEFENSIVE about what it reads. `assertStagedDrawings` casts rather than
+ * validates, so a group's `pages` is whatever was written on the day it was
+ * staged; a page that is not a positive whole number is dropped rather than
+ * offered as a button that cannot render.
+ */
+export function pagesOfCard(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): number[] {
+  const pages = new Set<number>();
+  const add = (page: unknown) => {
+    if (typeof page === "number" && Number.isInteger(page) && page > 0) pages.add(page);
+  };
+  for (const item of items) {
+    add(item.page);
+    for (const page of (doc ? codeGroupFor(doc, item.itemCodeRaw)?.pages : null) ?? []) add(page);
+  }
+  return [...pages].sort((a, b) => a - b);
+}
 
 function stateOf(item: DrawingItem): MemberState {
   if (item.observations.some((o) => o.reviewStatus === "pending")) return "pending";
@@ -297,6 +329,7 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
       codeRaw: group[0]!.itemCodeRaw ?? code,
       name: group.find((item) => item.itemNameRaw)?.itemNameRaw ?? null,
       page: group[0]!.page ?? null,
+      pages: pagesOfCard(group, doc),
       members,
       geometry: compareGeometry(members.filter((member) => member.state === "pending")),
     });
@@ -304,7 +337,7 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
 
   for (const item of items) {
     if (grouped.has(item.id)) continue;
-    cards.push({ kind: "single", id: item.id, page: item.page ?? null, item });
+    cards.push({ kind: "single", id: item.id, page: item.page ?? null, pages: pagesOfCard([item], doc), item });
   }
 
   return cards.sort(
