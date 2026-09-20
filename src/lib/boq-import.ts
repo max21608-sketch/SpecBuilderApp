@@ -30,6 +30,7 @@
 // said it on, so a reviewer can go and look.
 import type { SheetData } from "read-excel-file/node";
 import type { ItemLevel } from "@/lib/spec-vocab";
+import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
 
 export type BoqLine = {
   /** 1-based row number in the source sheet, for "go and look at line 34". */
@@ -79,6 +80,17 @@ export type StagedBoqLine = BoqLine & {
   level?: ItemLevel | null;
   levelStatus?: "suggested" | "chosen";
   levelReason?: string | null;
+  /**
+   * "This does not look like furniture" — a question, with what it was read
+   * from, stored at staging so the review screen and anything reading the
+   * staged bill see the same one. It decides NOTHING: `ignored` below is the
+   * only thing the confirm reads, and only a reviewer's click sets it.
+   *
+   * OPTIONAL, and the absence is meaningful: `undefined` is a bill staged
+   * before the question existed, and `src/lib/non-furniture-guess.ts` answers
+   * it at read time for those. `null` is the question asked and answered no.
+   */
+  nonFurnitureSuggested?: NonFurnitureGuess | null;
   ignored: boolean;
   /** The record this line continues, at the version the reviewer was shown. */
   replaces?: { recordId: string; recordVersion: number } | null;

@@ -41,6 +41,7 @@
 // turns a guess into a confident mistake.
 // ============================================================================
 import { normaliseName } from "@/lib/matching";
+import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import type { ItemLevel } from "@/lib/spec-vocab";
 
 export type LevelGuess = { level: ItemLevel; reason: string } | null;
@@ -73,7 +74,22 @@ export function guessLevelFromBill(line: {
   itemDescription?: string | null;
   productReference?: string | null;
   boqCategory?: string | null;
+  code?: string | null;
+  categoryStatus?: string | null;
 }): LevelGuess {
+  // A LINE THAT MAY NOT BE FURNITURE GETS NO LEVEL.
+  //
+  // `simple` is this function's answer to "the bill said nothing that suggests
+  // otherwise", and a packaging line says nothing about metalwork either — so
+  // `PACK-01` came out reading "Simple · guessed", which is the app asserting a
+  // complexity for a thing that is not an item. Two suggestions on one row, one
+  // of them about whether the row belongs in the bill at all: the cheaper
+  // question is answered first, and the level stays blank until it is.
+  //
+  // It is here rather than at the call site so every caller inherits it, and
+  // returning null rather than a level means nothing is stored either.
+  if (guessNonFurniture(line)) return null;
+
   // The line's own description and the client's reference for it. NOT the
   // area, and not the BOQ's category heading, which names furniture types
   // rather than complexity.

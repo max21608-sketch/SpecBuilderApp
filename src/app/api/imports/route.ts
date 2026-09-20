@@ -77,6 +77,7 @@ import { intakeSourceKind } from "@/lib/intake-source-types";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
 import { matchName, type MatchCandidate } from "@/lib/matching";
 import { guessLevelFromBill } from "@/lib/level-guess";
+import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
@@ -453,33 +454,53 @@ async function parseBoqInto(
     // is never written straight into the column the gate reads — a guessed
     // level lands in `level_suggested` unless the reviewer picks one. See
     // src/lib/level-guess.ts for what it reads, and what it refuses to.
-    const levelOf = (line: { itemDescription: string; productReference?: string | null }) => {
-      const guess = guessLevelFromBill(line);
+    type SuggestInput = { itemDescription: string; productReference?: string | null; code?: string | null };
+
+    const levelOf = (line: SuggestInput, categoryStatus: string) => {
+      const guess = guessLevelFromBill({ ...line, categoryStatus });
       return guess
         ? { level: guess.level, levelStatus: "suggested" as const, levelReason: guess.reason }
         : { level: null, levelStatus: "suggested" as const, levelReason: null };
     };
 
-    const suggest = (line: { itemDescription: string; productReference?: string | null }, index: number) => {
-      const level = levelOf(line);
+    // IS THIS A PIECE OF FURNITURE AT ALL? Asked at staging and STORED, like
+    // the category and the level, so the reviewer reads one answer rather than
+    // one per render. It is a question and nothing else: only the reviewer's
+    // click writes `ignored`, which is the only field the confirm reads.
+    //
+    // The CATEGORY is worked out first, because "nothing matched a category
+    // either" is supporting evidence the suggester is allowed to append — and
+    // never to fire on. And the level is worked out LAST, because a line this
+    // suggests is not furniture gets no level at all.
+    const suggest = (line: SuggestInput, index: number) => {
       const match = matchName(line.itemDescription, candidates);
-      if (match.status === "confident") {
-        return { index, ...line, ...level, categoryId: match.id, categoryStatus: "suggested", ignored: false };
-      }
+      const decided = (
+        categoryId: string | null,
+        categoryStatus: string,
+        extra: Record<string, unknown> = {},
+      ) => ({
+        index,
+        ...line,
+        ...levelOf(line, categoryStatus),
+        nonFurnitureSuggested: guessNonFurniture({ ...line, categoryStatus }),
+        categoryId,
+        categoryStatus,
+        ignored: false,
+        ...extra,
+      });
+
+      if (match.status === "confident") return decided(match.id, "suggested");
       if (match.status === "ambiguous") {
         // Several terms pointing at ONE category is agreement, not ambiguity.
         const ids = [...new Set(match.candidates.map((candidate) => candidate.id))];
-        if (ids.length === 1) {
-          return { index, ...line, ...level, categoryId: ids[0] ?? null, categoryStatus: "suggested", ignored: false };
-        }
-        return {
-          index, ...line, ...level, categoryId: null, categoryStatus: "ambiguous", ignored: false,
+        if (ids.length === 1) return decided(ids[0] ?? null, "suggested");
+        return decided(null, "ambiguous", {
           categoryCandidates: ids.map((id) => ({
             id, name: String(categories.find((c) => String(c.id) === id)?.name ?? id),
           })),
-        };
+        });
       }
-      return { index, ...line, ...level, categoryId: null, categoryStatus: "none", ignored: false };
+      return decided(null, "none");
     };
 
     // v2: every sheet with a header, each becoming a run at confirm. The line

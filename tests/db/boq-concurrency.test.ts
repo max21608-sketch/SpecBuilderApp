@@ -268,6 +268,41 @@ describeIfDb("BOQ confirm concurrency", () => {
     expect(runs.rows.map((row) => row.name)).toEqual(["MUR"]);
   });
 
+  it("writes no record for an ignored line, and the ignore is restorable before confirm", async () => {
+    // The write half of 1.5. The SUGGESTION is pure and tested in the pure
+    // tier; what has to be true here is that accepting one actually removes the
+    // line from the bill, and that declining it afterwards puts it back —
+    // house/conventions §5, every ignore path is reversible.
+    const { PATCH } = await import("@/app/api/imports/[id]/route");
+    const runId = await stageImport("__QAN", 0, [sheet("__QAN", 3, "__QA IGNORE")]);
+    const setIgnored = (index: number, ignored: boolean) =>
+      PATCH(
+        new Request("http://localhost/test", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sheetIndex: 0, index, ignored }),
+        }),
+        params(runId),
+      );
+
+    // Two ignored, then one of them put back: two lines should import.
+    expect((await setIgnored(0, true)).status).toBe(200);
+    expect((await setIgnored(1, true)).status).toBe(200);
+    expect((await setIgnored(1, false)).status).toBe(200);
+
+    expect((await confirm(runId)).status).toBe(200);
+    const imported = await client.query(
+      `select r.item_description from spec_records r
+       join spec_runs q on q.id = r.run_id
+       where q.source_import_id = $1 order by r.record_no`,
+      [runId],
+    );
+    expect(imported.rows.map((row) => row.item_description)).toEqual([
+      "__QA item __QAN2",
+      "__QA item __QAN3",
+    ]);
+  });
+
   it("creates ONE RUN PER SHEET, and files each sheet's records under its own", async () => {
     // The bug 0007 exists for: a three-tab bill imported as one tab, silently.
     const runId = await stageImport("__QAG", 0, [

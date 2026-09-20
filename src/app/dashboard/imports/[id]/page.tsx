@@ -29,6 +29,10 @@ import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
 import { describeHeader } from "@/lib/boq-import";
+// Pure: the "this may not be furniture" question, and the set the batch action
+// acts on. The page NEVER decides either for itself — one function behind the
+// count on the button and the loop behind it.
+import { linesToIgnore, nonFurnitureOf, type NonFurnitureGuess } from "@/lib/non-furniture-guess";
 import { formatDay } from "@/lib/format-day";
 import PageBody from "@/components/ui/PageBody";
 import Tabs from "@/components/ui/Tabs";
@@ -43,6 +47,9 @@ type Line = {
   // Guessed at parse time, corrected here. `chosen` is what makes it a
   // decision the quote gate may read; see db/migrations/0025.
   level?: string | null; levelStatus?: string; levelReason?: string | null;
+  // "This may not be furniture", asked at staging. ABSENT on a bill staged
+  // before the question existed, which `nonFurnitureOf` answers at read time.
+  nonFurnitureSuggested?: NonFurnitureGuess | null;
 };
 
 function isDuplicated(sheet: { lines: Line[] }, line: Line): boolean {
@@ -120,6 +127,18 @@ function LevelCell({
 }) {
   const [editing, setEditing] = useState(false);
   const chosen = line.levelStatus === "chosen" && line.level;
+  /**
+   * A LINE THAT MAY NOT BE FURNITURE IS NOT OFFERED A LEVEL TO ACCEPT.
+   *
+   * `guessLevelFromBill` stopped guessing one the day this question was added,
+   * so nothing is stored on a bill staged since — but the staged JSON is data
+   * from the past and every bill staged before it carries `Simple · the bill
+   * names no metalwork` on its packaging line. Reading it here suppresses the
+   * SUGGESTION on both, without touching a level somebody actually chose:
+   * accepting a guess is a decision, and the cheaper decision — whether the row
+   * belongs in the bill at all — has not been taken yet.
+   */
+  const notFurniture = nonFurnitureOf(line) !== null;
 
   if (chosen && !editing) {
     return (
@@ -134,7 +153,7 @@ function LevelCell({
     );
   }
 
-  if (!editing && line.level && isItemLevel(line.level)) {
+  if (!editing && !notFurniture && line.level && isItemLevel(line.level)) {
     return (
       <SuggestButton
         value={ITEM_LEVEL_LABELS[line.level]}
@@ -150,7 +169,7 @@ function LevelCell({
   return (
     <>
       <select
-        value={line.level ?? ""}
+        value={notFurniture && line.levelStatus !== "chosen" ? "" : (line.level ?? "")}
         disabled={!editable}
         onChange={(event) => {
           onSet(event.target.value || null);
@@ -165,7 +184,11 @@ function LevelCell({
           </option>
         ))}
       </select>
-      {!line.level && <span className="mt-1 block text-[10.5px] text-neutral-500">nothing to read it from</span>}
+      {notFurniture ? (
+        <span className="mt-1 block text-[10.5px] text-neutral-500">not furniture?</span>
+      ) : (
+        !line.level && <span className="mt-1 block text-[10.5px] text-neutral-500">nothing to read it from</span>
+      )}
     </>
   );
 }
@@ -351,6 +374,39 @@ export default function ReviewImportPage() {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ sheetIndex, index: line.index, level: line.level }),
+        });
+        if (!res.ok) {
+          setError(res.error);
+          break;
+        }
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Ignore every line the app has asked about as packaging or delivery.
+   *
+   * The SET comes from `linesToIgnore`, which is what the count on the button
+   * was computed from — one reading, so the control cannot ignore something its
+   * own label did not count. Sequential PATCHes and ONE reload, for the reason
+   * `acceptAllLevels` does it that way: the staged bill's route is per line,
+   * and reloading after each would re-render the table forty times.
+   *
+   * Every one of them is reversible from the Include checkbox, which is what
+   * makes a batch action acceptable here at all (house/conventions §5).
+   */
+  async function ignoreAllSuggested(sheetIndex: number, lines: Line[]) {
+    setBusy(true);
+    setError(null);
+    try {
+      for (const line of lines) {
+        const res = await apiFetch(`/api/imports/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sheetIndex, index: line.index, ignored: true }),
         });
         if (!res.ok) {
           setError(res.error);
@@ -602,8 +658,18 @@ export default function ReviewImportPage() {
           const reconciliation = data.reconciliation[sheetIndex] ?? null;
           const pairingFor = (index: number) => reconciliation?.lines.find((line) => line.index === index) ?? null;
           const live = sheet.lines.filter((line) => !line.ignored);
-          const noLevel = live.filter((line) => !line.level).length;
-          const suggested = live.filter((line) => line.level && line.levelStatus !== "chosen");
+          // The set *Ignore all suggested* acts on, from the one function the
+          // per-row buttons read — so the count on the control is exactly what
+          // the control does.
+          const notFurniture = linesToIgnore(live);
+          const notFurnitureIds = new Set(notFurniture.map((line) => line.index));
+          const noLevel = live.filter((line) => !line.level && !notFurnitureIds.has(line.index)).length;
+          // A line asked about as packaging is not also offered a level to
+          // accept: its cell prints "not furniture?" instead, so counting it
+          // here would put a number on the button the table does not show.
+          const suggested = live.filter(
+            (line) => line.level && line.levelStatus !== "chosen" && !notFurnitureIds.has(line.index),
+          );
           const duplicates = duplicateGroups(sheet);
           const columns = reconciliation ? 9 : 8;
           return (
@@ -748,16 +814,37 @@ export default function ReviewImportPage() {
                           {suggested.length} {suggested.length === 1 ? "has" : "have"} a suggested level
                         </Chip>
                       )}
+                      {notFurniture.length > 0 && (
+                        <Chip tone="info">
+                          {notFurniture.length} may not be furniture
+                        </Chip>
+                      )}
                     </>
                   }
                   actions={
-                    suggested.length > 0 && run.status === "parsed" ? (
-                      <SuggestButton
-                        value={`Accept all ${suggested.length}`}
-                        evidence="each row says what it was read from"
-                        busy={busy}
-                        onAccept={() => void acceptAllLevels(sheetIndex, suggested)}
-                      />
+                    run.status === "parsed" && (notFurniture.length > 0 || suggested.length > 0) ? (
+                      <span className="inline-flex flex-wrap items-center gap-4">
+                        {/* FIRST, because it is the cheaper decision: whether a
+                            row belongs in the bill at all comes before how
+                            complex it is. Neither is a `primary` — the screen's
+                            one primary is Confirm, in the header. */}
+                        {notFurniture.length > 0 && (
+                          <SuggestButton
+                            value={`Ignore all ${notFurniture.length} suggested`}
+                            evidence="each row says what it was read from · the Include box puts one back"
+                            busy={busy}
+                            onAccept={() => void ignoreAllSuggested(sheetIndex, notFurniture)}
+                          />
+                        )}
+                        {suggested.length > 0 && (
+                          <SuggestButton
+                            value={`Accept all ${suggested.length}`}
+                            evidence="each row says what it was read from"
+                            busy={busy}
+                            onAccept={() => void acceptAllLevels(sheetIndex, suggested)}
+                          />
+                        )}
+                      </span>
                     ) : undefined
                   }
                 >
@@ -776,7 +863,10 @@ export default function ReviewImportPage() {
                           <Tip>A line with no category still imports — it simply has no checklist yet.</Tip>
                         </Th>
                         <Th className="w-[170px]">Level</Th>
-                        <Th className="w-[80px]">Include</Th>
+                        {/* Wide enough for the "Not furniture?" question and
+                            its evidence, which live under the checkbox they
+                            act on. */}
+                        <Th className="w-[190px]">Include</Th>
                       </tr>
                     </thead>
                     <tbody>
@@ -908,6 +998,14 @@ export default function ReviewImportPage() {
                                 onSet={(level) => void setLine(sheetIndex, line.index, { level })}
                               />
                             </Td>
+                            {/* INCLUDE, AND THE ONE QUESTION THAT ASKS TO CHANGE
+                                IT. The suggestion sits in this cell rather than
+                                beside the description, because what it acts on
+                                is the checkbox under it: a reviewer who accepts
+                                it and changes their mind can see the way back
+                                without moving their eyes. Nothing is ignored on
+                                its own — this is the only control that does it,
+                                and the checkbox undoes it. */}
                             <Td>
                               <input
                                 type="checkbox"
@@ -916,6 +1014,19 @@ export default function ReviewImportPage() {
                                 aria-label={`Include row ${line.lineNo}`}
                                 onChange={() => setLine(sheetIndex, line.index, { ignored: !line.ignored })}
                               />
+                              {(() => {
+                                const guess = nonFurnitureOf(line);
+                                if (!guess || line.ignored || run.status !== "parsed") return null;
+                                return (
+                                  <SuggestButton
+                                    value="Not furniture"
+                                    evidence={guess.reason}
+                                    busy={busy}
+                                    onAccept={() => void setLine(sheetIndex, line.index, { ignored: true })}
+                                    className="mt-1.5"
+                                  />
+                                );
+                              })()}
                             </Td>
                           </Tr>
                         );
