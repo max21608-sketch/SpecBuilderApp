@@ -63,6 +63,9 @@ import { letterColour } from "@/components/records/letter-colours";
 import { ANSWER_STATE_LABELS, ITEM_LEVEL_LABELS, type AnswerState, type ItemLevel } from "@/lib/spec-vocab";
 import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
 import { selectionSummary } from "@/lib/chase-selection";
+import { areaOptions, matchesArea } from "@/lib/area-filter";
+import AreaSelect from "@/components/ui/AreaSelect";
+import { useUrlTab } from "@/lib/use-url-tab";
 import { formatDay } from "@/lib/format-day";
 import {
   allQuestions,
@@ -80,6 +83,12 @@ export type TableQuestion = GroupableQuestion & {
   waiting: { draftId: string; sentAt: string | null; contactName: string } | null;
   contactId: string;
   contactName: string;
+  /**
+   * The BOQ's fourth column, carried through from `/api/drafts` for the area
+   * filter and the search. Display only: it decides nothing about what may be
+   * asked, and no route ever reads it back.
+   */
+  area: string | null;
 };
 
 /** What this app guessed a line's level is, and what it read to say so. */
@@ -129,6 +138,25 @@ const COLUMNS = 8;
 
 /** How many questions a line shows before the fold. */
 const FOLD_AT = 3;
+
+/**
+ * The area a furniture line sits in.
+ *
+ * A line has no area of its own — `area` is a column on the RECORD, and a
+ * line is a record plus its finish options. The bill line's own row answers
+ * first, which is the rule `groupIntoLines` already applies to the code and
+ * the quantity; a finish option copies its parent's area when it is created,
+ * so it answers only where the bill line contributed no question at all.
+ */
+function lineArea(line: FurnitureLine<TableQuestion>): string | null {
+  const own = line.own.find((question) => (question.area ?? "").trim() !== "");
+  if (own) return own.area;
+  for (const option of line.options) {
+    const hit = option.questions.find((question) => (question.area ?? "").trim() !== "");
+    if (hit) return hit.area;
+  }
+  return null;
+}
 
 /** TGQ first, then the rest, then the commercial checklist. The fold reads down. */
 function byTier(questions: TableQuestion[]): TableQuestion[] {
@@ -205,8 +233,15 @@ export default function ChaseQuestionTable({
   const narrowed = Boolean(filters.text) || Boolean(filters.state) || tierValue !== "all";
 
   const text = filters.text.trim().toLowerCase();
+  // The AREA is in the search text as well as in its own select. That is what
+  // makes 35 areas findable without a custom combobox: somebody types
+  // "dressing" and the list narrows, exactly as the phase table has always
+  // done with `record.area`.
   const lineMatchesText = (line: FurnitureLine<TableQuestion>) =>
-    !text || `${line.code} ${line.itemDescription} ${line.recordLabel}`.toLowerCase().includes(text);
+    !text ||
+    `${line.code} ${line.itemDescription} ${line.recordLabel} ${lineArea(line) ?? ""}`
+      .toLowerCase()
+      .includes(text);
 
   function visible(line: FurnitureLine<TableQuestion>, list: TableQuestion[]): TableQuestion[] {
     const lineHit = lineMatchesText(line);
@@ -222,12 +257,47 @@ export default function ChaseQuestionTable({
     });
   }
 
-  function linePasses(line: FurnitureLine<TableQuestion>): boolean {
+  function linePassesExceptArea(line: FurnitureLine<TableQuestion>): boolean {
     if (contactValue && !line.contactIds.includes(contactValue)) return false;
     if (filters.runId && line.runId !== filters.runId) return false;
     if (filters.level === "none" && line.level !== null) return false;
     if (filters.level && filters.level !== "none" && line.level !== filters.level) return false;
     return true;
+  }
+
+  /**
+   * The areas on offer, counted over the lines the OTHER line filters leave.
+   *
+   * Not over everything loaded: this screen's primary axis is the contact, in
+   * the header band, and an option reading "Dressing area (12)" that lists
+   * nothing because all twelve belong to another designer is a count nobody
+   * can reach. Counted in LINES, because the sentence beside it counts lines.
+   */
+  const areas = useMemo(
+    () => areaOptions(lines.filter(linePassesExceptArea).map((line) => ({ area: lineArea(line) }))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lines, contactValue, filters.runId, filters.level],
+  );
+
+  /**
+   * WHICH AREA IS CHOSEN, AND IT LIVES IN THE URL.
+   *
+   * `useUrlTab`'s rule is what makes this safe: until the inventory loads
+   * `areas` is empty, `resolve` answers null, every area is listed and the URL
+   * is left alone rather than corrected out from under a pasted link.
+   */
+  const [areaValue, setAreaValue] = useUrlTab<string>({
+    param: "area",
+    fallback: "",
+    resolve: (raw) => (raw && areas.some((option) => option.key === raw) ? raw : null),
+  });
+
+  function linePasses(line: FurnitureLine<TableQuestion>): boolean {
+    if (!linePassesExceptArea(line)) return false;
+    // A filter narrows what is LISTED. The line's own two counts are untouched
+    // by it, and a ticked question on a line the area hides is still asked —
+    // the footer says how many, because `shown` is what it counts against.
+    return matchesArea({ area: lineArea(line) }, areaValue);
   }
 
   /** Each line with what the filters leave of it. Computed once per render. */
@@ -252,7 +322,7 @@ export default function ChaseQuestionTable({
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, filters, tierValue, contactValue, waitingValue]);
+  }, [lines, filters, tierValue, contactValue, waitingValue, areaValue]);
 
   const everything = useMemo(() => lines.flatMap((line) => allQuestions(line)), [lines]);
   const selectedQuestions = everything.filter((question) => selected.has(key(question.recordId, question.requirementId)));
@@ -288,7 +358,9 @@ export default function ChaseQuestionTable({
 
   const selectShown = () => onToggleMany(shown.flatMap((entry) => entry.visibleAll), true);
   const clearAll = () => onToggleMany(everything, false);
-  const filtering = Boolean(filters.text || filters.runId || filters.level || filters.state || tierValue !== "all");
+  const filtering = Boolean(
+    filters.text || filters.runId || filters.level || filters.state || areaValue || tierValue !== "all",
+  );
 
   return (
     <>
@@ -315,6 +387,11 @@ export default function ChaseQuestionTable({
             </option>
           ))}
         </select>
+        {/* THE AREA, beside the phase. Asked for on 2026-09-18 — "if you could
+            filter by that, that'd be quite handy". It narrows the LINES it
+            lists and nothing else: the ticks stay, and the footer says how
+            many of them this has taken off the screen. */}
+        <AreaSelect options={areas} value={areaValue} onChange={setAreaValue} />
         {/* THE ACTIVE TILE, REPEATED AS A REMOVABLE CHIP. A filter you cannot
             see is a filter you forget you set — and this one is set from a tile
             at the top of the page, which scrolls away. */}
@@ -396,6 +473,7 @@ export default function ChaseQuestionTable({
             onClick={() => {
               setFilters(EMPTY);
               setTierValue("all");
+              setAreaValue("");
             }}
           >
             Clear filters

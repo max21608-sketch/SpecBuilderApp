@@ -47,6 +47,9 @@ import { unallocatedQty } from "@/lib/record-variants";
 import { GATE_SHORT_LABELS, NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
 import type { GateSummaryEntry } from "@/lib/gate-load";
 import AddItem from "@/components/records/AddItem";
+import AreaSelect from "@/components/ui/AreaSelect";
+import { areaOptions, matchesArea } from "@/lib/area-filter";
+import { useUrlTab } from "@/lib/use-url-tab";
 import { letterColour } from "@/components/records/letter-colours";
 import {
   SPECS_AGREED_LABEL,
@@ -370,6 +373,25 @@ export default function SpecTable({
     ].sort();
   }, [records]);
 
+  /** The areas this phase's own records carry, folded for grouping only. */
+  const areas = useMemo(() => areaOptions(records ?? []), [records]);
+
+  /**
+   * WHICH AREA IS CHOSEN, AND IT LIVES IN THE URL.
+   *
+   * A 300-line phase narrowed to one floor is a screen somebody links to, and
+   * the tab beside it is already in the URL. `useUrlTab`'s own rule is what
+   * makes it safe here: while the records are still loading `areas` is empty,
+   * `resolve` answers null, the fallback renders EVERY area, and the URL is
+   * left exactly as it is — so a pasted `?area=` is not corrected a quarter of
+   * a second before it becomes valid.
+   */
+  const [area, setArea] = useUrlTab<string>({
+    param: "area",
+    fallback: "",
+    resolve: (raw) => (raw && areas.some((option) => option.key === raw) ? raw : null),
+  });
+
   if (error) return <p className="text-sm text-red-700">{error}</p>;
   if (!records) return <Spinner label="Loading spec records" />;
 
@@ -421,6 +443,10 @@ export default function SpecTable({
     }
     if (category && record.category_name !== category) return false;
     if (designer && (record.designer ?? "").trim() !== designer) return false;
+    // The area narrows the LIST. The tiles above and the tally reported up to
+    // the header band are computed over every record and are untouched by it:
+    // narrowing to one floor must never be able to make a phase look finished.
+    if (!matchesArea(record, area)) return false;
     switch (focus) {
       case "tgq":
         return (record.to_quote_outstanding ?? 0) > 0;
@@ -436,7 +462,7 @@ export default function SpecTable({
         return true;
     }
   });
-  const narrowed = focus !== null || term !== "" || category !== "" || designer !== "";
+  const narrowed = focus !== null || term !== "" || category !== "" || designer !== "" || area !== "";
 
   return (
     <>
@@ -606,6 +632,12 @@ export default function SpecTable({
                 </option>
               ))}
             </select>
+            {/* THE AREA. Asked for on 2026-09-18 — "if you could filter by
+                that, that'd be quite handy" — and it sits beside the other two
+                closed lists this phase's own rows offer. The search box to its
+                left still matches the area text, which is what makes 35 of
+                them findable without a combobox. */}
+            <AreaSelect options={areas} value={area} onChange={setArea} />
             {focus !== null && (
               <button type="button" onClick={() => setFocus(null)} className="inline-flex">
                 <Chip tone={focus === "quotable" ? "good" : focus === "tgq" ? "danger" : "warn"}>
