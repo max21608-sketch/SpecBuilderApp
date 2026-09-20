@@ -67,7 +67,17 @@ have completed the whole of stage 1"), so far:**
 | 1.11 follow-up: the step only in *Review complete* | `9b626eb` | 1 component test | S-100 review while open: no "Review 9 documents" beside Confirm | `b76cfb0` on staging, read back |
 | **1.9** step one: measure | `7b9ee6e` | 12 pure tests; `measure:drawings` gains the item-pictures block | sandbox: 100 items, **58 report a region, 42 none, 162 regions all in bounds, 0 faulty**. Conclusion: the crop is exonerated; the same file read twice gives opposite answers and two SPEC-346 sheets never report a region, so the fix is the PROMPT and it lands with the finishes-schedule re-read. No code changed; the whole-page proposal stands (`found-in-use.md`, finding 6) | `b76cfb0` |
 
-**Still outstanding in 1a:** the first-session script and the 300-line fixture (the verifier, in
+**Stage 1a CLOSED on staging, 2026-09-20.** The first-session script
+(`.claude/skills/verify/files/first-session.mjs`, the verifier's `7af4e56` +
+`4bbcbae`) ran against the `b76cfb0` deployment: **PASS 20 · FAIL 0 · SKIP 8**,
+the skips being 1.13 (written, to turn on), 1.15 (on staging, skip stale), the
+1b items, the two clone-has-no-preview checks and the 409 row-unfreeze half.
+The `__QA` project it made was swept from its own manifest. Remaining and
+Max's: apply 0033 to pilot, promote by the checklist, run the script on pilot,
+send the 0.6 message. The close's per-row evidence is in the plan's stage
+brief.
+
+**Still outstanding in 1a (Max's):** the first-session script and the 300-line fixture (the verifier, in
 progress), the pilot's console half (Max), the hand-over message (Max). Human
 acceptance outstanding on every item.
 
