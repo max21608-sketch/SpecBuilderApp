@@ -89,7 +89,7 @@ export async function openSession({
       // `waitForURL` is even registered, and then it waits for one that has
       // already happened.
       await Promise.all([
-        page.waitForURL(/\/dashboard/, { timeout: 20000 }),
+        page.waitForURL(/\/dashboard/, { timeout: 45000 }),
         page.click("button[type=submit]"),
       ]);
       signedIn = true;

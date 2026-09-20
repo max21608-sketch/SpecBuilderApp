@@ -135,6 +135,65 @@ function skip(item, what, why) {
 }
 
 /**
+ * Wait for a screen to have actually rendered.
+ *
+ * A dev server compiles a route on its first hit, so a settle long enough on a
+ * warm one leaves an assertion reading a half-painted page — which is reported
+ * as a defect in a screen that works. Every check that reads text waits for
+ * something only the finished screen carries.
+ */
+const PATIENCE = Number(process.env.WALK_PATIENCE ?? 60000);
+
+/**
+ * PRESS UNTIL IT OPENS.
+ *
+ * A click that lands before React has attached its handler does NOTHING — the
+ * markup is painted by the server, so the control is there, visible and inert.
+ * Under load that window is seconds long, and the walk then reports "the panel
+ * carries no reason field" about a panel that simply never opened. The same
+ * race as the sign-in form, in every disclosure on every screen.
+ */
+async function press(control, opened, attempts = 6) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await control.click({ timeout: Math.min(PATIENCE, 30000) }).catch(() => {});
+    for (let waited = 0; waited < 4000; waited += 500) {
+      if (await opened()) return true;
+      await page.waitForTimeout(500);
+    }
+  }
+  return false;
+}
+
+async function ready(pattern, timeout = PATIENCE) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const text = await page.locator("body").innerText().catch(() => "");
+    if (pattern.test(text)) return text;
+    await page.waitForTimeout(1000);
+  }
+  throw new Error(`the screen never rendered ${pattern}`);
+}
+
+/**
+ * Wait for a screen to stop SAYING it is loading.
+ *
+ * `ready` waits for something to appear; this waits for the spinners to go.
+ * The project screen paints its header, its tabs and its phase tally before
+ * the records arrive, so a pattern that matches the shell is satisfied while
+ * the table still reads "Loading spec records" — and the assertion under it
+ * reports an empty table on a screen that was two seconds from showing one.
+ */
+async function settled(timeout = PATIENCE) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const text = await page.locator("body").innerText().catch(() => "");
+    if (text && !/Loading (project|spec records|records)/i.test(text)) return text;
+    await page.waitForTimeout(1000);
+  }
+  throw new Error("the screen never stopped loading");
+}
+
+/**
  * Open a dashboard page and let it settle.
  *
  * NOT `networkidle`: this app's dashboard pages stream RSC payloads and poll,
@@ -142,6 +201,9 @@ function skip(item, what, why) {
  * looking exactly like a hung page. `domcontentloaded` plus a settle is what
  * the screens actually need, and each assertion waits for its own element.
  */
+// `WALK_PATIENCE` raises every navigation and every wait-for-render at once.
+// A development machine under load answers a first-hit route in tens of
+// seconds, and a walk that gives up there reports a working screen as broken.
 async function open(url, settle = 1200) {
   // RETRIED, AND PATIENT. A dev server compiles a route on its first hit and
   // can exceed the default navigation timeout under load — the skill's
@@ -150,7 +212,7 @@ async function open(url, settle = 1200) {
   // a working screen as broken.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: PATIENCE });
       break;
     } catch (error) {
       if (attempt === 2) throw error;
@@ -214,8 +276,18 @@ const writeManifest = () => writeFileSync(manifestPath, `${JSON.stringify(manife
 // `qa-demo-project.ts` records the same failure, where a whole build was lost
 // to `read ETIMEDOUT` on the closing query. Without the handler that arrives as
 // an unhandled 'error' event and kills the process mid-walk, after the writes.
-const client = new pg.Client({ connectionString: databaseUrl, keepAlive: true });
-client.on("error", (error) => console.log(`  note  database connection dropped: ${error.message}`));
+function connect() {
+  const next = new pg.Client({ connectionString: databaseUrl, keepAlive: true });
+  // ATTACHED TO EVERY CLIENT, INCLUDING THE REPLACEMENTS. The first version
+  // replaced the client in place with `Object.assign`, which overwrote the
+  // listener along with everything else — so the SECOND drop was an unhandled
+  // 'error' event that killed the walk after step 9, past every write and
+  // before the cleanup.
+  next.on("error", (error) => console.log(`  note  database connection dropped: ${error.message}`));
+  return next;
+}
+
+let client = connect();
 await client.connect();
 
 /** Re-connect if the socket died while the browser was working. */
@@ -225,7 +297,7 @@ async function query(text, params = []) {
   } catch (error) {
     if (!/ETIMEDOUT|terminat|Connection terminated|socket/i.test(String(error))) throw error;
     await client.end().catch(() => {});
-    Object.assign(client, new pg.Client({ connectionString: databaseUrl, keepAlive: true }));
+    client = connect();
     await client.connect();
     return client.query(text, params);
   }
@@ -374,7 +446,7 @@ try {
   // enough on a fast machine reads as "the screen is empty" on a slow one —
   // which is a failure report about the walk rather than about the app.
   const billConfirm = page.locator("button", { hasText: /^Confirm ·/ }).first();
-  await billConfirm.waitFor({ timeout: 60000 });
+  await billConfirm.waitFor({ timeout: PATIENCE });
 
   await check("1.1", "the bill review says PHASE, never run", async () => {
     const text = await page.locator("body").innerText();
@@ -395,7 +467,47 @@ try {
     expect(!/\bskipped\b/i.test(text), "the review still calls the rows above the header skipped");
     return `${header[0]} ${items[0]}`;
   });
-  skip("1.5", "PACK and DEL are suggested as non-furniture and can be ignored in one press", "not briefed in this stage");
+  await check("1.5", "a packaging line is a QUESTION, and one press answers all of them", async () => {
+    // `Include row 7` is an aria-label and never appears in `innerText`.
+    // Waiting for it waits for ever on a screen that has already painted.
+    const text = await ready(/SX11A/);
+    // A SUGGESTION WITH ITS EVIDENCE, never a decision: `PACK` and `DEL` are
+    // not furniture and the app may say so, but ignoring a bill line is a
+    // person's act. `SuggestButton` refuses to render without the evidence.
+    expect(/Not furniture/.test(text), "neither non-furniture line is questioned");
+    // The evidence is the app's own words — "the code starts PACK", "the
+    // description says “delivery”" — and the assertion is that BOTH lines carry
+    // one, not that it is phrased a particular way.
+    expect(
+      /the code starts|the description says/i.test(text),
+      "the suggestions do not name what they read",
+    );
+
+    const all = page.getByRole("button", { name: /^Ignore all 2 suggested/ }).first();
+    expect(await all.count(), `no "Ignore all 2 suggested" on the sheet: the count is what the control does`);
+
+    const countOn = async () => {
+      const label = await billConfirm.innerText();
+      return Number(/creates (\d+) record/.exec(label)?.[1] ?? 0);
+    };
+    const before = await countOn();
+    expect(before === FIXTURE_BILL_COUNTS.total, `the confirm offered ${before} records, not ${FIXTURE_BILL_COUNTS.total}`);
+
+    expect(await press(all, async () => (await countOn()) === before - 2), "Ignore all suggested changed no count");
+    // EXACTLY THOSE TWO. A control that ignored a line nobody asked about would
+    // take a real item out of the bill, and nothing downstream would question it.
+    const ignoredText = await page.locator("body").innerText();
+    expect(!/Not furniture/.test(ignoredText), "a line is still being asked about after ignoring all suggested");
+
+    // AND IT IS REVERSIBLE BEFORE THE CONFIRM — house §5: every ignore path is.
+    const include = page.locator('input[type=checkbox][aria-label^="Include row"]:not(:checked)').first();
+    expect(await include.count(), "the ignored rows cannot be found to put back");
+    expect(await press(include, async () => (await countOn()) === before - 1), "putting a row back did not restore it");
+    // Ignored again, so the confirm below counts what this walk expects.
+    const backOut = page.getByRole("button", { name: /^Ignore all 1 suggested/ }).first();
+    if (await backOut.count()) await press(backOut, async () => (await countOn()) === before - 2);
+    return `${before} → ${await countOn()} records, and back again`;
+  });
 
   await check("7.4", "confirm creates a record per line per phase", async () => {
     const label = await billConfirm.innerText();
@@ -408,10 +520,10 @@ try {
       await page.waitForTimeout(2000);
       ({ rows } = await query(`select count(*)::int as n from spec_records where project_id = $1`, [manifest.projectId]));
     }
-    expect(
-      rows[0].n === FIXTURE_BILL_COUNTS.total,
-      `expected ${FIXTURE_BILL_COUNTS.total} records from ${FIXTURE_BILL_COUNTS.tabs} tabs, found ${rows[0].n}`,
-    );
+    // TWO FEWER THAN THE BILL'S LINES: `PACK` and `DEL` were ignored above, on
+    // this sheet, as the reviewer's own act.
+    const expected = FIXTURE_BILL_COUNTS.total - 2;
+    expect(rows[0].n === expected, `expected ${expected} records after ignoring the two non-furniture lines, found ${rows[0].n}`);
     return `${label.trim()} → ${rows[0].n} records`;
   });
 
@@ -486,9 +598,46 @@ try {
   say(`   cloned ${SOURCE_RUN} → ${clonedRunId}`);
   note("the copy points at the ORIGINAL project's blob, so /api/imports/<id>/source 404s there and no page preview renders — by design (verify skill)");
 
-  await open(`${BASE}/dashboard/projects/${manifest.projectId}/intake/${manifest.batchId}`);
-  skip("1.6", "one summary line per document, whatever the pack size", "not briefed in this stage");
-  skip("1.7", "the three review states read as states, not as a status column", "not briefed in this stage");
+  await open(`${BASE}/dashboard/projects/${manifest.projectId}/intake/${manifest.batchId}`, 0);
+  const packText = await ready(/document/);
+
+  await check("1.6", "the pack says what it adds up to in ONE line", async () => {
+    // Max, unprompted: a yellow notice per document is a wall at eleven and a
+    // screen nobody can read at thirty. One sentence totals the set; what to do
+    // about a single document is on that document's own row.
+    const documents = await query(
+      `select count(*)::int as n from intake_runs where project_id = $1 and batch_id = $2`,
+      [manifest.projectId, manifest.batchId],
+    );
+    const total = documents.rows[0].n;
+    // ONE LINE FOR THE PACK. A sentence about a SUBSET — the drawings link's
+    // "1 document · 0 reviewed, 1 waiting for you" — is a different statement
+    // about a different set, so the test is that the pack's own total is said
+    // once, not that the word "document" appears once.
+    const lines = packText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => new RegExp(`^${total} documents? · `).test(line));
+    expect(lines.length === 1, `expected one summary line for ${total} documents, found ${lines.length}: ${lines.join(" | ")}`);
+    return lines[0];
+  });
+
+  await check("1.7", "a document says how much is left, rather than being ticked", async () => {
+    // The chip is the OUTSTANDING count while anything is pending, because
+    // "Ready to review" is the same word for six rows and for none — and a
+    // completion tick beside a document with proposals waiting is the tick
+    // Matthew read as "done".
+    // THE DRAWINGS DOCUMENT'S OWN ROW. The bill beside it IS reviewed and
+    // legitimately reads Review complete, so asserting over the whole page
+    // would fail on a screen that is telling the truth about both.
+    const row = page.locator("tr, li", { hasText: staged.filename }).first();
+    expect(await row.count(), `the pack screen does not list ${staged.filename}`);
+    const rowText = await row.innerText();
+    const left = /(\d+) to review/.exec(rowText);
+    expect(left, `the drawings row says nothing about what is left: ${rowText.replace(/\s+/g, " ").slice(0, 160)}`);
+    expect(!/Review complete/.test(rowText), "the drawings row reads Review complete with proposals still pending");
+    return `${left[0]} on ${staged.filename}`;
+  });
 
   // =========================================================================
   // 6. Review a drawings card.
@@ -498,7 +647,7 @@ try {
   // `Confirm 12 specs` on an item card, `Confirm S-100 (2 configurations)` on a
   // configuration card — one card per CODE, which is what this run stages.
   let cardConfirm = page.getByRole("button", { name: /^Confirm\b/ }).last();
-  await cardConfirm.waitFor({ timeout: 60000 }).catch(() => {});
+  await cardConfirm.waitFor({ timeout: PATIENCE }).catch(() => {});
 
   await check("1.8", "the TBC marker is a STATE and the fabric is the value", async () => {
     const text = await page.locator("body").innerText();
@@ -515,7 +664,76 @@ try {
 
   skip("1.9", "the item picture crops or says why it could not", "no page preview on a clone — the blob is the source project's");
   skip("1.10", "the swatch picker reaches page 2", "no page preview on a clone — the blob is the source project's");
-  skip("1.15", "a level can be accepted from the drawings card, as a button", "not on staging yet");
+  await check("1.15", "a level is set from the card by a BUTTON, and the click says how far it reaches", async () => {
+    const text = await ready(/sets the level on \d+ records|Set a level…|Change…/);
+    const panel = page.locator("div", { hasText: /sets the level on \d+ records/ }).last();
+    const fanOut = /sets the level on (\d+) records/.exec(text);
+    expect(fanOut, "the card does not say how many records a level would reach");
+    // A PRE-FILLED SELECT CANNOT BE THE ACCEPT CONTROL: choosing the value it
+    // already shows fires no change event, so the one action recording a
+    // person's agreement would do nothing. Every choice is its own button.
+    const picker = page.getByRole("button", { name: /^(Change…|Set a level…|Set another level…)$/ }).first();
+    expect(await picker.count(), "no level control on the drawings card");
+    const complex = page.getByRole("button", { name: "Complex", exact: true }).first();
+    expect(await press(picker, () => complex.count()), "the level picker never opened");
+    expect((await panel.locator("select").count()) === 0, "the level panel offers a select");
+
+    const levelled = async () => {
+      const { rows } = await query(
+        `select count(*)::int as n from spec_records where project_id = $1 and level = 'complex'`,
+        [manifest.projectId],
+      );
+      return rows[0].n;
+    };
+    // PRESSED ONCE. `press` retries, which is right for a disclosure and wrong
+    // for a write: a second click is a second `level_set` change set, and the
+    // count of those is the thing being asserted. The button is hydrated by
+    // now — the picker opening is the proof — so one click is enough, and what
+    // follows is a wait rather than a retry.
+    // A moment for the re-rendered panel to hydrate: the buttons are painted by
+    // the state flip the picker just caused, and the click that opened the
+    // picker proves the PICKER was live, not these.
+    await page.waitForTimeout(1500);
+    // PRESSED AGAIN ONLY IF THE FIRST PRESS LEFT NO TRACE. A retry that fires
+    // over a write is a second `level_set` change set, and one change set per
+    // click is the thing being asserted — so the retry is gated on the CHANGE
+    // SET being absent, which a landed click always leaves behind even while
+    // the level is still being written.
+    const traced = async () => {
+      const { rows } = await query(
+        `select count(*)::int as n from change_sets where project_id = $1 and kind = 'level_set'`,
+        [manifest.projectId],
+      );
+      return rows[0].n;
+    };
+    let levels = 0;
+    for (let attempt = 0; attempt < 3 && levels === 0; attempt += 1) {
+      if ((await traced()) > 0 && attempt > 0) break;
+      await complex.click().catch(() => {});
+      for (let waited = 0; waited < 45000 && levels === 0; waited += 1000) {
+        await page.waitForTimeout(1000);
+        levels = await levelled();
+      }
+    }
+    expect(levels > 0, "pressing Complex wrote no level");
+    const written = await query(
+      `select count(*)::int as n from spec_records where project_id = $1 and level = 'complex'`,
+      [manifest.projectId],
+    );
+    expect(
+      written.rows[0].n === Number(fanOut[1]),
+      `the card said ${fanOut[1]} records and ${written.rows[0].n} carry the level`,
+    );
+    // ONE CLICK IS ONE CHANGE SET, not one per record — the
+    // `acceptSuggestedLevels` rule, which is why the count is asserted rather
+    // than the write alone.
+    const changes = await query(
+      `select count(*)::int as n from change_sets where project_id = $1 and kind = 'level_set'`,
+      [manifest.projectId],
+    );
+    expect(changes.rows[0].n === 1, `expected one level_set change set, found ${changes.rows[0].n}`);
+    return `${fanOut[0]} · one level_set change`;
+  });
 
   await check("1.8", "a marker in the MIDDLE of a value is still the reviewer's question", async () => {
     // `TBC – subject to factory seat test` states something AND says it is not
@@ -570,7 +788,7 @@ try {
   await check("7.4", "the card confirms onto the records the bill made", async () => {
     // Re-located: the card re-rendered under the reloads above.
     cardConfirm = page.getByRole("button", { name: /^Confirm\b/ }).last();
-    await cardConfirm.waitFor({ timeout: 30000 }).catch(() => {});
+    await cardConfirm.waitFor({ timeout: Math.min(PATIENCE, 60000) }).catch(() => {});
     expect(await cardConfirm.count(), "no Confirm on the drawings card");
     const label = await cardConfirm.innerText();
     // WHY, not just that it is disabled. A card refusing to commit is the app
@@ -606,6 +824,50 @@ try {
     return `${rows[0].value} · ${rows[0].state}`;
   });
 
+  await check("1.7", "a page with nothing to match on is dismissed in one press", async () => {
+    // A page with no item code can never commit — no code, no resolved phases —
+    // so it is collapsed to a summary line with ONE button that ignores the
+    // whole page, rather than an Ignore per row. Until a reviewer presses it
+    // the document is not reviewed, which is what the count beside it says.
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}/intake/${manifest.batchId}/drawings`, 0);
+    await ready(/Ignore these rows|Review complete/);
+    const dismiss = page.getByRole("button", { name: /^Ignore these rows$/ }).first();
+    if ((await dismiss.count()) === 0) return "nothing left to dismiss";
+    // TWO PRESSES, because the control ARMS before it fires — dismissing a
+    // page is a reviewer's decision and the second press is where it is taken.
+    // The label changes when armed, so the same locator stops matching: a
+    // retry loop over the first name clicks nothing at all.
+    const armed = page.getByRole("button", { name: /^Ignore all \d+ rows\?$/ }).first();
+    expect(await press(dismiss, () => armed.count()), "the dismiss control never armed");
+    const cleared = async () => {
+      const { rows } = await query(
+        `select count(*)::int as n
+           from intake_runs, jsonb_array_elements(parsed->'items') item,
+                jsonb_array_elements(item->'observations') o
+          where intake_runs.id = $1 and o->>'reviewStatus' = 'pending'`,
+        [clonedRunId],
+      );
+      return rows[0].n === 0;
+    };
+    await armed.click();
+    let done = false;
+    for (let waited = 0; waited < 60000 && !done; waited += 1000) {
+      await page.waitForTimeout(1000);
+      done = await cleared();
+    }
+    expect(done, "the codeless page could not be dismissed");
+    return "the codeless page ignored, nothing pending";
+  });
+
+  await check("1.7", "and says Review complete once nothing is pending", async () => {
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}/intake/${manifest.batchId}`, 0);
+    await ready(/document/);
+    const row = page.locator("tr, li", { hasText: staged.filename }).first();
+    const rowText = await row.innerText();
+    expect(/Review complete/.test(rowText), `the confirmed drawings row still reads: ${rowText.replace(/\s+/g, " ").slice(0, 160)}`);
+    return "Review complete";
+  });
+
   // =========================================================================
   // 7. The phase table.
   // =========================================================================
@@ -619,7 +881,8 @@ try {
   await open(`${BASE}/dashboard/projects/${manifest.projectId}?tab=${firstPhase.id}`, 3000);
 
   await check("1.1", "the project screen says PHASE, never run", async () => {
-    const text = await page.locator("body").innerText();
+    await ready(/Needed to quote|Client code|Item/i);
+    const text = await settled();
     // ONLY THE NEGATIVE HALF HERE. A phase tab is labelled with the CLIENT'S
     // own tab name, so a project whose bill says MAIN RUN may legitimately
     // never print the word phase on this screen — asserting that it does is an
@@ -632,8 +895,9 @@ try {
     // `nextStep` decides it once and every screen renders the same answer, so
     // the assertion is that the project's header band carries one of its
     // labels — not a sentence telling somebody where to go.
-    await open(`${BASE}/dashboard/projects/${manifest.projectId}`, 2500);
-    const header = await page.locator("header, body").first().innerText();
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}`, 0);
+    await ready(new RegExp(projectName.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    const header = await page.locator("body").innerText();
     // EVERY label `nextStep` can produce. Written out rather than matched
     // loosely, because a loose pattern that happened to match a heading would
     // pass on a screen with no primary at all — which is the thing being
@@ -645,8 +909,69 @@ try {
     expect(step, "no next-step primary on the project screen");
     return step[0];
   });
+  await check("1.15", "the phase table shows the level as a DECISION, with no guess beside it", async () => {
+    // BACK TO THE PHASE TAB. The 1.11 check just opened the project OVERVIEW to
+    // read its header primary, so without this the row search below runs over
+    // the overview and reports "no row whose client ref is S-100" — which is
+    // what the first run against the deployment did (2026-09-20).
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}?tab=${firstPhase.id}`, 3000);
+    // Wait for the ROWS, not for the table's own headings: the header paints
+    // with the shell and the records arrive with the fetch. The item's own
+    // description is not a safe marker — the column truncates — so this waits
+    // for the level column's own vocabulary.
+    // The chip prints the STORED value — `complex`, the key — not the label.
+    //
+    // THREE WAITS, AND EACH CATCHES WHAT THE ONE BEFORE IT CANNOT. The header
+    // proves the screen arrived; `settled` proves the spinners have gone — and
+    // between "Loading project" going and "Loading spec records" appearing the
+    // body carries neither, so on its own it returns in the gap and the level
+    // column has not been painted yet. The LEVEL COLUMN'S OWN VOCABULARY is
+    // what proves the rows are there.
+    // WAIT FOR THE ROW, BY ITS CLIENT REF. The level column's own vocabulary is
+    // not a safe marker either: the suggestion banner above the table says
+    // "22 simple" and paints before the rows do, so a wait for the words
+    // returns while the table is still empty.
+    await ready(/Needed to quote|Client code|Item/i);
+    await settled();
+    // BY THE ITEM'S DESCRIPTION, not by its code: the project screen also lists
+    // the PACK, and the drawing's filename is `… S-100 - Sofa.pdf`, so a match
+    // on the code finds the DOCUMENT row and reports its chip as the level.
+    // BY THE CLIENT REF CELL, exactly. Matching text anywhere in a row finds
+    // the PACK's own row too — the drawing is `… S-100 - Sofa.pdf` — and
+    // matching the item description depends on how the column renders it.
+    const levelRow = page
+      .locator("tr")
+      .filter({ has: page.locator("td", { hasText: /^\s*S-100\s*$/ }) })
+      .first();
+    for (let waited = 0; waited < PATIENCE && (await levelRow.count()) === 0; waited += 1000) {
+      await page.waitForTimeout(1000);
+    }
+    expect(
+      await levelRow.count(),
+      `the phase table has no row whose client ref is S-100. It shows: ${(await page.locator("body").innerText()).replace(/\s+/g, " ").slice(0, 300)}`,
+    );
+    const levelText = await levelRow.innerText();
+    expect(
+      /complex/i.test(levelText),
+      `the level set on the card is not on the row: ${levelText.replace(/\s+/g, " ").slice(0, 200)}`,
+    );
+    // `level_suggested` and `level` are different columns and 0025 refuses a
+    // row holding both. A row reading "Complex · guessed" would mean the click
+    // wrote the guess rather than the decision.
+    // A DECISION IS A CHIP; a suggestion is a `SuggestButton` carrying its
+    // evidence. The two must not look alike, and the row this walk set is the
+    // first kind.
+    expect(
+      !/guessed|Accept/i.test(levelText),
+      `the row still offers it as a guess: ${levelText.replace(/\s+/g, " ").slice(0, 160)}`,
+    );
+    return "complex, decided";
+  });
+
   await check("1.12", "the to-quote cell DISCLOSES what is missing, rather than linking away", async () => {
-    await open(`${BASE}/dashboard/projects/${manifest.projectId}?tab=${firstPhase.id}`, 2500);
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}?tab=${firstPhase.id}`, 0);
+    await ready(/Needed to quote|Client code|Item/i);
+    await settled();
     const disclosure = page.locator("[aria-expanded]").first();
     expect(await disclosure.count(), "nothing on the phase table expands");
     const before = (await page.locator("body").innerText()).length;
@@ -664,20 +989,107 @@ try {
   // 8. The record.
   // =========================================================================
   say("\n8. The record");
+  // A record carrying a CONFIRMED DIMENSION, because that is what 1.13
+  // corrects: the composed cell has to be seen to recompose, which a fabric
+  // would not show.
   const target = await query(
-    `select r.id from spec_records r join record_attributes a on a.record_id = r.id
-      where r.project_id = $1 and a.status = 'active' limit 1`,
+    `select r.id, a.id as attribute_id, a.label, a.value, r.version
+       from spec_records r join record_attributes a on a.record_id = r.id
+      where r.project_id = $1 and a.status = 'active'
+        and a.attr_group = 'dimension' and a.state = 'confirmed'
+      order by a.sort_order limit 1`,
     [manifest.projectId],
   );
-  expect(target.rows[0], "no record carries an attribute to look at");
+  expect(target.rows[0], "no record carries a confirmed dimension to correct");
   const recordId = target.rows[0].id;
+  const correcting = target.rows[0];
   await open(`${BASE}/dashboard/records/${recordId}`, 0);
-  // The record screen is four tabs over a client fetch; wait for the tab strip
-  // rather than for a number of seconds.
-  await page.getByRole("tab").first().waitFor({ timeout: 60000 }).catch(() => {});
-  await page.waitForTimeout(1500);
+  // Four tabs over a client fetch: wait for the row this step is about rather
+  // than for a number of seconds.
+  await page.getByRole("tab").first().waitFor({ timeout: PATIENCE }).catch(() => {});
+  await ready(new RegExp(String(correcting.label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
-  skip("1.13", "a confirmed value can be corrected from beside the value", "its migration-dependent checks are still under review");
+  await check("1.13", "a confirmed value is corrected from BESIDE it, and the page it came from is kept", async () => {
+    // Matthew went looking for confirm-or-update on a confirmed record and
+    // there was no such verb. Retiring destroys the statement; typing a new one
+    // loses the page. Correcting keeps both.
+    const row = page.locator("tr", { hasText: correcting.label }).first();
+    const correct = row.getByRole("button", { name: "Correct", exact: true }).first();
+    expect(await correct.count(), `no Correct beside “${correcting.label}”`);
+    const panel = page.locator("tr", { hasText: `Correct “${correcting.label}”` }).first();
+    expect(await press(correct, () => panel.count()), "the correction panel never opened");
+    const value = panel.locator("input").first();
+    await value.fill("1234");
+    const why = panel.locator('input[placeholder^="Misread off page"]').first();
+    expect(await why.count(), "the correction asks for no reason");
+    // A REASON IS THE GATE. `attribute_correct` is in REASON_REQUIRED_KINDS and
+    // has a database constraint behind it, so a correction with none writes
+    // nothing at all.
+    const save = panel.getByRole("button", { name: /^Save the correction$/ }).first();
+    expect(await save.isDisabled(), "Save is enabled before a reason is typed");
+    await why.fill("__QA first session — misread off the page");
+    const corrected = async () => {
+      const { rows } = await query(
+        `select count(*)::int as n from record_attributes
+          where record_id = $1 and status = 'active' and value = '1234'`,
+        [recordId],
+      );
+      return rows[0].n > 0;
+    };
+    expect(await press(save, corrected), "Save the correction wrote nothing");
+    await page.waitForTimeout(2000);
+
+    const text = await ready(/1234/);
+    expect(/1234/.test(text), "the corrected figure is not on the record");
+    // THE COMPOSED CELL IS A PROJECTION OF THE ATTRIBUTES and must recompose.
+    const answer = await query(
+      `select a.value from spec_answers a join requirements q on q.id = a.requirement_id
+        where a.record_id = $1 and q.spec_field_id is not null and a.value like '%1234%' limit 1`,
+      [recordId],
+    );
+    expect(answer.rows[0], "the Dimensions answer did not recompose over the correction");
+
+    const changes = await query(
+      `select count(*)::int as n from change_sets where project_id = $1 and kind = 'attribute_correct'`,
+      [manifest.projectId],
+    );
+    expect(changes.rows[0].n === 1, `expected one attribute_correct change set, found ${changes.rows[0].n}`);
+
+    // THE RECORD'S OWN VERSION IS NOT TOUCHED. An attribute is its own row, and
+    // bumping the record would invalidate every extraction snapshot and chase
+    // coverage row taken against it for a reason that has nothing to do with them.
+    const after = await query(`select version from spec_records where id = $1`, [recordId]);
+    expect(
+      Number(after.rows[0].version) === Number(correcting.version),
+      `spec_records.version moved ${correcting.version} → ${after.rows[0].version}`,
+    );
+
+    // KEPT, NEVER DELETED: the old row is evidence that a document said it.
+    const retiredToggle = page.locator("button", { hasText: /\d+ retired spec/ }).first();
+    expect(await retiredToggle.count(), "the retired row is nowhere on the record");
+    await press(retiredToggle, async () =>
+      (await page.locator("body").innerText()).includes(String(correcting.value)),
+    );
+    const withRetired = await page.locator("body").innerText();
+    expect(
+      withRetired.includes(String(correcting.value)),
+      `the old value “${correcting.value}” is not under show retired`,
+    );
+
+    // AND THE VERSION IS A VERSION, named for what happened.
+    // The Versions tab loads only when opened — which is why its own tab
+    // carries no count — so the press waits for the entry rather than for the
+    // tab to look selected.
+    const versions = page.getByRole("tab", { name: /Versions/i }).first();
+    expect(await versions.count(), "the record has no Versions tab");
+    const named = async () => /Spec corrected/.test(await page.locator("body").innerText());
+    expect(await press(versions, named), "the record's versions do not name the correction");
+    return `${correcting.value} → 1234 · one attribute_correct · record version ${after.rows[0].version} unchanged`;
+  });
+
+  // Back to the checklist for the assertions that read it.
+  await page.getByRole("tab", { name: /Checklist/i }).first().click().catch(() => {});
+  await page.waitForTimeout(1500);
 
   await check("1.3", "the BWS ordinal is not printed beside a field name", async () => {
     // `1 · COM 1` cost ninety seconds and a wrong guess. The id is the export's
@@ -724,7 +1136,8 @@ try {
   // 9. The chase screen.
   // =========================================================================
   say("\n9. The chase screen");
-  await open(`${BASE}/dashboard/drafts?projectId=${manifest.projectId}`, 4000);
+  await open(`${BASE}/dashboard/drafts?projectId=${manifest.projectId}`, 0);
+  await ready(/Draft it|Nothing ticked|Nobody chosen|Nothing needed to quote|Cannot be chased/i);
 
   await check("1.14", "nothing is preselected until a person is chosen", async () => {
     const text = await page.locator("body").innerText();
@@ -769,7 +1182,67 @@ try {
     return `409 · "${body.error ?? body.message}" · nothing written`;
   });
 
-  skip("7.4", "the row unfreezes after the 409 and the message survives the reload", "asserted in the browser once 1.13 lands and the control exists");
+  await check("7.4", "the row unfreezes after a 409, and the message survives the reload it triggers", async () => {
+    // THROUGH THE SCREEN, not through the API — the API half above proves the
+    // server refuses; this proves the person is not left with a frozen row and
+    // no idea why. A screen that reloads after every action clears its banner
+    // on a successful load, so `setError` followed by `load()` showed the 409
+    // for a few milliseconds and then nothing at all.
+    await open(`${BASE}/dashboard/records/${recordId}`, 0);
+    await page.getByRole("tab", { name: /Checklist/i }).first().waitFor({ timeout: PATIENCE });
+    await page.getByRole("tab", { name: /Checklist/i }).first().click();
+    await page.waitForTimeout(2500);
+
+    // THE ROW IS CHOSEN OFF THE SCREEN, not out of the database. A question
+    // picked by query may be one the checklist has not painted — folded into a
+    // section, or below whatever the screen shows — and the walk then reports
+    // "no control for X" about a screen that is working. Read the label the
+    // page actually carries, then look THAT up.
+    // `State of X` is an aria-label and never reaches `innerText`; waiting for
+    // it waits for ever on a checklist that has already painted. Wait for the
+    // states themselves, which are text, then read the labels off the DOM.
+    await ready(/Missing|Confirmed|TBC/);
+    const labels = await page
+      .locator("select[aria-label^='State of ']")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")));
+    expect(labels.length > 0, "the checklist painted no state controls");
+    const stale = await query(
+      `select a.id, a.version, q.prompt from spec_answers a
+         join requirements q on q.id = a.requirement_id
+        where a.record_id = $1 and a.state = 'missing' and q.prompt = any($2::text[])
+        limit 1`,
+      [recordId, labels.map((label) => label.replace(/^State of /, ""))],
+    );
+    expect(stale.rows[0], "no unanswered question on screen to edit");
+    const control = page.getByLabel(`State of ${stale.rows[0].prompt}`).first();
+    expect(await control.count(), `no state control for “${stale.rows[0].prompt}”`);
+
+    // SOMEBODY ELSE ANSWERS IT while the screen is open. A legitimate edit, at
+    // the version the row actually holds — so the SCREEN is now one behind.
+    //
+    // TBC, NOT CONFIRMED, and that is not a detail: the checklist opens
+    // filtered to what blocks a quote, so answering it outright takes the row
+    // off the screen and the walk then reports a missing control on a screen
+    // that is behaving correctly. TBC is an answer that still blocks.
+    const bump = await context.request.patch(`${BASE}/api/answers/${stale.rows[0].id}`, {
+      headers: { "content-type": "application/json" },
+      data: { value: "__QA answered by somebody else", state: "tbc", version: stale.rows[0].version },
+    });
+    expect(bump.ok(), `the setup edit was refused: ${bump.status()}`);
+
+    await control.selectOption("tbc");
+    await page.waitForTimeout(3500);
+
+    const text = await page.locator("body").innerText();
+    expect(/changed by someone else|was not saved/i.test(text), "the 409 left no message on the screen");
+    // AND THE ROW IS USABLE AGAIN. `savingId` is cleared in a finally path, so
+    // an HTML error page or a refused request cannot leave the control disabled
+    // with no way back.
+    const reopened = page.getByLabel(`State of ${stale.rows[0].prompt}`).first();
+    await reopened.waitFor({ timeout: Math.min(PATIENCE, 60000) });
+    expect(!(await reopened.isDisabled()), "the row is still frozen after the refusal");
+    return "message shown, control enabled";
+  });
 } catch (error) {
   results.push({ ok: false, item: "walk", what: "the walk reached the end", detail: error instanceof Error ? error.stack : String(error) });
   console.log(`\n  FAIL  [walk] ${error instanceof Error ? error.message : String(error)}`);

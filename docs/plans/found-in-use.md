@@ -22,6 +22,15 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### The versions diff labels a phase "Run"
+
+**Status: open — seen 2026-09-20 while reviewing Stage 2 item 2.6's
+files, not in the browser.** `CORE_FIELDS` in `src/lib/snapshot-diff.ts`
+labels `runName` as `Run`, so a record moved between phases would show a diff
+line headed "Run". The vocabulary guard reads screen sources, not `src/lib`,
+which is why 1.1 missed it. One word; belongs with the next item that touches
+that file (2.6 adds a core field there).
+
 ### Found by the first-session script and the 300-line fixture, 2026-09-20
 
 **Status: open, six observations from the Stage 1a verifier's runs** on the

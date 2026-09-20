@@ -567,7 +567,49 @@ Jay's behalf — *"we end up repeating the question on ten lines"*, and
 *"what you want to do is say, oh, for the dressing area, we don't have a
 metalwork finish"*. A person works item by item; a CLIENT answers question by
 question, by area. Building the email the way the screen is built is the defect
-being reported. Not built yet — `docs/plans/catchup-2026-09-18.md` §4.4.
+being reported. **Built 2026-09-20 (Stage 2 item 2.5)**, and five things about
+the EMAIL are load-bearing:
+
+- **The regrouping lives in `chase-template.ts` and nowhere else.** The body's
+  unit is the QUESTION, then the AREA (the document's own wording, "No area
+  given" last), then the items under it; a question outstanding on one item
+  prints as one line with no area row. `groupByQuestionAndArea` is a pure
+  regrouping of the same coverage rows the screen and the send gate use.
+- **The coverage rows did not change shape.** `email_draft_items` is still one
+  row per record × question, and `tests/lib/chase-template.test.ts` extracts
+  the `(record, requirement)` pairs back out of the rendered body (each item
+  row carries `data-record` / `data-requirement`, which Outlook and Word
+  ignore) and asserts they equal the coverage set. That equality is what the
+  send gate rests on; a regrouping that built its own rows would break it
+  silently.
+- **The quantity is NOT on the item line**, though it is the obvious place. A
+  coverage row is a frozen `context_snapshot` compared with `canonicalJson`,
+  and it has never carried a quantity; adding a field makes every unsent draft
+  read as stale the moment it ships — the `chased_at` trap. The line is
+  `record · refs · description`. Max's call whether to pay that cost.
+- **A colleague can be the recipient, and the wording comes from the LIVE
+  contact row.** `groupByContact` gives a `project_contacts.role = 'internal'`
+  contact EVERY outstanding question with a level (a colleague is not routed
+  by designer code, and `blocked` is deliberately unchanged — it describes the
+  designer routing). The generate route reads `role` off the locked row and
+  passes `internal` to `defaultIntro`, which says *"we still need"* where a
+  designer gets *"we need from you"*; a request cannot set it (the
+  `questionTier` rule). A colleague's tab REPLACES the designers' groups on
+  the screen rather than sitting beside them, or `groupIntoLines` buckets
+  every question twice — found on the 300-line project as "5702 questions
+  ticked" for 2851.
+- **The tier banner is unchanged**: still first, still a one-cell table, still
+  counting coverage rows rather than question tables — one conservative count
+  rather than three of one thing.
+
+**Area is a filter (Stage 2 item 2.4), and it folds by case and whitespace
+only.** `src/lib/area-filter.ts` is a leaf; `AreaSelect` is a native select
+whose options are the area AS THE DOCUMENT FIRST WROTE IT, "No area given"
+last; the search box on both screens matches area text, which is what makes
+35 of them findable without a combobox. On the phase table and the chase
+screen it narrows what is LISTED — the tiles, the tally reported to the header
+and the Draft button's number never move — and `?area=` is in the URL through
+`useUrlTab`, which never rewrites a pasted value while the rows are loading.
 
 Asked for directly on 2026-09-17, on first sight of the screen with real data:
 "this is completely ridiculous, 822 to quote — we can't be showing all of
@@ -3196,6 +3238,19 @@ and the crop investigation concluding that the prompt is the fix (deferred to
 the finishes-schedule re-read). Not accepted by anybody. The whole of Stage 1
 is therefore on staging; the pilot promotion (0033 first), the script on
 pilot and the hand-over message are Max's.
+
+**Stage 2 opened 2026-09-20** (its stage brief is at the end of the plan), in
+dependency order because Matthew's screenshots have not arrived. **On staging
+so far: 2.4** (area as a filter on the phase table and the chase screen) and
+**2.5** (the chase EMAIL grouped by question × area; a colleague as recipient),
+both verified in the browser on the sandbox — 300-line phase narrowed to one
+floor, `18 of 300 shown`, tiles unmoved; a 69-question draft whose body holds
+exactly its 69 coverage rows under 8 question tables and 28 area rows; a
+colleague's draft reading "we still need". Not accepted by anybody. **Blocked
+and saying so:** 2.1/2.2 (no BWS account for Max), 2.9 (a proposal for
+Matthew), 2.11 (the rate cap first, then Max's own amendment of the inbound-
+email gate above), 2.12 (another session's plan). Nothing promotes to pilot
+until Max has driven 2.3 and 2.5 as the roles they are for (§7.5).
 
 **Outstanding — judgement, not code.**
 

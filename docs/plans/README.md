@@ -21,6 +21,38 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-20 — Stage 2 opens: area is a filter, and the email asks each question once
+
+Stage 2 of `make-it-work-2026-09-19.md` opened the same day Stage 1 closed on
+staging, at Max's instruction ("lets build stage 2"). Its stage brief is
+appended to the plan. Two Opus coders in worktrees OUTSIDE iCloud, the same
+discipline as Stage 1. Each item's §7.1 evidence, as facts:
+
+| Item | Commit | Built · Tested | Verified in the app | Deployed |
+|---|---|---|---|---|
+| **2.4** area as a filter | `17b733c` | `area-filter.ts` leaf (fold = case + whitespace, label as first written, no-area last) + `AreaSelect`; 11 pure, 8 + 7 component tests; `?area=` via `useUrlTab` | DEMO-300 MAIN RUN: 36 options, choosing "Bedroom, Level 4 (18)" lists 18 of 300 and the TGQ tile stays 5,829; chase screen: 222 → 15 lines, Draft the email still 2771, footer "2558 ticked questions are hidden by your filters — they will still be asked"; screenshotted at 1920×1080 | `3f8511d` deployed on `spec-builder-app-rho.vercel.app`, read back from `/api/auth/me`; the pasted `?area=bedroom, level 4` link on the deployed 300-line phase renders "Bedroom, Level 4 (18)", `18 of 300 shown`, TGQ tile 5,829 |
+| **2.5** the chase EMAIL by question × area; a colleague as recipient | `ee5e441` | `groupByQuestionAndArea` in `chase-template.ts`, `TEMPLATE_VERSION` 3, `data-record`/`data-requirement` per item row; `groupByContact` gives an internal contact every levelled question; 42 template tests (+11), 42 chase-drafts tests (+5), 4 picker tests; full suite 1,501 green with the database tier REQUIRED | DEMO-TEST-01, Priya Raman: a 69-question draft whose body holds exactly the 69 coverage pairs, 8 question tables, 28 area rows, "We need from you" once; a `QA Colleague` (internal) contact: 70 questions, intro "We still need … or say who to ask?", no "your"; the contact and its draft then removed; chase screen at 1440×900 shows the Colleague chip on the tab | `3f8511d` deployed, read back from `/api/auth/me` |
+
+**Three decisions taken by Coder A that Max should overrule if wrong:**
+
+- **No quantity on the email's item line.** The coverage snapshot has never
+  carried one and is compared with `canonicalJson`; adding it would make every
+  unsent draft stale. The line is `record · refs · description`.
+- **No "Colleagues" group header in the contact strip** — `Tabs` has no
+  grouping primitive; a colleague sorts last and carries a `Colleague` chip.
+- **The category name is gone from the email**; it was in the old per-record
+  heading and has no place in a per-question one.
+
+**Measured before briefing 2.3:** `loadOutstanding` on DEMO-300 returns
+19,582 outstanding questions in 845–1,263 ms. The loader is not the weight
+behind the 10.4-second overview; shipping that many rows to a browser is, and
+the infill brief is built around it.
+
+**Blocked, and saying so:** 2.1/2.2 (Max has no BWS account), 2.9 (proposal
+for Matthew — drafted in the plan's Stage 2 brief), 2.11 (the rate cap, then
+Max's own gate amendment), 2.12 (another session's). Human acceptance
+outstanding on both items.
+
 ## 2026-09-20 — Stage 1a, the first six items land
 
 Stage 1a of `make-it-work-2026-09-19.md` opened on 2026-09-19 (its stage brief
