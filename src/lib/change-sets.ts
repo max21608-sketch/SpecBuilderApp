@@ -64,6 +64,11 @@ export const CHANGE_SET_KINDS = [
   "run_create",
   "record_create",
   "attribute_create",
+  // 0033: a person superseding a spec with a corrected value, keeping the
+  // source run and page of the row it replaces. Not an edit in place --
+  // `record_attributes` is what a DOCUMENT said, and a row saying something
+  // its page does not while still citing that page is a false provenance.
+  "attribute_correct",
 ] as const;
 export type ChangeSetKind = (typeof CHANGE_SET_KINDS)[number];
 
@@ -78,6 +83,9 @@ export const REASON_REQUIRED_KINDS: readonly ChangeSetKind[] = [
   "finish_edit",
   "finish_unlink",
   "baseline",
+  // A correction overrides something a document said — the same test retiring
+  // one applies, and it asserts a replacement on top.
+  "attribute_correct",
 ];
 
 export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
@@ -100,6 +108,7 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   run_create: "Phase added by hand",
   record_create: "Item added by hand",
   attribute_create: "Spec added by hand",
+  attribute_correct: "Spec corrected",
 };
 
 export type OpenChangeSet = {

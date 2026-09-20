@@ -32,6 +32,7 @@ import Spinner from "@/components/ui/Spinner";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
+  ATTRIBUTE_UNITS,
   type AnswerState,
   type AttributeGroup,
   type AttributeState,
@@ -223,6 +224,24 @@ function RecordView() {
   const [retireReason, setRetireReason] = useState("");
   const [retireBusy, setRetireBusy] = useState(false);
   const [showRetired, setShowRetired] = useState(false);
+  /**
+   * THE SPEC BEING CORRECTED, and the boxes it opened pre-filled.
+   *
+   * PRE-FILLING IS RIGHT HERE and the level picker's trap does not apply: that
+   * rule is about a control whose ACTION is the selection, where a select
+   * already reading "Simple" fires no change event when somebody picks Simple.
+   * The action here is the Save, which fires whatever the boxes say.
+   *
+   * A correction is a SUPERSESSION, not an edit in place — see
+   * `src/lib/attribute-correct.ts`. The old row stays under "show retired",
+   * marked as superseded, with who corrected it and why.
+   */
+  const [correcting, setCorrecting] = useState<Attribute | null>(null);
+  const [correctValue, setCorrectValue] = useState("");
+  const [correctUnit, setCorrectUnit] = useState<AttributeUnit | "">("");
+  const [correctState, setCorrectState] = useState<AttributeState>("confirmed");
+  const [correctReason, setCorrectReason] = useState("");
+  const [correctBusy, setCorrectBusy] = useState(false);
   // The header's "Add a spec by hand" opens the form beside the specs it adds
   // to. One action, one button: the page-level action lives in the band.
   const [addingSpec, setAddingSpec] = useState(false);
@@ -360,6 +379,53 @@ function RecordView() {
     } finally {
       // Always reset: a non-JSON error must not leave the dialog stuck.
       setRetireBusy(false);
+    }
+  }
+
+  /** Open the editor on one spec, filled in with what it currently says. */
+  function beginCorrection(attribute: Attribute) {
+    setCorrecting(attribute);
+    setCorrectValue(attribute.value ?? "");
+    setCorrectUnit((attribute.unit as AttributeUnit | null) ?? "");
+    setCorrectState(attribute.state);
+    // NOT pre-filled: the reason is the one thing nobody can guess, and a
+    // default would be twenty rows in the trail reading the same sentence.
+    setCorrectReason("");
+  }
+
+  async function correct() {
+    if (!correcting || !correctReason.trim()) return;
+    setCorrectBusy(true);
+    try {
+      const res = await apiFetch<{ finishUnlinked?: boolean }>(
+        `/api/attributes/${encodeURIComponent(correcting.id)}/correct`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            value: correctState === "tbc" && !correctValue.trim() ? null : correctValue,
+            unit: correctUnit === "" ? null : correctUnit,
+            state: correctState,
+            version: correcting.version,
+            reason: correctReason.trim(),
+          }),
+        },
+      );
+      // RELOAD FIRST, REPORT AFTER. This screen clears its banner on a
+      // successful load, so setting the message first shows a 409 for a few
+      // milliseconds and then nothing at all — the click looks as though it
+      // never registered.
+      await reloadThen(
+        res.ok
+          ? res.data?.finishUnlinked
+            ? "Corrected. The finishes library says something else about that code, so this item is no longer linked to it — the library row is untouched."
+            : null
+          : res.error,
+      );
+      if (res.ok) setCorrecting(null);
+    } finally {
+      // Always, so an HTML error page cannot leave the Save button dead.
+      setCorrectBusy(false);
     }
   }
 
@@ -771,7 +837,8 @@ function RecordView() {
                             {ATTRIBUTE_GROUP_LABELS[group]}
                           </GroupRow>
                           {rows.map((attribute) => (
-                            <Tr key={attribute.id}>
+                            <Fragment key={attribute.id}>
+                            <Tr>
                               <Td>{attribute.label}</Td>
                               <Td>
                                 {attribute.state === "tbc" && !attribute.value ? (
@@ -840,22 +907,125 @@ function RecordView() {
                               </Td>
                               <Td muted>{specSource(attribute)}</Td>
                               <Td className="text-right">
-                                {/* Kept, never deleted — the row stays as
-                                    evidence that a document said this, with who
-                                    took it off and why. */}
-                                <Button
-                                  variant="quiet"
-                                  size="xs"
-                                  title="Take this spec off the item"
-                                  onClick={() => {
-                                    setRetiring(attribute);
-                                    setRetireReason("");
-                                  }}
-                                >
-                                  Retire
-                                </Button>
+                                <span className="inline-flex items-center gap-1">
+                                  {/* A CONTROL LIVES BESIDE THE THING IT ACTS
+                                      ON. Matthew went looking for
+                                      confirm-or-update on a confirmed record
+                                      and there was no such verb: a value could
+                                      be retired, or a new one typed with no
+                                      page. Correcting keeps the page. */}
+                                  <Button
+                                    size="xs"
+                                    title="Correct this value, keeping the page it was read from"
+                                    onClick={() => beginCorrection(attribute)}
+                                  >
+                                    Correct
+                                  </Button>
+                                  {/* Kept, never deleted — the row stays as
+                                      evidence that a document said this, with who
+                                      took it off and why. */}
+                                  <Button
+                                    variant="quiet"
+                                    size="xs"
+                                    title="Take this spec off the item"
+                                    onClick={() => {
+                                      setRetiring(attribute);
+                                      setRetireReason("");
+                                    }}
+                                  >
+                                    Retire
+                                  </Button>
+                                </span>
                               </Td>
                             </Tr>
+                            {/* A SPANNING PANEL IS ITS OWN `tr`, never an extra
+                                `td colSpan` beside the data cells — that makes
+                                the row ten column slots wide and the browser
+                                squeezes the editor into a ribbon beside the
+                                value it is editing. */}
+                            {correcting?.id === attribute.id && (
+                              <tr className="bg-amber-50/60">
+                                <td colSpan={5} className="border-b border-amber-200 px-4 py-3">
+                                  <p className="text-sm font-medium text-neutral-900">
+                                    Correct “{attribute.label}”
+                                  </p>
+                                  <p className="mt-0.5 text-xs text-neutral-600">
+                                    The old value is kept and marked as superseded, and the new one KEEPS the page it
+                                    was read from — {specSource(attribute)} — because that is still where to check it.
+                                    Any checklist answer it fills is recomposed.
+                                  </p>
+                                  <div className="mt-2 flex flex-wrap items-end gap-2">
+                                    <label className="flex flex-col gap-0.5 text-xs text-neutral-600">
+                                      Value
+                                      <input
+                                        value={correctValue}
+                                        autoFocus
+                                        onChange={(event) => setCorrectValue(event.target.value)}
+                                        className="w-64 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+                                      />
+                                    </label>
+                                    {/* Dimensions only: 0007 refuses a unit on
+                                        anything else, and an empty select
+                                        beside a fabric reads as a question. */}
+                                    {attribute.attr_group === "dimension" && (
+                                      <label className="flex flex-col gap-0.5 text-xs text-neutral-600">
+                                        Unit
+                                        <select
+                                          value={correctUnit}
+                                          onChange={(event) =>
+                                            setCorrectUnit(event.target.value as AttributeUnit | "")
+                                          }
+                                          className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+                                        >
+                                          <option value="">not stated</option>
+                                          {ATTRIBUTE_UNITS.map((unit) => (
+                                            <option key={unit} value={unit}>
+                                              {unit}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                    )}
+                                    <label className="flex flex-col gap-0.5 text-xs text-neutral-600">
+                                      State
+                                      <select
+                                        value={correctState}
+                                        onChange={(event) =>
+                                          setCorrectState(event.target.value as AttributeState)
+                                        }
+                                        className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+                                      >
+                                        <option value="confirmed">Confirmed</option>
+                                        <option value="tbc">TBC</option>
+                                      </select>
+                                    </label>
+                                    <label className="flex flex-1 flex-col gap-0.5 text-xs text-neutral-600">
+                                      Why
+                                      <input
+                                        value={correctReason}
+                                        onChange={(event) => setCorrectReason(event.target.value)}
+                                        placeholder="Misread off page 4 — the drawing says 1090"
+                                        className="w-full min-w-[16rem] rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+                                      />
+                                    </label>
+                                  </div>
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <Button
+                                      variant="primary"
+                                      size="sm"
+                                      disabled={!correctReason.trim() || correctBusy}
+                                      onClick={() => void correct()}
+                                    >
+                                      {correctBusy ? "Saving…" : "Save the correction"}
+                                    </Button>
+                                    <Button variant="quiet" size="sm" onClick={() => setCorrecting(null)}>
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            </Fragment>
                           ))}
                         </Fragment>
                       ))}
@@ -919,10 +1089,36 @@ function RecordView() {
                             retired{attribute.retired_by ? ` by ${attribute.retired_by}` : ""}
                           </span>
                           {attribute.superseded_by_id ? (
-                            // Replaced by a later drawing. Putting it back would
-                            // leave the item holding both, with nothing to say
-                            // which is current — so the button is not offered.
-                            <span className="text-xs text-neutral-500">replaced by a later drawing</span>
+                            // SUPERSEDED, and by WHAT. Putting it back would
+                            // leave the item holding both with nothing to say
+                            // which is current, so the button is not offered —
+                            // and the row names the value that took over,
+                            // looked up among the live specs above rather than
+                            // asserted to be "a later drawing", which since
+                            // 0033 it may not be.
+                            (() => {
+                              const replacement = attributes.find(
+                                (live) => live.id === attribute.superseded_by_id,
+                              );
+                              return (
+                                <span className="text-xs text-neutral-500">
+                                  {replacement
+                                    ? `superseded by “${replacement.value ?? "TBC"}${replacement.unit ?? ""}”`
+                                    : "superseded by a later spec"}
+                                  {/* THE WHY LIVES ON THE CHANGE, not on this
+                                      row: a reason belongs to the act, and the
+                                      Versions tab is where the act is read. */}
+                                  {" · "}
+                                  <button
+                                    type="button"
+                                    onClick={() => setTab("versions")}
+                                    className="text-blue-700 hover:underline"
+                                  >
+                                    why
+                                  </button>
+                                </span>
+                              );
+                            })()
                           ) : (
                             <Button size="xs" disabled={retireBusy} onClick={() => void restore(attribute)}>
                               Put back
