@@ -61,6 +61,39 @@ export async function snapshotRecords(
   const ordered = [...new Set(recordIds)].sort();
   if (ordered.length === 0) return written;
 
+  // The records are LOCKED before any snapshot number is read, in sorted order
+  // — `confirm-drawings`' rule, for the reason `baseline_members` is
+  // materialised under the project lock: transaction start time does not order
+  // commits. Without it, two transactions editing two different questions of
+  // ONE record both read `max(snapshot_no)` as n, both claim n+1, and the
+  // second dies on `record_snapshots_record_no_key` — which reaches the
+  // reviewer as a 500 saying nothing was written, over an edit that had
+  // nothing to do with the other one. Seen on the infill screen, 2026-09-20.
+  //
+  // The alternative is to compute the number inside the insert
+  // (`select coalesce(max(snapshot_no),0)+1`) and retry once on the unique
+  // violation. Its trap is that a retry re-runs a statement inside a
+  // transaction that Postgres has already aborted, so the caller has to
+  // savepoint every insert — and every other write path in this app already
+  // takes a row lock instead.
+  //
+  // `for update` fires no trigger: `bump_version` is `before update` (0002),
+  // so locking a record does not bump the version M2's extraction snapshots
+  // and the chase coverage rows are taken against. That is the one thing this
+  // function must never do.
+  //
+  // It introduces no lock that was not already being taken: the snapshot's own
+  // foreign key to `spec_records` has always taken a key-share lock on the
+  // same rows a moment later. What changes is only how long it is held.
+  // A record that is missing here is not an error: the loop below skips a
+  // record with no atoms for the same reason.
+  await txn`
+    select id from spec_records
+    where id = any(${ordered}::uuid[])
+    order by id
+    for update
+  `;
+
   const atoms = await loadRecordAtoms(txn, ordered);
 
   for (const recordId of ordered) {

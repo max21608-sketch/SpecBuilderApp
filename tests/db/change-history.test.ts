@@ -10,6 +10,8 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb } from "./db-tier";
 import pg from "pg";
+import { editAnswer } from "@/lib/answer-edit";
+import type { TxnSql } from "@/lib/db-transaction";
 
 // The history route is behind a session like every other read. Nothing else in
 // this file imports it.
@@ -280,6 +282,111 @@ describeIfDb("0012 change sets and versions", () => {
     expect(body.baselines[0]?.label).toBe("__QA Issued to client");
     expect(body.baselines[0]?.memberSnapshotNo).toBe(2);
   });
+
+  it("serialises two concurrent edits of ONE record into versions n+1 and n+2", async () => {
+    // The race, reported from the infill screen on 2026-09-20: two edits to two
+    // DIFFERENT questions of one record, each with its own change set (nobody
+    // had opened one), both read `max(snapshot_no)` as n, both claim n+1, and
+    // the second dies on `record_snapshots_record_no_key`. It reached the
+    // reviewer as a 500 saying nothing was written, over an edit that had
+    // nothing to do with the other one.
+    //
+    // `snapshotRecords` now locks the record before reading the number, so the
+    // second transaction waits and then reads what the first committed. The
+    // two are driven on their own connections and the order is FORCED — a
+    // Promise.all here would pass most of the time with the lock removed, and
+    // a test that usually passes is how this came back.
+    const record = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
+       values ($1, $2, 9011, $3, '__QA Concurrent', 'qa', 'qa') returning id`,
+      [projectId, runId, categoryId],
+    );
+    const recordId = record.rows[0].id;
+    await client.query(
+      `insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
+       select $1, q.id, q.spec_field_id, 'missing', 'manual', 'qa', 'qa'
+         from requirements q where q.category_id = $2 limit 2`,
+      [recordId, categoryId],
+    );
+    const answers = await client.query(
+      `select id, version from spec_answers where record_id = $1 order by id`,
+      [recordId],
+    );
+    expect(answers.rows).toHaveLength(2);
+
+    const clients = [new pg.Client({ connectionString: databaseUrl }), new pg.Client({ connectionString: databaseUrl })];
+    // A tagged-sql shim over a raw client, so the transaction's begin and
+    // commit are this test's to order. `withTransaction` deliberately gives a
+    // caller no way to hold one open.
+    const asSql =
+      (c: pg.Client): TxnSql =>
+      async (strings, ...values) => {
+        let text = "";
+        for (let i = 0; i < strings.length; i += 1) {
+          text += strings[i] ?? "";
+          if (i < values.length) text += `$${i + 1}`;
+        }
+        return (await c.query(text, values)).rows;
+      };
+
+    try {
+      for (const c of clients) {
+        await c.connect();
+        await c.query("begin");
+      }
+      const pidB = (await clients[1]!.query(`select pg_backend_pid() as pid`)).rows[0].pid;
+
+      // A edits question 1 and holds its transaction open, having taken the
+      // record lock inside `snapshotRecords`.
+      const first = await editAnswer(asSql(clients[0]!), {
+        answerId: answers.rows[0].id,
+        value: "__QA first",
+        state: "confirmed",
+        expectedVersion: answers.rows[0].version,
+        actor: "__qa-a@example.test",
+      });
+      expect(first.snapshotNo).toBe(1);
+
+      // B edits question 2. It gets as far as the lock and stops there.
+      const second = editAnswer(asSql(clients[1]!), {
+        answerId: answers.rows[1].id,
+        value: "__QA second",
+        state: "confirmed",
+        expectedVersion: answers.rows[1].version,
+        actor: "__qa-b@example.test",
+      });
+
+      // WAIT UNTIL B IS ACTUALLY BLOCKED, never on a sleep. A fixed pause is
+      // what made the first version of this test pass with the lock removed:
+      // four round trips to a London Neon endpoint take longer than any pause
+      // worth writing, so B reached the number AFTER A had committed by
+      // latency alone, and the race it exists to catch never happened.
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        const blocked = await client.query(`select cardinality(pg_blocking_pids($1)) > 0 as blocked`, [pidB]);
+        if (blocked.rows[0].blocked) break;
+        if (Date.now() > deadline) throw new Error("the second edit never blocked; the lock is not being taken");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      await clients[0]!.query("commit");
+      const result = await second;
+      await clients[1]!.query("commit");
+
+      // Not 1 again: the number was read after the first commit.
+      expect(result.snapshotNo).toBe(2);
+      expect(result.changeSetId).not.toBe(first.changeSetId);
+    } finally {
+      for (const c of clients) await c.query("rollback").catch(() => {});
+      for (const c of clients) await c.end().catch(() => {});
+    }
+
+    const snapshots = await client.query(
+      `select snapshot_no from record_snapshots where record_id = $1 order by snapshot_no`,
+      [recordId],
+    );
+    expect(snapshots.rows.map((row) => row.snapshot_no)).toEqual([1, 2]);
+  }, 30_000);
 
   it("COVERAGE: every spec-content write in the DATABASE belongs to a change that took a version", async () => {
     // The check that catches a write path forgetting to snapshot, and the
