@@ -32,7 +32,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const rows = await sql`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
-           r.spec_description, r.internal_notes,
+           r.spec_description, r.internal_notes, r.dimension_note,
            r.boq_category, r.status, r.version, r.source_line_no, r.category_id, r.level,
            r.level_suggested, r.level_suggested_reason,
            r.parent_id, r.variant_label,
@@ -353,6 +353,36 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 /**
+ * The record's own words. Pulled out of the union so a failure can be
+ * re-parsed against it alone — a union's first issue is "Invalid input" with
+ * an empty path, which tells somebody filling in a form nothing at all.
+ */
+const DetailsPatch = z
+  .object({
+    itemDescription: z.string().min(1).max(2000).optional(),
+    area: z.string().max(300).nullable().optional(),
+    qty: z.number().int().nonnegative().nullable().optional(),
+    designer: z.string().max(200).nullable().optional(),
+    specDescription: z.string().max(20000).nullable().optional(),
+    internalNotes: z.string().max(20000).nullable().optional(),
+    // 0034's qualifier, and the two bounds that make it safe to compose into
+    // BWS field 3. REFUSED HERE IN WORDS, before the database refuses it with
+    // a constraint whose message names nothing a person can act on: a newline
+    // inside a BWS cell is a change to the format of the file that OVERWRITES
+    // rather than fails.
+    dimensionNote: z
+      .string()
+      .max(200, "A dimension note is at most 200 characters — longer prose belongs in the quote description.")
+      .refine(
+        (value) => !/[\r\n]/.test(value),
+        "A dimension note is one line: it is written into the BWS dimensions cell, which cannot hold a line break.",
+      )
+      .nullable()
+      .optional(),
+  })
+  .strict();
+
+/**
  * Exactly one of `categoryId` or `level` per request.
  *
  * A union rather than two optional fields: each is its own decision, recorded
@@ -377,16 +407,7 @@ const Patch = z.union([
   // back so the screen can say what moved, and a no-op records nothing.
   z
     .object({
-      details: z
-        .object({
-          itemDescription: z.string().min(1).max(2000).optional(),
-          area: z.string().max(300).nullable().optional(),
-          qty: z.number().int().nonnegative().nullable().optional(),
-          designer: z.string().max(200).nullable().optional(),
-          specDescription: z.string().max(20000).nullable().optional(),
-          internalNotes: z.string().max(20000).nullable().optional(),
-        })
-        .strict(),
+      details: DetailsPatch,
       version: z.number().int().nonnegative(),
     })
     .strict(),
@@ -429,6 +450,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           error: `A level is one of ${ITEM_LEVELS.join(", ")}, or null to clear it.`,
           field: "level",
         },
+        400,
+      );
+    }
+    // Same treatment for the details shape, and it matters more here because
+    // this one is a form with seven boxes: re-parse against `DetailsPatch`
+    // alone so the reply names the box and says what is wrong with it.
+    if (body && "details" in body) {
+      const details = DetailsPatch.safeParse((body as { details: unknown }).details);
+      if (!details.success) {
+        const detailIssue = details.error.issues[0];
+        return json(
+          {
+            ok: false,
+            error: detailIssue?.message ?? "One of those fields is not something this record can hold.",
+            field: detailIssue ? ["details", ...detailIssue.path].join(".") : "details",
+          },
+          400,
+        );
+      }
+      return json(
+        { ok: false, error: "Send the version you were looking at with the details.", field: "version" },
         400,
       );
     }

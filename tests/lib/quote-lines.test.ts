@@ -116,6 +116,27 @@ describe("the Specification block", () => {
     expect(spec).toContain("DIMS: W2860 x D860 x H800mm");
   });
 
+  it("carries the record's typed dimension note on the DIMS line", () => {
+    // 0034. The client reads this line and BWS receives the same string; a
+    // quote that dropped the qualifier would be found by a client rather than
+    // by us, which is the argument for one composer in a third place.
+    const spec = composeSpecification(
+      record({ dimensionNote: "1250 L-shaped return" }),
+      [attribute({ attrGroup: "dimension", dimensionSlot: "W", value: "2860", unit: "mm", specFieldJsonId: null })],
+      [],
+    );
+    expect(spec).toContain("DIMS: W2860mm (1250 L-shaped return)");
+  });
+
+  it("writes a DIMS line for a note with no figures, rather than dropping it", () => {
+    const spec = composeSpecification(record({ dimensionNote: "1250 L-shaped return" }), [], []);
+    expect(spec).toContain("DIMS: (1250 L-shaped return)");
+  });
+
+  it("writes no DIMS line at all where there is neither a figure nor a note", () => {
+    expect(composeSpecification(record(), [], [])).not.toContain("DIMS:");
+  });
+
   it("numbers a label only when the item carries more than one of it", () => {
     const one = composeSpecification(record(), [attribute({ specFieldJsonId: 1, value: "Mohair" })], []);
     expect(one).toContain("COM: Mohair");

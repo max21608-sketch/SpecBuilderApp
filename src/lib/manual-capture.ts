@@ -373,6 +373,14 @@ export type RecordDetailPatch = {
   designer?: string | null;
   specDescription?: string | null;
   internalNotes?: string | null;
+  /**
+   * The qualifier that goes after the composed dimension cell (0034):
+   * "1250 L-shaped return". One line, at most 200 characters — the route
+   * refuses both in words, and `spec_records_dimension_note_one_line` refuses
+   * them again, because a constraint the app forgets is a constraint the
+   * database keeps.
+   */
+  dimensionNote?: string | null;
 };
 
 export type EditRecordDetailsResult = { recordId: string; version: number; changed: string[] };
@@ -396,7 +404,7 @@ export async function editRecordDetails(
 ): Promise<EditRecordDetailsResult> {
   const rows = await txn`
     select id, project_id, version, status, item_description, area, qty, designer,
-           spec_description, internal_notes
+           spec_description, internal_notes, dimension_note
       from spec_records where id = ${recordId} for update
   `;
   const record = rows[0];
@@ -423,6 +431,11 @@ export async function editRecordDetails(
       patch.specDescription === undefined ? (record.spec_description ?? null) : patch.specDescription?.trim() || null,
     internal_notes:
       patch.internalNotes === undefined ? (record.internal_notes ?? null) : patch.internalNotes?.trim() || null,
+    // Trimmed at the ends and NOTHING ELSE. It is composed into the dimension
+    // cell verbatim -- brackets, punctuation and all -- because anything
+    // cleverer would be this app editing a person's own words into the file.
+    dimension_note:
+      patch.dimensionNote === undefined ? (record.dimension_note ?? null) : patch.dimensionNote?.trim() || null,
   };
 
   const before: Record<string, unknown> = {
@@ -432,6 +445,7 @@ export async function editRecordDetails(
     designer: record.designer ?? null,
     spec_description: record.spec_description ?? null,
     internal_notes: record.internal_notes ?? null,
+    dimension_note: record.dimension_note ?? null,
   };
   const changed = Object.keys(next).filter(
     (key) => String(before[key] ?? "") !== String(next[key as keyof typeof next] ?? ""),
@@ -455,6 +469,7 @@ export async function editRecordDetails(
            designer         = ${next.designer},
            spec_description = ${next.spec_description},
            internal_notes   = ${next.internal_notes},
+           dimension_note   = ${next.dimension_note},
            updated_by       = ${actor}
      where id = ${recordId} and version = ${expectedVersion}
     returning version

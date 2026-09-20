@@ -41,6 +41,8 @@ type Details = {
   designer: string | null;
   spec_description: string | null;
   internal_notes: string | null;
+  /** 0034. Goes INTO the dimension cell, after the figures. */
+  dimension_note: string | null;
   version: number;
 };
 
@@ -51,6 +53,7 @@ type Form = {
   designer: string;
   specDescription: string;
   internalNotes: string;
+  dimensionNote: string;
 };
 
 const formOf = (record: Details): Form => ({
@@ -60,6 +63,7 @@ const formOf = (record: Details): Form => ({
   designer: record.designer ?? "",
   specDescription: record.spec_description ?? "",
   internalNotes: record.internal_notes ?? "",
+  dimensionNote: record.dimension_note ?? "",
 });
 
 /** One field of the read-only summary. */
@@ -138,6 +142,7 @@ export default function RecordDetails({
             designer: form.designer.trim() || null,
             specDescription: form.specDescription.trim() || null,
             internalNotes: form.internalNotes.trim() || null,
+            dimensionNote: form.dimensionNote.trim() || null,
           },
           version: record.version,
         }),
@@ -187,6 +192,13 @@ export default function RecordDetails({
           <Read label="Area or room">{form.area || <Blank />}</Read>
           <Read label="Quantity">{form.qty || <Blank />}</Read>
           <Read label="Designer">{form.designer || <Blank />}</Read>
+          <Read label="Dimension note" wide>
+            {form.dimensionNote ? (
+              <span className="font-mono">({form.dimensionNote})</span>
+            ) : (
+              <Blank>nothing recorded</Blank>
+            )}
+          </Read>
           <Read label="For the quote" wide>
             {form.specDescription ? (
               <span className="whitespace-pre-line">{form.specDescription}</span>
@@ -245,6 +257,27 @@ export default function RecordDetails({
             />
           </label>
         </div>
+
+        {/* ONE INPUT, ON THIS FORM, saved with everything else in one act.
+            It is the thing the five structured slots cannot hold -- Matthew's
+            "1250 bracket L-shaped return" -- and it goes INTO the cell rather
+            than beside it, which is why the placeholder shows the bracket.
+            Never a second box per slot: four slots off three pages could carry
+            four qualifiers and the cell would have to pick one. */}
+        <label className="block text-xs text-neutral-600">
+          Dimension note (in the cell, after the figures)
+          <span className="ml-2 font-normal text-neutral-400">
+            One line, up to 200 characters. Reaches BWS inside the dimensions cell, in brackets.
+          </span>
+          <input
+            value={form.dimensionNote}
+            onChange={set("dimensionNote")}
+            disabled={saving}
+            maxLength={200}
+            placeholder="1250 L-shaped return"
+            className="mt-1 block w-full border border-neutral-300 rounded px-2 py-1 text-sm disabled:opacity-50"
+          />
+        </label>
 
         <label className="block text-xs text-neutral-600">
           Description for the quote

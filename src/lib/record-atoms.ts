@@ -89,12 +89,13 @@ export type RecordAtoms = {
  * 1 — the original shape.
  * 2 — each attribute carries the finish its code resolves to (0018).
  * 3 — the record carries the item level a TGQ tier is read against (0019).
+ * 5 — the record carries the dimension note typed beside the five slots (0034).
  *
  * Bumped whenever a field is added, and every addition since 1 is optional on
  * read, so an older version still parses rather than reading as "everything
  * was deleted that day".
  */
-export const RECORD_ATOMS_SCHEMA_VERSION = 4;
+export const RECORD_ATOMS_SCHEMA_VERSION = 5;
 
 function text(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
@@ -199,7 +200,7 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
   const recordRows = await exec`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
            r.boq_category, r.status, r.category_id, r.level, r.run_id, r.parent_id, r.split_reason,
-           r.variant_label,
+           r.variant_label, r.dimension_note,
            p.bws_project_number, p.name as project_name, p.client,
            run.name as run_name,
            c.name as category_name,
@@ -242,6 +243,9 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
         runName: String(row.run_name),
         boqCodes: (row.boq_codes as string[] | null)?.map(String) ?? [],
         variantLabel: text(row.variant_label),
+        // 0034. Part of the record, so a version snapshot holds what the cell
+        // said on the day and a diff can show the note changing.
+        dimensionNote: text(row.dimension_note),
       },
       runId: String(row.run_id),
       runName: String(row.run_name),

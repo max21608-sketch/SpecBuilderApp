@@ -198,7 +198,9 @@ export type DimensionProblem =
   | { code: "no_unit"; slot: DimensionSlot; message: string }
   | { code: "not_numeric"; slot: DimensionSlot; message: string }
   | { code: "dia_conflict"; slots: DimensionSlot[]; message: string }
-  | { code: "duplicate_slot"; slot: DimensionSlot; message: string };
+  | { code: "duplicate_slot"; slot: DimensionSlot; message: string }
+  /** A note with nothing to qualify: the cell is the bracket and nothing else. */
+  | { code: "note_only"; message: string };
 
 export type DimensionCell = { text: string; problems: DimensionProblem[] };
 
@@ -206,7 +208,22 @@ export type DimensionCell = { text: string; problems: DimensionProblem[] };
 const ORDER_ROUND: DimensionSlot[] = ["DIA", "H", "SH"];
 const ORDER_SQUARE: DimensionSlot[] = ["W", "D", "H", "SH"];
 
-export function composeDimensionCell(rows: DimensionRow[]): DimensionCell {
+/**
+ * The five slots, and the one sentence a person typed about them.
+ *
+ * `note` is `spec_records.dimension_note` (0034): Matthew's "1250 bracket
+ * L-shaped return", the thing the structured boxes cannot hold. It is
+ * rendered LAST, in round brackets, and it is never parsed, never split and
+ * never trimmed beyond its outer whitespace — the moment this function read
+ * anything back out of it, a person's own words would start changing what the
+ * file says.
+ *
+ * It is written HERE rather than appended by the export, for the reason every
+ * other rule in this file lives here: the record screen, the quote and the
+ * costing sheet all call this function, and a bracket added beside one of them
+ * is a second composer — a screen promising what the file does not deliver.
+ */
+export function composeDimensionCell(rows: DimensionRow[], note?: string | null): DimensionCell {
   const problems: DimensionProblem[] = [];
 
   // One row per slot. A second active row in a slot cannot arrive through
@@ -306,6 +323,28 @@ export function composeDimensionCell(rows: DimensionRow[]): DimensionCell {
     .join(" x ");
   const conflict = problems.find((problem) => problem.code === "dia_conflict");
   const parts = [group, ...trailing, ...(conflict ? [`[conflict: ${conflict.message}]`] : [])].filter((part) => part !== "");
+
+  // THE TYPED NOTE GOES LAST, after the millimetre group, after any SH and
+  // after the brackets this cell uses to say what it could not derive. It
+  // qualifies the whole statement, so it cannot sit inside the figures; and
+  // round brackets keep it apart from the square ones, which are this app
+  // reporting a problem rather than a person speaking.
+  const typed = (note ?? "").trim();
+  if (typed) {
+    // A note on a record with no dimensions at all is a real state — somebody
+    // wrote down the awkward part before any drawing arrived — and the cell is
+    // then the bracket alone. Flagged, because a screen printing just
+    // "(1250 L-shaped return)" would otherwise read as a measurement this app
+    // mangled rather than as a measurement nobody has recorded yet.
+    if (parts.length === 0) {
+      problems.push({
+        code: "note_only",
+        message: "Dimensions not yet recorded — this note is all the cell carries.",
+      });
+    }
+    parts.push(`(${typed})`);
+  }
+
   return { text: parts.join(" "), problems };
 }
 

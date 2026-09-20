@@ -90,6 +90,12 @@ const AtomSchema = z.object({
     area: z.string().nullable(),
     runName: z.string(),
     boqCodes: z.array(z.string()),
+    // Added at schema 5 (0034). Optional and defaulted null, so a version
+    // written before the note existed parses as "nobody had typed one" rather
+    // than failing the screen -- and, because Zod strips what it does not
+    // name, a field left out here would be silently dropped from every
+    // snapshot this reads back.
+    dimensionNote: z.string().nullable().optional().default(null),
   }),
   runId: z.string(),
   runName: z.string(),
@@ -169,6 +175,11 @@ const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; read: (at
   { field: "boqCategory", label: "BOQ category", read: (a) => a.boqCategory },
   { field: "categoryName", label: "Category", read: (a) => a.categoryName },
   { field: "level", label: "Level", read: (a) => a.level },
+  // 0034. It is part of the composed Dimensions cell, so a change to it shows
+  // TWICE on a version -- here as the note, and in `cells` as the cell moving.
+  // Both are wanted: the cell says what BWS received, this says what somebody
+  // actually did.
+  { field: "dimensionNote", label: "Dimension note", read: (a) => a.record.dimensionNote ?? null },
   { field: "status", label: "Status", read: (a) => a.status },
   { field: "runName", label: "Run", read: (a) => a.runName },
   { field: "splitReason", label: "Split reason", read: (a) => a.splitReason },

@@ -129,6 +129,24 @@ describe("Tags carries the composed dimensions", () => {
     expect(only(sheet).tags).toContain("Dia.460");
   });
 
+  it("carries the record's typed dimension note, in the same bracket the file writes", () => {
+    // 0034. An estimator prices against the size, and "1250 L-shaped return"
+    // is part of the size. One composer, so the number on this sheet and the
+    // number in the BWS file cannot drift apart.
+    const sheet = compose({
+      records: [record({ dimensionNote: "1250 L-shaped return" })],
+      attributes: [dimension("W", "660"), dimension("H", "680")],
+    });
+    expect(only(sheet).tags).toBe("W660 x H680mm (1250 L-shaped return)");
+  });
+
+  it("carries a note even where nothing has been measured yet", () => {
+    // The note is then the only thing anybody has written down about the size,
+    // and an estimator is exactly the reader who has to see it.
+    const sheet = compose({ records: [record({ dimensionNote: "1250 L-shaped return" })] });
+    expect(only(sheet).tags).toBe("(1250 L-shaped return)");
+  });
+
   it("only takes rows that carry a slot, so a note is never priced as a size", () => {
     const arm = dimension("W", "520", { id: "arm", label: "ARM HEIGHT", attrGroup: "note", dimensionSlot: null });
     const sheet = compose({ attributes: [dimension("W", "660"), arm] });

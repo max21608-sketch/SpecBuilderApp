@@ -195,6 +195,13 @@ export type ExportRecord = {
   itemDescription: string;
   /** `A` on a fabric split, null otherwise. See the Name column below. */
   variantLabel?: string | null;
+  /**
+   * The one qualifier a person typed about the dimension cell (0034):
+   * "1250 L-shaped return". Optional for the same reason `variantLabel` is —
+   * a fixture composing a row need not know about it — and `loadRecordAtoms`
+   * always sets it, so every record the app loads carries the real value.
+   */
+  dimensionNote?: string | null;
   qty: number | null;
   area: string | null;
   runName: string;
@@ -386,7 +393,7 @@ export function renderAnswerValue(answer: { value: string | null; qualifier?: st
  * adapter: attributes in, cell out. Its `problems` are surfaced on those
  * screens, not in the cell's own column.
  */
-export function composeDimensions(attributes: ExportAttribute[]): string {
+export function composeDimensions(attributes: ExportAttribute[], note?: string | null): string {
   return composeDimensionCell(
     attributes
       .filter((attribute) => attribute.attrGroup === "dimension" && attribute.dimensionSlot !== null)
@@ -397,6 +404,10 @@ export function composeDimensions(attributes: ExportAttribute[]): string {
         state: attribute.state,
         sortOrder: attribute.sortOrder,
       })),
+    // The record's own typed qualifier (0034). It is passed THROUGH to the
+    // composer rather than appended here, so the file, the quote, the costing
+    // sheet's Tags and the record screen all write the bracket the same way.
+    note ?? null,
   ).text;
 }
 
@@ -468,7 +479,7 @@ export function composeRowCells(
   }
 
   const dimensionAttributes = mine.filter((attribute) => attribute.attrGroup === "dimension" && attribute.dimensionSlot !== null);
-  const dimensions = composeDimensions(mine);
+  const dimensions = composeDimensions(mine, record.dimensionNote ?? null);
 
   return BWS_EXPORT_COLUMNS.map((column): ExportCell => {
     // The id-less job-metadata block, by name.
@@ -505,10 +516,20 @@ export function composeRowCells(
     if (column.jsonId === DIMENSIONS_JSON_ID) {
       return {
         value: dimensions,
+        // The source stays what the FIGURES came from, and a typed note does
+        // not change it: a note carries no run and no page, deliberately, and
+        // naming a document beside it would be a false provenance rather than
+        // a missing one. Where the note is all there is, the check sheet's
+        // "Came from" is blank, which is the truth.
         source: dimensionAttributes.length ? { kind: "dimensions", attributes: dimensionAttributes } : { kind: "empty" },
         // A COMPOSED CELL HAS NO SINGLE PLACEMENT. Four slots off three pages
-        // could carry four; picking one would be the app inventing a fact.
-        qualifier: null,
+        // could carry four of 0029's placements; picking one would be the app
+        // inventing a fact. What it CAN carry is the record's own dimension
+        // note (0034) — ONE statement about the whole cell, typed by a person
+        // — and the check sheet shows it here, apart from the figures, so a
+        // reviewer reading the cell against a page can tell which half the
+        // page actually said.
+        qualifier: record.dimensionNote?.trim() || null,
       };
     }
     const attribute = byField.get(column.jsonId);

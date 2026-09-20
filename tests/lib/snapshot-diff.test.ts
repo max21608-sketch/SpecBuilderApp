@@ -67,6 +67,24 @@ const base = (): RecordAtoms => ({
 });
 
 describe("diffSnapshots", () => {
+  it("reports a dimension note as a core change AND as the cell moving", () => {
+    // Both, deliberately: the cell says what BWS received, the core line says
+    // what somebody actually did. A reader looking at the version screen for
+    // "why did the dimensions cell change" gets the answer beside it.
+    const after = base();
+    after.record = { ...after.record, dimensionNote: "1250 L-shaped return" };
+    const diff = diffSnapshots(base(), after);
+    expect(diff.core).toContainEqual({
+      field: "dimensionNote",
+      label: "Dimension note",
+      was: null,
+      now: "1250 L-shaped return",
+    });
+    expect(diff.cells).toContainEqual(
+      expect.objectContaining({ was: "W1900mm", now: "W1900mm (1250 L-shaped return)" }),
+    );
+  });
+
   it("reports nothing between two identical versions", () => {
     const diff = diffSnapshots(base(), base());
     expect(diff.isEmpty).toBe(true);
@@ -163,6 +181,25 @@ describe("parseAtoms", () => {
   it("refuses a version written by a newer build rather than showing part of it", () => {
     const future = { ...base(), schemaVersion: RECORD_ATOMS_SCHEMA_VERSION + 1 };
     expect(() => parseAtoms(JSON.parse(JSON.stringify(future)))).toThrow(/newer build/);
+  });
+
+  it("reads a version written before the dimension note existed as null, not as a crash", () => {
+    // Schema 5 added `record.dimensionNote` (0034). Every snapshot taken
+    // before it lacks the key, and Zod's default is what turns that into
+    // "nobody had typed one" rather than a failed screen — the same treatment
+    // `level` got at schema 3.
+    const older = JSON.parse(JSON.stringify(base())) as { schemaVersion: number; record: Record<string, unknown> };
+    older.schemaVersion = 4;
+    delete older.record.dimensionNote;
+    expect(parseAtoms(older).record.dimensionNote).toBeNull();
+  });
+
+  it("keeps a dimension note through the round trip, or a version would silently lose it", () => {
+    // Zod strips what it does not name, so a field added to the atoms and not
+    // to the schema reads back as absent on every snapshot.
+    const withNote = JSON.parse(JSON.stringify(base())) as RecordAtoms;
+    withNote.record.dimensionNote = "1250 L-shaped return";
+    expect(parseAtoms(withNote).record.dimensionNote).toBe("1250 L-shaped return");
   });
 
   it("refuses a malformed snapshot rather than reading it as an empty record", () => {

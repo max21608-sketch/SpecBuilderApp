@@ -171,7 +171,7 @@ export function sourceLink(origin: string, source: CostingSource): CostingLink {
  * 3 and the quote's DIMS line. A second implementation here is how a costing
  * sheet starts pricing against a size the file does not carry.
  */
-export function dimensionTag(attributes: ExportAttribute[]): string {
+export function dimensionTag(attributes: ExportAttribute[], note?: string | null): string {
   const rows: DimensionRow[] = attributes
     .filter((attribute) => attribute.attrGroup === "dimension" && attribute.dimensionSlot !== null)
     .map((attribute) => ({
@@ -181,8 +181,11 @@ export function dimensionTag(attributes: ExportAttribute[]): string {
       state: attribute.state,
       sortOrder: attribute.sortOrder,
     }));
-  if (rows.length === 0) return "";
-  return composeDimensionCell(rows).text.trim();
+  // A record with no figures but a typed note (0034) still has a Tags cell:
+  // the note is the only thing anybody has recorded about its size, and an
+  // estimator is exactly the reader who needs to see it.
+  if (rows.length === 0 && !note?.trim()) return "";
+  return composeDimensionCell(rows, note).text.trim();
 }
 
 export type CostingInput = ExportScope & {
@@ -230,7 +233,7 @@ export function composeCostingSheet(
       qty: record.qty === null ? "" : String(record.qty),
       hasImage: options.imageRecordIds.has(record.id),
       comments: record.internalNotes?.trim() ?? "",
-      tags: dimensionTag(mine),
+      tags: dimensionTag(mine, record.dimensionNote ?? null),
     });
   }
 

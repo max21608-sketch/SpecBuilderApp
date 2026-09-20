@@ -225,3 +225,66 @@ describe("composeDimensionCell", () => {
     expect(cell([]).text).toBe("");
   });
 });
+
+// ---- the note a person types beside the five slots (0034) ------------------
+//
+// Matthew, 2026-09-18: "you could say L, 1250 bracket L-shaped return ... a
+// text box for qualifying stuff, or for adding in stuff that doesn't quite fit
+// into the structured boxes". One per record, about the WHOLE cell, never read
+// off a page and never parsed back.
+describe("composeDimensionCell with a typed note", () => {
+  const note = (rows: DimensionRow[], text: string | null) =>
+    composeDimensionCell(rows.map((r, i) => ({ ...r, sortOrder: r.sortOrder || i })), text);
+
+  it("writes it in brackets after the millimetre group", () => {
+    expect(note([row("W", "1900"), row("D", "790"), row("H", "720")], "1250 L-shaped return").text).toBe(
+      "W1900 x D790 x H720mm (1250 L-shaped return)",
+    );
+  });
+
+  it("goes after the seat height, not between the figures", () => {
+    expect(note([row("W", "2925"), row("D", "1685"), row("H", "825"), row("SH", "420")], "left hand facing").text).toBe(
+      "W2925 x D1685 x H825 x SH420mm (left hand facing)",
+    );
+  });
+
+  it("is the whole cell where no dimension has been recorded, and says so", () => {
+    const result = note([], "1250 L-shaped return");
+    expect(result.text).toBe("(1250 L-shaped return)");
+    expect(result.problems.map((p) => p.code)).toEqual(["note_only"]);
+    expect(result.problems[0]?.message).toMatch(/not yet recorded/i);
+  });
+
+  it("does not flag note_only where there are figures to qualify", () => {
+    expect(note([row("W", "1900")], "front edge only").problems).toEqual([]);
+  });
+
+  it("keeps a TBC slot beside it", () => {
+    expect(
+      note([row("W", "1900"), row("D", null, "mm", { state: "tbc" }), row("H", "720")], "seat depth still open").text,
+    ).toBe("W1900 x D TBC x H720mm (seat depth still open)");
+  });
+
+  it("keeps a note verbatim, brackets and all — it is never parsed", () => {
+    // A note clever enough to be re-read is a note this app can rewrite. The
+    // person's own punctuation reaches BWS exactly as typed.
+    expect(note([row("W", "1900")], "1250 (measured to the return)").text).toBe(
+      "W1900mm (1250 (measured to the return))",
+    );
+  });
+
+  it("trims the ends and nothing else, and an empty note changes nothing", () => {
+    expect(note([row("W", "1900")], "  L-shaped  return  ").text).toBe("W1900mm (L-shaped  return)");
+    expect(note([row("W", "1900")], "   ").text).toBe("W1900mm");
+    expect(note([row("W", "1900")], null).text).toBe("W1900mm");
+    expect(note([], null).text).toBe("");
+  });
+
+  it("goes last, after a bracket saying what could not be derived", () => {
+    // The square brackets are this app reporting a problem; the round ones are
+    // a person speaking. The note qualifies the whole statement, so it ends it.
+    expect(note([row("W", "1900"), row("H", "720", null)], "returns at 90 degrees").text).toBe(
+      "W1900mm [H 720 — no unit] (returns at 90 degrees)",
+    );
+  });
+});

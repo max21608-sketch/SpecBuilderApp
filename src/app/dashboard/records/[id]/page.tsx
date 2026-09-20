@@ -88,6 +88,8 @@ type SpecRecord = {
   /** 0028's two free-text columns. `spec_description` is quote-facing;
    *  `internal_notes` never leaves this app. */
   spec_description: string | null; internal_notes: string | null;
+  /** 0034: the one sentence a person typed about the dimension cell. */
+  dimension_note: string | null;
   bws_project_number: string; project_name: string; project_id: string;
   run_id: string; run_name: string;
   category_name: string | null; category_family: string | null;
@@ -522,6 +524,10 @@ function RecordView() {
       state: attribute.state,
       sortOrder: attribute.sort_order,
     })),
+    // The note IS part of the cell, not a caption beside it (0034). Rendering
+    // it separately here would show a reviewer something the file does not
+    // say, which is the whole reason there is one composer.
+    record.dimension_note,
   );
   const provenance = dimensionProvenance(
     slotted.map((attribute) => ({

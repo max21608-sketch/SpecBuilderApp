@@ -130,6 +130,20 @@ describe("composeCheckSheet", () => {
     ]);
   });
 
+  it("shows the record's dimension note APART from the figures, and inside the value", () => {
+    // 0034. The exported cell joins them, so a reviewer checking it against a
+    // page has to be able to see which half the page said — which is the same
+    // job the Qualifier column already does for a placement. The note has no
+    // document and no page: it was typed, and naming one would be a false
+    // provenance.
+    const sheet = composeCheckSheet(
+      scope({ records: [record({ dimensionNote: "1250 L-shaped return" })], attributes: [attribute()] }),
+    );
+    expect(at(cell(sheet.rows, "Dimensions"), "Exported value", "Qualifier", "Came from")).toEqual([
+      "W1900mm (1250 L-shaped return)", "1250 L-shaped return", "Document",
+    ]);
+  });
+
   it("says where a non-dimension value came from", () => {
     const sheet = composeCheckSheet(
       scope({

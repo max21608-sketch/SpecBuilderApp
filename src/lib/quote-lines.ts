@@ -137,7 +137,16 @@ export function hasMetalFinish(attributes: ExportAttribute[]): boolean {
   });
 }
 
-function dimensionLine(attributes: ExportAttribute[]): string | null {
+/**
+ * The DIMS line, composed exactly as BWS field 3 is.
+ *
+ * `note` is the record's own typed qualifier (0034), passed through so the
+ * quote a client reads and the file BWS receives carry the same sentence. A
+ * record with nothing but a note still gets the line: the note IS the cell
+ * then, and a quote silently dropping it would be the second composer this
+ * file's header warns about.
+ */
+function dimensionLine(attributes: ExportAttribute[], note: string | null): string | null {
   const rows: DimensionRow[] = attributes
     .filter((attribute) => attribute.attrGroup === "dimension" && attribute.dimensionSlot !== null)
     .map((attribute) => ({
@@ -147,8 +156,8 @@ function dimensionLine(attributes: ExportAttribute[]): string | null {
       state: attribute.state,
       sortOrder: attribute.sortOrder,
     }));
-  if (rows.length === 0) return null;
-  const cell = composeDimensionCell(rows);
+  if (rows.length === 0 && !note?.trim()) return null;
+  const cell = composeDimensionCell(rows, note);
   return cell.text.trim() ? `DIMS: ${cell.text}` : null;
 }
 
@@ -169,7 +178,7 @@ export function composeSpecification(
   const prose = record.specDescription?.trim();
   if (prose) lines.push(...prose.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
 
-  const dims = dimensionLine(attributes);
+  const dims = dimensionLine(attributes, record.dimensionNote ?? null);
   if (dims) lines.push(dims);
 
   const byField = new Map<number, ExportAttribute>();

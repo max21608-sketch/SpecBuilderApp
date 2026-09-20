@@ -20,6 +20,7 @@ const record = {
   designer: "PDS",
   spec_description: "Curved sofa with fixed back and seat.",
   internal_notes: null,
+  dimension_note: null,
   version: 3,
 };
 
@@ -63,6 +64,30 @@ describe("the item details card", () => {
     // The version it was looking at, so a change underneath is refused rather
     // than overwritten.
     expect(body.version).toBe(3);
+  });
+
+  it("sends the dimension note with the rest of the panel, in ONE request", async () => {
+    // 0034. It is one box on this form rather than a control beside the
+    // dimension cell, because it is a fact about the item typed at the same
+    // moment as the others — and save-on-blur is the trap this whole panel
+    // exists to avoid.
+    render(<RecordDetails recordId="r1" record={record} onSaved={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    const box = screen.getByPlaceholderText("1250 L-shaped return");
+    await userEvent.type(box, "1250 L-shaped return");
+    await userEvent.tab();
+    expect(apiFetch).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((apiFetch.mock.calls[0]![1] as { body: string }).body);
+    expect(body.details.dimensionNote).toBe("1250 L-shaped return");
+  });
+
+  it("caps the note at the 200 characters the cell can carry", () => {
+    render(<RecordDetails recordId="r1" record={record} onSaved={() => {}} />);
+    expect(screen.getByPlaceholderText("1250 L-shaped return")).toHaveAttribute("maxLength", "200");
   });
 
   it("cannot write a no-op", async () => {

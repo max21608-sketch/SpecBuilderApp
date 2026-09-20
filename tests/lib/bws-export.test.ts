@@ -381,6 +381,35 @@ describe("the qualifier — the return line", () => {
     expect(dimensions?.qualifier).toBeNull();
   });
 
+  it("carries the record's OWN dimension note, apart from the value, for the check sheet", () => {
+    // 0034, and a different thing from the placement above it: that one is per
+    // ATTRIBUTE, and a cell composed from five of them could carry five. This
+    // is ONE statement about the whole cell, typed by a person, so the cell
+    // holds it — joined into the value by the composer, and shown apart here
+    // so a reviewer can tell which half a page actually said.
+    const cells = composeRowCells(
+      scope({}),
+      record({ dimensionNote: "1250 L-shaped return" }),
+      [
+        attribute({ attrGroup: "dimension", dimensionSlot: "W", value: "1900", unit: "mm", specFieldJsonId: null }),
+        attribute({ id: "attr-h", attrGroup: "dimension", dimensionSlot: "H", value: "720", unit: "mm", specFieldJsonId: null }),
+      ],
+      [],
+    );
+    const dimensions = cells[indexOfField(3)];
+    expect(dimensions?.value).toBe("W1900 x H720mm (1250 L-shaped return)");
+    expect(dimensions?.qualifier).toBe("1250 L-shaped return");
+  });
+
+  it("writes the note alone where a record has no dimensions yet", () => {
+    const cells = composeRowCells(scope({}), record({ dimensionNote: "1250 L-shaped return" }), [], []);
+    const dimensions = cells[indexOfField(3)];
+    expect(dimensions?.value).toBe("(1250 L-shaped return)");
+    // The source stays `empty`: a typed note has no document and no page, and
+    // naming one beside it would be a false provenance.
+    expect(dimensions?.source.kind).toBe("empty");
+  });
+
   it("NO EXPORTED CELL CONTAINS A NEWLINE while the mode is inline", () => {
     // The guard on EXPORT_QUALIFIER_MODE. Matthew can get Tim to build the BWS
     // importer to take a second line; until that exists and somebody has seen
@@ -398,5 +427,16 @@ describe("the qualifier — the return line", () => {
       [],
     );
     for (const cell of row) expect(cell).not.toMatch(/[\r\n]/);
+
+    // The dimension note (0034) reaches the same file, so it is held to the
+    // same rule — by the route in words, and by 0034's own CHECK. Nothing can
+    // have put one here, and this asserts the composed cell either way.
+    const withNote = composeRow(
+      scope({}),
+      record({ dimensionNote: "1250 L-shaped return" }),
+      [attribute({ attrGroup: "dimension", dimensionSlot: "W", value: "1900", unit: "mm", specFieldJsonId: null })],
+      [],
+    );
+    for (const cell of withNote) expect(cell).not.toMatch(/[\r\n]/);
   });
 });
