@@ -32,6 +32,7 @@ import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { correctAttribute } from "@/lib/attribute-correct";
 import { createAttribute, createRecord, createRun } from "@/lib/manual-capture";
+import { normaliseFinishCode } from "@/lib/finishes";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -99,6 +100,30 @@ describeIfDb("correcting a spec", () => {
       ],
     );
     return { id: rows.rows[0].id, version: Number(rows.rows[0].version) };
+  }
+
+  /**
+   * A library finish, normalised THE WAY THE APP DOES IT.
+   *
+   * THE FIRST VERSION OF THIS FIXTURE HAND-WROTE `code_norm` — `__QAUPH07` for
+   * the code `__QA UPH-07` — and `normaliseFinishCode` folds case and
+   * whitespace and NOTHING ELSE, so it produces `__QA UPH-07`. The two never
+   * matched, `resolveFinishCode` found no library row at all, and its answer
+   * was `new` rather than `conflict`.
+   *
+   * That made one test fail and the other pass FOR THE WRONG REASON: "keeps
+   * the link where the corrected words still match" was green because nothing
+   * resolved, and it would have stayed green with the whole finish branch
+   * deleted. A fixture that invents a normalisation is exactly what
+   * `normaliseFinishCode`'s own header warns against, one layer out.
+   */
+  async function libraryFinish(code: string, description: string): Promise<string> {
+    const rows = await client.query(
+      `insert into project_finishes (project_id, code, code_norm, description, state, created_by, updated_by)
+       values ($1, $2, $3, $4, 'confirmed', 'qa', 'qa') returning id`,
+      [projectId, code, normaliseFinishCode(code), description],
+    );
+    return rows.rows[0].id;
   }
 
   async function dimensionsAnswer(recordId: string): Promise<{ value: string | null; state: string } | null> {
@@ -408,13 +433,7 @@ describeIfDb("correcting a spec", () => {
   // something else — so the new row stays UNLINKED and the library is untouched.
   it("unlinks a corrected finish whose words now disagree with the library", async () => {
     const recordId = await item("__QA Armchair, fabric corrected");
-    const finish = await client.query(
-      `insert into project_finishes (project_id, code, code_norm, description, state, created_by, updated_by)
-       values ($1, '__QA UPH-07', '__QAUPH07', 'Yarn Tessarae YC04158', 'confirmed', 'qa', 'qa')
-       returning id`,
-      [projectId],
-    );
-    const finishId = finish.rows[0].id;
+    const finishId = await libraryFinish("__QA UPH-07", "Yarn Tessarae YC04158");
     const before = await documentSpec(recordId, {
       attrGroup: "material",
       label: "SOFA",
@@ -458,13 +477,7 @@ describeIfDb("correcting a spec", () => {
 
   it("keeps the link where the corrected words still match the library", async () => {
     const recordId = await item("__QA Armchair, fabric re-typed");
-    const finish = await client.query(
-      `insert into project_finishes (project_id, code, code_norm, description, state, created_by, updated_by)
-       values ($1, '__QA UPH-08', '__QAUPH08', 'Linen Weave LW-2', 'confirmed', 'qa', 'qa')
-       returning id`,
-      [projectId],
-    );
-    const finishId = finish.rows[0].id;
+    const finishId = await libraryFinish("__QA UPH-08", "Linen Weave LW-2");
     const before = await documentSpec(recordId, {
       attrGroup: "material",
       label: "SOFA",
@@ -493,6 +506,9 @@ describeIfDb("correcting a spec", () => {
     const fresh = await client.query(`select finish_id from record_attributes where id = $1`, [
       result.attributeId,
     ]);
+    // THE LINK SURVIVED A REAL COMPARISON. Before the fixture was corrected
+    // this assertion passed because nothing resolved at all — it would have
+    // held with the whole finish branch deleted.
     expect(fresh.rows[0].finish_id).toBe(finishId);
   }, SLOW);
 });

@@ -194,6 +194,15 @@ export async function correctAttribute(
   // with the drawings confirm. A conflict LINKS NOTHING: the library has
   // committed to a description and this row now says something else, and only a
   // person can say which is out of date.
+  //
+  // IT IS ASKED ABOUT THE ROW THIS ATTRIBUTE IS ALREADY LINKED TO, so the
+  // library row's OWN code goes in rather than the attribute's `material_code`.
+  // WHICH finish this is was settled at confirm time and a correction never
+  // moves it — `material_code` is copied verbatim below — so the only question
+  // left is whether the corrected WORDS still match. Passing the attribute's
+  // code instead makes the answer depend on the two normalising onto each
+  // other, and a row where they do not would come back `new`, which is not a
+  // conflict, and the link would survive a correction that contradicts it.
   let finishId = attribute.finish_id ? String(attribute.finish_id) : null;
   let finishUnlinked = false;
   if (finishId) {
@@ -214,13 +223,7 @@ export async function correctAttribute(
         colour: row.colour === null || row.colour === undefined ? null : String(row.colour),
         state: String(row.state) as AttributeState,
       };
-      const resolution = resolveFinishCode(
-        attribute.material_code === null || attribute.material_code === undefined
-          ? null
-          : String(attribute.material_code),
-        value,
-        [finish],
-      );
+      const resolution = resolveFinishCode(finish.code, value, [finish]);
       if (resolution.status === "conflict") {
         finishId = null;
         finishUnlinked = true;

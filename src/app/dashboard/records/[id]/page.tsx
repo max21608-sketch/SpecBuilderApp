@@ -893,14 +893,31 @@ function RecordView() {
                                 )}
                               </Td>
                               <Td muted>
+                                {/* THE BWS ID IS OURS, AND IT IS NOT A LABEL.
+                                    `1 · COM 1` and a bare `3 ·` cost Matthew
+                                    ninety seconds and a wrong guess on
+                                    2026-09-18. The NAME stays, because that is
+                                    the word BWS shows him; the number moves
+                                    onto the title, where an editor debugging an
+                                    export cell can still reach it. This table
+                                    was the one screen item 1.3 missed.
+
+                                    A DIMENSION REACHES FIELD 3 BY ITS SLOT and
+                                    carries no `spec_field_id` of its own, so it
+                                    names the cell it composes into and takes
+                                    the same title. A row with neither prints a
+                                    dash — never "BWS null". */}
                                 {attribute.field_name ? (
-                                  <>
-                                    {attribute.json_id ? `${attribute.json_id} · ` : ""}
+                                  <span
+                                    title={
+                                      attribute.json_id !== null ? `BWS field ${attribute.json_id}` : undefined
+                                    }
+                                  >
                                     {attribute.field_name.trim()}
                                     {attribute.dimension_slot ? ` (${attribute.dimension_slot})` : ""}
-                                  </>
+                                  </span>
                                 ) : attribute.dimension_slot ? (
-                                  `3 · Dimensions (${attribute.dimension_slot})`
+                                  <span title="BWS field 3">Dimensions ({attribute.dimension_slot})</span>
                                 ) : (
                                   "—"
                                 )}

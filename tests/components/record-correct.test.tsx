@@ -239,6 +239,66 @@ describe("correcting a spec from the record", () => {
     expect(screen.queryByLabelText("Unit")).toBeNull();
   });
 
+  // ITEM 1.3, ON THE ONE SCREEN IT MISSED. `1 · COM 1` and a bare `3 ·` cost
+  // Matthew ninety seconds and a wrong guess; the id is the export's key and
+  // means nothing to the person reading the row. The NAME stays and the number
+  // moves onto the title.
+  describe("the BWS field column", () => {
+    it("prints the name with no ordinal, and carries the id on the title", async () => {
+      serve(
+        payload({
+          attributes: [
+            attribute({
+              id: "attr-fab",
+              attr_group: "material",
+              label: "SOFA",
+              value: "Yarn Tessarae",
+              unit: null,
+              dimension_slot: null,
+              field_name: "COM 1",
+              json_id: 1,
+            }),
+          ],
+        }),
+      );
+      render(<RecordPage />);
+      const cell = await screen.findByTitle("BWS field 1");
+      expect(cell.textContent).toBe("COM 1");
+      expect(screen.queryByText(/^1 · /)).toBeNull();
+    });
+
+    // A DIMENSION REACHES FIELD 3 BY ITS SLOT and carries no field id of its
+    // own, so it names the cell it composes into and takes the same title.
+    it("names the cell a dimension composes into, without the number", async () => {
+      serve(payload());
+      render(<RecordPage />);
+      const cell = await screen.findByTitle("BWS field 3");
+      expect(cell.textContent).toBe("Dimensions (W)");
+      expect(screen.queryByText(/^3 · /)).toBeNull();
+    });
+
+    // Never "BWS null", and never "BWS field —".
+    it("prints a dash, and no title, where there is no field at all", async () => {
+      serve(
+        payload({
+          attributes: [
+            attribute({
+              id: "attr-note",
+              attr_group: "note",
+              label: "REMARKS",
+              value: "Refer to the general conditions.",
+              unit: null,
+              dimension_slot: null,
+            }),
+          ],
+        }),
+      );
+      render(<RecordPage />);
+      await screen.findByRole("button", { name: "Correct" });
+      expect(screen.queryByTitle(/^BWS field/)).toBeNull();
+    });
+  });
+
   // THE OLD ROW STAYS VISIBLE, and it names what took over rather than
   // asserting "a later drawing" — which, since the correction verb exists, it
   // may not have been.

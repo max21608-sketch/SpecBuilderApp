@@ -120,6 +120,23 @@ describe("resolveFinishCode", () => {
     expect(resolveFinishCode("CH-01.1", "Yarn Tessarae", blank).status).toBe("matched");
   });
 
+  // THE PREMISE THE CORRECTION VERB RESTS ON (src/lib/attribute-correct.ts).
+  //
+  // Correcting a spec that is already LINKED asks only whether the corrected
+  // words still match, so it passes the library row's OWN code — and the whole
+  // question is void unless that always resolves to the row it came from. The
+  // first version of it passed the ATTRIBUTE'S code instead, and a db-tier
+  // fixture whose hand-written `code_norm` did not match produced `new` rather
+  // than `conflict`: a correction contradicting the library kept its link, and
+  // the test that should have caught it passed for the wrong reason.
+  it("always resolves a library row against its own code, however it is punctuated", () => {
+    for (const code of ["CH-01.1", " ch-01.1 ", "__QA UPH-07", "WD  05"]) {
+      const row = finish({ code, codeNorm: normaliseFinishCode(code), description: "Yarn Tessarae" });
+      expect(resolveFinishCode(row.code, "Yarn Tessarae", [row]).status).toBe("matched");
+      expect(resolveFinishCode(row.code, "Something else entirely", [row]).status).toBe("conflict");
+    }
+  });
+
   it("says nothing at all about a spec with no code", () => {
     expect(resolveFinishCode(null, "Dark tinted wood", library).status).toBe("none");
     expect(resolveFinishCode("   ", "Dark tinted wood", library).status).toBe("none");
