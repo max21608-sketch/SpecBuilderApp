@@ -22,6 +22,41 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### A record's version number is taken without a lock, and two edits collide
+
+**Status: open — found 2026-09-20 by Coder B while driving the infill screen
+on the sandbox; the fix is briefed (Stage 2, coder B round 2).**
+`snapshotRecords` (`src/lib/record-snapshot.ts`) reads `max(snapshot_no)` for
+a record and inserts the next number with no lock on the record; `editAnswer`
+locks the ANSWER row only. Two edits to two different questions on one item —
+a palette picked, then a tab out of the next box — both claim the same number,
+the second dies on `record_snapshots_record_no_key`, and the reviewer sees a
+**500** saying nothing was written. Every write path shares it; the infill
+screen serialises its own saves so a meeting does not provoke it. Cause named
+apart from the observation: the baseline already writes under the project row
+lock for the same class of reason (0013); a version needs the record's.
+
+### The infill DoD walk left QA litter on the demo project
+
+**Status: open — housekeeping, not a defect. 2026-09-20.** Coder B's
+definition-of-done walk wrote four `__QA`-prefixed answers, one `W845mm`
+attribute and two change sets named "__QA Handover call with Hayley,
+2026-09-22" into DEMO-TEST-01 (`252bcdcf…`). 0014 refuses deleting a change
+set while its project exists, so it cannot be tidied piecemeal;
+`npm run qa:demo -- --clear --apply` rebuilds the project (~15 minutes) if it
+matters before a call. Fable's own 2.5 walk generated one ordinary draft for
+Priya Raman there and removed the temporary `QA Colleague` contact and its
+draft.
+
+### One component test sits at 3 s against a 5 s default
+
+**Status: open — observation from Stage 2's full runs, 2026-09-20.**
+`tests/components/spec-table-area.test.tsx › renders every area on a 300-line
+phase` takes about 3.0 s alone and timed out once under a full concurrent
+run; `extraction-queue.test.ts › exactly ONE of two simultaneous deliveries`
+did the same on another run. Both pass alone and passed on the run that
+gated the fast-forward. Same class as the Stage 1b contention timeouts.
+
 ### The versions diff labels a phase "Run"
 
 **Status: open — seen 2026-09-20 while reviewing Stage 2 item 2.6's

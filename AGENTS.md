@@ -671,6 +671,73 @@ the same rule the drawings card learned.
 `groupIntoLines` is pure and tested in the pure tier; the table's own behaviour
 is tested in the component tier, which runs without a database.
 
+### The infill screen fills in what we know, and it writes through the two routes that already exist
+
+`src/app/dashboard/projects/[id]/infill/page.tsx`, `src/components/infill/*`,
+`src/app/api/projects/[id]/infill/route.ts`, `src/lib/infill.ts`,
+`src/lib/chase-drafts.ts` (`loadOutstanding`'s scope), `src/lib/chase-grouping.ts`
+(`groupByQuestion`), `src/lib/manual-capture.ts` (`createAttribute`),
+`tools/measure-outstanding.ts`, `docs/plans/make-it-work-2026-09-19.md` §5.3
+
+Matthew's missing step (2026-09-18): the PM loads the pack, takes what is
+outstanding to the CAM, and only then to the client — and in a handover call
+the app is open in front of the client, "capturing as you go". Max's shape: the
+chase screen with an edit box where the tick box is. Built 2026-09-20 (Stage 2
+items 2.3 and 2.7). Two screens, one loader, one grouping — the chase screen
+selects questions to ASK, this one ANSWERS them, and the two can never
+disagree about what is outstanding because both read `loadOutstanding` and
+`groupIntoLines`.
+
+- **It ships lines, not questions.** Measured first (`npm run
+  measure:outstanding`): the 300-line project is 19,582 outstanding questions,
+  18,976 KB of JSON if sent whole, over a loader that answers in about a
+  second. The chase screen ships that whole list because a tick box needs it;
+  this route answers in three shapes over ONE loader — the collapsed lines with
+  two counts each, one line's questions on open, one question's items for the
+  by-question tab — through an optional SCOPE on `loadOutstanding` that is a
+  WHERE clause on the same query, never a second loader. First paint 1.9 s on
+  407 lines; the screen says its counts in words.
+- **The route writes nothing.** Every edit row posts to `PATCH /api/answers/[id]`
+  or `POST /api/attributes`, where the optimistic lock, the change set and the
+  reason rule already live. A 409 is shown on the row, which reloads ITSELF
+  with the live version; a 400 `reason_required` opens the reason box inline,
+  keeping the typed value.
+- **A dimension is written as an ATTRIBUTE, never as an answer.** `rowKind`
+  reads `jsonId === 3` and the row becomes slot + figure + unit → `createAttribute`,
+  because the Dimensions cell is a projection of the attributes and a typed
+  answer there would be wiped by the next drawing confirm. The row then says
+  *"Recorded as a width dimension"* and shows the composed cell. A palette
+  question offers `AnswerValue`'s dropdown with Other…; everything else is a
+  text box saving on blur as `source_kind = 'manual'`.
+- **A change is offered in the header and never required.** `OpenChangeBar`
+  sits in the header band; with one open, every edit attaches to it —
+  including a typed dimension, because `createAttribute` now joins the actor's
+  open change (it used to open its own every time, so a meeting's dimensions
+  filed as separate occasions beside its answers). The first edit works with no
+  change open. DoD on the demo project: one change, four gaps on two items in
+  nine seconds, ONE change set, one version per record, `spec_records.version`
+  untouched.
+- **Reference beside the gap, never pre-filled.** Sister finish options'
+  confirmed values and the library's description of a finish code print as
+  text with no button that copies them — M8's rule that a value is never
+  filled from a sister item.
+- **By question keys on the FIELD, not on `requirements.id`.** `requirements`
+  is per category, so "Dimensions" is 17 rows and keying on the id showed four
+  Dimensions headings on the 300-line project, where clearing one read as done.
+  `groupByQuestion` keys on BWS field → local key → folded prompt → id.
+- **The shared table body was NOT extracted**, deliberately: the tick column is
+  not the only difference (eight columns against seven, a selection model, a
+  level `SuggestButton`, a spanning reason panel). What decides anything is
+  shared — `groupIntoLines`, `countOutstanding`, `area-filter` — and forty
+  lines of JSX behind a prop per caller is a copy with extra steps. Two tables
+  sharing one grouping is acceptable; two groupings is not.
+
+Found by building it: **`snapshotRecords` numbers a version with no lock**, so
+two edits to two questions of one record can both claim the same number and
+the second reaches the reviewer as a 500. Every write path has it; the infill
+screen serialises its own saves so a meeting does not provoke it; the fix is
+briefed (Stage 2, coder B round 2).
+
 ### TOE dates are calendar days, and must never become a `Date`
 
 `src/lib/project-programme.ts`, `src/app/api/projects/[id]/route.ts`,
@@ -3246,7 +3313,11 @@ so far: 2.4** (area as a filter on the phase table and the chase screen) and
 both verified in the browser on the sandbox — 300-line phase narrowed to one
 floor, `18 of 300 shown`, tiles unmoved; a 69-question draft whose body holds
 exactly its 69 coverage rows under 8 question tables and 28 area rows; a
-colleague's draft reading "we still need". Not accepted by anybody. **Blocked
+colleague's draft reading "we still need". **2.3 and 2.7** (the infill screen
+and its by-question tab) followed the same day: `/dashboard/projects/[id]/infill`,
+measured first (`npm run measure:outstanding`), lines shipped rather than the
+19 MB of questions, four gaps on two items filed under one meeting's change in
+nine seconds. Not accepted by anybody. **Blocked
 and saying so:** 2.1/2.2 (no BWS account for Max), 2.9 (a proposal for
 Matthew), 2.11 (the rate cap first, then Max's own amendment of the inbound-
 email gate above), 2.12 (another session's plan). Nothing promotes to pilot

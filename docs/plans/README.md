@@ -32,6 +32,8 @@ discipline as Stage 1. Each item's §7.1 evidence, as facts:
 |---|---|---|---|---|
 | **2.4** area as a filter | `17b733c` | `area-filter.ts` leaf (fold = case + whitespace, label as first written, no-area last) + `AreaSelect`; 11 pure, 8 + 7 component tests; `?area=` via `useUrlTab` | DEMO-300 MAIN RUN: 36 options, choosing "Bedroom, Level 4 (18)" lists 18 of 300 and the TGQ tile stays 5,829; chase screen: 222 → 15 lines, Draft the email still 2771, footer "2558 ticked questions are hidden by your filters — they will still be asked"; screenshotted at 1920×1080 | `3f8511d` deployed on `spec-builder-app-rho.vercel.app`, read back from `/api/auth/me`; the pasted `?area=bedroom, level 4` link on the deployed 300-line phase renders "Bedroom, Level 4 (18)", `18 of 300 shown`, TGQ tile 5,829 |
 | **2.5** the chase EMAIL by question × area; a colleague as recipient | `ee5e441` | `groupByQuestionAndArea` in `chase-template.ts`, `TEMPLATE_VERSION` 3, `data-record`/`data-requirement` per item row; `groupByContact` gives an internal contact every levelled question; 42 template tests (+11), 42 chase-drafts tests (+5), 4 picker tests; full suite 1,501 green with the database tier REQUIRED | DEMO-TEST-01, Priya Raman: a 69-question draft whose body holds exactly the 69 coverage pairs, 8 question tables, 28 area rows, "We need from you" once; a `QA Colleague` (internal) contact: 70 questions, intro "We still need … or say who to ask?", no "your"; the contact and its draft then removed; chase screen at 1440×900 shows the Colleague chip on the tab | `3f8511d` deployed, read back from `/api/auth/me` |
+| **2.3** the infill screen | `98d4d30` (+ merge `45ff5bc`) | `measure:outstanding` (tool + `outstanding-measure.ts`); `GET /api/projects/[id]/infill` in three shapes over ONE `loadOutstanding` with a WHERE-clause scope; `InfillRow` with four row kinds, the dimension writer, the inline reason box, the 409 self-reload; `createAttribute` joins the actor's open change; 22 pure + 34 component + 6 db + 6 route tests; full suite 1,569 green with the database tier REQUIRED on the merged branch | Coder B's DoD on the sandbox production build: change "Handover call with Hayley, 2026-09-22" opened, four gaps on two items (a dimension composing `W845mm`, a palette) in 9 s, closed — ONE change set, one version per record (v12, v7), every answer `manual`, `spec_records.version` untouched. Fable's walk on the dev server: DEMO-TEST-01 infill renders three bands, one primary (*Chase what is left*), the uncategorised block with its picker, 29 lines; a line opens to its edit rows (Assembly guide as No/Yes/TBC); screenshotted at 1920×1080 and 1440×900. Measured: DEMO-300 first paint 1.84–1.87 s, settled 2.09–2.38 s, 19,582 questions / 18,976 KB if shipped whole | `f288ea9` pushed to staging (a fast-forward of Coder B's branch, which had merged staging twice); deployment to be read back |
+| **2.7** outstanding by question | `ed2f543` | `groupByQuestion` keyed on field → local key → folded prompt → id (keying on `requirements.id` gave four "Dimensions" headings); the `by-question` tab; a "by question" link under the phase table's TGQ header; +7 pure, 8 component tests | DEMO-300: "Dimensions" opens 401 rows in 831 ms, one area click → 27 rows; DEMO-TEST-01 by-question tab at 1440×900: 12 questions, "TGQ on 10 of 17" chips, area select "All areas (221)" | `f288ea9` pushed |
 
 **Three decisions taken by Coder A that Max should overrule if wrong:**
 
@@ -42,6 +44,19 @@ discipline as Stage 1. Each item's §7.1 evidence, as facts:
   grouping primitive; a colleague sorts last and carries a `Colleague` chip.
 - **The category name is gone from the email**; it was in the old per-record
   heading and has no place in a per-question one.
+
+**Two departures by Coder B that Max should know:** the shared table body
+between the chase and infill screens was NOT extracted (eight columns against
+seven, a selection model, a level `SuggestButton` — the grouping is shared, the
+JSX is not); and `groupByQuestion` keys on the FIELD rather than
+`requirements.id`, because "Dimensions" is seventeen requirement rows.
+
+**Found by building 2.3, logged in `found-in-use.md`:** `snapshotRecords`
+numbers a version with no lock, so two edits to two questions of one record
+can both claim the same number and the second reaches the reviewer as a 500;
+briefed to Coder B's round 2 as the first fix. And the DoD walk left `__QA`
+answers and two `__QA` change sets on DEMO-TEST-01, which `qa:demo --clear
+--apply` rebuilds if the litter matters before a call.
 
 **Measured before briefing 2.3:** `loadOutstanding` on DEMO-300 returns
 19,582 outstanding questions in 845–1,263 ms. The loader is not the weight
