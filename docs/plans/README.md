@@ -57,6 +57,16 @@ pushing. Each item's §7.1 evidence, as facts:
   since 1.14) beside the unchanged `toQuote`; the gate panel's own button loses
   its number. In progress.
 
+**Stage 1b, opened the same day at Max's instruction ("keep going until you
+have completed the whole of stage 1"), so far:**
+
+| Item | Commit | Built · Tested | Verified in the app | Deployed |
+|---|---|---|---|---|
+| **1.10** the swatch reaches page 2 | `36dbed5` | 4 component + 4 pure tests; the crop payload carries the page cropped from | S-100 card: "Crop from: page 1 · page 2" | not yet pushed |
+| **1.15** a level on the drawings card | `941573d` | 4 component + 2 db tests (one db fixture red on first run — `retired_by` missing — back with the coder) | S-100 card: LEVEL panel, "Simple · decided on 3 of 3 records", Change… as buttons | not yet pushed |
+| 1.11 follow-up: the step only in *Review complete* | `9b626eb` | 1 component test | S-100 review while open: no "Review 9 documents" beside Confirm | not yet pushed |
+| **1.9** step one: measure | `7b9ee6e` | 12 pure tests; `measure:drawings` gains the item-pictures block | sandbox: 100 items, **58 report a region, 42 none, 162 regions all in bounds, 0 faulty** — the conclusion is the coder's next report | not yet pushed |
+
 **Still outstanding in 1a:** the first-session script and the 300-line fixture (the verifier, in
 progress), the pilot's console half (Max), the hand-over message (Max). Human
 acceptance outstanding on every item.
