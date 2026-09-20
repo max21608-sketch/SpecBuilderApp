@@ -540,7 +540,7 @@ export type Workbook = {
 export const SPECS_SHEET_HEADER = [
   "Record",
   "Client code",
-  "Run",
+  "Phase",
   "Group",
   "Label",
   // The slot a dimension claims. Without it the long-form sheet cannot explain

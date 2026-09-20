@@ -51,12 +51,12 @@ export async function retireRun(
     select id, project_id, name, status from spec_runs where id = ${runId} for update
   `;
   const run = runs[0];
-  if (!run) throw new DomainConflictError("not_found", "No such run.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such phase.", { status: 404 });
   if (String(run.project_id) !== projectId) {
-    throw new DomainConflictError("wrong_project", "That run belongs to another project.", { status: 400 });
+    throw new DomainConflictError("wrong_project", "That phase belongs to another project.", { status: 400 });
   }
   if (String(run.status) !== "active") {
-    throw new DomainConflictError("already_retired", "That run has already been retired. Reload.");
+    throw new DomainConflictError("already_retired", "That phase has already been retired. Reload.");
   }
 
   if (replacedByRunId) {
@@ -64,7 +64,7 @@ export async function retireRun(
       select id, status from spec_runs where id = ${replacedByRunId} and project_id = ${projectId}
     `;
     if (!replacement[0]) {
-      throw new DomainConflictError("replacement_missing", "The run you named as its replacement is not on this project.", {
+      throw new DomainConflictError("replacement_missing", "The phase you named as its replacement is not on this project.", {
         status: 400,
       });
     }
@@ -100,7 +100,7 @@ export async function retireRun(
   if (Number(left[0]?.n ?? 0) > 0) {
     throw new DomainConflictError(
       "records_still_active",
-      "Something added a record to this run while it was being retired. Nothing was written — try again.",
+      "Something added a record to this phase while it was being retired. Nothing was written — try again.",
     );
   }
 
@@ -124,17 +124,17 @@ export async function restoreRun(
     select id, project_id, status, retired_at, replaced_by_run_id from spec_runs where id = ${runId} for update
   `;
   const run = runs[0];
-  if (!run) throw new DomainConflictError("not_found", "No such run.", { status: 404 });
+  if (!run) throw new DomainConflictError("not_found", "No such phase.", { status: 404 });
   if (String(run.project_id) !== projectId) {
-    throw new DomainConflictError("wrong_project", "That run belongs to another project.", { status: 400 });
+    throw new DomainConflictError("wrong_project", "That phase belongs to another project.", { status: 400 });
   }
   if (String(run.status) !== "retired") {
-    throw new DomainConflictError("not_retired", "That run is already on the project.");
+    throw new DomainConflictError("not_retired", "That phase is already on the project.");
   }
   if (run.replaced_by_run_id) {
     throw new DomainConflictError(
       "superseded",
-      "Another run replaced this one. Bringing it back would leave the project quoting the same codes twice with nothing to say which is live.",
+      "Another phase replaced this one. Bringing it back would leave the project quoting the same codes twice with nothing to say which is live.",
     );
   }
 

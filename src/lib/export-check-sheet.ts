@@ -58,7 +58,7 @@ export const CHECK_SHEET_HEADER = [
   "Record",
   "Client code",
   "Item",
-  "Run",
+  "Phase",
   "Column",
   "BWS field",
   "Field id",

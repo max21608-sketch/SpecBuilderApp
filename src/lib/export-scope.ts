@@ -37,7 +37,7 @@ export type ScopeFailure = { error: string; status: 404 };
  * compose its row.
  *
  * Returns a failure rather than throwing, so both routes report "no such
- * project" and "no such run on this project" in the same words.
+ * project" and "no such phase on this project" in the same words.
  */
 export async function loadExportScope(projectId: string, runId: string | null): Promise<LoadedExportScope | ScopeFailure> {
   const projects = await sql`select id, bws_project_number, name, client from projects where id = ${projectId}`;
@@ -47,7 +47,7 @@ export async function loadExportScope(projectId: string, runId: string | null): 
   let runName: string | null = null;
   if (runId) {
     const runs = await sql`select id, name from spec_runs where id = ${runId} and project_id = ${projectId}`;
-    if (!runs[0]) return { error: "No such run on this project.", status: 404 };
+    if (!runs[0]) return { error: "No such phase on this project.", status: 404 };
     runName = String(runs[0].name);
   }
 

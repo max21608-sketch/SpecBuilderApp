@@ -36,6 +36,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { CHANGE_SET_KIND_LABELS } from "@/lib/change-sets";
+import { SPECS_SHEET_HEADER } from "@/lib/bws-export";
+import { CHECK_SHEET_HEADER } from "@/lib/export-check-sheet";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DIRS = ["src/components", "src/app/dashboard"];
@@ -127,6 +130,24 @@ describe("screen vocabulary: a sub-quote is a phase", () => {
     const seen = new Set(ALL_HITS.map((hit) => hit.text));
     const stale = ALLOWED.filter((entry) => !seen.has(entry.text)).map((entry) => entry.text);
     expect(stale, `Allowlisted strings no longer in the source — delete them: ${stale.join(", ")}`).toEqual([]);
+  });
+
+  // THE THREE NAMES `src/lib` PUTS IN FRONT OF A PERSON, held one by one.
+  //
+  // The scan above deliberately stops at the two screen directories, because
+  // `src/lib` is where the SQL, the error codes and the column names live and
+  // widening it would turn `run_id` and `run_retire` into an allowlist nobody
+  // reads. These three are the exceptions worth naming: two workbook headings
+  // somebody reads in Excel, and the labels on the project's change trail.
+  it("names a phase, not a run, in the trail and in the two long-form sheets", () => {
+    const run = /\brun\b/i;
+    const labels = Object.entries(CHANGE_SET_KIND_LABELS).filter(([, label]) => run.test(label));
+    expect(labels, `Change-set LABELS say run; the keys (run_retire, run_create) stay: ${JSON.stringify(labels)}`).toEqual([]);
+    expect(SPECS_SHEET_HEADER.filter((name) => run.test(name))).toEqual([]);
+    expect(CHECK_SHEET_HEADER.filter((name) => run.test(name))).toEqual([]);
+    // The keys are the schema's and must NOT have been renamed with the label.
+    expect(CHANGE_SET_KIND_LABELS.run_retire).toBe("Phase retired");
+    expect(CHANGE_SET_KIND_LABELS.run_create).toBe("Phase added by hand");
   });
 
   it("reads the screens it claims to read", () => {

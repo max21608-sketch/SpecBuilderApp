@@ -56,7 +56,7 @@ export async function createRun(
   { projectId, name, actor }: { projectId: string; name: string; actor: string },
 ): Promise<CreateRunResult> {
   const trimmed = name.trim();
-  if (!trimmed) throw new DomainConflictError("name_required", "A run needs a name.", { status: 400 });
+  if (!trimmed) throw new DomainConflictError("name_required", "A phase needs a name.", { status: 400 });
 
   const projects = await txn`select id from projects where id = ${projectId} for update`;
   if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
@@ -67,7 +67,7 @@ export async function createRun(
     actor,
     // NOT `label`: 0012's `change_sets_label_is_baseline` reserves that column
     // for baselines — "a baseline is named, and nothing else is". The trail
-    // prints the kind's own label beside this, so "Run added by hand · MUR".
+    // prints the kind's own label beside this, so "Phase added by hand · MUR".
     reason: trimmed,
   });
 
@@ -118,7 +118,7 @@ export async function createRecord(txn: TxnSql, input: CreateRecordInput): Promi
   `;
   const run = runs[0];
   if (!run || String(run.project_id) !== input.projectId) {
-    throw new DomainConflictError("unknown_run", "That run is not on this project.", { status: 400 });
+    throw new DomainConflictError("unknown_run", "That phase is not on this project.", { status: 400 });
   }
   if (String(run.status) !== "active") {
     throw new DomainConflictError("run_retired", "That run has been retired. Add the item to a live run.", {

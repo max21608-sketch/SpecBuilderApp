@@ -83,7 +83,7 @@ export const REASON_REQUIRED_KINDS: readonly ChangeSetKind[] = [
 export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   boq_confirm: "Bill of quantities imported",
   boq_revision: "Bill of quantities revised",
-  run_retire: "Run retired",
+  run_retire: "Phase retired",
   drawing_confirm: "Drawings confirmed",
   spec_document_confirm: "Specification document confirmed",
   preamble_confirm: "Preamble confirmed",
@@ -97,7 +97,7 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   baseline: "Baseline",
   history_begins: "History begins",
   email_confirm: "Email confirmed",
-  run_create: "Run added by hand",
+  run_create: "Phase added by hand",
   record_create: "Item added by hand",
   attribute_create: "Spec added by hand",
 };

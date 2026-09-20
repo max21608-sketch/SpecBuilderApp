@@ -172,16 +172,16 @@ export async function confirmBoqImport(
       select id, project_id, status from spec_runs where id = any(${revisedRunIds}::uuid[])
     `;
     if (targetRuns.length !== new Set(revisedRunIds).size) {
-      throw new DomainConflictError("run_missing", "A run this revision replaces no longer exists. Reload the review.");
+      throw new DomainConflictError("run_missing", "A phase this revision replaces no longer exists. Reload the review.");
     }
     for (const target of targetRuns) {
       if (String(target.project_id) !== projectId) {
-        throw new DomainConflictError("wrong_project", "A run this revision replaces belongs to another project.", {
+        throw new DomainConflictError("wrong_project", "A phase this revision replaces belongs to another project.", {
           status: 400,
         });
       }
       if (String(target.status) !== "active") {
-        throw new DomainConflictError("run_retired", "A run this revision replaces has been retired. Reload the review.");
+        throw new DomainConflictError("run_retired", "A phase this revision replaces has been retired. Reload the review.");
       }
     }
   }
