@@ -1022,6 +1022,69 @@ could not be corrected at all.
   fixture behind. Delete the project; the changes go with it. Same for
   `record_snapshots` and its record.
 
+### A confirmed spec can be CORRECTED, and the correction keeps the page
+
+`db/migrations/0033_attribute_correct.sql`, `src/lib/attribute-correct.ts`,
+`src/app/api/attributes/[id]/correct/route.ts`, the record's Specs tab,
+`docs/plans/make-it-work-2026-09-19.md` §5.2
+
+Matthew went looking for confirm-or-update on a confirmed record on
+2026-09-18 and neither he nor Max could find it, because there was nothing to
+find: a confirmed `record_attributes` row could be RETIRED (reason required)
+or a new one TYPED by hand (no page), and correcting `W1900` to `W1090` off
+the same page was two acts, two change sets, and a replacement that had lost
+the page it was read from. Built 2026-09-20 (Stage 1a item 1.13).
+
+A correction is a **supersession by a person**, and six things about it are
+traps rather than preferences:
+
+- **Never an edit in place.** `record_attributes` is what a DOCUMENT said. An
+  in-place edit makes the row say something the page does not while still
+  citing the page — a false provenance — and the history can no longer answer
+  "what did the card say before Max fixed it". The old row is retired with
+  `superseded_by_id` pointing at the new one, and stays visible under *show
+  retired*, naming the value that replaced it.
+- **The new row KEEPS the source run and page.** The page is still the right
+  place to check the corrected figure; a correction that dropped it would be
+  indistinguishable from a number somebody made up. A hand-typed row has no
+  page and its correction keeps none — nothing is invented.
+- **Retire before insert, then point.** Both partial unique indexes are
+  `where status = 'active'`, so the old row is retired (version-checked) before
+  the new one is inserted, and `superseded_by_id` is set on the retired row
+  afterwards — the only order 0016's check (`superseded_by_id is null or
+  status = 'retired'`) allows. A row already superseded is REFUSED, naming the
+  newer value; a stale version is a 409 and nothing is written.
+- **A reason is required, as for retire**: `attribute_correct` is in
+  `REASON_REQUIRED_KINDS` AND in the database CHECK (0033 re-lists both CHECKs
+  from the LIVE constraint text, the 0032 lesson). An open change satisfies
+  it, as everywhere. The reason box is always shown on the record screen,
+  because that screen has no notion of an open change and a control that
+  sometimes asks is worse than one that always does.
+- **It never writes the answer and never touches `spec_records.version`.**
+  The checklist is recomposed through `recomposeAnswers` — the composed cell
+  is a projection of the attributes, so the next drawing confirm would wipe a
+  directly written answer — and one `snapshotRecords` gives the record its
+  v(n+1). The DoD on the demo sofa: two clicks, `W1820` → `W1830`, "1 changed ·
+  1 added · 1 removed · 60 unchanged".
+- **A corrected FINISH asks the library row's own code, not the attribute's.**
+  WHICH finish an attribute is was settled at confirm time and a correction
+  never moves it; the only question left is whether the corrected WORDS still
+  match the library's description, and a disagreement leaves the new row
+  UNLINKED (the CONFLICT rule) with the library untouched. The first version
+  passed the attribute's `material_code`, and a test fixture that hand-wrote
+  `code_norm` without `normaliseFinishCode` made both finish tests pass with
+  the branch deleted — a fixture that invents a normalisation is that
+  function's own warning, one layer out.
+
+Where it appears: beside every active spec on the record's Specs tab; on a
+drawings card only before confirm (the editable value box is already that);
+never on an applied proposal, which stays immutable history. Found on the way
+and fixed the same day: a checklist question with NO answer row came through
+`/api/records/[id]`'s LEFT JOIN as `state: null`, which every filtered view
+dropped and the `#q-` deep link rendered — the route now coalesces to
+`missing` and the tone lookup falls back to plain (`found-in-use.md`,
+2026-09-20).
+
 ### An attribute carries through to the checklist automatically
 
 `src/lib/promote-answers.ts`, `src/lib/confirm-drawings.ts`,
@@ -3100,6 +3163,22 @@ is per RECORD and refuses a subset), "Bring them in" on the finishes page
 quantity. **Verified in the browser against the sandbox DEMO-TEST-01 by the
 agents that built each screen and by a walk of the projects list, overview,
 run tab and record tabs; not accepted by Max on any screen.**
+
+**Built 2026-09-19/20, Stage 1a of `docs/plans/make-it-work-2026-09-19.md`.**
+Ten items, three Opus coders in worktrees, every diff reviewed against §2.3,
+the four checks run with the database tier REQUIRED before each cherry-pick,
+and each DoD driven in a browser on the sandbox before its push: **phase** on
+every screen and in every document (with a lexical guard over the screen
+sources); the BOQ header sentence; the BWS ordinal off every screen; the two
+chase counts each saying what they count, the header button counting what a
+chase will ask; `TBC – <fabric>` as a state; one `nextStep` rendered as every
+screen's primary; the phase table's count opening onto the missing fields; the
+correction verb (0033); the chase preselecting the TGQ set for the chosen
+contact. The dated evidence per item is in `docs/plans/README.md`
+(2026-09-20). **Not accepted by Max or Matthew on any screen.** The
+first-session script, the pilot's console half and the hand-over message are
+the remaining 1a steps; Stage 1b follows on `staging` at Max's instruction of
+2026-09-20.
 
 **Outstanding — judgement, not code.**
 
