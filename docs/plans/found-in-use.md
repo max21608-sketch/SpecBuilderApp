@@ -22,6 +22,20 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### Two dark controls on the drawings review and the BOQ review
+
+**Status: open — seen in the §7.4a screenshots of the `3b6d9db` deployment,
+2026-09-20, at both 1920×1080 and 1440×900.** On a drawings review that is
+still being reviewed, the page carries the card's `Confirm S-100 (2
+configurations)` AND item 1.11's next step `Review 9 documents` — and this
+document is one of the nine. The BOQ review of an already-confirmed bill shows
+its (disabled) `Confirm · creates 34 records on 3 phases` beside `Review 9
+documents`. The pack screen carries `Review all 9 drawings together` twice
+(header and card), which predates 1a. §0.3: one primary per screen, and it is
+the next step. The rule the step should follow on a review screen: render it
+only in the *Review complete* state (the plan's own wording for 1.11), never
+beside a live Confirm. A 1b line for the coder holding the drawings card.
+
 ### A checklist question with no answer row crashed the record screen
 
 **Status: FIXED 2026-09-20, `be8539d` (cherry-picked from Coder C's `100a511`),
