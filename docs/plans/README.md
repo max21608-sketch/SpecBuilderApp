@@ -36,6 +36,7 @@ pushing. Each item's §7.1 evidence, as facts:
 | **1.14** chase preselects the TGQ set | `1fcc506` | `chase-selection.ts`, 11 pure + 4 component tests | demo project, Priya Raman: Draft the email · 70, footer "70 to-quote questions preselected · 113 also outstanding"; the one to-quote question not ticked is awaiting a reply (observation in `found-in-use.md`) | `94e9e4b` |
 | **1.2** the header-row sentence | `cbfd614` | `describeHeader`, 5 pure tests; items-start row read off the first parsed line, never header + 1 | the real Panther bill: "Header on row 6. Items start on row 7. 5 rows above the header were read as the phase's notes" | `84e9e17` on staging, the sentence read back from the deployed BOQ review |
 | **1.3** the ordinal off the screen | `9cd7105` | 4 component tests; the gate board's `BWS id` column is a recorded mock-up deviation | the record that showed `1 · COM 1` shows the name only, id on the title | `84e9e17` on staging, read back from the deployed record |
+| **1.4** each count says what it counts | `7d569c3` (+ `019ad47`, the last "run" strings in `src/lib`) | `chase-counts.ts`, 16 pure + 2 component tests; the plan's hypothesis was WRONG and the coder stopped to say so — the buckets are derived from the gate rows | sofa record: "Chase the 4" · "6 to answer at TGQ · 4 to chase · 2 you record on this item's details", rows labelled "on the details", panel buttons "Chase these" | pushed; deployment check pending |
 | `/api/auth/me` names its commit | `94e9e4b` | — | `commit: 94e9e4b…` read back from staging | the one orchestrator one-liner, so a deployment can be confirmed for a SHA without the Vercel console |
 
 **Two decisions taken by Fable that Max should overrule if wrong:**
@@ -53,7 +54,7 @@ pushing. Each item's §7.1 evidence, as facts:
   since 1.14) beside the unchanged `toQuote`; the gate panel's own button loses
   its number. In progress.
 
-**Still outstanding in 1a:** 1.4 (in progress), 1.11, 1.12, 1.13 (Workstream
+**Still outstanding in 1a:** 1.11, 1.12, 1.13 (Workstream
 C, next), the first-session script and the 300-line fixture (the verifier, in
 progress), the pilot's console half (Max), the hand-over message (Max). Human
 acceptance outstanding on every item.
