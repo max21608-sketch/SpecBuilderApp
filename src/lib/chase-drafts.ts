@@ -60,6 +60,12 @@ export type OutstandingQuestion = {
   requirementId: string;
   requirementKind: "spec_field" | "readiness";
   prompt: string;
+  /**
+   * The block of the cheat sheet this question sits in ("Upholstery", "COM").
+   * Null on a sheet that never grouped its questions. Display only: it is what
+   * lets a list of 48 outstanding questions be read rather than scrolled.
+   */
+  section: string | null;
   sortOrder: number;
   fieldLabel: string | null;
   answerId: string | null;
@@ -502,6 +508,7 @@ export async function loadOutstanding(project: string | string[]): Promise<Outst
       q.id            as requirement_id,
       q.kind          as requirement_kind,
       q.prompt,
+      q.section,
       q.sort_order,
       q.tgq_levels,
       -- The two ways a question reaches Matthew's matrix: the BWS field it
@@ -591,6 +598,7 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): Outs
     requirementId: String(row.requirement_id),
     requirementKind: String(row.requirement_kind) === "readiness" ? "readiness" : "spec_field",
     prompt: String(row.prompt ?? ""),
+    section: row.section === null || row.section === undefined ? null : String(row.section),
     sortOrder: Number(row.sort_order ?? 0),
     fieldLabel: row.field_label === null || row.field_label === undefined ? null : String(row.field_label),
     answerId: row.answer_id === null || row.answer_id === undefined ? null : String(row.answer_id),
@@ -665,6 +673,7 @@ export async function loadQuestionsByKey(
       q.id            as requirement_id,
       q.kind          as requirement_kind,
       q.prompt,
+      q.section,
       q.sort_order,
       q.tgq_levels,
       -- The two ways a question reaches Matthew's matrix: the BWS field it

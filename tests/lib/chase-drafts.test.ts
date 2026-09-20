@@ -39,6 +39,7 @@ function question(overrides: Partial<OutstandingQuestion> = {}): OutstandingQues
     requirementId: "req-1",
     requirementKind: "spec_field",
     prompt: "Seat height (SH)?",
+    section: "Dimensions",
     sortOrder: 10,
     fieldLabel: "Dimensions",
     answerId: "ans-1",

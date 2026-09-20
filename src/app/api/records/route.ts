@@ -16,6 +16,16 @@ import { gateSummary, gatesForRecord, loadGateContext } from "@/lib/gate-load";
 
 export const dynamic = "force-dynamic";
 
+/** One outstanding to-quote question, named rather than counted. */
+type ToQuoteQuestion = {
+  requirementId: string;
+  label: string;
+  section: string | null;
+  state: string;
+  /** Asked, nothing back. The row says so rather than reading as untouched. */
+  waiting: boolean;
+};
+
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId");
@@ -30,6 +40,25 @@ export async function GET(request: Request): Promise<Response> {
   // because a record retired by a BOQ revision is a thing somebody has to go
   // and look at (a BWS job may already exist for it).
   const includeRetired = url.searchParams.get("includeRetired") === "1";
+
+  /**
+   * WHETHER TO NAME THE TO-QUOTE QUESTIONS, not just count them.
+   *
+   * Matthew, on the phase table: "On this page, you can't see what's missing?
+   * There's a button to go and see them." So the count opens into the list —
+   * and the list is THE SAME ROWS THE COUNT WAS MADE FROM, taken out of
+   * `loadOutstanding`'s own output a few lines below. A second query, or a
+   * reading of the checklist on the client, is how a cell comes to say five
+   * over a list of four.
+   *
+   * OFF BY DEFAULT, because it is bytes rather than work: `loadOutstanding`
+   * runs on every request either way, so this costs no query — but a 300-line
+   * phase whose categories fall to the 0019 placeholder carries 48 questions on
+   * every row, and shipping fourteen thousand of them on first paint to serve
+   * the one row somebody expands is the wrong trade. The table asks for them
+   * the first time anybody opens a cell, and keeps them.
+   */
+  const withToQuote = url.searchParams.get("withToQuote") === "1";
 
   // The programme the completion view measures Overdue against. Overdue is
   // COMPUTED from this date, never stored: writing it onto spec_answers would
@@ -176,14 +205,32 @@ export async function GET(request: Request): Promise<Response> {
     rows.map((row) => String(row.id)),
   );
 
-  const perRecord = new Map<string, { waiting: number; toQuote: number; toQuoteWaiting: number }>();
+  const perRecord = new Map<
+    string,
+    { waiting: number; toQuote: number; toQuoteWaiting: number; questions: ToQuoteQuestion[] }
+  >();
   for (const question of outstanding) {
-    const entry = perRecord.get(question.recordId) ?? { waiting: 0, toQuote: 0, toQuoteWaiting: 0 };
+    const entry = perRecord.get(question.recordId) ?? { waiting: 0, toQuote: 0, toQuoteWaiting: 0, questions: [] };
     const isWaiting = waiting.has(questionKey(question.recordId, question.requirementId, 0));
     if (isWaiting) entry.waiting += 1;
     if (question.tier === "to_quote") {
       entry.toQuote += 1;
       if (isWaiting) entry.toQuoteWaiting += 1;
+      // THE LIST IS THE COUNT. Same loop, same predicate, same `questionTier`
+      // reading — so the row can never open onto a different set of questions
+      // from the number it opened.
+      if (withToQuote) {
+        entry.questions.push({
+          requirementId: question.requirementId,
+          // The BWS field's name where the question fills one, the cheat
+          // sheet's own prompt where it does not. A readiness question has no
+          // field and its prompt is the only name it has.
+          label: question.fieldLabel ?? question.prompt,
+          section: question.section,
+          state: question.state,
+          waiting: isWaiting,
+        });
+      }
     }
     perRecord.set(question.recordId, entry);
   }
@@ -232,6 +279,10 @@ export async function GET(request: Request): Promise<Response> {
               ? null
               : (counts?.toQuote ?? 0),
         to_quote_waiting: counts?.toQuoteWaiting ?? 0,
+        // Absent unless asked for, and absent is not empty: the table tells
+        // the two apart so a row it has never fetched does not render as a row
+        // with nothing outstanding.
+        to_quote_questions: withToQuote ? (counts?.questions ?? []) : undefined,
       };
     }),
     retiredCount: Number(retiredRows[0]?.n ?? 0),

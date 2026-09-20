@@ -224,6 +224,14 @@ Collected from CLAUDE.md so they are in one place. Each has bitten once.
   the review card colours it", and the card's test pins its palette.
 - **No "Columns" chooser** on the spec table. One button in the mock-up, no
   behaviour; a real feature, still open.
+- **The spec table's TGQ cell is a DISCLOSURE, which the mock-up does not
+  draw** (2026-09-20, Stage 1a item 1.12, FIU 12). Matthew on that screen: "On
+  this page, you can't see what's missing? There's a button to go and see
+  them." The count opens in place onto the questions it counted, grouped by the
+  cheat sheet's own section, the first six with the rest one click away, each a
+  link to that question on the record's checklist. The mock-up's cell is a
+  number and a link to the record, which is the defect he reported. The panel is
+  its own `<tr>`, per the DOM rules below.
 - **No BWS ordinal anywhere it can be read as a label** (2026-09-19, FIU 9).
   The mock-up's gate table draws a `BWS id` column and the checklist row would
   carry `BWS 3 · Dimensions`; on the real screen those render as `1 · COM 1`

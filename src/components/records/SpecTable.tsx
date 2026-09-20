@@ -32,7 +32,7 @@
 // and the crop queue already paid for that mistake once (33 rasterisations for
 // 12 panels).
 // ============================================================================
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -88,6 +88,16 @@ export type SpecRecord = {
   to_quote_outstanding: number | null;
   to_quote_waiting: number;
   /**
+   * WHICH questions those are, named rather than counted — and ABSENT until
+   * somebody opens a cell. Absent is not empty: a row this table has never
+   * asked about must not render as a row with nothing outstanding.
+   *
+   * They come out of `loadOutstanding`'s own output, in the same loop that made
+   * the count, so a cell can never open onto a different set from the number it
+   * opened. See `/api/records`.
+   */
+  to_quote_questions?: ToQuoteQuestion[];
+  /**
    * Per gate, from Matthew's matrix (0026): this gate's own outstanding
    * fields, and the earlier gates holding it up. NULL where this record's
    * category is not one of the nine his matrix covers — printed as "—", never
@@ -101,6 +111,32 @@ export type SpecRecord = {
    */
   gates: Record<Gate, GateSummaryEntry> | null;
 };
+
+/** One outstanding to-quote question on a record, as `/api/records` names it. */
+export type ToQuoteQuestion = {
+  requirementId: string;
+  label: string;
+  section: string | null;
+  state: string;
+  waiting: boolean;
+};
+
+/**
+ * How many of a row's questions are listed before the rest fold away.
+ *
+ * A cabinetry item falls to the 0019 placeholder, where every one of its 48
+ * questions blocks a quote — and 48 names inside a table row is a row nobody
+ * scrolls past. Six is enough to see what KIND of thing is missing; the rest
+ * are one click, never dropped.
+ */
+const QUESTIONS_SHOWN = 6;
+
+/**
+ * How wide a spanning panel is. Counted off the header row below, and kept here
+ * so adding a column and forgetting the panel is one edit rather than two
+ * silently disagreeing numbers.
+ */
+const COLUMNS = 13;
 
 /** What the run's header band needs, from the payload this table already has. */
 export type RunTally = {
@@ -208,6 +244,21 @@ export default function SpecTable({
    * footer says how many rows are hidden.
    */
   const [focus, setFocus] = useState<Focus>(initialFocus);
+  /**
+   * WHICH ROWS ARE OPEN, AND WHETHER THE NAMES HAVE BEEN ASKED FOR.
+   *
+   * "On this page, you can't see what's missing? There's a button to go and see
+   * them." So the count opens in place. The names are not on the first payload:
+   * `loadOutstanding` runs server-side either way, so they cost no query — but
+   * a 300-line phase on the 0019 placeholder carries 48 per row, and shipping
+   * fourteen thousand of them to serve the one row somebody opens is the wrong
+   * trade. The first expand re-reads the SAME endpoint with `withToQuote=1` and
+   * every row has them from then on.
+   */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** Rows whose fold has been opened past the first six. */
+  const [expandedAll, setExpandedAll] = useState<Set<string>>(new Set());
+  const [namedQuestions, setNamedQuestions] = useState(false);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [designer, setDesigner] = useState("");
@@ -222,6 +273,7 @@ export default function SpecTable({
   const load = useCallback(async () => {
     const query = new URLSearchParams({ projectId, runId });
     if (showRetired) query.set("includeRetired", "1");
+    if (namedQuestions) query.set("withToQuote", "1");
     const res = await apiFetch<{
       records: SpecRecord[];
       programme: ProgrammeDates;
@@ -242,7 +294,7 @@ export default function SpecTable({
       toQuote: res.data.records.reduce((sum, record) => sum + (record.to_quote_outstanding ?? 0), 0),
       toQuoteItems: res.data.records.filter((record) => (record.to_quote_outstanding ?? 0) > 0).length,
     });
-  }, [projectId, runId, showRetired]);
+  }, [projectId, runId, showRetired, namedQuestions]);
 
   useEffect(() => {
     void load();
@@ -291,6 +343,24 @@ export default function SpecTable({
     } finally {
       setAcceptingRow(null);
     }
+  }
+
+  /**
+   * Open or close one row's to-quote list.
+   *
+   * The first open asks the server for the names. Nothing is filtered out of
+   * what comes back: the list is the RECORD'S OWN questions whatever the table
+   * is showing, the chase screen's rule — a filter narrows what is LISTED,
+   * never what is outstanding.
+   */
+  function toggleQuestions(recordId: string) {
+    setNamedQuestions(true);
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(recordId)) next.delete(recordId);
+      else next.add(recordId);
+      return next;
+    });
   }
 
   /** The designers this run's own records name. A filter offers only what is here. */
@@ -618,9 +688,9 @@ export default function SpecTable({
                   const isConfiguration = Boolean(record.variant_label);
                   const isHeading = n(record.variant_count) > 0;
                   const retired = record.status === "retired";
-                  return (
+                  const open = expanded.has(record.id);
+                  const body = (
                     <Tr
-                      key={record.id}
                       /* A CONFIGURATION IS TINTED AND INDENTED under its bill
                          line. It is sorted there by the query — on the
                          PARENT'S record_no, because its own is just the next
@@ -768,24 +838,38 @@ export default function SpecTable({
                         ) : record.to_quote_outstanding === null ? (
                           /* A DASH IS NEVER A ZERO. 0 here would read as
                              ready, and the record is not unready — it is
-                             untiered, which is a different thing and the tip
-                             says which. */
-                          <span className="text-neutral-400">
-                            —
-                            <Tip>
-                              A level is what decides which questions block a quote. Until one is set, nothing on
-                              this record is tiered.
-                            </Tip>
-                          </span>
+                             untiered, which is a different thing. It OPENS,
+                             like a count does, and says what is in the way:
+                             a row that could not be opened at all would be the
+                             one row on the screen where the control is absent
+                             for a reason nobody can see. */
+                          <button
+                            type="button"
+                            onClick={() => toggleQuestions(record.id)}
+                            aria-expanded={expanded.has(record.id)}
+                            className="text-neutral-400 hover:text-neutral-700"
+                          >
+                            — <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                          </button>
                         ) : record.to_quote_outstanding > 0 ? (
                           <span>
-                            <Link
-                              href={`/dashboard/records/${record.id}`}
-                              className="font-semibold text-red-700 no-underline hover:underline"
-                              title="Open the record to see which questions"
+                            {/* THE COUNT OPENS THE LIST. It used to be a link
+                                to the record — "there's a button to go and see
+                                them", which is the defect being reported: the
+                                answer to WHAT is missing was a page away. It is
+                                a button because it does something; each name
+                                inside it is a link, because those go
+                                somewhere. */}
+                            <button
+                              type="button"
+                              onClick={() => toggleQuestions(record.id)}
+                              aria-expanded={expanded.has(record.id)}
+                              className="font-semibold text-red-700 hover:underline"
+                              title="Show which questions"
                             >
-                              {record.to_quote_outstanding}
-                            </Link>
+                              {record.to_quote_outstanding}{" "}
+                              <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                            </button>
                             {record.to_quote_waiting > 0 && (
                               <span className="ml-1 text-xs font-normal text-blue-700">
                                 ({record.to_quote_waiting} asked)
@@ -793,6 +877,9 @@ export default function SpecTable({
                             )}
                           </span>
                         ) : record.category_name ? (
+                          /* NOTHING OUTSTANDING, SO NOTHING TO OPEN. A
+                             disclosure control over an empty list is a control
+                             that teaches people it is not worth pressing. */
                           <span className="text-green-700">Can quote</span>
                         ) : (
                           <span className="text-neutral-400">—</span>
@@ -875,6 +962,29 @@ export default function SpecTable({
                       </Td>
                     </Tr>
                   );
+                  if (!open) return <Fragment key={record.id}>{body}</Fragment>;
+                  return (
+                    <Fragment key={record.id}>
+                      {body}
+                      {/* A SPANNING PANEL IS ITS OWN `tr`, never an extra
+                          `td colSpan` beside the data cells: that makes the row
+                          21 column slots wide and the browser finds room for
+                          the panel BESIDE the data, squeezed into a ribbon.
+                          The drawings card paid for that once already. */}
+                      <tr className="bg-[#fbfbfb]">
+                        <td colSpan={COLUMNS} className="border-b border-neutral-200 px-4 py-3 align-top">
+                          <ToQuotePanel
+                            record={record}
+                            questions={record.to_quote_questions}
+                            showAll={expandedAll.has(record.id)}
+                            onShowAll={() =>
+                              setExpandedAll((current) => new Set(current).add(record.id))
+                            }
+                          />
+                        </td>
+                      </tr>
+                    </Fragment>
+                  );
                 })}
               </tbody>
             </Table>
@@ -906,5 +1016,127 @@ export default function SpecTable({
         </>
       )}
     </>
+  );
+}
+
+/**
+ * WHAT IS MISSING ON ONE ROW, inside the row.
+ *
+ * ============================================================================
+ * Matthew, on the phase table: "On this page, you can't see what's missing?
+ * There's a button to go and see them." The count was a link to the record, so
+ * the answer to WHAT was a page away and a run of 22 items was 22 visits.
+ *
+ * FOUR THINGS ARE LOAD-BEARING.
+ *
+ * THE LIST IS THE RECORD'S OWN, never the table's. It arrives on the record's
+ * payload out of the same `loadOutstanding` loop that made the count, so it
+ * cannot disagree with the number that opened it, and no filter above the table
+ * touches it — the chase screen's rule: a filter narrows what is LISTED, never
+ * what is outstanding.
+ *
+ * SIX, THEN THE REST, NEVER A CAP. A cabinetry item falls to the 0019
+ * placeholder where all 48 of its questions block a quote. Six names say what
+ * KIND of thing is missing; the other 42 are one click and are never dropped,
+ * because a list that silently stopped would be a row claiming its item needs
+ * less than it does.
+ *
+ * GROUPED BY THE SHEET'S OWN SECTION, in checklist order inside each. The
+ * commercial block and the upholstery block are different jobs, and a flat list
+ * of 48 reads as one undifferentiated pile.
+ *
+ * A LEVEL-LESS ROW EXPLAINS RATHER THAN LISTING NOTHING. Its cell is a dash
+ * because nothing on it is tiered, and an empty panel would read as an item
+ * with nothing outstanding — which is the one wrong answer this column exists
+ * to avoid. It names the control instead, which is on this same row.
+ * ============================================================================
+ */
+function ToQuotePanel({
+  record,
+  questions,
+  showAll,
+  onShowAll,
+}: {
+  record: SpecRecord;
+  /** Undefined until the table has asked for the names. Not the same as none. */
+  questions: ToQuoteQuestion[] | undefined;
+  showAll: boolean;
+  onShowAll: () => void;
+}) {
+  // A LEVEL IS WHAT TIERS A QUESTION, so a record without one has no to-quote
+  // set at all — under the half of TGQ that predates Matthew's matrix. The
+  // sentence says what it is needed FOR, because "set a level" on its own reads
+  // as a form field somebody forgot.
+  if (record.to_quote_outstanding === null) {
+    return (
+      <p className="text-sm text-neutral-700">
+        Nothing on this item is tiered yet, so this column cannot say what is missing.{" "}
+        <b>A level</b> — simple, complex or hero — is what decides which questions block a quote, and it also picks
+        the BWS boilerplate the item is priced against. Set it in the <b>Level</b> column on this row, or on{" "}
+        <Link href={`/dashboard/records/${record.id}`} className="text-blue-700 no-underline hover:underline">
+          the record
+        </Link>
+        .
+      </p>
+    );
+  }
+
+  if (!questions) return <p className="text-sm text-neutral-500">Loading the questions…</p>;
+  if (questions.length === 0) {
+    // The count said there were some and the list is empty: the table has been
+    // reloaded since. Said out loud rather than rendered as a blank panel.
+    return <p className="text-sm text-neutral-500">Nothing outstanding on this item.</p>;
+  }
+
+  const listed = showAll ? questions : questions.slice(0, QUESTIONS_SHOWN);
+  const folded = questions.length - listed.length;
+  // Grouped by the cheat sheet's own section, in the order the questions first
+  // appear — which is checklist order, because that is how the payload arrives.
+  const sections: { name: string; questions: ToQuoteQuestion[] }[] = [];
+  for (const question of listed) {
+    const name = question.section ?? "Other";
+    const last = sections[sections.length - 1];
+    if (last && last.name === name) last.questions.push(question);
+    else sections.push({ name, questions: [question] });
+  }
+
+  return (
+    <div className="text-sm">
+      <p className="mb-1.5 text-xs uppercase tracking-wide text-neutral-500">
+        Needed before this item can be quoted
+      </p>
+      <div className="flex flex-wrap gap-x-8 gap-y-3">
+        {sections.map((section, index) => (
+          <div key={`${section.name}-${index}`}>
+            <p className="text-xs font-medium text-neutral-500">{section.name}</p>
+            <ul className="mt-0.5 space-y-0.5">
+              {section.questions.map((question) => (
+                <li key={question.requirementId}>
+                  {/* EACH NAME OPENS ON THE QUESTION. The checklist already
+                      renders `id="q-<requirementId>"` and scrolls to it after
+                      its payload lands, so this lands on the row rather than
+                      at the top of a list of 43. */}
+                  <Link
+                    href={`/dashboard/records/${record.id}?tab=checklist#q-${question.requirementId}`}
+                    className="text-blue-700 no-underline hover:underline"
+                  >
+                    {question.label}
+                  </Link>
+                  {question.state === "tbc" && (
+                    <span className="ml-1 text-xs text-amber-700">TBC</span>
+                  )}
+                  {question.waiting && <span className="ml-1 text-xs text-blue-700">asked</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      {folded > 0 && (
+        <Button size="xs" variant="quiet" className="mt-2" onClick={onShowAll}>
+          and {folded} more
+        </Button>
+      )}
+    </div>
   );
 }
