@@ -93,7 +93,8 @@ try {
   // no answer rows, and this pass deliberately creates neither. Setting a
   // category later makes them `missing`, and a re-run picks them up.
   const records = await client.query(
-    `select r.id, r.record_no, r.item_description, p.bws_project_number, p.name as project_name, run.name as run_name
+    `select r.id, r.record_no, r.item_description, r.dimension_note,
+            p.bws_project_number, p.name as project_name, run.name as run_name
        from spec_records r
        join projects p on p.id = r.project_id
        join spec_runs run on run.id = r.run_id
@@ -131,7 +132,9 @@ try {
       sourceRunId: row.source_run_id ? String(row.source_run_id) : null,
     }));
 
-    const fills = planAnswerFills(promotable);
+    // With the record's own dimension note (0034), or a re-run of this script
+    // would strip a person's qualifier back out of every Dimensions answer.
+    const fills = planAnswerFills(promotable, record.dimension_note === null ? null : String(record.dimension_note));
     if (fills.length === 0) {
       untouched += 1;
       continue;

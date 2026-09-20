@@ -1,6 +1,6 @@
 // The version diff. Pure, so these run without a database.
 import { describe, it, expect } from "vitest";
-import { diffSnapshots, parseAtoms } from "@/lib/snapshot-diff";
+import { diffCells, diffSnapshots, parseAtoms } from "@/lib/snapshot-diff";
 import { RECORD_ATOMS_SCHEMA_VERSION, type RecordAtoms } from "@/lib/record-atoms";
 
 const base = (): RecordAtoms => ({
@@ -200,6 +200,19 @@ describe("parseAtoms", () => {
     const withNote = JSON.parse(JSON.stringify(base())) as RecordAtoms;
     withNote.record.dimensionNote = "1250 L-shaped return";
     expect(parseAtoms(withNote).record.dimensionNote).toBe("1250 L-shaped return");
+  });
+
+  it("keeps a configuration's letter, or a version renames the job it shipped", () => {
+    // Found while adding `dimensionNote`: Zod strips what it does not name,
+    // and `variantLabel` was not named. `diffCells` recomposes the Name column
+    // from the atoms, so `S-201 A` read back as `Armchair` where the file said
+    // `Armchair (A)`.
+    const split = JSON.parse(JSON.stringify(base())) as RecordAtoms;
+    split.record.variantLabel = "A";
+    const parsed = parseAtoms(split);
+    expect(parsed.record.variantLabel).toBe("A");
+    const cells = diffCells(base(), parsed);
+    expect(cells).toContainEqual(expect.objectContaining({ was: "Two seat sofa", now: "Two seat sofa (A)" }));
   });
 
   it("refuses a malformed snapshot rather than reading it as an empty record", () => {

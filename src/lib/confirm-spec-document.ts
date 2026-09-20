@@ -24,7 +24,7 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
-import { applyAnswerFills, applyAnswerRetractions, planAnswerFills } from "@/lib/promote-answers";
+import { applyAnswerFills, applyAnswerRetractions, loadDimensionNote, planAnswerFills } from "@/lib/promote-answers";
 import { loadPromotable } from "@/lib/attribute-retire";
 import {
   hasPendingProposals,
@@ -364,8 +364,12 @@ export async function confirmSpecDocumentRecord(
     // a message giving only the seat height still has to recompose the cell
     // over the width and depth an earlier drawing confirmed, or the answer
     // says SH445mm and the record says W660 x D685 x H680 x SH445mm.
+    // AND WITH THE RECORD'S OWN DIMENSION NOTE (0034). The composed cell is a
+    // projection of the attributes AND that note; recomposing without it would
+    // quietly drop a person's qualifier out of the checklist the first time
+    // any document touched the record.
     const promotable = await loadPromotable(txn, recordId);
-    const fills = planAnswerFills(promotable);
+    const fills = planAnswerFills(promotable, await loadDimensionNote(txn, recordId));
     await applyAnswerFills(txn, recordId, run.runId, actor, fills);
     await applyAnswerRetractions(txn, recordId, actor, fills);
   }

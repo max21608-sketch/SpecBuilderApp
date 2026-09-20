@@ -90,6 +90,14 @@ const AtomSchema = z.object({
     area: z.string().nullable(),
     runName: z.string(),
     boqCodes: z.array(z.string()),
+    // THE CONFIGURATION'S LETTER (0024), and it was MISSING here until
+    // 2026-09-20. Zod strips what it does not name, so every snapshot read
+    // back lost it — and `diffCells` recomposes the Name column from the
+    // atoms, so a version of `S-201 A` described a job called `Armchair`
+    // where the file had shipped `Armchair (A)`, and comparing a snapshot
+    // with a live record reported a change nobody made. Optional and
+    // defaulted, because versions written before 0024 genuinely have none.
+    variantLabel: z.string().nullable().optional().default(null),
     // Added at schema 5 (0034). Optional and defaulted null, so a version
     // written before the note existed parses as "nobody had typed one" rather
     // than failing the screen -- and, because Zod strips what it does not

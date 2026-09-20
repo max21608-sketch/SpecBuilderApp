@@ -481,6 +481,20 @@ export async function editRecordDetails(
     );
   }
 
+  // THE CHECKLIST FOLLOWS THE NOTE (0034). The composed Dimensions answer is a
+  // projection of the record's dimension attributes AND its note, so changing
+  // the note has to recompose it — otherwise the Specs tab and the BWS file
+  // read "W1830mm (1250 L-shaped return)" while the Checklist tab goes on
+  // saying "W1830mm".
+  //
+  // Through `recomposeAnswers` rather than by writing the answer here, so the
+  // guard comes with it: an answer somebody typed (`manual`) or confirmed off
+  // an email is never overwritten, exactly as for a correction. Only when the
+  // note actually moved — every other field on this form composes nothing.
+  if (changed.includes("dimension_note")) {
+    await recomposeAnswers(txn, recordId, null, actor);
+  }
+
   await snapshotRecords(txn, [recordId], changeSetId);
   return { recordId, version: Number(updated[0].version), changed };
 }

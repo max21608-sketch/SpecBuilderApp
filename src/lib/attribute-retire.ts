@@ -35,6 +35,7 @@ import { snapshotRecords } from "@/lib/record-snapshot";
 import {
   applyAnswerFills,
   applyAnswerRetractions,
+  loadDimensionNote,
   planAnswerFills,
   type PromotableAttribute,
 } from "@/lib/promote-answers";
@@ -100,7 +101,10 @@ export async function recomposeAnswers(
   actor: string,
 ): Promise<{ filled: number; retracted: number }> {
   const attributes = await loadPromotable(txn, recordId);
-  const fills = planAnswerFills(attributes);
+  // With the record's own dimension note (0034): the composed cell is a
+  // projection of the attributes AND that note, so every recomposition has to
+  // carry it or the checklist silently loses a person's qualifier.
+  const fills = planAnswerFills(attributes, await loadDimensionNote(txn, recordId));
   const filled = await applyAnswerFills(txn, recordId, runId, actor, fills);
   const retracted = await applyAnswerRetractions(txn, recordId, actor, fills);
   return { filled, retracted };

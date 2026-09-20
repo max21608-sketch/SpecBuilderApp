@@ -105,8 +105,15 @@ export type AnswerFill = {
  *
  * Pure, and deliberately so: the confirm route and any screen that wants to
  * preview the effect read the same answer out of the same function.
+ *
+ * `dimensionNote` is `spec_records.dimension_note` (0034), and it is here for
+ * the reason rule 3 exists: the composed cell is a PROJECTION of the record's
+ * dimension statements, and the checklist is a screen. Leaving it out left the
+ * Specs tab and the BWS file reading `W1830mm (1250 L-shaped return)` while
+ * the Checklist tab's own Dimensions answer said `W1830mm` — the exact
+ * disagreement this file exists to prevent, arriving from a new direction.
  */
-export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[] {
+export function planAnswerFills(attributes: PromotableAttribute[], dimensionNote?: string | null): AnswerFill[] {
   const fills: AnswerFill[] = [];
 
   // ---- the composed dimensions cell ---------------------------------------
@@ -127,7 +134,7 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
       state: attribute.state,
       sortOrder: attribute.sortOrder,
     }));
-    const cell = composeDimensionCell(rows);
+    const cell = composeDimensionCell(rows, dimensionNote);
     if (cell.text.trim() !== "") {
       // Confirmed only when every contributing slot is confirmed AND the cell
       // composed without a problem. Either doubt makes it TBC.
@@ -135,13 +142,22 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
       // And never confirmed over a cell carrying no figure. "W TBC" composes
       // cleanly and says nothing measurable, so a mislabelled attribute state
       // must not be able to turn it into a satisfied answer.
-      const hasFigure = /\d/.test(cell.text);
+      //
+      // READ OFF THE FIGURES ALONE, never off the cell with the note in it.
+      // A note is prose a person typed and it routinely contains a number —
+      // "1250 L-shaped return" — so testing the composed cell would let
+      // somebody's sentence stand in for the measurement and mark a record of
+      // nothing but TBCs as a CONFIRMED dimension, which a gate then reads as
+      // satisfied.
+      const hasFigure = /\d/.test(composeDimensionCell(rows).text);
       fills.push({
         specFieldId: null,
         jsonId: DIMENSIONS_JSON_ID,
         value: cell.text,
         qualifier: null,
         state: allConfirmed && hasFigure && cell.problems.length === 0 ? "confirmed" : "tbc",
+        // The DOCUMENTS' own figures, and only those: `value_raw` is what
+        // makes an answer checkable against a page, and the note has no page.
         valueRaw: rows
           .map((row) => `${row.slot} ${row.value ?? "—"}${row.unit ? ` ${row.unit}` : ""}`)
           .join(" · "),
@@ -189,6 +205,20 @@ export function planAnswerFills(attributes: PromotableAttribute[]): AnswerFill[]
   }
 
   return fills;
+}
+
+/**
+ * The record's own dimension note, for composing its cell.
+ *
+ * A separate one-column read rather than a field on `PromotableAttribute`:
+ * the note belongs to the RECORD, and a record with a note and no attributes
+ * at all still has to be answerable — `loadPromotable` returns no rows there
+ * and would have nowhere to carry it.
+ */
+export async function loadDimensionNote(txn: TxnSql, recordId: string): Promise<string | null> {
+  const rows = await txn`select dimension_note from spec_records where id = ${recordId}`;
+  const note = rows[0]?.dimension_note;
+  return note === null || note === undefined ? null : String(note);
 }
 
 /**

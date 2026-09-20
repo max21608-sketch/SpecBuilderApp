@@ -22,13 +22,14 @@
 //   * a newline is refused TWICE: by the route in words, and by 0034's CHECK.
 //     A constraint the app forgets is a constraint the database keeps.
 //
-// ---- IT WAITS ON 0034 BEING APPLIED --------------------------------------
+// ---- WHY THE COLUMN IS PROBED FIRST ---------------------------------------
 //
-// The migration is written and NOT applied by whoever wrote it. Until the
-// column exists on the sandbox, the cases that need it call `ctx.skip()` and
-// say so, rather than failing and being read as a defect in the code. The two
-// ROUTE refusals need no column — zod refuses before anything is written — so
-// they run today and prove the half that does not wait.
+// These were written before 0034 was applied to the sandbox, and the probe is
+// kept: a database that has not had the migration makes the cases that need
+// the column call `ctx.skip()` with that reason named, rather than failing and
+// being read as a defect in the code. The two ROUTE refusals need no column at
+// all — zod refuses before anything is loaded, which is the point they assert
+// — so they run either way.
 //
 // Rows are prefixed `__QA ` and deleted FK-safe by deleting the project: 0014
 // refuses a direct `delete from change_sets` outright and allows the cascade.
@@ -38,6 +39,7 @@ import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { createRecord, createRun } from "@/lib/manual-capture";
+import { recomposeAnswers } from "@/lib/attribute-retire";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
 import { composeRow, BWS_EXPORT_COLUMNS, DIMENSIONS_JSON_ID } from "@/lib/bws-export";
 import { composeCheckSheet, CHECK_SHEET_HEADER } from "@/lib/export-check-sheet";
@@ -89,6 +91,19 @@ describeIfDb("the dimension note", () => {
        values ($1, 'dimension', 'Width', $2, 'mm', 'W', 'confirmed', 'qa', 'qa')`,
       [recordId, value],
     );
+  }
+
+  /** The composed cell as the CHECKLIST holds it — BWS field 3's question. */
+  async function dimensionsAnswer(recordId: string): Promise<{ value: string | null; state: string } | null> {
+    const rows = await client.query(
+      `select a.value, a.state
+         from spec_answers a
+         join requirements q on q.id = a.requirement_id
+         join spec_fields f on f.id = q.spec_field_id
+        where a.record_id = $1 and f.json_id = 3 and a.revision_no = 0`,
+      [recordId],
+    );
+    return rows.rows[0] ? { value: rows.rows[0].value, state: String(rows.rows[0].state) } : null;
   }
 
   const version = async (recordId: string): Promise<number> =>
@@ -236,6 +251,55 @@ describeIfDb("the dimension note", () => {
     await expect(
       client.query(`update spec_records set dimension_note = $1 where id = $2`, ["x".repeat(201), recordId]),
     ).rejects.toThrow(/dimension_note/);
+  });
+
+  it("recomposes the CHECKLIST answer, and clearing the note takes the bracket back out", async (ctx) => {
+    needsMigration(ctx);
+    const recordId = await item("__QA Sofa, checklist follows the note");
+    await width(recordId, "1830");
+    // The answer as a document composed it, which is the state a drawing
+    // confirm leaves behind.
+    await withTransaction((txn) => recomposeAnswers(txn, recordId, null, "qa"));
+    expect((await dimensionsAnswer(recordId))?.value).toBe("W1830mm");
+
+    const { PATCH } = await import("@/app/api/records/[id]/route");
+    expect(
+      (
+        await PATCH(
+          patch({ details: { dimensionNote: "1250 L-shaped return" }, version: await version(recordId) }),
+          params(recordId),
+        )
+      ).status,
+    ).toBe(200);
+    // The Checklist tab is a screen, and the cell is one cell.
+    expect((await dimensionsAnswer(recordId))?.value).toBe("W1830mm (1250 L-shaped return)");
+
+    await PATCH(patch({ details: { dimensionNote: null }, version: await version(recordId) }), params(recordId));
+    expect((await dimensionsAnswer(recordId))?.value).toBe("W1830mm");
+  });
+
+  it("leaves a Dimensions answer somebody typed alone", async (ctx) => {
+    needsMigration(ctx);
+    const recordId = await item("__QA Sofa, hand-typed dimensions answer");
+    await width(recordId, "1830");
+    // `manual` is what /api/answers/[id] writes the moment a person edits an
+    // answer: from then on it is theirs, and nothing recomposed may touch it.
+    await client.query(
+      `update spec_answers a
+          set value = '__QA typed by a person', state = 'confirmed', source_kind = 'manual',
+              confirmed_by = 'qa', confirmed_at = now(), updated_by = 'qa'
+         from requirements q, spec_fields f
+        where a.requirement_id = q.id and f.id = q.spec_field_id and f.json_id = 3
+          and a.record_id = $1 and a.revision_no = 0`,
+      [recordId],
+    );
+
+    const { PATCH } = await import("@/app/api/records/[id]/route");
+    await PATCH(
+      patch({ details: { dimensionNote: "1250 L-shaped return" }, version: await version(recordId) }),
+      params(recordId),
+    );
+    expect((await dimensionsAnswer(recordId))?.value).toBe("__QA typed by a person");
   });
 
   it("clears back to null, because a note somebody typed by mistake must go", async (ctx) => {

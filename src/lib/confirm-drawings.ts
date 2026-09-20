@@ -28,7 +28,7 @@
 // column.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { applyAnswerFills, applyAnswerRetractions, planAnswerFills } from "@/lib/promote-answers";
+import { applyAnswerFills, applyAnswerRetractions, loadDimensionNote, planAnswerFills } from "@/lib/promote-answers";
 import { loadPromotable } from "@/lib/attribute-retire";
 import {
   acknowledgedReplacements,
@@ -694,8 +694,12 @@ export async function confirmDrawingItem(
     // FINISH: the export renders a linked attribute as the library says it is,
     // and an answer written from the attribute's own text would disagree with
     // the file the moment somebody edited the library.
+    // AND WITH THE RECORD'S OWN DIMENSION NOTE (0034). The composed cell is a
+    // projection of the attributes AND that note; recomposing without it would
+    // quietly drop a person's qualifier out of the checklist the first time
+    // any document touched the record.
     const promotable = await loadPromotable(txn, recordId);
-    const fills = planAnswerFills(promotable);
+    const fills = planAnswerFills(promotable, await loadDimensionNote(txn, recordId));
     const filled = await applyAnswerFills(txn, recordId, runId, actor, fills);
     // Retractions too, because a REPLACEMENT can orphan an answer: the row it
     // retired may have carried a BWS field the new row does not. Without this

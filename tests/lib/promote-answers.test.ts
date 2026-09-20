@@ -74,6 +74,39 @@ describe("planAnswerFills", () => {
     expect(fills[0]?.state).toBe("tbc");
   });
 
+  // ---- the record's own dimension note (0034) ------------------------------
+
+  it("composes the record's dimension note into the checklist answer", () => {
+    // The Checklist tab is a screen, and the cell is a projection of the
+    // attributes AND the note. Without this the Specs tab and the BWS file
+    // read "W1900mm (1250 L-shaped return)" while the checklist said
+    // "W1900mm" — one record, two answers to one question.
+    const fills = planAnswerFills([dim("W", "1900")], "1250 L-shaped return");
+    expect(fills[0]?.value).toBe("W1900mm (1250 L-shaped return)");
+    expect(fills[0]?.state).toBe("confirmed");
+    // `value_raw` is what makes an answer checkable against a page, and the
+    // note has no page: the figures alone.
+    expect(fills[0]?.valueRaw).toBe("W 1900 mm");
+  });
+
+  it("does not let a note's own digits stand in for a measurement", () => {
+    // The trap this argument is really about. "1250 L-shaped return" contains
+    // a number, so a hasFigure test run over the composed cell would mark a
+    // record of nothing but TBCs as a CONFIRMED dimension — and a gate reads
+    // that as satisfied.
+    const fills = planAnswerFills([dim("W", "TBC", { state: "confirmed" })], "1250 L-shaped return");
+    expect(fills[0]?.value).toBe("W TBC (1250 L-shaped return)");
+    expect(fills[0]?.state).toBe("tbc");
+  });
+
+  it("writes no dimensions answer for a note with no dimensions behind it", () => {
+    // The cell on the export still shows the bracket — it is the record's
+    // cell — but the checklist QUESTION stays missing, because nobody has
+    // recorded a dimension and "missing" is the honest state. A note-only
+    // answer would be a sentence standing where a measurement goes.
+    expect(planAnswerFills([], "1250 L-shaped return")).toHaveLength(0);
+  });
+
   it("attributes a composed cell to the LAST slot's document", () => {
     // Three drawings can each supply part of one cell, so the cell has no
     // single source. The newest is the one a reader would go and check.
