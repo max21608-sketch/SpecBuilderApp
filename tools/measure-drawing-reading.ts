@@ -28,6 +28,20 @@
 //
 // `dump:drawings` answers "what does THIS run reduce to". This answers "how
 // often is the app deciding rather than reading", across the lot.
+//
+// ---- THE VIEW REGIONS (item 1.9) ------------------------------------------
+//
+// The same pack, the same question, one column further right. *"The picture
+// extract hasn't worked very well this time."* Two failures look identical on
+// a card — the model reported NOTHING (the whole-page fallback, which is the
+// design) and the model reported a box the crop then drew wrong — and they
+// have different fixes at very different prices: the first is the PROMPT and
+// costs a re-read of every document already read, the second is `pdf-crop.ts`
+// and costs nothing. So they are counted apart, before either is touched.
+//
+// The counting is `src/lib/view-region-measure.ts`, which is pure and tested:
+// this file needs a database, and a rule nobody can test is a rule nobody can
+// trust.
 // ============================================================================
 import {
   assertStagedDrawings,
@@ -41,6 +55,14 @@ import {
   type StagedDrawings,
 } from "../src/lib/drawing-document";
 import { guessSlotsFromViews } from "../src/lib/dimension-guess";
+import {
+  addRegionCounts,
+  blankRegionCounts,
+  countRegions,
+  readViewRegions,
+  type RegionCounts,
+  type RegionFault,
+} from "../src/lib/view-region-measure";
 import { parseDimensionFigure } from "../src/lib/dimensions";
 import { normaliseDimensionSlot } from "../src/lib/spec-vocab";
 import { sql } from "../src/lib/db";
@@ -99,6 +121,8 @@ type Counts = {
   letteredGroups: number;
   falseSplitGroups: number;
   unfoldableDimensionRows: number;
+  /** Item 1.9 — see the header. Counted by its own pure module. */
+  regions: RegionCounts;
 };
 
 function blank(): Counts {
@@ -106,18 +130,20 @@ function blank(): Counts {
     runs: 0, runsV2: 0, items: 0, itemsNoCode: 0, placedRows: 0, suggestedRows: 0,
     magnitudeItems: 0, disputeItems: 0, labelContradictions: 0, unit: {},
     lettered: 0, letteredGroups: 0, falseSplitGroups: 0, unfoldableDimensionRows: 0,
+    regions: blankRegionCounts(),
   };
 }
 
 /** Sum `from` into `into`. Every field is a count, and `unit` is a count per key. */
 function add(into: Counts, from: Counts): void {
   for (const key of Object.keys(from) as (keyof Counts)[]) {
-    if (key === "unit") continue;
+    if (key === "unit" || key === "regions") continue;
     (into[key] as number) += from[key] as number;
   }
   for (const [source, n] of Object.entries(from.unit)) {
     into.unit[source] = (into.unit[source] ?? 0) + n;
   }
+  addRegionCounts(into.regions, from.regions);
 }
 
 const pending = (item: DrawingItem): DrawingObservation[] =>
@@ -187,6 +213,23 @@ function measure(staged: StagedDrawings, counts: Counts, label: string, notes: s
     if (!item.itemCodeRaw) counts.itemsNoCode += 1;
     if (letters.get(item.id)) counts.lettered += 1;
 
+    // WHAT THE PICTURE PANEL HAD TO WORK WITH. Read straight off the staged
+    // item, through the same fields `ItemImagePicker` reads.
+    const regionReading = readViewRegions(item);
+    countRegions(counts.regions, regionReading);
+    if (detail) {
+      for (const region of regionReading.regions) {
+        if (region.faults.length === 0) continue;
+        notes.push(
+          `  VIEW REGION  ${label}  ${item.itemCodeRaw ?? "(no code)"}  ${region.viewType} p${region.page ?? "?"} ` +
+            `[${(region.bbox ?? []).join(", ")}] — ${region.faults.join(", ")}`,
+        );
+      }
+      if (regionReading.reported === 0) {
+        notes.push(`  NO REGION    ${label}  ${item.itemCodeRaw ?? "(no code)"} — the card offers the whole page`);
+      }
+    }
+
     const rows = pending(item);
     for (const o of rows) {
       if (o.dimensionSlot) {
@@ -245,6 +288,31 @@ function report(title: string, c: Counts): void {
   console.log(`  unit provenance on placed rows:`);
   for (const [source, n] of Object.entries(c.unit).sort((a, b) => b[1] - a[1])) {
     console.log(`    ${source.padEnd(18)} ${n}`);
+  }
+  console.log("");
+  // ITEM 1.9. The first two lines answer "which failure is this" and nothing
+  // else does: an item with no region falls back to the whole page BY DESIGN,
+  // and an item with a faulty proposal is a picture somebody was shown and had
+  // to redraw.
+  const r = c.regions;
+  const mean = r.coverageCount === 0 ? "—" : `${Math.round((r.coverageSum / r.coverageCount) * 100)}% of the page`;
+  console.log(`  item pictures:`);
+  console.log(`    items reporting a region    ${r.itemsWithRegions}   ${pct(r.itemsWithRegions, c.items)} of items`);
+  console.log(`    items reporting NONE        ${r.itemsWithoutRegions}   <- the whole-page fallback, by design`);
+  console.log(`    items with no proposal      ${r.itemsFallingBack}   <- what a reviewer had to draw by hand`);
+  console.log(`    regions reported            ${r.regions}   (${r.regionsUsable} usable, ${pct(r.regionsUsable, r.regions)})`);
+  console.log(`    PROPOSALS that are faulty   ${r.proposalsFaulty}   <- a wrong box somebody was shown`);
+  console.log(`    mean region size            ${mean}`);
+  const faults = (Object.entries(r.faults) as [RegionFault, number][]).filter(([, n]) => n > 0);
+  console.log(`    faults: ${faults.length === 0 ? "none" : faults.map(([fault, n]) => `${fault} ${n}`).join(", ")}`);
+  const types = Object.entries(r.byViewType).sort((a, b) => b[1] - a[1]);
+  console.log(`    view types: ${types.length === 0 ? "none reported" : types.map(([type, n]) => `${type} ${n}`).join(", ")}`);
+  // A CAVEAT THE NUMBER CANNOT CARRY. `viewRegions` is optional on a staged
+  // item so a run from before pictures existed keeps reading, and such a run
+  // counts under "reporting NONE" — it was never asked rather than asked and
+  // silent. `--detail` names each one.
+  if (r.itemsWithoutRegions > 0) {
+    console.log(`    (a run staged before pictures existed also counts as NONE — use --detail to see which)`);
   }
 }
 
