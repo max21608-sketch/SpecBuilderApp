@@ -123,6 +123,16 @@ import SpecTable from "@/components/records/SpecTable";
 
 const fetched = vi.hoisted(() => ({ records: [] as Record<string, unknown>[] }));
 
+// The table's area filter keeps its value in the URL, so it reads the router.
+// A bare mount has none. Nothing here changes the area, so this stands still:
+// the reactive version lives in `spec-table-area.test.tsx`, which is what
+// exercises it.
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(""),
+  usePathname: () => "/dashboard/projects/p1",
+  useRouter: () => ({ replace: () => {} }),
+}));
+
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: async (url: string) => {
     const named = url.includes("withToQuote=1");

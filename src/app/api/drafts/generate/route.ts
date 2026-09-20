@@ -161,7 +161,7 @@ export async function POST(request: Request): Promise<Response> {
       // 5. Contacts, locked, and proven to belong to this project.
       const contactIds = input.selections.map((s) => s.contactId);
       const contactRows = await sql`
-        select id, name, email, version
+        select id, name, email, role, version
         from project_contacts
         where project_id = ${input.projectId} and id = any(${contactIds}::uuid[])
         order by id
@@ -262,7 +262,14 @@ export async function POST(request: Request): Promise<Response> {
 
         const covered = questions.map(coveredFromQuestion);
         const groups = groupsFromCovered(covered);
-        const intro = defaultIntro(projectLabel, tierCounts(groups));
+        // WHO IS BEING ASKED, off the LIVE contact row and never off the
+        // request. A colleague gets "we still need" where a designer gets "we
+        // need from you": the wording is a claim about the recipient, and a
+        // client that could set it could make an external chase read as an
+        // internal note. The `questionTier` rule, in a second place.
+        const intro = defaultIntro(projectLabel, tierCounts(groups), {
+          internal: String(contact.role) === "internal",
+        });
         const closing = defaultClosing();
         const { subject, body } = buildChaseEmail({
           projectLabel,

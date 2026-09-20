@@ -406,6 +406,35 @@ export type ContactGroup = {
  * Splits outstanding questions into groups that can be drafted and records
  * that cannot, with the reason. A record is never silently dropped: if there
  * is nobody to ask, that is a visible blocker with an action next to it.
+ *
+ * ============================================================================
+ * A COLLEAGUE IS NOT ROUTED BY DESIGNER CODE
+ *
+ * Matthew, 2026-09-18: "You can send it to the CAM or to the sales system or
+ * to production… It doesn't have to be an external e-mail." A designer is
+ * reached through `spec_records.designer`, which is how the bill says whose
+ * item a line is. An internal contact has no code and is not on a bill line at
+ * all, so routing them that way would leave every colleague with an empty
+ * chase.
+ *
+ * So a contact whose `role` is `internal` gets a group of their own holding
+ * EVERY outstanding question on the project. Two things about it:
+ *
+ *   * A LEVEL IS STILL REQUIRED. No level, no tier, and the email could not
+ *     say which half of it blocks the quote — which is the whole point of the
+ *     message. Blocked with the reason, exactly as for a designer.
+ *
+ *   * `blocked` IS UNCHANGED, and that is deliberate. It describes the
+ *     DESIGNER routing — "there is nobody to ask about this line" — and it is
+ *     what the screen's Nobody assigned tab and its blockers panel are about.
+ *     A colleague being askable about everything does not mean the line has a
+ *     designer, and silently emptying that list would hide 31 unrouted
+ *     questions behind a convenience.
+ *
+ * A question therefore appears in a designer's group AND in every colleague's.
+ * The generate route already refuses one question selected for two recipients,
+ * and the screen shows one contact's tab at a time.
+ * ============================================================================
  */
 export function groupByContact(
   questions: OutstandingQuestion[],
@@ -415,6 +444,7 @@ export function groupByContact(
   for (const contact of contacts) {
     if (contact.designerCode) byCode.set(contact.designerCode, contact);
   }
+  const colleagues = contacts.filter((contact) => contact.role === "internal");
 
   const groups = new Map<string, ContactGroup>();
   const blockedByRecord = new Map<string, BlockedRecord>();
@@ -436,6 +466,17 @@ export function groupByContact(
   };
 
   for (const question of questions) {
+    // A colleague can be asked about a line with no designer, so this runs
+    // before the designer routing and is not affected by its refusals. The
+    // level is the one thing it still needs, for the reason above.
+    if (question.level !== null) {
+      for (const colleague of colleagues) {
+        const group = groups.get(colleague.id);
+        if (group) group.questions.push(question);
+        else groups.set(colleague.id, { contact: colleague, questions: [question] });
+      }
+    }
+
     const key = designerKey(question.designer);
     const contact = key ? byCode.get(key) : undefined;
 
@@ -452,13 +493,26 @@ export function groupByContact(
       continue;
     }
 
+    // A colleague who also carries a designer code already has this question
+    // through the path above, and pushing it again would list it twice in
+    // their own chase.
+    if (contact.role === "internal") continue;
+
     const group = groups.get(contact.id);
     if (group) group.questions.push(question);
     else groups.set(contact.id, { contact, questions: [question] });
   }
 
   return {
-    groups: [...groups.values()].sort((a, b) => a.contact.name.localeCompare(b.contact.name)),
+    // DESIGNERS FIRST, THEN COLLEAGUES, each by name. The strip on the chase
+    // screen reads left to right and the external chase is the common one;
+    // a colleague sorted into the middle of it by their first name would read
+    // as another designer.
+    groups: [...groups.values()].sort(
+      (a, b) =>
+        Number(a.contact.role === "internal") - Number(b.contact.role === "internal") ||
+        a.contact.name.localeCompare(b.contact.name),
+    ),
     blocked: [...blockedByRecord.values()].sort((a, b) => a.recordLabel.localeCompare(b.recordLabel)),
   };
 }

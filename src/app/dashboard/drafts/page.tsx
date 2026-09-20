@@ -273,8 +273,24 @@ function DraftsView() {
     // what is listed; they must not decide what is asked, or a question
     // somebody deliberately ticked disappears from the draft when they change a
     // dropdown. Where the two disagree the table says so in words.
-    return data.inventory.groups.map((group) => ({ contact: group.contact, questions: group.questions }));
-  }, [data]);
+    //
+    // A COLLEAGUE'S GROUP IS A COPY OF EVERYBODY'S, so it is never flattened
+    // BESIDE the designers' — it replaces them.
+    //
+    // `groupByContact` gives an internal contact every outstanding question on
+    // the project, because a colleague is not routed by designer code. Listing
+    // both at once means `groupIntoLines` buckets each question twice into the
+    // same furniture line: found in the browser on the 300-line project, where
+    // a colleague's tab read "5702 questions ticked" for 2851 questions and
+    // offered "Draft it · 3 drafts" for one recipient.
+    const tab = effectiveContact(contactId, data);
+    const chosen = data.inventory.groups.find((group) => group.contact.id === tab);
+    const groups =
+      chosen && chosen.contact.role === "internal"
+        ? [chosen]
+        : data.inventory.groups.filter((group) => group.contact.role !== "internal");
+    return groups.map((group) => ({ contact: group.contact, questions: group.questions }));
+  }, [data, contactId]);
 
   /** One flat list, each question carrying the contact it would be asked of. */
   const tableQuestions = useMemo<TableQuestion[]>(
@@ -509,6 +525,17 @@ function DraftsView() {
   const contactTab = effectiveContact(contactId, data);
 
   /**
+   * How many questions the designer chases cover, all together.
+   *
+   * `tableQuestions` is the wrong number for the Everyone tab the moment a
+   * colleague is chosen: their group holds a COPY of every outstanding
+   * question, and only their own tab lists it.
+   */
+  const designerQuestionCount = inventory.groups
+    .filter((group) => group.contact.role !== "internal")
+    .reduce((sum, group) => sum + group.questions.length, 0);
+
+  /**
    * What the preselection ticked, and what it deliberately left.
    *
    * The NOBODY tab is not a contact: it lists records with no route to a
@@ -590,10 +617,25 @@ function DraftsView() {
             value={contactTab}
             onChange={chooseContact}
             items={[
-              { id: "", label: "Everyone", count: tableQuestions.length },
+              // EVERYONE IS EVERY DESIGNER. A colleague's group holds a copy of
+              // the same questions, so counting the strip over every group
+              // would report the project twice.
+              { id: "", label: "Everyone", count: designerQuestionCount },
               ...inventory.groups.map((group) => ({
                 id: group.contact.id,
-                label: group.contact.name,
+                // A COLLEAGUE IS MARKED, not just sorted last. `groupByContact`
+                // puts them after the designers, but a name on its own in that
+                // strip reads as one more person at the design practice, and
+                // what a chase to them says is different.
+                label:
+                  group.contact.role === "internal" ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      {group.contact.name}
+                      <Chip tone="info">Colleague</Chip>
+                    </span>
+                  ) : (
+                    group.contact.name
+                  ),
                 count: group.questions.length,
               })),
               {

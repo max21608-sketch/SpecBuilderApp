@@ -4,11 +4,55 @@
 // row until you open it, its two counts are its own whatever the filter says,
 // and a question that is ticked but hidden is still asked — and said to be.
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ChaseQuestionTable, { type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
 import { defaultSelection } from "@/lib/chase-selection";
+
+// ===========================================================================
+// THE ROUTER, BECAUSE THE AREA FILTER LIVES IN THE URL
+//
+// `useUrlTab` reads the query string on every render rather than seeding state
+// from it once, which is what makes a pasted `?area=` survive. A bare mount
+// has no router, so this stands in for one — and unlike the mock in
+// `use-url-tab.test.tsx` it is REACTIVE: `replace` writes the new query back
+// and wakes every mounted `useSearchParams`, so choosing an area in a test
+// narrows the table the way it does in the browser. A mock that recorded the
+// call and left the query alone would let a filter that never applies pass.
+// ===========================================================================
+const replace = vi.fn();
+let search = "";
+const listeners = new Set<() => void>();
+
+vi.mock("next/navigation", async () => {
+  const { useEffect, useReducer } = await import("react");
+  return {
+    useSearchParams: () => {
+      const [, bump] = useReducer((n: number) => n + 1, 0);
+      useEffect(() => {
+        listeners.add(bump);
+        return () => {
+          listeners.delete(bump);
+        };
+      }, []);
+      return new URLSearchParams(search);
+    },
+    usePathname: () => "/dashboard/drafts",
+    useRouter: () => ({
+      replace: (url: string) => {
+        replace(url);
+        search = url.includes("?") ? url.slice(url.indexOf("?") + 1) : "";
+        for (const listener of [...listeners]) listener();
+      },
+    }),
+  };
+});
+
+beforeEach(() => {
+  replace.mockClear();
+  search = "";
+});
 
 let n = 0;
 function question(over: Partial<TableQuestion> = {}): TableQuestion {
@@ -25,6 +69,7 @@ function question(over: Partial<TableQuestion> = {}): TableQuestion {
     waiting: null,
     refs: "S-301",
     itemDescription: "Desk chair",
+    area: "Dressing area",
     level: "hero",
     qty: 45,
     runId: "run-1",
@@ -246,6 +291,114 @@ describe("a filter narrows what is listed, never what is asked", () => {
   it("does not say n shown just because the default view hides readiness", () => {
     render(<Harness questions={[question(), question({ requirementKind: "readiness" })]} />);
     expect(within(line()).queryByText(/shown$/)).toBeNull();
+  });
+});
+
+// ===========================================================================
+// THE AREA FILTER
+//
+// Sebastian, 2026-09-18: "if you could filter by that, that'd be quite handy".
+// It is the same rule as every other filter on this screen — it narrows what
+// is LISTED and never what is asked — and the cases below are the ones the
+// simple version gets wrong: two spellings of one room, and a line nobody has
+// placed anywhere.
+// ===========================================================================
+describe("filtering by area", () => {
+  const acrossAreas = () => [
+    question({ area: "Dressing area" }),
+    question({
+      recordId: "line-2",
+      refs: "S-402",
+      itemDescription: "Bench",
+      area: "dressing  AREA",
+      groupNo: 14,
+      groupLabel: "AP364c-014",
+    }),
+    question({
+      recordId: "line-3",
+      refs: "S-100",
+      itemDescription: "Sofa",
+      area: "Living room",
+      groupNo: 15,
+      groupLabel: "AP364c-015",
+    }),
+    question({
+      recordId: "line-4",
+      refs: "S-500",
+      itemDescription: "Stool",
+      area: null,
+      groupNo: 16,
+      groupLabel: "AP364c-016",
+    }),
+  ];
+
+  it("offers one option per area, spelled as the bill wrote it, with no-area last", () => {
+    render(<Harness questions={acrossAreas()} />);
+    const select = screen.getByLabelText("Filter by area") as HTMLSelectElement;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      "All areas (4)",
+      "Dressing area (2)",
+      "Living room (1)",
+      "No area given (1)",
+    ]);
+  });
+
+  it("narrows the lines it lists, and merges the two spellings of one room", async () => {
+    render(<Harness questions={acrossAreas()} />);
+    await userEvent.selectOptions(screen.getByLabelText("Filter by area"), "dressing area");
+    expect(screen.getByText("Desk chair")).toBeTruthy();
+    expect(screen.getByText("Bench")).toBeTruthy();
+    expect(screen.queryByText("Sofa")).toBeNull();
+    expect(screen.getByText(/2 lines shown of 4/)).toBeTruthy();
+  });
+
+  it("finds a line nobody has placed, rather than dropping it", async () => {
+    render(<Harness questions={acrossAreas()} />);
+    await userEvent.selectOptions(screen.getByLabelText("Filter by area"), "__none__");
+    expect(screen.getByText("Stool")).toBeTruthy();
+    expect(screen.queryByText("Desk chair")).toBeNull();
+  });
+
+  it("finds an area by typing it in the search box, which is what makes 35 of them usable", async () => {
+    render(<Harness questions={acrossAreas()} />);
+    await userEvent.type(screen.getByPlaceholderText(/Search a code/), "living");
+    expect(screen.getByText("Sofa")).toBeTruthy();
+    expect(screen.queryByText("Desk chair")).toBeNull();
+  });
+
+  it("keeps the line's own counts and never touches the selection", async () => {
+    render(<Harness seed contactId="c-1" questions={acrossAreas()} />);
+    // Four lines, one to-quote question each, all ticked by the preselection.
+    expect(screen.getByText(/4 questions ticked/)).toBeTruthy();
+    await userEvent.selectOptions(screen.getByLabelText("Filter by area"), "living room");
+    expect(screen.getByText(/4 questions ticked/)).toBeTruthy();
+    // The line still on screen reports ITS OWN count, not what the filter left.
+    expect(within(screen.getByText("Sofa").closest("tr")!).getByText("1")).toBeTruthy();
+    // And the three it hid are said out loud rather than silently dropped.
+    expect(screen.getByText(/3 ticked questions are hidden by your filters/)).toBeTruthy();
+    expect(screen.getByText(/will still be asked/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Draft it · 1 draft" })).toBeTruthy();
+  });
+
+  it("keeps the chosen area in the URL, replacing rather than pushing", async () => {
+    render(<Harness questions={acrossAreas()} />);
+    await userEvent.selectOptions(screen.getByLabelText("Filter by area"), "living room");
+    expect(replace).toHaveBeenCalledWith("/dashboard/drafts?area=living+room");
+  });
+
+  it("renders what a pasted link says, and leaves an area it does not carry alone", () => {
+    search = "area=living room";
+    render(<Harness questions={acrossAreas()} />);
+    expect(screen.getByText("Sofa")).toBeTruthy();
+    expect(screen.queryByText("Desk chair")).toBeNull();
+
+    cleanup();
+    // An area this contact's lines do not carry: every line is listed, and the
+    // URL is NOT corrected — the inventory may still be arriving.
+    search = "area=basement";
+    render(<Harness questions={acrossAreas()} />);
+    expect(screen.getByText("Desk chair")).toBeTruthy();
+    expect(replace).not.toHaveBeenCalled();
   });
 });
 
