@@ -38,6 +38,7 @@ type Payload = {
   designerContactAmbiguous: boolean;
   quoteReadiness: {
     toQuote: number | null;
+    toChase: number | null;
     alsoOutstanding: number | null;
     outstanding: number;
     settled: number;
@@ -273,12 +274,23 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
     expect(chasedPayload.quoteReadiness.toQuote).toBeGreaterThan(0);
     expect(chasedPayload.quoteReadiness.settled).toBe(1);
 
+    // AND HOW MANY OF THOSE A CHASE WOULD ASK. A readiness question is ours to
+    // record and the chase screen never selects one, so `toChase` is a subset
+    // of `toQuote` — never larger, or the button would name work no screen
+    // would tick (FIU 13).
+    expect(chasedPayload.quoteReadiness.toChase).not.toBeNull();
+    expect(chasedPayload.quoteReadiness.toChase!).toBeLessThanOrEqual(chasedPayload.quoteReadiness.toQuote!);
+    expect(chasedPayload.quoteReadiness.toChase!).toBeGreaterThanOrEqual(0);
+
     // A DASH, NEVER A ZERO. The category is not on Matthew's matrix and the
     // record has no level, so no question on it can be sorted into what blocks
     // a quote — and reporting 0 would read as an item that is ready.
     const levellessPayload = await read(levellessRecordId);
     expect(levellessPayload.quoteReadiness.noLevel).toBe(true);
     expect(levellessPayload.quoteReadiness.toQuote).toBeNull();
+    // Both tiered counts go null together: a chase figure beside a dash would
+    // be a number with nothing to compare it to.
+    expect(levellessPayload.quoteReadiness.toChase).toBeNull();
     expect(levellessPayload.quoteReadiness.alsoOutstanding).toBeNull();
     expect(levellessPayload.quoteReadiness.outstanding).toBeGreaterThan(0);
   });

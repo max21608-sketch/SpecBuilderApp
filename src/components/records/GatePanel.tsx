@@ -60,6 +60,7 @@ import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
 import Button, { buttonClass } from "@/components/ui/Button";
+import { gateRowRole, questionForField } from "@/lib/chase-counts";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import type { Tone } from "@/components/ui/tone";
 
@@ -86,7 +87,14 @@ const BAND: Record<"settled" | "in_play" | "not_reached", string> = {
   not_reached: "border-slate-200 bg-slate-50",
 };
 
-/** Somebody can answer it today. `unanswerable` is deliberately not in here. */
+/**
+ * Somebody can answer it today. `unanswerable` is deliberately not in here.
+ *
+ * `summariseGateRows(...).toAnswer` is the same figure derived from the ROWS
+ * rather than from the counts, and a pure test pins the two together — the
+ * record header's explanation quotes it, and a sentence describing a number
+ * the chip beside it does not show would be worse than no sentence.
+ */
 function answerable(status: GateStatus): number {
   return status.counts.blocking + status.counts.unknown;
 }
@@ -114,6 +122,11 @@ export type GateAnswer = {
   prompt: string;
   json_id: number | null;
   local_key: string | null;
+  /**
+   * `requirements.kind`. It is what tells a readiness row — ours to record,
+   * never chased — from a spec-field one, and the row's label says which.
+   */
+  kind?: string | null;
   state: AnswerState;
 };
 
@@ -147,28 +160,51 @@ export default function GatePanel({
     );
   }
 
-  /** The checklist question a matrix field is answered through, where there is one. */
-  const questionFor = (field: GateField | MatrixFieldRow): GateAnswer | null => {
-    const jsonId = "jsonId" in field ? field.jsonId : field.specFieldJsonId;
-    return (
-      answers.find(
-        (answer) =>
-          (field.localKey !== null && answer.local_key === field.localKey) ||
-          (jsonId !== null && answer.json_id === jsonId),
-      ) ?? null
-    );
-  };
+  // ONE MATCHER, shared with the sentence the record header prints. Two copies
+  // is how a row's label and the number explaining it start disagreeing.
+  const questionFor = (field: GateField | MatrixFieldRow): GateAnswer | null =>
+    questionForField<GateAnswer>(field, answers);
   const questionByKey = (key: string): GateAnswer | null =>
     answers.find((answer) => answer.local_key === key) ?? null;
 
-  /** A field's name, as a link into the checklist where it can be answered. */
-  const FieldName = ({ field }: { field: GateField }) => {
+  /**
+   * A field's name, as a link into the checklist where it can be answered.
+   *
+   * AND WHETHER A CHASE WILL EVER ASK IT, in two words. These are exactly the
+   * rows the header button's number leaves out, so saying it here is what
+   * makes the two figures add up on the page rather than in somebody's head.
+   *
+   *   "you record this"   a READINESS question — one of Matthew's id-less
+   *                       rows, tied to its gate row by `local_key` — which is
+   *                       ours to answer and never put to a designer
+   *                       (decision 19).
+   *   "on the details"    a row with no checklist question at all, resolved
+   *                       from a column on `spec_records`: Spec notes,
+   *                       Designer reference, Item name. Measured on the
+   *                       sandbox sofa of 2026-09-19, where those two WERE the
+   *                       gap between 6 and 4 — not the readiness rows.
+   *
+   * Plain, never amber: neither is a problem, they are whose job it is. And
+   * neither is `unanswerable`, which has nowhere to record it at all and says
+   * so in its own chip.
+   */
+  const FieldName = ({ field, outcome }: { field: GateField; outcome?: GateOutcome }) => {
     const question = questionFor(field);
-    if (!question) return <span className="text-neutral-800">{field.fieldName}</span>;
-    return (
+    const role = gateRowRole({ outcome: outcome ?? "blocking", field }, question);
+    const name = question ? (
       <Link href={`?tab=checklist#q-${question.requirement_id}`} className="underline hover:text-neutral-900">
         {field.fieldName}
       </Link>
+    ) : (
+      <span className="text-neutral-800">{field.fieldName}</span>
+    );
+    const label = role === "readiness" ? "you record this" : role === "details" ? "on the details" : null;
+    if (!label) return name;
+    return (
+      <>
+        {name}
+        <span className="ml-1.5 text-[11px] text-neutral-500">{label}</span>
+      </>
     );
   };
 
@@ -281,7 +317,7 @@ export default function GatePanel({
                       {OUTCOME_LABEL[row.outcome]}
                     </Chip>
                     <div className="min-w-0">
-                      <FieldName field={row.field} />
+                      <FieldName field={row.field} outcome={row.outcome} />
                       {row.field.dimensionSlot && (
                         <span className="ml-1 text-[11px] text-neutral-400">({row.field.dimensionSlot})</span>
                       )}
@@ -308,8 +344,13 @@ export default function GatePanel({
                   // and chasing them early is not wrong, but a black button on
                   // three boards at once says all three are the thing to do —
                   // and only one of them is. Same argument as the slate band.
+                  //
+                  // NO NUMBER ON IT. `toAnswer` counts FIELDS and the header's
+                  // button counts chaseable QUESTIONS; a third figure beside
+                  // two that are now explained in words is what produced the
+                  // question in the room. The chip above still carries it.
                   <Link href={chaseHref} className={buttonClass(first ? "secondary" : "primary", "xs", "flex-1")}>
-                    Chase the {toAnswer}
+                    Chase these
                   </Link>
                 )}
                 <Button

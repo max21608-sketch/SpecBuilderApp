@@ -56,6 +56,7 @@ import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
 import type { Palette } from "@/lib/palettes";
 import { GATES, type Gate, type GateStatus } from "@/lib/gates";
+import { describeChaseCounts, summariseGateRows } from "@/lib/chase-counts";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
@@ -157,9 +158,11 @@ export type Payload = {
   waiting: Record<string, { draftId: string; sentAt: string | null; contactName: string }>;
   designerContact: DesignerContact | null;
   designerContactAmbiguous: boolean;
-  /** `toQuote`/`alsoOutstanding` are NULL where the record has no level. A dash, never a zero. */
+  /** `toQuote`/`alsoOutstanding`/`toChase` are NULL where the record has no level. A dash, never a zero. */
   quoteReadiness: {
     toQuote: number | null;
+    /** Of `toQuote`, the ones a chase would ask — readiness rows are ours to record. */
+    toChase: number | null;
     alsoOutstanding: number | null;
     outstanding: number;
     settled: number;
@@ -400,7 +403,7 @@ function RecordView() {
   const runHref = `/dashboard/projects/${record.project_id}?tab=${record.run_id}`;
   const level = normaliseItemLevel(record.level);
   const readiness = data.quoteReadiness ?? {
-    toQuote: null, alsoOutstanding: null, outstanding: 0, settled: 0, notApplicable: 0, noLevel: true,
+    toQuote: null, toChase: null, alsoOutstanding: null, outstanding: 0, settled: 0, notApplicable: 0, noLevel: true,
   };
 
   /**
@@ -418,6 +421,18 @@ function RecordView() {
   const outstandingCount = answers.filter(
     (answer) => answer.state === "missing" || answer.state === "tbc",
   ).length;
+  // WHY THE NUMBERS ON THIS SCREEN DIFFER, DERIVED FROM THE ROWS BELOW THEM.
+  //
+  // Not from a remembered cause: driven on the sandbox, the gap on one sofa
+  // was Spec notes and Designer reference — rows read off this record's own
+  // columns, with no checklist question and nowhere to chase — and on another
+  // record it is a dimension slot or a readiness question. `summariseGateRows`
+  // buckets the TGQ rows the panel is about to list, so the line can only ever
+  // describe what is on the screen. Null where Matthew's matrix does not reach
+  // the category: there is no second measure there to explain.
+  const tgqBuckets = data.gates ? summariseGateRows(data.gates.TGQ.fields, answers) : null;
+  const chaseCounts = describeChaseCounts({ buckets: tgqBuckets, toChase: readiness.toChase });
+
   const gateSummaryLabel = data.gates
     ? `${GATES.filter((gate) => data.gates![gate].satisfied).length} of ${GATES.length}`
     : null;
@@ -634,10 +649,17 @@ function RecordView() {
             >
               Add a spec by hand
             </Button>
-            {readiness.toQuote !== null && readiness.toQuote > 0 && (
+            {/* THE BUTTON COUNTS WHAT IT WILL ASK. `toQuote` includes the
+                readiness rows we answer ourselves; the chase screen never
+                selects those, so a button naming that figure lands on a screen
+                ticking fewer. The muted line under it says which is which. */}
+            {readiness.toChase !== null && readiness.toChase > 0 && (
               <Link href={chaseHref} className={buttonClass("primary", "sm")}>
-                Chase the {readiness.toQuote}
+                Chase the {readiness.toChase}
               </Link>
+            )}
+            {chaseCounts && (
+              <span className="basis-full text-right text-xs text-neutral-500">{chaseCounts}</span>
             )}
           </>
         }
@@ -990,9 +1012,10 @@ function RecordView() {
                   </span>
                   <span className="text-neutral-500">settled</span>
                 </div>
-                {readiness.toQuote !== null && readiness.toQuote > 0 && (
+                {/* The same button, so it carries the same number. */}
+                {readiness.toChase !== null && readiness.toChase > 0 && (
                   <Link href={chaseHref} className={buttonClass("secondary", "sm", "mt-3 w-full")}>
-                    Chase the {readiness.toQuote}
+                    Chase the {readiness.toChase}
                   </Link>
                 )}
               </Card>

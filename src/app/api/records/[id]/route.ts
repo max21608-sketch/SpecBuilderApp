@@ -259,6 +259,27 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const notApplicable = answers.filter((row) => String(row.state ?? "") === "na").length;
   const quoteReadiness = {
     toQuote: untiered ? null : outstanding.filter((question) => question.tier === "to_quote").length,
+    // ---- AND HOW MANY OF THOSE A CHASE WOULD ACTUALLY ASK ------------------
+    //
+    // A READINESS QUESTION IS OURS TO RECORD AND IS NEVER CHASED (decision
+    // 19). `groupByContact` has excluded them from its own to-quote figure
+    // since it was written, and the chase screen preselects `spec_field` rows
+    // only — so a button reading "Chase the 5" that lands on a screen ticking
+    // four is the same defect one screen later. That pair was read out loud on
+    // 2026-09-18 and nobody in the room could say why the numbers differed.
+    //
+    // `toQuote` keeps its meaning exactly — it is what the Quote readiness
+    // tile counts and what the spec table's TGQ column counts — and the button
+    // gets its own number rather than one of them being quietly redefined.
+    // Two names for two counts, because they answer two questions.
+    //
+    // `waiting` is deliberately NOT excluded here: whether to re-ask something
+    // already chased is a decision the chase screen offers a control for, and
+    // a header that silently dropped those would understate the work.
+    toChase: untiered
+      ? null
+      : outstanding.filter((question) => question.tier === "to_quote" && question.requirementKind === "spec_field")
+          .length,
     alsoOutstanding: untiered ? null : outstanding.filter((question) => question.tier === "later").length,
     /** Missing plus TBC, whatever the tier. Always a number, so a dash above it still has a size beside it. */
     outstanding: outstanding.length,

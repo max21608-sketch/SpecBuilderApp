@@ -110,12 +110,93 @@ describe("the gate panel", () => {
     expect(screen.queryByText("2 outstanding")).not.toBeInTheDocument();
   });
 
-  it("chases only what somebody can answer", () => {
+  it("chases only what somebody can answer, and puts no third number on the button", () => {
+    // The button counts FIELDS; the header's counts chaseable QUESTIONS. Two
+    // explained figures beside a third unexplained one is what produced the
+    // question in the room (FIU 13), so this one carries no number at all.
     renderPanel();
-    expect(screen.getByRole("link", { name: "Chase the 1" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Chase these" })).toHaveAttribute(
       "href",
       "/dashboard/drafts?projectId=p1",
     );
+    expect(screen.queryByRole("link", { name: /Chase the \d/ })).not.toBeInTheDocument();
+    // The chip still carries it, so nothing is hidden.
+    expect(screen.getByText("1 to answer")).toBeInTheDocument();
+  });
+
+  // FIU 13, the other half. Three kinds of row the header's chase number
+  // leaves out, each labelled for the reason it is left out — measured on the
+  // sandbox sofa of 2026-09-19, where the gap was NOT the readiness rows but
+  // Spec notes and Designer reference, read off this record's own columns.
+  it("marks the rows a chase will never ask, and says which kind each is", () => {
+    const headboard = field({
+      matrixRow: 7,
+      gate: "TGQ",
+      fieldName: "Headboard fitted",
+      localKey: "headboard_fitted",
+    });
+    // No checklist question exists for either of these: `loadGateContext`
+    // resolves them from `spec_records`, which is what makes them blocking.
+    const specNotes = field({ matrixRow: 8, gate: "TGQ", fieldName: "Spec notes", localKey: "spec_notes" });
+    const designerRef = field({
+      matrixRow: 9,
+      gate: "TGQ",
+      fieldName: "Designer reference",
+      localKey: "designer_reference",
+    });
+    const environment = field({ matrixRow: 10, gate: "TGQ", fieldName: "Indoor / Outdoor", specFieldJsonId: 130 });
+    renderPanel({
+      gates: statuses({
+        TGQ: [
+          row(PRODUCT_CODE, "unanswerable"),
+          row(specNotes, "blocking"),
+          row(designerRef, "blocking"),
+          row(headboard, "blocking"),
+          row(environment, "blocking"),
+        ],
+        TG0: [],
+        TG1: [],
+      }),
+      answers: [
+        {
+          requirement_id: "r-hb",
+          prompt: "Headboard fitted?",
+          json_id: null,
+          local_key: "headboard_fitted",
+          kind: "readiness",
+          state: "missing" as const,
+        },
+        {
+          requirement_id: "r-env",
+          prompt: "Indoor or outdoor?",
+          json_id: 130,
+          local_key: null,
+          kind: "spec_field",
+          state: "missing" as const,
+        },
+      ],
+    });
+    expect(within(screen.getByText("Headboard fitted").closest("li")!).getByText("you record this")).toBeInTheDocument();
+    expect(within(screen.getByText("Spec notes").closest("li")!).getByText("on the details")).toBeInTheDocument();
+    expect(
+      within(screen.getByText("Designer reference").closest("li")!).getByText("on the details"),
+    ).toBeInTheDocument();
+    // A real question carries neither label, and `unanswerable` carries its own
+    // words already — "nowhere to record it" is not "you record this".
+    const chased = screen.getByText("Indoor / Outdoor").closest("li")!;
+    expect(within(chased).queryByText("on the details")).not.toBeInTheDocument();
+    expect(within(chased).queryByText("you record this")).not.toBeInTheDocument();
+    const nowhere = screen.getByText("Product code").closest("li")!;
+    expect(within(nowhere).queryByText("on the details")).not.toBeInTheDocument();
+    expect(within(nowhere).queryByText("you record this")).not.toBeInTheDocument();
+  });
+
+  it("does not mark a matrix row that has no question at all", () => {
+    // Product code is `unanswerable` — there is nowhere to record it, which is
+    // a different statement from either label and already said in words.
+    renderPanel();
+    expect(screen.queryByText("you record this")).not.toBeInTheDocument();
+    expect(screen.queryByText("on the details")).not.toBeInTheDocument();
   });
 
   it("paints a gate whose predecessor is unmet slate, never green, and names the one to do first", () => {
