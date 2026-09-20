@@ -22,6 +22,34 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### A checklist question with no answer row crashed the record screen
+
+**Status: FIXED 2026-09-20, `be8539d` (cherry-picked from Coder C's `100a511`),
+the same day it was found.** Driving item 1.12's disclosure link —
+`/dashboard/records/<id>?tab=checklist#q-<requirement>` — rendered
+"Application error: a client-side exception has occurred",
+`Cannot read properties of undefined (reading 'chip')`. The record loaded
+with `?tab=checklist` alone and with `#q-…` alone; only the combination
+crashed.
+
+**Cause, stated apart from the observation:** `GET /api/records/[id]` builds
+its answers off `requirements` with a LEFT JOIN to `spec_answers` and selected
+`a.state` with no coalesce, so a requirement added to a category after the
+record was categorised came back `state: null`. Every filtered view of the
+checklist tests the state and dropped the row silently; the anchor path
+clears the filter so the target is on the page, the row reached
+`TONE[ANSWER_STATE_TONE[null]].chip`, and the screen went white. A latent
+defect since the checklist existed, reached for the first time by a link that
+opens the checklist unfiltered. Fixed at both ends: the route coalesces to
+`missing` (the reading `loadOutstanding` and `loadProjectSummary` already
+carry), and the tone lookup falls back to plain, `intakeStatusTone`'s rule.
+Three component tests render the checklist under a `#q-` hash with every
+state, including none. Also found by the test: `scrollIntoView` was called
+unguarded inside an effect, which jsdom does not implement.
+
+**Still open from it:** the payload's `state` is typed non-null while only
+the route's coalesce makes that true. A route-tier assertion would hold it.
+
 ### iCloud writes " 2" copies into `.next`, and typecheck reads them
 
 **Status: open — environment, not code. Seen 2026-09-20 on the Stage 1a
