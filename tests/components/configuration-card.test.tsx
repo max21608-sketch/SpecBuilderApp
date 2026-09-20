@@ -76,6 +76,7 @@ function renderConfigurations(
         onReviewMany={spies.onReviewMany}
         onImage={spies.onImage}
         onSwatch={spies.onSwatch}
+      onSetLevel={spies.onSetLevel}
       />
     );
   }

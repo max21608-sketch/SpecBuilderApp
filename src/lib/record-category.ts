@@ -218,3 +218,73 @@ export async function acceptSuggestedLevels(
   await snapshotRecords(txn, updated.map((row) => String(row.id)), changeSetId);
   return { accepted: updated.length };
 }
+
+/**
+ * Set ONE level on the records a drawings card names, under ONE change set.
+ *
+ * ============================================================================
+ * WHY IT IS NOT `setRecordLevel` CALLED THREE TIMES
+ *
+ * A drawing of S-200 is quoted by the mock-up phase, the main phase and the VE
+ * phase, so one card fans out to three records — and the brass leg the level is
+ * being decided from is one fact on one page. Three calls would be three change
+ * sets reading "level set" for one decision somebody took once, which is the
+ * failure `acceptSuggestedLevels` exists to avoid and the one `editFinish`'s
+ * `changeSetId` parameter was added for.
+ *
+ * WHAT IT WILL NOT DO. It never invents a level — the caller passes one a
+ * person clicked. It touches only ACTIVE records on the named project, so a
+ * client cannot reach across projects with a list of ids, and it reports how
+ * many it actually wrote so the screen can say something true rather than
+ * echoing the length of its own request.
+ *
+ * NO VERSION CHECK, deliberately, and for `acceptSuggestedLevels`' reason: the
+ * request names the LEVEL rather than an edit to a value the screen read, so
+ * there is nothing to be stale about. Setting hero over hero is a no-op and
+ * setting hero over simple is exactly the decision the person just took. The
+ * row lock is what keeps two of them from interleaving.
+ * ============================================================================
+ */
+export async function setLevelOnRecords(
+  txn: TxnSql,
+  {
+    projectId,
+    recordIds,
+    level,
+    actor,
+  }: { projectId: string; recordIds: string[]; level: ItemLevel; actor: string },
+): Promise<{ set: number; level: ItemLevel }> {
+  const ids = [...new Set(recordIds)];
+  if (ids.length === 0) return { set: 0, level };
+
+  const found = await txn`
+    select id from spec_records
+     where id = any(${ids}::uuid[]) and project_id = ${projectId} and status = 'active'
+     order by record_no
+     for update
+  `;
+  const live = found.map((row) => String(row.id));
+  if (live.length === 0) {
+    throw new DomainConflictError(
+      "no_records",
+      "None of those records are on this project any more. Reload before setting a level.",
+      { status: 404 },
+    );
+  }
+
+  const { changeSetId } = await changeSetForEdit(txn, { projectId, actor, kind: "level_set" });
+
+  // THE SUGGESTION ENDS HERE, whichever way the decision went — `setRecordLevel`'s
+  // rule, and 0025 refuses a row holding both anyway.
+  const updated = await txn`
+    update spec_records
+       set level = ${level},
+           level_suggested = null,
+           level_suggested_reason = null,
+           updated_by = ${actor}
+     where id = any(${live}::uuid[])
+    returning id
+  `;
+  await snapshotRecords(txn, updated.map((row) => String(row.id)), changeSetId);
+  return { set: updated.length, level };
+}

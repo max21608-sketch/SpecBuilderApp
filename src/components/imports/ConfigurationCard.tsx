@@ -42,7 +42,8 @@ import { measuredRows, wasReadByModel, type DrawingItem, type DrawingObservation
 import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import { sharedTargets, type ConfigurationMember, type ReviewCard } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
-import { DIMENSION_SLOT_LABELS, type DimensionSlot } from "@/lib/spec-vocab";
+import { DIMENSION_SLOT_LABELS, type DimensionSlot, type ItemLevel } from "@/lib/spec-vocab";
+import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
 import {
@@ -109,6 +110,8 @@ export type ConfigurationCardProps = {
   onImage: (itemId: string, image: CroppedImage | null) => void;
   /** The page is the one the crop was taken FROM — the card covers several. */
   onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
+  /** One level on the records this card applies to, through the levels route. */
+  onSetLevel: (recordIds: string[], level: ItemLevel) => Promise<void>;
 };
 
 export default function ConfigurationCard({
@@ -128,6 +131,7 @@ export default function ConfigurationCard({
   onReviewMany,
   onImage,
   onSwatch,
+  onSetLevel,
 }: ConfigurationCardProps) {
   const [open, setOpen] = useState(true);
   const [showOther, setShowOther] = useState(false);
@@ -285,6 +289,13 @@ export default function ConfigurationCard({
 
   // ------------------------------------------------------------ applies to
   const { ticked, mixed } = sharedTargets(card.members);
+  // THE CARD'S OWN RECORDS, from whichever configuration resolved them — the
+  // runs are the same for every member (Applies to is one set for the card),
+  // so the first pending member's resolution is the card's.
+  const levelForTargets = levelTargets(
+    pendingMembers[0]?.resolution?.resolution.runs ?? card.members[0]?.resolution?.resolution.runs ?? [],
+    [...ticked],
+  );
   const toggleRun = (recordId: string, on: boolean) => {
     for (const member of pendingMembers) {
       const current = new Set(member.item.targets?.ticked ?? member.resolution?.resolution.suggested ?? []);
@@ -576,6 +587,22 @@ export default function ConfigurationCard({
                 </p>
               ) : undefined
             }
+          />
+
+          {/* THE LEVEL, ON THE BILL LINES THIS CARD APPLIES TO. One control for
+              the card, like Applies to and for the same reason: a level is a
+              statement about the ITEM, and one configuration priced as a hero
+              beside another priced as simple is not a thing the bill can say.
+              A configuration created later inherits it (`ensureVariant`). */}
+          <LevelControl
+            targets={levelForTargets}
+            suggestion={suggestLevelFromCard(
+              pendingMembers.flatMap((member) =>
+                member.pending.map((observation) => ({ ...observation, page: member.item.page })),
+              ),
+            )}
+            busy={busyHere}
+            onSet={(level) => void onSetLevel(levelForTargets.map((entry) => entry.id), level)}
           />
         </div>
       </div>

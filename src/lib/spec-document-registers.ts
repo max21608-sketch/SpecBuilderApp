@@ -15,6 +15,7 @@ import {
   type AnswerState,
   type AttributeGroup,
   type AttributeState,
+  normaliseItemLevel,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import type { SpecFieldEntry } from "@/lib/drawing-document";
@@ -28,6 +29,7 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
   // should land on, and a draft one has not been confirmed into existence.
   const recordRows = await sql`
     select r.id, r.record_no, r.item_description, r.category_id, r.version,
+           r.level, r.level_suggested, r.level_suggested_reason,
            c.name as category_name,
            p.bws_project_number,
            r.run_id, run.name as run_name,
@@ -71,6 +73,15 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
     parentId: row.parent_id ? String(row.parent_id) : null,
     variantLabel: row.variant_label ? String(row.variant_label) : null,
     version: Number(row.version),
+    // A DECISION AND A GUESS, KEPT APART (0025). The drawings card renders a
+    // decided level as a settled chip and a suggested one as an offer with its
+    // reason, and it can only tell them apart if they arrive as two fields.
+    // `normaliseItemLevel` rather than a cast: the column is checked in the
+    // database and read here, and a value neither of them recognises is better
+    // read as "nothing said" than rendered as a level nobody can act on.
+    level: normaliseItemLevel(row.level),
+    levelSuggested: normaliseItemLevel(row.level_suggested),
+    levelSuggestedReason: row.level_suggested_reason ? String(row.level_suggested_reason) : null,
   }));
 
   // Only the categories this project actually uses. The full register is 728

@@ -34,11 +34,12 @@
 // reviewer's decision, taken once instead of once per row.
 // ============================================================================
 import { Fragment, useEffect, useState } from "react";
-import type { DimensionSlot } from "@/lib/spec-vocab";
+import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { isMeasuredRow, measuredRows, wasReadByModel } from "@/lib/drawing-document";
 import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
+import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
 import {
@@ -135,6 +136,7 @@ export default function ItemCard({
   onReview,
   onImage,
   onSwatch,
+  onSetLevel,
 }: {
   item: DrawingItem;
   /**
@@ -162,6 +164,15 @@ export default function ItemCard({
    *  page is the one the crop was taken FROM, which on a two-page item need
    *  not be the page the row was read from. */
   onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
+  /**
+   * Set ONE level on the records this card writes to, through the levels route.
+   *
+   * REQUIRED, not optional: a card that cannot set a level is a card missing a
+   * control, and a screen that forgot to pass it would lose it silently. It is
+   * separate from `onReview` on purpose — the card's confirm carries no level,
+   * so the two writes cannot be confused.
+   */
+  onSetLevel: (recordIds: string[], level: ItemLevel) => Promise<void>;
 }) {
   const pending = item.observations.filter((o) => o.reviewStatus === "pending");
 
@@ -215,6 +226,9 @@ export default function ItemCard({
   useEffect(() => setArmed(false), [pending.length]);
 
   const targets = resolution?.targets ?? [];
+  // The records one level click would reach, computed once: the control prints
+  // the count and the click sends the same list, so they cannot disagree.
+  const levelForTargets = levelTargets(resolution?.resolution.runs ?? [], targets);
   const blockers = resolution?.blockers ?? [];
   const warnings = resolution?.warnings ?? [];
   const blockerFor = (observationId: string) => blockers.filter((b) => b.observationId === observationId);
@@ -521,6 +535,16 @@ export default function ItemCard({
             onToggle={toggleRun}
             onPick={(recordId) => void onSaveTargets(item, [recordId], [])}
             className="rounded-lg border border-neutral-200 px-3 py-2.5"
+          />
+
+          {/* THE LEVEL, BESIDE THE RECORDS IT LANDS ON. §0.3: a control lives
+              beside the thing it acts on, and what a level is set ON is the
+              records this card applies to. It is not part of the confirm. */}
+          <LevelControl
+            targets={levelForTargets}
+            suggestion={suggestLevelFromCard(pending.map((o) => ({ ...o, page: item.page })))}
+            busy={busy}
+            onSet={(level) => void onSetLevel(levelForTargets.map((entry) => entry.id), level)}
           />
         </div>
       </div>

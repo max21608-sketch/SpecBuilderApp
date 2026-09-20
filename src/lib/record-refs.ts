@@ -9,6 +9,13 @@
 //
 // Everything here is re-exported by `spec-document`, so no existing caller had
 // to change.
+//
+// The ONE import is `spec-vocab`, which is itself a leaf (it imports nothing at
+// all) and holds the controlled vocabularies. Re-declaring `ItemLevel` here to
+// keep the count at zero would be the second copy of a vocabulary the database
+// has a CHECK for — the 0032 lesson — and a cycle is impossible against a
+// module with no imports.
+import type { ItemLevel } from "@/lib/spec-vocab";
 
 export type RecordEntry = {
   id: string;
@@ -38,6 +45,19 @@ export type RecordEntry = {
   parentId: string | null;
   variantLabel: string | null;
   version: number;
+  /**
+   * The level a PERSON decided, and the one this app suggested — never both
+   * (0025 refuses a row holding two).
+   *
+   * OPTIONAL, and populated only by `loadExtractionRegisters`: a screen showing
+   * a record has to be able to say whether its level is settled, where the
+   * confirm path that also builds these entries has no use for it. Absent means
+   * "this loader did not read it", which is a different statement from null —
+   * so a screen reads `level === undefined` as unknown rather than as unset.
+   */
+  level?: ItemLevel | null;
+  levelSuggested?: ItemLevel | null;
+  levelSuggestedReason?: string | null;
 };
 
 // ---- refs ------------------------------------------------------------------

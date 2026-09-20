@@ -37,6 +37,7 @@ function renderCard(observations: DrawingObservation[], over: Parameters<typeof 
       onReview={spies.onReview}
       onImage={spies.onImage}
       onSwatch={spies.onSwatch}
+      onSetLevel={spies.onSetLevel}
     />,
   );
   return spies;
@@ -207,6 +208,7 @@ describe("a page with no code on it", () => {
         onReview={spies.onReview}
         onImage={spies.onImage}
         onSwatch={spies.onSwatch}
+      onSetLevel={spies.onSetLevel}
       />,
     );
     expect(screen.getByText(/No item code on this page/)).toBeInTheDocument();
@@ -303,5 +305,83 @@ describe("a specification sheet's blank sub-dimensions", () => {
     // Materials, then finishes, then the paragraphs — whatever order the page
     // happened to state them in.
     expect(rowLabels()).toEqual(["WIDTH", "FABRIC CODE", "EXPOSED WOODWORK", "REMARKS", "Item"]);
+  });
+});
+
+// ============================================================================
+// ITEM 1.15 — THE LEVEL, SET WHERE THE EVIDENCE FOR IT IS.
+//
+// Every BOQ row read *Simple · guessed*, including packaging, and there was no
+// level control on the drawings review at all — which is where the brass leg
+// first appears. Three things have to hold and each is a trap: the control is
+// never a pre-filled select (0025: a select already reading "Simple" fires no
+// change event when somebody picks Simple, so agreeing would do nothing); the
+// card says how far one click reaches, because a drawing quoted by three
+// phases writes three records; and a level already decided is shown rather
+// than re-suggested.
+// ============================================================================
+describe("the item card's level control", () => {
+  const brass = () => {
+    resetIds();
+    return [
+      figure("WIDTH", "660", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm", unitSource: "printed", isOverall: true }),
+      callout("LEGS", "Antique brass", "MT-02"),
+    ];
+  };
+
+  it("offers the level as buttons, never as a select", async () => {
+    renderCard(brass());
+    // The suggestion is an offer with what it was read from beside it.
+    expect(screen.getByRole("button", { name: /Complex/ })).toBeInTheDocument();
+    expect(screen.getByText(/a brass callout on page 5/)).toBeInTheDocument();
+    // Opening the other choices gives three BUTTONS. A select here is the
+    // 0025 trap: choosing the value it already shows fires nothing.
+    await userEvent.click(screen.getByRole("button", { name: "Set another level…" }));
+    for (const label of ["Simple", "Complex", "Hero"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("combobox", { name: /level/i })).toBeNull();
+  });
+
+  it("says how many records one click reaches, and sends exactly those", async () => {
+    const spies = renderCard(brass());
+    // The fixture resolves to the main phase and the VE phase.
+    expect(screen.getByText("sets the level on 2 records")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Complex/ }));
+    expect(spies.of("onSetLevel")).toHaveLength(1);
+    expect(spies.of("onSetLevel")[0]!.args).toEqual([["rec-main", "rec-ve"], "complex"]);
+  });
+
+  it("shows a level that is already decided, and does not re-suggest one", () => {
+    renderCard(brass(), {
+      resolution: {
+        runs: [
+          {
+            runId: "run-main",
+            runName: "MAIN RUN",
+            status: "matched",
+            record: { ...records[0]!, level: "hero" },
+          },
+        ],
+        suggested: ["rec-main"],
+      },
+      targets: ["rec-main"],
+    });
+    expect(screen.getByText("Hero")).toBeInTheDocument();
+    expect(screen.getByText("decided on 1 of 1 record")).toBeInTheDocument();
+    // No offer over a decision, and the way to change it says so.
+    expect(screen.queryByRole("button", { name: /Complex \?/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Change…" })).toBeInTheDocument();
+    // One record, so no fan-out sentence to mislead anybody.
+    expect(screen.queryByText(/sets the level on/)).toBeNull();
+  });
+
+  it("says it has nothing to suggest rather than guessing simple", () => {
+    // `guessLevelFromAttributes` never returns `simple`: a page that names no
+    // metal is not evidence that the item has none.
+    resetIds();
+    renderCard([callout("FABRIC CODE", "Woven raffia", "UPH-07", { attrGroup: "material" })]);
+    expect(screen.getByText(/nothing to suggest/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set a level…" })).toBeInTheDocument();
   });
 });

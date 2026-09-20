@@ -13,7 +13,7 @@ import { it, expect, beforeAll, afterAll } from "vitest";
 import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
-import { acceptSuggestedLevels, setRecordLevel } from "@/lib/record-category";
+import { acceptSuggestedLevels, setLevelOnRecords, setRecordLevel } from "@/lib/record-category";
 import { ensureVariant } from "@/lib/variant-create";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -140,6 +140,61 @@ describeIfDb("item level suggestions", () => {
     // Nothing to agree with is nothing to write.
     expect((await read(c.id)).level).toBeNull();
 
+    const after = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
+    expect(after.rows[0].n - before.rows[0].n).toBe(1);
+  });
+
+  // ITEM 1.15 — the drawings card's level control. One drawing of S-200 is
+  // quoted by the mock-up, main and VE phases, so one click writes three
+  // records; the brass leg is one fact on one page and the trail has to say so
+  // once. This is the half a component test cannot see.
+  it("writes one level across a fan-out under ONE change set", async () => {
+    const a = await makeRecord("simple");
+    const b = await makeRecord(null);
+    const c = await makeRecord("hero", "the bill calls it a feature piece");
+    const before = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
+
+    const result = await withTransaction((txn) =>
+      setLevelOnRecords(txn, { projectId, recordIds: [a.id, b.id, c.id], level: "complex", actor: "qa" }),
+    );
+    expect(result.set).toBe(3);
+
+    for (const record of [a, b, c]) {
+      const after = await read(record.id);
+      expect(after.level).toBe("complex");
+      // THE SUGGESTION ENDS HERE, whichever way the decision went: 0025
+      // refuses a row holding both, and one left behind a decision is a second
+      // answer waiting for a screen to read it first.
+      expect(after.level_suggested).toBeNull();
+      expect(after.level_suggested_reason).toBeNull();
+    }
+
+    const after = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
+    expect(after.rows[0].n - before.rows[0].n).toBe(1);
+  });
+
+  it("writes nothing for ids that are not live records on this project", async () => {
+    const live = await makeRecord(null);
+    const retired = await makeRecord(null);
+    await client.query(`update spec_records set status = 'retired' where id = $1`, [retired.id]);
+    const before = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
+
+    const result = await withTransaction((txn) =>
+      setLevelOnRecords(txn, { projectId, recordIds: [live.id, retired.id], level: "hero", actor: "qa" }),
+    );
+    // Reported as what it wrote, not as the length of the request — a screen
+    // echoing its own list would claim a record it never touched.
+    expect(result.set).toBe(1);
+    expect((await read(live.id)).level).toBe("hero");
+    expect((await read(retired.id)).level).toBeNull();
+
+    // A list naming NOTHING live is refused rather than silently writing zero
+    // rows under a change set that says a level was set.
+    await expect(
+      withTransaction((txn) =>
+        setLevelOnRecords(txn, { projectId, recordIds: [retired.id], level: "hero", actor: "qa" }),
+      ),
+    ).rejects.toThrow();
     const after = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
     expect(after.rows[0].n - before.rows[0].n).toBe(1);
   });

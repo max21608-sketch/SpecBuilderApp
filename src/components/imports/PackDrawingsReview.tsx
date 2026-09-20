@@ -27,6 +27,7 @@ import Spinner from "@/components/ui/Spinner";
 import Button, { buttonClass } from "@/components/ui/Button";
 import PageHeader from "@/components/ui/PageHeader";
 import NextStepAction from "@/components/ui/NextStepAction";
+import type { ItemLevel } from "@/lib/spec-vocab";
 import { useNextStep } from "@/lib/use-next-step";
 import PageBody from "@/components/ui/PageBody";
 import Card from "@/components/ui/Card";
@@ -218,6 +219,39 @@ export default function PackDrawingsReview({
   const runs = useMemo(() => data?.runs ?? [], [data]);
   const inFlight = runs.some((run) => isIntakeRunWorking(run.status));
   usePoll(load, { intervalMs: 3000, active: inFlight });
+
+
+  /**
+   * A LEVEL, THROUGH THE LEVELS ROUTE — never through the confirm.
+   *
+   * Item 1.15. The drawing is where the evidence for a level first appears (the
+   * brass leg is on page 2, not on the bill), so the card carries the control —
+   * but the write goes to `/levels/accept`, which is the one boundary for a
+   * level. A card's confirm request carries no level, so one acknowledgement
+   * can never cover two decisions, and the level never blocks the card.
+   *
+   * ONE REQUEST for the whole fan-out, which is ONE `level_set` change set: the
+   * same drawing quoted by three phases is one decision, not three entries in
+   * the trail.
+   *
+   * RELOAD FIRST, REPORT AFTER: this screen clears its banner on a successful
+   * load, so setting the error and then reloading showed a refusal for a few
+   * milliseconds and then nothing at all.
+   */
+  async function setLevel(projectId: string, recordIds: string[], level: ItemLevel) {
+    setBusy("level");
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/levels/accept`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ recordIds, level }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   /** Serialised: two autosaves racing would each write the other's stale copy. */
   function queueSave(fn: () => Promise<void>) {
@@ -730,6 +764,7 @@ export default function PackDrawingsReview({
               onImage={rememberImage}
               onSwatch={rememberSwatch}
               onReview={review}
+              onSetLevel={(recordIds, level) => setLevel(projectId, recordIds, level)}
             />
           ) : (
             <ConfigurationCard
@@ -748,6 +783,7 @@ export default function PackDrawingsReview({
               onReviewMany={reviewMany}
               onImage={rememberImage}
               onSwatch={rememberSwatch}
+              onSetLevel={(recordIds, level) => setLevel(projectId, recordIds, level)}
             />
           )}
         </div>

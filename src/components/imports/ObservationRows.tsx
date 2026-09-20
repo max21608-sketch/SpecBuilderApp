@@ -31,6 +31,7 @@ import {
   type AttributeGroup,
   type AttributeState,
   type DimensionSlot,
+  type ItemLevel,
 } from "@/lib/spec-vocab";
 import { foldableRow, isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
 import SwatchPicker from "@/components/imports/SwatchPicker";
@@ -38,9 +39,26 @@ import Button from "@/components/ui/Button";
 import { Th } from "@/components/ui/Table";
 import type { CroppedImage } from "@/lib/pdf-crop";
 
+/**
+ * One record a card resolves to, as the screen needs it.
+ *
+ * The level fields are OPTIONAL because they are optional on `RecordEntry`:
+ * only `loadExtractionRegisters` reads them, and a payload built without them
+ * means "this loader did not look", which is not the same statement as "no
+ * level". The level CONTROL reads them; nothing else does.
+ */
+export type ResolvedRecord = {
+  id: string;
+  label: string;
+  itemDescription: string;
+  level?: ItemLevel | null;
+  levelSuggested?: ItemLevel | null;
+  levelSuggestedReason?: string | null;
+};
+
 export type RunResolution =
-  | { runId: string; runName: string; status: "matched"; record: { id: string; label: string; itemDescription: string } }
-  | { runId: string; runName: string; status: "ambiguous"; candidates: { id: string; label: string; itemDescription: string }[] };
+  | { runId: string; runName: string; status: "matched"; record: ResolvedRecord }
+  | { runId: string; runName: string; status: "ambiguous"; candidates: ResolvedRecord[] };
 
 export type Occupant = {
   attributeId: string;

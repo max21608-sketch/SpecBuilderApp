@@ -40,7 +40,7 @@ import Card from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
 import Button from "@/components/ui/Button";
 import Tabs from "@/components/ui/Tabs";
-import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
+import { DOCUMENT_KIND_LABELS, type ItemLevel } from "@/lib/spec-vocab";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
 import ItemCard, {
   BulkUnit,
@@ -261,6 +261,39 @@ export default function DrawingsReview({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: run.version, requestId: crypto.randomUUID(), action }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+
+  /**
+   * A LEVEL, THROUGH THE LEVELS ROUTE — never through the confirm.
+   *
+   * Item 1.15. The drawing is where the evidence for a level first appears (the
+   * brass leg is on page 2, not on the bill), so the card carries the control —
+   * but the write goes to `/levels/accept`, which is the one boundary for a
+   * level. A card's confirm request carries no level, so one acknowledgement
+   * can never cover two decisions, and the level never blocks the card.
+   *
+   * ONE REQUEST for the whole fan-out, which is ONE `level_set` change set: the
+   * same drawing quoted by three phases is one decision, not three entries in
+   * the trail.
+   *
+   * RELOAD FIRST, REPORT AFTER: this screen clears its banner on a successful
+   * load, so setting the error and then reloading showed a refusal for a few
+   * milliseconds and then nothing at all.
+   */
+  async function setLevel(projectId: string, recordIds: string[], level: ItemLevel) {
+    setBusy("level");
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/levels/accept`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ recordIds, level }),
       });
       await reloadThen(res.ok ? null : res.error);
     } finally {
@@ -743,6 +776,7 @@ export default function DrawingsReview({
                 onImage={rememberImage}
                 onSwatch={rememberSwatch}
                 onReview={review}
+                onSetLevel={(recordIds, level) => setLevel(run.project_id, recordIds, level)}
               />
             ) : (
               <ConfigurationCard
@@ -761,6 +795,7 @@ export default function DrawingsReview({
                 onReviewMany={reviewMany}
                 onImage={rememberImage}
                 onSwatch={rememberSwatch}
+                onSetLevel={(recordIds, level) => setLevel(run.project_id, recordIds, level)}
               />
             )}
           </div>
