@@ -20,6 +20,22 @@ mark it FIXED with the date and the commit.
 
 ---
 
+## 2026-09-20
+
+### The chase footer does not say why one to-quote question is not ticked
+
+**Status: open — an observation from verifying Stage 1a item 1.14, not a
+fault in it.** On the sandbox demo project, chasing Priya Raman: the lines'
+to-quote column sums to **71**, the button and footer say **70**. The one is a
+to-quote question on DEMO-TEST-01-003 already chased and awaiting a reply, which
+the preselection excludes by the plan's own rule and the line still counts
+because it is still outstanding. Both numbers are right; the footer reads
+"70 to-quote questions preselected · 113 also outstanding, not selected" and
+names no third bucket. The same shape as finding 13 of 2026-09-18 (two counts,
+one unexplained), on a different screen. A sentence — "1 awaiting a reply, not
+selected" — closes it; not built, because 1.14's source line does not ask for
+it and the "Include questions awaiting a reply" control already exists.
+
 ## 2026-09-19
 
 ### Two tests fail under the full concurrent run and pass alone
@@ -217,7 +233,12 @@ Grouped because each is a line or two, not because they are one problem.
    did not. (28:02)
 7. **`TBC – <fabric>` puts the marker inside the value.** The sheet prints a
    fabric *and* the word TBC; both landed in the value. Matthew: *"it shouldn't
-   really be in the name."* (31:01)
+   really be in the name."* (31:01) **FIXED 2026-09-19, `d853976`** (Stage 1a
+   item 1.8): a separator-bound marker at either edge of a value is the STATE
+   and the remainder is the value, at staging and at read time, so the packs
+   already staged show it without a re-read. Verified on the sandbox S-100 card.
+   A canonical row confirmed before that date keeps its old value and is
+   rendered once by `renderAttributeValue`, as before.
 8. **The swatch picker cannot reach the page the finishes are on.** *"It was on
    the second page, and I've only got one page, so… I need to work on that."*
    Matthew confirmed two-page items are normal for this pack: *"you've got the
@@ -256,7 +277,12 @@ Grouped because each is a line or two, not because they are one problem.
     it in the room: *"it hasn't automatically selected… it's still selecting all
     of them, when in fact it should have just selected [the four]."* Red dot =
     needed to quote, grey = also outstanding; the reading is right and the
-    default selection is not. (1:21:29)
+    default selection is not. (1:21:29) **FIXED 2026-09-20, `1fcc506`** (Stage
+    1a item 1.14): exactly the chosen contact's `to_quote` questions are ticked
+    on load and again when the contact changes; a filter never touches the
+    ticks. Verified on the sandbox: Draft the email · 70, footer "70 to-quote
+    questions preselected · 113 also outstanding". One observation left open
+    below.
 
 One thing that looked like a defect and is not: **"These pages do not agree"**
 fired because two pages state the same dimension in different units. Sebastian
