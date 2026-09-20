@@ -184,6 +184,23 @@ describe("the project overview's header", () => {
     expect(screen.getByRole("link", { name: "Chase 5" }).className).not.toContain("bg-neutral-900");
   });
 
+  // ONE PRIMARY PER BAND. The export cluster's "Spec upload" is normally the
+  // emphatic control on this screen; with a step beside it two black controls
+  // sat side by side and neither read as the thing to do.
+  it("gives up the export cluster's emphasis while a step is showing", async () => {
+    overview();
+    await screen.findByRole("link", { name: "Review 14 items — 5 to-quote specs outstanding" });
+    const specUpload = screen.getByText("Spec upload");
+    expect(specUpload.className).not.toContain("bg-neutral-900");
+  });
+
+  it("keeps it where the step IS the export, which is suppressed", async () => {
+    overview({ summary: { toQuote: 0 } });
+    await screen.findByRole("link", { name: "Chase 0" });
+    // Nothing else is emphatic, so the file is the thing to do and says so.
+    expect(screen.getByText("Spec upload").className).toContain("bg-neutral-900");
+  });
+
   it("asks for the pack where nothing has arrived", async () => {
     overview({ documents: [], runs: [], summary: { records: 0, toQuote: 0 } });
     const link = await screen.findByRole("link", { name: "Upload the pack" });

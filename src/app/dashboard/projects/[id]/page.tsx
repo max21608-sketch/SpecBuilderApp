@@ -1123,7 +1123,18 @@ function ProjectOverview() {
             {/* THE EXPORT IS NEVER FILTERED, so the cluster carries the scope
                 of whatever is on screen and nothing else: this run on a run
                 tab, the whole project everywhere else. */}
-            {runs.length > 0 && <ExportMenu projectId={project.id} runId={activeRun?.id ?? null} />}
+            {runs.length > 0 && (
+              /* ONE PRIMARY PER BAND. The spec upload is normally the emphatic
+                 control here; where a next step is also rendered, two black
+                 controls sit side by side and neither reads as the thing to
+                 do. The step wins — except when the step IS the export, which
+                 is suppressed below, and then the cluster keeps it. */
+              <ExportMenu
+                projectId={project.id}
+                runId={activeRun?.id ?? null}
+                emphasis={!step || step.kind === "export"}
+              />
+            )}
             {/* THE NEXT STEP, LAST AND EMPHATIC. `export` is suppressed here
                 and nowhere else: the export cluster is already in this band, so
                 a second control saying the same thing would be the only place

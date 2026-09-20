@@ -80,10 +80,26 @@ function Output({
 export default function ExportMenu({
   projectId,
   runId = null,
+  emphasis = true,
 }: {
   projectId: string;
   /** One run's scope, or null for the whole project. Never anything else. */
   runId?: string | null;
+  /**
+   * Whether the spec upload is drawn as this band's emphatic control.
+   *
+   * ONE PRIMARY PER BAND (§0.3). The spec upload carries the emphasis because
+   * it is the output that matters of the three — but on a screen whose header
+   * also shows a NEXT STEP (`src/lib/next-step.ts`), two black controls sit
+   * side by side and neither reads as the thing to do. The step wins there,
+   * because the export is what happens when nothing is outstanding; where the
+   * step IS the export it is suppressed and this keeps its emphasis.
+   *
+   * It changes which of the three outputs is emphasised and NOTHING else: all
+   * three are still offered, in the same order, with the same formats and the
+   * same scope. The export is never filtered.
+   */
+  emphasis?: boolean;
 }) {
   const scope = runId ? `?runId=${runId}` : "";
   const and = runId ? "&" : "?";
@@ -91,7 +107,7 @@ export default function ExportMenu({
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Output
         name="Spec upload"
-        emphasis
+        emphasis={emphasis}
         tip="Always every record in scope — a BWS import replaces the fields it is given, so a partial file would erase what it left out. It carries no job number: it is a file to read, not to import."
         formats={[
           { label: ".xlsx", href: `/api/projects/${projectId}/export${scope}` },

@@ -154,9 +154,21 @@ export async function restoreAttribute(
     );
   }
   if (attribute.superseded_by_id) {
+    // NAME THE VALUE, NOT THE CAUSE. This said "a later drawing replaced this
+    // spec", which was true while a revised drawing was the only thing that
+    // could supersede one. Since 0033 a PERSON can, by correcting it, and a
+    // sentence blaming a drawing sends somebody looking for a document that
+    // does not exist. The value is what they need either way.
+    const newer = await txn`
+      select value, unit from record_attributes where id = ${attribute.superseded_by_id}
+    `;
+    const replacement = newer[0];
+    const says = replacement
+      ? `: “${replacement.value === null || replacement.value === undefined ? "TBC" : String(replacement.value)}${replacement.unit ? String(replacement.unit) : ""}”`
+      : "";
     throw new DomainConflictError(
       "superseded",
-      "A later drawing replaced this spec. Retire the replacement first, or this item would hold both with nothing to say which is current.",
+      `A later value replaced this spec${says}. Retire that one first, or this item would hold both with nothing to say which is current.`,
     );
   }
 

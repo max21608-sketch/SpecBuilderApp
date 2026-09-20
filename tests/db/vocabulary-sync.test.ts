@@ -35,7 +35,7 @@ import {
   REQUIREMENT_KINDS,
   SPLIT_REASONS,
 } from "@/lib/spec-vocab";
-import { CHANGE_SET_KINDS } from "@/lib/change-sets";
+import { CHANGE_SET_KINDS, REASON_REQUIRED_KINDS } from "@/lib/change-sets";
 import { FINISH_KINDS } from "@/lib/finishes";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -114,6 +114,49 @@ describeIfDb("every controlled vocabulary matches its CHECK", () => {
       expect(rejected, `${vocabulary.constraint} rejects: ${rejected.join(", ")}`).toEqual([]);
     });
   }
+
+  // ==========================================================================
+  // THE OTHER CHECK ON THE SAME TABLE, WHICH NOTHING ASSERTED.
+  //
+  // `change_sets_reason_required` is `kind <> all (array[...]) or reason is
+  // not null` — a SECOND full list of kinds on the same table, re-listed and
+  // re-copied by exactly the same mechanism as the first. 0032's post-mortem
+  // is about a value silently lost from one of these lists; this one could
+  // lose a kind the same way, and the failure would be quieter still: a
+  // correction or a retire would simply stop asking why, and nothing would go
+  // red. `REASON_REQUIRED_KINDS` is what the app reads to decide whether to
+  // collect a reason, so the two must be the same set in BOTH directions.
+  //
+  // It is its own pair of assertions rather than a row in VOCABULARIES,
+  // because that table's contract is "every value the constant holds must be
+  // ALLOWED" and this constraint's literals mean the opposite — they are the
+  // kinds that are REFUSED without a reason.
+  // ==========================================================================
+  it("REASON_REQUIRED_KINDS: the database demands a reason for every kind the constant names", async () => {
+    const rows = await client.query(
+      `select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'change_sets_reason_required'`,
+    );
+    const definition = String(rows.rows[0]?.def ?? "");
+    expect(definition, "change_sets_reason_required not found").toBeTruthy();
+    const demanded = new Set(allowedValues(definition));
+    const unguarded = REASON_REQUIRED_KINDS.filter((kind) => !demanded.has(kind));
+    // A kind here that the constraint does not name is a kind the app asks a
+    // reason for and the database would accept without one.
+    expect(unguarded, `the constraint does not demand a reason for: ${unguarded.join(", ")}`).toEqual([]);
+  });
+
+  it("REASON_REQUIRED_KINDS: the constant names every kind the database demands a reason for", async () => {
+    const rows = await client.query(
+      `select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'change_sets_reason_required'`,
+    );
+    const demanded = allowedValues(String(rows.rows[0]?.def ?? ""));
+    const known = new Set<string>(REASON_REQUIRED_KINDS);
+    const missing = demanded.filter((kind) => !known.has(kind));
+    // The other direction, and it is the one that reaches a person: a kind the
+    // database demands a reason for and the app does not know about is a
+    // screen that writes nothing and reports a constraint name.
+    expect(missing, `the constant does not know: ${missing.join(", ")}`).toEqual([]);
+  });
 
   it("reports any value the DATABASE allows and the constants do not", () => {
     // Not a failure on its own. `spec_answers.source_kind` allowed 'email'
