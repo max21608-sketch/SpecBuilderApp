@@ -79,6 +79,24 @@ function allowedValues(definition: string): string[] {
   return [...definition.matchAll(/'((?:[^']|'')*)'/g)].map((match) => (match[1] ?? "").replace(/''/g, "'"));
 }
 
+/**
+ * The literals inside a constraint's `ARRAY[...]`, and NOTHING ELSE.
+ *
+ * `change_sets_reason_required` is not a bare `in (...)`: it is
+ * `kind <> all (array[…]) or (reason is not null and btrim(reason) <> '')`,
+ * and that trailing `''::text` is a single-quoted literal like any other. The
+ * whole-definition reader therefore returned an EMPTY STRING as one of the
+ * kinds, and the "constant names every kind" direction failed against a value
+ * that is not a kind at all.
+ *
+ * Read from the ARRAY group alone. Anything outside it belongs to the other
+ * half of the predicate.
+ */
+function arrayValues(definition: string): string[] {
+  const group = /ARRAY\s*\[([^\]]*)\]/i.exec(definition);
+  return group ? allowedValues(group[1] ?? "") : [];
+}
+
 describeIfDb("every controlled vocabulary matches its CHECK", () => {
   const client = new pg.Client({ connectionString: databaseUrl });
   const definitions = new Map<string, string>();
@@ -138,7 +156,7 @@ describeIfDb("every controlled vocabulary matches its CHECK", () => {
     );
     const definition = String(rows.rows[0]?.def ?? "");
     expect(definition, "change_sets_reason_required not found").toBeTruthy();
-    const demanded = new Set(allowedValues(definition));
+    const demanded = new Set(arrayValues(definition));
     const unguarded = REASON_REQUIRED_KINDS.filter((kind) => !demanded.has(kind));
     // A kind here that the constraint does not name is a kind the app asks a
     // reason for and the database would accept without one.
@@ -149,7 +167,7 @@ describeIfDb("every controlled vocabulary matches its CHECK", () => {
     const rows = await client.query(
       `select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'change_sets_reason_required'`,
     );
-    const demanded = allowedValues(String(rows.rows[0]?.def ?? ""));
+    const demanded = arrayValues(String(rows.rows[0]?.def ?? ""));
     const known = new Set<string>(REASON_REQUIRED_KINDS);
     const missing = demanded.filter((kind) => !known.has(kind));
     // The other direction, and it is the one that reaches a person: a kind the

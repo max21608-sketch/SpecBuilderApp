@@ -41,7 +41,7 @@ import Link from "next/link";
 import {
   ANSWER_STATES,
   ANSWER_STATE_LABELS,
-  ANSWER_STATE_TONE,
+  answerStateTone,
   type AnswerState,
   type ItemLevel,
 } from "@/lib/spec-vocab";
@@ -208,7 +208,12 @@ export default function RecordChecklist({
     const target = document.getElementById(hash.slice(1));
     if (!target) return;
     scrolled.current = true;
-    target.scrollIntoView({ block: "center" });
+    // OPTIONAL-CALLED, the rule `DrawingsReview`'s navigator already follows:
+    // `scrollIntoView` is not implemented in jsdom, so a component test that
+    // sets the hash threw here — and it throws inside an EFFECT, which takes
+    // the screen down rather than failing quietly. Any environment without it
+    // would do the same to a real reader.
+    target.scrollIntoView?.({ block: "center" });
   });
 
   const matrix = useMemo(
@@ -526,7 +531,7 @@ export default function RecordChecklist({
                       onChange={(event) => onSave(answer, answer.value ?? "", event.target.value as AnswerState)}
                       aria-label={`State of ${answer.prompt}`}
                       className={`rounded border px-1.5 py-0.5 text-[11.5px] disabled:opacity-50 ${
-                        TONE[ANSWER_STATE_TONE[answer.state]].chip
+                        TONE[answerStateTone(answer.state)].chip
                       }`}
                     >
                       {ANSWER_STATES.map((state) => (

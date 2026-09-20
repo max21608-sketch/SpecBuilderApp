@@ -98,7 +98,17 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     select q.id as requirement_id, q.kind, q.prompt, q.help_text, q.section, q.sort_order,
            q.tgq_levels, q.local_key,
            f.name as field_name, f.json_id, f.field_category,
-           a.id as answer_id, a.value, a.qualifier, a.state, a.version, a.confirmed_by, a.confirmed_at
+           a.id as answer_id, a.value, a.qualifier,
+           -- NO ANSWER ROW AT ALL IS MISSING, not null. This drives off
+           -- the requirements table with a left join, so a question added to a
+           -- category after this record was categorised has no answer row and
+           -- came back with a null state -- which the screen's own type said
+           -- was impossible and the tone map had no entry for. The same
+           -- coalesce loadOutstanding and loadProjectSummary both carry, for
+           -- the same reason: a question nobody has looked at is missing, not
+           -- stateless. (No backticks in here: one closes the tagged template.)
+           coalesce(a.state, 'missing') as state,
+           a.version, a.confirmed_by, a.confirmed_at
     from requirements q
     left join spec_fields f on f.id = q.spec_field_id
     left join spec_answers a on a.requirement_id = q.id and a.record_id = ${id} and a.revision_no = 0

@@ -50,6 +50,26 @@ export const ANSWER_STATE_TONE: Record<AnswerState, "good" | "warn" | "plain"> =
   na: "plain",
 };
 
+/**
+ * The tone for an answer state, or `plain` for one this does not know.
+ *
+ * `intakeStatusTone`'s rule — "the tone, or plain for a status this does not
+ * know, never a colour" — applied to the state a checklist row renders its
+ * select in. It exists because the map being TOTAL over `AnswerState` was only
+ * ever true of the TYPE: `GET /api/records/[id]` drives its answers off the
+ * requirements table with a left join and returned a NULL state for a question
+ * with no answer row, so `TONE[ANSWER_STATE_TONE[state]].chip` threw
+ * `Cannot read properties of undefined` and took the whole record screen down.
+ *
+ * The route now coalesces that to `missing`, which is the real fix. This is
+ * the second one, and it is worth having: a screen must not go white over a
+ * value it cannot colour, and the next state added to the vocabulary will
+ * reach this map through a payload before it reaches it through a deploy.
+ */
+export function answerStateTone(state: unknown): "good" | "warn" | "plain" {
+  return isAnswerState(state) ? ANSWER_STATE_TONE[state] : "plain";
+}
+
 /** Whether a requirement's answer belongs in a BWS spec column, or nowhere. */
 export const REQUIREMENT_KINDS = ["spec_field", "readiness"] as const;
 export type RequirementKind = (typeof REQUIREMENT_KINDS)[number];

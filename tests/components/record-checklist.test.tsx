@@ -1,6 +1,6 @@
 // The checklist tab: four tiles that filter, and a right-hand column that is
 // the next action rather than provenance alone.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RecordChecklist, {
@@ -174,5 +174,94 @@ describe("the record checklist", () => {
     // Never "BWS null" and never a naked separator.
     expect(screen.queryByText(/BWS/)).not.toBeInTheDocument();
     expect(screen.queryByTitle(/BWS field/)).not.toBeInTheDocument();
+  });
+});
+
+// ============================================================================
+// ARRIVING BY AN ANCHOR SHOWS EVERY ROW, SO EVERY ROW HAS TO RENDER.
+//
+// A LINK FROM THE PHASE TABLE'S DISCLOSURE (1.12) TOOK THE SCREEN DOWN:
+// `?tab=checklist#q-<id>` rendered "Application error: a client-side
+// exception has occurred", and `?tab=checklist` alone and `#q-<id>` alone were
+// both fine. The COMBINATION is the whole of it. The hash clears the default
+// TGQ filter — a linked question is routinely one the filter would hide — so
+// rows that are otherwise never listed reach the screen, and one of them
+// carried a state the tone map had no entry for. `TONE[undefined].chip` threw.
+//
+// The state was NULL, off `GET /api/records/[id]`: it drives its answers off
+// the requirements table with a LEFT JOIN and did not coalesce, so a question
+// with no answer row came back stateless. Every filter tests the state, so
+// such a row was silently dropped from every view except the unfiltered one —
+// which is why only the anchor could reach it.
+//
+// Both halves are fixed: the route coalesces to `missing`, and
+// `answerStateTone` falls back to `plain` rather than throwing. These hold the
+// SCREEN's half, which is the one a payload cannot take away.
+// ============================================================================
+describe("the checklist reached by an anchor", () => {
+  afterEach(() => {
+    window.location.hash = "";
+  });
+
+  /** Every state the vocabulary holds, plus the two a payload has produced. */
+  const EVERY_STATE: ChecklistAnswer[] = [
+    answer({ requirement_id: "s1", prompt: "Confirmed question", state: "confirmed", value: "Yes" }),
+    answer({ requirement_id: "s2", prompt: "TBC question", state: "tbc" }),
+    answer({ requirement_id: "s3", prompt: "Missing question", state: "missing" }),
+    answer({ requirement_id: "s4", prompt: "N/A question", state: "na" }),
+    // THE ROW THAT CRASHED IT. A question with no answer row at all: no id, no
+    // version, and — before the route coalesced it — no state. The type says
+    // this cannot happen and the database said otherwise.
+    answer({
+      requirement_id: "s5",
+      prompt: "Question nobody has looked at",
+      answer_id: null,
+      state: null as unknown as ChecklistAnswer["state"],
+    }),
+  ];
+
+  it("renders every state, including one the payload left stateless", () => {
+    window.location.hash = "#q-s5";
+    renderChecklist({ answers: EVERY_STATE, readiness: { ...READINESS, toQuote: 2, outstanding: 3 } });
+    // The anchor clears the filter, so all five are on the page — which is the
+    // point of clearing it, and the reason the crash was reachable.
+    expect(screen.getByText("showing 5 of 5")).toBeInTheDocument();
+    for (const prompt of [
+      "Confirmed question",
+      "TBC question",
+      "Missing question",
+      "N/A question",
+      "Question nobody has looked at",
+    ]) {
+      expect(screen.getByText(prompt)).toBeInTheDocument();
+    }
+  });
+
+  it("puts the linked question on the page with its own anchor to scroll to", () => {
+    window.location.hash = "#q-s5";
+    renderChecklist({ answers: EVERY_STATE, readiness: { ...READINESS, toQuote: 2, outstanding: 3 } });
+    // The id the phase table's disclosure links to, and the row it names.
+    const target = document.getElementById("q-s5");
+    expect(target).not.toBeNull();
+    expect(within(target as HTMLElement).getByText("Question nobody has looked at")).toBeInTheDocument();
+  });
+
+  // A STATE THE MAP DOES NOT HOLD IS PLAIN, NEVER A THROW. `intakeStatusTone`'s
+  // rule, and the one that survives whatever a future payload does.
+  it("colours a state it has never seen as plain rather than going white", () => {
+    window.location.hash = "#q-s6";
+    expect(() =>
+      renderChecklist({
+        answers: [
+          answer({
+            requirement_id: "s6",
+            prompt: "Something new",
+            state: "withdrawn" as unknown as ChecklistAnswer["state"],
+          }),
+        ],
+        readiness: { ...READINESS, toQuote: 0, outstanding: 0 },
+      }),
+    ).not.toThrow();
+    expect(screen.getByText("Something new")).toBeInTheDocument();
   });
 });
