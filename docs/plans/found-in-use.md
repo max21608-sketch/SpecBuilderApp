@@ -206,7 +206,7 @@ Grouped because each is a line or two, not because they are one problem.
 1. **The header-row message names the wrong row.** The BOQ review said *"row 6
    was skipped, header found on row 6"*. Matthew opened the workbook: products
    start at row 7. The message is about the header and reads as an error about
-   the data. (12:39) **FIXED 2026-09-20, `bd4a1a4`**
+   the data. (12:39) **FIXED 2026-09-20, `cbfd614`**
    (Stage 1a item 1.2): the review now prints "Header on row 6. Items start on
    row 7. 5 rows above the header were read as the phase's notes (revision,
    date, terms)." — the items-start row read off the first parsed line, never
