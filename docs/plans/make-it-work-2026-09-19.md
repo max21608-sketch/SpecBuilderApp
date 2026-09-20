@@ -2093,5 +2093,26 @@ first-session script runs clean on staging. Six items: 1.5, 1.6, 1.7, 1.9,
 | **Fable's own** | the four checks with the db tier required before every cherry-pick, each gated on its own exit code (the 1.4 push went out on the build's code alone — never again); the browser walk of each DoD on the sandbox; `found-in-use.md` findings 2, 4, 5, 6, 8 and the level entry marked FIXED with commits; the dated README lines; the `CLAUDE.md` level section gains "a level can be set on the drawings card, on a click, one change set per phase" (§2.6, 1b) |
 | **Close** | the six items each have §7.1's rows written as facts against the deployed SHA; the first-session script runs clean on staging with every 1a and 1b assertion un-skipped; `found-in-use.md` swept. Then ONE promotion to pilot by the `docs/environments.md` checklist — Max's step — and the 0.6 message |
 
+**Stage 1b BUILT and on staging, 2026-09-20.** Six items in two workstreams,
+two coders in parallel, the same discipline as 1a. Against the stage's own
+close line:
+
+| §7.1 row | Evidence |
+|---|---|
+| Built · Tested | 1.5, 1.6, 1.7, 1.10, 1.15 built; 1.9 measured and CONCLUDED (the crop is exonerated, the prompt is the fix, deferred to the finishes-schedule re-read). Full suite green with the database tier required except two contention timeouts that pass alone; one order-dependent fixture (a reused item code) found by running the file whole and fixed |
+| Variance | each item's cases tested or driven; the per-item lines are in `docs/plans/README.md` |
+| Findable | the swatch's page selector sits beside the finish, the level panel on the card, the non-furniture suggestion on the line, the pack's states on the rows |
+| Simplest | 1.7 has two states and a count, not an invented third; 1.9 changed no code; 1.5 suggests and never decides |
+| Looks right | the pack screen and the S-100 card screenshotted at 1920×1080 on the sandbox: one summary line, one primary, "Crop from: page 1 · page 2", the level panel |
+| Failure path | the 409 on the configuration card's second confirm is recorded as noise to quieten, not a fault |
+| Deployed | `b76cfb0` (drawings items) and `da863b7` (intake items, and the whole of Stage 1) on `spec-builder-app-rho.vercel.app`, each read back from `/api/auth/me` and the flow driven on it |
+| Recorded | `README.md` per item; `found-in-use.md` findings 2, 4, 5, 8 and the level entry FIXED, finding 6 INVESTIGATED; `CLAUDE.md` level section amended |
+| Accepted | **outstanding on every item** |
+
+**Not done, and Max's:** the ONE promotion to pilot (0033 first), the script
+on pilot, the hand-over message. The first-session script's 1b checks are
+being turned on by the verifier; until they are, 1b's release gate is the
+browser walks recorded above.
+
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*
