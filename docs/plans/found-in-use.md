@@ -22,6 +22,45 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### Found by the first-session script and the 300-line fixture, 2026-09-20
+
+**Status: open, six observations from the Stage 1a verifier's runs** on the
+sandbox, none fixed. The script (`.claude/skills/verify/files/first-session.mjs`)
+walked all eleven steps of the plan's §7.4 — 20 assertions pass, 8 are
+deliberately skipped (1.13's, 1b's, and two that need a page preview a clone
+does not have) — and `npm run qa:demo -- --lines=300 --no-checklist --apply`
+built **DEMO-300** (`a88aed3e-ef7f-4290-a732-0ef173ae3474`, 503 records over
+3 phases, 416 seconds), beside DEMO-TEST-01 rather than instead of it.
+
+1. **The 300-line project overview takes 10.4 seconds to render.** Measured
+   on DEMO-300. §7.4a asks for under two. The same shape as the two-second
+   projects list already recorded; `loadOutstanding` over 503 records is the
+   likely weight and the overview's tiles all read it.
+2. **The configuration card issues one confirm per configuration and the
+   second returns 409** while the first succeeds; attributes are written and
+   the card reloads correctly. Consistent with "a refusal on B leaves A
+   applied", but it lands in the failure collector every run — a person would
+   read it as an error.
+3. **`/api/records/<id>/image` 404s for a record with no picture**, console
+   noise on every record open. A 204, or not asking, would be quiet.
+4. **The staged S-100 run `116b6b93…` reads the sofa as 2 configurations**,
+   so a confirm on a clone creates variants A and B. If that grouping is wrong
+   on the real pack it is wrong on the source project too — a reading for a
+   person against the pages, not a code question.
+5. **`qa:demo --clear --apply` sweeps every `DEMO%` project**, now DEMO-300 and
+   the walkthrough together. Unchanged behaviour, worth knowing an hour before
+   a call.
+6. **A second demo project needed its own mailbox**: `email_messages` is unique
+   on `(mailbox, graph_message_id)` with fixed ids, fixed for `--lines`; any
+   future second demo hits it.
+
+And one about the machine rather than the app: the repo lives in iCloud Drive,
+and four coder worktrees each carrying `node_modules` drove the load average
+to 79 (`fileproviderd`, `cloudd`, `bird`); typecheck did not finish in one
+worktree in forty minutes, and conflict copies named `* 2.ts` appeared in a
+worktree's `src/lib`. Worktrees go outside iCloud from now on, and are removed
+when their coder is done.
+
 ### Two dark controls on the drawings review and the BOQ review
 
 ### The two dark controls on the review screens — FIXED same day
