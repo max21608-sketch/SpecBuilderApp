@@ -22,6 +22,20 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### iCloud writes " 2" copies into `.next`, and typecheck reads them
+
+**Status: open — environment, not code. Seen 2026-09-20 on the Stage 1a
+checks.** `npm run typecheck` failed with `TS2300 Duplicate identifier` on
+`.next/types/cache-life.d 2.ts`, a conflict copy iCloud Drive made while the
+dev server and a worktree build both wrote `.next`; `routes-manifest 2.json`
+and three siblings appeared beside it. The build passed, so the failure read as
+a regression in the commit under test and was not. `find .next -name "* 2.*"
+-delete` and a rerun was clean. The checkout lives under `Mobile
+Documents/com~apple~CloudDocs`; moving it, or excluding `.next` from sync, is
+Max's call. Also in the same run: `tests/db/manual-capture.test.ts` › *a typed
+dimension PROMOTES* failed once at 7.3s under the full concurrent run and
+passed alone — a third name for the contention class recorded on 2026-09-19.
+
 ### A bill's date prints as an ISO timestamp
 
 **Status: open — seen on the BOQ review and the phase header while verifying
@@ -287,7 +301,17 @@ Grouped because each is a line or two, not because they are one problem.
     read *"5 to answer"*; the button top right read *"Chase the 4"*. Sebastian
     asked outright: *"top right-hand corner is 4. Is that something different?"*
     It took Max a moment to work out why — Spec notes is a manual entry and is
-    not chased. The reason is right; the screen says none of it. (49:38–50:18)
+    not chased. The reason is right; the screen says none of it. (49:38–50:18) **FIXED 2026-09-20, `7d569c3`** (Stage 1a item 1.4). The cause
+    as measured in code was not quite the one given in the room: the panel
+    counts FIELDS off the gate rows and the button counts QUESTIONS, and the
+    extra rows are fields recorded on the item's details (Spec notes, Designer
+    reference) that have no checklist question, plus — on other records — the
+    four dimension slots against one Dimensions question. Both numbers stay;
+    each now says what it counts ("6 to answer at TGQ · 4 to chase · 2 you
+    record on this item's details"), the rows are labelled, and the button
+    counts what the chase screen will tick (`toChase`, spec-field to-quote
+    questions — the one change of meaning, Max to overrule). Verified on the
+    sandbox sofa record.
 14. **A confirmed record's update path could not be found, and Matthew went
     looking for it.** *"I remember seeing a page… where it kind of had confirm,
     or you could update it. You could confirm that what was captured is correct,
