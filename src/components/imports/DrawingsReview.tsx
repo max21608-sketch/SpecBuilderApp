@@ -33,6 +33,8 @@ import { usePoll } from "@/lib/use-poll";
 import Spinner from "@/components/ui/Spinner";
 import Disclosure, { DisclosureList } from "@/components/ui/Disclosure";
 import PageHeader from "@/components/ui/PageHeader";
+import NextStepAction from "@/components/ui/NextStepAction";
+import { useNextStep } from "@/lib/use-next-step";
 import PageBody from "@/components/ui/PageBody";
 import Card from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
@@ -79,6 +81,16 @@ export default function DrawingsReview({
   packDrawingCount?: number;
 }) {
   const [run, setRun] = useState<Run | null>(null);
+  /**
+   * WHERE THIS REVIEWER GOES NEXT, decided by the project and not by this
+   * screen. The bottom of the page used to read "Open the project page", which
+   * is where — never what for; Matthew asked "at what point in the workflow do
+   * you come to this?" on exactly this screen. It is fetched rather than passed
+   * because this component is mounted from an import id and learns its project
+   * only once the document has loaded; it reads the SAME endpoint the project
+   * overview reads, and a failure costs the emphasis and never the route.
+   */
+  const nextAction = useNextStep(run?.project_id ?? null);
   const [resolution, setResolution] = useState<ItemResolution[]>([]);
   const [specFields, setSpecFields] = useState<SpecField[]>([]);
   const [records, setRecords] = useState<RecordChoice[]>([]);
@@ -616,7 +628,9 @@ export default function DrawingsReview({
           reviewed, so a finished document was an empty screen under a heading —
           indistinguishable from one whose cards had failed to load. */}
       {reviewComplete && (
-        <Note tone="good" title="Review complete">
+        /* THE BOX CARRIES THE NEXT STEP, not a full stop. A finished review is
+           the one moment a reviewer is certainly looking for what to do next. */
+        <Note tone="good" title="Review complete" actions={<NextStepAction step={nextAction} size="sm" />}>
           All {staged.items.length} item{staged.items.length === 1 ? "" : "s"} in this document have been reviewed
           {appliedCount > 0 && <> · {appliedCount} spec{appliedCount === 1 ? "" : "s"} applied</>}
           {ignoredCount > 0 && <> · {ignoredCount} ignored</>}. Nothing here is waiting on you.
@@ -761,8 +775,15 @@ export default function DrawingsReview({
           back was the browser's own. It is navigation, so it is a link — but one
           wearing `buttonClass`, because at the foot of a long page an underlined
           phrase is not findable. */}
-      <div className="mt-8 border-t border-neutral-200 pt-4">
-        <Link href={`/dashboard/projects/${run.project_id}`} className={buttonClass("primary")}>
+      <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-neutral-200 pt-4">
+        {/* THE STEP IS THE PRIMARY AND IT READS WHAT IT LEADS TO. The project
+            page stays reachable beside it, demoted: it is the way back, which
+            is a different question from what to do next. */}
+        <NextStepAction step={nextAction} />
+        <Link
+          href={`/dashboard/projects/${run.project_id}`}
+          className={buttonClass(nextAction ? "secondary" : "primary", "sm", "no-underline")}
+        >
           Open the project page
         </Link>
       </div>

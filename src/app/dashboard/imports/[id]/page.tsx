@@ -20,6 +20,8 @@ import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
 import PageHeader from "@/components/ui/PageHeader";
+import NextStepAction from "@/components/ui/NextStepAction";
+import { useNextStep } from "@/lib/use-next-step";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import Tip from "@/components/ui/Tip";
@@ -269,6 +271,13 @@ export default function ReviewImportPage() {
   useEffect(() => { void load(); }, [load]);
 
   const projectId = data?.import.project_id ?? "";
+  /**
+   * WHAT COMES AFTER THIS BILL. The confirm already pushes to the phase tabs,
+   * where the header's own primary is this same step; this is the other half —
+   * a bill somebody comes BACK to, already confirmed, whose screen said "This
+   * import has already been confirmed" and offered nothing to do about it.
+   */
+  const step = useNextStep(projectId || null);
   useEffect(() => {
     if (!projectId || !id) return;
     void apiFetch<{ batches: { id: string; created_at: string; runs: { id: string; documentKind: string | null }[] }[] }>(
@@ -557,7 +566,11 @@ export default function ReviewImportPage() {
           </Note>
         )}
 
-        {run.status === "confirmed" && <Note tone="good">This import has already been confirmed.</Note>}
+        {run.status === "confirmed" && (
+          <Note tone="good" actions={<NextStepAction step={step} size="sm" />}>
+            This import has already been confirmed.
+          </Note>
+        )}
 
         {error && (
           <Note tone="danger">

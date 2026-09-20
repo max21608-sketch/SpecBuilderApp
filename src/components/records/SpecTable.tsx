@@ -156,7 +156,7 @@ function Captured({
 }
 
 /** What the tiles above the table can narrow it to. Null lists everything. */
-type Focus = null | "tgq" | "waiting" | "no_category" | "no_level" | "quotable";
+export type Focus = null | "tgq" | "waiting" | "no_category" | "no_level" | "quotable";
 
 /** The word beside the removable chip in the filter row, per tile. */
 const FOCUS_LABELS: Record<Exclude<Focus, null>, string> = {
@@ -171,11 +171,22 @@ export default function SpecTable({
   projectId,
   runId,
   onSummary,
+  initialFocus = null,
 }: {
   projectId: string;
   runId: string;
   /** Called after every load with this run's own numbers, for the header band. */
   onSummary?: (tally: RunTally) => void;
+  /**
+   * Which tile is pressed when this table first renders.
+   *
+   * The next-step control (`src/lib/next-step.ts`) lands somebody here already
+   * narrowed — "Categorise 6 items" has to arrive showing the six. It seeds the
+   * state and nothing more: the tile is then pressable as normal, and the URL
+   * is never rewritten, because correcting a link somebody pasted is how the
+   * `useUrlTab` trap started.
+   */
+  initialFocus?: Focus;
 }) {
   const [records, setRecords] = useState<SpecRecord[] | null>(null);
   const [programme, setProgramme] = useState<ProgrammeDates | null>(null);
@@ -196,7 +207,7 @@ export default function SpecTable({
    * reason somebody cannot narrow this screen until a run looks finished. The
    * footer says how many rows are hidden.
    */
-  const [focus, setFocus] = useState<Focus>(null);
+  const [focus, setFocus] = useState<Focus>(initialFocus);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [designer, setDesigner] = useState("");

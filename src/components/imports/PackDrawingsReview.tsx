@@ -26,6 +26,8 @@ import { intakeStatusLabel, intakeStatusTone, isIntakeRunWorking } from "@/lib/i
 import Spinner from "@/components/ui/Spinner";
 import Button, { buttonClass } from "@/components/ui/Button";
 import PageHeader from "@/components/ui/PageHeader";
+import NextStepAction from "@/components/ui/NextStepAction";
+import { useNextStep } from "@/lib/use-next-step";
 import PageBody from "@/components/ui/PageBody";
 import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
@@ -85,6 +87,8 @@ export default function PackDrawingsReview({
   packDay?: string | null;
 }) {
   const [data, setData] = useState<Payload | null>(null);
+  /** What the project needs next — see the note in `DrawingsReview`. */
+  const step = useNextStep(projectId);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<DrawingObservation>>>({});
@@ -739,15 +743,22 @@ export default function PackDrawingsReview({
           happened to finish on. "Review complete", never "complete": settled
           answers are a different question. */}
       {cards.length === 0 && runs.some((run) => run.staged) && (
-        <Note tone="good" title="Review complete">
+        /* The same box the single-document screen shows, carrying the same
+           next step: it must not matter which of the two a reviewer finished
+           on. */
+        <Note tone="good" title="Review complete" actions={<NextStepAction step={step} size="sm" />}>
           Nothing left to review in this pack. Settled answers are a different question — the records screen is where
           those live.
         </Note>
       )}
 
       {/* Where a reviewer goes next. The bottom of this screen was a dead end. */}
-      <div className="mt-8 border-t border-neutral-200 pt-4">
-        <Link href={`/dashboard/projects/${projectId}`} className={buttonClass("primary")}>
+      <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-neutral-200 pt-4">
+        <NextStepAction step={step} />
+        <Link
+          href={`/dashboard/projects/${projectId}`}
+          className={buttonClass(step ? "secondary" : "primary", "sm", "no-underline")}
+        >
           Open the project page
         </Link>
       </div>

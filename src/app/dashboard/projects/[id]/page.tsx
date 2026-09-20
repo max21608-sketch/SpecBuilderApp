@@ -28,12 +28,12 @@
 // ============================================================================
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact, type ContactsOutstanding } from "@/components/projects/ContactsPanel";
 import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
-import SpecTable, { type RunTally } from "@/components/records/SpecTable";
+import SpecTable, { type Focus, type RunTally } from "@/components/records/SpecTable";
 import ExportMenu from "@/components/records/ExportMenu";
 import ProjectHistory from "@/components/history/ProjectHistory";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
@@ -60,6 +60,8 @@ import {
 } from "@/lib/project-completion";
 import { EMPTY_SUMMARY, type ProjectSummary } from "@/lib/project-summary";
 import StatTile from "@/components/ui/StatTile";
+import NextStepAction from "@/components/ui/NextStepAction";
+import { nextStep } from "@/lib/next-step";
 import Tip from "@/components/ui/Tip";
 import Pill from "@/components/ui/Pill";
 import Chip from "@/components/ui/Chip";
@@ -284,6 +286,21 @@ function day(value: string | null): React.ReactNode {
 
 function ProjectOverview() {
   const projectId = String(useParams().id ?? "");
+  /**
+   * `?focus=` — which of the spec table's tiles a link arrived pressing.
+   *
+   * The next-step control lands somebody on a phase tab already narrowed, so
+   * "Categorise 6 items" shows the six rather than every record with a filter
+   * to find. Read here rather than inside the table because the table is a
+   * component with no business knowing about URLs, and RESOLVED against the
+   * table's own vocabulary so a hand-edited query cannot put it in a state no
+   * tile can clear.
+   */
+  const rawFocus = useSearchParams().get("focus");
+  const initialFocus: Focus = ((): Focus => {
+    const known: Focus[] = ["tgq", "waiting", "no_category", "no_level", "quotable"];
+    return known.find((value) => value === rawFocus) ?? null;
+  })();
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<DocumentRun[] | null>(null);
   const [runs, setRuns] = useState<SpecRun[]>([]);
@@ -749,6 +766,26 @@ function ProjectOverview() {
   const activeRun = runs.find((run) => run.id === tab) ?? null;
   const activeTally = activeRun ? runTallies[activeRun.id] : undefined;
 
+  /**
+   * WHAT THIS PROJECT NEEDS NEXT, and it is the header's primary action.
+   *
+   * Decided by `nextStep()` from the numbers this page has already loaded — no
+   * second fetch, no second reading of any rule — so this screen, the bill
+   * review's success state and both drawings reviews all print the same answer.
+   * See `src/lib/next-step.ts` for the precedence and why it is one function.
+   *
+   * `waiting` is NOT passed, and deliberately: this payload does not carry one.
+   * A zero here would make this screen claim nothing is waiting where another
+   * screen with the real figure says otherwise, so the step is skipped instead.
+   */
+  const step = nextStep({
+    projectId: project.id,
+    summary,
+    documents: documents ?? [],
+    runs,
+    packId: packs.find((pack) => pack.id)?.id ?? null,
+  });
+
   const field = (key: keyof Form) => ({
     value: form[key],
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: e.target.value }),
@@ -1075,13 +1112,23 @@ function ProjectOverview() {
         actions={
           <>
             <OpenChangeBar projectId={project.id} onChanged={() => void load()} />
-            <Link href={chaseHref} className={buttonClass("secondary", "sm", "no-underline")}>
-              Chase {(activeTally ? activeTally.toQuote : summary.toQuote).toLocaleString()}
-            </Link>
+            {/* CHASE IS SECONDARY, AND IT GOES WHEN IT IS THE STEP. Two
+                controls in one band leading to the same screen, one of them
+                emphasised, reads as two different jobs. */}
+            {step?.kind !== "waiting" && (
+              <Link href={chaseHref} className={buttonClass("secondary", "sm", "no-underline")}>
+                Chase {(activeTally ? activeTally.toQuote : summary.toQuote).toLocaleString()}
+              </Link>
+            )}
             {/* THE EXPORT IS NEVER FILTERED, so the cluster carries the scope
                 of whatever is on screen and nothing else: this run on a run
                 tab, the whole project everywhere else. */}
             {runs.length > 0 && <ExportMenu projectId={project.id} runId={activeRun?.id ?? null} />}
+            {/* THE NEXT STEP, LAST AND EMPHATIC. `export` is suppressed here
+                and nowhere else: the export cluster is already in this band, so
+                a second control saying the same thing would be the only place
+                in the app with two primaries in one header. */}
+            <NextStepAction step={step} suppress={["export"]} />
           </>
         }
         /* One tab per RUN. The same item code appears in several of them at
@@ -1161,6 +1208,7 @@ function ProjectOverview() {
                 projectId={project.id}
                 runId={run.id}
                 onSummary={(tally) => onRunSummary(run.id, tally)}
+                initialFocus={initialFocus}
               />
 
               {/* WHERE THIS RUN CAME FROM, AT THE BOTTOM. It is provenance —
