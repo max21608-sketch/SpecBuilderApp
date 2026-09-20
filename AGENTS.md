@@ -2425,6 +2425,14 @@ no reason.
 - **A pre-filled select cannot be the accept control.** A select showing
   "Simple" fires no change event when somebody picks Simple, so agreeing would
   silently do nothing. Every accept is its own button.
+- **A level can be set on the drawings card too** (2026-09-20, Stage 1b item
+  1.15): the item card and the configuration card carry a LEVEL panel — the
+  suggestion with its reason as a `SuggestButton`, and *Change…* opening three
+  BUTTONS — writing `spec_records.level` through the existing levels route
+  (which now also accepts `recordIds` + `level`), ONE `level_set` change set
+  per click, one write per record of a fan-out ("sets the level on 3
+  records"). The card's confirm request never carries a level, so the two
+  writes cannot be confused, and a level never blocks a card.
 
 ### The record is four jobs, and a tab each
 
