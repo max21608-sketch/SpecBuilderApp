@@ -3184,9 +3184,13 @@ screen's primary; the phase table's count opening onto the missing fields; the
 correction verb (0033); the chase preselecting the TGQ set for the chosen
 contact. The dated evidence per item is in `docs/plans/README.md`
 (2026-09-20). **Not accepted by Max or Matthew on any screen.** The
-first-session script, the pilot's console half and the hand-over message are
-the remaining 1a steps; Stage 1b follows on `staging` at Max's instruction of
-2026-09-20.
+first-session script (`.claude/skills/verify/files/first-session.mjs`, the
+release gate that never calls the model) ran against the `b76cfb0` deployment
+on 2026-09-20: 20 pass, 0 fail, 8 skipped by design — so **Stage 1a is
+closed on staging**. Remaining and Max's: 0033 onto pilot, the promotion, the
+script on pilot, the hand-over message. Stage 1b is being built on `staging`
+at Max's instruction of 2026-09-20; its drawings items (1.10, 1.15, the 1.9
+measurement and conclusion) are deployed at `b76cfb0`.
 
 **Outstanding — judgement, not code.**
 
