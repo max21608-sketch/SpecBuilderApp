@@ -62,6 +62,7 @@ import { TONE } from "@/components/ui/tone";
 import { letterColour } from "@/components/records/letter-colours";
 import { ANSWER_STATE_LABELS, ITEM_LEVEL_LABELS, type AnswerState, type ItemLevel } from "@/lib/spec-vocab";
 import { TIER_LABELS, type QuestionTier } from "@/lib/tgq";
+import { selectionSummary } from "@/lib/chase-selection";
 import { formatDay } from "@/lib/format-day";
 import {
   allQuestions,
@@ -274,6 +275,17 @@ export default function ChaseQuestionTable({
     });
   }
 
+  /**
+   * WHAT THE SCREEN TICKED FOR YOU, in the same words the page seeded it with.
+   *
+   * `selectionSummary` is the function `defaultSelection` shares its inputs
+   * with, so the sentence and the ticks cannot disagree — a footer counting its
+   * own way is how a screen comes to claim a preselection it never made. It
+   * describes the DEFAULT, beside the live "n ticked" count which is the truth
+   * at any moment.
+   */
+  const preselection = selectionSummary(questions, contactValue);
+
   const selectShown = () => onToggleMany(shown.flatMap((entry) => entry.visibleAll), true);
   const clearAll = () => onToggleMany(everything, false);
   const filtering = Boolean(filters.text || filters.runId || filters.level || filters.state || tierValue !== "all");
@@ -481,7 +493,16 @@ export default function ChaseQuestionTable({
         <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-2.5">
           <span className="text-sm text-neutral-700">
             {selectedQuestions.length === 0 ? (
-              "Nothing ticked"
+              // A CONTACT WITH NOTHING BLOCKING A QUOTE IS A REAL STATE, and
+              // the screen says which of the two silences this is rather than
+              // leaving somebody to wonder whether the ticks failed to load.
+              !preselection.contactChosen ? (
+                "Nobody chosen — pick who you are chasing above and what blocks a quote is ticked for you"
+              ) : preselection.preselected === 0 ? (
+                "Nothing needed to quote for this contact — tick a question below to ask it anyway"
+              ) : (
+                "Nothing ticked"
+              )
             ) : (
               <>
                 <b className="font-semibold text-neutral-900">{selectedQuestions.length} question
@@ -492,6 +513,12 @@ export default function ChaseQuestionTable({
               </>
             )}
           </span>
+          {preselection.preselected > 0 && (
+            <span className="text-sm text-neutral-500">
+              {preselection.preselected} to-quote question{preselection.preselected === 1 ? "" : "s"} preselected ·{" "}
+              {preselection.alsoOutstanding} also outstanding, not selected
+            </span>
+          )}
           {hiddenSelected > 0 && (
             <Chip tone="warn">
               {hiddenSelected} ticked question{hiddenSelected === 1 ? " is" : "s are"} hidden by your filters — they

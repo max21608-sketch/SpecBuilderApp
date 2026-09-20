@@ -50,6 +50,7 @@ import {
   type ItemLevel,
 } from "@/lib/spec-vocab";
 import { type QuestionTier } from "@/lib/tgq";
+import { defaultSelection, selectionKey, selectionSummary } from "@/lib/chase-selection";
 import Button from "@/components/ui/Button";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
@@ -148,7 +149,13 @@ type Payload = {
   inventory: Inventory;
 };
 
-const key = (recordId: string, requirementId: string) => `${recordId}:${requirementId}`;
+const key = selectionKey;
+
+/** One flat list of the inventory's questions, each carrying who it is asked of. */
+const flatten = (payload: Payload) =>
+  payload.inventory.groups.flatMap((group) =>
+    group.questions.map((question) => ({ ...question, contactId: group.contact.id, contactName: group.contact.name })),
+  );
 
 /**
  * The contact tab for records with nobody to ask.
@@ -163,6 +170,19 @@ const NOBODY = "__nobody__";
 
 /** Blocked because there is nobody to ask, as opposed to having no level. */
 const isContactBlocker = (reason: string) => reason !== "no level on the record";
+
+/**
+ * The contact tab actually on screen, given what the inventory holds.
+ *
+ * A `contactId` from the URL may name somebody with nothing outstanding on
+ * this project, or nobody at all; that falls back to Everyone. It is a
+ * function rather than an expression in the render because the DEFAULT
+ * SELECTION has to be seeded for the same tab the strip is showing — two
+ * readings of that would preselect one person's questions under another
+ * person's name.
+ */
+const effectiveContact = (contactId: string, payload: Payload) =>
+  contactId === NOBODY || payload.inventory.groups.some((group) => group.contact.id === contactId) ? contactId : "";
 
 function DraftsView() {
   const params = useSearchParams();
@@ -193,10 +213,15 @@ function DraftsView() {
   const [tier, setTier] = useState<"all" | QuestionTier>("all");
   const [includeWaiting, setIncludeWaiting] = useState(false);
   const [acceptingLevels, setAcceptingLevels] = useState(false);
-  // The default selection is computed ONCE. After that a reload intersects the
-  // user's choices with what is still selectable, so acting on a card does not
+  // The default selection is computed on FIRST LOAD and again when the contact
+  // changes, and at no other time. After that a reload intersects the user's
+  // choices with what is still selectable, so acting on a card does not
   // silently re-tick what they unticked.
   const seeded = useRef(false);
+  // The contact the seeding should read, without putting it in `load`'s
+  // dependencies: doing that would re-fetch the whole inventory every time
+  // somebody pressed another tab.
+  const contactRef = useRef(contactId);
 
   const load = useCallback(async () => {
     if (!projectId) {
@@ -212,20 +237,18 @@ function DraftsView() {
     setData(res.data);
 
     const live = new Set<string>();
-    const defaults = new Set<string>();
     for (const group of res.data.inventory.groups) {
       for (const question of group.questions) {
-        const k = key(question.recordId, question.requirementId);
-        live.add(k);
-        // Both tiers of spec-field questions, minus anything already awaiting
-        // a reply. Readiness is never defaulted in — decision 19.
-        if (question.requirementKind === "spec_field" && !question.waiting) defaults.add(k);
+        live.add(key(question.recordId, question.requirementId));
       }
     }
 
     if (!seeded.current) {
       seeded.current = true;
-      setSelected(defaults);
+      // EXACTLY WHAT BLOCKS A QUOTE for the contact on screen, which may be
+      // one named in the URL. It used to be both tiers across every contact,
+      // which is what Max saw: 822 ticked where four were meant.
+      setSelected(defaultSelection(flatten(res.data), effectiveContact(contactRef.current, res.data)));
       return;
     }
     setSelected((prev) => new Set([...prev].filter((k) => live.has(k))));
@@ -265,6 +288,24 @@ function DraftsView() {
       ),
     [selectable],
   );
+
+  /**
+   * CHANGING CONTACT RE-SEEDS THE SELECTION, and that is the default rather
+   * than a convenience.
+   *
+   * A chase is written to ONE person. Carrying Hayley's ticks onto Claire's
+   * email is a wrong default nobody would see until it had been sent, and a
+   * footer counting the preselection would meanwhile describe a set the screen
+   * never ticked. Nothing is remembered either way: coming back to a contact
+   * re-seeds rather than restoring what was ticked before, because a
+   * per-contact memory is a third state to keep in step with a question list
+   * that moves under it.
+   */
+  function chooseContact(next: string) {
+    contactRef.current = next;
+    setContactId(next);
+    if (data) setSelected(defaultSelection(flatten(data), effectiveContact(next, data)));
+  }
 
   function toggle(recordId: string, requirementId: string) {
     setSelected((prev) => {
@@ -461,10 +502,20 @@ function DraftsView() {
    * A `contactId` from the URL may name somebody who has nothing outstanding
    * on this project, or nobody at all. That falls back to Everyone SILENTLY:
    * the alternative is an empty table under a tab that is not in the strip,
-   * which reads as a project with no questions on it.
+   * which reads as a project with no questions on it. The SAME function seeds
+   * the default selection, so the ticks can never belong to a tab the strip is
+   * not showing.
    */
-  const contactTab =
-    contactId === NOBODY || inventory.groups.some((group) => group.contact.id === contactId) ? contactId : "";
+  const contactTab = effectiveContact(contactId, data);
+
+  /**
+   * What the preselection ticked, and what it deliberately left.
+   *
+   * The NOBODY tab is not a contact: it lists records with no route to a
+   * person, renders no question table and has nothing to tick, so it reads as
+   * "nobody chosen" rather than as a contact with nothing blocking a quote.
+   */
+  const preselection = selectionSummary(tableQuestions, contactTab === NOBODY ? "" : contactTab);
 
   /** Records nobody can be asked about, as opposed to records with no level. */
   const nobody = inventory.blocked.filter((row) => isContactBlocker(row.reason));
@@ -506,7 +557,17 @@ function DraftsView() {
             <Button
               variant="primary"
               disabled={generating || selected.size === 0}
-              title={selected.size === 0 ? "Tick at least one question below" : undefined}
+              // WHY IT IS DISABLED, not just that it is. Nothing preselected
+              // for a contact whose to-quote set is empty is a real state and
+              // not a fault, so the reason says what is true of THAT contact
+              // rather than repeating the generic instruction.
+              title={
+                selected.size > 0
+                  ? undefined
+                  : preselection.contactChosen && preselection.preselected === 0
+                    ? "Nothing needed to quote for this contact — tick a question below to ask it anyway"
+                    : "Tick at least one question below"
+              }
               onClick={() => void generate()}
             >
               {generating ? "Drafting…" : `Draft the email · ${selected.size} question${selected.size === 1 ? "" : "s"}`}
@@ -517,7 +578,7 @@ function DraftsView() {
           <Tabs
             label="Who to chase"
             value={contactTab}
-            onChange={setContactId}
+            onChange={chooseContact}
             items={[
               { id: "", label: "Everyone", count: tableQuestions.length },
               ...inventory.groups.map((group) => ({

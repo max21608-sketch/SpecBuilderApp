@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ChaseQuestionTable, { type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
+import { defaultSelection } from "@/lib/chase-selection";
 
 let n = 0;
 function question(over: Partial<TableQuestion> = {}): TableQuestion {
@@ -41,11 +42,29 @@ function question(over: Partial<TableQuestion> = {}): TableQuestion {
   };
 }
 
-/** The table with the page's own selection behaviour around it. */
-function Harness({ questions }: { questions: TableQuestion[] }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+/**
+ * The table with the page's own selection behaviour around it.
+ *
+ * `contactId` and `seed` mirror what the page does: it hands the table the
+ * chosen contact and seeds the selection with `defaultSelection` over the same
+ * questions. A test that ticks by hand cannot see a preselection claim the
+ * footer makes, which is the half this harness exists for.
+ */
+function Harness({
+  questions,
+  contactId,
+  seed = false,
+}: {
+  questions: TableQuestion[];
+  contactId?: string;
+  seed?: boolean;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(() =>
+    seed ? defaultSelection(questions, contactId ?? "") : new Set(),
+  );
   return (
     <ChaseQuestionTable
+      contactId={contactId}
       questions={questions}
       selected={selected}
       onToggle={(recordId, requirementId) =>
@@ -185,6 +204,33 @@ describe("a filter narrows what is listed, never what is asked", () => {
     await userEvent.type(screen.getByPlaceholderText(/Search a code/), "stitching");
     expect(screen.getByText(/hidden by your filters/)).toBeTruthy();
     expect(screen.getByText(/will still be asked/)).toBeTruthy();
+    // AND THE TICKS THEMSELVES ARE UNTOUCHED. The count is the line's own
+    // selection, not what the search left of it, and the question still on
+    // screen is still ticked.
+    expect(screen.getByText(/2 questions ticked/)).toBeTruthy();
+    expect((within(line()).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("A FILTER CHANGE NEVER ALTERS THE PRESELECTION", async () => {
+    // Seeded the way the page seeds it, then narrowed three different ways.
+    // The selection is the truth; hiding a question does not untick it.
+    render(
+      <Harness
+        seed
+        contactId="c-1"
+        questions={[question({ prompt: "Stitching spec" }), question({ prompt: "Stud spec" }), question({ tier: "later", prompt: "Packing" })]}
+      />,
+    );
+    expect(screen.getByText(/2 questions ticked/)).toBeTruthy();
+
+    await userEvent.selectOptions(screen.getByLabelText("Filter by answer state"), "tbc");
+    expect(screen.getByText(/2 questions ticked/)).toBeTruthy();
+
+    await userEvent.type(screen.getByPlaceholderText(/Search a code/), "packing");
+    expect(screen.getByText(/2 questions ticked/)).toBeTruthy();
+
+    await userEvent.click(screen.getByLabelText("Show readiness questions"));
+    expect(screen.getByText(/2 questions ticked/)).toBeTruthy();
   });
 
   it("hides readiness questions by default without calling them settled", async () => {
@@ -262,5 +308,34 @@ describe("what would be generated", () => {
     await userEvent.click(screen.getByText("Select everything shown"));
     expect(screen.getByText(/2 recipients/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Draft it · 2 drafts" })).toBeTruthy();
+  });
+});
+
+describe("what the screen ticked for you", () => {
+  it("says how many block a quote and how many it left", () => {
+    render(
+      <Harness
+        seed
+        contactId="c-1"
+        questions={[question(), question(), question({ tier: "later" }), question({ tier: "later" }), question({ tier: "later" })]}
+      />,
+    );
+    expect(screen.getByText(/2 to-quote questions preselected/)).toBeTruthy();
+    expect(screen.getByText(/3 also outstanding, not selected/)).toBeTruthy();
+    expect(screen.getByText(/2 questions ticked/)).toBeTruthy();
+  });
+
+  it("says nothing blocks a quote for this contact rather than looking broken", () => {
+    render(<Harness seed contactId="c-1" questions={[question({ tier: "later" })]} />);
+    expect(screen.getByText(/Nothing needed to quote for this contact/)).toBeTruthy();
+    expect(screen.getByText(/tick a question below to ask it anyway/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Draft it" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("asks for a contact before it ticks anything", () => {
+    // The Everyone tab: one press would draft an email to each of them.
+    render(<Harness seed questions={[question(), question({ contactId: "c-2" })]} />);
+    expect(screen.getByText(/Nobody chosen/)).toBeTruthy();
+    expect(screen.queryByText(/preselected/)).toBeNull();
   });
 });
