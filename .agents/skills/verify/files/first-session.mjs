@@ -910,6 +910,11 @@ try {
     return step[0];
   });
   await check("1.15", "the phase table shows the level as a DECISION, with no guess beside it", async () => {
+    // BACK TO THE PHASE TAB. The 1.11 check just opened the project OVERVIEW to
+    // read its header primary, so without this the row search below runs over
+    // the overview and reports "no row whose client ref is S-100" — which is
+    // what the first run against the deployment did (2026-09-20).
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}?tab=${firstPhase.id}`, 3000);
     // Wait for the ROWS, not for the table's own headings: the header paints
     // with the shell and the records arrive with the fetch. The item's own
     // description is not a safe marker — the column truncates — so this waits
