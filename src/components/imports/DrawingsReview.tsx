@@ -791,13 +791,22 @@ export default function DrawingsReview({
           wearing `buttonClass`, because at the foot of a long page an underlined
           phrase is not findable. */}
       <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-neutral-200 pt-4">
-        {/* THE STEP IS THE PRIMARY AND IT READS WHAT IT LEADS TO. The project
+        {/* ONLY ONCE THE REVIEW IS DONE, which is §0.3's one-primary rule read
+            strictly. A document with cards still pending already has its
+            primary — the card's own Confirm — and the deployed screen carried
+            both: `Confirm S-100 (2 configurations)` beside `Review 9
+            documents`, one of the nine being the document being looked at. Two
+            dark buttons proposing different next steps is the screen failing to
+            say which one it is for.
+
+            THE STEP IS THE PRIMARY AND IT READS WHAT IT LEADS TO. The project
             page stays reachable beside it, demoted: it is the way back, which
-            is a different question from what to do next. */}
-        <NextStepAction step={nextAction} />
+            is a different question from what to do next — and while cards are
+            pending it is demoted too, because the primary is on the card. */}
+        {reviewComplete && <NextStepAction step={nextAction} />}
         <Link
           href={`/dashboard/projects/${run.project_id}`}
-          className={buttonClass(nextAction ? "secondary" : "primary", "sm", "no-underline")}
+          className={buttonClass(reviewComplete && !nextAction ? "primary" : "secondary", "sm", "no-underline")}
         >
           Open the project page
         </Link>

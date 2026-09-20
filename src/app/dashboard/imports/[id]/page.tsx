@@ -496,6 +496,14 @@ export default function ReviewImportPage() {
           </>
         }
         actions={
+          // A CONFIRMED BILL HAS NO CONFIRM. It used to render disabled and
+          // still wearing the primary's dark fill, so the screen's most
+          // emphatic control was one nobody could press — beside a green box
+          // whose own action IS the next step. §0.3: one primary, and it is
+          // what a person does next. Every other reason the button is disabled
+          // (nothing parsed yet, no active lines) keeps it on screen, because
+          // then it is the control being refused and it has to say so.
+          run.status === "confirmed" ? null : (
           <Button
             variant="primary"
             onClick={confirm}
@@ -507,6 +515,7 @@ export default function ReviewImportPage() {
                 ? `Confirm · updates this phase from ${activeLines.length} line${activeLines.length === 1 ? "" : "s"}`
                 : `Confirm · creates ${activeLines.length} record${activeLines.length === 1 ? "" : "s"} on ${activeSheets.length} phase${activeSheets.length === 1 ? "" : "s"}`}
           </Button>
+          )
         }
         tabs={
           sheets.length > 1 ? (

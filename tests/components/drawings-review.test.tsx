@@ -116,6 +116,25 @@ describe("a reviewed drawing set", () => {
     await screen.findByRole("link", { name: "Open the project page" });
     expect(screen.queryByText("Review complete")).toBeNull();
   });
+
+  // ONE PRIMARY PER SCREEN, AND IT IS THE NEXT STEP (§0.3). The deployed screen
+  // carried the card's `Confirm S-100 (2 configurations)` AND `Review 9
+  // documents` at the foot — and this document was one of the nine, so the two
+  // dark buttons proposed different next moves in the same weight. While cards
+  // are pending the card's Confirm is the primary and the step is not shown at
+  // all; the way back stays, demoted, because it always has to.
+  it("shows no next step while cards are still pending", async () => {
+    show([item({ observations: [observation({ reviewStatus: "pending" })] })], {
+      ok: true,
+      summary: { records: 14, uncategorised: 0, toQuote: 5, documentsReading: 0, documentsFailed: 0 },
+      documents: [{ id: "import-1", status: "confirmed", source_kind: "spec_document", document_kind: "shop_drawings", batch_id: "batch-1" }],
+      runs: [{ id: "run-1" }],
+    });
+    const back = await screen.findByRole("link", { name: "Open the project page" });
+    expect(screen.queryByRole("link", { name: "Review 14 items — 5 to-quote specs outstanding" })).toBeNull();
+    // Not the primary either: the primary is on the card.
+    expect(back.className).not.toContain("bg-neutral-900");
+  });
 });
 
 // The navigator, added when the screen was rebuilt to the approved mock-up.

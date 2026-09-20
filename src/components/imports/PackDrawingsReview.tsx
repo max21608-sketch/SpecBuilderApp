@@ -767,12 +767,19 @@ export default function PackDrawingsReview({
         </Note>
       )}
 
-      {/* Where a reviewer goes next. The bottom of this screen was a dead end. */}
+      {/* Where a reviewer goes next. The bottom of this screen was a dead end.
+
+          ONLY ONCE THERE IS NOTHING LEFT TO REVIEW — §0.3's one-primary rule,
+          the same reading as the single-document screen. A pack with cards on
+          it already has its primary on each card, and a step beside them
+          proposes a different next move in the same weight. While cards are
+          pending the way back is demoted too, because the primary is the
+          card's Confirm. */}
       <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-neutral-200 pt-4">
-        <NextStepAction step={step} />
+        {cards.length === 0 && <NextStepAction step={step} />}
         <Link
           href={`/dashboard/projects/${projectId}`}
-          className={buttonClass(step ? "secondary" : "primary", "sm", "no-underline")}
+          className={buttonClass(cards.length === 0 && !step ? "primary" : "secondary", "sm", "no-underline")}
         >
           Open the project page
         </Link>
