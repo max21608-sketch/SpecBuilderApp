@@ -176,7 +176,15 @@ describeIfDb("item level suggestions", () => {
   it("writes nothing for ids that are not live records on this project", async () => {
     const live = await makeRecord(null);
     const retired = await makeRecord(null);
-    await client.query(`update spec_records set status = 'retired' where id = $1`, [retired.id]);
+    // RETIRING NAMES WHO AND WHEN. `spec_records_retired_has_actor` (0017)
+    // refuses a retired row that says neither, which is the same shape
+    // `retireRun` writes — a fixture that retired a row with a bare status
+    // failed the constraint rather than the assertion.
+    await client.query(
+      `update spec_records set status = 'retired', retired_at = now(), retired_by = 'qa', updated_by = 'qa'
+        where id = $1`,
+      [retired.id],
+    );
     const before = await client.query(`select count(*)::int as n from change_sets where project_id = $1`, [projectId]);
 
     const result = await withTransaction((txn) =>
