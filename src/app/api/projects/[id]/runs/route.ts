@@ -30,7 +30,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return json({ ok: false, error: "invalid JSON" }, 400);
   }
   const parsed = Body.safeParse(raw);
-  if (!parsed.success) return json({ ok: false, error: "A run needs a name." }, 400);
+  if (!parsed.success) return json({ ok: false, error: "A phase needs a name." }, 400);
 
   try {
     const run = await withTransaction((txn) =>

@@ -76,7 +76,7 @@ export function stagePreamble(
 export function assertStagedPreamble(parsed: unknown): StagedPreamble {
   const doc = parsed as Partial<StagedPreamble> | null;
   if (!doc || typeof doc !== "object" || doc.kind !== "preamble" || !Array.isArray(doc.notes)) {
-    throw new Error("This run was not staged as a preamble. Upload the preamble again.");
+    throw new Error("This document was not staged as a preamble. Upload the preamble again.");
   }
   return doc as StagedPreamble;
 }

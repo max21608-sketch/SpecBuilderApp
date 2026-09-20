@@ -121,7 +121,7 @@ export async function createRecord(txn: TxnSql, input: CreateRecordInput): Promi
     throw new DomainConflictError("unknown_run", "That phase is not on this project.", { status: 400 });
   }
   if (String(run.status) !== "active") {
-    throw new DomainConflictError("run_retired", "That run has been retired. Add the item to a live run.", {
+    throw new DomainConflictError("run_retired", "That phase has been retired. Add the item to a live phase.", {
       status: 400,
     });
   }

@@ -614,8 +614,8 @@ async function patchBoqLine(
     let clearPairings = false;
     if (typeof body.runName === "string") {
       const name = body.runName.trim();
-      if (name === "") return json({ ok: false, error: "A run needs a name." }, 400);
-      if (name.length > 200) return json({ ok: false, error: "That run name is too long." }, 400);
+      if (name === "") return json({ ok: false, error: "A phase needs a name." }, 400);
+      if (name.length > 200) return json({ ok: false, error: "That phase name is too long." }, 400);
       patch.proposedRunName = name;
     }
     if (typeof body.ignored === "boolean") {

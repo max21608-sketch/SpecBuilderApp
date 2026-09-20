@@ -36,7 +36,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       return json(
         {
           ok: false,
-          error: `This export is never filtered — "${key}" is not accepted. A BWS import replaces every field it is given, so a partial export erases what it leaves out. Export a whole run, or the whole project.`,
+          error: `This export is never filtered — "${key}" is not accepted. A BWS import replaces every field it is given, so a partial export erases what it leaves out. Export a whole phase, or the whole project.`,
         },
         400,
       );

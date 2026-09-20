@@ -40,7 +40,7 @@ export async function PATCH(
         ok: false,
         error:
           issue?.path[0] === "reason"
-            ? "Say why this run is being retired. It keeps every record and can be brought back, but the export stops carrying it."
+            ? "Say why this phase is being retired. It keeps every record and can be brought back, but the export stops carrying it."
             : "That request is not valid.",
         field: issue?.path.join("."),
       },

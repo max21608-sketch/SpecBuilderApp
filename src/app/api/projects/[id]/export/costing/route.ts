@@ -60,7 +60,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const url = new URL(request.url);
   for (const key of url.searchParams.keys()) {
     if (!ALLOWED_PARAMS.has(key)) {
-      return json({ ok: false, error: `"${key}" is not accepted. Cost a whole run, or the whole project.` }, 400);
+      return json({ ok: false, error: `"${key}" is not accepted. Cost a whole phase, or the whole project.` }, 400);
     }
   }
   const runId = url.searchParams.get("runId");

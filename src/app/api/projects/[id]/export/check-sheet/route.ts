@@ -36,7 +36,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       return json(
         {
           ok: false,
-          error: `The check sheet is never filtered — "${key}" is not accepted. Signing off a sheet that covered only part of the export would say the file was read when it was not. Take a whole run, or the whole project.`,
+          error: `The check sheet is never filtered — "${key}" is not accepted. Signing off a sheet that covered only part of the export would say the file was read when it was not. Take a whole phase, or the whole project.`,
         },
         400,
       );

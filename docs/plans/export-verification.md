@@ -24,8 +24,8 @@ empty for the reviewer.
 
 ## Producing it
 
-On a phase's spec table, beside *Export this phase*: **Check sheet**. Or
-directly:
+On a phase's spec table, in the header's outputs cluster — Spec upload, Quote
+lines, Costing block — press **Check sheet**. Or directly:
 
 ```bash
 curl -b sb_session=... "$BASE/api/projects/$PROJECT/export/check-sheet?runId=$RUN" -o check-sheet.xlsx

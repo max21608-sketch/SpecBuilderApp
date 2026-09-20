@@ -322,7 +322,7 @@ export async function confirmBoqImport(
         if (!changed[0]) {
           throw new DomainConflictError(
             "record_changed",
-            `The record paired with BOQ line ${line.lineNo} has changed, moved run, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
+            `The record paired with BOQ line ${line.lineNo} has changed, moved phase, or been retired since you reviewed this revision. Nothing was written — reload and check the pairing.`,
           );
         }
         carriedForward.add(target.recordId);

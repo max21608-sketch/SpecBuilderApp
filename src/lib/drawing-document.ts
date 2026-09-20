@@ -1035,7 +1035,7 @@ export function drawingItemBlockers(
       // never match one however many bills are confirmed, so sending its
       // reviewer to the BOQ is advice that cannot work.
       message: resolution.runs.length
-        ? "Every run this item appears in is unticked or unresolved."
+        ? "Every phase this item appears in is unticked or unresolved."
         : item.itemCodeRaw === null
           ? "This page carries no item code, so nothing matched it. Say which record it is, or ignore the page."
           : "No record carries this item code yet. Confirm the BOQ for this pack first.",
@@ -1906,7 +1906,7 @@ export function stageDrawings(
 export function assertStagedDrawings(parsed: unknown, fields?: SpecFieldEntry[]): StagedDrawings {
   const doc = parsed as Partial<StagedDrawings> | null;
   if (!doc || typeof doc !== "object" || doc.kind !== "shop_drawings" || !Array.isArray(doc.items)) {
-    throw new Error("This run was not staged as shop drawings. Upload the drawings again.");
+    throw new Error("This document was not staged as shop drawings. Upload the drawings again.");
   }
   const upgraded = upgradeTbcMarkers(upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []));
   return upgraded.schemaVersion === 2 ? upgraded : applyViewGuesses(upgraded);
