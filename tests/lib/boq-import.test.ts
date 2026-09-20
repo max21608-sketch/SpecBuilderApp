@@ -5,7 +5,14 @@
 // folder.
 import { describe, it, expect } from "vitest";
 import type { SheetData } from "read-excel-file/node";
-import { parseBoqSheets, normaliseRef, assertBoqDocument, activeSheets, countLines } from "@/lib/boq-import";
+import {
+  parseBoqSheets,
+  normaliseRef,
+  assertBoqDocument,
+  activeSheets,
+  countLines,
+  describeHeader,
+} from "@/lib/boq-import";
 import type { BoqParseResult, ParsedBoqSheet } from "@/lib/boq-import";
 
 const HEADER = ["Designer", "Category", "Code", "Item Description", "Product Reference", "Total Qty Updated"];
@@ -219,6 +226,90 @@ describe("assertBoqDocument", () => {
     // A v2 row that 0017 did not reach is refused rather than read as v3.
     expect(() => assertBoqDocument({ schemaVersion: 2, sheets: [] })).toThrow(/Upload the BOQ again/);
     expect(() => assertBoqDocument(null)).toThrow(/Upload the BOQ again/);
+  });
+});
+
+// ============================================================================
+// "ROW 6 WAS SKIPPED, HEADER FOUND ON ROW 6" (FIU 1)
+//
+// Two populations were being reported as one number and neither was named. The
+// rows ABOVE the header are read for the revision, the date and the terms; the
+// `skippedRows` count is rows UNDER it with neither a code nor a description.
+// And the items-start row is the first parsed line's own `lineNo`, never
+// `headerRow + 1`, which lies the moment a blank or a totals row sits under the
+// header — the same class of mistake as the message being replaced.
+// ============================================================================
+describe("describeHeader", () => {
+  // The AP364 shape that produced the complaint: five rows of titles, the
+  // header on 6, the first item on 7.
+  const PANTHER: SheetData = [
+    ["EX364 - Example", null, null, null, null, null],
+    ["TENDER - EXAMPLE PACKAGES", null, null, null, null, null],
+    ["Revision: ", "0", null, null, null, null],
+    ["Date: ", "14-Sep-26", null, null, null, null],
+    ["*All fabrics are COM", null, null, null, null, null],
+    HEADER,
+    ["AAA", "Seating", "X-100", "Sofa", "Model A", 14],
+  ];
+
+  it("names the header row and the row the items actually start on", () => {
+    const staged = one(parseBoqSheets(sheet(PANTHER)));
+    expect(staged.headerRow).toBe(6);
+    expect(staged.lines[0]?.lineNo).toBe(7);
+    expect(describeHeader(staged)).toBe(
+      "Header on row 6. Items start on row 7. 5 rows above the header were read as the phase's notes " +
+        "(revision, date, terms).",
+    );
+  });
+
+  it("says nothing was above a header on row 1", () => {
+    const staged = one(parseBoqSheets(sheet([HEADER, ["AAA", "Seating", "X-100", "Sofa", "Model A", 14]])));
+    expect(describeHeader(staged)).toBe("Header on row 1. Items start on row 2. Nothing above it.");
+  });
+
+  it("reads the items-start row off the first line, not off the header, when a blank row follows it", () => {
+    // `headerRow + 1` would say row 7 here and row 7 is empty. A fully blank
+    // row is in NEITHER count: it is not a note and it is not a spacer with
+    // content, so nothing claims it was passed over.
+    const gap: SheetData = [
+      ["EX364 - Example", null, null, null, null, null],
+      HEADER,
+      [null, null, null, null, null, null],
+      [null, null, null, null, null, null],
+      ["AAA", "Seating", "X-100", "Sofa", "Model A", 14],
+    ];
+    const staged = one(parseBoqSheets(sheet(gap)));
+    expect(staged.skippedRows).toBe(0);
+    expect(describeHeader(staged)).toBe(
+      "Header on row 2. Items start on row 5. 1 row above the header was read as the phase's notes " +
+        "(revision, date, terms).",
+    );
+  });
+
+  it("reports the spacers and totals in their TRUE meaning, and only when there are any", () => {
+    const staged = one(parseBoqSheets(sheet([...TYPICAL, [null, null, null, null, null, 99]])));
+    expect(staged.skippedRows).toBe(1);
+    expect(describeHeader(staged)).toContain(
+      "1 row under the header with no code or description was passed over (spacers or totals).",
+    );
+    // TYPICAL on its own has none, and the sentence is then absent rather than
+    // reading "0 rows … were passed over".
+    expect(describeHeader(one(parseBoqSheets(sheet(TYPICAL))))).not.toContain("passed over");
+  });
+
+  it("degrades honestly for a sheet staged before this sentence existed", () => {
+    // Data from the past: no field was added to the staged JSON, so the only
+    // thing that can be missing is a line number, and it prints as an em dash
+    // rather than falling back to header + 1.
+    expect(describeHeader({ headerRow: 6, skippedRows: 0, lines: [{}] })).toBe(
+      "Header on row 6. Items start on row —. 5 rows above the header were read as the phase's notes " +
+        "(revision, date, terms).",
+    );
+    expect(describeHeader({ headerRow: 6, skippedRows: 0, lines: [] })).toBe(
+      "Header on row 6. No items under it. 5 rows above the header were read as the phase's notes " +
+        "(revision, date, terms).",
+    );
+    expect(describeHeader({})).toBe("The header row was not recorded. No items under it.");
   });
 });
 

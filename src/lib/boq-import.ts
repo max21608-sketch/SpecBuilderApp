@@ -348,6 +348,75 @@ function readRows(
 }
 
 /**
+ * What the reader did with this sheet, in the words a reviewer wants.
+ *
+ * ============================================================================
+ * "ROW 6 WAS SKIPPED, HEADER FOUND ON ROW 6" WAS TRUE AND UNREADABLE.
+ *
+ * The review printed `headerRow` and `skippedRows` side by side as two bare
+ * fragments, and the pair read as a contradiction: the header row was not
+ * skipped, and the rows that WERE skipped are two different populations that
+ * the screen never distinguished.
+ *
+ *   - Rows ABOVE the header are not skipped at all. `readMetadata` reads them
+ *     for the revision, the date and the terms the phase is priced under, and
+ *     keeps everything else verbatim as a note. Saying so is the point: a
+ *     reviewer who believes five rows were thrown away goes looking for them.
+ *   - `skippedRows` counts rows UNDER the header carrying neither a code nor a
+ *     description — spacers and totals — and only the non-blank ones, so a
+ *     blank line between the header and the first item is in neither count.
+ *
+ * AND THE ITEMS-START ROW IS READ, NEVER COMPUTED. `headerRow + 1` is the
+ * obvious arithmetic and it lies on every bill with a blank line or a totals
+ * row under its header — which is the same class of mistake as the message it
+ * replaces. It comes from the FIRST PARSED LINE's own `lineNo`, so it is
+ * whatever the reader actually started at, and it degrades to an em dash
+ * rather than guessing when a staged sheet carries no usable line number.
+ *
+ * Pure and structural on purpose: the staged JSON is data from the past and no
+ * field was added to it, so this renders the same sentence for a bill staged
+ * today and one staged before the sentence existed.
+ * ============================================================================
+ */
+export function describeHeader(sheet: {
+  headerRow?: number;
+  skippedRows?: number;
+  lines?: readonly { lineNo?: number }[];
+}): string {
+  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+  const sentences: string[] = [];
+
+  const headerRow = Number.isFinite(sheet.headerRow) ? Number(sheet.headerRow) : null;
+  sentences.push(headerRow === null ? "The header row was not recorded." : `Header on row ${headerRow}.`);
+
+  const lines = sheet.lines ?? [];
+  const firstLineNo = lines[0]?.lineNo;
+  const firstItemRow = Number.isFinite(firstLineNo) ? Number(firstLineNo) : null;
+  if (lines.length === 0) sentences.push("No items under it.");
+  else sentences.push(`Items start on row ${firstItemRow ?? "—"}.`);
+
+  const above = headerRow === null ? null : headerRow - 1;
+  if (above !== null) {
+    sentences.push(
+      above <= 0
+        ? "Nothing above it."
+        : `${above} ${plural(above, "row", "rows")} above the header ${plural(above, "was", "were")} read as the ` +
+          "phase's notes (revision, date, terms).",
+    );
+  }
+
+  const skipped = Number.isFinite(sheet.skippedRows) ? Number(sheet.skippedRows) : 0;
+  if (skipped > 0) {
+    sentences.push(
+      `${skipped} ${plural(skipped, "row", "rows")} under the header with no code or description ` +
+        `${plural(skipped, "was", "were")} passed over (spacers or totals).`,
+    );
+  }
+
+  return sentences.join(" ");
+}
+
+/**
  * Reads a staged BOQ run's `parsed` column as v2.
  *
  * v1 staged ONE sheet as `{sheet, lines, …}`; migration 0007 rewrote every

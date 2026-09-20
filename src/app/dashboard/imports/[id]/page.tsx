@@ -24,6 +24,9 @@ import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import Tip from "@/components/ui/Tip";
 import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
+// Pure and type-only inside: the parser's own wording for what it did with a
+// sheet, so the screen cannot describe the parse differently from the parser.
+import { describeHeader } from "@/lib/boq-import";
 import { formatDay } from "@/lib/format-day";
 import PageBody from "@/components/ui/PageBody";
 import Tabs from "@/components/ui/Tabs";
@@ -617,11 +620,17 @@ export default function ReviewImportPage() {
                   >
                     {[sheet.metadata?.revision, sheet.metadata?.date].filter(Boolean).join(" · ") || "— none printed —"}
                   </Field>
-                  <Field label="Header found on">
-                    row {sheet.headerRow}
-                    {sheet.skippedRows > 0 ? ` · ${sheet.skippedRows} skipped` : ""}
-                  </Field>
                 </div>
+
+                {/* WHAT THE READER DID WITH THE SHEET, in sentences.
+                    Two bare fragments — "row 6 · 1 skipped" — read as a
+                    contradiction beside each other, and neither said what
+                    happened to the rows above the header. `describeHeader` is
+                    the single wording, so the screen cannot describe the parse
+                    differently from the parser. Printed, not a Tip: a reviewer
+                    who never hovers must not be left believing five rows were
+                    thrown away. */}
+                <p className="mt-3 text-xs text-neutral-500">{describeHeader(sheet)}</p>
 
                 {/* IS THIS A NEW RUN, OR A REVISION OF ONE?
                     Never chosen automatically. A revised bill that silently
