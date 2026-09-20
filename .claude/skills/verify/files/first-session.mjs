@@ -383,7 +383,18 @@ try {
     return "phase throughout";
   });
 
-  skip("1.2", "the header says what this screen is for and what happens on confirm", "not on staging yet");
+  await check("1.2", "the header-row message names the right row, in words", async () => {
+    const text = await page.locator("body").innerText();
+    const header = /Header on row (\d+)\./.exec(text);
+    expect(header, "the review does not say which row the header was found on");
+    const items = /Items start on row (\d+)/.exec(text);
+    expect(items, "the review does not say which row the items start on");
+    expect(Number(items[1]) > Number(header[1]), `items start on row ${items[1]}, at or above the header on ${header[1]}`);
+    // Rows above the header are READ, for the revision and the date. Calling
+    // them skipped is what sent somebody looking for a lost line.
+    expect(!/\bskipped\b/i.test(text), "the review still calls the rows above the header skipped");
+    return `${header[0]} ${items[0]}`;
+  });
   skip("1.5", "PACK and DEL are suggested as non-furniture and can be ignored in one press", "not briefed in this stage");
 
   await check("7.4", "confirm creates a record per line per phase", async () => {
@@ -617,8 +628,37 @@ try {
     return `${phases.rows.length} phases, none called a run`;
   });
 
-  skip("1.11", "the primary action is the next step in the workflow", "not on staging yet");
-  skip("1.12", "the to-quote cell discloses which fields are missing", "not on staging yet");
+  await check("1.11", "the screen's primary action IS the next step", async () => {
+    // `nextStep` decides it once and every screen renders the same answer, so
+    // the assertion is that the project's header band carries one of its
+    // labels — not a sentence telling somebody where to go.
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}`, 2500);
+    const header = await page.locator("header, body").first().innerText();
+    // EVERY label `nextStep` can produce. Written out rather than matched
+    // loosely, because a loose pattern that happened to match a heading would
+    // pass on a screen with no primary at all — which is the thing being
+    // asserted. Keep it in step with `src/lib/next-step.ts`.
+    const step =
+      /Upload the pack|Reading \d+ documents?…|Retry the failed read|Retry \d+ failed reads|Review the bill|Review the document|Review \d+ documents|Categorise \d+ items?|Review \d+ items?|\d+ questions? waiting on a reply|Export/.exec(
+        header,
+      );
+    expect(step, "no next-step primary on the project screen");
+    return step[0];
+  });
+  await check("1.12", "the to-quote cell DISCLOSES what is missing, rather than linking away", async () => {
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}?tab=${firstPhase.id}`, 2500);
+    const disclosure = page.locator("[aria-expanded]").first();
+    expect(await disclosure.count(), "nothing on the phase table expands");
+    const before = (await page.locator("body").innerText()).length;
+    await disclosure.click();
+    await page.waitForTimeout(1200);
+    const after = await page.locator("body").innerText();
+    expect(after.length > before, "the cell expanded and showed nothing");
+    // The list is of QUESTIONS on that record, so it names fields rather than
+    // repeating the count.
+    expect(/[A-Za-z]{4,}/.test(after.slice(before)), "the expansion carries no field names");
+    return `expanded, ${after.length - before} more characters of questions`;
+  });
 
   // =========================================================================
   // 8. The record.
@@ -637,9 +677,41 @@ try {
   await page.getByRole("tab").first().waitFor({ timeout: 60000 }).catch(() => {});
   await page.waitForTimeout(1500);
 
-  skip("1.13", "a confirmed value can be corrected from beside the value", "not on staging yet");
-  skip("1.3", "no ordinal is shown where the app has no ordinal to show", "not on staging yet");
-  skip("1.4", "the two counts are explained in one sentence", "not on staging yet");
+  skip("1.13", "a confirmed value can be corrected from beside the value", "its migration-dependent checks are still under review");
+
+  await check("1.3", "the BWS ordinal is not printed beside a field name", async () => {
+    // `1 · COM 1` cost ninety seconds and a wrong guess. The id is the export's
+    // key and belongs in a tip, never inline; the field NAME stays, because
+    // that is the word BWS shows him.
+    for (const tab of ["Checklist", "Gates"]) {
+      const control = page.getByRole("tab", { name: new RegExp(tab, "i") }).first();
+      if ((await control.count()) === 0) continue;
+      await control.click();
+      await page.waitForTimeout(1500);
+      const text = await page.locator("body").innerText();
+      const bare = /(?:^|\n)\s*\d+\s+·/.exec(text) ?? /\bBWS \d+\s*·/.exec(text);
+      expect(!bare, `the ${tab.toLowerCase()} tab still prints an ordinal: ${bare?.[0]}`);
+      expect(!/BWS null/.test(text), `the ${tab.toLowerCase()} tab prints "BWS null" for a question with no id`);
+    }
+    return "no ordinal on the checklist or the gates tab";
+  });
+
+  await check("1.4", "two counts that differ are explained in the same breath", async () => {
+    const text = await page.locator("body").innerText();
+    const outstanding = /(\d+) outstanding at TGQ/.exec(text);
+    if (!outstanding) return "this record has no TGQ reading — the sentence has nothing to explain";
+    // "5 outstanding at TGQ · 4 to chase, 1 you record here". The qualifier is
+    // omitted where the difference is zero, which is the variance case.
+    const chase = /(\d+) to chase/.exec(text);
+    expect(chase, `"${outstanding[0]}" is printed with no chase count beside it`);
+    const self = /(\d+) you record here/.exec(text);
+    const difference = Number(outstanding[1]) - Number(chase[1]);
+    expect(
+      difference === 0 ? !self : self && Number(self[1]) === difference,
+      `the counts differ by ${difference} and the sentence says ${self?.[0] ?? "nothing"}`,
+    );
+    return `${outstanding[0]} · ${chase[0]}${self ? `, ${self[0]}` : ""}`;
+  });
 
   await check("7.4", "the record opens, names the item and shows what the drawing said", async () => {
     const text = await page.locator("body").innerText();
