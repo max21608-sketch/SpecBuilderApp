@@ -2050,6 +2050,29 @@ the 300-line fixture (the verifier, in progress), the pilot's console half
 (Max), and the hand-over message (Max, §0.6). Migration 0033 is applied to
 the sandbox and NOT yet to pilot — it goes on the promotion checklist.
 
+**Stage 1a CLOSED on `staging`, 2026-09-20.** Against the plan's own close
+line — "its ten items meet §7.1, the walkthrough script runs clean on staging
+and then on pilot, `CLAUDE.md` says phase and carries the correction verb, and
+Matthew has the link" — three of four are done and the fourth is Max's:
+
+| §7.1 row | Evidence |
+|---|---|
+| Built · Tested | ten items, 1,412 tests green with the database tier REQUIRED at `f888e1e`; every diff reviewed against §2.3 before its checks; three items came back from review with a real finding (1.4's cause, 1.13's finish fixture, the null-state crash) and none was accepted until fixed |
+| Variance | every case named in the items is tested or driven; the per-item lines are in `docs/plans/README.md`, 2026-09-20 |
+| Findable | projects list → project → primary → item → Checklist is four presses on AP364c, pressing the primary each time (1.11); the first-session script presses them too |
+| Simplest | each brief named the simplest version and the trap; the two places complexity was kept are recorded as decisions for Max — the two chase counts stay two numbers, and the correction is a supersession |
+| Looks right | nine screens screenshotted at 1920×1080 and 1440×900 on the `3b6d9db` deployment: no horizontal overflow, the chip on every screen, one primary per band after `9b626eb`; the 300-line fixture DEMO-300 exists and its overview renders in 10.4s — recorded as open, not fixed |
+| Failure path | the 409 on a stale answer PATCH reaches the screen with nothing written (the script's step 10, run against the deployment); the checklist deep link that crashed was found and fixed |
+| Deployed | `3b6d9db` (1a complete) and `b76cfb0` (1b's drawings items) on `spec-builder-app-rho.vercel.app`, each SHA read back from `/api/auth/me` and the flow driven on it |
+| Recorded | `README.md` per item; `found-in-use.md` findings 1, 7, 9, 11, 12, 13, 14, 15 FIXED with commits; `CLAUDE.md` says phase and carries the correction verb |
+| Accepted | **outstanding on every item**, until Matthew or Max has driven it |
+
+**The first-session script, run against the `b76cfb0` deployment on 2026-09-20: `PASS 20 · FAIL 0 · SKIP 8`** — the eight skipped are 1.13 (its assertion is written and waits to be turned on), 1.15 (on staging since `b76cfb0`, the script's skip is stale), 1.5/1.6/1.7 (1b, in progress), 1.9/1.10 (a clone has no page preview, by design) and the 409 row-unfreeze half that needs 1.13's control. Turning 1.13 and 1.15 on is a small edit to the script, queued.
+
+**Not done, and not this repo's to do:** the promotion to pilot (migration
+0033 first, then the fast-forward, by `docs/environments.md`'s checklist),
+the first-session script run on pilot, and the 0.6 message with the link.
+
 ### Stage 1b brief — opened 2026-09-20
 
 Max, 2026-09-20: *"keep going until you have completed the whole of stage
