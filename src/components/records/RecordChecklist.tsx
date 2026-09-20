@@ -473,9 +473,24 @@ export default function RecordChecklist({
                       {answer.json_id !== null && FIELD_TIPS[answer.json_id] && (
                         <Tip>{FIELD_TIPS[answer.json_id]!}</Tip>
                       )}
+                      {/* THE BWS ID IS OURS, AND IT IS NOT A LABEL.
+                          `1 · COM 1` and a bare `3 ·` cost Matthew ninety
+                          seconds and a wrong guess on 2026-09-18: the number is
+                          the export's key, useful to us and meaningless to the
+                          person answering the question. It moves onto the
+                          title, where an editor debugging an export cell can
+                          still reach it without opening the database, and the
+                          NAME stays, because that is the word BWS shows him.
+                          A readiness question has no id and prints nothing
+                          extra — never "BWS null" and never "BWS field —".
+                          Field 3 carries its id inside `FIELD_TIPS` already,
+                          so no row grows a second `?`. */}
                       {answer.field_name && (
-                        <span className="mt-0.5 block text-[11px] text-neutral-400">
-                          BWS {answer.json_id} · {answer.field_name.trim()}
+                        <span
+                          title={answer.json_id !== null ? `BWS field ${answer.json_id}` : undefined}
+                          className="mt-0.5 block text-[11px] text-neutral-400"
+                        >
+                          {answer.field_name.trim()}
                         </span>
                       )}
                     </span>

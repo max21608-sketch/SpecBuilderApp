@@ -202,9 +202,13 @@ export default function AddSpec({
               className="mt-1 block w-56 border border-neutral-300 rounded px-2 py-1 text-sm"
             >
               <option value="">— no BWS field —</option>
+              {/* The NAME only. The `json_id` is the export's key, not a
+                  label: it read as "COM 1 (1)" here, which is a number nobody
+                  picking a field has any use for. It stays reachable on the
+                  option's own title. */}
               {specFields.map((field) => (
-                <option key={field.id} value={field.id}>
-                  {field.name.trim()} ({field.json_id})
+                <option key={field.id} value={field.id} title={`BWS field ${field.json_id}`}>
+                  {field.name.trim()}
                 </option>
               ))}
             </select>

@@ -224,6 +224,13 @@ Collected from CLAUDE.md so they are in one place. Each has bitten once.
   the review card colours it", and the card's test pins its palette.
 - **No "Columns" chooser** on the spec table. One button in the mock-up, no
   behaviour; a real feature, still open.
+- **No BWS ordinal anywhere it can be read as a label** (2026-09-19, FIU 9).
+  The mock-up's gate table draws a `BWS id` column and the checklist row would
+  carry `BWS 3 · Dimensions`; on the real screen those render as `1 · COM 1`
+  and a bare `3 ·`, and Matthew spent ninety seconds and a wrong guess on one.
+  The id is the export's key and is real, so it is on the field name's `title`
+  and nowhere else. The field NAME stays, because that is the word BWS shows
+  him.
 - **No per-spec tick boxes on the email review.** The confirm route takes ONE
   record and all of its pending proposals and refuses a subset, and a row's
   phases are shared with other rows — a per-row tick cannot become a

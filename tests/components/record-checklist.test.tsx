@@ -150,4 +150,29 @@ describe("the record checklist", () => {
     renderChecklist({ answers: [] });
     expect(screen.getByText(/No checklist yet/)).toBeInTheDocument();
   });
+
+  // FIU 9. The row printed `BWS 1 · COM 1`, and on a row whose field had no
+  // name, a bare `3 ·`. The ordinal is the export's key and means nothing to
+  // the person answering the question.
+  it("prints the BWS field NAME and never its ordinal, keeping the ordinal on hover", () => {
+    renderChecklist({
+      readiness: { ...READINESS, toQuote: 0 },
+      answers: [answer({ requirement_id: "q9", prompt: "Main fabric", json_id: 1, field_name: "COM 1 " })],
+    });
+    expect(screen.getByText("COM 1")).toBeInTheDocument();
+    expect(screen.queryByText(/BWS 1/)).not.toBeInTheDocument();
+    expect(screen.queryByText("1 · COM 1")).not.toBeInTheDocument();
+    expect(screen.getByTitle("BWS field 1")).toHaveTextContent("COM 1");
+  });
+
+  it("prints nothing extra for a readiness question, which has no BWS field at all", () => {
+    renderChecklist({
+      readiness: { ...READINESS, toQuote: 0 },
+      answers: [answer({ requirement_id: "q10", prompt: "Headboard fitted?", local_key: "headboard_fitted" })],
+    });
+    expect(screen.getByText("Headboard fitted?")).toBeInTheDocument();
+    // Never "BWS null" and never a naked separator.
+    expect(screen.queryByText(/BWS/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/BWS field/)).not.toBeInTheDocument();
+  });
 });

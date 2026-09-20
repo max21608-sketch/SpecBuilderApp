@@ -360,8 +360,11 @@ export default function GatePanel({
           <Table scroll>
             <thead>
               <tr>
+                {/* NO `BWS id` COLUMN. The mock-up draws one and it is a
+                    deliberate departure (see docs/design-language.md): a
+                    column of bare ordinals beside the field names is where
+                    `3 ·` came from, and the id is on each name's title. */}
                 <Th>Field</Th>
-                <Th>BWS id</Th>
                 <Th>Gates</Th>
                 <Th>How it arrives</Th>
                 <Th>Palette</Th>
@@ -378,19 +381,18 @@ export default function GatePanel({
                 return (
                   <Tr key={field.matrixRow}>
                     <Td>
-                      {question ? (
-                        <Link href={`?tab=checklist#q-${question.requirement_id}`} className="underline">
-                          {field.fieldName}
-                        </Link>
-                      ) : (
-                        field.fieldName
-                      )}
+                      <span title={field.jsonId !== null ? `BWS field ${field.jsonId}` : undefined}>
+                        {question ? (
+                          <Link href={`?tab=checklist#q-${question.requirement_id}`} className="underline">
+                            {field.fieldName}
+                          </Link>
+                        ) : (
+                          field.fieldName
+                        )}
+                      </span>
                       {field.dimensionSlot && (
                         <span className="ml-1 text-[11px] text-neutral-400">({field.dimensionSlot})</span>
                       )}
-                    </Td>
-                    <Td mono muted>
-                      {field.jsonId ?? "—"}
                     </Td>
                     <Td>
                       <Chip tone={field.gate === "TGQ" ? "danger" : "plain"}>{field.gate}</Chip>

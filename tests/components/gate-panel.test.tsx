@@ -170,4 +170,18 @@ describe("the gate panel", () => {
     // An id-less row of his matrix has no home in this app, and says so.
     expect(screen.getByText("No home")).toBeInTheDocument();
   });
+
+  // FIU 9: `1 · COM 1` and a bare `3 ·` cost Matthew ninety seconds and a
+  // wrong guess. The ordinal is the export's key, not a label.
+  it("prints no bare BWS ordinal in the matrix table, and keeps it on the field's title", async () => {
+    renderPanel();
+    await userEvent.click(screen.getByRole("button", { name: /Why these questions/ }));
+    expect(screen.queryByText("BWS id")).not.toBeInTheDocument();
+    // Dimensions is row 3 of the matrix and there is no cell reading "3".
+    for (const id of ["3", "24", "50"]) expect(screen.queryByText(id)).not.toBeInTheDocument();
+    // Still reachable: the name carries it for an editor chasing an export cell.
+    expect(screen.getAllByTitle("BWS field 3").length).toBeGreaterThan(0);
+    // An id-less row carries no title at all — never "BWS field —".
+    expect(screen.queryByTitle(/BWS field (—|null|undefined)/)).not.toBeInTheDocument();
+  });
 });
