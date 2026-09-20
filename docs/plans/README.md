@@ -21,6 +21,43 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-20 — Stage 1a, the first six items land
+
+Stage 1a of `make-it-work-2026-09-19.md` opened on 2026-09-19 (its stage brief
+is appended to that file). Two Opus coders in worktrees, Fable reviewing each
+diff against §2.3, running the four checks with the database tier REQUIRED,
+cherry-picking onto `staging`, and driving the result in a browser before
+pushing. Each item's §7.1 evidence, as facts:
+
+| Item | Commit | Built · Tested | Verified in the app | Deployed |
+|---|---|---|---|---|
+| **1.1** run → phase, every screen and doc | `e8e2a47` + `d721102` (the sheet headings and the `src/lib` messages the guard cannot see) | lexical guard `tests/lib/vocabulary-guard.test.ts` parses the screen sources with the TypeScript parser; 1,285 → 1,309 green | every dashboard screen walked at 1920×1080: the only "run" left on screen is the client's own tab name `MAIN RUN` | `94e9e4b` on staging, chip STAGING, "Add a phase" on the deployed overview |
+| **1.8** `TBC – <fabric>` is a state | `d853976` | 17 pure tests + 1 export test; a colon binds a LEADING marker only (found by `SUPPLIER: TO BID`) | the staged S-100 card reads `Yarn Collective Tessarae YC04158 - 01` with state TBC and "drawing said: TBC – …" beneath — no re-read, nothing charged | `94e9e4b` |
+| **1.14** chase preselects the TGQ set | `1fcc506` | `chase-selection.ts`, 11 pure + 4 component tests | demo project, Priya Raman: Draft the email · 70, footer "70 to-quote questions preselected · 113 also outstanding"; the one to-quote question not ticked is awaiting a reply (observation in `found-in-use.md`) | `94e9e4b` |
+| **1.2** the header-row sentence | `cbfd614` | `describeHeader`, 5 pure tests; items-start row read off the first parsed line, never header + 1 | the real Panther bill: "Header on row 6. Items start on row 7. 5 rows above the header were read as the phase's notes" | `0926a88` pushed; deployment check below |
+| **1.3** the ordinal off the screen | `9cd7105` | 4 component tests; the gate board's `BWS id` column is a recorded mock-up deviation | the record that showed `1 · COM 1` shows the name only, id on the title | `0926a88` pushed |
+| `/api/auth/me` names its commit | `94e9e4b` | — | `commit: 94e9e4b…` read back from staging | the one orchestrator one-liner, so a deployment can be confirmed for a SHA without the Vercel console |
+
+**Two decisions taken by Fable that Max should overrule if wrong:**
+
+- **1.8's TBC state is not painted amber on the drawings card.** The plan's DoD
+  said "amber TBC beside it"; on that screen amber means *needs a person*, and
+  a recorded TBC is decided. The state select reads TBC in the neutral tone.
+- **1.4 will count CHASEABLE questions on the header button.** Coder A stopped
+  1.4 with a finding: the plan's hypothesis (Spec notes causes the ±1) is
+  wrong — `spec_notes` has no requirement row at all, readiness questions are
+  in BOTH numbers today, and the real gap is fields vs questions (four
+  dimension slots against one Dimensions question). Ruling: the two numbers
+  stay two numbers, each labelled by what it counts; the header button gains
+  `toChase` (to-quote spec-field questions, what the chase screen will tick
+  since 1.14) beside the unchanged `toQuote`; the gate panel's own button loses
+  its number. In progress.
+
+**Still outstanding in 1a:** 1.4 (in progress), 1.11, 1.12, 1.13 (Workstream
+C, next), the first-session script and the 300-line fixture (the verifier, in
+progress), the pilot's console half (Max), the hand-over message (Max). Human
+acceptance outstanding on every item.
+
 ## 2026-09-18 — the catchup, and the first time anybody else watched it run
 
 Max demonstrated the whole app end to end to Matthew, Sebastian, Steve and Tony
