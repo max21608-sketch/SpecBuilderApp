@@ -206,7 +206,11 @@ Grouped because each is a line or two, not because they are one problem.
 1. **The header-row message names the wrong row.** The BOQ review said *"row 6
    was skipped, header found on row 6"*. Matthew opened the workbook: products
    start at row 7. The message is about the header and reads as an error about
-   the data. (12:39)
+   the data. (12:39) **FIXED 2026-09-20, `bd4a1a4`**
+   (Stage 1a item 1.2): the review now prints "Header on row 6. Items start on
+   row 7. 5 rows above the header were read as the phase's notes (revision,
+   date, terms)." — the items-start row read off the first parsed line, never
+   header + 1. Verified on the sandbox against the real Panther bill.
 2. **Packaging and delivery came through as records.** `PACK` and `DEL` lines
    became furniture. Matthew confirmed outright they should not be there. Max:
    *"probably a good test — how easy is it to ignore?"* Today it is a per-row
@@ -247,7 +251,12 @@ Grouped because each is a line or two, not because they are one problem.
    fabric, `3 ·` beside dimensions. Matthew spent about ninety seconds working
    out whether the number was a BWS reference — including a wrong guess,
    *"it's the reference for the JSON file"* — before Max said *"that's just an
-   internal app thing… I'll get it to hide it."* (36:43)
+   internal app thing… I'll get it to hide it."* (36:43) **FIXED 2026-09-20,
+   `9cd7105`** (Stage 1a item 1.3): the field NAME stays and the id moves onto
+   the element's title, on the checklist, the Add-a-spec list and the gate
+   board (whose `BWS id` column is gone — a recorded deviation from the
+   mock-up). A readiness question prints nothing extra. Verified on the
+   sandbox record that showed `1 · COM 1`.
 10. **Project-level questions are asked inside every item's checklist.** TOE
     agreement, sales folder and similar appear on each furniture line. Matthew:
     *"you do that once for the project presumably?"* (40:22)
