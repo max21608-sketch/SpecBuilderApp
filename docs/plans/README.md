@@ -80,6 +80,17 @@ Max's: apply 0033 to pilot, promote by the checklist, run the script on pilot,
 send the 0.6 message. The close's per-row evidence is in the plan's stage
 brief.
 
+**Promoted to pilot, 2026-09-20 13:15, at Max's instruction ("apply to
+pilot").** Steps 1–3 of `docs/environments.md`'s checklist, done by Fable:
+pilot backed up (`spec-builder-pilot-2026-09-20T13-11-40-147Z.sql`, outside
+the repo), `0033_attribute_correct.sql` applied to the pilot host
+(`ep-long-recipe…`, "Applied 1 migration(s); 32 already present"; the ledger
+reads 33), and `pilot` fast-forwarded `ded4dcf` → `da863b7`, the SHA verified
+on the staging deployment. Steps 4–8 — a deployment for that SHA, Ready,
+`/api/auth/me` reporting `pilot`/`pilot` and `commit: da863b7…`, the PILOT
+chip, the first-session script on pilot — are Max's, at his request not
+probed from here. The pilot database holds seeds and two logins, no projects.
+
 **Still outstanding in 1a (Max's):** the first-session script and the 300-line fixture (the verifier, in
 progress), the pilot's console half (Max), the hand-over message (Max). Human
 acceptance outstanding on every item.
