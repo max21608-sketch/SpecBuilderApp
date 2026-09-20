@@ -46,6 +46,7 @@ import {
   type ItemLevel,
 } from "@/lib/spec-vocab";
 import { questionTierOrNull, TIER_LABELS } from "@/lib/tgq";
+import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 import { formatDay } from "@/lib/format-day";
 import type { Palette } from "@/lib/palettes";
 import type { Gate, GateField } from "@/lib/gates";
@@ -198,6 +199,21 @@ export default function RecordChecklist({
         : null,
   );
   const [search, setSearch] = useState("");
+  // THE FOLD OPENS FOR A DEEP LINK. A `#q-<id>` from the gates tab, a chase or
+  // a search names one question, and a link that lands on a screen the
+  // question is not on is the defect `found-in-use.md` already records once
+  // (2026-09-20, a question with no answer row rendering nothing). Decided in
+  // the initial state rather than in an effect so the row exists on the first
+  // render, which is what the scroll effect below is waiting for.
+  const [projectWideOpen, setProjectWideOpen] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.location.hash.startsWith("#q-") &&
+      answers.some(
+        (answer) =>
+          answer.section === PROJECT_WIDE_SECTION && `#q-${answer.requirement_id}` === window.location.hash,
+      ),
+  );
   // The rows render after the payload, so the browser's own hash scroll has
   // already happened by the time the target exists.
   const scrolled = useRef(false);
@@ -333,6 +349,21 @@ export default function RecordChecklist({
     map.set(key, (map.get(key) ?? 0) + 1);
     return map;
   }, new Map());
+  // The project-wide section goes LAST, however the cheat sheet ordered it:
+  // the questions about the item in front of you are the reason the tab was
+  // opened. A category that does not ask them drops out here and no fold is
+  // drawn — an empty "Project-wide" box would be a promise of questions that
+  // do not exist.
+  const orderedSections = [...sections.entries()].sort(
+    (a, b) => Number(a[0] === PROJECT_WIDE_SECTION) - Number(b[0] === PROJECT_WIDE_SECTION),
+  );
+  // THE COUNT ON THE TOGGLE IS THE SECTION'S OWN, whatever the filter hides —
+  // the chase screen's rule, and the whole safeguard here. A closed fold with
+  // no number on it is how an outstanding question that blocks a price stops
+  // being seen at all.
+  const projectWideOutstanding = answers.filter(
+    (answer) => answer.section === PROJECT_WIDE_SECTION && isOutstanding(answer.state),
+  ).length;
 
   if (answers.length === 0) {
     return (
@@ -426,17 +457,40 @@ export default function RecordChecklist({
         </Note>
       )}
 
-      {[...sections.entries()].map(([section, rows]) => (
+      {orderedSections.map(([section, rows]) => {
+      const projectWide = section === PROJECT_WIDE_SECTION;
+      return (
         <Card
           key={section}
-          title={section}
+          title={projectWide ? "Project-wide — the same answer applies to every item" : section}
           actions={
-            <CardHeadingNote>
-              {rows.length} of {sectionTotals.get(section) ?? rows.length} here
-            </CardHeadingNote>
+            projectWide ? (
+              <Button
+                variant="quiet"
+                size="xs"
+                aria-expanded={projectWideOpen}
+                onClick={() => setProjectWideOpen(!projectWideOpen)}
+              >
+                <CardHeadingNote>
+                  {projectWideOutstanding} outstanding · {rows.length} of {sectionTotals.get(section) ?? rows.length}{" "}
+                  here
+                </CardHeadingNote>
+                <span className="ml-2 normal-case tracking-normal">{projectWideOpen ? "hide" : "show"}</span>
+              </Button>
+            ) : (
+              <CardHeadingNote>
+                {rows.length} of {sectionTotals.get(section) ?? rows.length} here
+              </CardHeadingNote>
+            )
           }
           flush
         >
+          {projectWide && !projectWideOpen ? (
+            <p className="px-4 py-3 text-[12.5px] text-neutral-500">
+              The same answer applies to every item on this project. Nothing about the data has changed — these
+              questions are still asked of this record and still counted in the tiles above.
+            </p>
+          ) : (
           <div>
             <div className={`${ROW_GRID} hidden border-b border-neutral-200 bg-[#fcfcfc] min-[760px]:grid`}>
               <div className="px-4 py-2 text-th font-semibold uppercase tracking-wider text-neutral-500">Question</div>
@@ -568,8 +622,10 @@ export default function RecordChecklist({
               );
             })}
           </div>
+          )}
         </Card>
-      ))}
+      );
+      })}
     </>
   );
 }

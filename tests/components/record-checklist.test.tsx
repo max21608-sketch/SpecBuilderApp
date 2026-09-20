@@ -165,6 +165,64 @@ describe("the record checklist", () => {
     expect(screen.getByTitle("BWS field 1")).toHaveTextContent("COM 1");
   });
 
+  // ---- 2.8 step 1: the project-wide section, folded ------------------------
+  //
+  // Matthew: *"you do that once for the project presumably?"* Nothing about
+  // the data changes — the questions are still asked of this record and still
+  // counted in the tiles. What changes is that they are not the first thing on
+  // the tab.
+  const WITH_PROJECT_WIDE: ChecklistAnswer[] = [
+    answer({ requirement_id: "p1", prompt: "TOE agreement", section: "Project / commercial", state: "missing" }),
+    answer({ requirement_id: "p2", prompt: "Sales folder", section: "Project / commercial", state: "confirmed", value: "Set" }),
+    answer({ requirement_id: "i1", prompt: "Seat height", section: "Dimensions and construction", state: "missing" }),
+  ];
+
+  it("folds the project-wide section, last and closed, with its outstanding count on the toggle", () => {
+    renderChecklist({
+      answers: WITH_PROJECT_WIDE,
+      readiness: { ...READINESS, toQuote: 0, alsoOutstanding: 2, outstanding: 2, settled: 1, notApplicable: 0 },
+    });
+    expect(screen.getByText("Project-wide — the same answer applies to every item")).toBeInTheDocument();
+    // Closed: the rows inside are not on the page.
+    expect(screen.queryByText("TOE agreement")).not.toBeInTheDocument();
+    expect(screen.getByText("Seat height")).toBeInTheDocument();
+    // THE COUNT IS ON THE TOGGLE. A closed fold with no number on it is how an
+    // outstanding question stops being seen at all.
+    expect(screen.getByText(/1 outstanding · 2 of 2 here/)).toBeInTheDocument();
+    // And it is the LAST card on the tab.
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((node) => node.textContent ?? "");
+    expect(headings[headings.length - 1]).toContain("Project-wide");
+  });
+
+  it("opens the fold on a click, leaving everything else where it was", async () => {
+    renderChecklist({
+      answers: WITH_PROJECT_WIDE,
+      readiness: { ...READINESS, toQuote: 0, alsoOutstanding: 2, outstanding: 2, settled: 1, notApplicable: 0 },
+    });
+    await userEvent.click(screen.getByRole("button", { name: /1 outstanding/ }));
+    expect(screen.getByText("TOE agreement")).toBeInTheDocument();
+    expect(screen.getByText("Sales folder")).toBeInTheDocument();
+    expect(screen.getByText("Seat height")).toBeInTheDocument();
+  });
+
+  it("draws no fold at all for a category that asks nothing project-wide", () => {
+    renderChecklist({ readiness: { ...READINESS, toQuote: 0 } });
+    expect(screen.queryByText(/Project-wide/)).not.toBeInTheDocument();
+  });
+
+  it("reads 0 outstanding, and stays closed, once every project-wide question is settled", () => {
+    renderChecklist({
+      answers: [
+        answer({ requirement_id: "p1", prompt: "TOE agreement", section: "Project / commercial", state: "confirmed", value: "Signed" }),
+        answer({ requirement_id: "p2", prompt: "Sales folder", section: "Project / commercial", state: "na" }),
+        answer({ requirement_id: "i1", prompt: "Seat height", section: "Dimensions and construction", state: "missing" }),
+      ],
+      readiness: { ...READINESS, toQuote: 0, alsoOutstanding: 1, outstanding: 1, settled: 1, notApplicable: 1 },
+    });
+    expect(screen.getByText(/0 outstanding · 2 of 2 here/)).toBeInTheDocument();
+    expect(screen.queryByText("TOE agreement")).not.toBeInTheDocument();
+  });
+
   it("prints nothing extra for a readiness question, which has no BWS field at all", () => {
     renderChecklist({
       readiness: { ...READINESS, toQuote: 0 },
@@ -248,6 +306,37 @@ describe("the checklist reached by an anchor", () => {
 
   // A STATE THE MAP DOES NOT HOLD IS PLAIN, NEVER A THROW. `intakeStatusTone`'s
   // rule, and the one that survives whatever a future payload does.
+  // A DEEP LINK INTO THE FOLD OPENS IT. The gates tab, the phase table's
+  // disclosure and the chase screen all link to one question by its anchor,
+  // and four of Matthew's matrix rows live in the project-wide section — a
+  // link that landed on a closed fold would look like a link to nothing.
+  it("opens the project-wide fold when the anchor names a question inside it", () => {
+    window.location.hash = "#q-p1";
+    renderChecklist({
+      answers: [
+        answer({ requirement_id: "p1", prompt: "TOE agreement", section: "Project / commercial", state: "missing" }),
+        answer({ requirement_id: "i1", prompt: "Seat height", section: "Dimensions and construction", state: "missing" }),
+      ],
+      readiness: { ...READINESS, toQuote: 0, alsoOutstanding: 2, outstanding: 2, settled: 0, notApplicable: 0 },
+    });
+    const target = document.getElementById("q-p1");
+    expect(target).not.toBeNull();
+    expect(within(target as HTMLElement).getByText("TOE agreement")).toBeInTheDocument();
+  });
+
+  it("leaves the fold closed for an anchor that names a question outside it", () => {
+    window.location.hash = "#q-i1";
+    renderChecklist({
+      answers: [
+        answer({ requirement_id: "p1", prompt: "TOE agreement", section: "Project / commercial", state: "missing" }),
+        answer({ requirement_id: "i1", prompt: "Seat height", section: "Dimensions and construction", state: "missing" }),
+      ],
+      readiness: { ...READINESS, toQuote: 0, alsoOutstanding: 2, outstanding: 2, settled: 0, notApplicable: 0 },
+    });
+    expect(screen.getByText("Seat height")).toBeInTheDocument();
+    expect(screen.queryByText("TOE agreement")).not.toBeInTheDocument();
+  });
+
   it("colours a state it has never seen as plain rather than going white", () => {
     window.location.hash = "#q-s6";
     expect(() =>
