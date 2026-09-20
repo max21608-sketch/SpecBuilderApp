@@ -92,7 +92,10 @@ describe("the record's versions", () => {
     // A diff that hides the unchanged fields entirely cannot prove nothing
     // else moved.
     render(<RecordHistory recordId="r1" projectId="p1" />);
-    const toggle = await screen.findByRole("button", { name: /unchanged — show them/ });
+    // 10s, not the 1s default: under a full concurrent run this took over a
+    // second three times on 2026-09-19/20 and passed alone every time
+    // (found-in-use.md). A longer wait is the honest fix; a retry is not.
+    const toggle = await screen.findByRole("button", { name: /unchanged — show them/ }, { timeout: 10_000 });
     expect(screen.queryByText("COM 1")).not.toBeInTheDocument();
     await userEvent.click(toggle);
     expect(screen.getByText("COM 1")).toBeInTheDocument();
