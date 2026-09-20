@@ -175,6 +175,73 @@ describe("groupByContact", () => {
   });
 });
 
+// ===========================================================================
+// A CHASE NEED NOT BE EXTERNAL
+//
+// Matthew, 2026-09-18: "You can send it to the CAM or to the sales system or
+// to production… It doesn't have to be an external e-mail." A colleague is not
+// on a bill line and carries no designer code, so routing them the way a
+// designer is routed would leave every one of them with an empty chase.
+// ===========================================================================
+describe("groupByContact — a colleague", () => {
+  const colleague = (overrides: Partial<ProjectContact> = {}) =>
+    contact({ id: "c-cam", name: "Ana Whitcombe", role: "internal", designerCode: null, ...overrides });
+
+  it("receives every outstanding question on the project, whoever the designer is", () => {
+    const { groups } = groupByContact(
+      [
+        question(),
+        question({ recordId: "rec-2", requirementId: "req-2", designer: "TA" }),
+        question({ recordId: "rec-3", requirementId: "req-3", designer: null }),
+      ],
+      [contact(), colleague()],
+    );
+    const internal = groups.find((g) => g.contact.id === "c-cam");
+    expect(internal?.questions).toHaveLength(3);
+    // The designer still receives only the lines carrying their own code.
+    expect(groups.find((g) => g.contact.id === "c-lcs")?.questions).toHaveLength(1);
+  });
+
+  it("still needs a level, because the email could not say what blocks the quote", () => {
+    const { groups, blocked } = groupByContact(
+      [question({ level: null, tier: null })],
+      [contact(), colleague()],
+    );
+    expect(groups.find((g) => g.contact.id === "c-cam")).toBeUndefined();
+    expect(blocked[0]?.reason).toBe("no level on the record");
+  });
+
+  it("does not empty the blocked list — a colleague being askable is not a designer", () => {
+    // The Nobody assigned tab is about the DESIGNER routing. Hiding 31
+    // unrouted questions behind a colleague's availability would lose the one
+    // screen that says a bill line has nobody on it.
+    const { blocked } = groupByContact([question({ designer: null })], [colleague()]);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]?.reason).toBe("no designer on the record");
+  });
+
+  it("sorts colleagues after the designers", () => {
+    const { groups } = groupByContact(
+      [question(), question({ recordId: "rec-2", requirementId: "req-2", designer: "TA" })],
+      [colleague({ name: "Ana Whitcombe" }), contact(), contact({ id: "c-ta", name: "Tristan Auer", designerCode: "TA" })],
+    );
+    expect(groups.map((g) => g.contact.name)).toEqual([
+      "Lecoadic Scotto",
+      "Tristan Auer",
+      "Ana Whitcombe",
+    ]);
+  });
+
+  it("lists a question once for a colleague who also carries a designer code", () => {
+    const { groups } = groupByContact(
+      [question()],
+      [colleague({ designerCode: "LCS" })],
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.questions).toHaveLength(1);
+  });
+});
+
 describe("coverageStaleReasons", () => {
   it("is fresh when nothing has moved", () => {
     const q = question();
