@@ -695,6 +695,16 @@ export default function SpecTable({
                       Questions blocking a quotation. Matthew&rsquo;s matrix where he has written one for this
                       category, the older per-level model where he has not.
                     </Tip>
+                    {/* THE SAME QUESTIONS, THE OTHER WAY UP. "Show me all the
+                        jobs with dimensions missing" is a real question this
+                        column cannot answer, and it is one link away rather
+                        than a second view of this table. */}
+                    <Link
+                      href={`/dashboard/projects/${encodeURIComponent(projectId)}/infill?tab=by-question`}
+                      className="block text-[10.5px] font-normal normal-case tracking-normal text-blue-700 no-underline hover:underline"
+                    >
+                      by question
+                    </Link>
                   </Th>
                   <Th num>Waiting</Th>
                   <Th>TG0</Th>

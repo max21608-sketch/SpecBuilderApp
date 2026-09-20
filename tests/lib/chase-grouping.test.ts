@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { allQuestions, countOutstanding, groupIntoLines, type GroupableQuestion } from "@/lib/chase-grouping";
+import {
+  allQuestions,
+  countOutstanding,
+  groupByQuestion,
+  groupIntoLines,
+  type GroupableQuestion,
+} from "@/lib/chase-grouping";
 
 type Q = GroupableQuestion & { requirementId: string };
 
@@ -121,5 +127,97 @@ describe("countOutstanding", () => {
   it("counts what is awaiting a reply alongside, not instead", () => {
     const counts = countOutstanding([question({ waiting: { draftId: "d1" } }), question({})]);
     expect(counts).toEqual({ toQuote: 2, later: 0, waiting: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The second grouping: by question.
+// ---------------------------------------------------------------------------
+type QG = Q & { prompt: string; fieldLabel: string | null; jsonId?: number | null; localKey?: string | null; area: string | null };
+
+function asked(over: Partial<QG>): QG {
+  return {
+    ...question({}),
+    prompt: "Dimensions",
+    fieldLabel: "Dimensions",
+    jsonId: 3,
+    localKey: null,
+    area: "Signature Suite",
+    ...over,
+  };
+}
+
+describe("groupByQuestion", () => {
+  it("FOLDS THE SAME QUESTION ACROSS CATEGORIES INTO ONE HEADING", () => {
+    // `requirements` is seeded per category, so "Dimensions" is seventeen rows.
+    // Measured on the sandbox 300-line project: nine of them, 401 items. Four
+    // separate "Dimensions" headings would let somebody clear one and believe
+    // they had done dimensions.
+    const groups = groupByQuestion([
+      asked({ recordId: "r1", requirementId: "req-armchairs" }),
+      asked({ recordId: "r2", requirementId: "req-sofas" }),
+      asked({ recordId: "r3", requirementId: "req-desks" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.heading).toBe("Dimensions");
+    expect(groups[0]!.requirementIds).toEqual(["req-armchairs", "req-sofas", "req-desks"]);
+    expect(groups[0]!.rows).toHaveLength(3);
+  });
+
+  it("keys on the BWS field, then the local key, then the prompt", () => {
+    const groups = groupByQuestion([
+      asked({ requirementId: "a", jsonId: 3 }),
+      asked({ requirementId: "b", jsonId: null, localKey: "headboard_fitted", prompt: "Headboard fitted?", fieldLabel: null }),
+      asked({ requirementId: "c", jsonId: null, localKey: null, prompt: "  Stitching  SPEC ", fieldLabel: null }),
+      asked({ requirementId: "d", jsonId: null, localKey: null, prompt: "Stitching spec", fieldLabel: null }),
+    ]);
+    expect(groups.map((g) => g.key).sort()).toEqual([
+      "field:3",
+      "local:headboard_fitted",
+      "prompt:stitching spec",
+    ]);
+  });
+
+  it("keeps a question with one record under its own heading", () => {
+    const groups = groupByQuestion([asked({ requirementId: "only" })]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.rows).toHaveLength(1);
+  });
+
+  it("counts to-quote PER ROW, because a level can differ between items", () => {
+    const groups = groupByQuestion([
+      asked({ recordId: "r1", tier: "to_quote", level: "hero" }),
+      asked({ recordId: "r2", tier: "later", level: "simple" }),
+    ]);
+    expect(groups[0]!.toQuote).toBe(1);
+    expect(groups[0]!.rows).toHaveLength(2);
+  });
+
+  it("a readiness question never counts as blocking a quote", () => {
+    const groups = groupByQuestion([
+      asked({ requirementKind: "readiness", tier: "to_quote", jsonId: null, localKey: "toe", fieldLabel: null }),
+    ]);
+    expect(groups[0]!.toQuote).toBe(0);
+  });
+
+  it("sorts what blocks a quote first, then by heading, stably", () => {
+    const groups = groupByQuestion([
+      asked({ requirementId: "a", jsonId: 90, fieldLabel: "Zebra finish", tier: "later" }),
+      asked({ requirementId: "b", jsonId: 3, fieldLabel: "Dimensions", tier: "to_quote" }),
+      asked({ requirementId: "c", jsonId: 91, fieldLabel: "Alpha finish", tier: "later" }),
+    ]);
+    expect(groups.map((g) => g.heading)).toEqual(["Dimensions", "Alpha finish", "Zebra finish"]);
+  });
+
+  it("every question lands in exactly one group, whichever way it is grouped", () => {
+    const rows = [
+      asked({ recordId: "r1", requirementId: "a" }),
+      asked({ recordId: "r1", requirementId: "b", jsonId: 1, fieldLabel: "COM 1" }),
+      asked({ recordId: "r2", requirementId: "a" }),
+    ];
+    const byQuestion = groupByQuestion(rows).reduce((n, g) => n + g.rows.length, 0);
+    const byLine = groupIntoLines(rows).reduce((n, line) => n + allQuestions(line).length, 0);
+    expect(byQuestion).toBe(rows.length);
+    expect(byLine).toBe(rows.length);
   });
 });

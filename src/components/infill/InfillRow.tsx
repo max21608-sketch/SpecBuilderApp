@@ -38,6 +38,7 @@ import Chip from "@/components/ui/Chip";
 import { TONE } from "@/components/ui/tone";
 import AnswerValue from "@/components/records/AnswerValue";
 import { Td } from "@/components/ui/Table";
+import { letterColour } from "@/components/records/letter-colours";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import { formatDay } from "@/lib/format-day";
 import { rowKind, type InfillDimension, type InfillQuestion } from "@/lib/infill";
@@ -85,6 +86,7 @@ export default function InfillRow({
   palette,
   columns,
   pad,
+  heading = "question",
   onSaveAnswer,
   onSaveDimension,
   onReload,
@@ -95,6 +97,14 @@ export default function InfillRow({
   columns: number;
   /** The indent of the level this row sits at, so options read as nested. */
   pad: string;
+  /**
+   * WHICH HALF THE GROUPING ALREADY SAID.
+   *
+   * Under a furniture line the row names the QUESTION; under a question it
+   * names the ITEM. Printing both twice is what made the flat list unreadable
+   * — twenty questions about one headboard each repeating the headboard.
+   */
+  heading?: "question" | "record";
   onSaveAnswer: SaveAnswer;
   onSaveDimension: SaveDimension;
   /** Re-read THIS line's questions. Called after a refusal, never after a save. */
@@ -164,9 +174,34 @@ export default function InfillRow({
 
         {/* ---- what is being asked, and what is already known -------------- */}
         <Td colSpan={2} className="align-top">
-          <span className="text-neutral-900">{question.prompt}</span>
-          {question.fieldLabel && (
-            <span className="block text-[11px] text-neutral-500">BWS: {question.fieldLabel.trim()}</span>
+          {heading === "record" ? (
+            <>
+              <Link
+                href={`/dashboard/records/${question.recordId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                prefetch={false}
+                className="font-mono font-semibold text-blue-700 no-underline hover:underline"
+              >
+                {question.recordLabel}
+              </Link>{" "}
+              <span className="text-neutral-900">{question.itemDescription}</span>
+              {question.variantLabel && <b className={letterColour(question.variantLabel)}> {question.variantLabel}</b>}
+              <span className="block text-[11px] text-neutral-500">
+                {question.area ?? "no area given"}
+                {/* The PROMPT still, quietly: two categories word the same BWS
+                    field differently, and the heading above is the field. */}
+                {" · "}
+                {question.prompt}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-neutral-900">{question.prompt}</span>
+              {question.fieldLabel && (
+                <span className="block text-[11px] text-neutral-500">BWS: {question.fieldLabel.trim()}</span>
+              )}
+            </>
           )}
           {/* REFERENCE, NEVER A PRE-FILL. There is deliberately no control that
               copies any of this into the box: a value is never filled in from a

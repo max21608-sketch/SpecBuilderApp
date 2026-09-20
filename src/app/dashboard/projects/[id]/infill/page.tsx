@@ -44,17 +44,22 @@ import Tabs from "@/components/ui/Tabs";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
 import InfillTable, { NO_FILTERS, type Filters } from "@/components/infill/InfillTable";
 import UncategorisedBlock, { type UncategorisedRecord } from "@/components/infill/UncategorisedBlock";
+import QuestionGroups, { type QuestionSummary } from "@/components/infill/QuestionGroups";
 import type { SaveOutcome } from "@/components/infill/InfillRow";
 import { useUrlTab } from "@/lib/use-url-tab";
 import type { InfillLineSummary, InfillQuestion } from "@/lib/infill";
 import { DIMENSION_SLOT_LABELS, type DimensionSlot } from "@/lib/spec-vocab";
 import type { Palette, PaletteOption } from "@/lib/palettes";
+import type { AreaOption } from "@/lib/area-filter";
 
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
 
 type Summary = {
   project: { id: string; bws_project_number: string; name: string };
   lines: InfillLineSummary[];
+  questions: QuestionSummary[];
+  /** The areas, counted in item rows, for the by-question tab's filter. */
+  questionAreas: AreaOption[];
   phases: { id: string; name: string }[];
   totals: { questions: number; toQuote: number; later: number; noLevel: number; waiting: number };
   uncategorised: UncategorisedRecord[];
@@ -68,7 +73,7 @@ type Summary = {
   paletteByQuestion: { json_id: number | null; local_key: string | null; palette_key: string }[];
 };
 
-const TABS = ["by-item"] as const;
+const TABS = ["by-item", "by-question"] as const;
 type TabId = (typeof TABS)[number];
 
 function InfillView() {
@@ -82,6 +87,9 @@ function InfillView() {
   const [lineError, setLineError] = useState<Record<string, string>>({});
   const [loadingLine, setLoadingLine] = useState<string | null>(null);
   const [answered, setAnswered] = useState<Record<string, number>>({});
+  const [rowsByQuestion, setRowsByQuestion] = useState<Record<string, InfillQuestion[]>>({});
+  const [questionError, setQuestionError] = useState<Record<string, string>>({});
+  const [loadingQuestion, setLoadingQuestion] = useState<string | null>(null);
 
   /**
    * ONE SAVE AT A TIME, AND IT IS NOT A PERFORMANCE MEASURE.
@@ -158,6 +166,36 @@ function InfillView() {
     [projectId],
   );
 
+  /**
+   * One question's items, through the same loader, scoped to the `requirements`
+   * rows the heading folds. The ids came from this route's own summary.
+   */
+  const loadQuestion = useCallback(
+    async (group: QuestionSummary) => {
+      setLoadingQuestion(group.key);
+      try {
+        const res = await apiFetch<{ questions: InfillQuestion[] }>(
+          `/api/projects/${encodeURIComponent(projectId)}/infill?requirements=${encodeURIComponent(
+            group.requirementIds.join(","),
+          )}`,
+        );
+        if (!res.ok) {
+          setQuestionError((prev) => ({ ...prev, [group.key]: res.error }));
+          return;
+        }
+        setQuestionError((prev) => {
+          const next = { ...prev };
+          delete next[group.key];
+          return next;
+        });
+        setRowsByQuestion((prev) => ({ ...prev, [group.key]: res.data.questions }));
+      } finally {
+        setLoadingQuestion(null);
+      }
+    },
+    [projectId],
+  );
+
   /** Which line a question belongs to — its own, or its finish option's parent. */
   const lineOf = useCallback(
     (question: InfillQuestion): string => {
@@ -209,24 +247,27 @@ function InfillView() {
       // THE ROW STAYS, WITH THE VERSION IT NOW HAS. Reloading the list here
       // would make the row somebody just answered vanish — a filled gap leaves
       // `loadOutstanding` — which reads as the save having failed.
+      //
+      // BOTH VIEWS HOLD THE SAME ROW, so both are patched: the same question
+      // sits under its item on one tab and under its question on the other,
+      // and leaving the other stale means the next edit there is refused with
+      // a version nobody changed.
+      const patch = (row: InfillQuestion) =>
+        row.recordId === question.recordId && row.requirementId === question.requirementId
+          ? {
+              ...row,
+              state: res.data.answer.state,
+              currentValue: res.data.answer.value,
+              answerVersion: res.data.answer.version,
+            }
+          : row;
       const lineId = lineOf(question);
-      setQuestionsByLine((prev) => {
-        const list = prev[lineId];
-        if (!list) return prev;
-        return {
-          ...prev,
-          [lineId]: list.map((row) =>
-            row.recordId === question.recordId && row.requirementId === question.requirementId
-              ? {
-                  ...row,
-                  state: res.data.answer.state,
-                  currentValue: res.data.answer.value,
-                  answerVersion: res.data.answer.version,
-                }
-              : row,
-          ),
-        };
-      });
+      setQuestionsByLine((prev) =>
+        Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.map(patch)])),
+      );
+      setRowsByQuestion((prev) =>
+        Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.map(patch)])),
+      );
       setAnswered((prev) => ({ ...prev, [lineId]: (prev[lineId] ?? 0) + 1 }));
       return {
         ok: true,
@@ -364,7 +405,12 @@ function InfillView() {
             label="How to work through it"
             value={tab}
             onChange={setTab}
-            items={[{ id: "by-item", label: "By item", count: data.lines.length }]}
+            items={[
+              { id: "by-item", label: "By item", count: data.lines.length },
+              // "Show me all the jobs with dimensions missing" — the same
+              // outstanding list, grouped by what is being asked.
+              { id: "by-question", label: "By question", count: data.questions.length },
+            ]}
           />
         }
       />
@@ -397,6 +443,22 @@ function InfillView() {
           />
         )}
 
+        {tab === "by-question" ? (
+          <QuestionGroups
+            questions={data.questions}
+            areas={data.questionAreas}
+            filters={filters}
+            onFilters={setFilters}
+            rowsByQuestion={rowsByQuestion}
+            loadingQuestion={loadingQuestion}
+            questionError={questionError}
+            onOpenQuestion={(group) => void loadQuestion(group)}
+            onReloadQuestion={loadQuestion}
+            paletteFor={paletteFor}
+            onSaveAnswer={saveAnswer}
+            onSaveDimension={saveDimension}
+          />
+        ) : (
         <InfillTable
           lines={data.lines}
           phases={data.phases}
@@ -412,6 +474,7 @@ function InfillView() {
           onSaveDimension={saveDimension}
           answered={answered}
         />
+        )}
       </PageBody>
     </>
   );

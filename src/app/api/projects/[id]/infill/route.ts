@@ -16,6 +16,9 @@
 //   ?line=<id>      the questions on ONE furniture line, with everything the
 //                   edit rows need — what is already known, what the library
 //                   calls a finish code, what the record already measures.
+//   ?requirements=  the same, for every record still owing ONE question. The
+//                   by-question view's unit, and 401 rows under "Dimensions"
+//                   on the 300-line project — so it is read on demand too.
 //
 // The scope is a WHERE clause on `loadOutstanding`, never a second query: the
 // predicates it carries (active record, active phase, a split bill line being
@@ -36,6 +39,8 @@ import {
   type OutstandingQuestion,
 } from "@/lib/chase-drafts";
 import { summariseLines, infillTotals, type InfillDimension, type InfillQuestion, type InfillSister } from "@/lib/infill";
+import { groupByQuestion } from "@/lib/chase-grouping";
+import { areaOptions } from "@/lib/area-filter";
 import { normaliseFinishCode } from "@/lib/finishes";
 
 export const dynamic = "force-dynamic";
@@ -53,8 +58,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const params = new URL(request.url).searchParams;
   const lineId = params.get("line");
+  const requirements = (params.get("requirements") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 
-  if (lineId) return detail(projectId, [lineId]);
+  if (lineId) return detail(projectId, { lineIds: [lineId] });
+  // The ids come from a heading this route itself sent. They are a FILTER and
+  // never a target — the scope is still this project, so an id from elsewhere
+  // returns nothing rather than anything it should not.
+  if (requirements.length > 0) return detail(projectId, { requirementIds: requirements });
 
   // ---- the summary ---------------------------------------------------------
   const [outstanding, uncategorised, coverage] = await Promise.all([
@@ -70,11 +83,35 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const lines = summariseLines(withWaiting);
 
+  // THE SECOND VIEW, off the same load. "Show me all the jobs with dimensions
+  // missing" — one heading per question with its count, and its rows read when
+  // it is opened, for the reason the lines are: 19,582 rows is 19,582 rows
+  // whichever way they are grouped.
+  const questions = groupByQuestion(withWaiting).map((group) => ({
+    key: group.key,
+    requirementIds: group.requirementIds,
+    heading: group.heading,
+    fieldLabel: group.fieldLabel,
+    toQuote: group.toQuote,
+    rows: group.rows.length,
+    // How many ITEMS owe it, which is the number the question is about.
+    records: new Set(group.rows.map((row) => row.recordId)).size,
+    // The areas it is outstanding in, so the filter can narrow a heading
+    // without opening it.
+    areas: [...new Set(group.rows.map((row) => row.area?.trim() || null))],
+  }));
+
   // The facets. Phases and areas come off the questions rather than off their
   // own query, so a phase with nothing outstanding cannot appear in a filter
   // that would then empty the screen.
   const phases = new Map<string, string>();
   for (const line of lines) phases.set(line.runId, line.runName);
+
+  // THE AREAS, COUNTED IN ROWS. The by-item tab builds its own from the lines,
+  // because there the count is what that list goes back to; the by-question
+  // tab lists headings and the useful number under an area is how many ITEMS
+  // are in it, which only the rows can give.
+  const questionAreas = areaOptions(withWaiting);
 
   // The 17 cheat sheets, so an uncategorised item can be categorised where it
   // is listed rather than on a screen somebody has to know exists.
@@ -92,6 +129,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       name: String(project.name),
     },
     lines,
+    questions,
+    questionAreas,
     phases: [...phases.entries()].map(([value, label]) => ({ id: value, name: label })),
     totals: infillTotals(outstanding, new Set(waiting.keys())),
     uncategorised,
@@ -101,17 +140,28 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   });
 }
 
-/** Everything one furniture line's edit rows need. */
-async function detail(projectId: string, lineIds: string[]): Promise<Response> {
+/** Everything one furniture line's — or one question's — edit rows need. */
+async function detail(
+  projectId: string,
+  scope: { lineIds?: string[]; requirementIds?: string[] },
+): Promise<Response> {
   const [questions, coverage] = await Promise.all([
-    loadOutstanding(projectId, { lineIds }),
+    loadOutstanding(projectId, scope),
     loadSentCoverage(projectId),
   ]);
   const waiting = waitingByQuestion(questions, coverage);
 
   const recordIds = [...new Set(questions.map((question) => question.recordId))];
+  // SISTERS ONLY WHERE THERE ARE ANY. A sister value is a FINISH OPTION's
+  // reference — what A settled on, beside B's empty box — so only a line that
+  // has been split can produce one. In the by-question view that is a handful
+  // of the 401 lines under "Dimensions", and asking for all of them would load
+  // every confirmed answer on the project to print nothing.
+  const splitLines = [
+    ...new Set(questions.filter((question) => question.parentId).map((question) => question.parentId!)),
+  ];
   const [sisters, dimensions, finishes] = await Promise.all([
-    loadSisters(projectId, lineIds),
+    splitLines.length > 0 ? loadSisters(projectId, splitLines) : Promise.resolve([] as SisterRow[]),
     loadDimensions(recordIds),
     loadFinishes(projectId),
   ]);

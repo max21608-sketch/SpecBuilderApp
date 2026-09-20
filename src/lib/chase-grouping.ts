@@ -210,3 +210,123 @@ export function countOutstanding(questions: readonly GroupableQuestion[]): Outst
   }
   return { toQuote, later, waiting };
 }
+
+// ---------------------------------------------------------------------------
+// The SECOND grouping: by question, then the items under it.
+//
+// ============================================================================
+// "CAN YOU SHOW ME ALL THE JOBS WITH DIMENSIONS MISSING?"
+//
+// Matthew, 2026-09-18. The same outstanding questions, turned ninety degrees:
+// the unit is the QUESTION and the items are inside it, because "who still owes
+// me a metalwork finish" is a different job from "what does this chair still
+// need" and walking the item list to answer it is how a whole afternoon goes.
+//
+// Same input as `groupIntoLines`, so the two views can never disagree about
+// what is outstanding — that is the whole reason this lives beside it rather
+// than in a loader of its own.
+//
+// ---- A QUESTION IS NOT A `requirements` ROW ------------------------------
+//
+// The obvious key is `requirementId`, and it is wrong, measured rather than
+// argued: `requirements` is seeded PER CATEGORY, so "Dimensions" is seventeen
+// rows — one per cheat sheet — and on the sandbox 300-line project it comes
+// back as 166 records under one of them and 65 under another. Grouping by the
+// row would print "Dimensions" as four separate headings, and somebody who
+// cleared the first would believe they had done dimensions. That is the
+// confidently-wrong answer this view exists to prevent.
+//
+// So a question is keyed by WHAT IT ASKS FOR, in the same order everything
+// else in this app resolves a question: the BWS field it fills, then the local
+// key a readiness row carries instead (0030's six id-less questions), then its
+// own prompt folded for case and space. The requirement id is the last resort,
+// and reaching it means the row has no field, no key and no prompt.
+// ============================================================================
+
+/** What this grouping needs beyond `GroupableQuestion`. */
+export type QuestionGroupable = GroupableQuestion & {
+  requirementId: string;
+  prompt: string;
+  fieldLabel: string | null;
+  /** The BWS field, and the local key a readiness question carries instead. */
+  jsonId?: number | null;
+  localKey?: string | null;
+  area?: string | null;
+};
+
+export type QuestionGroup<Q> = {
+  /** Stable across categories: this is what makes one "Dimensions" heading. */
+  key: string;
+  /** Every `requirements` row folded into it, so a caller can scope a re-read. */
+  requirementIds: string[];
+  /** The heading. The BWS field's name where there is one — it is the shared half. */
+  heading: string;
+  fieldLabel: string | null;
+  /** How many of the rows under it hold up a quote. Never all-or-nothing: a
+   *  question can be TGQ on a hero item and later on a simple one. */
+  toQuote: number;
+  /** One row per (record, question). The screen's edit rows. */
+  rows: Q[];
+};
+
+/** The key two categories asking the same thing share. */
+export function questionGroupKey(question: QuestionGroupable): string {
+  if (question.jsonId !== null && question.jsonId !== undefined) return `field:${question.jsonId}`;
+  if (question.localKey) return `local:${question.localKey}`;
+  const folded = question.prompt.replace(/\s+/g, " ").trim().toLowerCase();
+  return folded ? `prompt:${folded}` : `requirement:${question.requirementId}`;
+}
+
+/**
+ * One group per question, with the items that still owe it an answer.
+ *
+ * Insertion order inside a group is the order the loader returned, which is
+ * bill order. The GROUPS are sorted to-quote first and then by heading, so the
+ * questions holding up a quotation are the ones at the top of the screen.
+ */
+export function groupByQuestion<Q extends QuestionGroupable>(questions: readonly Q[]): QuestionGroup<Q>[] {
+  const groups = new Map<string, QuestionGroup<Q> & { requirementSet: Set<string> }>();
+
+  for (const question of questions) {
+    const key = questionGroupKey(question);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        key,
+        requirementIds: [],
+        requirementSet: new Set<string>(),
+        // The BWS field's name is what the two categories AGREE on; a prompt is
+        // one sheet's wording of it. Where there is no field, the prompt is all
+        // there is and the first one seen stands for the group.
+        heading: question.fieldLabel?.trim() || question.prompt.trim() || "Unnamed question",
+        fieldLabel: question.fieldLabel,
+        toQuote: 0,
+        rows: [],
+      };
+      groups.set(key, group);
+    }
+    if (!group.requirementSet.has(question.requirementId)) {
+      group.requirementSet.add(question.requirementId);
+      group.requirementIds.push(question.requirementId);
+    }
+    if (question.tier === "to_quote" && question.requirementKind === "spec_field") group.toQuote += 1;
+    group.rows.push(question);
+  }
+
+  // The working set is dropped on the way out: it exists to keep
+  // `requirementIds` free of duplicates in insertion order, and a Set on the
+  // wire would serialise as `{}`.
+  return [...groups.values()]
+    .map((group) => ({
+      key: group.key,
+      requirementIds: group.requirementIds,
+      heading: group.heading,
+      fieldLabel: group.fieldLabel,
+      toQuote: group.toQuote,
+      rows: group.rows,
+    }))
+    .sort((a, b) => {
+      const blocking = (group: QuestionGroup<Q>) => (group.toQuote > 0 ? 0 : 1);
+      return blocking(a) - blocking(b) || b.toQuote - a.toQuote || a.heading.localeCompare(b.heading);
+    });
+}

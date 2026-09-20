@@ -195,6 +195,41 @@ describe("InfillTable", () => {
     expect(screen.getByText(/quantity not allocated/)).toBeInTheDocument();
   });
 
+  it("AN AREA FILTER NARROWS WHAT IS LISTED AND CHANGES NO COUNT", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        lines={[
+          line({ area: "Signature Suite" }),
+          // Same room, spelled differently by the bill. One option, or picking
+          // either hides half the room.
+          line({ lineId: "line-2", code: "S-100", area: "signature suite" }),
+          line({ lineId: "line-3", code: "S-402", area: "Lobby" }),
+          line({ lineId: "line-4", code: "S-500", area: null }),
+        ]}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("Filter by area"), "signature suite");
+    expect(screen.getByRole("link", { name: "S-301" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "S-100" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "S-402" })).not.toBeInTheDocument();
+    const row = screen.getByRole("link", { name: "S-301" }).closest("tr")!;
+    expect(within(row).getByText("4")).toBeInTheDocument();
+    expect(screen.getByText("2 of 4 items shown")).toBeInTheDocument();
+  });
+
+  it("a line with no area is REACHABLE rather than dropped", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        lines={[line({ area: "Lobby" }), line({ lineId: "line-2", code: "S-500", area: null })]}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("Filter by area"), "__none__");
+    expect(screen.getByRole("link", { name: "S-500" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "S-301" })).not.toBeInTheDocument();
+  });
+
   it("sends a level-less line to the record, because a level is a decision taken there", () => {
     render(<Harness lines={[line({ level: null })]} />);
     expect(screen.getByRole("link", { name: "Set level" })).toHaveAttribute("href", "/dashboard/records/line-1");

@@ -114,6 +114,40 @@ describeIfDb("the infill routes", () => {
     expect(body.palettes.length).toBeGreaterThan(0);
   }, SLOW);
 
+  it("groups by question too, folding the same question across categories", async () => {
+    const { GET } = await import("@/app/api/projects/[id]/infill/route");
+    const res = await GET(new Request("http://localhost/test"), params(projectId));
+    const body = (await res.json()) as {
+      questions: { key: string; heading: string; requirementIds: string[]; records: number; rows: number }[];
+      questionAreas: { key: string; label: string; count: number }[];
+    };
+    const dimensions = body.questions.find((group) => group.heading === "Dimensions");
+    expect(dimensions).toBeTruthy();
+    // Keyed on the BWS field, so seventeen `requirements` rows are ONE heading.
+    expect(dimensions!.key).toBe("field:3");
+    expect(dimensions!.records).toBe(1);
+    // And the areas are counted in ROWS, which is what the by-question list is
+    // about — the by-item tab counts lines and builds its own.
+    expect(body.questionAreas.length).toBeGreaterThan(0);
+    expect(body.questionAreas.reduce((sum, area) => sum + area.count, 0)).toBeGreaterThan(0);
+  }, SLOW);
+
+  it("returns ONE question's items when a heading is opened", async () => {
+    const { GET } = await import("@/app/api/projects/[id]/infill/route");
+    const summary = await (await GET(new Request("http://localhost/test"), params(projectId))).json();
+    const group = (summary as { questions: { heading: string; requirementIds: string[] }[] }).questions.find(
+      (row) => row.heading === "Dimensions",
+    )!;
+    const res = await GET(
+      new Request(`http://localhost/test?requirements=${group.requirementIds.join(",")}`),
+      params(projectId),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { questions: { prompt: string; jsonId: number | null }[] };
+    expect(body.questions.length).toBeGreaterThan(0);
+    for (const question of body.questions) expect(question.jsonId).toBe(3);
+  }, SLOW);
+
   it("returns ONE line's questions when the line is opened, with what is already known", async () => {
     const { GET } = await import("@/app/api/projects/[id]/infill/route");
     const res = await GET(

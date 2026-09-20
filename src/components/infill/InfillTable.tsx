@@ -46,6 +46,8 @@ import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { letterColour } from "@/components/records/letter-colours";
+import AreaSelect from "@/components/ui/AreaSelect";
+import { areaOptions, matchesArea } from "@/lib/area-filter";
 import InfillRow, { type SaveAnswer, type SaveDimension } from "@/components/infill/InfillRow";
 import type { InfillLineSummary, InfillQuestion } from "@/lib/infill";
 import type { Palette } from "@/lib/palettes";
@@ -58,11 +60,13 @@ const COLUMNS = 7;
 export type Filters = {
   text: string;
   runId: string;
+  /** A key from `area-filter.ts`, or "" for every area. */
+  area: string;
   tier: "all" | QuestionTier;
   state: "" | "missing" | "tbc";
 };
 
-export const NO_FILTERS: Filters = { text: "", runId: "", tier: "all", state: "" };
+export const NO_FILTERS: Filters = { text: "", runId: "", area: "", tier: "all", state: "" };
 
 export default function InfillTable({
   lines,
@@ -98,11 +102,21 @@ export default function InfillTable({
   const [open, setOpen] = useState<Set<string>>(new Set());
 
   const text = filters.text.trim().toLowerCase();
-  const narrowed = Boolean(text) || filters.tier !== "all" || filters.state !== "";
+  const narrowed = Boolean(text) || filters.tier !== "all" || filters.state !== "" || filters.area !== "";
+
+  // A CLIENT WALKS A BUILDING ROOM BY ROOM. The options come off the lines
+  // actually loaded, so an area with nothing outstanding cannot appear in a
+  // filter that would then empty the screen. The phase narrows them, because
+  // picking a phase and then an area it does not carry reads as a fault.
+  const areas = useMemo(
+    () => areaOptions(lines.filter((line) => !filters.runId || line.runId === filters.runId)),
+    [lines, filters.runId],
+  );
 
   const shown = useMemo(() => {
     return lines.filter((line) => {
       if (filters.runId && line.runId !== filters.runId) return false;
+      if (!matchesArea(line, filters.area)) return false;
       // The tier and state filters read the line's own counts, because a line
       // arrives without its questions. A line with nothing in the half being
       // filtered for is not hidden work — it has none.
@@ -174,6 +188,7 @@ export default function InfillTable({
             </option>
           ))}
         </select>
+        <AreaSelect options={areas} value={filters.area} onChange={(area) => onFilters({ ...filters, area })} />
         <select
           value={filters.tier}
           onChange={(event) => onFilters({ ...filters, tier: event.target.value as Filters["tier"] })}
