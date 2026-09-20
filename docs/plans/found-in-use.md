@@ -22,6 +22,19 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### A bill's date prints as an ISO timestamp
+
+**Status: open — seen on the BOQ review and the phase header while verifying
+Stage 1a item 1.2, 2026-09-20.** The Panther bill's `Revision` field reads
+`0 · 2026-09-15T00:00:00.000Z`, and the phase subtitle `BOQ rev 0,
+2026-09-15T00:00:00.000Z`. The rule that the date stays TEXT is right (the
+TOE-dates trap), but the text kept is the spreadsheet library's serialisation
+of a date CELL, not what the sheet printed — a person reading the workbook sees
+`15/09/2026`. Cause, stated apart: `readMetadata` in `boq-import.ts` takes a
+Date-typed cell's `String()` form. The fix is to format a Date-typed cell the
+way the sheet displayed it (or `YYYY-MM-DD`) AT PARSE TIME, still as text, and
+it is not a Stage 1a item.
+
 ### The chase footer does not say why one to-quote question is not ticked
 
 **Status: open — an observation from verifying Stage 1a item 1.14, not a
