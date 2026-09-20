@@ -2111,8 +2111,9 @@ close line:
 
 **Not done, and Max's:** the ONE promotion to pilot (0033 first), the script
 on pilot, the hand-over message. The first-session script's 1b checks are
-being turned on by the verifier; until they are, 1b's release gate is the
-browser walks recorded above.
+on (`2be632b`, `c46fe95`) and the script ran against the `da863b7` deployment:
+**PASS 29 · FAIL 0 · SKIP 2** (the picture and swatch checks a clone cannot
+render). Stage 1b's release gate is met on staging.
 
 ### Stage 2 brief — opened 2026-09-20
 
