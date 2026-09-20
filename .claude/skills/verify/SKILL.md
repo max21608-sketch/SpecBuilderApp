@@ -18,6 +18,34 @@ repo dependency, and neither belongs in one.
 - `files/qa-cleanup.mjs` — deletes a QA run in foreign-key-safe order. Dry run
   by default; `--apply` writes. It leaves `audit_log` and `notes` alone by
   design, and it does NOT clear Vercel Blob.
+- `files/first-session.mjs` — **the release gate**: the eleven steps of
+  `docs/plans/make-it-work-2026-09-19.md` §7.4, driven, against a `__QA` copy.
+  Sign in, create a project, upload a synthetic bill (built by
+  `files/first-session-fixtures.mjs`, two tabs, `SX11A` twice, a `PACK` and a
+  `DEL` line), confirm it, clone one already-staged drawings run onto the copy,
+  review and confirm the card, walk the phase table, the record and the chase
+  screen, force a stale-version 409, and sweep up. **It never calls the
+  model** — it refuses to upload a specification document, says so in its
+  output, and declares the bill'"'"'s kind rather than letting the classifier
+  answer; a gate that costs money is a gate people skip. Every assertion names
+  the plan item it holds (1.1, 1.8, 1.14 today), and an item not yet on
+  `staging` is written and SKIPPED, printed by number at the end so it can be
+  turned on as it lands. Run it against local before a push, against staging on
+  the deployed SHA, and against pilot before a promotion:
+
+  ```
+  PLAYWRIGHT_DIR=$SCRATCHPAD/pw \
+  PLAYWRIGHT_CHROMIUM="$HOME/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" \
+  BASE=http://localhost:3000 QA_EMAIL=... QA_PASSWORD=... \
+  node --env-file=.env.local .claude/skills/verify/files/first-session.mjs
+  ```
+
+  It runs from the REPO (so `pg` and `exceljs` resolve) and imports
+  `playwright-session.mjs` from `PLAYWRIGHT_DIR` (so `playwright` resolves
+  there). `--keep` leaves the `__QA` project for a person to look at; `--headed`
+  watches it. It writes a JSON manifest of every row and blob it touched, and
+  the sweep is `qa-cleanup.mjs` narrowed to that run'"'"'s own project name —
+  blobs are listed, never deleted.
 
 ## Build & launch
 
