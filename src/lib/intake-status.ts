@@ -60,3 +60,46 @@ export function intakeStatusLabel(status: string): string {
 export function isIntakeRunWorking(status: string): boolean {
   return status === "queued" || status === "parsing";
 }
+
+/** What a set of intake runs adds up to. Four states, and they total the set. */
+export type PackTally = {
+  total: number;
+  reviewed: number;
+  toReview: number;
+  reading: number;
+  failed: number;
+  /** `pending`: registered, never read. Rare, and it is not progress. */
+  notRead: number;
+};
+
+/**
+ * A pack's runs, counted once.
+ *
+ * ONE reading behind the tiles, the summary line and the drawings step — the
+ * `composeDimensionCell` rule in a small place. The pack screen had this inline
+ * and the drawings step already calls it with a subset, so a second copy is how
+ * the line comes to say something the tiles beside it contradict.
+ *
+ * `confirmed` counts as REVIEWED, never "complete": it means no pending
+ * proposals remain, applied or explicitly ignored. Whether the answers it
+ * produced are settled is a different question, asked on the record screen.
+ *
+ * A status this does not know counts toward `total` and toward none of the
+ * five, which is deliberate: an unknown state is not evidence of progress, and
+ * a SUMMARY LINE has to be able to say so — four labelled tiles never implied
+ * they added up, and one sentence does.
+ */
+export function packTally(runs: { status: string }[]): PackTally {
+  return runs.reduce<PackTally>(
+    (acc, run) => {
+      acc.total += 1;
+      if (run.status === "confirmed") acc.reviewed += 1;
+      else if (run.status === "parsed") acc.toReview += 1;
+      else if (run.status === "failed") acc.failed += 1;
+      else if (run.status === "pending") acc.notRead += 1;
+      else if (isIntakeRunWorking(run.status)) acc.reading += 1;
+      return acc;
+    },
+    { total: 0, reviewed: 0, toReview: 0, reading: 0, failed: 0, notRead: 0 },
+  );
+}

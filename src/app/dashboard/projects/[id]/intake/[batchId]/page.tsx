@@ -23,7 +23,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
-import { intakeStatusLabel, intakeStatusTone, isIntakeRunWorking } from "@/lib/intake-status";
+import { intakeStatusLabel, intakeStatusTone, isIntakeRunWorking, packTally } from "@/lib/intake-status";
+import PackSummary from "@/components/imports/PackSummary";
 import { formatDay } from "@/lib/format-day";
 import PageBody from "@/components/ui/PageBody";
 
@@ -176,7 +177,8 @@ export default function IntakeBatchPage({
   const inFlight = (batch?.runs ?? []).some((run) => isIntakeRunWorking(run.status));
   usePoll(load, { intervalMs: 3000, active: inFlight });
 
-  async function extract(run: Run, action: "start" | "retry-dispatch" = "start") {
+  /** Returns whether the attempt was accepted, so a caller doing several can stop. */
+  async function extract(run: Run, action: "start" | "retry-dispatch" = "start"): Promise<boolean> {
     setBusy(run.id);
     setError(null);
     try {
@@ -185,7 +187,7 @@ export default function IntakeBatchPage({
       const current = await apiFetch<{ import: { version: number } }>(`/api/imports/${run.id}`);
       if (!current.ok) {
         setError(current.error);
-        return;
+        return false;
       }
       const res = await apiFetch(`/api/imports/${run.id}/extract`, {
         method: "POST",
@@ -198,9 +200,29 @@ export default function IntakeBatchPage({
       });
       if (!res.ok) setError(res.error);
       await load();
+      return res.ok;
     } finally {
       // Always reset: an HTML error page must not leave the button spinning.
       setBusy(null);
+    }
+  }
+
+  /**
+   * Retry every failed read, one after another.
+   *
+   * It is the EXISTING per-row action, N times — not a new route and not a
+   * batch one. Sequential because each retry is a charged model call and
+   * firing eleven at once is the un-rate-limited enqueue path this app already
+   * has a note about.
+   *
+   * It stops at the FIRST refusal, on the return value rather than on `error`:
+   * the state read inside this loop is the one captured at render, so testing
+   * the banner here would never see the failure it just caused. A refusal that
+   * applies to one of them usually applies to all, and each attempt costs.
+   */
+  async function retryAllFailed() {
+    for (const run of (batch?.runs ?? []).filter((row) => row.status === "failed")) {
+      if (!(await extract(run))) break;
     }
   }
 
@@ -213,32 +235,16 @@ export default function IntakeBatchPage({
     bill: runs.filter((run) => run.sourceKind === "boq_xlsx"),
   };
 
-  /**
-   * What the pack is waiting on, counted once.
-   *
-   * `confirmed` means no pending proposals remain — applied or explicitly
-   * ignored — which is what the review screens call "Review complete". It does
-   * NOT mean the answers it produced are settled, and the wording here follows
-   * that: "reviewed", never "complete".
-   */
-  const tally = (rows: Run[]) =>
-    rows.reduce(
-      (acc, run) => {
-        if (run.status === "confirmed") acc.reviewed += 1;
-        else if (run.status === "parsed") acc.toReview += 1;
-        else if (run.status === "failed") acc.failed += 1;
-        else if (isIntakeRunWorking(run.status)) acc.reading += 1;
-        return acc;
-      },
-      { reviewed: 0, toReview: 0, reading: 0, failed: 0 },
-    );
-
-  const packState = tally(runs);
+  // What the pack is waiting on, counted ONCE, by `packTally` — the same
+  // function `PackSummary` calls, so the sentence and the tiles cannot
+  // disagree. It used to be an inline reducer here and that is exactly how they
+  // would have.
+  const packState = packTally(runs);
   // The drawings step counts DRAWINGS. It used to print the pack's own totals
   // beside the drawing count, so a pack of two drawings read "2 documents · 3
   // reviewed" — a number nobody could make add up, because the third was the
   // bill.
-  const drawingState = tally(drawingRuns);
+  const drawingState = packTally(drawingRuns);
 
   const stepDone = {
     preamble: packSteps.preamble.length > 0,
@@ -283,11 +289,14 @@ export default function IntakeBatchPage({
         ]}
         title={batch ? `Pack delivered ${formatDay(batch.created_at.slice(0, 10))}` : "Intake pack"}
         subtitle={
+          // WHO DELIVERED IT, not what state it is in. The subtitle used to
+          // assert that "every specification document was read on arrival",
+          // which is false on exactly the pack that matters — one where a read
+          // failed. What the pack adds up to is `PackSummary`, one line, below.
           batch && (
             <>
-              {runs.length} document{runs.length === 1 ? "" : "s"}
-              {batch.created_by && <> · uploaded by {batch.created_by}</>} · every specification document was read
-              on arrival
+              {batch.created_by ? `Uploaded by ${batch.created_by} · ` : ""}
+              every specification document is read on arrival
             </>
           )
         }
@@ -314,6 +323,11 @@ export default function IntakeBatchPage({
 
       <PageBody>
         {error && <Note tone="danger">{error}</Note>}
+
+        {/* THE PACK IN ONE LINE — found-in-use 5. It reads from the same runs
+            the table does, re-tallied on every render, so the three-second poll
+            moves it without anything else being wired up. */}
+        <PackSummary runs={runs} busy={busy !== null} onRetryFailed={() => void retryAllFailed()} />
 
         {/* WHAT THIS PACK WANTS FROM YOU, at a glance.
             ==================================================================
@@ -412,8 +426,15 @@ export default function IntakeBatchPage({
             meaning="attach specs to those records"
             last
             action={
+              // SECONDARY, not primary — the header carries the same link and
+              // the same words, and the screen had two dark fills
+              // (`found-in-use.md`, 2026-09-20, named there as 1.6's). §0.3:
+              // one primary per screen, and it is the next step. It stays HERE
+              // as well as in the header because a control belongs beside the
+              // thing it acts on, and this is the row that says how many
+              // drawings are waiting.
               drawingRuns.length > 1 ? (
-                <Link href={drawingsHref} className={buttonClass("primary", "sm", "no-underline")}>
+                <Link href={drawingsHref} className={buttonClass("secondary", "sm", "no-underline")}>
                   Review all {drawingRuns.length} together
                 </Link>
               ) : undefined
