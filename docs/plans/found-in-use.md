@@ -463,7 +463,22 @@ Grouped because each is a line or two, not because they are one problem.
    once. Until then the whole-page proposal with *Drag a box* is the designed
    path, and it is what saved the demo. Still to look at with a person: a
    region that is in bounds but TRANSPOSED on a landscape sheet, which no
-   measurement can see.
+   measurement can see. **FIXED 2026-09-20, `1c2fe43`** (Stage 1b item 1.5): a leaf suggester
+   reads the code's prefix, then the description's words, with a missing
+   category as supporting evidence only; the review shows *Not furniture?* with
+   its reason as a `SuggestButton` and *Ignore all suggested (n)* ignores
+   exactly that set in one press; nothing is ignored on its own and every
+   ignore is restorable. The level guess no longer fires on a suggested line.
+   Confirmed bills show no suggestion (nothing left to ignore). The DoD on a
+   fresh bill is the first-session script's 1.5 check, being turned on. **FIXED 2026-09-20, `26ea895`** (Stage 1b item 1.7): "opened" is
+   recorded nowhere (the GET writes nothing), so there are two derivable states
+   and a count — `29 to review` while proposals are pending, `Review complete`
+   when none are — and the count wins over the status everywhere the pack
+   reads it; the pending count is a SQL count over the staged JSON's three
+   named shapes, never the blob. Driven on the sandbox AP364e pack. **FIXED 2026-09-20, `38e6f65`** (Stage 1b item 1.6): one summary line
+   per pack — "11 documents · 2 reviewed · 9 waiting for you" — with the
+   detail on the document's own row, and one primary on the screen. Driven on
+   the sandbox AP364e pack.
 
 One thing that looked like a defect and is not: **"These pages do not agree"**
 fired because two pages state the same dimension in different units. Sebastian
