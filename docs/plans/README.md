@@ -62,10 +62,10 @@ have completed the whole of stage 1"), so far:**
 
 | Item | Commit | Built · Tested | Verified in the app | Deployed |
 |---|---|---|---|---|
-| **1.10** the swatch reaches page 2 | `36dbed5` | 4 component + 4 pure tests; the crop payload carries the page cropped from | S-100 card: "Crop from: page 1 · page 2" | not yet pushed |
-| **1.15** a level on the drawings card | `941573d` | 4 component + 2 db tests (one db fixture red on first run — `retired_by` missing — back with the coder) | S-100 card: LEVEL panel, "Simple · decided on 3 of 3 records", Change… as buttons | not yet pushed |
-| 1.11 follow-up: the step only in *Review complete* | `9b626eb` | 1 component test | S-100 review while open: no "Review 9 documents" beside Confirm | not yet pushed |
-| **1.9** step one: measure | `7b9ee6e` | 12 pure tests; `measure:drawings` gains the item-pictures block | sandbox: 100 items, **58 report a region, 42 none, 162 regions all in bounds, 0 faulty** — the conclusion is the coder's next report | not yet pushed |
+| **1.10** the swatch reaches page 2 | `36dbed5` | 4 component + 4 pure tests; the crop payload carries the page cropped from | S-100 card: "Crop from: page 1 · page 2" | `b76cfb0` on staging, read back |
+| **1.15** a level on the drawings card | `941573d` | 4 component + 2 db tests (one db fixture red on first run — `retired_by` missing — back with the coder) | S-100 card: LEVEL panel, "Simple · decided on 3 of 3 records", Change… as buttons | `b76cfb0` on staging, read back; the red fixture fixed in `f888e1e`, 1,412 green |
+| 1.11 follow-up: the step only in *Review complete* | `9b626eb` | 1 component test | S-100 review while open: no "Review 9 documents" beside Confirm | `b76cfb0` on staging, read back |
+| **1.9** step one: measure | `7b9ee6e` | 12 pure tests; `measure:drawings` gains the item-pictures block | sandbox: 100 items, **58 report a region, 42 none, 162 regions all in bounds, 0 faulty**. Conclusion: the crop is exonerated; the same file read twice gives opposite answers and two SPEC-346 sheets never report a region, so the fix is the PROMPT and it lands with the finishes-schedule re-read. No code changed; the whole-page proposal stands (`found-in-use.md`, finding 6) | `b76cfb0` |
 
 **Still outstanding in 1a:** the first-session script and the 300-line fixture (the verifier, in
 progress), the pilot's console half (Max), the hand-over message (Max). Human
