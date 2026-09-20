@@ -101,6 +101,49 @@ export const BILL: BillLine[] = [
   { designer: "AHS", category: "Joinery", area: "Entrance lobby", code: "JU-950", description: "Bespoke joinery unit @ lobby, refer to detail", productReference: null, mockUp: null, main: 12, ve: null },
 ];
 
+/**
+ * THE SAME BILL, LONGER — the 300 test's fixture.
+ *
+ * Max, 2026-09-19: *"A lot of the demo data might have 15 lines. What happens
+ * when it has 300?"* (§7.4a). Every list screen behaves differently at three
+ * hundred rows: a button at the foot of the table is a button nobody finds, a
+ * header that scrolls away takes the column names with it, and a summary line
+ * that wraps to six is a row nobody can read.
+ *
+ * So this repeats the hand-written eighteen, VARIED rather than duplicated:
+ * a distinct code (the copy number is appended, so `AC-101` becomes
+ * `AC-101-02`), a floor in the area, and a quantity that moves — enough that
+ * the screens have real variety to sort, filter and group by. Everything else
+ * about a line is kept, INCLUDING the two shapes that exist to be awkward: the
+ * repeated `SD-502` and the uncategorisable `JU-950` come round again on every
+ * cycle, so a long bill is not a tidier bill.
+ *
+ * `n <= BILL.length` returns the hand-written bill unchanged, which is what
+ * keeps the DEFAULT demo exactly what it was.
+ */
+const DEMO_FLOORS = ["Level 2", "Level 3", "Level 4", "Level 5", "Level 6", "Penthouse"];
+
+export function expandBill(lines: BillLine[], n: number): BillLine[] {
+  if (n <= lines.length) return lines;
+  const out: BillLine[] = [...lines];
+  for (let index = lines.length; index < n; index += 1) {
+    const source = lines[index % lines.length]!;
+    const copy = Math.floor(index / lines.length) + 1;
+    const floor = DEMO_FLOORS[copy % DEMO_FLOORS.length]!;
+    const scale = 1 + (copy % 4);
+    out.push({
+      ...source,
+      code: `${source.code}-${String(copy + 1).padStart(2, "0")}`,
+      area: `${source.area}, ${floor}`,
+      description: `${source.description} (${floor})`,
+      mockUp: source.mockUp === null ? null : source.mockUp,
+      main: source.main === null ? null : source.main * scale,
+      ve: source.ve === null ? null : source.ve * scale,
+    });
+  }
+  return out;
+}
+
 export const BILL_METADATA = {
   mockUp: { revision: "A", date: "04-Aug-26" },
   main: { revision: "B", date: "28-Aug-26" },

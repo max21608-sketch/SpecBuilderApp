@@ -95,6 +95,7 @@ import { drawingPdf, preamblePdf, itemPicture, swatch } from "./demo/sheets";
 import { loadSourcePictures, sourceItemFor, copyPictureInto, type RealPicture } from "./demo/real-pictures";
 import {
   BILL,
+  expandBill,
   BILL_METADATA,
   CONTACTS,
   DRAWINGS_A,
@@ -113,6 +114,69 @@ import {
 const ACTOR = "demo-seed";
 const apply = process.argv.includes("--apply");
 const clear = process.argv.includes("--clear");
+
+// ---- the two flags the 300 test needs --------------------------------------
+//
+// `--lines=N` makes the invented bill N lines instead of the hand-written
+// eighteen, for §7.4a: "a lot of the demo data might have 15 lines. What
+// happens when it has 300?" The extra lines are VARIATIONS of the real ones
+// (`expandBill`), so a long bill is not a tidier bill. Anything at or below
+// the hand-written count leaves the bill exactly as it was, which is what
+// keeps the default demo unchanged.
+//
+// `--no-checklist` skips step 8b, which is where nearly all the time goes: it
+// answers a question at a time through the app's own `editAnswer`, and at 300
+// lines that is tens of thousands of writes. The 300 test is about what the
+// LIST SCREENS do with three hundred rows, and none of them needs the
+// checklist worked up to show it.
+const linesArg = process.argv.find((arg) => arg.startsWith("--lines="))?.split("=")[1];
+const requestedLines = linesArg ? Number(linesArg) : BILL.length;
+if (!Number.isInteger(requestedLines) || requestedLines < 1 || requestedLines > 2000) {
+  console.error(`--lines must be a whole number between 1 and 2000. Got: ${linesArg}`);
+  process.exit(1);
+}
+const noChecklist = process.argv.includes("--no-checklist");
+const BILL_LINES = expandBill(BILL, requestedLines);
+
+/**
+ * A LONG BILL IS ITS OWN PROJECT, beside the demo rather than instead of it.
+ *
+ * `DEMO-TEST-01` is the walkthrough — the one that gets opened in front of
+ * somebody — and this script refuses to build a second project under a number
+ * that already exists. Giving the 300-line fixture the same number would mean
+ * sweeping the walkthrough to make one, which is not a trade anybody would
+ * choose at five to nine on the morning of a call. It keeps the `DEMO` prefix,
+ * so `--clear --apply` still takes both.
+ */
+const DEMO = {
+  ...PROJECT,
+  ...(requestedLines > BILL.length
+    ? {
+        number: `DEMO-${requestedLines}`,
+        name: `${PROJECT.name} — ${requestedLines} lines`,
+        // Its own mailbox, so its correspondence does not collide with the
+        // walkthrough's on `email_messages`' (mailbox, graph_message_id).
+        inbox: `demo-${requestedLines}@ashcombe.example.com`,
+      }
+    : {}),
+};
+
+if (process.argv.includes("--help")) {
+  console.log(`npm run qa:demo -- [--apply] [--clear] [--lines=N] [--no-checklist]
+
+  --apply          write it. Without this it is a dry run and touches nothing.
+  --clear          sweep every DEMO project (with --apply).
+  --lines=N        make the bill N lines instead of ${BILL.length}, for the 300 test
+                   (docs/plans/make-it-work-2026-09-19.md §7.4a). The extra lines
+                   are variations of the real ones, with distinct codes and areas.
+  --no-checklist   skip working the checklist up. That step is nearly all of the
+                   runtime — a question at a time through the app's own editAnswer —
+                   and a 300-line bill takes hours with it. The list screens the
+                   300 test is about do not need it.
+
+Sandbox only. No model is called and nothing is charged.`);
+  process.exit(0);
+}
 
 // ---- guards, before anything is touched ------------------------------------
 const databaseUrl = process.env.DATABASE_URL;
@@ -263,21 +327,21 @@ if (clear) {
 // ===========================================================================
 // What it is going to build, said before it builds it.
 // ===========================================================================
-const existing = await client.query(`select id from projects where bws_project_number = $1`, [PROJECT.number]);
+const existing = await client.query(`select id from projects where bws_project_number = $1`, [DEMO.number]);
 if (existing.rows.length > 0) {
-  console.error(`${PROJECT.number} already exists. Remove it first:  npm run qa:demo -- --clear --apply`);
+  console.error(`${DEMO.number} already exists. Remove it first:  npm run qa:demo -- --clear --apply`);
   await client.end();
   process.exit(1);
 }
 
-const billLines = BILL.length;
-console.log(`${PROJECT.number} — ${PROJECT.name}`);
-say("bill of quantities", `3 tabs, ${billLines} lines on the main run`);
+const billLines = BILL_LINES.length;
+console.log(`${DEMO.number} — ${DEMO.name}`);
+say("bill of quantities", `3 tabs, ${billLines} lines on the main phase${requestedLines > BILL.length ? ` (${BILL.length} written, the rest varied for the 300 test)` : ""}`);
 say("shop drawings", `issue A (${DRAWINGS_A.length} sheets, confirmed) + issue B (${DRAWINGS_B.length} sheets, on the desk)`);
 say("preamble", `${PREAMBLE_NOTES.length} notes`);
 say("correspondence", `${INBOX.length} held in the inbox, 1 on the project awaiting review`);
 say("finishes", `${Object.keys(FINISH_DETAIL).length} codes, each with a swatch`);
-say("pictures", "one per record on the main run");
+say("pictures", "one per record on the main phase");
 
 if (!apply) {
   console.log("\nDry run. Nothing was written and nothing was stored. Add --apply to build it.");
@@ -299,8 +363,8 @@ const project = await sql`
     (bws_project_number, name, client, shared_inbox, order_date, specs_agreed_by, delivery_date,
      default_dimension_unit, status, created_by, updated_by)
   values
-    (${PROJECT.number}, ${PROJECT.name}, ${PROJECT.client}, ${PROJECT.inbox},
-     ${"2026-08-10"}, ${"2026-09-25"}, ${"2026-12-18"}, ${PROJECT.defaultUnit}, 'active', ${ACTOR}, ${ACTOR})
+    (${DEMO.number}, ${DEMO.name}, ${DEMO.client}, ${DEMO.inbox},
+     ${"2026-08-10"}, ${"2026-09-25"}, ${"2026-12-18"}, ${DEMO.defaultUnit}, 'active', ${ACTOR}, ${ACTOR})
   returning id
 `;
 const projectId = String(project[0]?.id);
@@ -340,14 +404,14 @@ async function buildBoqWorkbook(): Promise<Buffer> {
     // The rows ABOVE the header, which carry the revision, the date and the
     // terms the run is priced under. A client template writes the label in one
     // cell and the value in the NEXT one, and this one does too.
-    sheet.addRow([PROJECT.name]);
+    sheet.addRow([DEMO.name]);
     sheet.addRow([BILL_METADATA.notes[0]]);
     sheet.addRow(["Revision:", metadata.revision, "", "Date:", metadata.date]);
     sheet.addRow([BILL_METADATA.notes[1]]);
     sheet.addRow([BILL_METADATA.notes[2]]);
     sheet.addRow([]);
     sheet.addRow(["Designer", "Category", "Area", "Code", "Item Description", "Product Reference", "TOTAL Q-ty", "Unit"]);
-    for (const line of BILL) {
+    for (const line of BILL_LINES) {
       const qty = line[key];
       if (qty === null) continue;
       sheet.addRow([
@@ -853,7 +917,13 @@ say("drawings issue B", `${DRAWINGS_B.length} sheets staged, left on the reviewe
 // queue attempt, which is a paid model read, and this script is going to be
 // re-run. Its staged output is written straight in, from `resolveProposals`.
 // ===========================================================================
-const MAILBOX = "demo@ashcombe.example.com";
+// THE PROJECT'S OWN INBOX, not a constant shared with the walkthrough.
+//
+// `email_messages` is unique on (mailbox, graph_message_id) and the demo's
+// message ids are fixed strings, so a SECOND demo project under the same
+// mailbox fails on the first message — found by building the 300-line fixture
+// beside DEMO-TEST-01, 400 seconds in, after 492 pictures had been stored.
+const MAILBOX = DEMO.inbox;
 
 function rfc2822(date: Date): string {
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -1036,8 +1106,14 @@ say("inbox", `${INBOX.length} messages, all held`);
 // change_set_id) do nothing`. So this whole pass is ONE entry in the trail and
 // ONE new version per record, which is what a person working through a
 // checklist in an afternoon actually produces — not eleven hundred of them.
+//
+// SKIPPED BY `--no-checklist`, and said out loud rather than silently left
+// empty: a demo that opens at 4% answered is a wall of "missing", and somebody
+// opening the 300-line fixture has to know which of the two they are looking at.
 // ===========================================================================
-{
+if (noChecklist) {
+  say("checklist worked up", "SKIPPED (--no-checklist) — the project opens at about 4% answered");
+} else {
   const { demoAnswerFor } = await import("./demo/answers");
   const { closeChangeSet } = await import("@/lib/change-sets");
 
@@ -1173,7 +1249,7 @@ say("inbox", `${INBOX.length} messages, all held`);
   const designer = groups.find((group) => group.contact.role === "designer");
 
   if (designer) {
-    const projectLabel = `${PROJECT.number} ${PROJECT.name}`;
+    const projectLabel = `${DEMO.number} ${DEMO.name}`;
     // The questions that block a QUOTE go in the sent one; the rest wait.
     const toQuote = designer.questions.filter((question) => question.tier === "to_quote").slice(0, 14);
     const rest = designer.questions.filter((question) => !toQuote.includes(question)).slice(0, 26);
@@ -1205,7 +1281,7 @@ say("inbox", `${INBOX.length} messages, all held`);
            sent_at, sent_by, created_by, updated_by)
         values
           (${projectId}, ${designer.contact.id}, 'chase', ${status}, ${intro}, ${closing}, ${subject}, ${body},
-           'html', ${TEMPLATE_VERSION}, ${designer.contact.name}, ${designer.contact.email}, ${PROJECT.inbox},
+           'html', ${TEMPLATE_VERSION}, ${designer.contact.name}, ${designer.contact.email}, ${DEMO.inbox},
            ${designer.contact.version}, ${projectLabel}, ${sentAt}, ${status === "sent" ? ACTOR : null},
            ${ACTOR}, ${ACTOR})
         returning id
@@ -1287,7 +1363,7 @@ const summary = await client.query(
   [projectId],
 );
 const row = summary.rows[0] as Record<string, string>;
-console.log(`\n${PROJECT.number} built.\n`);
+console.log(`\n${DEMO.number} built.\n`);
 for (const [key, value] of Object.entries(row)) say(key.replace(/_/g, " "), String(value));
 console.log(`\n  ${stored.length} files stored under projects/${projectId}/ and mailbox/`);
 console.log(`\n  Open it at /dashboard/projects/${projectId}`);
