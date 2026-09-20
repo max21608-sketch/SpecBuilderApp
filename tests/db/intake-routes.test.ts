@@ -661,7 +661,7 @@ describeIfDb("intake routes", () => {
     //
     // This is also the only thing that proves the jsonpath: three staged shapes
     // carry a reviewStatus and the route names all three.
-    const code = "__QAX140";
+    const code = "__QAX146";
     await makeRecord(mainRunId, code, "__QA Pending console");
     const batch = await client.query(
       `insert into intake_batches (project_id, label, created_by, updated_by)
