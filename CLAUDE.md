@@ -818,6 +818,33 @@ The per-level columns (`L1`..`L6`) are deliberately absent from the header
 synonyms. They are quantities, and a bill that read `L1` where `qty` belonged
 would order 3 sofas instead of 14.
 
+**The variance matrix's bills rows (plan §6.10.a) were driven through this
+reader on 2026-09-21**, nine rows, each a synthetic fixture built by
+`tests/fixtures/build-boq.ts` (real `.xlsx` bytes in memory — no spreadsheet
+is committed, because `.gitignore` refuses `*BOQ*.xlsx` as the NDA guard and a
+fixture named to slip past it would hollow out the rule). Four of them changed
+the code, and each is a trap: **a bill whose headings the reader does not
+know is refused by quoting the bill's own headings back**, naming the closest
+row and the required column it lacked, ON THE REVIEW SCREEN — the sentence
+used to be a 422 the upload screen alone saw, and `intake_runs.error` had
+never been rendered for a bill; **a header split over two rows is read as one
+header**, only where the second row COMPLETES a row that already matched;
+**one fold everywhere a code is matched** — `boq-reconcile.ts` used
+`boq-import`'s looser fold while every other matcher used `record-refs`'
+`normaliseRef`, so `S.201` against `S-201` read as a new line beside a
+retired one, and confirming that revision would have retired a record with
+its drawings, specs and picture over a dot; and **`.xls`, `.xlsb`, `.xlsm`,
+`.ods` and `.numbers` are refused in the browser before a byte is stored**,
+with *save as .xlsx* as the way out, while `.csv`/`.tsv` proceed and the drop
+zone says so. A bill with no quantity column proceeds with `qty` null and BOTH
+screens now say *quantity not given* — never 1. A bill inside a PDF is
+refused at classify time (`fileDocument`, the exact step; a certain answer
+only) so no charged read starts. Two bills in one pack both stage and the
+pack screen says nothing is paired. Recorded and NOT fixed: a subtotal or
+section row that carries a description becomes a spec record with the
+subtotal's figure as its quantity. The header synonym list is still CODE
+(`COLUMNS`), not seed.
+
 Rows above the header carry the revision, the date and the terms the run is
 priced under. A client template writes `Revision:` in one cell and `0` in the
 NEXT one, so the reader handles the split form as well as the inline one. Both

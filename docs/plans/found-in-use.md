@@ -84,6 +84,29 @@ it (Fable's greps on 2026-09-20 returned empty for exactly this reason and it
 was blamed on a shell function), and `git diff` treated the file as binary.
 Same technique, escaped; behaviour unchanged, the template tests green.
 
+### Two database-tier runs at once collide on hard-coded `__QA` project numbers
+
+**Status: open — found 2026-09-21 by Coder C, twice in two full runs, while
+another coder ran the db tier against the same sandbox.** Fixtures create
+`__QA P90014`-style projects with fixed numbers; the second run to arrive
+fails in `beforeAll` on `projects_bws_project_number_key`, then fails AGAIN in
+`afterAll` with `invalid input syntax for type uuid: ""` because `projectId`
+was never assigned — two messages that read as unrelated defects. Every such
+file passes alone. This matters because `npm run checks` is Stage 2's release
+gate and two agents at once is the plan's normal state. Cause apart from
+observation: a per-run suffix on the fixture's project number (or a
+per-process prefix in `db-tier.ts`) removes the collision.
+
+### A subtotal or section row that carries a description becomes a record
+
+**Status: open — pinned as a gap by Coder C's row 6, 2026-09-21.** A code-less
+subtotal row is skipped and the review says how many; a section or subtotal
+row that carries text in the description column becomes a spec record with
+the subtotal's figure as its quantity, and nothing suggests ignoring it. On a
+300-line bill the Include box is the only way out. The word list that would
+catch it is `non-furniture-guess.ts`'s, whose own header says it is Max and
+Matthew's to extend.
+
 ### Three single-document review screens say "Not read yet" for a run the cap deferred
 
 **Status: open — observation from Coder B's round 3, 2026-09-21.**
