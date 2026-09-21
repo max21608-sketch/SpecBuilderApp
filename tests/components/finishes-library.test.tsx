@@ -302,3 +302,49 @@ describe("the finishes library", () => {
     expect(screen.queryByText("MOR005")).not.toBeInTheDocument();
   });
 });
+
+describe("the codes the library cannot reach (row e2)", () => {
+  // A code a drawing carries and the library does not hold — because the two
+  // disagree about what it means, so the confirm linked nothing. It is the one
+  // promise this screen makes that is then unavailable: correcting the code
+  // once corrects every item carrying it, and an unlinked code cannot be
+  // corrected at all.
+  const withUnlinked = {
+    ...PAYLOAD,
+    unlinked: [
+      { code: "CH-02", records: 3 },
+      { code: "UPH-07", records: 1 },
+    ],
+  };
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify(withUnlinked), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("NAMES them, with how many items each one is on", async () => {
+    // Named rather than counted: "two codes are not in the library" is a
+    // number somebody dismisses, where CH-02 and UPH-07 is a job.
+    render(<FinishesLibrary projectId="proj-1" />);
+    const banner = (await screen.findByText(/not in the library yet/)).closest("div")!;
+    expect(within(banner).getByText("CH-02")).toBeInTheDocument();
+    expect(within(banner).getByText("UPH-07")).toBeInTheDocument();
+    // The counts are read off the banner's text rather than as elements: the
+    // sentence interleaves spans and bare text, so each number is its own node.
+    expect(banner.textContent).toContain("CH-02 (3 items)");
+    expect(banner.textContent).toContain("UPH-07 (1 item)");
+  });
+
+  it("says what it means — that correcting them once is not possible", async () => {
+    // The consequence rather than the state. And the action beside it is the
+    // backfill, because nothing in the app links an unlinked attribute:
+    // `createFinish` writes the row and leaves `finish_id` null, so a button
+    // here would appear to work and change nothing.
+    render(<FinishesLibrary projectId="proj-1" />);
+    await screen.findByText(/not in the library yet/);
+    expect(screen.getByText(/correcting them once is not possible/)).toBeInTheDocument();
+    expect(screen.getByText(/db:backfill-finishes/)).toBeInTheDocument();
+  });
+});
