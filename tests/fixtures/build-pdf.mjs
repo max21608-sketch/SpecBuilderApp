@@ -4,7 +4,7 @@
 // WHY A BUILDER AND NOT A FIXTURE FILE
 //
 // Two Stage 2 variance rows need PDFs this repo cannot hold: a page rotated 90
-// degrees (row 5) and a file of 120 pages (row 6). A real client drawing is
+// degrees (row 5) and files of 120 and 601 pages (row 6). A real client drawing is
 // exactly what never enters this repo, and a 120-page binary would be a
 // megabyte of it. So the bytes are generated, from nothing, by this script —
 // invented geometry and invented text, deterministic, and small enough that a

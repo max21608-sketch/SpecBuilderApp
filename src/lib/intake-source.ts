@@ -76,20 +76,24 @@ export async function readSpreadsheetSheets(
 // ============================================================================
 // HOW MANY PAGES ONE READ TAKES — Stage 2 variance row 6.
 //
-// MEASURED FIRST, as the row asked, and the finding is that nothing in this app
-// had ever counted. A 120-page PDF is registered (the 20MB byte cap does not
-// touch it — a 120-page synthetic is 33KB and even a real drawing set of that
-// length is usually under the cap), base64'd whole, and sent. It does not hang:
-// `MODEL_DEADLINE_MS` bounds it at 240s inside a 270s run abort. What it does
-// is come back from the API as a 400, which `classifyTransportFailure` reports
-// as `invalid_request` — "The request was refused (400)." — so the run goes
-// terminal, an attempt is spent on a charged request, and the sentence in front
-// of the person says nothing about pages.
+// MEASURED FIRST, as the row asked, and the answer for 120 pages is PROCEEDS.
+// Nothing in this app had ever counted pages, and the first version of this
+// cap was set at 100 — which would have REFUSED a 120-page document the API
+// accepts. 100 is the per-request page limit for a 200k-context model; the
+// extraction model is `claude-sonnet-5`, whose window is 1M, and its limit is
+// 600. A wrong cap here is the worst outcome available: a document nobody can
+// get into the app at all, refused by us with a confident sentence.
 //
-// So the cap is stated here, where the bytes are already in hand and BEFORE the
-// call. A refusal at this point costs nothing: `extraction-run.ts` catches it
-// and fails the run with these words, which is the same treatment an encrypted
-// or unparseable file already gets.
+// What a 120-page PDF actually does: it is registered (the 20MB byte cap does
+// not touch it — a 120-page synthetic is 33KB), base64'd whole, and read. It
+// does not hang either way; `MODEL_DEADLINE_MS` bounds the call at 240s inside
+// a 270s run abort, and an answer too long for one extraction is already
+// reported as `truncated` with "Split it into smaller documents".
+//
+// So the cap is the REAL limit, stated here where the bytes are already in hand
+// and BEFORE the call, so a 700-page file gets a sentence naming the number
+// instead of the API's bare "The request was refused (400)." — which is what it
+// got until now, after an attempt had been spent on a charged request.
 //
 // IT IS NOT ENFORCED AT REGISTRATION, and that is deliberate.
 // `registerSpecDocument` reads only the store's METADATA — `headTrustedBlob` —
@@ -100,11 +104,18 @@ export async function readSpreadsheetSheets(
 /**
  * The most pages one extraction can carry.
  *
- * The model's own documented ceiling for a PDF in one request, not a number
- * this app chose. Stated rather than discovered, so the sentence a person reads
- * says what to do.
+ * THE MODEL'S OWN DOCUMENTED CEILING, NOT A NUMBER THIS APP CHOSE, and it is
+ * tied to the model: 600 for a 1M-context model, which `EXTRACTION_MODEL`
+ * (`claude-sonnet-5`) is, and 100 for a 200k-context one. If the extraction
+ * model is ever changed to a 200k-context model this has to come down with it,
+ * which is the reason the figure is a named constant with this sentence beside
+ * it rather than a literal in a message.
+ *
+ * In practice the 20MB registration cap and the 32MB request cap bite first on
+ * any real drawing set of this length; this is the gate for a file with a great
+ * many small pages.
  */
-export const MAX_MODEL_PDF_PAGES = 100;
+export const MAX_MODEL_PDF_PAGES = 600;
 
 /**
  * How many pages a PDF has, or NULL where this cannot tell.
