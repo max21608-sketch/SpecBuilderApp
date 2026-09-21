@@ -240,7 +240,7 @@ function itemLabel(question: ChaseQuestion): string {
 
 /** A question, identified the way two coverage rows are the same question. */
 function questionKey(question: ChaseQuestion): string {
-  return `${question.prompt.trim()} ${(question.fieldLabel ?? "").trim()}`;
+  return `${question.prompt.trim()}\u0000${(question.fieldLabel ?? "").trim()}`;
 }
 
 type AreaBlock = { label: string; noArea: boolean; questions: ChaseQuestion[] };
@@ -276,7 +276,7 @@ export function groupByQuestionAndArea(questions: readonly ChaseQuestion[]): Que
     block.count += 1;
 
     const folded = foldArea(question.area);
-    const areaKey = folded ?? " none";
+    const areaKey = folded ?? "\u0000none";
     const areas = areasByBlock.get(key)!;
     let area = areas.get(areaKey);
     if (!area) {

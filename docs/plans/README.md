@@ -50,6 +50,17 @@ discipline as Stage 1. Each item's §7.1 evidence, as facts:
 - **The category name is gone from the email**; it was in the old per-record
   heading and has no place in a per-question one.
 
+**The first-session script walks Stage 2 (`023dbc4`, the verifier's
+`bc48210`).** Eleven new assertions over 2.3, 2.4, 2.5, 2.6, 2.7 and 2.8 and a
+new step 10 (the infill screen), never calling the model. Run against the
+`bc1857a` deployment: **PASS 40 · FAIL 0 · SKIP 2** (the two clone-has-no-
+preview skips), e.g. `2.5 — 492 coverage rows · 49 question tables · 167 area
+rows · "from you"` and `2.6 — "W1234 x D790 x H720 x SH440mm (1250 L-shaped
+return)" · in the checklist answer · in the csv`. Against the local dev server:
+37 · 3 · 2, all three downstream of one finding (an infill save refused as
+retryable, local only) logged in `found-in-use.md`. Found on the way and fixed
+by Fable in one line: two literal NUL bytes in `chase-template.ts`.
+
 **Two departures by Coder B that Max should know:** the shared table body
 between the chase and infill screens was NOT extracted (eight columns against
 seven, a selection model, a level `SuggestButton` — the grouping is shared, the

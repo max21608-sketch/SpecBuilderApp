@@ -22,6 +22,31 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### An answer typed on the infill screen is refused on the LOCAL dev server, and only there
+
+**Status: open — found 2026-09-21 by the verifier's first-session runs, three
+of three on `http://localhost:3000`, zero of one on the staging deployment.**
+Filling a text answer on an opened infill line and blurring leaves it unwritten
+and the row prints "Nothing was written — try again"; two attempts 45 s apart
+both fail. On staging the same step succeeds (`outstanding 989 → 988`). Cause
+apart from observation: the wording is `transactionErrorResponse`'s retryable
+branch — deadlock, `lock_timeout` (5 s) or `statement_timeout` (15 s) inside
+the guarded transaction — and the route does not log which; `pg_locks` and
+`pg_stat_activity` showed no held lock afterwards. The by-question tab's
+records also failed to arrive within 24 s on local only, probably the same
+cause. A dev server sharing a laptop with a full test run is the likeliest
+reading, and it is unproven; this is the meeting screen, so it is worth
+proving before Matthew is in front of a client with it.
+
+### `chase-template.ts` held two raw NUL bytes — FIXED same day
+
+**Status: FIXED 2026-09-21, on staging with the verifier's script.** Two key
+separators were written as literal `\0` bytes rather than `\u0000` escapes,
+so `file` called the source `data`, `grep` printed nothing for any symbol in
+it (Fable's greps on 2026-09-20 returned empty for exactly this reason and it
+was blamed on a shell function), and `git diff` treated the file as binary.
+Same technique, escaped; behaviour unchanged, the template tests green.
+
 ### *Read all* starts every document at once, past the pack's cap
 
 **Status: open — found 2026-09-21 by Coder B while building the cap (Stage 2
