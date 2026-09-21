@@ -32,7 +32,7 @@ const signedIn = vi.hoisted(() => ({
   value: null as null | { id: string; email: string; name: string; role: string },
 }));
 
-const store = vi.hoisted(() => ({ bytes: Buffer.alloc(0) }));
+const store = vi.hoisted(() => ({ bytes: new Uint8Array() }));
 
 vi.mock("@/lib/blob-source", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/blob-source")>();
@@ -42,7 +42,8 @@ vi.mock("@/lib/blob-source", async (importOriginal) => {
     // stands in for is the store, which a test environment has none of.
     readTrustedBlob: async (pathname: string, projectId: string) => {
       actual.assertProjectScopedPathname(pathname, projectId);
-      return { bytes: store.bytes, contentType: "message/rfc822", size: store.bytes.byteLength, pathname };
+      const bytes = Buffer.from(store.bytes);
+      return { bytes, contentType: "message/rfc822", size: bytes.byteLength, pathname };
     },
   };
 });
@@ -86,7 +87,7 @@ describeIfDb("the email attachment route", () => {
   let pdfRunId = "";
 
   beforeAll(async () => {
-    store.bytes = eml();
+    store.bytes = new Uint8Array(eml());
     signedIn.value = {
       id: "00000000-0000-0000-0000-000000000001",
       email: "__qa@example.test",
