@@ -245,6 +245,48 @@ function expect(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+/**
+ * The `.eml` body, decoded.
+ *
+ * `eml.ts` writes quoted-printable, which breaks a line at 76 characters with
+ * a trailing `=` — BY COUNT, not at anything meaningful, so
+ * `data-record="…"` is routinely split down the middle. Asserting over the raw
+ * download therefore finds fewer item rows than the body carries, which reads
+ * as a defect in the regrouping rather than as a transfer encoding. The `=XX`
+ * octets are UTF-8, so they are collected as BYTES and decoded once: taking
+ * them as code points mangles the en dash the email's own wording uses.
+ */
+function decodeQuotedPrintable(raw) {
+  const unfolded = raw.replace(/=\r?\n/g, "");
+  const bytes = [];
+  for (let at = 0; at < unfolded.length; at += 1) {
+    if (unfolded[at] === "=" && /^[0-9A-Fa-f]{2}$/.test(unfolded.slice(at + 1, at + 3))) {
+      bytes.push(parseInt(unfolded.slice(at + 1, at + 3), 16));
+      at += 2;
+      continue;
+    }
+    bytes.push(unfolded.charCodeAt(at) & 0xff);
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+/**
+ * Does this inventory still mention one question on one record?
+ *
+ * Walked rather than read off a known path, because the chase inventory puts a
+ * question in one of several places depending on whether its record's designer
+ * resolves to a contact — `groups`, `blocked`, `uncategorised`. Searching for
+ * the requirement id alone would match every other record that asks the same
+ * question, since `requirements` is per CATEGORY; the pair is what identifies
+ * the row that was just answered.
+ */
+function mentionsQuestion(value, recordId, requirementId) {
+  if (Array.isArray(value)) return value.some((entry) => mentionsQuestion(entry, recordId, requirementId));
+  if (value === null || typeof value !== "object") return false;
+  if (value.recordId === recordId && value.requirementId === requirementId) return true;
+  return Object.values(value).some((entry) => mentionsQuestion(entry, recordId, requirementId));
+}
+
 // ---- the manifest ----------------------------------------------------------
 //
 // Every row and blob this run created, written as it goes, so a walk that dies
@@ -985,6 +1027,57 @@ try {
     return `expanded, ${after.length - before} more characters of questions`;
   });
 
+  await check("2.4", "the phase table filters by AREA, says how much it hid, and moves no tile", async () => {
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}?tab=${firstPhase.id}`, 0);
+    await ready(/Needed to quote|Client code|Item/i);
+    await settled();
+
+    const select = page.getByLabel("Filter by area").first();
+    expect(await select.count(), "no area select on the phase table");
+    const options = await select.locator("option").evaluateAll((nodes) =>
+      nodes.map((node) => ({ value: node.value, label: (node.textContent ?? "").trim() })),
+    );
+    // MORE THAN ONE REAL AREA, or the control proves nothing. The fixture bill
+    // carries an Area column — Lounge, Study, Corridor, Bedroom, Suite — so
+    // this assertion is about the select rather than about the data.
+    expect(
+      options.length > 2,
+      `the area select offers ${options.length} option(s): ${options.map((option) => option.label).join(", ")}`,
+    );
+    expect(options[0].value === "", `the first option is "${options[0].label}", not all areas`);
+
+    // THE TILE IS THE PHASE'S OWN NUMBER, whatever the filter says. A tile that
+    // moved with the filter would let somebody narrow the screen until a phase
+    // looked finished — the rule the chase screen's two counts state as well.
+    // `/^TGQ/` and not `hasText: "TGQ"`: the Ready-to-quote tile's own meaning
+    // line reads "TGQ satisfied", so a substring match finds two tiles.
+    const tgq = page.locator("button[aria-pressed]").filter({ hasText: /^TGQ/ }).first();
+    expect(await tgq.count(), "no TGQ tile above the phase table");
+    const readTile = async () => (await tgq.innerText()).replace(/\s+/g, " ").trim();
+    const before = await readTile();
+
+    const pick = options.find((option) => option.value !== "");
+    await select.selectOption(pick.value);
+    // "n of m shown" ONLY WHEN THE LIST WAS NARROWED, which is as much the rule
+    // being asserted as the number is: printing it on every visit teaches
+    // people to ignore the one row where it means something. The footer's own
+    // "Showing n of m items" does not match — this pattern needs the word
+    // `shown` immediately after.
+    const shownText = await ready(/\d+ of \d+ shown/, Math.min(PATIENCE, 30000));
+    const shown = /(\d+) of (\d+) shown/.exec(shownText);
+    expect(
+      Number(shown[1]) < Number(shown[2]),
+      `choosing "${pick.label}" listed ${shown[0]} — the area filter narrowed nothing`,
+    );
+    const after = await readTile();
+    expect(after === before, `the TGQ tile moved with the filter: "${before}" → "${after}"`);
+    // AND IT IS IN THE URL, through `useUrlTab`, so a narrowed screen is one
+    // somebody can send.
+    const inUrl = new URL(page.url()).searchParams.get("area");
+    expect(inUrl === pick.value, `?area= reads "${inUrl}", not "${pick.value}"`);
+    return `${options.length - 1} areas · ${shown[0]} · the TGQ tile unmoved`;
+  });
+
   // =========================================================================
   // 8. The record.
   // =========================================================================
@@ -1132,6 +1225,187 @@ try {
     return "the confirmed fabric is on the record";
   });
 
+  // ---- 2.6 the one qualifier a PERSON types, beside the five slots ---------
+  const DIMENSION_NOTE = "1250 L-shaped return";
+
+  await check("2.6", "a newline in the dimension note is refused in words, and nothing is written", async () => {
+    // THE REFUSAL COMES FIRST, because it is the cheaper half to get wrong: the
+    // composed cell goes into BWS field 3 and a newline inside a BWS cell is a
+    // change to the format of the file that OVERWRITES rather than fails. 0034
+    // has a CHECK behind this, and a constraint reaching a person as a 500 is
+    // the `email_confirm` lesson — so the route has to say it in words first.
+    const before = await query(`select dimension_note, version from spec_records where id = $1`, [recordId]);
+    const response = await context.request.patch(`${BASE}/api/records/${recordId}`, {
+      headers: { "content-type": "application/json" },
+      // THE DETAILS SHAPE. `PATCH /api/records/[id]` is a union of three, and
+      // the note lives in the third — a bare `dimensionNote` at the top level
+      // matches none of them and comes back as the union's own "Invalid
+      // input", which is the route's fallback rather than its refusal.
+      data: {
+        details: { dimensionNote: "1250 L-shaped return\nand a second line" },
+        version: Number(before.rows[0].version),
+      },
+    });
+    expect(response.status() === 400, `expected 400, got ${response.status()}`);
+    const body = await response.json().catch(() => ({}));
+    const said = String(body.error ?? body.message ?? "");
+    expect(/one line|line break/i.test(said), `the 400 does not say why in words: "${said}"`);
+    const after = await query(`select dimension_note from spec_records where id = $1`, [recordId]);
+    expect(
+      (after.rows[0].dimension_note ?? null) === (before.rows[0].dimension_note ?? null),
+      "the refused note landed anyway",
+    );
+    return `400 · "${said.slice(0, 80)}" · nothing written`;
+  });
+
+  await check("2.6", "the note is typed on Edit details, reaches the composed cell and the BWS file", async () => {
+    // Matthew endorsed the structured slots outright and then named what they
+    // cannot hold: "a text box for qualifying stuff". It is ONE statement about
+    // the WHOLE cell, so it is a column on the record rather than a sixth slot
+    // or a second 0029 qualifier — there are up to five of those per cell and
+    // picking one to stand for it would invent a fact.
+    await open(`${BASE}/dashboard/records/${recordId}`, 0);
+    // CASE-INSENSITIVE, because `innerText` returns the RENDERED text and the
+    // details panel's labels carry `uppercase` — so the screen says DIMENSION
+    // NOTE and a pattern matching the source's own capitals waits for ever on
+    // a panel that has already painted. Every `ready` over a label needs this.
+    await ready(/dimension note/i);
+    const edit = page.getByRole("button", { name: "Edit", exact: true }).first();
+    const box = page.locator('input[placeholder="1250 L-shaped return"]').first();
+    expect(await press(edit, () => box.count()), "Edit details never opened a dimension-note box");
+    await box.fill(DIMENSION_NOTE);
+    // SAVED AS ONE ACT, not on blur. Typing the quote description, tabbing to
+    // Internal notes and typing there used to lose the second box, because the
+    // first blur saved and the reload re-keyed every input.
+    const save = page.getByRole("button", { name: /^Sav(e|ing)/ }).first();
+    const written = async () => {
+      const { rows } = await query(`select dimension_note from spec_records where id = $1`, [recordId]);
+      return (rows[0].dimension_note ?? "") === DIMENSION_NOTE;
+    };
+    expect(await press(save, written), "Save wrote no dimension note");
+
+    // THE SPECS CELL IS A PROJECTION OF THE ATTRIBUTES PLUS THIS NOTE, and the
+    // note goes LAST — after the millimetre group, after any SH, in ROUND
+    // brackets, because the square ones are this app reporting a problem
+    // rather than a person speaking.
+    await open(`${BASE}/dashboard/records/${recordId}`, 0);
+    const cell = page.locator("p.font-mono").first();
+    await cell.waitFor({ timeout: PATIENCE });
+    let composed = "";
+    for (let waited = 0; waited < Math.min(PATIENCE, 30000); waited += 1000) {
+      composed = (await cell.innerText()).replace(/\s+/g, " ").trim();
+      if (composed.endsWith(`(${DIMENSION_NOTE})`)) break;
+      await page.waitForTimeout(1000);
+    }
+    expect(
+      composed.endsWith(`(${DIMENSION_NOTE})`),
+      `the composed cell does not end with the note: "${composed}"`,
+    );
+    expect(
+      /\d/.test(composed.replace(`(${DIMENSION_NOTE})`, "")),
+      `the cell is the bracket alone — this record was supposed to carry figures: "${composed}"`,
+    );
+
+    // THE CHECKLIST'S DIMENSIONS ANSWER CARRIES THE SAME TEXT, because the
+    // answer is that same projection: a cell the screen shows and the answer
+    // does not is how a screen starts promising what the file cannot deliver.
+    let answer = null;
+    for (let waited = 0; waited < Math.min(PATIENCE, 30000) && !answer; waited += 1000) {
+      const { rows } = await query(
+        `select a.value from spec_answers a join requirements q on q.id = a.requirement_id
+          where a.record_id = $1 and q.spec_field_id is not null and a.value like $2 limit 1`,
+        [recordId, `%(${DIMENSION_NOTE})%`],
+      );
+      answer = rows[0] ?? null;
+      if (!answer) await page.waitForTimeout(1000);
+    }
+    expect(answer, "the Dimensions checklist answer does not carry the note");
+
+    // AND THE FILE. `composeDimensionCell` is the single composer and the
+    // export calls it, so this is the one assertion that proves the screen and
+    // the 109-column file are saying the same thing.
+    // THE RECORD'S OWN PHASE. `spec_records.run_id` is not null and a record
+    // is on exactly one phase, so exporting `firstPhase` finds the note only
+    // when the record this walk corrected happens to have landed there — which
+    // is not deterministic, and reported the export as having lost a value it
+    // was never asked for (staging, 2026-09-21).
+    const { rows: onPhase } = await query(`select run_id from spec_records where id = $1`, [recordId]);
+    const csv = await fetchAs(
+      context,
+      `/api/projects/${manifest.projectId}/export?runId=${onPhase[0].run_id}&format=csv`,
+    );
+    expect(csv.ok(), `the csv export returned ${csv.status()}`);
+    const text = await csv.text();
+    const line = text
+      .split(/\r?\n/)
+      .find((row) => row.includes(DIMENSION_NOTE));
+    expect(line, `no exported row carries the note. The file has ${text.split(/\r?\n/).length} lines`);
+    // ONE LINE, ALWAYS. A newline in a BWS cell is a file-format change to the
+    // file that overwrites rather than fails, which is why the 400 above
+    // exists — and why this is asserted over the emitted bytes too.
+    expect(!/\(1250 L-shaped\s*\r?\n/.test(text), "the exported cell broke the note across two lines");
+    return `"${composed}" · in the checklist answer · in the csv`;
+  });
+
+  // ---- 2.8 step 1: the questions that are not about this item -------------
+  await check("2.8", "the project-wide questions are ONE card, last, and closed", async () => {
+    // FIU 10: the same commercial block is on all seventeen cheat sheets, so
+    // every record asks "COM payment plan" and a person reading a record hunts
+    // past questions that are not about the item in front of them. Step 1 is a
+    // FOLD and nothing in the data — no `scope` column until Matthew asks
+    // again — so the questions are still asked of this record and still
+    // counted in the tiles, which the closed card says in words.
+    await open(`${BASE}/dashboard/records/${recordId}`, 0);
+    const checklist = page.getByRole("tab", { name: /Checklist/i }).first();
+    await checklist.waitFor({ timeout: PATIENCE });
+    await checklist.click();
+    await ready(/Missing|Confirmed|TBC/);
+
+    // EVERY SECTION CARD'S HEADING CARRIES ITS OWN COUNT — "n of m here" — so
+    // that is what picks the checklist's sections out of the page's other
+    // headings, rather than counting every `h2` and hoping.
+    const headings = await page
+      .locator("h2")
+      .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? "").replace(/\s+/g, " ").trim()));
+    const sections = headings.filter((heading) => /\bhere\b/.test(heading));
+    const at = sections.findIndex((heading) => heading.includes("Project-wide"));
+    if (at === -1) {
+      // A category whose cheat sheet authored no project-wide section has none,
+      // and that is a true statement about the seed rather than a defect. An
+      // empty "Project-wide" box would be a promise of questions that are not
+      // there, which is why the component omits it.
+      return `no project-wide section on this record's category (${sections.length} sections)`;
+    }
+    // LAST, however the cheat sheet ordered it. A card of questions that are
+    // not about the item cannot sit above the ones that are.
+    expect(
+      at === sections.length - 1,
+      `the project-wide card is section ${at + 1} of ${sections.length}: ${sections.slice(at + 1).join(" | ")}`,
+    );
+    expect(
+      /the same answer applies to every item/i.test(sections[at]),
+      `the card's title does not say what it is: "${sections[at]}"`,
+    );
+
+    // CLOSED, and its own outstanding count still on the heading. A card that
+    // opened by default would be the wall this fold exists to remove; one that
+    // hid its count would say less than the screen used to.
+    const card = page.locator("h2").filter({ hasText: "Project-wide" }).first();
+    const show = card.locator("button[aria-expanded]").first();
+    expect(await show.count(), "the project-wide card has no show control");
+    expect((await show.getAttribute("aria-expanded")) === "false", "the project-wide card is open by default");
+    expect(/\d+ outstanding/.test(sections[at]), `the heading carries no outstanding count: "${sections[at]}"`);
+    const text = await page.locator("body").innerText();
+    expect(
+      /still counted in the tiles above/.test(text),
+      "the closed card does not say the questions are still asked and still counted",
+    );
+
+    const opened = async () => (await show.getAttribute("aria-expanded")) === "true";
+    expect(await press(show, opened), "the project-wide card would not open");
+    return `card ${at + 1} of ${sections.length}, closed, and it opens`;
+  });
+
   // =========================================================================
   // 9. The chase screen.
   // =========================================================================
@@ -1157,12 +1431,487 @@ try {
     return "stated";
   });
 
-  note("no contact carries a designer code on this project, so there is nobody to chase — the per-contact preselection is covered in the component tier");
+  // ---- somebody to chase, and something to chase them for -----------------
+  //
+  // SETUP, NOT THE GATE, and both halves are written directly for the reason
+  // the programme dates are. A designer CODE is what a bill printed and
+  // nothing in this app edits one (`qa:levels` says the same); a LEVEL is a
+  // person's decision taken on a record or a card, and step 6 has already
+  // exercised the control that takes it. What is being gated here is the
+  // chase screen, which needs a contact the designer code resolves to and
+  // questions that carry a tier.
+  await query(
+    `insert into project_contacts (project_id, name, email, organisation, role, designer_code, created_by, updated_by)
+     values ($1, '__QA Designer', 'qa-designer@example.com', '__QA Design Studio', 'designer', 'QA', $2, $2)
+     on conflict do nothing`,
+    [manifest.projectId, ACTOR],
+  );
+  const levelled = await query(
+    `update spec_records set level = 'simple', level_suggested = null, level_suggested_reason = null,
+       updated_by = $2 where project_id = $1 and level is null and status = 'active'`,
+    [manifest.projectId, ACTOR],
+  );
+  note(
+    `a designer contact for code QA, and a level on ${levelled.rowCount} levelless record(s), written directly: both are setup, and the controls that take them are gated in steps 6 and 7`,
+  );
+
+  await check("2.4", "the chase screen filters by AREA, and the filter never changes what is ASKED", async () => {
+    await open(`${BASE}/dashboard/drafts?projectId=${manifest.projectId}`, 0);
+    await ready(/lines? shown of|Nothing needed to quote|Cannot be chased/i);
+
+    // THE CONTACT'S OWN TAB, because that is what preselects the TGQ set —
+    // 1.14 above has already asserted that the Everyone tab preselects nothing.
+    const tab = page.getByRole("button", { name: /__QA Designer/ }).first();
+    if (await tab.count()) {
+      await press(tab, async () => /ticked/.test(await page.locator("body").innerText()));
+    }
+    let header = await ready(/(\d+) ticked/);
+    let ticked = Number(/(\d+) ticked/.exec(header)[1]);
+    if (ticked === 0) {
+      // NOTHING PRESELECTED IS A REAL STATE — a project whose questions all
+      // sit below TGQ has nothing to preselect — so the walk ticks the rows
+      // itself rather than reporting a working screen as empty.
+      const all = page.getByRole("button", { name: /^Select everything shown$/ }).first();
+      if (await all.count()) {
+        await press(all, async () => !/\b0 ticked/.test(await page.locator("body").innerText()));
+        header = await page.locator("body").innerText();
+        ticked = Number(/(\d+) ticked/.exec(header)?.[1] ?? 0);
+      }
+    }
+    expect(ticked > 0, "nothing is ticked and nothing could be ticked — there is no chase to filter");
+
+    const draft = page.getByRole("button", { name: /^Draft/ }).first();
+    expect(await draft.count(), "no Draft button on the chase screen");
+    const draftBefore = (await draft.innerText()).trim();
+
+    const select = page.getByLabel("Filter by area").first();
+    expect(await select.count(), "no area select on the chase screen");
+    const options = await select.locator("option").evaluateAll((nodes) =>
+      nodes.map((node) => ({ value: node.value, label: (node.textContent ?? "").trim() })),
+    );
+    expect(options.length > 2, `the chase area select offers ${options.length} option(s)`);
+    const linesBefore = /(\d+) lines? shown of (\d+)/.exec(await page.locator("body").innerText());
+    expect(linesBefore, "the chase screen does not say how many lines it is showing");
+
+    const pick = options.find((option) => option.value !== "");
+    await select.selectOption(pick.value);
+    // WAITED FOR THE NUMBER TO MOVE, not for the pattern to appear. The
+    // sentence already matched before the area was chosen, so `ready` returns on
+    // the FIRST read and the assertion compares the count with itself — which
+    // reports a working filter as one that narrowed nothing. The same race the
+    // script's own `settled` exists for.
+    let narrowedText = await page.locator("body").innerText();
+    let linesAfter = /(\d+) lines? shown of (\d+)/.exec(narrowedText);
+    for (let waited = 0; waited < Math.min(PATIENCE, 30000); waited += 1000) {
+      narrowedText = await page.locator("body").innerText();
+      linesAfter = /(\d+) lines? shown of (\d+)/.exec(narrowedText);
+      if (linesAfter && Number(linesAfter[1]) < Number(linesBefore[1])) break;
+      await page.waitForTimeout(1000);
+    }
+    expect(linesAfter, "the chase screen stopped saying how many lines it is showing");
+    expect(
+      Number(linesAfter[1]) < Number(linesBefore[1]),
+      `choosing "${pick.label}" left ${linesAfter[0]} — the area filter narrowed no lines`,
+    );
+    // THE SELECTION IS THE TRUTH. Hiding a question does not untick it, and the
+    // footer says in words how many ticked questions the filter is hiding —
+    // the old screen dropped them from `selectable` instead, so a question
+    // somebody had deliberately added left the draft when they changed a
+    // dropdown, silently.
+    const draftAfter = (await draft.innerText()).trim();
+    expect(
+      draftAfter === draftBefore,
+      `the Draft button changed with the filter: "${draftBefore}" → "${draftAfter}"`,
+    );
+    const hidden = /(\d+) ticked questions? (?:is|are) hidden by your filters/.exec(narrowedText);
+    if (hidden) {
+      expect(/will still be asked/.test(narrowedText), "the screen hides ticked questions without saying they are still asked");
+    }
+    // Back to every area, so the draft below covers what the preselection chose.
+    await select.selectOption("");
+    await page.waitForTimeout(1200);
+    return `${options.length - 1} areas · ${linesBefore[1]} → ${linesAfter[1]} lines · "${draftAfter}" unchanged${hidden ? ` · ${hidden[0]}` : ""}`;
+  });
+
+  await check("2.5", "the EMAIL is grouped by question then area, and its rows ARE the coverage", async () => {
+    // The SCREEN is a list of ITEMS and the EMAIL is a list of QUESTIONS, and
+    // that is deliberate: a person works item by item, a client answers
+    // question by question, by area. Matthew, for Jay: "we end up repeating
+    // the question on ten lines".
+    const draft = page.getByRole("button", { name: /^Draft it/ }).first();
+    expect(await draft.count(), "no Draft it button to press");
+    const drafted = async () => {
+      const { rows } = await query(
+        `select count(*)::int as n from email_drafts where project_id = $1`,
+        [manifest.projectId],
+      );
+      return rows[0].n > 0;
+    };
+    expect(await press(draft, drafted), "Draft it produced no draft");
+
+    const { rows: draftRows } = await query(
+      `select id from email_drafts where project_id = $1 order by created_at desc limit 1`,
+      [manifest.projectId],
+    );
+    const draftId = draftRows[0].id;
+
+    // THE COVERAGE AS THE APP REPORTS IT, not as this walk recomputes it. The
+    // send gate rests on the body and the coverage being the same set, so the
+    // two sides of that equality have to come from the app.
+    const inventory = await fetchAs(context, `/api/drafts?projectId=${manifest.projectId}`);
+    expect(inventory.ok(), `/api/drafts returned ${inventory.status()}`);
+    const inventoryBody = await inventory.json();
+    const listed = (inventoryBody.drafts ?? []).find((row) => String(row.id) === String(draftId));
+    expect(listed, `the draft ${draftId} is not in the inventory`);
+    const coverage = new Set(
+      (listed.items ?? []).map((item) => `${item.recordId}|${item.requirementId}`),
+    );
+    expect(coverage.size > 0, "the draft carries no coverage rows");
+
+    const eml = await fetchAs(context, `/api/drafts/${draftId}/eml`);
+    expect(eml.ok(), `the .eml download returned ${eml.status()}`);
+    const body = decodeQuotedPrintable(await eml.text());
+
+    // ONE ROW PER COVERAGE ROW, extracted back out of the rendered body. Word
+    // and Outlook ignore attributes they do not know, so `data-record` and
+    // `data-requirement` cost the reader nothing and make the equality a
+    // structural property somebody can check rather than a claim.
+    const inBody = new Set(
+      [...body.matchAll(/data-record="([^"]+)"\s+data-requirement="([^"]+)"/g)].map(
+        (match) => `${match[1]}|${match[2]}`,
+      ),
+    );
+    expect(inBody.size > 0, "the body carries no item rows — the regrouping built its own rows, or the download is not the body");
+    const missing = [...coverage].filter((key) => !inBody.has(key));
+    const extra = [...inBody].filter((key) => !coverage.has(key));
+    expect(
+      missing.length === 0 && extra.length === 0,
+      `the body and the coverage are different sets: ${missing.length} covered and not asked, ${extra.length} asked and not covered`,
+    );
+
+    // A QUESTION TABLE PER QUESTION, and an AREA row inside it. A question
+    // outstanding on ONE item prints as one line with no area row at all, so
+    // the assertion is that the grouping exists where there is something to
+    // group — not that every table carries one.
+    const tables = (body.match(/<table\b/g) ?? []).length;
+    expect(tables > 0, "the body carries no question tables");
+    const groupRows = [...body.matchAll(/<tr><td colspan="2"[^>]*>([^<]+)<\/td><\/tr>/g)].map((match) => match[1]);
+    const multi = (listed.items ?? []).length > tables;
+    if (groupRows.length === 0 && multi) {
+      throw new Error(`${tables} question table(s) over ${(listed.items ?? []).length} rows and not one area group row`);
+    }
+    // THE TIER BANNER IS STILL FIRST, and still a one-cell table: Word's
+    // renderer drops a border declared on a `<p>` and that banner carries the
+    // whole point of the message.
+    expect(/Needed before we can quote/.test(body), "the tier banner is not in the body");
+
+    // AND THE WORDING COMES FROM THE LIVE CONTACT ROW. A designer gets "we
+    // need from you"; a colleague gets "we still need", because "from you"
+    // reads as though the app thinks a colleague is the client.
+    expect(
+      /[Ff]rom you/.test(body),
+      "a designer's draft does not say “from you” — the recipient kind did not reach the intro",
+    );
+    return `${coverage.size} coverage rows · ${tables} question tables · ${groupRows.length} area rows · "from you"`;
+  });
 
   // =========================================================================
-  // 10. One forced failure: a stale version on the answer PATCH.
+  // 10. The infill screen — filling in what we know, in a meeting.
   // =========================================================================
-  say("\n10. Force a failure");
+  say("\n10. The infill screen");
+  await open(`${BASE}/dashboard/projects/${manifest.projectId}/infill`, 0);
+
+  /** The answer this walk records, so the 409 step has something real to conflict with. */
+  let infillQuestion = null;
+
+  await check("2.3", "the screen says what it is for, and ships LINES rather than questions", async () => {
+    // Matthew's missing step: the PM loads the pack, takes what is outstanding
+    // to the CAM, and only then to the client — "capturing as you go". Max's
+    // shape: the chase screen with an edit box where the tick box is.
+    const text = await ready(/Fill in what we know/);
+    expect(/Fill in what we know/.test(text), "the infill screen is not titled");
+    // INTERNAL, and it says so: this screen ANSWERS questions where the chase
+    // screen ASKS them, and nothing here is sent.
+    expect(/Nothing here is sent/.test(text), "the screen does not say that nothing is sent");
+    // THE COUNTS IN WORDS. 19,582 outstanding questions is 18,976 KB of JSON
+    // if sent whole, so the route answers in three shapes over one loader and
+    // the screen says how many rows there are and how many are shown.
+    // "21 of 21 items shown". ITEMS, not lines: the word on this screen is the
+    // bill line's, and unlike the phase table it is printed on every visit
+    // because the whole screen is a narrowing exercise.
+    const shown = /(\d+) of (\d+) items? shown/.exec(text);
+    expect(shown, `the screen does not say how many items it is listing: ${text.slice(0, 300).replace(/\s+/g, " ")}`);
+    const { rows } = await query(
+      `select count(*)::int as n from spec_records where project_id = $1 and status = 'active'`,
+      [manifest.projectId],
+    );
+    expect(rows[0].n > 0, "the project has no records for the infill screen to list");
+    return shown[0];
+  });
+
+  await check("2.3", "opening a line shows an edit row where the tick box was", async () => {
+    // BOTH SCREENS READ `loadOutstanding` AND `groupIntoLines`, so they can
+    // never disagree about what is outstanding. The difference is the control
+    // in the row, which is what this asserts.
+    const lines = page.locator("tbody tr");
+    for (let waited = 0; waited < PATIENCE && (await lines.count()) === 0; waited += 1000) {
+      await page.waitForTimeout(1000);
+    }
+    expect(await lines.count(), "the infill screen listed no lines");
+    // THE LINE'S OWN ROW opens it — the row is the control, as on the chase
+    // screen. A row that carried its own button would be a second way in.
+    const opened = async () => (await page.locator('input[placeholder="Value"], select').count()) > 4;
+    expect(await press(lines.first(), opened), "opening a line showed no edit rows");
+    const text = await page.locator("body").innerText();
+    // TBC IS AN ANSWER and a distinct one, so it is its own control rather
+    // than a value somebody types.
+    expect(/TBC/.test(text), "no TBC control inside the opened line");
+    return `${await lines.count()} rows, one open`;
+  });
+
+  await check("2.3", "a typed answer is recorded, and what is outstanding stops listing it", async () => {
+    // THE ROUTE WRITES NOTHING. Every edit row posts to PATCH /api/answers/[id]
+    // or POST /api/attributes, where the optimistic lock, the change set and
+    // the reason rule already live — so this is a walk of the two routes that
+    // already existed rather than of a third way to write an answer.
+    const before = await fetchAs(context, `/api/drafts?projectId=${manifest.projectId}`);
+    expect(before.ok(), `/api/drafts returned ${before.status()}`);
+    const outstandingBefore = (await before.json()).inventory?.totals?.outstanding ?? null;
+    expect(typeof outstandingBefore === "number", "the chase inventory does not report a total");
+
+    // A PLAIN TEXT BOX, deliberately: a palette question offers a dropdown and
+    // a Dimensions row becomes slot + figure + unit written as an ATTRIBUTE,
+    // because the composed cell is a projection of the attributes and a typed
+    // answer there would be wiped by the next drawing confirm. This step is
+    // about the ordinary case.
+    const box = page.locator('input[placeholder="Value"]').first();
+    expect(await box.count(), "no plain text answer box in the opened line");
+    // WHICH question the box belongs to is read off the SCREEN, then looked up
+    // — a row picked by query may be one the screen has not painted.
+    const row = page.locator("tr").filter({ has: box }).first();
+    const rowText = (await row.innerText()).replace(/\s+/g, " ").trim();
+    const landed = async () => {
+      const { rows } = await query(
+        `select a.id, a.record_id, a.requirement_id, a.version, a.source_kind, q.prompt
+           from spec_answers a join requirements q on q.id = a.requirement_id
+           join spec_records r on r.id = a.record_id
+          where r.project_id = $1 and a.value = '__QA recorded in the meeting' limit 1`,
+        [manifest.projectId],
+      );
+      return rows[0] ?? null;
+    };
+
+    // TWO ATTEMPTS, AND THE ROW'S OWN MESSAGE EITHER WAY.
+    //
+    // `transactionErrorResponse` answers a contended write with a 503 saying
+    // "Nothing was written — try again", so a gate that failed on the first
+    // one would be reporting the app doing exactly what it says it does. What
+    // is NOT acceptable is a refusal a person cannot see or act on, so the row
+    // is read for its message on every attempt and the message is reported
+    // whether or not the retry then works — a save that only lands second time
+    // is a finding even when the walk goes green.
+    let recorded = null;
+    const saidOnRow = [];
+    for (let attempt = 0; attempt < 2 && !recorded; attempt += 1) {
+      const target = attempt === 0 ? box : page.locator("tr").filter({ hasText: rowText.split(" ")[0] }).locator('input[placeholder="Value"]').first();
+      if ((await target.count()) === 0) break;
+      // SAVED ON BLUR, each answer its own decision.
+      await target.fill("__QA recorded in the meeting");
+      await target.blur();
+      for (let waited = 0; waited < Math.min(PATIENCE, 45000) && !recorded; waited += 1500) {
+        await page.waitForTimeout(1500);
+        recorded = await landed();
+        const shown = await row.innerText().catch(() => "");
+        const complaint = /(Nothing was written[^\n]*|changed by someone else[^\n]*|no checklist row[^\n]*|could not[^\n]*)/i.exec(shown);
+        if (complaint && !saidOnRow.includes(complaint[1])) saidOnRow.push(complaint[1]);
+        if (complaint) break;
+      }
+    }
+    expect(
+      recorded,
+      saidOnRow.length > 0
+        ? `nothing was written for "${rowText.slice(0, 80)}" — the row said: ${saidOnRow.join(" | ")}`
+        : `nothing was written for the row "${rowText.slice(0, 120)}", and the row said nothing at all`,
+    );
+    if (saidOnRow.length > 0) note(`the infill save was refused once before it landed, and the row said: ${saidOnRow.join(" | ")}`);
+    // `source_kind = 'manual'`, which takes the answer out of
+    // `applyAnswerFills`' reach for good: a value a person typed is never
+    // overwritten by a later document.
+    expect(recorded.source_kind === "manual", `the answer was filed as "${recorded.source_kind}", not manual`);
+    infillQuestion = recorded;
+
+    // AND IT LEAVES WHAT IS OUTSTANDING. Both screens read one loader, so a
+    // gap filled here is a gap the chase screen stops asking about — which is
+    // the whole claim of the two screens being one question.
+    let outstandingAfter = outstandingBefore;
+    let stillListed = true;
+    for (let waited = 0; waited < Math.min(PATIENCE, 45000) && stillListed; waited += 2000) {
+      const response = await fetchAs(context, `/api/drafts?projectId=${manifest.projectId}`);
+      const inventory = (await response.json()).inventory ?? {};
+      outstandingAfter = inventory.totals?.outstanding ?? outstandingAfter;
+      stillListed = mentionsQuestion(inventory, recorded.record_id, recorded.requirement_id);
+      if (stillListed) await page.waitForTimeout(2000);
+    }
+    expect(
+      !stillListed,
+      `the chase inventory still lists “${recorded.prompt}” on that record after it was answered`,
+    );
+    expect(
+      outstandingAfter < outstandingBefore,
+      `the outstanding total did not move: ${outstandingBefore} → ${outstandingAfter}`,
+    );
+    return `“${recorded.prompt}” recorded · outstanding ${outstandingBefore} → ${outstandingAfter}`;
+  });
+
+  await check("2.3", "a stale version is a 409 on the ROW, and the row unfreezes", async () => {
+    // THE INFILL SCREEN SERIALISES ITS OWN SAVES, so a meeting does not
+    // provoke `snapshotRecords` numbering a version with no lock — but a
+    // colleague answering the same question in another window still can, and
+    // the row is where that has to be said. A screen that reloads after every
+    // action clears its banner on a successful load, so the reload comes
+    // FIRST and the message after it.
+    expect(infillQuestion, "the step before recorded nothing to conflict with");
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}/infill`, 0);
+    await ready(/Fill in what we know/);
+    const lines = page.locator("tbody tr");
+    for (let waited = 0; waited < PATIENCE && (await lines.count()) === 0; waited += 1000) {
+      await page.waitForTimeout(1000);
+    }
+
+    // THE LINE THE PREVIOUS STEP WROTE TO, not whichever line happens to be
+    // first. `requirements` is per CATEGORY, so one prompt — "TOE agreement"
+    // is on all seventeen cheat sheets — belongs to a row on every record in
+    // the project: picking the answer by prompt alone bumped the version of a
+    // DIFFERENT record's copy, the screen's own save then succeeded because
+    // nothing had changed underneath it, and the walk reported "the 409 left
+    // no message" about a screen that was right (staging, 2026-09-21).
+    const { rows: lineOf } = await query(
+      `select coalesce(parent_id, id) as line_id from spec_records where id = $1`,
+      [infillQuestion.record_id],
+    );
+    const lineId = lineOf[0].line_id;
+    const lineRow = page
+      .locator("tbody tr")
+      .filter({ has: page.locator(`a[href*="${lineId}"]`) })
+      .first();
+    expect(await lineRow.count(), `the infill screen does not list the line ${lineId}`);
+    const opened = async () => (await page.locator('input[placeholder="Value"]').count()) > 0;
+    expect(await press(lineRow, opened), "the line would not open");
+
+    // A QUESTION ON THAT RECORD WHOSE ROW IS ON SCREEN EXACTLY ONCE. A line
+    // holds its configurations' rows too, so a prompt can legitimately appear
+    // more than once inside one open line — and a walk that took the first of
+    // them would be editing a row it had not made stale.
+    const { rows: candidates } = await query(
+      `select a.id, a.version, q.prompt from spec_answers a
+         join requirements q on q.id = a.requirement_id
+        where a.record_id = $1 and a.state = 'missing' limit 20`,
+      [infillQuestion.record_id],
+    );
+    let stale = null;
+    let box = null;
+    for (const candidate of candidates) {
+      const boxes = page
+        .locator("tr")
+        .filter({ hasText: candidate.prompt })
+        .locator('input[placeholder="Value"]');
+      if ((await boxes.count()) !== 1) continue;
+      stale = candidate;
+      box = boxes.first();
+      break;
+    }
+    if (!stale) {
+      // Said rather than failed: the API half of this refusal is gated in step
+      // 11, and not being able to point at one row unambiguously is a limit of
+      // the walk rather than of the screen.
+      note(
+        `no question on record ${infillQuestion.record_id} has exactly one answer box on the open line (${candidates.length} candidates)`,
+      );
+      return "no unambiguous row to make stale; the API half is gated in step 11";
+    }
+
+    // SOMEBODY ELSE ANSWERS IT while the screen is open — a legitimate edit at
+    // the version the row actually holds, so the SCREEN is now one behind.
+    const bump = await context.request.patch(`${BASE}/api/answers/${stale.id}`, {
+      headers: { "content-type": "application/json" },
+      data: { value: "__QA answered by somebody else", state: "tbc", version: stale.version },
+    });
+    expect(bump.ok(), `the setup edit was refused: ${bump.status()}`);
+
+    await box.fill("__QA a stale write");
+    await box.blur();
+
+    let said = "";
+    for (let waited = 0; waited < Math.min(PATIENCE, 45000); waited += 1500) {
+      await page.waitForTimeout(1500);
+      said = await page.locator("body").innerText();
+      if (/changed by someone else|was not saved/i.test(said)) break;
+    }
+    expect(/changed by someone else|was not saved/i.test(said), "the 409 left no message on the row");
+    const after = await query(`select value from spec_answers where id = $1`, [stale.id]);
+    expect(after.rows[0].value !== "__QA a stale write", "the refused write landed anyway");
+    // AND THE ROW IS USABLE AGAIN. `busy` is cleared in a `finally` path, so a
+    // non-JSON response cannot leave the box disabled with no way back. The
+    // row RELOADS ITSELF first, so the box is re-keyed on the live version.
+    const reopened = page
+      .locator("tr")
+      .filter({ hasText: stale.prompt })
+      .locator('input[placeholder="Value"]')
+      .first();
+    await reopened.waitFor({ timeout: Math.min(PATIENCE, 60000) });
+    expect(!(await reopened.isDisabled()), "the row is still frozen after the refusal");
+    return `409 on “${stale.prompt}” · message shown · box enabled`;
+  });
+
+  await check("2.7", "the by-question tab lists question headings, and opening one lists records", async () => {
+    // "Show me all the jobs with dimensions missing". KEYED ON THE FIELD, not
+    // on `requirements.id`: `requirements` is per category, so "Dimensions" is
+    // 17 rows and keying on the id showed four Dimensions headings on the
+    // 300-line project, where clearing one read as done.
+    await open(`${BASE}/dashboard/projects/${manifest.projectId}/infill?tab=by-question`, 0);
+    await ready(/Fill in what we know/);
+    const headings = page.locator("tbody tr");
+    for (let waited = 0; waited < PATIENCE && (await headings.count()) === 0; waited += 1000) {
+      await page.waitForTimeout(1000);
+    }
+    expect(await headings.count(), "the by-question tab listed no headings");
+    const first = (await headings.first().innerText()).replace(/\s+/g, " ").trim();
+    expect(/[A-Za-z]{4,}/.test(first), `the first heading carries no question text: "${first}"`);
+    // ONE HEADING PER QUESTION, not per requirement row. Asserted as the
+    // absence of a repeat rather than against a number, because how many
+    // questions a project has depends on its categories.
+    // THE HEADING'S OWN CELL, not the row. The row also carries "asked by n
+    // categories" and "TGQ on n of m", and stripping the digits to compare
+    // rows folds `COM 1` and `COM 2` into one name — which reports a correct
+    // screen as printing a duplicate.
+    const names = await headings
+      .locator("span.font-medium")
+      .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean));
+    expect(names.length > 0, "no question heading carries a name");
+    const repeated = names.filter((name, index) => names.indexOf(name) !== index);
+    expect(
+      repeated.length === 0,
+      `the same question heads more than one row: ${[...new Set(repeated)].slice(0, 3).join(" | ")}`,
+    );
+
+    // THE ROWS ARRIVE WHEN A HEADING IS OPENED, for the reason the lines do.
+    const before = (await page.locator("body").innerText()).length;
+    const grew = async () => (await page.locator("body").innerText()).length > before + 40;
+    expect(await press(headings.first(), grew), `opening “${first.slice(0, 60)}” listed nothing`);
+    const opened = await page.locator("body").innerText();
+    // IT LISTS RECORDS: each row under a heading is an item, so it carries an
+    // item's own identity rather than repeating the question.
+    expect(
+      /[A-Z]{1,4}-?\d{2,}|QA\d{6}-\d{3}/.test(opened.slice(before)),
+      "the opened heading lists no records",
+    );
+    return `${await headings.count()} question headings, one opened`;
+  });
+
+  // =========================================================================
+  // 11. One forced failure: a stale version on the answer PATCH.
+  // =========================================================================
+  say("\n11. Force a failure");
   await check("7.4", "a stale version on an answer is a 409 the screen can show", async () => {
     const answer = await query(
       `select a.id, a.version from spec_answers a join spec_records r on r.id = a.record_id
@@ -1248,7 +1997,7 @@ try {
   console.log(`\n  FAIL  [walk] ${error instanceof Error ? error.message : String(error)}`);
 } finally {
   // =========================================================================
-  // 11. Clean up from the manifest.
+  // 12. Clean up from the manifest.
   // =========================================================================
   manifest.finishedAt = new Date().toISOString();
   manifest.results = results;
@@ -1257,7 +2006,7 @@ try {
   manifest.consoleAndNetworkFailures = failures;
   writeManifest();
 
-  say("\n11. Clean up");
+  say("\n12. Clean up");
   say(`   manifest: ${manifestPath}`);
   if (browser) await browser.close().catch(() => {});
   await client.end().catch(() => {});
