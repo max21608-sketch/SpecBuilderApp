@@ -84,6 +84,27 @@ it (Fable's greps on 2026-09-20 returned empty for exactly this reason and it
 was blamed on a shell function), and `git diff` treated the file as binary.
 Same technique, escaped; behaviour unchanged, the template tests green.
 
+### What the concurrent-run proof did NOT fix
+
+**Status: open — observations from Coder F, 2026-09-21.**
+`tests/db/chase-drafts.test.ts` strikes a level off the SEEDED
+`requirements.tgq_levels` for one test, so a concurrent run reads `later`
+where it expects `to_quote`; no per-run name fixes shared seed — that suite
+needs its own category and requirement rows. The COMPONENT tier times out
+under machine saturation, not database load: two unbounded runs are sixteen
+forks on eight CPUs, and `boq-review-variance`, `spec-table-area`,
+`failure-surfaces`, `record-correct` and `configuration-card` failed 5 s
+timeouts that pass alone in about 3 s — a worker bound on the second run, or
+on the tier. `GET /api/projects` is the slow route that cascades: the
+archived-project test's four list calls hit the 30 s bound when another run's
+`__QA` projects are on the list, and its in-flight PATCH then lands after
+teardown. Registration does not check for a scanned PDF (classify does), so a
+hand-declared kind on an image-only PDF still spends the read.
+`tests/manual/verify-model.test.ts` still writes a literal `'__QA P99001'`
+(not the db tier, gated on `VERIFY_MODEL=1`). `SpecDocumentReview.startExtraction`
+sets its error before reloading — the `reloadThen` trap, surviving only
+because that state is local to the component.
+
 ### Three screens say "quantity not allocated", and two of them say it whatever the data
 
 **Status: open — observations from Coder G's rows d3/d4, 2026-09-21.** The
@@ -141,8 +162,10 @@ charged call on a synthetic PDF and is a deliberate spend, not a test.
 
 ### Two database-tier runs at once collide on hard-coded `__QA` project numbers
 
-**Status: open — found 2026-09-21 by Coder C, twice in two full runs, while
-another coder ran the db tier against the same sandbox.** Fixtures create
+**FIXED 2026-09-21, `7d34ac9` + `85e8a8a`** (Coder F): `qaNumber` appends a
+per-process suffix and thirty files ask for their number; proved by two full
+passes at once, both green. Two things it does not cover are logged below.
+Found by Coder C, twice in two full runs, while another coder ran the db tier. Fixtures create
 `__QA P90014`-style projects with fixed numbers; the second run to arrive
 fails in `beforeAll` on `projects_bws_project_number_key`, then fails AGAIN in
 `afterAll` with `invalid input syntax for type uuid: ""` because `projectId`
@@ -164,8 +187,10 @@ Matthew's to extend.
 
 ### Three single-document review screens say "Not read yet" for a run the cap deferred
 
-**Status: open — observation from Coder B's round 3, 2026-09-21.**
-`DrawingsReview`, `SpecDocumentReview` and `PreambleReview` call the extract
+**FIXED 2026-09-21, `f91f43c`** (Coder F): the GET payload carries
+`waitingForSlot` and the three screens say *Waiting for a slot*, with a 202
+press reported as an info notice. Original entry: `DrawingsReview`,
+`SpecDocumentReview` and `PreambleReview` call the extract
 route and reload; a deferred press correctly shows no error, and then the
 page's own chip reads *Not read yet* — the sentence for a document waiting for
 a PERSON. `GET /api/imports/[id]` already selects `attempt_deadline_at`, so it

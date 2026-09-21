@@ -58,7 +58,19 @@ one agent.
 | `npm run dump:drawings -- --run=<id>` | read only: what a staged drawing run reduces to through the REAL read-time pipeline — measured rows, placed slots, folded rows, unit provenance, the composed BWS cell. Run it before and after a change to that pipeline; the diff is the change |
 | `npm run vocab:gap` | read only: every label the staged documents carry, which route places it (slot / BWS field / question), what is left, and — the point — what a looser rule would have wrongly written instead. Run it before seeding `requirement_aliases`, and read the NEAR MISSES before adding one |
 
-Tests run in FOUR tiers — pure / component / db-gated / route. The database
+Tests run in FOUR tiers — pure / component / db-gated / route. **A db-tier
+fixture asks for its project number** — `qaNumber("P90010")` from
+`tests/db/db-tier.ts`, which appends a per-process suffix after the `__QA `
+prefix the sweep matches on — because two agents running the tier at once is
+the plan's normal state and a literal `'__QA P90010'` in two runs collides on
+`projects_bws_project_number_key`, failing the loser in `beforeAll` and then
+again in `afterAll` with an empty uuid (2026-09-21, found three times in one
+day). The same goes for any other shared key a fixture writes — a mailbox, a
+subscription id, a scratch table, a `shared_inbox`. Two things it does NOT
+cover, both logged: `chase-drafts.test.ts` mutates the seeded
+`requirements.tgq_levels`, and the COMPONENT tier times out under machine
+saturation (two unbounded runs are sixteen forks on eight CPUs), so a second
+concurrent `checks` should carry `--maxWorkers=4`. The database
 tiers skip without `DATABASE_URL`, which is the correct state for pure-library
 work; the component tier (`tests/components/`, jsdom + React Testing Library)
 runs always and is scoped by PATH in `vitest.config.ts`, never by a per-file
@@ -1618,9 +1630,13 @@ slot because that attempt is alive and will be redelivered. `inFlight` counts
 only attempts inside their deadline, or one stuck document would shrink a
 pack's capacity for good and stop the *Read all* that is the way out. Two
 holes stand and are logged: nothing settles an attempt that passes its 24-hour
-deadline, so nothing hands its slot on at that moment; and three
-single-document review screens still say *Not read yet* for a run the cap
-deferred (logged). *Read all* honours the cap since `73cf827`: the extract
+deadline, so nothing hands its slot on at that moment. The three
+single-document review screens say *Waiting for a slot* for a deferred run
+since `f91f43c` (the GET payload carries `waitingForSlot`; a 202 `waiting`
+press reports the sentence as an info notice after the reload, never the red
+banner); `WAITING_FOR_SLOT_MESSAGE` lives in `intake-status.ts`, a leaf,
+because a client component importing `extraction-slots.ts` would pull the
+database driver into the browser bundle. *Read all* honours the cap since `73cf827`: the extract
 route's `start` takes a slot or defers with a 202 that says *waiting*, never
 an error; `retry-dispatch` and `restart-expired` stay uncapped because the
 first re-publishes an attempt that already holds a slot and the second is one
@@ -2174,6 +2190,16 @@ each file, asks what it is, fills the box in and reads it.
   beats the suggestion.
 - **The kind still arrives DECLARED** at `/api/imports`, which is untouched. The
   classify route creates no run, opens no attempt and stages nothing.
+- **A scanned, image-only PDF is refused at classify time** (`91360b6`,
+  2026-09-21): `pdfHasTextLayer` scans the stream objects, inflates a lone
+  `/FlateDecode`, treats image codecs as known-not-text, and answers NULL for
+  anything it cannot decode — a filter chain, an unimplemented codec, no
+  visible page — so the refusal fires only on a CERTAIN "no text anywhere"
+  and the naive test (no `Tj` in the raw bytes) that would have called every
+  compressed real drawing "scanned" is the trap it exists to avoid. The
+  sentence goes on the upload row, nothing registers, no model call.
+  Registration itself does not yet check it (logged): a hand-declared kind on
+  an image-only PDF still spends the read.
 - A `.eml` costs nothing — it is unambiguously an email. Haiku, not the
   extraction model. The blob is addressed by PATHNAME and scoped to the project
   before a byte is read.
