@@ -47,10 +47,28 @@ it (Fable's greps on 2026-09-20 returned empty for exactly this reason and it
 was blamed on a shell function), and `git diff` treated the file as binary.
 Same technique, escaped; behaviour unchanged, the template tests green.
 
+### Three single-document review screens say "Not read yet" for a run the cap deferred
+
+**Status: open — observation from Coder B's round 3, 2026-09-21.**
+`DrawingsReview`, `SpecDocumentReview` and `PreambleReview` call the extract
+route and reload; a deferred press correctly shows no error, and then the
+page's own chip reads *Not read yet* — the sentence for a document waiting for
+a PERSON. `GET /api/imports/[id]` already selects `attempt_deadline_at`, so it
+is one computed column plus three chip call sites. The pack screen and the
+drawings step are right; the "On its own" link from the drawings step leads
+straight to one of the three that are not. Also from the same round: `deferRead`
+refreshes the 24-hour deadline on every press, so a document pressed
+repeatedly from the pack screen's per-row Read never reaches the resting
+state where *Read all* would pick it up (harmless while the button is not
+offered for it); and `readAll` still issues two round trips per document,
+serially, so thirty documents read "Starting…" for sixty calls.
+
 ### *Read all* starts every document at once, past the pack's cap
 
-**Status: open — found 2026-09-21 by Coder B while building the cap (Stage 2
-item 2.10.f); briefed the same day as Coder B's round 3.** Registration now
+**FIXED 2026-09-21, `73cf827`** (Coder B round 3): the extract route's
+`start` takes a slot or defers with a 202 that says *waiting*; the review's
+chip reads *Waiting for a slot*; *Read all* reports the split and excludes
+promised reads. Found the same day by Coder B while building the cap. Registration now
 reads three documents of a pack at a time and defers the rest, but
 `PackDrawingsReview.readAll` loops `POST /api/imports/[id]/extract` with
 `action: "start"`, which takes no slot — one press on an eleven-document pack

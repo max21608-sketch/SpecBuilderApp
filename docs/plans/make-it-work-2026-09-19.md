@@ -2211,5 +2211,25 @@ The 2.13 ask of Tony is a separate short note, below it.
 >
 > Max
 
+**2.11 is ready to brief and waits on one sentence from Max.** The cap (2.10.f,
+its *Read all* half, and a per-project cap for emails) is on staging, so the
+prerequisite is met. What remains is the plan's own rule: the hard approval
+gate on inbound email in `CLAUDE.md` is amended by Max, in words, in the same
+commit as the code — or 2.11 does not land. The proposed replacement for the
+gate's current line *"Placing an INBOUND email on a project. It is what starts
+the charged read, and nothing is ever auto-assigned from an ambiguous routing
+outcome."* is:
+
+> *Placing an INBOUND email on a project starts the charged read. The app
+> assigns one automatically ONLY where routing decided on the two strongest
+> signals — the project inbox in the forwarding headers, or in To/Cc — and
+> the inbox says so in words with Unassign beside it, under the actor
+> `system:router`. A subject reference or a known sender is HELD for a person;
+> an ambiguous outcome is always held; nothing is ever auto-assigned from one.
+> Every automatic read counts against the per-project cap.*
+
+Max: reply "yes, amend" (or edit the words) and 2.11 is briefed the same day;
+"no" and the entry in `found-in-use.md` stays open as a change asked for.
+
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*

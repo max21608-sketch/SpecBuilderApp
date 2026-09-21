@@ -1572,8 +1572,20 @@ slot because that attempt is alive and will be redelivered. `inFlight` counts
 only attempts inside their deadline, or one stuck document would shrink a
 pack's capacity for good and stop the *Read all* that is the way out. Two
 holes stand and are logged: nothing settles an attempt that passes its 24-hour
-deadline, so nothing hands its slot on at that moment; and *Read all* in the
-drawings review started reads without a slot (briefed the same day).
+deadline, so nothing hands its slot on at that moment; and three
+single-document review screens still say *Not read yet* for a run the cap
+deferred (logged). *Read all* honours the cap since `73cf827`: the extract
+route's `start` takes a slot or defers with a 202 that says *waiting*, never
+an error; `retry-dispatch` and `restart-expired` stay uncapped because the
+first re-publishes an attempt that already holds a slot and the second is one
+press on a document whose expired attempt has stopped counting. The advisory
+lock is taken BEFORE the run's row lock, because the hand-off takes them in
+that order and the reverse is a real deadlock that would turn a correct press
+into a 500. A deferred `failed` run is put back to `pending` with its attempt
+columns cleared, because the hand-off can only find the (no attempt, live
+deadline) marker and a red Retry beside a read already promised is a lie. The
+*Read all* button no longer counts a waiting run — "each is charged" over eight
+promised reads would be a charge nobody pays.
 
 ### An extraction attempt is owned by two identifiers
 
@@ -3402,8 +3414,7 @@ until Max has driven 2.3 and 2.5 as the roles they are for (§7.5).
 - **A swatch has never been cropped from a real page.** The upload path works
   and requires the source to be named; nobody has used it.
 - **A pack now reads three documents at a time** (2.10.f, 2026-09-21 — see
-  the registration section). What is NOT capped yet: *Read all* on the
-  drawings review (briefed), and an attempt that passes its 24-hour deadline
+  the registration section). What is NOT settled: an attempt that passes its 24-hour deadline
   frees its slot by ceasing to count rather than by anything handing on. The
   cap has never been exercised against the real queue — its db tests stub the
   publisher — so the first real Panther delivery is still the test.
