@@ -22,6 +22,26 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-21
 
+### The tiles are taller than they need to be
+
+**Status: open. A CHANGE ASKED FOR**, in the same breath as the entry below
+and shippable with it or on its own. Max: *"you could just display line items
+503 and they can still have the same functionality, but you don't need to
+actually have 'filter to these' displayed."*
+
+The label, the number, the sub-line and a blue *filter to these →* / *see them
+all →* / *open the library →* line make each tile four rows tall.
+
+**The link line costs nothing to remove.** `StatTile` renders the whole tile
+as a `<Link>` (`StatTile.tsx:87`); the `action` prop is only the blue line at
+`:70`. Dropping it loses no behaviour — the tile stays pressable — and the
+strip already carries one caption underneath saying *"Pressing a tile opens
+the spec table already filtered to it."*
+
+Worth deciding at the same time, since it is the other row: whether the
+sub-line stays (*"3 phases"*, *"10841 unlooked · 0 TBC"*, *"2 codes not in the
+library"*). The entry below may change what those say anyway.
+
 ### The overview's tiles count QUESTIONS, and at 503 lines the numbers stop meaning anything
 
 **Status: open. A CHANGE ASKED FOR**, not a fault — the tiles are counting
