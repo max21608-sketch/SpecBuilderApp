@@ -21,7 +21,7 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION, assertBoqDocument, type BoqLine } from "@/lib/boq-import";
-import { noQtyColumn, twoRowHeader } from "../fixtures/boq-shapes";
+import { noQtyColumn } from "../fixtures/boq-shapes";
 import { bill300Workbook, twoRowHeaderWorkbook } from "../fixtures/build-boq";
 
 /**
