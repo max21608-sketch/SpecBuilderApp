@@ -55,23 +55,21 @@ export async function loadExportScope(projectId: string, runId: string | null): 
   if (runId) {
     const runs = await sql`select id, name, status from spec_runs where id = ${runId} and project_id = ${projectId}`;
     if (!runs[0]) return { error: "No such phase on this project.", status: 404 };
-    // ============================================================================
     // A RETIRED PHASE PRODUCES NO FILE AT ALL — variance matrix row d5.
     //
-    // The records query below requires an ACTIVE run, so a retired phase used to
-    // compose cleanly: a workbook with a header row, no records, and the phase's
-    // own name in the filename. That is the most dangerous empty file in the
-    // product. A BWS import REPLACES what it is given rather than merging, so a
-    // download that looks like the phase it names and carries none of its items
-    // is one upload away from wiping the fields of every job in the set — the
-    // filtered-export trap with the filter set to everything.
+    // The records query below requires an ACTIVE run, so a retired phase used
+    // to compose cleanly: a workbook with a header row, no records, and the
+    // phase's own name in the filename. That is the most dangerous empty file
+    // in the product. A BWS import REPLACES what it is given rather than
+    // merging, so a download that looks like the phase it names and carries
+    // none of its items is one upload away from wiping the fields of every job
+    // in the set — the filtered-export trap with the filter set to everything.
     //
-    // It is refused HERE rather than in the four routes, because all of them
-    // (the BWS file, the check sheet, the quote and the costing sheet) read this
-    // loader and each would otherwise need its own copy of the rule. The project
-    // -wide export is untouched: a retired phase simply has no active records,
-    // and leaving it out of the whole-project file is correct.
-    // ============================================================================
+    // Refused HERE rather than in the four routes, because all of them — the
+    // BWS file, the check sheet, the quote and the costing sheet — read this
+    // loader, and each would otherwise need its own copy of the rule. The
+    // whole-project export is untouched: a retired phase simply has no active
+    // records, and leaving it out of that file is correct.
     if (String(runs[0].status) !== "active") {
       return {
         error:
