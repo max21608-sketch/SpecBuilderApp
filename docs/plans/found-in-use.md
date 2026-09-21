@@ -22,6 +22,38 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-21
 
+### The overview's tiles count QUESTIONS, and at 503 lines the numbers stop meaning anything
+
+**Status: open. A CHANGE ASKED FOR**, not a fault — the tiles are counting
+what they were built to count. Max, on a 503-line project: *"these numbers are
+so high, they're just meaningless."*
+
+Seen on the project overview (screenshot), 503 line items across 3 phases:
+**TGQ 8,769**, **Also outstanding 10,841** (`10841 unlooked · 0 TBC`),
+**Settled 65**.
+
+**Asked for: TGQ, Also outstanding and Settled should be per LINE ITEM** — how
+many items are still held at TGQ — rather than per question.
+
+`project-summary.ts:229-232` counts those three over ANSWER rows
+(`count(*) filter (where state in ('missing','tbc') and to_quote)` and its
+siblings), while `records` on line 205 counts records. So the strip mixes two
+units and only the first tile is in the one a person thinks in.
+
+Two things a plan has to settle, and the second is a trap:
+
+- **A per-item count already exists on the TGQ tile's own sub-line** — *"166
+  items still on the placeholder"* — which is a different statement (it is
+  which TGQ MODEL applies, not what is outstanding). Whatever the big number
+  becomes, those two must not read as the same measure.
+- **The three item counts will OVERLAP where the question counts partition.**
+  Every answer is exactly one of to-quote / also-outstanding / settled, so
+  today the three add up. Items do not: an item can be clear at TGQ and still
+  carry other questions, so it belongs to two tiles at once, and "Settled" as
+  an item count means *nothing outstanding at all* — a much smaller number
+  than 65 answers implies. Three item tiles that no longer sum need to say
+  what they each mean, or the strip trades one misleading reading for another.
+
 ### The checklist's Dimensions box is free text, so two of four dimensions can be marked Confirmed
 
 **Status: open. The most consequential thing found so far** — it lets an item
