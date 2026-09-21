@@ -894,6 +894,26 @@ export default function SpecTable({
                             heading is the more useful answer. */}
                         {isHeading ? (
                           <span className="text-neutral-400">—</span>
+                        ) : !record.category_name ? (
+                          /* AN UNCATEGORISED RECORD IS NOT UNTIERED, IT IS
+                             UNASKED — variance matrix row d1. It has no
+                             checklist at all, so it scores zero outstanding,
+                             and the two readings this cell had for it were both
+                             wrong: a plain dash where a level was set (silent
+                             about why), and the LEVEL sentence where one was
+                             not, which sends somebody to choose simple or hero
+                             when a level would buy them nothing. Same control
+                             either way, and the panel says which decision is
+                             actually missing. */
+                          <button
+                            type="button"
+                            onClick={() => toggleQuestions(record.id)}
+                            aria-expanded={expanded.has(record.id)}
+                            className="text-neutral-400 hover:text-neutral-700"
+                            title="No category, so there is no checklist to count"
+                          >
+                            — <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                          </button>
                         ) : record.to_quote_outstanding === null ? (
                           /* A DASH IS NEVER A ZERO. 0 here would read as
                              ready, and the record is not unready — it is
@@ -1122,6 +1142,25 @@ function ToQuotePanel({
   showAll: boolean;
   onShowAll: () => void;
 }) {
+  // CATEGORISE FIRST, and this is said BEFORE the level. An uncategorised
+  // record has no checklist — no questions of any tier — so the level sentence
+  // below would be a true statement about the wrong decision: setting a level
+  // on it changes nothing, because there is nothing to tier. Variance matrix
+  // row d1, where the rule is that no screen may report zero outstanding on a
+  // record nobody has decided what to ask about.
+  if (!record.category_name) {
+    return (
+      <p className="text-sm text-neutral-700">
+        <b>No category</b>, so this item has no checklist and nothing to count — not nothing outstanding. Choosing a
+        category is what creates its questions. Set one on{" "}
+        <Link href={`/dashboard/records/${record.id}`} className="text-blue-700 no-underline hover:underline">
+          the record
+        </Link>
+        .
+      </p>
+    );
+  }
+
   // A LEVEL IS WHAT TIERS A QUESTION, so a record without one has no to-quote
   // set at all — under the half of TGQ that predates Matthew's matrix. The
   // sentence says what it is needed FOR, because "set a level" on its own reads
