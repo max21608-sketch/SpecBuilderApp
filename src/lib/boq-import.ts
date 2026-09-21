@@ -172,6 +172,30 @@ const COLUMNS = {
 type ColumnKey = keyof typeof COLUMNS;
 const REQUIRED: ColumnKey[] = ["code", "itemDescription"];
 
+/** What one row of a sheet looked like to the header reader. */
+type HeaderReading = {
+  /** Which wanted column each recognised heading sat in. */
+  found: Partial<Record<ColumnKey, number>>;
+  /** The headings on the row that matched no synonym at all, in printed order. */
+  unrecognised: string[];
+  /** True when both required columns are there, which makes this row the header. */
+  complete: boolean;
+};
+
+/** The nearest thing to a header the reader saw, for a refusal that can be acted on. */
+type HeaderAttempt = HeaderReading & { sheetName: string; rowNo: number };
+
+const COLUMN_LABEL: Record<ColumnKey, string> = {
+  designer: "designer",
+  boqCategory: "category",
+  area: "area",
+  code: "code",
+  itemDescription: "description",
+  productReference: "product reference",
+  qty: "quantity",
+  qtyUnit: "unit",
+};
+
 function norm(value: unknown): string {
   if (value === null || value === undefined) return "";
   const text = value instanceof Date ? value.toISOString() : String(value);
@@ -191,21 +215,38 @@ function quantity(value: unknown): number | null {
 }
 
 /**
- * Finds the header row and maps each wanted column to its index.
- * Returns null if this row is not a header.
+ * Reads one row AS A HEADER: which wanted column each heading sat in, which
+ * headings it did not recognise, and whether that adds up to a header at all.
+ *
+ * IT NO LONGER RETURNS NULL FOR A NEAR MISS, and that is the whole of row 1 of
+ * the variance matrix. A bill whose columns read "Item No." and "Product"
+ * matched nothing required, so the reader refused with a list of the words it
+ * accepts and NOT ONE WORD about what the bill actually said — which is the
+ * only half a person can act on. Keeping the partial reading is what lets the
+ * refusal name the closest row and quote its own headings back.
  */
-function mapHeader(row: readonly unknown[]): Partial<Record<ColumnKey, number>> | null {
+function readHeader(row: readonly unknown[]): HeaderReading {
   const found: Partial<Record<ColumnKey, number>> = {};
+  const unrecognised: string[] = [];
   row.forEach((cell, index) => {
     const value = norm(cell);
     if (!value) return;
+    let claimed = false;
     for (const [key, synonyms] of Object.entries(COLUMNS) as [ColumnKey, readonly string[]][]) {
       // First match wins: "Product Reference" must not be claimed by `code`'s
       // "reference" synonym once a real "Code" column has been seen.
-      if (found[key] === undefined && (synonyms as readonly string[]).includes(value)) found[key] = index;
+      if (!(synonyms as readonly string[]).includes(value)) continue;
+      claimed = true;
+      if (found[key] === undefined) found[key] = index;
     }
+    if (!claimed) unrecognised.push(text(cell) ?? "");
   });
-  return REQUIRED.every((key) => found[key] !== undefined) ? found : null;
+  return { found, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
+}
+
+/** How much of a header a row managed to be, for picking the closest one. */
+function headerScore(reading: HeaderReading): number {
+  return Object.keys(reading.found).length;
 }
 
 const LABEL_ONLY = /^(revision|rev|date)\s*[:\-]?\s*$/i;
@@ -276,29 +317,92 @@ export function parseBoqSheets(sheets: { sheet: string; data: SheetData }[]): Bo
   if (sheets.length === 0) return { ok: false, error: "The file has no sheets." };
 
   const staged: ParsedBoqSheet[] = [];
+  /** The nearest miss on any sheet, kept only so a refusal can name it. */
+  let closest: HeaderAttempt | null = null;
 
   for (const { sheet, data } of sheets) {
     for (let rowIndex = 0; rowIndex < data.length; rowIndex += 1) {
       const row = data[rowIndex];
       if (!row) continue;
-      const header = mapHeader(row);
-      if (!header) continue;
-      staged.push(readRows(sheet, data, rowIndex, header));
-      break;
+      const reading = readHeader(row);
+      if (reading.complete) {
+        staged.push(readRows(sheet, data, rowIndex, reading.found));
+        break;
+      }
+      if (headerScore(reading) > (closest ? headerScore(closest) : 0)) {
+        closest = { ...reading, sheetName: sheet, rowNo: rowIndex + 1 };
+      }
     }
   }
 
-  if (staged.length === 0) {
-    return {
-      ok: false,
-      error:
-        "Could not find a header row on any sheet. A BOQ needs a row naming at least its code column " +
-        `(one of: ${COLUMNS.code.join(", ")}) and its description column ` +
-        `(one of: ${COLUMNS.itemDescription.join(", ")}).`,
-    };
-  }
+  if (staged.length === 0) return { ok: false, error: noHeaderError(closest) };
 
   return { ok: true, sheets: staged };
+}
+
+/** As many of a row's own headings as a sentence can carry. */
+const HEADINGS_NAMED = 8;
+const HEADING_CHARS = 40;
+
+/**
+ * Why no sheet could be read, in a form somebody can act on.
+ *
+ * ============================================================================
+ * IT NAMES THE BILL'S OWN WORDS, NOT ONLY OURS.
+ *
+ * The old message listed the synonyms this reader accepts and stopped there. On
+ * the shape row 1 of the variance matrix is about — a bill headed "Item No." and
+ * "Product" — that is a refusal a reviewer can do nothing with: they cannot see
+ * which of their columns was not understood, and the person who CAN add the
+ * alias never finds out what to add. So the closest row is quoted back, with
+ * what it did recognise and what it did not.
+ *
+ * The synonym list is CODE (`COLUMNS` above), not seed data. The plan wants it
+ * seeded eventually; until it is, adding a word is a commit, and this sentence
+ * is what tells somebody which word.
+ * ============================================================================
+ */
+function noHeaderError(closest: HeaderAttempt | null): string {
+  const wanted =
+    "A BOQ needs one row naming at least its code column " +
+    `(one of: ${COLUMNS.code.join(", ")}) and its description column ` +
+    `(one of: ${COLUMNS.itemDescription.join(", ")}).`;
+
+  // Nothing on any sheet matched even one heading: there is no row to quote,
+  // and inventing one — the widest row, the first row — would put a reviewer
+  // in front of a heading list that was never a header.
+  if (!closest || headerScore(closest) === 0) {
+    return `Could not find a header row on any sheet. ${wanted} No row on any sheet named even one of them.`;
+  }
+
+  const matched = (Object.keys(closest.found) as ColumnKey[]).map((key) => COLUMN_LABEL[key]);
+  const missing = REQUIRED.filter((key) => closest.found[key] === undefined).map((key) => COLUMN_LABEL[key]);
+  const quoted = closest.unrecognised
+    .filter((heading) => heading !== "")
+    .slice(0, HEADINGS_NAMED)
+    .map((heading) => `“${heading.length > HEADING_CHARS ? `${heading.slice(0, HEADING_CHARS)}…` : heading}”`);
+
+  const parts = [
+    `Could not find a header row on any sheet. ${wanted}`,
+    `The closest is row ${closest.rowNo} of “${closest.sheetName}”, which named its ` +
+      `${list(matched)} column${matched.length === 1 ? "" : "s"} but no ${list(missing)} column.`,
+  ];
+  if (quoted.length > 0) {
+    parts.push(
+      `Its other headings read ${list(quoted)}${closest.unrecognised.length > HEADINGS_NAMED ? " and more" : ""}, ` +
+        "and this reader knows none of them. Rename them to words above, or have the bill's own wording added to " +
+        "the reader's list.",
+    );
+  } else {
+    parts.push("Rename that column to one of the words above, or have the bill's own wording added to the reader's list.");
+  }
+  return parts.join(" ");
+}
+
+/** "a", "a and b", "a, b and c" — a list a person reads rather than parses. */
+function list(values: string[]): string {
+  if (values.length <= 1) return values.join("");
+  return `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`;
 }
 
 function readRows(

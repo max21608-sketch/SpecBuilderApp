@@ -175,6 +175,8 @@ describe("parseBoqSheets", () => {
     if (result.ok) return;
     expect(result.error).toMatch(/code column/i);
     expect(result.error).toMatch(/description column/i);
+    // Nothing matched, so there is no row to quote and none is invented.
+    expect(result.error).toContain("No row on any sheet named even one of them.");
   });
 
   it("stages a header with nothing under it as ignored, not as a failure", () => {
@@ -204,6 +206,80 @@ describe("parseBoqSheets", () => {
       productReference: null,
       qty: 12,
     });
+  });
+});
+
+// ============================================================================
+// VARIANCE MATRIX §6.10.a ROW 1 — HEADER SYNONYMS NOT MATCHED.
+//
+// EXPECTED: REFUSES, naming the columns it looked for, the words it accepts,
+// and — the half that was missing — the closest row's OWN headings, so the
+// person reading the refusal can see which of their columns was not understood.
+//
+// The synonym list is CODE (`COLUMNS` in src/lib/boq-import.ts), not seed data.
+// §6.10.a wants it seeded eventually; until it is, adding a word is a commit,
+// and this refusal is what says which word.
+//
+// The fixture is a bill headed the way the plan names one — "Item No.",
+// "Product" — with invented codes and descriptions.
+// ============================================================================
+describe("a bill whose headings this reader does not know", () => {
+  const FOREIGN: SheetData = [
+    ["EXAMPLE CLIENT LTD", null, null, null],
+    ["Item No.", "Product", "Qty", "Rate"],
+    ["1", "ZZ-101 Side table", 4, null],
+    ["2", "ZZ-102 Armchair", 2, null],
+  ];
+
+  it("refuses rather than reading the first row it can make sense of", () => {
+    const result = parseBoqSheets(sheet(FOREIGN, "Bill"));
+    // The trap: "Qty" IS recognised, so a reader that took any partial match
+    // would stage two lines with no code and no description at all.
+    expect(result.ok).toBe(false);
+  });
+
+  it("names the closest row, what it recognised, and what it did not", () => {
+    const result = parseBoqSheets(sheet(FOREIGN, "Bill"));
+    if (result.ok) throw new Error("expected a refusal");
+    expect(result.error).toContain("The closest is row 2 of “Bill”");
+    expect(result.error).toContain("named its quantity column but no code and description column");
+    // THE BILL'S OWN WORDS. Without these the refusal is unactionable: nobody
+    // can see which column to rename or which alias to add.
+    expect(result.error).toContain("“Item No.”");
+    expect(result.error).toContain("“Product”");
+    expect(result.error).toContain("“Rate”");
+    expect(result.error).toMatch(/have the bill's own wording added to the reader's list/);
+  });
+
+  it("still lists the words it accepts, so renaming is possible without asking", () => {
+    const result = parseBoqSheets(sheet(FOREIGN));
+    if (result.ok) throw new Error("expected a refusal");
+    for (const synonym of ["ff&e code", "client ref"]) expect(result.error).toContain(synonym);
+    for (const synonym of ["item description", "description"]) expect(result.error).toContain(synonym);
+  });
+
+  it("quotes the CLOSEST row, not the first one it looked at", () => {
+    // A title row above the header matches nothing; the header-ish row below it
+    // matches one column. The refusal must be about the second.
+    const result = parseBoqSheets(
+      sheet([
+        ["Some client, some project", null, null],
+        ["Nr", "Thing", "Total Qty"],
+        ["1", "ZZ-101 Side table", 4],
+      ]),
+    );
+    if (result.ok) throw new Error("expected a refusal");
+    expect(result.error).toContain("row 2");
+    expect(result.error).toContain("“Nr”");
+  });
+
+  it("caps how many headings it quotes rather than printing a wide sheet back", () => {
+    const wide = Array.from({ length: 14 }, (_, index) => `Column ${index + 1}`);
+    const result = parseBoqSheets(sheet([[...wide, "Qty"], ["x"]]));
+    if (result.ok) throw new Error("expected a refusal");
+    expect(result.error).toContain("and more");
+    expect(result.error).toContain("“Column 8”");
+    expect(result.error).not.toContain("“Column 9”");
   });
 });
 
