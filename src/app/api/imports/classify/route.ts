@@ -23,8 +23,8 @@ import { sql } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind, legacySpreadsheetAdvice } from "@/lib/intake-source-types";
 import { readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
-import { prepareDocumentSource } from "@/lib/intake-source";
-import { classifyDocument, KIND_FROM_GENRE } from "@/lib/document-classify";
+import { prepareDocumentSource, pdfHasTextLayer } from "@/lib/intake-source";
+import { classifyDocument, KIND_FROM_GENRE, scannedPdfRefusal } from "@/lib/document-classify";
 
 export const maxDuration = 60;
 
@@ -102,6 +102,32 @@ export async function POST(request: Request): Promise<Response> {
     source = await prepareDocumentSource(blob.bytes, input.filename, blob.contentType || input.contentType);
   } catch (cause) {
     return json({ ok: false, error: cause instanceof Error ? cause.message : String(cause) }, 400);
+  }
+
+  // A SCANNED PDF COSTS NOTHING TO REFUSE AND FOUR MINUTES TO READ (§6.10.b).
+  //
+  // Before the call, not after it: the model would look at pictures of pages
+  // for the whole deadline and come back with nothing to review, and the charge
+  // would be for being told what one pass over the bytes already says. Only a
+  // CERTAIN reading refuses — `pdfHasTextLayer` returns null for a stream it
+  // cannot decode and null proceeds, because the naive test calls every
+  // compressed PDF scanned and would refuse the whole pilot pack. Nothing is
+  // registered either way: this route has never created a run.
+  const scanned = scannedPdfRefusal(source.type, source.type === "pdf" ? pdfHasTextLayer(blob.bytes) : null);
+  if (scanned) {
+    return json(
+      {
+        ok: true,
+        genre: "unclear",
+        decision: null,
+        unsupported: scanned,
+        titleText: null,
+        evidence: "the pages carry no text, only images",
+        certain: true,
+        charged: false,
+      },
+      200,
+    );
   }
 
   const result = await classifyDocument(source);

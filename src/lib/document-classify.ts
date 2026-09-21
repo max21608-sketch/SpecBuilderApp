@@ -195,6 +195,48 @@ export const BOQ_AS_PDF =
   "from a spreadsheet's cells. Export it to .xlsx or .csv and upload that. If it is a drawing set rather " +
   "than a bill, say so beside the file.";
 
+/**
+ * A SCANNED PDF IS REFUSED BEFORE ANYTHING READS IT.
+ *
+ * ============================================================================
+ * Plan §6.10.b. A PDF with no text layer is a photograph of a document. Shown
+ * to the model it spends the whole deadline and comes back with nothing to
+ * review: about four minutes and one charged read for an empty screen, and the
+ * person who uploaded it has no way of telling that from a pack that failed.
+ *
+ * CERTAIN OR PROCEED, which is `BOQ_AS_PDF`'s rule and the harder half here.
+ * `pdfHasTextLayer` answers null for anything it cannot decode, and null
+ * PROCEEDS — a refusal is a document nobody can get into the app at all, and
+ * the naive version of this test (no `Tj` in the raw bytes) calls every modern
+ * PDF scanned, because an exporter compresses its content streams. So only a
+ * measured `false` refuses.
+ *
+ * It is checked in the route BEFORE the model call, unlike `fileDocument`'s
+ * refusals, which read the model's own answer: paying to be told a photograph
+ * is a photograph is the charge this exists to avoid.
+ * ============================================================================
+ */
+export const SCANNED_PDF =
+  "This PDF is a scanned document — pictures of pages, with no text in them. This app reads text, not " +
+  "images, so it is not supported: reading it would spend a charged read and come back with nothing. " +
+  "Upload a PDF exported from the original document, or one that has been through OCR.";
+
+/**
+ * Why this upload is refused before a model sees it, or null.
+ *
+ * Separate from `fileDocument` because it is answered from the BYTES rather
+ * than from an answer, and pure so that certain-or-proceed is provable: `null`
+ * from `pdfHasTextLayer` means "cannot tell" and must behave exactly as a text
+ * layer does.
+ */
+export function scannedPdfRefusal(
+  sourceType: DocumentSource["type"],
+  hasTextLayer: boolean | null,
+): string | null {
+  if (sourceType !== "pdf") return null;
+  return hasTextLayer === false ? SCANNED_PDF : null;
+}
+
 /** What to file this document as, and why it cannot be filed at all. */
 export function fileDocument(
   answer: { genre: DocumentGenre; certain: boolean },

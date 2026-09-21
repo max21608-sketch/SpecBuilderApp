@@ -1,5 +1,6 @@
 import readExcelFile, { type SheetData } from "read-excel-file/node";
 import { parse } from "csv-parse/sync";
+import { inflateSync } from "node:zlib";
 import { intakeSourceKind } from "@/lib/intake-source-types";
 
 export type DocumentSource =
@@ -147,6 +148,117 @@ export function countPdfPages(bytes: Buffer): number | null {
     if (best === null || pages > best) best = pages;
   }
   return best;
+}
+
+/** Codecs that carry a picture. Known NOT to be text, rather than unreadable. */
+const IMAGE_FILTERS = new Set(["/DCTDecode", "/JPXDecode", "/JBIG2Decode", "/CCITTFaxDecode"]);
+
+/**
+ * Does this PDF carry a TEXT LAYER, or is it pictures of pages? NULL where this
+ * cannot tell.
+ *
+ * ============================================================================
+ * A SCANNED DRAWING SET IS A FOUR-MINUTE READ THAT RETURNS NOTHING.
+ *
+ * Plan §6.10.b: a PDF with no text layer is a photograph of a document. The
+ * model is shown it, spends the whole deadline on it, and comes back with
+ * nothing to review — a charged read whose result is an empty screen. Answering
+ * before the call costs one pass over the bytes.
+ *
+ * CERTAIN OR PROCEED, and the naive version is the trap. "No `Tj` anywhere in
+ * the raw bytes" calls EVERY modern PDF scanned, because an exporter compresses
+ * its content streams and the operators are inside a Flate payload: that test
+ * would refuse the whole Panther pack. So each stream is decoded where it can
+ * be — `inflateSync` on `FlateDecode`, which is what Node gives us for nothing
+ * — and anything else makes the answer NULL. A wrong refusal is a document
+ * nobody can get into the app at all, which is the same reasoning
+ * `countPdfPages` above is built on.
+ *
+ * WHY SCANNING EVERY STREAM OBJECT IS SOUND. A content stream is always its own
+ * indirect object: the format forbids a stream inside an object stream, so a
+ * compressed catalogue can hide the page TREE from `countPdfPages` and cannot
+ * hide a page's CONTENTS from this. An image's own stream is known not to be
+ * text and is skipped rather than counted as unreadable — that is the whole
+ * shape of a scan, and reading it as "cannot tell" would make every scanned
+ * document proceed.
+ *
+ * AT LEAST ONE PAGE HAS TO BE VISIBLE. "No text and no pages" is an empty or
+ * unreadable file, and this must not be the thing that tells somebody about it.
+ * ============================================================================
+ */
+export function pdfHasTextLayer(bytes: Buffer): boolean | null {
+  // latin1 so every byte maps to one character; the structure is ASCII.
+  const text = bytes.toString("latin1");
+
+  // A page tree count, or failing that a page object we can see. Either is
+  // evidence of a page; neither is evidence of none.
+  const counted = countPdfPages(bytes);
+  const pageObjects = (text.match(/\/Type\s*\/Page(?![a-zA-Z])/g) ?? []).length;
+  if ((counted === null || counted <= 0) && pageObjects === 0) return null;
+
+  let unreadable = false;
+  let streams = 0;
+
+  // Every `stream` keyword, with the dictionary that precedes it. Read BACKWARD
+  // to the object header rather than matching `<< ... >>` forward, because a
+  // stream dictionary nests (`/DecodeParms << … >>`) and a non-greedy match
+  // would stop at the inner brace and mis-read the filter.
+  const keyword = /\bstream\r?\n/g;
+  let hit: RegExpExecArray | null;
+  while ((hit = keyword.exec(text)) !== null) {
+    const objStart = text.lastIndexOf(" obj", hit.index);
+    if (objStart < 0) continue;
+    const dict = text.slice(objStart, hit.index);
+    const end = text.indexOf("endstream", keyword.lastIndex);
+    if (end < 0) {
+      unreadable = true;
+      continue;
+    }
+    const payload = text.slice(keyword.lastIndex, end);
+
+    // A cross-reference stream and an object stream hold structure, never a
+    // content stream, so neither can carry a text operator and neither is
+    // evidence of anything missing.
+    if (/\/Type\s*\/(XRef|ObjStm)\b/.test(dict)) continue;
+
+    const filters = dict.match(/\/(FlateDecode|DCTDecode|JPXDecode|JBIG2Decode|CCITTFaxDecode|LZWDecode|ASCII85Decode|ASCIIHexDecode|RunLengthDecode|Crypt)\b/g) ?? [];
+    // An image. Known NOT to be text, which is the point: a scan is pages of
+    // these, and treating them as unreadable would make every scan proceed.
+    if (/\/Subtype\s*\/Image\b/.test(dict) || filters.some((f) => IMAGE_FILTERS.has(f))) continue;
+
+    streams += 1;
+    let content: string;
+    if (filters.length === 0) {
+      content = payload;
+    } else if (filters.length === 1 && filters[0] === "/FlateDecode") {
+      try {
+        content = inflateSync(Buffer.from(payload, "latin1")).toString("latin1");
+      } catch {
+        // An encrypted or truncated payload. Not evidence of no text.
+        unreadable = true;
+        continue;
+      }
+    } else {
+      // A filter chain, or a codec this does not decode. Say so.
+      unreadable = true;
+      continue;
+    }
+    if (showsText(content)) return true;
+  }
+
+  // Nothing read at all is not the same as nothing found.
+  if (unreadable || streams === 0) return null;
+  return false;
+}
+
+/**
+ * Does this content stream SHOW text? A text object that shows nothing does
+ * not count: a `BT`/`ET` pair with no `Tj` sets up a font and draws nothing,
+ * which is what an OCR-less scan's content stream can still contain.
+ */
+function showsText(content: string): boolean {
+  const blocks = content.match(/\bBT\b[\s\S]*?\bET\b/g) ?? [];
+  return blocks.some((block) => /\bT[jJ]\b|\)\s*['"]/.test(block));
 }
 
 export async function prepareDocumentSource(bytes: Buffer, filename: string, contentType: string): Promise<DocumentSource> {

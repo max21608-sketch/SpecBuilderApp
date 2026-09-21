@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countPdfPages,
   MAX_MODEL_PDF_PAGES,
+  pdfHasTextLayer,
   prepareDocumentSource,
   readSpreadsheetSheets,
   spreadsheetSheetsToText,
@@ -12,7 +13,7 @@ import {
   legacySpreadsheetAdvice,
   spreadsheetRefusal,
 } from "@/lib/intake-source-types";
-import { buildPdfOfPages } from "../fixtures/build-pdf.mjs";
+import { buildPdf, buildPdfOfPages } from "../fixtures/build-pdf.mjs";
 import { parseBoqSheets } from "@/lib/boq-import";
 
 describe("intake spreadsheet sources", () => {
@@ -191,5 +192,66 @@ describe("a bill that is not a spreadsheet this app reads", () => {
 
   it("prefers the way out over the list when there is one", () => {
     expect(spreadsheetRefusal("bill.xls", "unsupported")).toBe(legacySpreadsheetAdvice("bill.xls"));
+  });
+});
+
+
+// =====================================================================
+// VARIANCE MATRIX §6.10.b — A SCANNED (IMAGE-ONLY) PDF.
+//
+// The row: refuse early with "scanned document — not supported" rather than a
+// four-minute read that returns nothing, by detecting no text layer at classify
+// time. What is tested here is the READING; the refusal it feeds is in
+// `document-classify.test.ts`.
+//
+// THE TRAP IS THE NAIVE VERSION. "No `Tj` in the raw bytes" is true of a scan
+// AND of every PDF an exporter compressed, so it would refuse the whole pilot
+// pack — which is why a compressed page carrying text is the first case below
+// and why anything undecodable answers NULL.
+// =====================================================================
+describe("whether a PDF carries a text layer", () => {
+  it("reads text out of a COMPRESSED content stream, which is the normal case", () => {
+    // The case that makes the naive test unusable: the operators are inside a
+    // Flate payload, and every real exporter writes one.
+    expect(pdfHasTextLayer(buildPdf([{ compress: true, label: "__QA S-100 ARMCHAIR" }]))).toBe(true);
+    expect(pdfHasTextLayer(buildPdf([{ compress: true }, { compress: true }, { label: "__QA plain" }]))).toBe(true);
+  });
+
+  it("reads text out of an uncompressed one", () => {
+    expect(pdfHasTextLayer(buildPdfOfPages(1))).toBe(true);
+    expect(pdfHasTextLayer(buildPdfOfPages(120))).toBe(true);
+  });
+
+  it("says FALSE for pages that are only pictures", () => {
+    // Each page places one image XObject and shows no text. The pixels are in a
+    // `/DCTDecode` stream, which is known NOT to be text rather than
+    // unreadable — read as unreadable, every scan would proceed.
+    expect(pdfHasTextLayer(buildPdf([{ image: true }]))).toBe(false);
+    expect(pdfHasTextLayer(buildPdf([{ image: true }, { image: true }, { image: true }]))).toBe(false);
+  });
+
+  it("is not fooled by a text object that shows nothing", () => {
+    // A scan's content stream can still set a font inside `BT`/`ET` and draw
+    // nothing. Stopping at `BT` would call that a text layer.
+    const scan = buildPdf([{ image: true }]);
+    expect(scan.toString("latin1")).toContain("BT");
+    expect(pdfHasTextLayer(scan)).toBe(false);
+  });
+
+  it("answers NULL for a stream it cannot decode, and NULL proceeds", () => {
+    // A codec this does not implement. Not evidence of no text — and a wrong
+    // refusal is a document nobody can get into the app at all.
+    expect(pdfHasTextLayer(buildPdf([{ contentFilter: "LZWDecode" }]))).toBeNull();
+    // One readable page with text still answers true; one unreadable page and
+    // no text found anywhere is the case that has to abstain.
+    expect(pdfHasTextLayer(buildPdf([{ label: "__QA plain" }, { contentFilter: "LZWDecode" }]))).toBe(true);
+    expect(pdfHasTextLayer(buildPdf([{ image: true }, { contentFilter: "LZWDecode" }]))).toBeNull();
+  });
+
+  it("answers NULL where it can see no page at all", () => {
+    // "No text and no pages" is an empty or unreadable file, and this must not
+    // be the thing that tells somebody about it.
+    expect(pdfHasTextLayer(Buffer.from("%PDF-1.7\nnot really a pdf\n%%EOF\n", "latin1"))).toBeNull();
+    expect(pdfHasTextLayer(Buffer.alloc(0))).toBeNull();
   });
 });

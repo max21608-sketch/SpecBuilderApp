@@ -8,6 +8,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BOQ_AS_PDF,
+  SCANNED_PDF,
+  scannedPdfRefusal,
   ClassifyOutput,
   DOCUMENT_GENRES,
   KIND_FROM_GENRE,
@@ -158,5 +160,49 @@ describe("a bill of quantities that arrived as a PDF", () => {
       expect(fileDocument({ genre, certain: true }, "pdf").unsupported).toBeNull();
       expect(fileDocument({ genre, certain: true }, "email").unsupported).toBeNull();
     }
+  });
+});
+
+
+// =====================================================================
+// VARIANCE MATRIX §6.10.b — A SCANNED PDF IS REFUSED BEFORE THE CALL.
+//
+// `pdfHasTextLayer` (tested in `intake-source.test.ts`) answers true, false or
+// NULL. This is the half that decides what to do with each, and the whole rule
+// is that only `false` refuses: null means "cannot tell", and a wrong refusal
+// is a document nobody can get into the app at all.
+// =====================================================================
+describe("a PDF with no text layer", () => {
+  it("is refused, in words that say what to do instead", () => {
+    expect(scannedPdfRefusal("pdf", false)).toBe(SCANNED_PDF);
+    expect(SCANNED_PDF).toMatch(/scanned document/);
+    expect(SCANNED_PDF).toMatch(/not supported/);
+    expect(SCANNED_PDF).toMatch(/OCR/);
+  });
+
+  it("proceeds where the answer is not certain", () => {
+    // NULL IS "CANNOT TELL", and it behaves exactly as a text layer does. The
+    // naive reading calls every compressed PDF scanned, so this is the clause
+    // that keeps the pilot pack readable.
+    expect(scannedPdfRefusal("pdf", null)).toBeNull();
+    expect(scannedPdfRefusal("pdf", true)).toBeNull();
+  });
+
+  it("says nothing about anything that is not a PDF", () => {
+    // A spreadsheet and an email reach the model as text. There is no page to
+    // have no text layer on.
+    for (const type of ["spreadsheet", "email"] as const) {
+      expect(scannedPdfRefusal(type, false)).toBeNull();
+      expect(scannedPdfRefusal(type, null)).toBeNull();
+    }
+  });
+
+  it("is a different refusal from the model's own, and neither fires on unclear", () => {
+    // `fileDocument` reads an ANSWER and this reads the BYTES, so the two
+    // cannot be folded together — and an `unclear` answer still files nothing
+    // and refuses nothing, which is what makes "you decide" a real outcome.
+    expect(SCANNED_PDF).not.toBe(BOQ_AS_PDF);
+    expect(fileDocument({ genre: "unclear", certain: false }, "pdf").unsupported).toBeNull();
+    expect(scannedPdfRefusal("pdf", true)).toBeNull();
   });
 });

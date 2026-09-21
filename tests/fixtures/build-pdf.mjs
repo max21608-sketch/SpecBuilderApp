@@ -20,6 +20,14 @@
 //   node tests/fixtures/build-pdf.mjs 120 > /tmp/big.pdf
 // ============================================================================
 
+/**
+ * COMPRESSED CONTENT IS THE NORMAL CASE, which is why a page can ask for it.
+ * Every real exporter deflates its content streams, so a reader that greps the
+ * raw bytes for a text operator finds none in any real document and calls the
+ * whole Panther pack scanned. A page built with `compress` is that document.
+ */
+import { deflateSync } from "node:zlib";
+
 /** A PDF content stream that draws one line of text, so a page is not blank. */
 function contents(label) {
   const escaped = String(label).replace(/([\\()])/g, "\\$1");
@@ -27,7 +35,31 @@ function contents(label) {
 }
 
 /**
- * @param {{ width?: number, height?: number, rotate?: number, label?: string }[]} pages
+ * A content stream that draws an IMAGE and no text — a scanned page.
+ *
+ * ============================================================================
+ * WHAT A SCAN ACTUALLY LOOKS LIKE, and why the naive test fails it. The page's
+ * own content stream places one image XObject and shows no text at all; the
+ * pixels sit in a separate `/DCTDecode` stream. So "no `Tj` in the bytes" is
+ * true of this file AND of every PDF whose text is inside a compressed stream,
+ * which is why `pdfHasTextLayer` decodes rather than greps.
+ *
+ * It even keeps a `BT`/`ET` pair with nothing shown in it, because an OCR-less
+ * scan's stream can carry one: a text object that sets a font and draws nothing
+ * is not a text layer, and a reader that stopped at `BT` would call this file
+ * readable.
+ * ============================================================================
+ */
+function imageContents() {
+  return "q 515 0 0 762 40 40 cm /Im0 Do Q\nBT /F1 12 Tf 40 20 Td ET\n";
+}
+
+/** Invented bytes standing in for a JPEG. Never decoded by anything here. */
+const IMAGE_BYTES = "\xff\xd8\xff\xe0__QA not a real jpeg__\xff\xd9";
+
+/**
+ * @param {{ width?: number, height?: number, rotate?: number, label?: string,
+ *           image?: boolean, contentFilter?: string, compress?: boolean }[]} pages
  * @returns {Buffer}
  */
 export function buildPdf(pages) {
@@ -36,7 +68,11 @@ export function buildPdf(pages) {
   // 1 catalog, 2 pages tree, 3 font, then a page object and a content stream
   // for each page.
   const objects = [];
+  // A page and its content stream each, then one shared image object at the end
+  // for the scanned pages to place.
   const pageIds = pages.map((_, index) => 4 + index * 2);
+  const imageId = 4 + pages.length * 2;
+  const anyImage = pages.some((page) => page.image);
 
   objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
   objects[2] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`;
@@ -51,12 +87,32 @@ export function buildPdf(pages) {
     // is about: the MediaBox does not change, so anything reading a page's width
     // and height off the box alone crops a rotated page against the wrong axes.
     const rotate = page.rotate ? ` /Rotate ${page.rotate}` : "";
+    // A scanned page needs the image in its resources; a text page needs the font.
+    const resources = page.image
+      ? `/Resources << /XObject << /Im0 ${imageId} 0 R >> /Font << /F1 3 0 R >> >>`
+      : "/Resources << /Font << /F1 3 0 R >> >>";
     objects[pageId] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}]${rotate} ` +
-      `/Resources << /Font << /F1 3 0 R >> >> /Contents ${streamId} 0 R >>`;
-    const stream = contents(page.label ?? `page ${index + 1}`);
-    objects[streamId] = `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}endstream`;
+      `${resources} /Contents ${streamId} 0 R >>`;
+    const stream = page.image ? imageContents() : contents(page.label ?? `page ${index + 1}`);
+    // `contentFilter` names a codec this app does not decode, so the content
+    // stream becomes UNREADABLE rather than absent — the "cannot tell" case,
+    // which has to proceed rather than be called a scan. The payload is not
+    // really encoded: nothing here decodes it, which is the point.
+    const filter = page.contentFilter ? ` /Filter /${page.contentFilter}` : "";
+    const payload = page.compress ? deflateSync(Buffer.from(stream, "latin1")).toString("latin1") : stream;
+    const compressed = page.compress ? " /Filter /FlateDecode" : "";
+    objects[streamId] =
+      `<< /Length ${Buffer.byteLength(payload, "latin1")}${filter}${compressed} >>\n` +
+      `stream\n${payload}\nendstream`;
   });
+
+  if (anyImage) {
+    objects[imageId] =
+      `<< /Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceRGB ` +
+      `/BitsPerComponent 8 /Filter /DCTDecode /Length ${IMAGE_BYTES.length} >>\n` +
+      `stream\n${IMAGE_BYTES}\nendstream`;
+  }
 
   const header = "%PDF-1.4\n";
   let body = "";
