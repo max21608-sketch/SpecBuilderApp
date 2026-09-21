@@ -13,9 +13,10 @@
 //
 // ONE DEFINITION, TWO CONSUMERS. These functions return `SheetData` — the
 // positional rows `read-excel-file` hands the parser — and `build-boq.ts`
-// writes the same rows into real `.xlsx` workbooks beside this file. A shape
-// that only ever exists as an array of arrays cannot prove anything about
-// merged cells, which is why row 3's fixture has to survive a real workbook.
+// builds the same rows into real `.xlsx` bytes. A shape that only ever exists
+// as an array of arrays cannot prove anything about merged cells, which is why
+// row 3's fixture has to survive a real workbook. Nothing is written into the
+// repo: see the note in `build-boq.ts` about `.gitignore`'s NDA guard.
 // ============================================================================
 import type { SheetData } from "read-excel-file/node";
 
