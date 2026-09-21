@@ -93,3 +93,37 @@ export function twoRowHeaderIncomplete(): SheetData {
     ["Example lounge", "Sofa", 14, null],
   ];
 }
+
+/**
+ * A bill laid out in sections, with a subtotal under each and a grand total
+ * at the foot — the shape most client templates print.
+ *
+ * Three populations, and they are NOT the same:
+ *
+ *   * A SPACER or a total row carrying neither a code nor a description
+ *     ("", "", "", 16). Counted and passed over.
+ *   * A SECTION HEADING carrying a description and no code ("SEATING").
+ *     Staged as a line, because a bill line with no code is normal — a real
+ *     "Bench @ entrance" often has none — and dropping a described row would
+ *     lose items nothing downstream could ever ask about.
+ *   * A SUBTOTAL carrying a description ("Subtotal — seating") and a figure.
+ *     Staged as a line too, for the same reason and with the same cost.
+ *
+ * The last two are the finding this fixture exists to pin, not a behaviour it
+ * asserts is right.
+ */
+export function sectionedBill(): SheetData {
+  return [
+    ["ZZ001 - Example Project", null, null, null],
+    ["Area", "FF&E code", "Item description", "TOTAL Q-ty"],
+    [null, null, "SEATING", null],
+    ["Example lounge", "ZZ-101", "Sofa", 14],
+    ["Example lounge", "ZZ-102", "Armchair", 2],
+    [null, null, "Subtotal — seating", 16],
+    [null, null, null, null],
+    [null, null, "TABLES", null],
+    ["Example suite", "ZZ-201", "Side table", 4],
+    [null, null, null, 4],
+    [null, null, null, 20],
+  ];
+}

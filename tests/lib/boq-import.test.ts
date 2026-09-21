@@ -17,7 +17,13 @@ import {
 import type { BoqParseResult, ParsedBoqSheet } from "@/lib/boq-import";
 // Synthetic, built by `tests/fixtures/build-boq.ts`. Modelled on the shape of a
 // real bill; not one line of one.
-import { blankQtyCells, noQtyColumn, twoRowHeader, twoRowHeaderIncomplete } from "../fixtures/boq-shapes";
+import {
+  blankQtyCells,
+  noQtyColumn,
+  sectionedBill,
+  twoRowHeader,
+  twoRowHeaderIncomplete,
+} from "../fixtures/boq-shapes";
 // The same shapes as real workbooks, built in memory — see the note on the
 // workbook suite below for why none of them is committed.
 import { twoRowHeaderWorkbook } from "../fixtures/build-boq";
@@ -452,6 +458,66 @@ describe("the same bill as a real workbook", () => {
     const rows = sheets[0]?.data ?? [];
     expect(rows[2]?.[0]).toBe("Area");
     expect(rows[3]?.[0] ?? null).toBeNull();
+  });
+});
+
+// ============================================================================
+// VARIANCE MATRIX §6.10.a ROW 6 — SUBTOTAL AND SECTION ROWS.
+//
+// EXPECTED: PROCEEDS, skipped, and the review says how many and why. IT
+// ALREADY DID, so this row is a test and no change — `readRows` counts a row
+// carrying neither a code nor a description, and `describeHeader` reports it
+// as "spacers or totals" in the sentence the review prints.
+//
+// WHAT IT DOES NOT COVER, and this is the finding rather than the fix: a
+// subtotal or a section heading that carries a DESCRIPTION is staged as a
+// line. That is the same rule as a real codeless item ("Bench @ entrance"),
+// and it cannot be tightened here without dropping described rows a bill
+// genuinely wants — so the reviewer's Include box is the only thing that
+// removes one. `non-furniture-guess.ts` is where a suggestion would go, and
+// its own header says its word list is Max and Matthew's to extend rather
+// than a tidy-up. Reported, not widened.
+// ============================================================================
+describe("a bill printed in sections with subtotals", () => {
+  it("passes over the rows that carry neither a code nor a description", () => {
+    const staged = one(parseBoqSheets(sheet(sectionedBill(), "Bill")));
+    // Two figure-only rows and one grand total; the fully blank row is in
+    // NEITHER count, because it is not a spacer with content.
+    expect(staged.skippedRows).toBe(2);
+  });
+
+  it("says how many and why, in the sentence the review prints", () => {
+    const staged = one(parseBoqSheets(sheet(sectionedBill())));
+    expect(describeHeader(staged)).toContain(
+      "2 rows under the header with no code or description were passed over (spacers or totals).",
+    );
+  });
+
+  it("reads every real item, and keeps its source row number", () => {
+    const staged = one(parseBoqSheets(sheet(sectionedBill())));
+    const items = staged.lines.filter((line) => line.code !== null);
+    expect(items.map((line) => [line.code, line.qty, line.lineNo])).toEqual([
+      ["ZZ-101", 14, 4],
+      ["ZZ-102", 2, 5],
+      ["ZZ-201", 4, 9],
+    ]);
+  });
+
+  it("stages a described section heading and subtotal as lines — the known gap", () => {
+    // PINNING TODAY'S BEHAVIOUR, not endorsing it. A described row is staged
+    // because a codeless ITEM is normal and losing one is unrecoverable; the
+    // consequence is that "SEATING" and "Subtotal — seating" arrive as lines
+    // for the reviewer to untick, and nothing suggests it to them.
+    const staged = one(parseBoqSheets(sheet(sectionedBill())));
+    const described = staged.lines.filter((line) => line.code === null);
+    expect(described.map((line) => line.itemDescription)).toEqual([
+      "SEATING",
+      "Subtotal — seating",
+      "TABLES",
+    ]);
+    // And the subtotal's figure comes through as a quantity, which is what
+    // would make it a record for 16 of something.
+    expect(described[1]?.qty).toBe(16);
   });
 });
 
