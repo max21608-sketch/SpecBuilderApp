@@ -22,6 +22,67 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-21
 
+### The checklist's Dimensions box is free text, so two of four dimensions can be marked Confirmed
+
+**Status: open. The most consequential thing found so far** — it lets an item
+reach a quotation with a key dimension nobody has, and nothing downstream
+says so. Max, on finding it: *"eventually someone's going to realise, oh
+wait, we don't have this key dimension … because someone's said it's
+confirmed with only two dimensions out of the four needed."*
+
+Seen on the record screen, Checklist tab (screenshot),
+`DEMO-300-102 · Bench, luggage @ entrance`.
+
+The Dimensions row's Answer cell is a plain text box. `W1900 x D1400mm` was
+typed into it and its state set to **Confirmed** — no height, no seat height —
+and the **TGQ tile reads 0**, *"blocks a price going out"*.
+
+**The same screen contradicts itself two lines apart.** The header above the
+tabs already says *"3 to answer at TGQ · 1 you record on this item's details ·
+2 counted as separate slots"*, and the tile underneath says 0.
+
+Four things found by reading the code, kept apart from what was seen:
+
+- **The box is disconnected from the slots, and that is the hole.**
+  `RecordChecklist.tsx:296` special-cases field 3 for PROVENANCE only — it
+  finds the first attribute carrying a `dimension_slot` so the row can show
+  where the value came from. The cell itself is the ordinary free-text answer
+  control, so what a person types there is a STRING, and no W/D/H/SH exists
+  behind it.
+- **The infill screen already does it the right way**, which is what makes
+  this a gap rather than a design. `rowKind` reads `jsonId === 3` and turns
+  the row into slot + figure + unit, writing through `createAttribute` —
+  because the composed cell is a projection of the attributes. The record's
+  Checklist tab never learned it.
+- **The count that reads 0 is the QUESTION count, not the gate's.** There is
+  ONE Dimensions question and it is confirmed, so the tile is right about what
+  it measures. Matthew's matrix carries FOUR rows at TGQ, one BWS id each with
+  a `dimension_slot`, and the Gates tab counts those. This is the
+  already-recorded "the table's TGQ column is a DIFFERENT measure from the TGQ
+  gate" landing somewhere it does real harm — the person reads 0 and stops.
+- **A typed Dimensions answer is written `manual`, which locks the cell for
+  good.** `planAnswerFills`' composed-dimensions branch touches an answer only
+  while it is `missing` or document-written; `manual` and `email` are
+  deliberately out of reach (`promote-answers.ts:298`). So after somebody
+  types into that box, **no later drawing or email confirm can ever recompose
+  the cell** — the record can hold four real slots off a page and go on
+  showing the two somebody typed.
+
+**What Max asked for**, recorded as the request and not as a design: show
+Dimensions, and under it a breakdown of the key dimensions this line item
+needs, with ALL of them required before it can read as confirmed.
+
+Two things a plan has to settle rather than assume, both already written down
+elsewhere:
+
+- **Which slots a given item needs is Matthew's matrix, per category** — rows
+  4-7 for seating — and it is null for the eight cabinetry sheets his matrix
+  does not reach. "All four, always" would report a missing seat height on a
+  bedside table.
+- **`composeDimensionCell` stays the single composer**, and 0034's
+  `dimension_note` is the one free-text part of that cell. Whatever replaces
+  the box must not become a second way to write the cell directly.
+
 ### The drawings card's table is cut off, and a column can only be reached by scrolling sideways
 
 **Status: open.** Seen on the pack drawings review (screenshot), Ashcombe House
