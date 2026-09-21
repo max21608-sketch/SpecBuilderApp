@@ -31,6 +31,8 @@ import { loadUnlinkedFinishCodes, normaliseFinishCode } from "@/lib/finishes";
 import { sql } from "@/lib/db";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
 import { POST as confirmRoute } from "@/app/api/imports/[id]/confirm/route";
+import { POST as bulkFinishesRoute } from "@/app/api/projects/[id]/finishes/bulk/route";
+import { suggestFinishKind } from "@/lib/finish-kind-guess";
 
 // Only the session is stubbed; the routes are the real ones.
 vi.mock("@/lib/session", () => ({
@@ -343,6 +345,91 @@ describeIfDb("the finishes library, against the codes a client actually writes",
       const mine = unlinked.find((row) => row.code === normaliseFinishCode(code));
       expect(mine).toBeTruthy();
       expect(mine?.records).toBe(1);
+    });
+  });
+  describe("a code with no description anywhere (row e3)", () => {
+    // The pasted-list path, which is how the library is meant to be set out
+    // before the first drawing lands: "Project finishes I think are the way to
+    // go; set these out from the outset." A bare code is the normal thing to
+    // paste, because a finishes schedule's codes arrive long before anybody has
+    // written down what each one is.
+    const code = "__QA CH-03";
+
+    const bulk = async (action: "preview" | "create", text: string) => {
+      const response = await bulkFinishesRoute(
+        new Request("http://localhost/test", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action, text }),
+        }),
+        { params: Promise.resolve({ id: projectId }) },
+      );
+      return { response, body: (await response.json()) as Record<string, unknown> };
+    };
+
+    it("previews before it writes, so nothing is created by a paste alone", async () => {
+      const { response, body } = await bulk("preview", `${code}\n`);
+      expect(response.status).toBe(200);
+      expect(body.newCount).toBe(1);
+      const held = await client.query(
+        `select count(*)::int as n from project_finishes where project_id = $1 and code_norm = $2`,
+        [projectId, normaliseFinishCode(code)],
+      );
+      expect(held.rows[0].n).toBe(0);
+    });
+
+    it("creates the row with the CODE ALONE, and files it as nothing", async () => {
+      const { response, body } = await bulk("create", `${code}\n`);
+      // 201: the route created something, and says so.
+      expect(response.status).toBe(201);
+      expect(body.created).toBe(1);
+
+      const finish = await client.query(
+        `select code, description, kind, state, supplier_raw, reference from project_finishes
+          where project_id = $1 and code_norm = $2 and status = 'active'`,
+        [projectId, normaliseFinishCode(code)],
+      );
+      expect(finish.rows).toHaveLength(1);
+      expect(finish.rows[0].description).toBeNull();
+      // KIND IS NEVER INFERRED. `classifyGroup` already guesses a group from
+      // words in a label, and a second guess stacked on it produces a register
+      // full of confident mistakes.
+      expect(finish.rows[0].kind).toBeNull();
+      // TBC is the honest state: a code somebody pasted is not a code anybody
+      // has confirmed, and 0018's own CHECK refuses a confirmed row with no
+      // description for the same reason.
+      expect(finish.rows[0].state).toBe("tbc");
+      expect(finish.rows[0].supplier_raw).toBeNull();
+    });
+
+    it("refuses to be CONFIRMED while it says nothing, at the database", async () => {
+      // The constraint behind the state, and the reason it is worth a test: a
+      // confirmed finish with no description is the confidently-wrong state the
+      // whole register exists to avoid, and it would reach a BWS cell as a
+      // settled value nothing downstream questions.
+      await expect(
+        client.query(
+          `update project_finishes set state = 'confirmed', updated_by = 'qa'
+            where project_id = $1 and code_norm = $2`,
+          [projectId, normaliseFinishCode(code)],
+        ),
+      ).rejects.toThrow(/project_finishes_confirmed_has_description/);
+    });
+
+    it("has nothing to suggest, which is a different answer from an empty cell", async () => {
+      // `suggestFinishKind` is the same pure function the screen runs, so the
+      // row the page renders under "Nothing to suggest" is decided here. What
+      // the page then SAYS is pinned in tests/components/finishes-library.
+      const row = await client.query(
+        `select code, description from project_finishes where project_id = $1 and code_norm = $2`,
+        [projectId, normaliseFinishCode(code)],
+      );
+      expect(
+        suggestFinishKind({
+          code: String(row.rows[0].code),
+          description: row.rows[0].description as string | null,
+        }),
+      ).toBeNull();
     });
   });
 });

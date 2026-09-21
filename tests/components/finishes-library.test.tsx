@@ -348,3 +348,56 @@ describe("the codes the library cannot reach (row e2)", () => {
     expect(screen.getByText(/db:backfill-finishes/)).toBeInTheDocument();
   });
 });
+
+describe("a code with no description anywhere (row e3)", () => {
+  // ST-11 in the payload above: a code and nothing else. It is the shape the
+  // pasted-list path produces on purpose, because a finishes schedule's codes
+  // arrive long before anybody has written down what each one is — and the real
+  // set's `CH-01.1` is the same shape for a different reason, which is that no
+  // page says what CH stands for.
+  // ST-11 is re-declared as TBC here rather than taken from PAYLOAD, where it
+  // is `confirmed` with no description — a state 0018's
+  // `project_finishes_confirmed_has_description` CHECK refuses outright, so a
+  // test resting on it would be describing a row that cannot exist.
+  beforeEach(() => {
+    fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          ...PAYLOAD,
+          finishes: PAYLOAD.finishes.map((entry) =>
+            entry.id === "fin-3" ? { ...entry, state: "tbc" } : entry,
+          ),
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("says what it could not read, rather than showing an empty cell", async () => {
+    render(<FinishesLibrary projectId="proj-1" />);
+    const row = (await screen.findByText("ST-11")).closest("tr")!;
+    // The kind: not blank, and not a guess. "no page says what ST means" is a
+    // question somebody can answer; an empty cell is not.
+    expect(within(row).getByText(/no page says what ST means/i)).toBeInTheDocument();
+    // The description: absent, and said so.
+    expect(within(row).getByText("Nothing recorded yet")).toBeInTheDocument();
+    // And the picker is there, empty, because the row is TBC and a person can
+    // still file it by hand.
+    expect((within(row).getByLabelText("Kind of ST-11") as HTMLSelectElement).value).toBe("");
+  });
+
+  it("groups it under a heading that says why, rather than mixing it in", async () => {
+    // A code with nothing to suggest is a different problem from one with a
+    // suggestion nobody has accepted: the first needs a page or a person, the
+    // second needs one click. Mixed together, the clickable ones get lost.
+    render(<FinishesLibrary projectId="proj-1" />);
+    await screen.findByText("ST-11");
+    const heading = screen.getByText("Nothing to suggest").closest("tr")!;
+    expect(heading.textContent).toContain("the code says nothing and no description has been recorded");
+    // It is BELOW the rows that do have something, which is what makes the
+    // heading mean anything.
+    const listed = codes();
+    expect(listed.indexOf("ST-11")).toBe(listed.length - 1);
+  });
+});
