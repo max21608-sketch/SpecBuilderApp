@@ -144,6 +144,49 @@ describeIfDb("the per-pack cap on charged reads", () => {
     return { status: res.status, body: await res.json() };
   }
 
+  /**
+   * A document nobody has read and nobody has promised to — `pending`, no
+   * attempt, no deadline. Inserted rather than registered, because that is
+   * exactly the row *Read all* is for: one that predates automatic reading,
+   * or one whose deferral marker has expired. Registering it would start or
+   * defer the read this test is about to press.
+   */
+  async function insertUnreadDoc(batchId: string, name: string, documentKind = "ffe_schedule") {
+    const attachment = await client.query(
+      `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+       values ('project', $1, 'spec_document', $2, $3, 'application/pdf', 4, 'qa') returning id`,
+      [projectId, `projects/${projectId}/__QA ${name}.pdf`, `__QA ${name}.pdf`],
+    );
+    const run = await client.query(
+      `insert into intake_runs (project_id, attachment_id, batch_id, source_kind, document_kind, status, created_by, updated_by)
+       values ($1, $2, $3, 'spec_document', $4, 'pending', 'qa', 'qa') returning id`,
+      [projectId, attachment.rows[0].id, batchId, documentKind],
+    );
+    return String(run.rows[0].id);
+  }
+
+  /**
+   * One press of Read, through the REAL extract route, with the version read
+   * fresh — which is what the pack screen does per document.
+   */
+  async function readIt(runId: string, action: "start" | "retry-dispatch" | "restart-expired" = "start") {
+    const version = await client.query(`select version from intake_runs where id = $1`, [runId]);
+    const { POST } = await import("@/app/api/imports/[id]/extract/route");
+    const res = await POST(
+      new Request("http://localhost/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedVersion: Number(version.rows[0].version),
+          requestId: randomUUID(),
+          action,
+        }),
+      }),
+      { params: Promise.resolve({ id: runId }) },
+    );
+    return { status: res.status, body: await res.json() };
+  }
+
   /** A pack's runs, oldest first, as the screens read them. */
   async function packRuns(batchId: string) {
     const rows = await client.query(
@@ -379,5 +422,161 @@ describeIfDb("the per-pack cap on charged reads", () => {
     expect(published).toHaveLength(0);
     const runs = await packRuns(batchId);
     expect(runs.find((r) => String(r.id) === String(first.importId))?.waiting_for_slot).toBe(true);
+  });
+  // ---- *Read all* honours the cap too (item 2.10.f's open half) -------------
+
+  it("READ ALL over eleven unread documents starts three and holds the other eight", async () => {
+    const batchId = await newBatch("read-all-eleven");
+    const ids: string[] = [];
+    for (let n = 0; n < 11; n += 1) ids.push(await insertUnreadDoc(batchId, `read-all-eleven-${n}`));
+    published.length = 0;
+
+    const answers = [];
+    for (const id of ids) answers.push(await readIt(id));
+
+    // The decisive assertion, and the reason this item exists: one press over
+    // eleven documents is three paid calls, not eleven. Retrying eleven
+    // documents a 429 storm has just failed is the worst case the cap is for.
+    expect(published).toHaveLength(MAX_IN_FLIGHT_READS_PER_PACK);
+
+    const started = answers.filter((a) => a.status === 200);
+    const deferred = answers.filter((a) => a.status === 202);
+    expect(started).toHaveLength(MAX_IN_FLIGHT_READS_PER_PACK);
+    expect(deferred).toHaveLength(11 - MAX_IN_FLIGHT_READS_PER_PACK);
+
+    // NEVER AN ERROR. The press was correct and the document will be read.
+    for (const answer of deferred) {
+      expect(answer.body.ok).toBe(true);
+      expect(answer.body.waiting).toBe(true);
+      expect(answer.body.attemptId).toBeNull();
+      expect(String(answer.body.note)).toContain("starts on its own");
+      expect(answer.body.error).toBeUndefined();
+    }
+
+    const runs = await packRuns(batchId);
+    expect(runs.filter((r) => r.status === "queued")).toHaveLength(MAX_IN_FLIGHT_READS_PER_PACK);
+    expect(runs.filter((r) => r.waiting_for_slot)).toHaveLength(11 - MAX_IN_FLIGHT_READS_PER_PACK);
+  });
+
+  it("READ ALL with two reads already in flight starts one and defers the rest", async () => {
+    const batchId = await newBatch("read-all-partial");
+    for (let n = 0; n < MAX_IN_FLIGHT_READS_PER_PACK - 1; n += 1) await registerDoc(batchId, `read-all-partial-${n}`);
+    const ids: string[] = [];
+    for (let n = 0; n < 3; n += 1) ids.push(await insertUnreadDoc(batchId, `read-all-partial-extra-${n}`));
+    published.length = 0;
+
+    const answers = [];
+    for (const id of ids) answers.push(await readIt(id));
+
+    expect(published).toHaveLength(1);
+    expect(answers.filter((a) => a.status === 200)).toHaveLength(1);
+    expect(answers.filter((a) => a.status === 202)).toHaveLength(2);
+  });
+
+  it("VARIANCE: a retry of a FAILED document at the cap is deferred, and its Retry goes with it", async () => {
+    const batchId = await newBatch("retry-failed");
+    for (let n = 0; n < MAX_IN_FLIGHT_READS_PER_PACK; n += 1) await registerDoc(batchId, `retry-failed-${n}`);
+    const failedId = await insertUnreadDoc(batchId, "retry-failed-dead");
+    await client.query(
+      `update intake_runs set status = 'failed', attempt_id = $2, claim_count = 2,
+              error = '__QA rate limited', attempt_deadline_at = now() + interval '1 hour'
+         where id = $1`,
+      [failedId, randomUUID()],
+    );
+    published.length = 0;
+
+    const { status, body } = await readIt(failedId);
+    expect(status).toBe(202);
+    expect(body.waiting).toBe(true);
+    expect(published).toHaveLength(0);
+
+    // Put back to `pending` with no attempt, which is the ONLY marker the
+    // hand-off reads — and with the error cleared, or the screen would show a
+    // red failure and a Retry button for a read that is already promised.
+    const row = await client.query(
+      `select status, attempt_id, claim_count, error, (attempt_deadline_at > now()) as live
+         from intake_runs where id = $1`,
+      [failedId],
+    );
+    expect(row.rows[0]).toMatchObject({ status: "pending", attempt_id: null, claim_count: 0, error: null, live: true });
+  });
+
+  it("VARIANCE: a deferral that came from READ ALL is handed a freed slot like any other", async () => {
+    // The marker is the same pair whoever wrote it, so the hand-off cannot
+    // tell a Read all deferral from a registration one. Asserted rather than
+    // assumed: a second marker would be a second set of rules about which
+    // pending rows may be spent on.
+    const batchId = await newBatch("read-all-handoff");
+    for (let n = 0; n < MAX_IN_FLIGHT_READS_PER_PACK; n += 1) await registerDoc(batchId, `read-all-handoff-${n}`);
+    const inFlight = await packRuns(batchId);
+    const deferredId = await insertUnreadDoc(batchId, "read-all-handoff-late");
+    const answer = await readIt(deferredId);
+    expect(answer.status).toBe(202);
+    published.length = 0;
+
+    const outcome = await runWorker(String(inFlight[0].id), String(inFlight[0].attempt_id));
+    expect(outcome.outcome).toBe("parsed");
+
+    const after = await packRuns(batchId);
+    const promoted = after.find((r) => String(r.id) === deferredId);
+    expect(promoted?.status).toBe("queued");
+    expect(published).toHaveLength(1);
+    expect(published[0]?.extractionId).toBe(deferredId);
+  });
+
+  it("VARIANCE: retry-dispatch at the cap proceeds, because its attempt already holds a slot", async () => {
+    const batchId = await newBatch("retry-dispatch");
+    for (let n = 0; n < MAX_IN_FLIGHT_READS_PER_PACK; n += 1) await registerDoc(batchId, `retry-dispatch-${n}`);
+    const runs = await packRuns(batchId);
+    published.length = 0;
+
+    // Re-publishing an attempt that is already queued and unclaimed starts no
+    // new read, so capping it would refuse the recovery from a publish whose
+    // outcome nobody knows.
+    const { status, body } = await readIt(String(runs[0].id), "retry-dispatch");
+    expect(status).toBe(200);
+    expect(body.status).toBe("queued");
+    expect(body.attemptId).toBe(String(runs[0].attempt_id));
+    expect(published).toHaveLength(1);
+  });
+
+  it("VARIANCE: restart-expired at the cap proceeds, because one abandoned document is one press", async () => {
+    const batchId = await newBatch("restart-expired");
+    for (let n = 0; n < MAX_IN_FLIGHT_READS_PER_PACK; n += 1) await registerDoc(batchId, `restart-expired-${n}`);
+    const abandonedId = await insertUnreadDoc(batchId, "restart-expired-dead");
+    await client.query(
+      // `queued_at` because the live CHECK `intake_runs_attempt_shape_check`
+      // requires it of a `queued` spec document, which is what an abandoned
+      // attempt looks like.
+      `update intake_runs set status = 'queued', attempt_id = $2, queued_at = now() - interval '2 hours',
+              attempt_deadline_at = now() - interval '1 hour' where id = $1`,
+      [abandonedId, randomUUID()],
+    );
+    published.length = 0;
+
+    const { status } = await readIt(abandonedId, "restart-expired");
+    expect(status).toBe(200);
+    expect(published).toHaveLength(1);
+  });
+
+  // The DoD's other half: the drawings step's chips agree with the pack screen.
+  it("the drawings step says WAITING FOR A SLOT for a document Read all deferred", async () => {
+    const batchId = await newBatch("drawings-chip");
+    const ids: string[] = [];
+    for (let n = 0; n < 5; n += 1) ids.push(await insertUnreadDoc(batchId, `drawings-chip-${n}`, "shop_drawings"));
+    published.length = 0;
+    for (const id of ids) await readIt(id);
+
+    const { loadBatchDrawings } = await import("@/lib/drawing-resolution");
+    const { runs } = await loadBatchDrawings(projectId, batchId);
+    expect(runs).toHaveLength(5);
+    expect(runs.filter((run) => run.status === "queued")).toHaveLength(3);
+    expect(runs.filter((run) => run.waitingForSlot)).toHaveLength(2);
+
+    // One reading of a document's state, shared with the pack screen: "Not
+    // read yet" is a document waiting for a PERSON.
+    const waiting = runs.find((run) => run.waitingForSlot)!;
+    expect(documentReviewLabel(waiting)).toBe("Waiting for a slot");
+    expect(documentReviewLabel(runs.find((run) => run.status === "queued")!)).not.toBe("Waiting for a slot");
   });
 });

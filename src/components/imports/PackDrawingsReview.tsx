@@ -22,7 +22,7 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import { formatDay } from "@/lib/format-day";
 
 import { usePoll } from "@/lib/use-poll";
-import { intakeStatusLabel, intakeStatusTone, isIntakeRunWorking } from "@/lib/intake-status";
+import { documentReviewLabel, documentReviewTone, isIntakeRunWorking } from "@/lib/intake-status";
 import Spinner from "@/components/ui/Spinner";
 import Button, { buttonClass } from "@/components/ui/Button";
 import PageHeader from "@/components/ui/PageHeader";
@@ -49,6 +49,8 @@ type Run = {
   importId: string;
   filename: string | null;
   status: string;
+  /** `pending` because the pack is at its read cap, not because nobody asked. */
+  waitingForSlot?: boolean | null;
   error: string | null;
   version: number;
   staged: StagedDrawings | null;
@@ -77,6 +79,37 @@ type Payload = {
   repeated: Repeated[];
 };
 
+/**
+ * The documents *Read all* is for: nobody has read them and nobody has
+ * promised to.
+ *
+ * A RUN WAITING FOR A SLOT IS NOT ONE OF THEM, though it is `pending`. Its
+ * read is already promised and the worker that frees a slot starts it, so
+ * offering "Read all 8 — each is charged" over eight documents that are
+ * already queued would be a charge nobody is about to pay and a press that
+ * does nothing visible. The marker expires with its deadline, after which the
+ * run is an ordinary unread document again and this button picks it up —
+ * which is the recovery path `extraction-slots.ts` relies on.
+ *
+ * A FAILED run stays in: that one really is waiting for a person.
+ */
+function unreadRuns(runs: Run[]): Run[] {
+  return runs.filter((run) => run.status === "failed" || (run.status === "pending" && !run.waitingForSlot));
+}
+
+/** What one press of *Read all* did, in words. Null when it did nothing. */
+function readAllSummary(reading: number, waiting: number): string | null {
+  if (reading + waiting === 0) return null;
+  const parts = [`${reading} reading`];
+  if (waiting > 0) parts.push(`${waiting} waiting for a slot`);
+  return (
+    parts.join(" · ") +
+    (waiting > 0
+      ? " — a waiting document starts on its own when one of the reads finishes. Nothing more to press."
+      : "")
+  );
+}
+
 export default function PackDrawingsReview({
   projectId,
   batchId,
@@ -91,6 +124,14 @@ export default function PackDrawingsReview({
   /** What the project needs next — see the note in `DrawingsReview`. */
   const step = useNextStep(projectId);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * What an action DID, where that is not a failure.
+   *
+   * *Read all* over eleven documents starts three of them and leaves eight
+   * waiting for a slot, which is the pack working correctly — so it is not an
+   * error and must not be painted as one, and it is also not nothing.
+   */
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<DrawingObservation>>>({});
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
@@ -207,9 +248,10 @@ export default function PackDrawingsReview({
    * happen (the refused request means this screen is out of date), so the
    * message is put back after it.
    */
-  async function reloadThen(failure: string | null) {
+  async function reloadThen(failure: string | null, said?: string | null) {
     await load();
     if (failure) setError(failure);
+    if (said) setNotice(said);
   }
 
   useEffect(() => {
@@ -486,7 +528,7 @@ export default function PackDrawingsReview({
 
   /** One Extract per unread drawing document, in sequence. */
   async function readAll() {
-    const unread = runs.filter((run) => run.status === "pending" || run.status === "failed");
+    const unread = unreadRuns(runs);
     if (unread.length === 0) return;
     // The single-file button carries this warning; a bulk button would hide it
     // N times over, so it is stated with the count before anything is spent.
@@ -498,8 +540,19 @@ export default function PackDrawingsReview({
 
     setBusy("read-all");
     setError(null);
+    setNotice(null);
     try {
       let failure: string | null = null;
+      // WHAT THE PRESS ACTUALLY DID, counted as it goes.
+      //
+      // At most three reads of one pack run at once, so eleven presses are
+      // three starts and eight deferrals — and the route answers each of the
+      // eight `ok: true` with `waiting`, because the document will be read.
+      // Reporting "11 started" over that would be the screen promising eleven
+      // model calls that are not happening, and somebody would go looking for
+      // why eight of them produced nothing.
+      let reading = 0;
+      let waiting = 0;
       for (const run of unread) {
         // Version read fresh per run: the extract route refuses a mismatch
         // rather than starting a second attempt, and this screen holds no
@@ -509,7 +562,7 @@ export default function PackDrawingsReview({
           failure = current.error;
           break;
         }
-        const res = await apiFetch(`/api/imports/${run.importId}/extract`, {
+        const res = await apiFetch<{ waiting?: boolean }>(`/api/imports/${run.importId}/extract`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -522,8 +575,13 @@ export default function PackDrawingsReview({
           failure = res.error;
           break;
         }
+        if (res.data.waiting) waiting += 1;
+        else reading += 1;
       }
-      await reloadThen(failure);
+      // Said alongside a failure rather than instead of it: the counts
+      // describe the documents this press got to before it stopped, and the
+      // banner says why it stopped.
+      await reloadThen(failure, readAllSummary(reading, waiting));
     } finally {
       // Always reset: an HTML error page must not leave the button spinning.
       setBusy(null);
@@ -583,7 +641,7 @@ export default function PackDrawingsReview({
   const pendingItems = runs.flatMap((run) =>
     (run.staged?.items ?? []).filter((item) => item.observations.some((observation) => observation.reviewStatus === "pending")),
   );
-  const unread = runs.filter((run) => run.status === "pending" || run.status === "failed");
+  const unread = unreadRuns(runs);
   const unitsOutstanding = pendingItems.reduce(
     (total, item) =>
       total +
@@ -596,6 +654,7 @@ export default function PackDrawingsReview({
   return shell(
     <>
       {error && <Note tone="danger">{error}</Note>}
+      {notice && <Note tone="info">{notice}</Note>}
 
       {/* Which files are in, and what state each is in. At one PDF per line
           item this list IS the progress bar. */}
@@ -638,8 +697,12 @@ export default function PackDrawingsReview({
                   {run.error && <span className="mt-0.5 block text-xs text-neutral-500">{run.error}</span>}
                 </Td>
                 <Td>
-                  <Chip tone={intakeStatusTone(run.status)} dot={isIntakeRunWorking(run.status)}>
-                    {intakeStatusLabel(run.status)}
+                  {/* One reading of a document's state, shared with the pack
+                      screen: "Not read yet" is a document waiting for a
+                      PERSON, and one the cap deferred is waiting for a slot
+                      and starts on its own. */}
+                  <Chip tone={documentReviewTone(run)} dot={isIntakeRunWorking(run.status)}>
+                    {documentReviewLabel(run)}
                   </Chip>
                 </Td>
                 <Td>

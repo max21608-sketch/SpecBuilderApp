@@ -230,6 +230,12 @@ export type ResolvedRun = {
   importId: string;
   filename: string | null;
   status: string;
+  /**
+   * `pending` because the pack is already reading as many documents as it may,
+   * rather than because nobody has asked for it. Two different sentences on
+   * the screen, and only one of them is a button somebody has to press.
+   */
+  waitingForSlot: boolean;
   error: string | null;
   version: number;
   staged: StagedDrawings | null;
@@ -241,7 +247,19 @@ export async function loadBatchDrawings(
   batchId: string,
 ): Promise<{ runs: ResolvedRun[]; records: ReturnType<typeof recordChoices> }> {
   const rows = await sql`
-    select r.id, r.status, r.error, r.version, r.parsed, a.filename
+    select r.id, r.status, r.error, r.version, r.parsed, a.filename,
+           -- Deferred by the in-flight cap, not by a person: the pair (no
+           -- attempt, a live deadline) is written by nothing else, because
+           -- openAttempt always writes both.
+           --
+           -- THE SAME EXPRESSION IS IN src/app/api/projects/[id]/batches/route.ts,
+           -- which is where the pack screen reads it. The HTTP driver cannot
+           -- share a SQL fragment, so the two copies are the price — the
+           -- loadExportScope situation, in a smaller place. Change one and
+           -- change the other, or the drawings step and the pack screen start
+           -- disagreeing about which documents are waiting.
+           (r.status = 'pending' and r.attempt_id is null and r.attempt_deadline_at > now())
+             as waiting_for_slot
     from intake_runs r
     left join attachments a on a.id = r.attachment_id
     where r.batch_id = ${batchId}
@@ -272,6 +290,7 @@ export async function loadBatchDrawings(
       importId: String(row.id),
       filename: row.filename ? String(row.filename) : null,
       status: String(row.status),
+      waitingForSlot: Boolean(row.waiting_for_slot),
       error: row.error ? String(row.error) : null,
       version: Number(row.version),
       staged,

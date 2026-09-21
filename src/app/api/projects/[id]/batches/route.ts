@@ -50,6 +50,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                        -- Deferred by the in-flight cap, not by a person: the
                        -- pair (no attempt, a live deadline) is written by
                        -- nothing else, because openAttempt always writes both.
+                       --
+                       -- THE SAME EXPRESSION IS IN src/lib/drawing-resolution.ts,
+                       -- where the drawings step reads it. The driver cannot
+                       -- share a SQL fragment; change one and change the other.
                        'waitingForSlot', (r.status = 'pending' and r.attempt_id is null
                                           and r.attempt_deadline_at > now()),
                        'error', r.error,

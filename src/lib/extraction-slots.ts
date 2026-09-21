@@ -46,6 +46,22 @@
 // alternative to degrading is a document that starts reading itself a week
 // after anybody was watching.
 //
+// ---- PRESSING READ IS CAPPED TOO, AND RETRYING IS THE WORST CASE ----------
+//
+// The extract route's `start` takes a slot through the same two functions.
+// Leaving it uncapped was the obvious reading — registration reads a pack
+// automatically, so what is left to press is the exceptions — and it left the
+// hole the cap exists for wide open: *Read all* on the pack screen is one
+// press over every unread document, and the documents it is pressed for are
+// usually the eleven a 429 storm has just failed. Eleven concurrent calls to
+// recover from eleven rate-limited calls is the shape that burns the
+// deliveries recovery depends on.
+//
+// `retry-dispatch` stays uncapped, because its attempt already holds a slot
+// and re-publishing it starts no new read. So does `restart-expired`: it is
+// one deliberate press on one abandoned document, and the attempt it replaces
+// stopped counting as in flight when its deadline passed.
+//
 // ---- AN EXPIRED ATTEMPT IS NOT IN FLIGHT ----------------------------------
 //
 // `inFlight` counts only attempts still inside their deadline, because the
@@ -143,17 +159,40 @@ export async function takeReadSlot(txn: TxnSql, scope: ReadScope): Promise<boole
  * it. The deadline is what tells `dispatchNextWaiting` this run is one of ours
  * rather than one of the `pending` rows that predate automatic reading.
  *
- * Only a run still `pending` with no attempt: the two callers have both just
- * inserted one. A `failed` run is not deferred here because nothing defers a
- * retry — the extract route is uncapped, which is recorded as an observation
- * rather than fixed in this item.
+ * THREE CALLERS AND TWO STARTING STATES. Registration and email assignment
+ * both defer a row they have just inserted, which is `pending` with no
+ * attempt. The extract route's `start` defers one it has locked, and that one
+ * may be `failed` — a retry after a terminal failure is the case the cap
+ * exists for most, because eleven documents a 429 storm just failed are
+ * eleven concurrent calls behind one press.
+ *
+ * A FAILED RUN IS PUT BACK TO `pending`, WITH ITS ERROR CLEARED, because the
+ * marker `dispatchNextWaiting` looks for is that pair and nothing else can
+ * stand in for it. Every column reset here is one `openAttempt` would have
+ * reset a moment later had there been a slot, so a deferred retry and a
+ * dispatched one differ in exactly one thing: whether an attempt was opened.
+ * Leaving the row `failed` instead would show a reviewer a red failure and a
+ * Retry button for a read that is already promised, and no hand-off would
+ * ever start it.
+ *
+ * The predicate is the set `start` accepts, and it is a fence rather than the
+ * decision: every caller holds the row already — the two registration paths
+ * through their own insert, the extract route through `for update` — so a
+ * no-match cannot happen and nothing is returned for a caller to check.
  */
 export async function deferRead(txn: TxnSql, runId: string, actor: string): Promise<void> {
   await txn`
     update intake_runs
-    set attempt_deadline_at = now() + make_interval(hours => ${ATTEMPT_DEADLINE_HOURS}),
+    set status = 'pending',
+        attempt_id = null,
+        claim_token = null,
+        claim_count = 0,
+        processing_started_at = null,
+        error = null,
+        attempt_deadline_at = now() + make_interval(hours => ${ATTEMPT_DEADLINE_HOURS}),
         updated_by = ${actor}
-    where id = ${runId} and status = 'pending' and attempt_id is null
+    where id = ${runId}
+      and (status = 'failed' or (status = 'pending' and attempt_id is null))
   `;
 }
 

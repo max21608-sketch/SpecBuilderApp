@@ -15,17 +15,41 @@
 // THREE ACTIONS, and the difference between them is what a human is agreeing to:
 //
 //   start            a first read, or a retry after a terminal failure. Only
-//                    `pending` or `failed`.
+//                    `pending` or `failed`. CAPPED: see below.
 //   retry-dispatch   the same attempt, still queued, never claimed. Costs
 //                    nothing new and must NOT reset a worker that already has it.
 //   restart-expired  a new attempt over an abandoned one. SAYS PLAINLY that
 //                    another model call may be charged, because it may.
+//
+// ============================================================================
+// `start` TAKES A READ SLOT, AND OVER THE CAP IT DEFERS RATHER THAN REFUSES.
+//
+// At most MAX_IN_FLIGHT_READS_PER_PACK charged reads of one pack run at once
+// (src/lib/extraction-slots.ts). Registration has honoured that since it
+// started reading automatically; this route did not, and *Read all* on the
+// pack screen is one press over every unread document — usually the eleven a
+// rate-limit storm has just failed. Eleven concurrent calls to recover from
+// eleven rate-limited calls is the case the cap exists for.
+//
+// Over the cap the answer is 202 AND `ok: true`, never an error. The press was
+// correct and the document WILL be read: it is marked as a read that has been
+// promised, and the worker that frees a slot starts it. A red failure there
+// would be the app reporting its own queueing as the reviewer's problem, and
+// they would press again.
+//
+// `retry-dispatch` and `restart-expired` stay uncapped, on purpose.
+// `retry-dispatch` re-publishes an attempt that already holds a slot, so it
+// starts no new read. `restart-expired` is one deliberate press on one
+// document whose attempt is past its deadline — and an expired attempt has
+// already stopped counting as in flight, so capping it would let three stuck
+// documents refuse the only control that clears them.
 // ============================================================================
 import { z } from "zod";
 import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
+import { takeReadSlot, deferRead, WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
 import { CLAIM_EXPIRY_SECONDS, MAX_CLAIMS_PER_ATTEMPT } from "@/lib/extraction-claim";
 
 export const dynamic = "force-dynamic";
@@ -57,9 +81,35 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const { expectedVersion, requestId, action } = parsed.data;
 
-  let attempt: { attemptId: string; alreadyDispatched: boolean };
+  let attempt: { attemptId: string | null; alreadyDispatched: boolean };
   try {
     attempt = await withTransaction(async (txn) => {
+      // ======================================================================
+      // THE SLOT IS TAKEN BEFORE THE ROW IS LOCKED, AND THAT ORDER IS THE
+      // WHOLE REASON THIS IS TWO STATEMENTS.
+      //
+      // `takeReadSlot` opens with an advisory lock on the pack. `handOffReadSlot`
+      // takes that same advisory lock and THEN locks the waiting run it is
+      // about to dispatch — so a press on the very run a finishing worker has
+      // just picked would hold the row and wait for the advisory lock while the
+      // worker held the advisory lock and waited for the row. Postgres would
+      // break that by aborting one of them, and the reviewer's correct press
+      // would come back a 500. Same order on both sides costs one extra read
+      // and cannot deadlock.
+      //
+      // The scope read takes NO lock, which is what makes it safe to do first:
+      // a run's project and pack never change once it is inserted.
+      // ======================================================================
+      let hasSlot = true;
+      if (action === "start") {
+        const scope = await txn`select project_id, batch_id from intake_runs where id = ${id}`;
+        if (!scope[0]) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
+        hasSlot = await takeReadSlot(txn, {
+          projectId: String(scope[0].project_id),
+          batchId: scope[0].batch_id ? String(scope[0].batch_id) : null,
+        });
+      }
+
       // Only this run's row. A worker-facing operation never takes a project
       // lock, and neither does the thing that schedules it.
       const rows = await txn`
@@ -127,10 +177,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             : "This document is already being read.",
         );
       }
+      // At the cap. The document is marked as a read that has been promised
+      // and not started, and nothing is published — the worker that frees a
+      // slot opens the attempt. A `failed` run is put back to `pending` by
+      // `deferRead`, so the screens stop offering a Retry for a read that is
+      // already queued behind the three in flight.
+      if (!hasSlot) {
+        await deferRead(txn, id, user.email);
+        return { attemptId: null, alreadyDispatched: false };
+      }
       return { attemptId: await opened(txn, id, requestId, user.email), alreadyDispatched: false };
     });
   } catch (cause) {
     return transactionErrorResponse(cause);
+  }
+
+  // Deferred by the cap. 202 and `ok: true`, because the press was correct and
+  // the read will happen; `waiting` is what the screens read to say so in
+  // words rather than painting a working pack red.
+  if (!attempt.attemptId) {
+    return json(
+      { ok: true, importId: id, attemptId: null, status: "waiting", waiting: true, note: WAITING_FOR_SLOT_MESSAGE },
+      202,
+    );
   }
 
   if (attempt.alreadyDispatched) {
