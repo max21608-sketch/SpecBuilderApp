@@ -14,12 +14,13 @@
 // the way `next-step-action.test.tsx` does it. No database, no model, no money.
 // ============================================================================
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { parseBoqSheets, type BoqLine } from "@/lib/boq-import";
 import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import ReviewImportPage from "@/app/dashboard/imports/[id]/page";
 // Synthetic, from the committed builder. Invented codes, invented rooms.
-import { blankQtyCells, noQtyColumn } from "../fixtures/boq-shapes";
+import { bill300, blankQtyCells, noQtyColumn } from "../fixtures/boq-shapes";
 
 const PROJECT = "project-variance";
 const IMPORT = "import-variance";
@@ -192,5 +193,64 @@ describe("VARIANCE row 2: a bill that gave no quantities", () => {
     expect(screen.getByText("Sofa").closest("tr")!.querySelectorAll("td")[4]!.textContent).toBe("4");
     // One line has a quantity, so the tab-level sentence is not printed.
     expect(screen.queryByText(/No line here carries a quantity/)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ROW 7 — 300 LINES, 40 AREAS, 60 NON-FURNITURE LINES.
+//
+// Expected: PROCEEDS, the review renders in under two seconds, and *Ignore all
+// suggested* works over sixty lines in one press.
+//
+// The bound here is 2.5s and the environment is jsdom, which is deliberately
+// generous: jsdom is slower than a browser at laying out a 300-row table and a
+// bound that only fails under contention is a red suite nobody can read. The
+// measured number is printed, because that is the finding — the bound is only
+// there to catch a change of ORDER.
+// ---------------------------------------------------------------------------
+describe("VARIANCE row 7: three hundred lines", () => {
+  const sheet = () => stagedSheet([{ sheet: "MAIN", data: bill300() }]);
+
+  it("renders the whole bill, and says how long it took", async () => {
+    const staged = sheet();
+    expect(staged.lines).toHaveLength(300);
+
+    const started = performance.now();
+    mount({}, [staged]);
+    // The LAST line, not the first: a table that has painted its first row is
+    // not a table anybody can read.
+    await screen.findByText("ZZ-0399");
+    const elapsed = performance.now() - started;
+    console.log(`[row 7] 300-line review rendered in ${Math.round(elapsed)}ms (jsdom)`);
+    expect(elapsed).toBeLessThan(2_500);
+  });
+
+  it("counts the sixty lines that may not be furniture, and offers them in one press", async () => {
+    mount({}, [sheet()]);
+    const button = await screen.findByRole("button", { name: /Ignore all 60 suggested/ });
+    routes.calls.length = 0;
+    await userEvent.click(button);
+
+    // Sixty PATCHes and ONE reload, which is how the screen's own batch
+    // actions work: the staged bill's route is per line, and reloading after
+    // each would re-render a 300-row table sixty times.
+    await waitFor(() => {
+      const patches = routes.calls.filter((call) => call.method === "PATCH");
+      expect(patches).toHaveLength(60);
+    });
+    const patches = routes.calls.filter((call) => call.method === "PATCH");
+    expect(patches.every((call) => (call.body as { ignored?: boolean }).ignored === true)).toBe(true);
+    // Every one of them is a line the button counted — the same set, never a
+    // second reading of "which lines".
+    const indexes = patches.map((call) => (call.body as { index: number }).index);
+    expect(new Set(indexes).size).toBe(60);
+    expect(routes.calls.filter((call) => call.method === "GET")).toHaveLength(1);
+  });
+
+  it("says how many areas the bill named, without a filter having to be used", async () => {
+    // Forty areas is the case the area filter exists for; what matters here is
+    // only that 300 lines do not stop the tab describing itself.
+    mount({}, [sheet()]);
+    expect(await screen.findByText(/300 lines/)).toBeTruthy();
   });
 });

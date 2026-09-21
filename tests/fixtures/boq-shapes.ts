@@ -127,3 +127,67 @@ export function sectionedBill(): SheetData {
     [null, null, null, 20],
   ];
 }
+
+/** Generic furniture, so a description matches no "not furniture" word. */
+const FURNITURE = [
+  "Sofa",
+  "Armchair",
+  "Side table",
+  "Bench",
+  "Desk chair",
+  "Headboard",
+  "Stool",
+  "Coffee table",
+  "Dressing stool",
+  "Ottoman",
+];
+
+/** The lines a bill carries that are not items, with the code each uses. */
+const NOT_FURNITURE = [
+  ["PACK", "Packaging and protection"],
+  ["DEL", "Delivery to site"],
+  ["INST", "Installation, second fix"],
+  ["FREIGHT", "Freight, sea"],
+  ["SHIP", "Shipping and handling"],
+  ["CRATE", "Crating, export standard"],
+] as const;
+
+/**
+ * THREE HUNDRED LINES, FORTY AREAS, SIXTY LINES THAT ARE NOT FURNITURE.
+ *
+ * The shape §6.10.a row 7 names, and the size Matthew's real projects reach —
+ * the sandbox's own 300-line phase is what every Stage 2 measurement has been
+ * taken against. Every fifth line is packaging, delivery, installation,
+ * freight, shipping or crating, which is exactly 60 of them, so *Ignore all
+ * suggested* has a real number behind it rather than two rows.
+ *
+ * Deterministic, with no randomness at all: a fixture that generates a
+ * different bill on every run turns a timing measurement into a lottery and a
+ * failure into something nobody can reproduce.
+ */
+export function bill300(): SheetData {
+  const rows: SheetData = [
+    ["ZZ001 - Example Project", null, null, null, null],
+    ["TENDER - EXAMPLE PACKAGE", null, null, null, null],
+    ["Revision: ", "3", null, null, null],
+    ["Area", "FF&E code", "Item description", "Product reference", "TOTAL Q-ty"],
+  ];
+  for (let index = 0; index < 300; index += 1) {
+    // Forty areas, each with its own name as a bill would print it.
+    const area = `Example area ${String((index % 40) + 1).padStart(2, "0")}`;
+    if (index % 5 === 0) {
+      const [prefix, description] = NOT_FURNITURE[(index / 5) % NOT_FURNITURE.length] as readonly [string, string];
+      rows.push([area, `${prefix}-${String(index + 1).padStart(3, "0")}`, description, null, 1]);
+      continue;
+    }
+    const description = FURNITURE[index % FURNITURE.length] as string;
+    rows.push([
+      area,
+      `ZZ-${String(index + 100).padStart(4, "0")}`,
+      description,
+      `Model ${String.fromCharCode(65 + (index % 26))}`,
+      (index % 9) + 1,
+    ]);
+  }
+  return rows;
+}

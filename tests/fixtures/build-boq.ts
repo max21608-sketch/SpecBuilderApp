@@ -42,7 +42,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import ExcelJS from "exceljs";
 import type { SheetData } from "read-excel-file/node";
-import { twoRowHeader } from "./boq-shapes";
+import { bill300, twoRowHeader } from "./boq-shapes";
 
 /** One sheet of positional rows, written as itself. */
 function addSheet(book: ExcelJS.Workbook, name: string, rows: SheetData): ExcelJS.Worksheet {
@@ -69,9 +69,17 @@ export async function twoRowHeaderWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/** 300 lines, 40 areas, 60 that are not furniture, as a real workbook. */
+export async function bill300Workbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  addSheet(book, "MAIN", bill300());
+  return bytes(book);
+}
+
 /** Every workbook this module can build, by the filename the CLI gives it. */
 export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-two-row-header.xlsx": twoRowHeaderWorkbook,
+  "bill-300-lines.xlsx": bill300Workbook,
 };
 
 async function main(): Promise<void> {

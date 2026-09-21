@@ -6,6 +6,7 @@
 import { describe, it, expect } from "vitest";
 import type { SheetData } from "read-excel-file/node";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
+import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import {
   parseBoqSheets,
   normaliseRef,
@@ -18,6 +19,7 @@ import type { BoqParseResult, ParsedBoqSheet } from "@/lib/boq-import";
 // Synthetic, built by `tests/fixtures/build-boq.ts`. Modelled on the shape of a
 // real bill; not one line of one.
 import {
+  bill300,
   blankQtyCells,
   noQtyColumn,
   sectionedBill,
@@ -26,7 +28,7 @@ import {
 } from "../fixtures/boq-shapes";
 // The same shapes as real workbooks, built in memory — see the note on the
 // workbook suite below for why none of them is committed.
-import { twoRowHeaderWorkbook } from "../fixtures/build-boq";
+import { bill300Workbook, twoRowHeaderWorkbook } from "../fixtures/build-boq";
 
 const HEADER = ["Designer", "Category", "Code", "Item Description", "Product Reference", "Total Qty Updated"];
 
@@ -449,6 +451,19 @@ describe("the same bill as a real workbook", () => {
     expect(staged.lines.map((line) => line.code)).toEqual(["ZZ-101", "ZZ-102", "ZZ-103"]);
     expect(staged.lines.map((line) => line.area)).toEqual(["Example lounge", "Example lounge", "Example suite"]);
     expect(staged.lines.map((line) => line.qty)).toEqual([14, 58, 2]);
+  });
+
+  it("reads three hundred lines, forty areas and sixty non-furniture lines", async () => {
+    // Row 7's fixture, through the real reader. The component tier measures
+    // what the review screen then does with it.
+    const sheets = await readSpreadsheetSheets(await bill300Workbook(), "bill-300-lines.xlsx", "");
+    const staged = one(parseBoqSheets(sheets));
+    expect(staged.lines).toHaveLength(300);
+    expect(new Set(staged.lines.map((line) => line.area)).size).toBe(40);
+    expect(staged.lines.filter((line) => guessNonFurniture(line) !== null)).toHaveLength(60);
+    // The array and the workbook are the same bill, which is what lets the
+    // component tier use the cheaper one.
+    expect(one(parseBoqSheets(sheet(bill300()))).lines).toEqual(staged.lines);
   });
 
   it("really does carry a merged cell, read as a blank on the second row", async () => {
