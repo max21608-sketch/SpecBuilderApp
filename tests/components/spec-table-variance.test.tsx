@@ -241,3 +241,41 @@ describe("a record with no client ref (row d3)", () => {
     expect(within(configuration).getByText("no client ref")).toBeTruthy();
   });
 });
+
+describe("a configuration with no quantity (row d4)", () => {
+  // The bill says 45 of S-201 and never says how many are fabric A. Nothing
+  // divides it — `unallocatedQty` does not even clamp an over-allocation away,
+  // because variants adding up to more than the bill line is a real mistake.
+  const family = () => [
+    record({ item_description: "Armchair", id: "parent-2", refs: "S-201", qty: 45, variant_count: "2", variant_qty: "0" }),
+    record({ item_description: "Armchair", parent_id: "parent-2", parent_refs: "S-201", variant_label: "A", qty: null }),
+  ];
+
+  it("says not allocated, in the words the infill and chase lines use", async () => {
+    // Three screens describing one state in two ways is how a reader comes to
+    // believe they are two states. This cell said "qty not set", which reads as
+    // a field somebody forgot to fill in.
+    mountWith(family());
+    const rows = await screen.findAllByText("Armchair");
+    const configuration = rows[rows.length - 1].closest("tr")!;
+    expect(within(configuration).getByText("not allocated")).toBeTruthy();
+    expect(within(configuration).queryByText("quantity not given")).toBeNull();
+  });
+
+  it("keeps the bill line's own quantity on the bill line, and says what is unaccounted for", async () => {
+    mountWith(family());
+    const rows = await screen.findAllByText("Armchair");
+    const billLine = rows[0].closest("tr")!;
+    expect(within(billLine).getByText("45")).toBeTruthy();
+    expect(within(billLine).getByText(/45 not allocated/)).toBeTruthy();
+  });
+
+  it("does not confuse it with a bill line the bill gave no quantity for", async () => {
+    // A different statement, and the matrix's row 2: the bill had no quantity
+    // column at all, so nothing was ever said. Never a 1.
+    mountWith([record({ item_description: "Unquantified bench", qty: null })]);
+    const row = await rowFor("Unquantified bench");
+    expect(within(row).getByText("quantity not given")).toBeTruthy();
+    expect(within(row).queryByText("not allocated")).toBeNull();
+  });
+});

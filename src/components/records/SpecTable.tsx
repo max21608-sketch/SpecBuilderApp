@@ -836,7 +836,17 @@ export default function SpecTable({
                             quantity is unallocated rather than ungiven. */}
                         {record.qty === null ? (
                           isConfiguration ? (
-                            <Chip tone="warn">qty not set</Chip>
+                            /* THE SAME WORDS THE OTHER TWO SCREENS USE. The
+                               infill line and the chase line both say "quantity
+                               not allocated"; this said "qty not set", which
+                               reads as somebody having forgotten to fill a
+                               field in — where the truth is that the bill said
+                               45 and never said how many are fabric A. Three
+                               screens describing one state in two ways is how a
+                               reader comes to believe they are two states. */
+                            <Chip tone="warn" title="The bill's quantity is never divided between configurations.">
+                              not allocated
+                            </Chip>
                           ) : (
                             <span
                               className="text-xs text-amber-800"
