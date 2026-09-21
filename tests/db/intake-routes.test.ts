@@ -1522,4 +1522,68 @@ describeIfDb("intake routes", () => {
     expect(none.rows[0].n).toBe(0);
   }, 40_000);
 
+  // ==========================================================================
+  // AN OUTLOOK .msg — Stage 2 variance row 3 (plan §6.10.c).
+  //
+  // `registerSpecDocument` has always refused one; the EMAIL branch never
+  // asked, so a .msg declared as an email reached `parseEnvelope`, which reads
+  // binary OLE as a message with nothing in it, and `assignMessage` then
+  // dispatched a charged read of gibberish. Refused now before anything is
+  // recorded, and the refusal says what to do about it.
+  // ==========================================================================
+  it("refuses an Outlook .msg declared as an email, in words, and records nothing", async () => {
+    const { POST } = await import("@/app/api/imports/route");
+    const before = await client.query(
+      `select (select count(*)::int from intake_runs where project_id = $1) as runs,
+              (select count(*)::int from email_messages where project_id = $1) as messages`,
+      [projectId],
+    );
+
+    const refused = await POST(
+      post({
+        projectId,
+        importType: "spec_document",
+        documentKind: "email",
+        // A pathname under the project's own prefix, so nothing here is
+        // refused for the wrong reason.
+        pathname: `projects/${projectId}/__QA Panther query.msg`,
+        filename: "__QA Panther query.msg",
+        contentType: "application/vnd.ms-outlook",
+      }),
+    );
+    expect(refused.status).toBe(400);
+    const body = await refused.json();
+    expect(body.error).toMatch(/save it as \.eml/i);
+    expect(body.error).toMatch(/File → Save As/);
+    expect(body.error).toMatch(/binary the app does not read/i);
+
+    // NOTHING was believed: no run, no message, and therefore no dispatch.
+    const after = await client.query(
+      `select (select count(*)::int from intake_runs where project_id = $1) as runs,
+              (select count(*)::int from email_messages where project_id = $1) as messages`,
+      [projectId],
+    );
+    expect(after.rows[0].runs).toBe(before.rows[0].runs);
+    expect(after.rows[0].messages).toBe(before.rows[0].messages);
+  });
+
+  it("refuses any non-.eml declared as an email, not just a .msg", async () => {
+    // The guard is "this must be a saved email", not a denylist of one
+    // extension — a PDF filed as an email would be read as a message body of
+    // PDF header bytes at full price.
+    const { POST } = await import("@/app/api/imports/route");
+    const refused = await POST(
+      post({
+        projectId,
+        importType: "spec_document",
+        documentKind: "email",
+        pathname: `projects/${projectId}/__QA thread.pdf`,
+        filename: "__QA thread.pdf",
+        contentType: "application/pdf",
+      }),
+    );
+    expect(refused.status).toBe(400);
+    expect((await refused.json()).error).toMatch(/is not an email this app can read/i);
+  });
+
 });

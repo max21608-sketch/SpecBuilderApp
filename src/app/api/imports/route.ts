@@ -167,6 +167,38 @@ type Registered = z.infer<typeof Registration>;
 const MAX_EMAIL_BYTES = 30 * 1024 * 1024;
 
 async function registerEmail(input: Registered, actor: string): Promise<Response> {
+  // ======================================================================
+  // AN OUTLOOK .msg IS REFUSED HERE, BEFORE ANY OF IT IS BELIEVED.
+  //
+  // `registerSpecDocument` has always refused one — `intakeSourceKind` returns
+  // `unsupported` and says so — and THIS branch never asked. So a `.msg`
+  // declared as an email walked straight past it: `parseEnvelope` reads binary
+  // OLE as a message with no sender, no subject and no body, routing holds it
+  // as unplaced, and `assignMessage` then dispatches a CHARGED read of
+  // gibberish. Failing four minutes later in the worker would at least be
+  // visible; succeeding at full price on nothing is worse.
+  //
+  // Nothing is recorded and nothing is dispatched. The blob itself is already
+  // in the store — every intake upload is client-direct and registration is
+  // the step after it — so "before storing" is not available on this
+  // architecture, and the sweep that removes an unregistered upload is the
+  // same one it has always been.
+  //
+  // NO PARSER IS ADDED. `package.json` carries none, and a .msg reader is a
+  // dependency taken on to read a format the sender can re-save in one menu.
+  // It stays accepted as EVIDENCE on a change set, which only ever downloads.
+  // ======================================================================
+  if (intakeSourceKind(input.filename, input.contentType) !== "eml") {
+    return json(
+      {
+        ok: false,
+        error: `"${input.filename}" is not an email this app can read. In Outlook, save it as .eml (File → Save As) — Outlook's .msg is a binary the app does not read.`,
+        field: "filename",
+      },
+      400,
+    );
+  }
+
   let blob;
   try {
     blob = await readTrustedBlob(input.pathname, input.projectId, { maxBytes: MAX_EMAIL_BYTES });
