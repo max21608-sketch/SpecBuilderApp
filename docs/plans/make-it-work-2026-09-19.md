@@ -2228,8 +2228,9 @@ outcome."* is:
 > an ambiguous outcome is always held; nothing is ever auto-assigned from one.
 > Every automatic read counts against the per-project cap.*
 
-Max: reply "yes, amend" (or edit the words) and 2.11 is briefed the same day;
-"no" and the entry in `found-in-use.md` stays open as a change asked for.
+**Max, 2026-09-21: "yes, amend."** 2.11 is briefed (`~/dev/briefs/stage2/brief-E1.md`)
+and launches as soon as one of the two running coders finishes; the gate
+amendment above goes into `CLAUDE.md` in the same commit as the code.
 
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*
