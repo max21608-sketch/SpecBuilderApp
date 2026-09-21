@@ -119,6 +119,26 @@ function mountWith(records: SpecRecord[]) {
 // synchronous lookup finds the spinner.
 const rowFor = async (description: string) => (await screen.findByText(description)).closest("tr")!;
 
+/**
+ * The LAST row bearing this description, which is the configuration where a
+ * bill line and its configuration share one. `noUncheckedIndexedAccess` is on,
+ * so the lookup is asserted here once rather than at every call.
+ */
+async function lastRowFor(description: string): Promise<HTMLElement> {
+  const found = await screen.findAllByText(description);
+  const row = found[found.length - 1]?.closest("tr");
+  if (!row) throw new Error(`No row for ${description}`);
+  return row as HTMLElement;
+}
+
+/** The FIRST such row: the bill line the configurations sit under. */
+async function firstRowFor(description: string): Promise<HTMLElement> {
+  const found = await screen.findAllByText(description);
+  const row = found[0]?.closest("tr");
+  if (!row) throw new Error(`No row for ${description}`);
+  return row as HTMLElement;
+}
+
 beforeEach(() => {
   replace.mockClear();
   apiFetch.mockReset();
@@ -236,8 +256,7 @@ describe("a record with no client ref (row d3)", () => {
         qty: null,
       }),
     ]);
-    const rows = await screen.findAllByText("Armchair");
-    const configuration = rows[rows.length - 1].closest("tr")!;
+    const configuration = await lastRowFor("Armchair");
     expect(within(configuration).getByText("no client ref")).toBeTruthy();
   });
 });
@@ -256,16 +275,14 @@ describe("a configuration with no quantity (row d4)", () => {
     // believe they are two states. This cell said "qty not set", which reads as
     // a field somebody forgot to fill in.
     mountWith(family());
-    const rows = await screen.findAllByText("Armchair");
-    const configuration = rows[rows.length - 1].closest("tr")!;
+    const configuration = await lastRowFor("Armchair");
     expect(within(configuration).getByText("not allocated")).toBeTruthy();
     expect(within(configuration).queryByText("quantity not given")).toBeNull();
   });
 
   it("keeps the bill line's own quantity on the bill line, and says what is unaccounted for", async () => {
     mountWith(family());
-    const rows = await screen.findAllByText("Armchair");
-    const billLine = rows[0].closest("tr")!;
+    const billLine = await firstRowFor("Armchair");
     expect(within(billLine).getByText("45")).toBeTruthy();
     expect(within(billLine).getByText(/45 not allocated/)).toBeTruthy();
   });
