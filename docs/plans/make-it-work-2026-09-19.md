@@ -2144,5 +2144,72 @@ says so.
 | **Promotion** | None in this stage without Max's §7.5 review of 2.3 and 2.5 driven as the role each is for. Everything lands on `staging`; the pilot stays at `da863b7` |
 | **Close** | each item built has §7.1's rows written as facts against the deployed SHA; the by-item table in `README.md`; `measure:outstanding` reports the same number the infill screen, the phase table and the chase button show; `CLAUDE.md` amended; the blocked items say in this brief what they wait on and who holds it |
 
+**Stage 2, as of 2026-09-21 morning.** Round 1 and most of round 2 are on
+`staging` and deployed, each read back from `/api/auth/me` and driven on the
+deployment; the per-item evidence is in `docs/plans/README.md` (2026-09-20,
+"Stage 2 opens"). Landed: **2.4** (`17b733c`), **2.5** (`ee5e441`), **2.3**
+and **2.7** (`f288ea9`), **2.6** with migration `0034` (`f460dc9`, `fd0d7f3`),
+**2.8 step 1** (`9715b0f`), and the snapshot-numbering race found by building
+2.3 (`929a5b6`). In progress: **2.10.f** (the per-pack cap on charged reads,
+half-built before Max's pause of 2026-09-20 and being finished), **2.10.g**
+(the failure-surface sweep), and the first-session script gaining a step per
+Stage 2 item (the verifier). Still blocked and unchanged: 2.1/2.2, 2.9, 2.11,
+2.12. **Not accepted by anybody**; nothing promoted to pilot. Three judgement
+calls by the coders are recorded in the README for Max to overrule: no
+quantity on the email's item line, no "Colleagues" header in the contact
+strip, and the chase and infill table bodies left as two tables over one
+grouping.
+
+**The Stage 2 questions message — DRAFTED 2026-09-20, NOT SENT.** §11 says
+these go in the same message as Matthew's screenshots come back, not before;
+the draft is here so it is ready that day. Max sends it from his own Outlook.
+The 2.13 ask of Tony is a separate short note, below it.
+
+> **Subject: Spec Builder — four questions, no rush**
+>
+> Matthew,
+>
+> Four things I'd like your steer on, alongside whatever screenshots you
+> send back. One-line answers are fine.
+>
+> 1. **Which questions are project-wide?** Our reading is the commercial
+>    block that sits on every cheat sheet — TOE agreement, sales folder,
+>    client contact list, COM payment plan, FSC, floor plans, sign-off
+>    visit, counter samples, prototype, expedited, delivery direct, and the
+>    access/lift/assembly-guide questions. For now the app folds them under
+>    one closed heading on each item's checklist. If you'd rather answer
+>    them once per project and have that answer land on every item, say so
+>    and I'll build that next; if the fold is enough, it stays.
+> 2. **In a handover call, is one "change" per meeting the right grain, or
+>    one per item?** The app now has a screen for filling in what we know
+>    ourselves, and everything typed during a meeting can be recorded under
+>    one named change ("Handover call with Hayley, 22 Sept") with the invite
+>    attached. Our assumption is per meeting.
+> 3. **The phase overview tiles.** You said the "22 product categories" tile
+>    told you nothing. Our proposal is five: *Can quote* (items), *Needed to
+>    quote* (questions on items), *Waiting on a reply* (with the oldest),
+>    *Not yet categorised / levelled*, and *Documents* (read / failed). Yes,
+>    or tell me what you'd actually look at.
+> 4. **Emails whose spec is in an attached PDF** — how often does that
+>    happen? It decides whether reading the attachment is a button someone
+>    presses or something the app does on its own.
+>
+> Max
+
+> **Subject: A "what normal looks like" reference for the intake**
+>
+> Tony,
+>
+> On the 18th you described a knowledge base of what a normal piece of
+> furniture is. The one slice of it the intake could use straight away is a
+> per-family range of typical overall dimensions — a sofa's width, an
+> armchair's seat height, a headboard's height — so that when a drawing
+> reads as an eight-metre sofa the app can flag it. It would only ever
+> FLAG: nothing in the app fills a value from a range. If you have that in
+> any form — a sheet, a page of notes, the boilerplates' own defaults — a
+> copy in whatever shape it's in is enough to start.
+>
+> Max
+
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*
