@@ -171,6 +171,64 @@ function enqueue<T>(work: () => Promise<T>): Promise<T> {
  * RenderingCancelledException. Anything driving this from an effect should
  * pass one.
  */
+export type CropGeometry = {
+  /** Render scale for the page, chosen so the crop lands on the thumbnail budget. */
+  scale: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  /** How far to shift the page so the region's top-left sits at the canvas origin. */
+  translateX: number;
+  translateY: number;
+};
+
+/**
+ * The crop's own arithmetic, apart from the canvas so it can be proved.
+ *
+ * ============================================================================
+ * `pageWidth` AND `pageHeight` COME FROM THE VIEWPORT, NEVER FROM THE MEDIABOX.
+ *
+ * That is the whole of Stage 2 variance row 5, and it is why this is a function
+ * with named arguments rather than four lines reading `page.something`. A page
+ * carrying `/Rotate 90` keeps its MediaBox: `page.view` on a rotated A4 still
+ * reads 595 x 842, and pdfjs's `getViewport()` reports 842 x 595 — the page as
+ * a reader sees it — with the rotation baked into the transform it renders
+ * with. `bbox` is in fractions of the page AS DISPLAYED, which is what the
+ * model reports (it read the page as an image) and what a drag on a rendered
+ * page produces.
+ *
+ * So the viewport is the only pair of numbers that agrees with both the bbox
+ * and the render. Taking the MediaBox instead would size the canvas against
+ * the wrong axes and shift the page by the wrong distances, and a region
+ * reported on a rotated page would come out as a different part of it — which
+ * looks like a model that read the page wrongly rather than like a bug here.
+ * `tests/lib/pdf-crop.test.ts` proves the swap against a real rotated PDF.
+ * ============================================================================
+ */
+export function cropGeometry(
+  page: { width: number; height: number },
+  bbox: CropBox,
+): CropGeometry | { tooSmall: true } {
+  const [x0, y0, x1, y1] = bbox;
+  const regionWidth = Math.max(0, x1 - x0) * page.width;
+  const regionHeight = Math.max(0, y1 - y0) * page.height;
+  if (regionWidth < 1 || regionHeight < 1) return { tooSmall: true };
+
+  // Scale so the LONGEST side of the crop lands on the thumbnail budget, then
+  // supersample. Sizing off the page instead would make a small inset render at
+  // a handful of pixels.
+  const target = (MAX_IMAGE_PX * SUPERSAMPLE) / Math.max(regionWidth, regionHeight);
+  // Never upscale past the supersample factor: blowing a 40pt detail up to
+  // 1280px makes a blurry picture look like a deliberate one.
+  const scale = Math.min(target, SUPERSAMPLE * 4);
+  return {
+    scale,
+    canvasWidth: Math.max(1, Math.round(regionWidth * scale)),
+    canvasHeight: Math.max(1, Math.round(regionHeight * scale)),
+    translateX: -x0 * page.width * scale,
+    translateY: -y0 * page.height * scale,
+  };
+}
+
 export function cropPdfRegion(
   url: string,
   pageNumber: number,
@@ -191,24 +249,18 @@ async function renderCrop(
   const doc = await openPdf(url);
   const page = await doc.getPage(Math.min(Math.max(1, pageNumber), doc.numPages));
 
+  // The VIEWPORT, not `page.view`: a page carrying /Rotate 90 keeps its
+  // MediaBox and pdfjs reports the turned dimensions here, with the rotation
+  // baked into the transform the render below uses. See `cropGeometry`.
   const base = page.getViewport({ scale: 1 });
-  const [x0, y0, x1, y1] = bbox;
-  const regionWidth = Math.max(0, x1 - x0) * base.width;
-  const regionHeight = Math.max(0, y1 - y0) * base.height;
-  if (regionWidth < 1 || regionHeight < 1) throw new Error("That area of the page is too small to capture.");
-
-  // Scale so the LONGEST side of the crop lands on the thumbnail budget, then
-  // supersample. Sizing off the page instead would make a small inset render at
-  // a handful of pixels.
-  const target = (MAX_IMAGE_PX * SUPERSAMPLE) / Math.max(regionWidth, regionHeight);
-  // Never upscale past the supersample factor: blowing a 40pt detail up to
-  // 1280px makes a blurry picture look like a deliberate one.
-  const scale = Math.min(target, SUPERSAMPLE * 4);
+  const geometry = cropGeometry({ width: base.width, height: base.height }, bbox);
+  if ("tooSmall" in geometry) throw new Error("That area of the page is too small to capture.");
+  const { scale, canvasWidth, canvasHeight, translateX, translateY } = geometry;
   const viewport = page.getViewport({ scale });
 
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(regionWidth * scale));
-  canvas.height = Math.max(1, Math.round(regionHeight * scale));
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("This browser would not provide a canvas to draw on.");
 
@@ -217,7 +269,7 @@ async function renderCrop(
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   // Shift the page so the region's top-left sits at the canvas origin.
-  context.translate(-x0 * base.width * scale, -y0 * base.height * scale);
+  context.translate(translateX, translateY);
 
   // ============================================================================
   // A SUPERSEDED RENDER IS CANCELLED, NOT ABANDONED.
