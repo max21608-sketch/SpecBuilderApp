@@ -601,9 +601,33 @@ export default function ReviewImportPage() {
       />
 
       <PageBody width="wide">
+        {/* THE BILL THAT COULD NOT BE READ SAYS SO ON THIS SCREEN.
+            ==================================================================
+            The parser's refusal was returned by the registration route as a 422
+            and shown on the UPLOAD screen — and then never again. A reviewer who
+            followed the link from the pack, or came back to the run later, got
+            this page with no sheets, no error and a blue note explaining that a
+            tab is a phase. `intake_runs.error` has carried the sentence all
+            along and nothing rendered it.
+
+            Row 1 of the variance matrix (§6.10.a) is a REFUSAL, and a refusal
+            has to be readable where the document is. `parseBoqSheets` names the
+            columns it looked for, the words it accepts, and the closest row's
+            own headings, so the sentence below is the one thing a person needs
+            in order to act. */}
+        {run.status === "failed" && (
+          <Note tone="danger" title="This bill could not be read, and nothing was staged from it.">
+            {run.error ?? "The reader gave no reason, which is itself worth reporting."}
+          </Note>
+        )}
+
         {/* A TAB IS A PHASE, NOT A REVISION. Three tabs quote the same codes at
             different quantities and can all be live at once, which is why they
-            become `spec_runs` rows rather than versions of one. */}
+            become `spec_runs` rows rather than versions of one.
+
+            Only where there ARE tabs: on a bill that failed to parse it was a
+            standing explanation of something the screen was not showing. */}
+        {sheets.length > 0 && (
         <Note tone="info" title="A tab is a phase, not a revision.">
           {sheets.length > 1 ? "These" : "This"} quote the same codes at different quantities and can all be live at
           once. Drop a tab to leave it out
@@ -623,6 +647,7 @@ export default function ReviewImportPage() {
             "."
           )}
         </Note>
+        )}
 
         {run.parsed?.sourcePreserved === false && (
           <Note tone="warn" title="The source file was not kept.">
@@ -887,9 +912,28 @@ export default function ReviewImportPage() {
                               )}
                             </Td>
                             <Td>{line.area ?? line.boqCategory ?? "—"}</Td>
+                            {/* NO QUANTITY IS NOT A DASH AND IT IS NEVER A 1.
+                                A bill with no `TOTAL Q-ty` column gives every
+                                line a null quantity (variance matrix row 2),
+                                and an em dash there reads as "nothing to say"
+                                rather than as a gap somebody has to close. The
+                                tab's own sentence above says it once for the
+                                whole sheet; this is short because the column is
+                                narrow and there are three hundred of them. */}
                             <Td num>
-                              {line.qty ?? "—"}
-                              {line.qtyUnit && <span className="text-neutral-400"> {line.qtyUnit}</span>}
+                              {line.qty === null ? (
+                                <span
+                                  className="text-[11px] text-amber-800"
+                                  title="The bill gave no quantity for this line. Nothing is assumed."
+                                >
+                                  not given
+                                </span>
+                              ) : (
+                                <>
+                                  {line.qty}
+                                  {line.qtyUnit && <span className="text-neutral-400"> {line.qtyUnit}</span>}
+                                </>
+                              )}
                             </Td>
                             <Td mono muted>
                               {line.designer ?? "—"}

@@ -221,3 +221,40 @@ describe("the chosen area in the URL", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 });
+
+// ===========================================================================
+// VARIANCE MATRIX §6.10.a ROW 2 — a bill line with NO QUANTITY.
+//
+// EXPECTED: FLAGS. It used to print an em dash, which on this table means
+// "nothing to say" — and a bill with no `TOTAL Q-ty` column produces a whole
+// phase of lines that have something to say. A configuration is a DIFFERENT
+// statement and keeps its own: the bill said 45 and never said how many are
+// fabric A.
+// ===========================================================================
+describe("a record the bill gave no quantity for", () => {
+  it("says quantity not given, rather than printing a dash", async () => {
+    mountWith([record({ item_description: "Sofa", qty: null })]);
+    expect(await screen.findByText("Sofa")).toBeTruthy();
+    const cell = within(rowFor("Sofa")).getByText("quantity not given");
+    expect(cell).toBeTruthy();
+    expect(cell.className).toContain("text-amber-800");
+  });
+
+  it("leaves a configuration saying its quantity is not ALLOCATED", async () => {
+    // Two different facts: nobody gave one, versus the bill gave one to the
+    // line above and never said how it splits.
+    mountWith([
+      record({ item_description: "Armchair A", qty: null, parent_id: "rec-parent", variant_label: "A" }),
+    ]);
+    expect(await screen.findByText("Armchair A")).toBeTruthy();
+    expect(within(rowFor("Armchair A")).getByText("qty not set")).toBeTruthy();
+    expect(within(rowFor("Armchair A")).queryByText("quantity not given")).toBeNull();
+  });
+
+  it("still prints a quantity the bill did give", async () => {
+    mountWith([record({ item_description: "Bench", qty: 14 })]);
+    expect(await screen.findByText("Bench")).toBeTruthy();
+    expect(within(rowFor("Bench")).getByText("14")).toBeTruthy();
+    expect(within(rowFor("Bench")).queryByText("quantity not given")).toBeNull();
+  });
+});

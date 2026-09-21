@@ -14,6 +14,12 @@ import {
   isReviewComplete,
   packTally,
 } from "@/lib/intake-status";
+import { waitFor } from "@testing-library/react";
+import IntakeBatchPage from "@/app/dashboard/projects/[id]/intake/[batchId]/page";
+
+// The page below is rendered whole; the components above need neither.
+const apiFetch = vi.fn();
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }));
 
 /** n documents in one state, as the pack payload carries them. */
 const runs = (spec: Record<string, number>) =>
@@ -247,5 +253,70 @@ describe("a document's own state", () => {
     expect(container.textContent).toContain("2 to review");
     expect(documentReviewTone({ status: "confirmed", pendingReview: 2 })).toBe("warn");
     expect(documentReviewTone({ status: "confirmed" })).toBe("good");
+  });
+});
+
+// ============================================================================
+// VARIANCE MATRIX §6.10.a ROW 9 — TWO BILLS IN ONE PACK.
+//
+// EXPECTED: FLAGS. Both stage (the route test in tests/db/boq-variance.test.ts
+// proves that half), and this screen — the one that lists what arrived — says
+// two came and that pairing them is a person's call. Nothing auto-pairs.
+//
+// Left unsaid, two bills read as an accident: the reviewer's next move is
+// either to drop one or to mark one a revision of the other's phase, and
+// confirming both as new phases quietly doubles the project.
+// ============================================================================
+describe("a pack carrying two bills of quantities", () => {
+  const bills = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `boq-${index}`,
+      sourceKind: "boq_xlsx",
+      documentKind: null,
+      status: "parsed",
+      error: null,
+      filename: `Example bill rev ${String.fromCharCode(65 + index)}.xlsx`,
+      createdAt: "2026-09-21T09:00:00.000Z",
+    }));
+
+  function mount(count: number) {
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/batches")) {
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            batches: [
+              {
+                id: "b1",
+                label: null,
+                created_at: "2026-09-21T09:00:00.000Z",
+                created_by: "somebody@example.test",
+                runs: bills(count),
+              },
+            ],
+          },
+        };
+      }
+      return { ok: true, status: 200, data: { project: { id: "p1", bws_project_number: "ZZ001", name: "Example" } } };
+    });
+    return render(<IntakeBatchPage params={Promise.resolve({ id: "p1", batchId: "b1" })} />);
+  }
+
+  it("says how many arrived and that nothing has been paired", async () => {
+    mount(2);
+    await waitFor(() => expect(screen.getByText(/2 bills arrived in this pack/)).toBeInTheDocument());
+    const said = screen.getByText(/2 bills arrived in this pack/);
+    expect(said.textContent).toContain("which is a revision of which is your call");
+    expect(said.textContent).toContain("Nothing has been paired.");
+    // Both files are named, so nobody has to guess which two.
+    expect(screen.getAllByText(/Example bill rev A\.xlsx/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Example bill rev B\.xlsx/).length).toBeGreaterThan(0);
+  });
+
+  it("says nothing of the kind about the ordinary pack with one bill", async () => {
+    mount(1);
+    await waitFor(() => expect(screen.getAllByText(/Example bill rev A\.xlsx/).length).toBeGreaterThan(0));
+    expect(screen.queryByText(/arrived in this pack/)).not.toBeInTheDocument();
   });
 });

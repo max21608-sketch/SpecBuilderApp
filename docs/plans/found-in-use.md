@@ -20,6 +20,43 @@ mark it FIXED with the date and the commit.
 
 ---
 
+## 2026-09-21
+
+### The drawings card's table is cut off, and a column can only be reached by scrolling sideways
+
+**Status: open.** Seen on the pack drawings review (screenshot), Ashcombe House
+— Shop Drawings Issue B, card `BT-503 Bedside table · page 1`, on a full-width
+monitor.
+
+Six columns are readable — Group, Label, Value, Unit, Dimension / BWS field,
+State — and the table is **clipped at the card's right edge with a seventh
+column past it**, reachable only by scrolling the table sideways. Max: *"I
+don't want to have to scroll to view all of the fields on the table."*
+
+**The seventh column has no heading.** `ObservationTableHead` ends with
+`<Th className="px-4" />` and every spanning panel is `colSpan={7}`
+(`src/components/imports/ObservationRows.tsx:140`), so the thing being hidden
+is the per-row action column — which makes it the hardest clipping to notice,
+because nothing in the header row goes missing.
+
+Three layout facts, stated as findings rather than as the cause:
+
+- Both cards lay out as `grid … lg:grid-cols-[minmax(0,1fr)_300px]`
+  (`DrawingItemCard.tsx:400`, `ConfigurationCard.tsx:352`) — a FIXED 300px
+  column for the picture, and the table takes what is left.
+- The table sits in `overflow-x-auto`, so it is scrolling **as built**. This
+  is not a broken container: `docs/design-language.md` allows a table wider
+  than the page inside its own `overflow-x` box, and that permission is what
+  is being overridden here.
+- Almost every cell holds a `<select>`, and a select does not shrink the way
+  text does.
+
+**Which "first one" was meant is not settled.** Max said *"all the rest seem
+to be fine … it just seems to be that first one"*, and the screenshot holds
+one card. The first CARD on the page and the first ROW of the table are both
+readable from that sentence, and they point at different fixes. Ask before
+starting. He also said he does not think it is unique to this page.
+
 ## 2026-09-20
 
 ### An answer typed on the infill screen is refused on the LOCAL dev server, and only there
@@ -46,6 +83,29 @@ so `file` called the source `data`, `grep` printed nothing for any symbol in
 it (Fable's greps on 2026-09-20 returned empty for exactly this reason and it
 was blamed on a shell function), and `git diff` treated the file as binary.
 Same technique, escaped; behaviour unchanged, the template tests green.
+
+### Two database-tier runs at once collide on hard-coded `__QA` project numbers
+
+**Status: open — found 2026-09-21 by Coder C, twice in two full runs, while
+another coder ran the db tier against the same sandbox.** Fixtures create
+`__QA P90014`-style projects with fixed numbers; the second run to arrive
+fails in `beforeAll` on `projects_bws_project_number_key`, then fails AGAIN in
+`afterAll` with `invalid input syntax for type uuid: ""` because `projectId`
+was never assigned — two messages that read as unrelated defects. Every such
+file passes alone. This matters because `npm run checks` is Stage 2's release
+gate and two agents at once is the plan's normal state. Cause apart from
+observation: a per-run suffix on the fixture's project number (or a
+per-process prefix in `db-tier.ts`) removes the collision.
+
+### A subtotal or section row that carries a description becomes a record
+
+**Status: open — pinned as a gap by Coder C's row 6, 2026-09-21.** A code-less
+subtotal row is skipped and the review says how many; a section or subtotal
+row that carries text in the description column becomes a spec record with
+the subtotal's figure as its quantity, and nothing suggests ignoring it. On a
+300-line bill the Include box is the only way out. The word list that would
+catch it is `non-furniture-guess.ts`'s, whose own header says it is Max and
+Matthew's to extend.
 
 ### Three single-document review screens say "Not read yet" for a run the cap deferred
 

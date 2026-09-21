@@ -121,6 +121,15 @@ export type StagedBoqSheet = {
   /** Defaulted from the sheet name, edited by the reviewer, becomes the run. */
   proposedRunName: string;
   headerRow: number;
+  /**
+   * How many rows the header spans: 1, or 2 where the second completes the
+   * first ("FF&E" over "code"). `headerRow` is always the LAST of them, so
+   * the items start after it either way.
+   *
+   * OPTIONAL, and absent means one: the staged JSON is data from the past and
+   * every bill staged before two-row headers were read carries no such key.
+   */
+  headerRows?: number;
   skippedRows: number;
   ignored: boolean;
   ignoredReason: string | null;
@@ -172,6 +181,35 @@ const COLUMNS = {
 type ColumnKey = keyof typeof COLUMNS;
 const REQUIRED: ColumnKey[] = ["code", "itemDescription"];
 
+/** What one row of a sheet looked like to the header reader. */
+type HeaderReading = {
+  /** Which wanted column each recognised heading sat in. */
+  found: Partial<Record<ColumnKey, number>>;
+  /** The headings on the row that matched no synonym at all, in printed order. */
+  unrecognised: string[];
+  /** True when both required columns are there, which makes this row the header. */
+  complete: boolean;
+};
+
+/** The nearest thing to a header the reader saw, for a refusal that can be acted on. */
+type HeaderAttempt = HeaderReading & {
+  sheetName: string;
+  rowNo: number;
+  /** The row below that was read together with it, where one was tried. */
+  pairedWith?: number;
+};
+
+const COLUMN_LABEL: Record<ColumnKey, string> = {
+  designer: "designer",
+  boqCategory: "category",
+  area: "area",
+  code: "code",
+  itemDescription: "description",
+  productReference: "product reference",
+  qty: "quantity",
+  qtyUnit: "unit",
+};
+
 function norm(value: unknown): string {
   if (value === null || value === undefined) return "";
   const text = value instanceof Date ? value.toISOString() : String(value);
@@ -191,21 +229,81 @@ function quantity(value: unknown): number | null {
 }
 
 /**
- * Finds the header row and maps each wanted column to its index.
- * Returns null if this row is not a header.
+ * Reads one row AS A HEADER: which wanted column each heading sat in, which
+ * headings it did not recognise, and whether that adds up to a header at all.
+ *
+ * IT NO LONGER RETURNS NULL FOR A NEAR MISS, and that is the whole of row 1 of
+ * the variance matrix. A bill whose columns read "Item No." and "Product"
+ * matched nothing required, so the reader refused with a list of the words it
+ * accepts and NOT ONE WORD about what the bill actually said — which is the
+ * only half a person can act on. Keeping the partial reading is what lets the
+ * refusal name the closest row and quote its own headings back.
  */
-function mapHeader(row: readonly unknown[]): Partial<Record<ColumnKey, number>> | null {
+function readHeader(row: readonly unknown[]): HeaderReading {
   const found: Partial<Record<ColumnKey, number>> = {};
+  const unrecognised: string[] = [];
   row.forEach((cell, index) => {
     const value = norm(cell);
     if (!value) return;
+    let claimed = false;
     for (const [key, synonyms] of Object.entries(COLUMNS) as [ColumnKey, readonly string[]][]) {
       // First match wins: "Product Reference" must not be claimed by `code`'s
       // "reference" synonym once a real "Code" column has been seen.
-      if (found[key] === undefined && (synonyms as readonly string[]).includes(value)) found[key] = index;
+      if (!(synonyms as readonly string[]).includes(value)) continue;
+      claimed = true;
+      if (found[key] === undefined) found[key] = index;
     }
+    if (!claimed) unrecognised.push(text(cell) ?? "");
   });
-  return REQUIRED.every((key) => found[key] !== undefined) ? found : null;
+  return { found, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
+}
+
+/** How much of a header a row managed to be, for picking the closest one. */
+function headerScore(reading: HeaderReading): number {
+  return Object.keys(reading.found).length;
+}
+
+/**
+ * TWO ROWS READ AS ONE HEADER — variance matrix row 3.
+ *
+ * A client template that merges cells vertically, or simply wraps a long
+ * heading, splits one label over two rows: "FF&E" above "code", "Item" above
+ * "description", "Total" above "Q-ty". Neither row is a header on its own, so
+ * a whole bill refused for want of a code column it plainly has.
+ *
+ * Each column offers three readings — the upper cell, the lower cell, and the
+ * two joined in printed order — and the same whole-value synonym rule decides.
+ * Joining is NOT a substring rule: "ff&e code" matches because it is a synonym,
+ * where a rule clever enough to find "code" inside "ff&e code" would also find
+ * it inside "cost code" and inside a data row's "Coded oak".
+ *
+ * IT IS ONLY EVER TRIED ON A ROW THAT ALREADY LOOKS LIKE A HEADER, and only
+ * when the pair COMPLETES the required columns. Trying it on any row would let
+ * a title row and the first data row under it conspire into a header, and the
+ * bill would then be read one row short with its first item as column names.
+ */
+function readHeaderPair(upper: readonly unknown[], lower: readonly unknown[]): HeaderReading {
+  const width = Math.max(upper.length, lower.length);
+  const joined: unknown[] = [];
+  for (let index = 0; index < width; index += 1) {
+    const above = text(upper[index]);
+    const below = text(lower[index]);
+    joined.push(above && below ? `${above} ${below}` : (above ?? below));
+  }
+
+  // Each of the three readings, merged first-match-wins per column key: the
+  // lower row's own words win over a join, and the join over the upper row's,
+  // because the lower row is the one immediately above the items.
+  const readings = [readHeader(lower), readHeader(joined), readHeader(upper)];
+  const found: Partial<Record<ColumnKey, number>> = {};
+  for (const reading of readings) {
+    for (const [key, index] of Object.entries(reading.found) as [ColumnKey, number][]) {
+      if (found[key] === undefined) found[key] = index;
+    }
+  }
+  // What NEITHER row nor the join recognised, for the refusal to quote.
+  const unrecognised = readHeader(joined).unrecognised;
+  return { found, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
 }
 
 const LABEL_ONLY = /^(revision|rev|date)\s*[:\-]?\s*$/i;
@@ -276,29 +374,118 @@ export function parseBoqSheets(sheets: { sheet: string; data: SheetData }[]): Bo
   if (sheets.length === 0) return { ok: false, error: "The file has no sheets." };
 
   const staged: ParsedBoqSheet[] = [];
+  /** The nearest miss on any sheet, kept only so a refusal can name it. */
+  let closest: HeaderAttempt | null = null;
 
   for (const { sheet, data } of sheets) {
     for (let rowIndex = 0; rowIndex < data.length; rowIndex += 1) {
       const row = data[rowIndex];
       if (!row) continue;
-      const header = mapHeader(row);
-      if (!header) continue;
-      staged.push(readRows(sheet, data, rowIndex, header));
-      break;
+      const reading = readHeader(row);
+      if (reading.complete) {
+        staged.push(readRows(sheet, data, rowIndex, reading.found));
+        break;
+      }
+
+      // A ROW THAT LOOKS LIKE HALF A HEADER GETS ONE MORE READING, with the row
+      // below it (row 3 of the variance matrix). Nothing else does: a row that
+      // matched no column at all is a title, and pairing it with the row under
+      // it is how a bill loses its first item to the header.
+      const below = headerScore(reading) > 0 ? data[rowIndex + 1] : undefined;
+      if (below) {
+        const pair = readHeaderPair(row, below);
+        if (pair.complete) {
+          staged.push(readRows(sheet, data, rowIndex + 1, pair.found, { headerRows: 2 }));
+          break;
+        }
+      }
+
+      if (headerScore(reading) > (closest ? headerScore(closest) : 0)) {
+        closest = {
+          ...reading,
+          sheetName: sheet,
+          rowNo: rowIndex + 1,
+          ...(below ? { pairedWith: rowIndex + 2 } : {}),
+        };
+      }
     }
   }
 
-  if (staged.length === 0) {
-    return {
-      ok: false,
-      error:
-        "Could not find a header row on any sheet. A BOQ needs a row naming at least its code column " +
-        `(one of: ${COLUMNS.code.join(", ")}) and its description column ` +
-        `(one of: ${COLUMNS.itemDescription.join(", ")}).`,
-    };
-  }
+  if (staged.length === 0) return { ok: false, error: noHeaderError(closest) };
 
   return { ok: true, sheets: staged };
+}
+
+/** As many of a row's own headings as a sentence can carry. */
+const HEADINGS_NAMED = 8;
+const HEADING_CHARS = 40;
+
+/**
+ * Why no sheet could be read, in a form somebody can act on.
+ *
+ * ============================================================================
+ * IT NAMES THE BILL'S OWN WORDS, NOT ONLY OURS.
+ *
+ * The old message listed the synonyms this reader accepts and stopped there. On
+ * the shape row 1 of the variance matrix is about — a bill headed "Item No." and
+ * "Product" — that is a refusal a reviewer can do nothing with: they cannot see
+ * which of their columns was not understood, and the person who CAN add the
+ * alias never finds out what to add. So the closest row is quoted back, with
+ * what it did recognise and what it did not.
+ *
+ * The synonym list is CODE (`COLUMNS` above), not seed data. The plan wants it
+ * seeded eventually; until it is, adding a word is a commit, and this sentence
+ * is what tells somebody which word.
+ * ============================================================================
+ */
+function noHeaderError(closest: HeaderAttempt | null): string {
+  const wanted =
+    "A BOQ needs one row naming at least its code column " +
+    `(one of: ${COLUMNS.code.join(", ")}) and its description column ` +
+    `(one of: ${COLUMNS.itemDescription.join(", ")}).`;
+
+  // Nothing on any sheet matched even one heading: there is no row to quote,
+  // and inventing one — the widest row, the first row — would put a reviewer
+  // in front of a heading list that was never a header.
+  if (!closest || headerScore(closest) === 0) {
+    return `Could not find a header row on any sheet. ${wanted} No row on any sheet named even one of them.`;
+  }
+
+  const matched = (Object.keys(closest.found) as ColumnKey[]).map((key) => COLUMN_LABEL[key]);
+  const missing = REQUIRED.filter((key) => closest.found[key] === undefined).map((key) => COLUMN_LABEL[key]);
+  const quoted = closest.unrecognised
+    .filter((heading) => heading !== "")
+    .slice(0, HEADINGS_NAMED)
+    .map((heading) => `“${heading.length > HEADING_CHARS ? `${heading.slice(0, HEADING_CHARS)}…` : heading}”`);
+
+  const parts = [
+    `Could not find a header row on any sheet. ${wanted}`,
+    `The closest is row ${closest.rowNo} of “${closest.sheetName}”, which named its ` +
+      `${list(matched)} column${matched.length === 1 ? "" : "s"} but no ${list(missing)} column.`,
+  ];
+  // SAY THAT THE SECOND READING WAS TRIED. A two-row header is read as one
+  // where the lower row completes the upper (variance matrix row 3), so a
+  // refusal that did not mention it would leave somebody wondering whether a
+  // split heading was the problem.
+  if (closest.pairedWith !== undefined) {
+    parts.push(`Reading it together with row ${closest.pairedWith} beneath it did not complete it either.`);
+  }
+  if (quoted.length > 0) {
+    parts.push(
+      `Its other headings read ${list(quoted)}${closest.unrecognised.length > HEADINGS_NAMED ? " and more" : ""}, ` +
+        "and this reader knows none of them. Rename them to words above, or have the bill's own wording added to " +
+        "the reader's list.",
+    );
+  } else {
+    parts.push("Rename that column to one of the words above, or have the bill's own wording added to the reader's list.");
+  }
+  return parts.join(" ");
+}
+
+/** "a", "a and b", "a, b and c" — a list a person reads rather than parses. */
+function list(values: string[]): string {
+  if (values.length <= 1) return values.join("");
+  return `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`;
 }
 
 function readRows(
@@ -306,7 +493,9 @@ function readRows(
   data: SheetData,
   headerIndex: number,
   header: Partial<Record<ColumnKey, number>>,
+  options: { headerRows?: number } = {},
 ): ParsedBoqSheet {
+  const headerRows = options.headerRows ?? 1;
   const at = (row: readonly unknown[], key: ColumnKey): unknown => {
     const index = header[key];
     return index === undefined ? null : row[index];
@@ -351,10 +540,14 @@ function readRows(
     sheetName: sheet,
     proposedRunName: sheet,
     headerRow: headerIndex + 1,
+    headerRows,
     skippedRows,
     ignored: empty,
     ignoredReason: empty ? "No rows under the header." : null,
-    metadata: readMetadata(data, headerIndex),
+    // The metadata stops at the FIRST of the header's rows. Reading up to the
+    // last would file the upper half of a two-row header — "FF&E", "Item",
+    // "Total" — as the phase's notes, where the revision and the COM terms go.
+    metadata: readMetadata(data, headerIndex - (headerRows - 1)),
     lines,
   } satisfies ParsedBoqSheet;
 }
@@ -392,14 +585,26 @@ function readRows(
  */
 export function describeHeader(sheet: {
   headerRow?: number;
+  headerRows?: number;
   skippedRows?: number;
-  lines?: readonly { lineNo?: number }[];
+  lines?: readonly { lineNo?: number; qty?: number | null }[];
 }): string {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   const sentences: string[] = [];
 
   const headerRow = Number.isFinite(sheet.headerRow) ? Number(sheet.headerRow) : null;
-  sentences.push(headerRow === null ? "The header row was not recorded." : `Header on row ${headerRow}.`);
+  // A header spanning two rows says both, because a reviewer checking the
+  // sentence against the file has to find the same thing the reader found.
+  // Absent means one: a bill staged before two-row headers were read carries
+  // no such key, and the sentence must still be true of it.
+  const spans = Number.isFinite(sheet.headerRows) ? Math.max(1, Number(sheet.headerRows)) : 1;
+  sentences.push(
+    headerRow === null
+      ? "The header row was not recorded."
+      : spans > 1
+        ? `Header on rows ${headerRow - spans + 1} to ${headerRow}, read as one.`
+        : `Header on row ${headerRow}.`,
+  );
 
   const lines = sheet.lines ?? [];
   const firstLineNo = lines[0]?.lineNo;
@@ -407,7 +612,7 @@ export function describeHeader(sheet: {
   if (lines.length === 0) sentences.push("No items under it.");
   else sentences.push(`Items start on row ${firstItemRow ?? "—"}.`);
 
-  const above = headerRow === null ? null : headerRow - 1;
+  const above = headerRow === null ? null : headerRow - spans;
   if (above !== null) {
     sentences.push(
       above <= 0
@@ -415,6 +620,28 @@ export function describeHeader(sheet: {
         : `${above} ${plural(above, "row", "rows")} above the header ${plural(above, "was", "were")} read as the ` +
           "phase's notes (revision, date, terms).",
     );
+  }
+
+  /**
+   * NO QUANTITY ON THIS TAB AT ALL — variance matrix row 2.
+   *
+   * Said ONCE, here, rather than as a long label on three hundred rows: a bill
+   * with no `TOTAL Q-ty` column gives no line a quantity, and the per-row cell
+   * only has room to say "not given". The two halves are the same fact at two
+   * scales, and neither of them is a 1.
+   *
+   * It does not distinguish a missing COLUMN from a column of blanks, because
+   * the staged sheet does not record which columns were found and inventing
+   * that distinction from the lines would be a guess. "The bill gave none" is
+   * true of both.
+   *
+   * Strictly `null`, never a missing key: a staged line has carried `qty`
+   * since the first version of this shape, so `undefined` means a partial
+   * object in a test rather than a bill, and claiming a fact about one of
+   * those is how this sentence would come to be wrong about a real sheet.
+   */
+  if (lines.length > 0 && lines.every((line) => line.qty === null)) {
+    sentences.push("No line here carries a quantity — the bill gave none, so none is written.");
   }
 
   const skipped = Number.isFinite(sheet.skippedRows) ? Number(sheet.skippedRows) : 0;

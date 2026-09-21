@@ -804,10 +804,27 @@ export default function SpecTable({
                             are fabric A. Splitting it has a price attached, so
                             the table says how much is unaccounted for rather
                             than dividing it. */}
-                        {isConfiguration && record.qty === null ? (
-                          <Chip tone="warn">qty not set</Chip>
+                        {/* A BILL LINE WITH NO QUANTITY SAYS SO — variance
+                            matrix row 2. It used to print an em dash, which
+                            reads as "nothing to say" beside the columns that
+                            genuinely have nothing to say, and a bill with no
+                            quantity column produces a whole phase of them. A
+                            CONFIGURATION is a different statement: the bill
+                            said 45 and never said how many are fabric A, so its
+                            quantity is unallocated rather than ungiven. */}
+                        {record.qty === null ? (
+                          isConfiguration ? (
+                            <Chip tone="warn">qty not set</Chip>
+                          ) : (
+                            <span
+                              className="text-xs text-amber-800"
+                              title="The bill gave no quantity for this line. Nothing is assumed."
+                            >
+                              quantity not given
+                            </span>
+                          )
                         ) : (
-                          (record.qty ?? "—")
+                          record.qty
                         )}
                         {isHeading &&
                           record.qty !== null &&

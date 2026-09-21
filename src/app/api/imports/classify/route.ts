@@ -21,7 +21,7 @@ import { z } from "zod";
 import { json } from "@/lib/db";
 import { sql } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
-import { intakeSourceKind } from "@/lib/intake-source-types";
+import { intakeSourceKind, legacySpreadsheetAdvice } from "@/lib/intake-source-types";
 import { readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { prepareDocumentSource } from "@/lib/intake-source";
 import { classifyDocument, KIND_FROM_GENRE } from "@/lib/document-classify";
@@ -63,7 +63,13 @@ export async function POST(request: Request): Promise<Response> {
 
   const kind = intakeSourceKind(input.filename, input.contentType);
   if (kind === "unsupported") {
-    return json({ ok: false, error: `"${input.filename}" is not a supported document.` }, 400);
+    // An `.xls` reaches this route before it reaches registration, so the way
+    // out has to be here too — otherwise a pack containing one is refused
+    // twice and told how to fix it neither time.
+    return json(
+      { ok: false, error: legacySpreadsheetAdvice(input.filename) ?? `“${input.filename}” is not a supported document.` },
+      400,
+    );
   }
   // AN .eml NEEDS NO MODEL CALL. A saved email is unambiguously an email, and
   // paying to be told so would be the filename hint with a bill attached.
@@ -73,6 +79,7 @@ export async function POST(request: Request): Promise<Response> {
         ok: true,
         genre: "email",
         decision: KIND_FROM_GENRE.email,
+        unsupported: null,
         titleText: null,
         evidence: "a saved email file",
         certain: true,
@@ -102,13 +109,19 @@ export async function POST(request: Request): Promise<Response> {
   // a document is leaves the dropdown empty and a person sets it, which is
   // exactly where this app was before; failing the request would make the whole
   // upload look broken over a hint.
-  if (!result.ok) return json({ ok: true, genre: "unclear", decision: null, error: result.error, charged: true }, 200);
+  if (!result.ok) {
+    return json({ ok: true, genre: "unclear", decision: null, unsupported: null, error: result.error, charged: true }, 200);
+  }
 
   return json(
     {
       ok: true,
       genre: result.genre,
       decision: result.decision,
+      // A REFUSAL, not a gap. `decision: null` with nothing here means "you
+      // decide"; with a sentence here it means the app knows what this is and
+      // does not read it — a bill inside a PDF, today (§6.10.a row 8).
+      unsupported: result.unsupported,
       titleText: result.titleText,
       evidence: result.evidence,
       certain: result.certain,

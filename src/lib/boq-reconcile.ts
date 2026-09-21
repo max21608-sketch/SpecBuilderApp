@@ -34,7 +34,23 @@
 // fallback reports a phantom change on every line whose bill left Area blank —
 // which on the pilot is most of them.
 // ============================================================================
-import { normaliseRef } from "@/lib/boq-import";
+// ---- ONE FOLD, THE MATCHING ONE -----------------------------------------
+//
+// `record-refs`' fold, which is the one `findRecordsByRef`, `groupItemsByCode`
+// and `variantLettersByItem` all match by — NOT `boq-import`'s, which exists
+// for the stored `ref_value_norm` column and keeps dots and dashes.
+//
+// It used to be `boq-import`'s, and the two disagree: `S 201` folded to
+// `S201` while `S.201` stayed `S.201`, so a revised bill writing a code with
+// a dot where the record holds a dash read as a NEW line beside a record NO
+// LONGER LISTED — and confirming that retires the record, taking its
+// drawings, its specs and its picture off the phase, silently. Variance
+// matrix row 4: the same fold everywhere a code is matched.
+//
+// The looser fold collides more often. That is the safe direction and it is
+// the fold's own argument: a collision it creates produces AMBIGUITY — both
+// sides offered as candidates, nothing chosen — never a wrong pick.
+import { normaliseRef } from "@/lib/record-refs";
 
 export type ExistingRecord = {
   id: string;
@@ -142,7 +158,8 @@ export function lineDeltas(line: RevisedLine, record: ExistingRecord): FieldDelt
 export function reconcileSheet(lines: RevisedLine[], records: ExistingRecord[]): SheetReconciliation {
   const live = lines.filter((line) => !line.ignored);
 
-  // Codes on each side, normalised the way the BOQ import normalises a ref.
+  // Codes on each side, folded the way every other matcher in the app folds
+  // one — see the note on the import above.
   const recordsByCode = new Map<string, ExistingRecord[]>();
   for (const record of records) {
     for (const code of record.codes) {

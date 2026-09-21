@@ -440,6 +440,21 @@ export default function IntakeBatchPage({
               <>
                 {packSteps.bill.map((run) => run.filename ?? "Unnamed file").join(", ")} ·{" "}
                 {stepDone.bill ? "confirmed" : "not confirmed yet"}
+                {/* TWO BILLS IN ONE PACK — variance matrix §6.10.a row 9.
+                    Both stage, and NOTHING pairs them: which is a revision of
+                    which is a person's call, taken on the bill's own review
+                    screen where the phase to revise is chosen. Said here
+                    because this is the screen that lists what arrived, and two
+                    bills read as an accident otherwise — the reviewer's next
+                    move is either to drop one or to mark one a revision, and
+                    confirming both as new phases quietly doubles the project. */}
+                {packSteps.bill.length > 1 && (
+                  <span className="mt-0.5 block text-amber-800">
+                    {packSteps.bill.length} bills arrived in this pack. Each becomes its own phase unless somebody
+                    says otherwise — which is a revision of which is your call, on the bill&rsquo;s own review
+                    screen. Nothing has been paired.
+                  </span>
+                )}
               </>
             )}
           </Step>
