@@ -88,6 +88,15 @@ export async function GET(request: Request): Promise<Response> {
            em.version, em.created_at,
            p.bws_project_number, p.name as project_name,
            r.status as run_status, r.error as run_error,
+           -- A READ THE CAP DEFERRED, which is not a read nobody started and
+           -- not a read that failed. The marker is the pair nothing else
+           -- writes: a deadline with no attempt (extraction-slots.ts). Without
+           -- it an auto-assigned message over the project's cap renders as
+           -- "Reading..." for as long as it waits, and a screen that says the
+           -- app is busy on a row where it has not begun is how somebody comes
+           -- to distrust the column.
+           (r.status = 'pending' and r.attempt_id is null and r.attempt_deadline_at > now())
+             as waiting_for_slot,
            -- How much of the email is still waiting on a person. Computed from
            -- the staged JSON rather than stored: a blocker frozen at extraction
            -- time is stale by the first edit.

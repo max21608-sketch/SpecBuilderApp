@@ -82,8 +82,14 @@ A human confirms each of these, and nothing else may write it:
 - Producing the BWS CSV export.
 - Sending any chase email. Drafts only, sent by a human from their own Outlook.
   There is no send path in this app.
-- Placing an INBOUND email on a project. It is what starts the charged read,
-  and nothing is ever auto-assigned from an ambiguous routing outcome.
+- Placing an INBOUND email on a project starts the charged read. The app
+  assigns one automatically ONLY where routing decided on the two strongest
+  signals — the project inbox in the forwarding headers, or in To/Cc — and
+  the inbox says so in words with Unassign beside it, under the actor
+  `system:router`. A subject reference or a known sender is HELD for a
+  person; an ambiguous outcome is always held; nothing is ever auto-assigned
+  from one. Every automatic read counts against the per-project cap.
+  (Amended by Max, 2026-09-21 — "yes, amend" — Stage 2 item 2.11.)
 - Marking a gate (TG0/TG1/TG2) satisfied for a record.
 - Accepting a VE alternative, which changes which version is live.
 - Retiring a spec, a record or a run, and editing a confirmed finish. Each
@@ -1308,7 +1314,20 @@ Five things are load-bearing:
   puts a message on a project, because it is also what opens the attempt and
   dispatches the charged read, and two places doing that is two places to forget
   one half. `registration_request_id` is `email:<messageId>`, so a replay
-  returns the run it already made.
+  returns the run it already made. **Since 2.11 (2026-09-21) the Graph
+  ingestion path assigns automatically on `autoAssignDecision`** — a pure
+  function in `email-routing.ts` that says yes ONLY for `forwarded_from_inbox`
+  and `recipient_is_inbox`, under actor `system:router`; `sender_is_contact`
+  and the subject signals are HELD with routing's sentence and the project
+  NAMED but not chosen. Before it, that path auto-assigned on EVERY `assigned`
+  outcome, weakest signal included — the trap the gate names, one flag away
+  from spending money on a contact who works on two projects. The decision is
+  shared; the ACT stays at the arrival caller and is not inside
+  `recordMessage`, because a deliberate upload must never be stamped `auto`.
+  A placement that fails (a refused copy, an archived project) holds the
+  message with the reason rather than burning a delivery. `assignMessage`
+  opens no change set: the trail carries `system:router` through the audit
+  layer's `updated_by`, not a `change_sets` row.
 - **Routing never breaks its own tie.** Signals run in order — a project inbox
   in the forwarding headers, then in To/Cc, then a project number or code in the
   subject, then the sender being a contact on exactly one project — and the

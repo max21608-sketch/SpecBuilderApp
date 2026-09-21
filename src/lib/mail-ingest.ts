@@ -32,7 +32,7 @@ import {
   mailIngestionEnabled,
   mailboxPath,
 } from "@/lib/graph-client";
-import { describeRouting, routeMessage } from "@/lib/email-routing";
+import { autoAssignDecision, describeRouting, routeMessage, ROUTER_ACTOR } from "@/lib/email-routing";
 import { loadRoutingRegisters, loadSentDrafts } from "@/lib/email-ingest";
 import { parseEnvelope, type EmailEnvelope } from "@/lib/email-envelope";
 import { matchReplyToChase } from "@/lib/chase-reply";
@@ -279,17 +279,46 @@ export async function ingestGraphMessage(job: MailIngestMessage): Promise<Ingest
     return { outcome: "duplicate", messageId };
   }
 
-  // 7. Confident routing assigns, which is what starts the charged read. An
-  //    ambiguous outcome never does: two projects matching equally well is a
-  //    decision, and it waits on the Inbox screen for a person.
-  if (routing.status === "assigned") {
-    await assignMessage({
-      messageId,
-      projectId: routing.projectId,
-      kind: "auto",
-      actor: "system:microsoft-graph",
-    });
-    return { outcome: "stored", messageId, assigned: true };
+  // 7. THE TWO STRONGEST SIGNALS ASSIGN THEMSELVES, AND NOTHING ELSE DOES.
+  //
+  //    `autoAssignDecision` is the single reading of that rule — mail at a
+  //    project's own inbox, or forwarded from it, starts its charged read with
+  //    nobody watching; a subject reference, a known sender and an ambiguous
+  //    outcome all wait on the Inbox screen with routing's own sentence. The
+  //    decision lives beside the signals it reads rather than here, so the one
+  //    other thing that will ever act on it cannot come to a different answer.
+  const decision = autoAssignDecision(routing);
+  if (decision.assign) {
+    try {
+      await assignMessage({
+        messageId,
+        projectId: decision.projectId,
+        kind: "auto",
+        // The ROUTER placed it, not the fetcher: the trail has to say what
+        // decided, because "the mailbox connector" is where the message came
+        // from and not why it landed on this project.
+        actor: ROUTER_ACTOR,
+      });
+      return { outcome: "stored", messageId, assigned: true };
+    } catch (cause) {
+      // The message IS recorded and IS readable; only the placement failed —
+      // a copy the store refused, or a project archived since the registers
+      // were read. Throwing here would burn a delivery on an answer that will
+      // not change, and would leave a stored message reported as a failed
+      // ingest: off the inbox's held list, which is the one state in this
+      // feature that silently stops work. So it stays HELD, with the reason on
+      // the row, and the Assign button is still there.
+      const why = cause instanceof Error ? cause.message : String(cause);
+      // Composed OUTSIDE the query: a backtick inside a tagged sql template
+      // closes it, and esbuild then reports the syntax error thirty lines away.
+      const reason = describeRouting(routing) + ". It could not be placed automatically: " + why;
+      await sql`
+        update email_messages
+        set routing_reason = ${reason}, updated_by = ${actor}
+        where id = ${messageId}
+      `;
+      return { outcome: "stored", messageId, assigned: false };
+    }
   }
 
   return { outcome: "stored", messageId, assigned: false };
