@@ -2229,8 +2229,8 @@ outcome."* is:
 > Every automatic read counts against the per-project cap.*
 
 **Max, 2026-09-21: "yes, amend."** 2.11 is briefed (`~/dev/briefs/stage2/brief-E1.md`)
-and launches as soon as one of the two running coders finishes; the gate
-amendment above goes into `CLAUDE.md` in the same commit as the code.
+**Landed 2026-09-21 at `5b2b9f3`**, the gate amendment in the same commit
+as the code, per the plan's rule.
 
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*
