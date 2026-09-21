@@ -497,7 +497,7 @@ function readRows(
 export function describeHeader(sheet: {
   headerRow?: number;
   skippedRows?: number;
-  lines?: readonly { lineNo?: number }[];
+  lines?: readonly { lineNo?: number; qty?: number | null }[];
 }): string {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   const sentences: string[] = [];
@@ -519,6 +519,28 @@ export function describeHeader(sheet: {
         : `${above} ${plural(above, "row", "rows")} above the header ${plural(above, "was", "were")} read as the ` +
           "phase's notes (revision, date, terms).",
     );
+  }
+
+  /**
+   * NO QUANTITY ON THIS TAB AT ALL — variance matrix row 2.
+   *
+   * Said ONCE, here, rather than as a long label on three hundred rows: a bill
+   * with no `TOTAL Q-ty` column gives no line a quantity, and the per-row cell
+   * only has room to say "not given". The two halves are the same fact at two
+   * scales, and neither of them is a 1.
+   *
+   * It does not distinguish a missing COLUMN from a column of blanks, because
+   * the staged sheet does not record which columns were found and inventing
+   * that distinction from the lines would be a guess. "The bill gave none" is
+   * true of both.
+   *
+   * Strictly `null`, never a missing key: a staged line has carried `qty`
+   * since the first version of this shape, so `undefined` means a partial
+   * object in a test rather than a bill, and claiming a fact about one of
+   * those is how this sentence would come to be wrong about a real sheet.
+   */
+  if (lines.length > 0 && lines.every((line) => line.qty === null)) {
+    sentences.push("No line here carries a quantity — the bill gave none, so none is written.");
   }
 
   const skipped = Number.isFinite(sheet.skippedRows) ? Number(sheet.skippedRows) : 0;

@@ -912,9 +912,28 @@ export default function ReviewImportPage() {
                               )}
                             </Td>
                             <Td>{line.area ?? line.boqCategory ?? "—"}</Td>
+                            {/* NO QUANTITY IS NOT A DASH AND IT IS NEVER A 1.
+                                A bill with no `TOTAL Q-ty` column gives every
+                                line a null quantity (variance matrix row 2),
+                                and an em dash there reads as "nothing to say"
+                                rather than as a gap somebody has to close. The
+                                tab's own sentence above says it once for the
+                                whole sheet; this is short because the column is
+                                narrow and there are three hundred of them. */}
                             <Td num>
-                              {line.qty ?? "—"}
-                              {line.qtyUnit && <span className="text-neutral-400"> {line.qtyUnit}</span>}
+                              {line.qty === null ? (
+                                <span
+                                  className="text-[11px] text-amber-800"
+                                  title="The bill gave no quantity for this line. Nothing is assumed."
+                                >
+                                  not given
+                                </span>
+                              ) : (
+                                <>
+                                  {line.qty}
+                                  {line.qtyUnit && <span className="text-neutral-400"> {line.qtyUnit}</span>}
+                                </>
+                              )}
                             </Td>
                             <Td mono muted>
                               {line.designer ?? "—"}

@@ -18,6 +18,8 @@ import { render, screen } from "@testing-library/react";
 import { parseBoqSheets, type BoqLine } from "@/lib/boq-import";
 import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import ReviewImportPage from "@/app/dashboard/imports/[id]/page";
+// Synthetic, from the committed builder. Invented codes, invented rooms.
+import { blankQtyCells, noQtyColumn } from "../fixtures/boq-shapes";
 
 const PROJECT = "project-variance";
 const IMPORT = "import-variance";
@@ -158,5 +160,37 @@ describe("VARIANCE row 1: a bill this reader could not read", () => {
     mount({}, [stagedSheet(READABLE)]);
     expect(await screen.findByText(/A tab is a phase, not a revision/)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ROW 2 — NO QUANTITY COLUMN. Expected: FLAGS, on the row and on the tab.
+// ---------------------------------------------------------------------------
+describe("VARIANCE row 2: a bill that gave no quantities", () => {
+  it("says not given on every line, and prints no number at all", async () => {
+    mount({}, [stagedSheet([{ sheet: "Bill", data: noQtyColumn() }])]);
+    expect(await screen.findByText("Sofa")).toBeTruthy();
+    expect(screen.getAllByText("not given")).toHaveLength(3);
+    // THE TRAP: the per-level figures ARE on the row. None of them may appear
+    // in the Qty column, and neither may a 1.
+    const sofa = screen.getByText("Sofa").closest("tr")!;
+    const qty = sofa.querySelectorAll("td")[4]!;
+    expect(qty.textContent).toBe("not given");
+  });
+
+  it("says it once for the whole tab as well, in the parser's own words", async () => {
+    mount({}, [stagedSheet([{ sheet: "Bill", data: noQtyColumn() }])]);
+    expect(
+      await screen.findByText(/No line here carries a quantity — the bill gave none, so none is written\./),
+    ).toBeTruthy();
+  });
+
+  it("flags the blank cells and leaves the figures alone where there are any", async () => {
+    mount({}, [stagedSheet([{ sheet: "Bill", data: blankQtyCells() }])]);
+    expect(await screen.findByText("Sofa")).toBeTruthy();
+    expect(screen.getAllByText("not given")).toHaveLength(2);
+    expect(screen.getByText("Sofa").closest("tr")!.querySelectorAll("td")[4]!.textContent).toBe("4");
+    // One line has a quantity, so the tab-level sentence is not printed.
+    expect(screen.queryByText(/No line here carries a quantity/)).toBeNull();
   });
 });

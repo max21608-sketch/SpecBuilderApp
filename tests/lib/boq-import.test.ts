@@ -14,6 +14,9 @@ import {
   describeHeader,
 } from "@/lib/boq-import";
 import type { BoqParseResult, ParsedBoqSheet } from "@/lib/boq-import";
+// Synthetic, built by `tests/fixtures/build-boq.ts`. Modelled on the shape of a
+// real bill; not one line of one.
+import { blankQtyCells, noQtyColumn } from "../fixtures/boq-shapes";
 
 const HEADER = ["Designer", "Category", "Code", "Item Description", "Product Reference", "Total Qty Updated"];
 
@@ -280,6 +283,45 @@ describe("a bill whose headings this reader does not know", () => {
     expect(result.error).toContain("and more");
     expect(result.error).toContain("“Column 8”");
     expect(result.error).not.toContain("“Column 9”");
+  });
+});
+
+// ============================================================================
+// VARIANCE MATRIX §6.10.a ROW 2 — NO QUANTITY COLUMN.
+//
+// EXPECTED: FLAGS. Lines are staged with `qty` null, the review and the phase
+// table say so in words, and NOTHING writes a 1. The trap is specific and it
+// has been guarded since 0007 in one direction only: `L1`..`L6` are per-level
+// quantities and are absent from the header synonyms, so a bill carrying only
+// those has no quantity at all — and the plausible wrong answer is to read the
+// first level's figure, which would order 3 sofas instead of 14.
+// ============================================================================
+describe("a bill with no quantity column", () => {
+  it("gives every line a null quantity, never a 1 and never L1", () => {
+    const staged = one(parseBoqSheets(sheet(noQtyColumn(), "Bill")));
+    expect(staged.lines).toHaveLength(3);
+    expect(staged.lines.map((line) => line.qty)).toEqual([null, null, null]);
+    // The figures ARE on the row — 3, 1, 4, 3, 2 — and none of them is read.
+    expect(staged.lines[0]?.qtyUnit).toBe("pcs");
+  });
+
+  it("reads a blank cell in a quantity column the same way", () => {
+    const staged = one(parseBoqSheets(sheet(blankQtyCells(), "Bill")));
+    expect(staged.lines.map((line) => line.qty)).toEqual([4, null, null]);
+  });
+
+  it("says once, on the tab, that the bill gave no quantity", () => {
+    // Said at the sheet's scale rather than as a long label on three hundred
+    // rows. The per-row cell is the screen's half and is asserted in the
+    // component tier.
+    expect(describeHeader(one(parseBoqSheets(sheet(noQtyColumn()))))).toContain(
+      "No line here carries a quantity — the bill gave none, so none is written.",
+    );
+  });
+
+  it("does not say it when any line has one", () => {
+    expect(describeHeader(one(parseBoqSheets(sheet(blankQtyCells()))))).not.toContain("carries a quantity");
+    expect(describeHeader(one(parseBoqSheets(sheet(TYPICAL))))).not.toContain("carries a quantity");
   });
 });
 
