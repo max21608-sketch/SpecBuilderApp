@@ -54,3 +54,42 @@ export function blankQtyCells(): SheetData {
     ["Example suite", "ZZ-203", "Bench", ""],
   ];
 }
+
+/**
+ * A two-row header: "FF&E" over "code", "Item" over "description", "Total"
+ * over "Q-ty", with the Area heading merged down both rows.
+ *
+ * Neither row is a header on its own — the upper names an area and an item and
+ * no code, the lower names a code and a description and no total — and the
+ * pair completes. `build-boq.ts` writes this same shape as a real workbook with
+ * A3:A4 merged, because a merged cell is only a merged cell in a file: as an
+ * array of arrays it is indistinguishable from a blank.
+ */
+export function twoRowHeader(): SheetData {
+  return [
+    ["ZZ001 - Example Project", null, null, null],
+    ["Revision: ", "2", null, null],
+    ["Area", "FF&E", "Item", "Total"],
+    [null, "code", "description", "Q-ty"],
+    ["Example lounge", "ZZ-101", "Sofa", 14],
+    ["Example lounge", "ZZ-102", "Armchair", 58],
+    ["Example suite", "ZZ-103", "Side table", 2],
+  ];
+}
+
+/**
+ * A two-row header that does NOT complete: the lower row names the quantity
+ * and nothing names a code.
+ *
+ * The expected behaviour is a refusal that says which rows it read together,
+ * because a person looking at a split heading needs to know that reading was
+ * tried before they go hunting for a different cause.
+ */
+export function twoRowHeaderIncomplete(): SheetData {
+  return [
+    ["ZZ001 - Example Project", null, null, null],
+    ["Room", "Item", "Nr", null],
+    [null, "description", "Total Q-ty", null],
+    ["Example lounge", "Sofa", 14, null],
+  ];
+}

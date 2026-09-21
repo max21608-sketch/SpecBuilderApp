@@ -5,6 +5,7 @@
 // folder.
 import { describe, it, expect } from "vitest";
 import type { SheetData } from "read-excel-file/node";
+import { readSpreadsheetSheets } from "@/lib/intake-source";
 import {
   parseBoqSheets,
   normaliseRef,
@@ -16,7 +17,10 @@ import {
 import type { BoqParseResult, ParsedBoqSheet } from "@/lib/boq-import";
 // Synthetic, built by `tests/fixtures/build-boq.ts`. Modelled on the shape of a
 // real bill; not one line of one.
-import { blankQtyCells, noQtyColumn } from "../fixtures/boq-shapes";
+import { blankQtyCells, noQtyColumn, twoRowHeader, twoRowHeaderIncomplete } from "../fixtures/boq-shapes";
+// The same shapes as real workbooks, built in memory — see the note on the
+// workbook suite below for why none of them is committed.
+import { twoRowHeaderWorkbook } from "../fixtures/build-boq";
 
 const HEADER = ["Designer", "Category", "Code", "Item Description", "Product Reference", "Total Qty Updated"];
 
@@ -322,6 +326,132 @@ describe("a bill with no quantity column", () => {
   it("does not say it when any line has one", () => {
     expect(describeHeader(one(parseBoqSheets(sheet(blankQtyCells()))))).not.toContain("carries a quantity");
     expect(describeHeader(one(parseBoqSheets(sheet(TYPICAL))))).not.toContain("carries a quantity");
+  });
+});
+
+// ============================================================================
+// VARIANCE MATRIX §6.10.a ROW 3 — MERGED CELLS / A TWO-ROW HEADER.
+//
+// EXPECTED: PROCEEDS where the second row completes the first; otherwise
+// REFUSES, naming the row it read with it.
+//
+// The shape is one label split over two rows — "FF&E" above "code", "Item"
+// above "description", "Total" above "Q-ty" — which a merged cell and a wrapped
+// heading both produce. Neither row is a header on its own, and before this the
+// whole bill refused for want of a code column it plainly had.
+//
+// THE TRAP IS THE OTHER DIRECTION. A reader that paired any two rows would take
+// a title row and the first ITEM under it as the header, reading the bill one
+// row short with a sofa for a column name. So the pair is only tried on a row
+// that already matched at least one column, and only taken when it completes.
+// ============================================================================
+describe("a header split over two rows", () => {
+  it("reads the two rows as one header", () => {
+    const staged = one(parseBoqSheets(sheet(twoRowHeader(), "Bill")));
+    expect(staged.headerRow).toBe(4);
+    expect(staged.headerRows).toBe(2);
+    expect(staged.lines).toHaveLength(3);
+    expect(staged.lines[0]).toMatchObject({
+      lineNo: 5,
+      area: "Example lounge",
+      code: "ZZ-101",
+      itemDescription: "Sofa",
+      qty: 14,
+    });
+  });
+
+  it("does not file the upper half of the header as the phase's notes", () => {
+    // The metadata is the rows ABOVE the header, and the header now starts a
+    // row earlier. "FF&E", "Item" and "Total" in the revision-and-terms panel
+    // would be this fix wearing a new defect.
+    const staged = one(parseBoqSheets(sheet(twoRowHeader())));
+    expect(staged.metadata.revision).toBe("2");
+    expect(staged.metadata.notes).toContain("ZZ001 - Example Project");
+    for (const heading of ["FF&E", "Item", "Total", "code", "description"]) {
+      expect(staged.metadata.notes).not.toContain(heading);
+    }
+  });
+
+  it("says both rows in the sentence the review prints", () => {
+    const staged = one(parseBoqSheets(sheet(twoRowHeader())));
+    expect(describeHeader(staged)).toBe(
+      "Header on rows 3 to 4, read as one. Items start on row 5. 2 rows above the header were read as the " +
+        "phase's notes (revision, date, terms).",
+    );
+  });
+
+  it("refuses, and names the row it read with it, when the pair still has no code", () => {
+    const result = parseBoqSheets(sheet(twoRowHeaderIncomplete(), "Bill"));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/Reading it together with row \d+ beneath it did not complete it either\./);
+  });
+
+  it("never takes a title row and the first item as a header", () => {
+    // The row above the header matches nothing, so no pair is tried at all and
+    // the header is found where it is. If it were tried, "Sofa" would be a
+    // column name and the bill would be one line short.
+    const staged = one(
+      parseBoqSheets(
+        sheet([
+          ["ZZ001 - Example Project", null, null],
+          ["FF&E code", "Item description", "TOTAL Q-ty"],
+          ["ZZ-101", "Sofa", 14],
+        ]),
+      ),
+    );
+    expect(staged.headerRow).toBe(2);
+    expect(staged.headerRows).toBe(1);
+    expect(staged.lines.map((line) => line.itemDescription)).toEqual(["Sofa"]);
+  });
+
+  it("does not pair a row that matched one column with a DATA row to make a header", () => {
+    // "Item" alone matches the description column; the row under it is a line,
+    // and joining them names no code, so the bill refuses rather than staging
+    // the second row as column headings.
+    const result = parseBoqSheets(
+      sheet([
+        ["Item", "Nr", null],
+        ["Sofa", 14, null],
+      ]),
+    );
+    expect(result.ok).toBe(false);
+  });
+});
+
+// ============================================================================
+// THE SAME BILL AS A REAL WORKBOOK, WITH A REAL MERGED CELL.
+//
+// A merged cell is only a merged cell in a FILE: `read-excel-file` puts the
+// region's value in its top-left and nothing in the others, and every array
+// fixture above is an assumption that it does. `tests/fixtures/build-boq.ts`
+// builds `twoRowHeader()` as a real workbook with A3:A4 genuinely merged, and
+// this reads it back through `readSpreadsheetSheets` — the same function
+// `/api/imports` calls — so the assumption is checked once against the library
+// rather than trusted everywhere.
+//
+// THE BYTES ARE BUILT, NOT COMMITTED. `.gitignore` refuses `*BOQ*.xlsx`
+// outright as an NDA guard, and a synthetic fixture named to slip past that
+// rule is how the rule stops meaning anything.
+// ============================================================================
+describe("the same bill as a real workbook", () => {
+  it("parses the merged two-row header the same way the array does", async () => {
+    const sheets = await readSpreadsheetSheets(await twoRowHeaderWorkbook(), "bill-two-row-header.xlsx", "");
+    const staged = one(parseBoqSheets(sheets));
+    expect(staged.headerRows).toBe(2);
+    expect(staged.headerRow).toBe(4);
+    expect(staged.lines.map((line) => line.code)).toEqual(["ZZ-101", "ZZ-102", "ZZ-103"]);
+    expect(staged.lines.map((line) => line.area)).toEqual(["Example lounge", "Example lounge", "Example suite"]);
+    expect(staged.lines.map((line) => line.qty)).toEqual([14, 58, 2]);
+  });
+
+  it("really does carry a merged cell, read as a blank on the second row", async () => {
+    // If `read-excel-file` ever filled a merged region's every cell, the pair
+    // reading above would still pass and this is what would say why.
+    const sheets = await readSpreadsheetSheets(await twoRowHeaderWorkbook(), "bill-two-row-header.xlsx", "");
+    const rows = sheets[0]?.data ?? [];
+    expect(rows[2]?.[0]).toBe("Area");
+    expect(rows[3]?.[0] ?? null).toBeNull();
   });
 });
 

@@ -121,6 +121,15 @@ export type StagedBoqSheet = {
   /** Defaulted from the sheet name, edited by the reviewer, becomes the run. */
   proposedRunName: string;
   headerRow: number;
+  /**
+   * How many rows the header spans: 1, or 2 where the second completes the
+   * first ("FF&E" over "code"). `headerRow` is always the LAST of them, so
+   * the items start after it either way.
+   *
+   * OPTIONAL, and absent means one: the staged JSON is data from the past and
+   * every bill staged before two-row headers were read carries no such key.
+   */
+  headerRows?: number;
   skippedRows: number;
   ignored: boolean;
   ignoredReason: string | null;
@@ -183,7 +192,12 @@ type HeaderReading = {
 };
 
 /** The nearest thing to a header the reader saw, for a refusal that can be acted on. */
-type HeaderAttempt = HeaderReading & { sheetName: string; rowNo: number };
+type HeaderAttempt = HeaderReading & {
+  sheetName: string;
+  rowNo: number;
+  /** The row below that was read together with it, where one was tried. */
+  pairedWith?: number;
+};
 
 const COLUMN_LABEL: Record<ColumnKey, string> = {
   designer: "designer",
@@ -247,6 +261,49 @@ function readHeader(row: readonly unknown[]): HeaderReading {
 /** How much of a header a row managed to be, for picking the closest one. */
 function headerScore(reading: HeaderReading): number {
   return Object.keys(reading.found).length;
+}
+
+/**
+ * TWO ROWS READ AS ONE HEADER — variance matrix row 3.
+ *
+ * A client template that merges cells vertically, or simply wraps a long
+ * heading, splits one label over two rows: "FF&E" above "code", "Item" above
+ * "description", "Total" above "Q-ty". Neither row is a header on its own, so
+ * a whole bill refused for want of a code column it plainly has.
+ *
+ * Each column offers three readings — the upper cell, the lower cell, and the
+ * two joined in printed order — and the same whole-value synonym rule decides.
+ * Joining is NOT a substring rule: "ff&e code" matches because it is a synonym,
+ * where a rule clever enough to find "code" inside "ff&e code" would also find
+ * it inside "cost code" and inside a data row's "Coded oak".
+ *
+ * IT IS ONLY EVER TRIED ON A ROW THAT ALREADY LOOKS LIKE A HEADER, and only
+ * when the pair COMPLETES the required columns. Trying it on any row would let
+ * a title row and the first data row under it conspire into a header, and the
+ * bill would then be read one row short with its first item as column names.
+ */
+function readHeaderPair(upper: readonly unknown[], lower: readonly unknown[]): HeaderReading {
+  const width = Math.max(upper.length, lower.length);
+  const joined: unknown[] = [];
+  for (let index = 0; index < width; index += 1) {
+    const above = text(upper[index]);
+    const below = text(lower[index]);
+    joined.push(above && below ? `${above} ${below}` : (above ?? below));
+  }
+
+  // Each of the three readings, merged first-match-wins per column key: the
+  // lower row's own words win over a join, and the join over the upper row's,
+  // because the lower row is the one immediately above the items.
+  const readings = [readHeader(lower), readHeader(joined), readHeader(upper)];
+  const found: Partial<Record<ColumnKey, number>> = {};
+  for (const reading of readings) {
+    for (const [key, index] of Object.entries(reading.found) as [ColumnKey, number][]) {
+      if (found[key] === undefined) found[key] = index;
+    }
+  }
+  // What NEITHER row nor the join recognised, for the refusal to quote.
+  const unrecognised = readHeader(joined).unrecognised;
+  return { found, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
 }
 
 const LABEL_ONLY = /^(revision|rev|date)\s*[:\-]?\s*$/i;
@@ -329,8 +386,27 @@ export function parseBoqSheets(sheets: { sheet: string; data: SheetData }[]): Bo
         staged.push(readRows(sheet, data, rowIndex, reading.found));
         break;
       }
+
+      // A ROW THAT LOOKS LIKE HALF A HEADER GETS ONE MORE READING, with the row
+      // below it (row 3 of the variance matrix). Nothing else does: a row that
+      // matched no column at all is a title, and pairing it with the row under
+      // it is how a bill loses its first item to the header.
+      const below = headerScore(reading) > 0 ? data[rowIndex + 1] : undefined;
+      if (below) {
+        const pair = readHeaderPair(row, below);
+        if (pair.complete) {
+          staged.push(readRows(sheet, data, rowIndex + 1, pair.found, { headerRows: 2 }));
+          break;
+        }
+      }
+
       if (headerScore(reading) > (closest ? headerScore(closest) : 0)) {
-        closest = { ...reading, sheetName: sheet, rowNo: rowIndex + 1 };
+        closest = {
+          ...reading,
+          sheetName: sheet,
+          rowNo: rowIndex + 1,
+          ...(below ? { pairedWith: rowIndex + 2 } : {}),
+        };
       }
     }
   }
@@ -387,6 +463,13 @@ function noHeaderError(closest: HeaderAttempt | null): string {
     `The closest is row ${closest.rowNo} of “${closest.sheetName}”, which named its ` +
       `${list(matched)} column${matched.length === 1 ? "" : "s"} but no ${list(missing)} column.`,
   ];
+  // SAY THAT THE SECOND READING WAS TRIED. A two-row header is read as one
+  // where the lower row completes the upper (variance matrix row 3), so a
+  // refusal that did not mention it would leave somebody wondering whether a
+  // split heading was the problem.
+  if (closest.pairedWith !== undefined) {
+    parts.push(`Reading it together with row ${closest.pairedWith} beneath it did not complete it either.`);
+  }
   if (quoted.length > 0) {
     parts.push(
       `Its other headings read ${list(quoted)}${closest.unrecognised.length > HEADINGS_NAMED ? " and more" : ""}, ` +
@@ -410,7 +493,9 @@ function readRows(
   data: SheetData,
   headerIndex: number,
   header: Partial<Record<ColumnKey, number>>,
+  options: { headerRows?: number } = {},
 ): ParsedBoqSheet {
+  const headerRows = options.headerRows ?? 1;
   const at = (row: readonly unknown[], key: ColumnKey): unknown => {
     const index = header[key];
     return index === undefined ? null : row[index];
@@ -455,10 +540,14 @@ function readRows(
     sheetName: sheet,
     proposedRunName: sheet,
     headerRow: headerIndex + 1,
+    headerRows,
     skippedRows,
     ignored: empty,
     ignoredReason: empty ? "No rows under the header." : null,
-    metadata: readMetadata(data, headerIndex),
+    // The metadata stops at the FIRST of the header's rows. Reading up to the
+    // last would file the upper half of a two-row header — "FF&E", "Item",
+    // "Total" — as the phase's notes, where the revision and the COM terms go.
+    metadata: readMetadata(data, headerIndex - (headerRows - 1)),
     lines,
   } satisfies ParsedBoqSheet;
 }
@@ -496,6 +585,7 @@ function readRows(
  */
 export function describeHeader(sheet: {
   headerRow?: number;
+  headerRows?: number;
   skippedRows?: number;
   lines?: readonly { lineNo?: number; qty?: number | null }[];
 }): string {
@@ -503,7 +593,18 @@ export function describeHeader(sheet: {
   const sentences: string[] = [];
 
   const headerRow = Number.isFinite(sheet.headerRow) ? Number(sheet.headerRow) : null;
-  sentences.push(headerRow === null ? "The header row was not recorded." : `Header on row ${headerRow}.`);
+  // A header spanning two rows says both, because a reviewer checking the
+  // sentence against the file has to find the same thing the reader found.
+  // Absent means one: a bill staged before two-row headers were read carries
+  // no such key, and the sentence must still be true of it.
+  const spans = Number.isFinite(sheet.headerRows) ? Math.max(1, Number(sheet.headerRows)) : 1;
+  sentences.push(
+    headerRow === null
+      ? "The header row was not recorded."
+      : spans > 1
+        ? `Header on rows ${headerRow - spans + 1} to ${headerRow}, read as one.`
+        : `Header on row ${headerRow}.`,
+  );
 
   const lines = sheet.lines ?? [];
   const firstLineNo = lines[0]?.lineNo;
@@ -511,7 +612,7 @@ export function describeHeader(sheet: {
   if (lines.length === 0) sentences.push("No items under it.");
   else sentences.push(`Items start on row ${firstItemRow ?? "—"}.`);
 
-  const above = headerRow === null ? null : headerRow - 1;
+  const above = headerRow === null ? null : headerRow - spans;
   if (above !== null) {
     sentences.push(
       above <= 0
