@@ -11,7 +11,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb, qaNumber } from "./db-tier";
+import { describeIfDb, qaNumber, QA_RUN_SUFFIX } from "./db-tier";
 import pg from "pg";
 import { resolveProposals } from "@/lib/spec-document";
 import { PROPOSAL_SCHEMA_VERSION } from "@/lib/spec-document";
@@ -69,7 +69,7 @@ describeIfDb("email intake", () => {
 
     const project = await client.query(
       `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
-       values ('${qaNumber("P90009")}', '__QA Email project', '__qa-p90009@example.test', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90009")}', '__QA Email project', '__qa-p90009-${QA_RUN_SUFFIX}@example.test', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 

@@ -15,7 +15,7 @@
 // is append-only by design and a cleanup that deletes from it has broken the
 // thing under test.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb, qaNumber } from "./db-tier";
+import { describeIfDb, qaNumber, QA_RUN_SUFFIX } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -38,6 +38,11 @@ function post(body: unknown): Request {
 }
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 
+// The project's shared inbox carries this process's suffix too. Routing's first
+// signal is a project inbox, so two runs sharing one string is a latent
+// ambiguity even though nothing reads it here yet.
+const INBOX = `__qa-inbox-${QA_RUN_SUFFIX}@example.test`;
+
 describeIfDb("chase drafts", () => {
   const client = new pg.Client({ connectionString: databaseUrl });
 
@@ -53,7 +58,7 @@ describeIfDb("chase drafts", () => {
 
     const project = await client.query(
       `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
-       values ('${qaNumber("P90001")}', '__QA Chase project', '__qa-inbox@example.test', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90001")}', '__QA Chase project', '${INBOX}', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 
@@ -196,7 +201,7 @@ describeIfDb("chase drafts", () => {
     expect(absent[0].snapshot_answer_version).toBeNull();
 
     // The Cc snapshot is the project inbox, taken at generation.
-    expect(drafts[0].cc_email).toBe("__qa-inbox@example.test");
+    expect(drafts[0].cc_email).toBe(INBOX);
     // Non-production, so the subject is marked.
     expect(String(drafts[0].subject)).toContain("[STAGING]");
   });

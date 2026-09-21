@@ -6,7 +6,7 @@
 // What is under test is the gate: a disabled deployment, the validation
 // handshake, and every way a body can fail to authenticate.
 import { it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, QA_RUN_SUFFIX } from "./db-tier";
 import pg from "pg";
 import { clientStateHash } from "@/lib/graph-subscriptions";
 
@@ -24,8 +24,14 @@ vi.mock("@/lib/extraction-queue", async (importOriginal) => {
 const databaseUrl = process.env.DATABASE_URL;
 
 const SECRET = "__qa-client-state";
-const MAILBOX = "__qa-inbox@example.test";
-const SUBSCRIPTION = "__qa-subscription-1";
+// NAMED FOR THIS PROCESS, like every `qaNumber` fixture and for the same
+// reason: `graph_subscriptions` is keyed on the mailbox and the subscription id,
+// and this suite deletes its row by mailbox on the way in and out. With two
+// db-tier runs at once — the plan's normal state — one run's teardown deleted
+// the other's subscription mid-suite, and the webhook then answered 401 where
+// the test expected 202: a failure that reads as broken authentication.
+const MAILBOX = `__qa-inbox-${QA_RUN_SUFFIX}@example.test`;
+const SUBSCRIPTION = `__qa-subscription-${QA_RUN_SUFFIX}`;
 
 function notify(body: unknown, query = ""): Request {
   return new Request(`http://localhost/api/graph/notifications${query}`, {
