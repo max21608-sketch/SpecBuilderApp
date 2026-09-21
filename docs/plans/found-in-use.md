@@ -84,6 +84,21 @@ it (Fable's greps on 2026-09-20 returned empty for exactly this reason and it
 was blamed on a shell function), and `git diff` treated the file as binary.
 Same technique, escaped; behaviour unchanged, the template tests green.
 
+### Three screens say "quantity not allocated", and two of them say it whatever the data
+
+**Status: open — observations from Coder G's rows d3/d4, 2026-09-21.** The
+phase table conditions the words on `qty` being null; the infill line and the
+chase line print *quantity not allocated* UNCONDITIONALLY, because
+`FinishOptionGroup` carries no `qty`. True today only because nothing had set
+one — and the record's details panel CAN set one (0028), so the moment somebody
+does, three screens disagree. The fix is to carry `qty` through
+`chase-grouping.ts` into both tables. Two more from the same round: `/api/records`'s
+`refs` is every ref system while the export's Client Code is `boq_code` only, so
+a record carrying only a `bws_job` ref shows a ref on the table and exports a
+blank code; and `loadUncategorisedRecords` neither requires the run to be
+active nor excludes a split parent, so an uncategorised split bill line would
+be listed as an item to categorise when it is a heading.
+
 ### After 2.11: what an automatic assignment does not yet do
 
 **Status: open — observations from Coder E, 2026-09-21.** An auto-assigned read

@@ -1846,7 +1846,12 @@ already exist.
 - **`/api/records` filters to active**, with a toggle. It had no status
   predicate at all, so the moment anything was retired the spec table and the
   export described different sets — the disagreement the check sheet exists to
-  prevent. `loadExportScope` also requires the RUN to be active.
+  prevent. `loadExportScope` also requires the RUN to be active — and since
+  2026-09-21 (variance row d5) **an export asked for a retired phase is
+  REFUSED with a 409 in words**, never a file: it used to compose an empty
+  workbook named after the phase, which uploaded to BWS would wipe the job
+  set. Reachable only by a stale link or a pasted `runId`; a downloaded 409
+  renders as raw JSON, as the 404 always has.
 - **Retiring a run asserts its own cascade.** `spec_records.status` does not
   follow `spec_runs.status` and no constraint can make it, so `retireRun`
   retires every record and then counts, before commit.
@@ -2327,11 +2332,16 @@ Five things about it are load-bearing:
   letter A in both and writes to the same variant — the pack's
   `duplicateTargets` banner is what reports that case.
 
-**STILL OUTSTANDING:** nothing lets a person SET a configuration's quantity — the
-gap is reported and there is no field to close it. And a record that already
-carries confirmed specs cannot be split at all (`ensureVariant`'s guard), so the
-thirteen records in the sandbox that hold specs would need those moved onto a
-configuration first, which is a path that does not exist.
+**STILL OUTSTANDING:** a record that already carries confirmed specs cannot be
+split at all (`ensureVariant`'s guard), so the thirteen records in the sandbox
+that hold specs would need those moved onto a configuration first, which is a
+path that does not exist. **CORRECTED 2026-09-21 (variance row d4):** this file
+said for four days that nothing lets a person SET a configuration's quantity.
+That has been false since 0028 — `PATCH /api/records/[id]`'s `details` accepts
+`qty` and the record's details panel renders the field on a configuration too.
+What is true: nothing APPORTIONS it, and the three list screens say *quantity
+not allocated* in the same words while it is null; the infill and chase lines
+say it UNCONDITIONALLY (`FinishOptionGroup` carries no `qty`), which is logged.
 
 ### A drawing dimensions everything, and four of them matter
 
