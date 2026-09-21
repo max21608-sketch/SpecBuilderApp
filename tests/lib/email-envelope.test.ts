@@ -1,7 +1,7 @@
 // Parsing an email. Synthetic fixtures only — real client mail never enters
 // this repo, the same rule as every other document.
 import { describe, expect, it } from "vitest";
-import { buildEmailModelText, parseEnvelope, stripReplyPrefixes } from "@/lib/email-envelope";
+import { buildEmailModelText, parseEnvelope, readAttachment, stripReplyPrefixes } from "@/lib/email-envelope";
 
 function eml(headers: string, body: string): Buffer {
   return Buffer.from(`${headers.trim()}\r\n\r\n${body}`, "utf8");
@@ -172,5 +172,94 @@ describe("stripReplyPrefixes", () => {
 
   it("leaves a subject whose first word merely looks like a prefix", () => {
     expect(stripReplyPrefixes("Revised drawings attached")).toBe("Revised drawings attached");
+  });
+});
+
+// ============================================================================
+// AN EMAIL WHOSE SPECIFICATION IS IN AN ATTACHED PDF — Stage 2 variance row 4.
+//
+// The body is read as it always was; the attachment is LISTED and never read,
+// because a document's kind is declared by a person and reading one is a
+// charged call. What this pins is that the list is right and that the bytes are
+// reachable by the index the list shows — the two disagreeing about which file
+// is number three would have somebody download the wrong document believing it
+// was the one they clicked.
+//
+// The PDF is four invented bytes. Nothing real, and nothing is parsed out of it.
+// ============================================================================
+describe("an email carrying attachments", () => {
+  const pdfBytes = Buffer.from("%PDF-1.7 invented", "utf8");
+  const withAttachments = Buffer.from(
+    [
+      "From: Jane Doe <jane@designers.test>",
+      "To: Project Panther <p17726@benwhistler.test>",
+      "Subject: RE: X-100 - sizes attached",
+      "Date: Wed, 16 Sep 2026 10:30:00 +0100",
+      "Message-ID: <att1@designers.test>",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="B1"',
+      "",
+      "--B1",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "Sizes are in the attached sheet. Fabric is CH-01.1.",
+      "--B1",
+      'Content-Type: application/pdf; name="X-100 sizes.pdf"',
+      "Content-Disposition: attachment; filename=\"X-100 sizes.pdf\"",
+      "Content-Transfer-Encoding: base64",
+      "",
+      pdfBytes.toString("base64"),
+      "--B1",
+      'Content-Type: message/rfc822; name="forwarded.eml"',
+      'Content-Disposition: attachment; filename="forwarded.eml"',
+      "",
+      "From: someone@else.test",
+      "Subject: the original",
+      "",
+      "the original body",
+      "--B1--",
+      "",
+    ].join("\r\n"),
+    "utf8",
+  );
+
+  it("lists each attachment with its name, type and size, and marks a forwarded message", async () => {
+    const envelope = await parseEnvelope(withAttachments);
+    // The body is still read: the attachment does not replace it.
+    expect(envelope.textBody).toContain("Fabric is CH-01.1");
+    expect(envelope.attachments).toHaveLength(2);
+    const [sheet, forwarded] = envelope.attachments;
+    expect(sheet?.filename).toBe("X-100 sizes.pdf");
+    expect(sheet?.contentType).toBe("application/pdf");
+    expect(sheet?.size).toBe(pdfBytes.byteLength);
+    expect(sheet?.isRfc822).toBe(false);
+    // A forwarded message is a different thing from a document and says so on
+    // the screen, because registering one as an intake document is wrong.
+    expect(forwarded?.isRfc822).toBe(true);
+  });
+
+  it("hands back ONE attachment's bytes, by the index the list shows", async () => {
+    const found = await readAttachment(withAttachments, 0);
+    expect(found?.meta.filename).toBe("X-100 sizes.pdf");
+    expect(found?.bytes.equals(pdfBytes)).toBe(true);
+    // The index is taken against the same parse that produced the list.
+    expect((await readAttachment(withAttachments, 1))?.meta.filename).toBe("forwarded.eml");
+  });
+
+  it("refuses an index the message does not have, rather than guessing one", async () => {
+    expect(await readAttachment(withAttachments, 2)).toBeNull();
+    expect(await readAttachment(withAttachments, -1)).toBeNull();
+    expect(await readAttachment(withAttachments, 1.5)).toBeNull();
+    // A message with no attachments has none to hand back.
+    expect(await readAttachment(plain, 0)).toBeNull();
+  });
+
+  it("never inlines an attachment into the text the model reads", async () => {
+    // A charged read of the body must not become a charged read of everything
+    // that came with it: the kind of each file is a person's declaration.
+    const { text } = buildEmailModelText(await parseEnvelope(withAttachments));
+    expect(text).toContain("Sizes are in the attached sheet");
+    expect(text).not.toContain("%PDF");
+    expect(text).not.toContain(pdfBytes.toString("base64"));
   });
 });

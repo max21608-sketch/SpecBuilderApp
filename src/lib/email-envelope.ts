@@ -122,6 +122,52 @@ export async function parseEnvelope(bytes: Buffer | Uint8Array): Promise<EmailEn
   };
 }
 
+/**
+ * ONE attachment's bytes, by the position it holds in `parseEnvelope`'s list.
+ *
+ * Stage 2 variance row 4: specification arrives as an attachment constantly —
+ * the email says "sizes attached" and the sizes are in a PDF — and until now
+ * the bytes were only reachable by downloading the whole .eml, opening it in a
+ * mail client and saving the file out by hand.
+ *
+ * THE INDEX IS TAKEN AGAINST THE SAME PARSE THAT PRODUCED THE LIST, which is
+ * why this lives here and not in the route. `email_messages.attachments_meta`
+ * says what a message carries and is what the screen renders; if the route
+ * counted the metadata and then re-parsed to fetch, the two could disagree
+ * about which file is number three, and a person would download the wrong
+ * document believing it was the one they clicked.
+ *
+ * Returns null for an index the message does not have, and for an attachment
+ * whose content this cannot make bytes of. NOTHING IS DECODED FURTHER: a .zip
+ * stays a .zip, an .eml inside an .eml stays one. A reader clever enough to
+ * open a container is a reader accepting input a stranger chose the shape of.
+ */
+export async function readAttachment(
+  bytes: Buffer | Uint8Array,
+  index: number,
+): Promise<{ meta: EmailAttachmentMeta; bytes: Buffer } | null> {
+  if (!Number.isInteger(index) || index < 0) return null;
+  const envelope = await parseEnvelope(bytes);
+  const meta = envelope.attachments[index];
+  if (!meta) return null;
+
+  // Re-parsed rather than threaded through `parseEnvelope`'s return: the
+  // envelope is stored as JSON on `email_messages` and on every staged run, and
+  // putting attachment BYTES in that shape would put a client's whole PDF into
+  // a jsonb column. `parseEnvelope`'s own comment says the bytes never enter
+  // the staged JSON, and this keeps that true.
+  const parsed = await PostalMime.parse(bytes);
+  const content = (parsed.attachments ?? [])[index]?.content;
+  const body =
+    content instanceof ArrayBuffer
+      ? Buffer.from(content)
+      : typeof content === "string"
+        ? Buffer.from(content, "base64")
+        : null;
+  if (!body) return null;
+  return { meta, bytes: body };
+}
+
 /** `RE: FW: Re: Panther` → `Panther`. Covers the English, German and French prefixes Outlook writes. */
 export function stripReplyPrefixes(subject: string): string {
   let out = subject.trim();

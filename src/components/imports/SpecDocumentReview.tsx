@@ -522,7 +522,7 @@ export default function SpecDocumentReview({
               : "That is a result, not an error — check the document is the one you meant."}
           </p>
         </Card>
-        {message && <EmailEnvelope message={message} />}
+        {message && <EmailEnvelope message={message} runId={run.id} />}
       </>,
     );
   }
@@ -600,7 +600,7 @@ export default function SpecDocumentReview({
           because a reply quotes the question it answers. */}
       {tab === "message" && (
         <>
-          {message && <EmailEnvelope message={message} />}
+          {message && <EmailEnvelope message={message} runId={run.id} />}
           <Card title={message ? "The message, as plain text" : "The document"}>
             {message?.body_text ? (
               <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap font-sans text-sm text-neutral-800">
