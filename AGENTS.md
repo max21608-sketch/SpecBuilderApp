@@ -261,6 +261,22 @@ The cell is a SUMMARY; the long-form sheet carries every original value, unit,
 slot and page, which is what makes a converted `W1900` re-checkable against a
 page that says 190.
 
+**A person's ONE qualifier for the whole cell is a record column, composed by
+the same composer** (`spec_records.dimension_note`, 0034, Stage 2 item 2.6,
+2026-09-20). Matthew: *"1250 bracket L-shaped return"*. `composeDimensionCell`
+takes it as its second argument and renders it LAST, `W1830 x D880 x H760 x
+SH440mm (1250 L-shaped return)`, so the export, the quote's DIMS line, the
+costing sheet's `Tags`, the record screen AND the checklist's Dimensions answer
+(`planAnswerFills` reads the note; `editRecordDetails` recomposes when it
+changes) all show one cell. It is NOT 0029's per-attribute placement — four
+slots off three pages could carry four of those — and it is never an
+attribute, because it has no page. One line, 200 characters, refused by the
+route in words and by a CHECK; a note with no dimensions behind it is the
+bracket alone with a `note_only` problem and writes NO answer, because a
+sentence must not stand where a measurement goes; and `hasFigure` is read off
+the figures WITHOUT the note, or "1250" in a note would confirm a TBC width.
+The check sheet prints it in the Qualifier column, apart from the figures.
+
 `Dia.` beside a `W` or `D` is a **conflict**, caught as a computed blocker and
 named on the cell — cross-row, so no check constraint can hold it and a trigger
 would fire mid-fan-out naming a row the reviewer never saw.
@@ -732,11 +748,15 @@ disagree about what is outstanding because both read `loadOutstanding` and
   lines of JSX behind a prop per caller is a copy with extra steps. Two tables
   sharing one grouping is acceptable; two groupings is not.
 
-Found by building it: **`snapshotRecords` numbers a version with no lock**, so
-two edits to two questions of one record can both claim the same number and
-the second reaches the reviewer as a 500. Every write path has it; the infill
-screen serialises its own saves so a meeting does not provoke it; the fix is
-briefed (Stage 2, coder B round 2).
+Found by building it, and FIXED the same day (`929a5b6`): **`snapshotRecords`
+numbered a version with no lock**, so two edits to two questions of one record
+could both claim the same number and the second reached the reviewer as a
+500. It now locks the records it is about to version (`for update`, in id
+order) before reading `max(snapshot_no)` — the baseline's own rule (0013), on
+the record instead of the project. The db test that holds it polls
+`pg_blocking_pids` until the second transaction is genuinely blocked; the
+first version used a fixed pause and passed with the lock deleted, because
+four round trips to London were slower than the race.
 
 ### TOE dates are calendar days, and must never become a `Date`
 
@@ -2573,6 +2593,15 @@ tabs. Five things about it.
   under the checklist; on its own tab it can simply be the page. It still loads
   only when opened, which is why its tab carries no count — a number there would
   either be wrong or force a query nobody asked for.
+- **The project-wide section folds LAST and CLOSED** (Stage 2 item 2.8 step
+  1, 2026-09-20): `requirements.section = 'Project / commercial'` — TOE
+  agreement, sales folder, the access and assembly-guide questions, identical
+  on all seventeen sheets — renders as one collapsed card titled *"Project-wide
+  — the same answer applies to every item"*, its outstanding count on the
+  toggle, and a `#q-` deep link into it opens it. Nothing about the data
+  changed; the constant lives in the leaf `src/lib/checklist-sections.ts` and a
+  pure test holds it against the seed. Step 2 — answering once per project and
+  fanning out — is built only if Matthew asks again after seeing this.
 - **`RecordDetails` reads as a summary until Edit**, like the project's. Six
   inputs and two paragraphs of help above the tabs on every visit put the tabs
   themselves below the fold. The form inside is UNCHANGED, including the rule
@@ -3317,7 +3346,11 @@ colleague's draft reading "we still need". **2.3 and 2.7** (the infill screen
 and its by-question tab) followed the same day: `/dashboard/projects/[id]/infill`,
 measured first (`npm run measure:outstanding`), lines shipped rather than the
 19 MB of questions, four gaps on two items filed under one meeting's change in
-nine seconds. Not accepted by anybody. **Blocked
+nine seconds. **2.6** (the dimension note, migration 0034 on the sandbox),
+**2.8 step 1** (the project-wide fold) and the snapshot-race fix landed at
+`9715b0f`: the demo sofa reads `W1830 x D880 x H760 x SH440mm (1250 L-shaped
+return)` on its Specs tab, its checklist and the BWS export after one Save,
+one change set and one version. Not accepted by anybody. **Blocked
 and saying so:** 2.1/2.2 (no BWS account for Max), 2.9 (a proposal for
 Matthew), 2.11 (the rate cap first, then Max's own amendment of the inbound-
 email gate above), 2.12 (another session's plan). Nothing promotes to pilot

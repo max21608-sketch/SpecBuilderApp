@@ -24,8 +24,10 @@ mark it FIXED with the date and the commit.
 
 ### A record's version number is taken without a lock, and two edits collide
 
-**Status: open — found 2026-09-20 by Coder B while driving the infill screen
-on the sandbox; the fix is briefed (Stage 2, coder B round 2).**
+**FIXED 2026-09-20, `929a5b6`** (Stage 2, Coder B round 2): `snapshotRecords`
+locks the records it versions before reading the number; a db test races two
+transactions deterministically. Found by Coder B while driving the infill
+screen on the sandbox.
 `snapshotRecords` (`src/lib/record-snapshot.ts`) reads `max(snapshot_no)` for
 a record and inserts the next number with no lock on the record; `editAnswer`
 locks the ANSWER row only. Two edits to two different questions on one item —
@@ -419,7 +421,7 @@ Grouped because each is a line or two, not because they are one problem.
    sandbox record that showed `1 · COM 1`.
 10. **Project-level questions are asked inside every item's checklist.** TOE
     agreement, sales folder and similar appear on each furniture line. Matthew:
-    *"you do that once for the project presumably?"* (40:22)
+    *"you do that once for the project presumably?"* (40:22) **Step 1 FIXED 2026-09-20, `9715b0f`** (Stage 2 item 2.8): the section folds last and closed on every checklist; answering once per project (step 2) waits for Matthew to ask again.
 11. **There is no visible route from a confirmed intake to reviewing each line.**
     Matthew asked *"how do you get to this page? At what point in the workflow do
     you come to this?"* and, when told email intake would handle it, correctly
