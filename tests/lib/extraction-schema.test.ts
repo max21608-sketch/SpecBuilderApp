@@ -110,3 +110,104 @@ describe("output schemas", () => {
     expect(parsed.success && parsed.data.items[0]?.materials[0]?.materialCodeRaw).toBe("WD-01");
   });
 });
+
+// ============================================================================
+// NEVER FAIL A PAID RUN OVER A HINT — Stage 2 variance row 2 (plan §6.10.b).
+//
+// One test per FIELD CLASS, because the audit that produced them went field by
+// field: a string where a list belongs, a number where a string belongs, an
+// unknown enum value, a null where an object belongs. The finding was that
+// every scalar and every enum in these schemas already degrades to null or to
+// the cautious enum — and that six ARRAYS did not, each of them the `itemCodes`
+// shape that has already cost one charged call.
+//
+// A malformed field must leave ONE amber row in front of a reviewer, never a
+// terminal `failed` on a document somebody has paid to read.
+// ============================================================================
+describe("a malformed optional field never fails a paid run", () => {
+  const item = (overrides: Record<string, unknown> = {}) => ({ itemCodeRaw: "X-1", itemNameRaw: "Sofa", page: 1, ...overrides });
+  const drawings = (overrides: Record<string, unknown>) =>
+    DrawingsOutput.safeParse({ items: [item(overrides)], codeGroups: [], documentNotes: null });
+
+  it("a NUMBER where a string belongs becomes null, on every text field", () => {
+    const parsed = drawings({ itemNameRaw: 7, dimensions: [{ labelRaw: 7, valueRaw: "1800", unitRaw: 5, slotEvidence: {} }] });
+    expect(parsed.success).toBe(true);
+    const dimension = parsed.success ? parsed.data.items[0]?.dimensions[0] : null;
+    expect(dimension?.labelRaw).toBeNull();
+    expect(dimension?.unitRaw).toBeNull();
+    expect(dimension?.slotEvidence).toBeNull();
+    // The figure itself survives: it is the only thing on the row worth having.
+    expect(dimension?.valueRaw).toBe("1800");
+  });
+
+  it("an UNKNOWN ENUM value becomes the cautious answer, never a confident one", () => {
+    const parsed = drawings({ confidence: "very", dimensions: [{ labelRaw: "W", valueRaw: "1", slot: "girth" }] });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items[0]?.confidence).toBeNull();
+    // An unrecognised slot places NOTHING, so the label vocabulary decides.
+    expect(parsed.success && parsed.data.items[0]?.dimensions[0]?.slot).toBeNull();
+
+    // `configurations` is the value that turns one item into several BWS jobs,
+    // so an unrecognised relationship must land on the one that asks a person.
+    const grouped = DrawingsOutput.safeParse({
+      items: [item()],
+      codeGroups: [{ itemCodes: ["S-100"], pages: [1], relationship: "maybe", evidence: null }],
+      documentNotes: null,
+    });
+    expect(grouped.success && grouped.data.codeGroups?.[0]?.relationship).toBe("unclear");
+
+    const email = ExtractionOutput.safeParse({ proposals: [{ valueRaw: "x", changeIntent: "maybe" }], documentNotes: null });
+    expect(email.success && email.data.proposals[0]?.changeIntent).toBeNull();
+  });
+
+  it("a NULL where an object belongs drops that entry and keeps its siblings", () => {
+    const parsed = drawings({
+      dimensions: [null, { labelRaw: "W", valueRaw: "1900" }],
+      viewRegions: [null, { viewType: "front", page: 1, bbox: [0, 0, 1, 1] }],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items[0]?.dimensions).toEqual([{ labelRaw: "W", valueRaw: "1900" }]);
+  });
+
+  it("a STRING where a list of strings belongs is read as a one-entry list", () => {
+    // The `itemCodes` precedent, which cost a charged call on a real document.
+    const parsed = drawings({ dimensionsCombinedRaw: "80 x 70 x 90 cm", notesRaw: "REMARKS: verify on site" });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items[0]?.dimensionsCombinedRaw).toEqual(["80 x 70 x 90 cm"]);
+    expect(parsed.success && parsed.data.items[0]?.notesRaw).toEqual(["REMARKS: verify on site"]);
+    // And a number inside one keeps its digits rather than killing the run.
+    const numeric = drawings({ notesRaw: [5] });
+    expect(numeric.success && numeric.data.items[0]?.notesRaw).toEqual(["5"]);
+  });
+
+  it("a STRING where a list of observations belongs becomes ONE unlabelled observation", () => {
+    // Nothing is invented: the value is kept and no slot, unit or field is
+    // claimed, which is the shape the card already renders as `Dimension 1`.
+    const asString = drawings({ dimensions: "1800", materials: "Dark tinted oak" });
+    expect(asString.success).toBe(true);
+    expect(asString.success && asString.data.items[0]?.dimensions).toEqual([{ labelRaw: null, valueRaw: "1800" }]);
+    expect(asString.success && asString.data.items[0]?.materials).toEqual([
+      { labelRaw: null, valueRaw: "Dark tinted oak", materialCodeRaw: null },
+    ]);
+
+    const flat = ExtractionOutput.safeParse({ proposals: "the seat height is 445mm", documentNotes: null });
+    expect(flat.success && flat.data.proposals[0]?.valueRaw).toBe("the seat height is 445mm");
+    expect(flat.success && flat.data.proposals[0]?.attributeRaw).toBeNull();
+
+    const preamble = PreambleOutput.safeParse({ notes: "Moisture content 8-12%", documentNotes: null });
+    expect(preamble.success && preamble.data.notes[0]?.bodyRaw).toBe("Moisture content 8-12%");
+  });
+
+  it("still refuses the three failures that are not hints", () => {
+    // An ABSENT required array is a failure to answer, not a thin answer, and
+    // defaulting it to empty would report "the document says nothing".
+    expect(ExtractionOutput.safeParse({ documentNotes: null }).success).toBe(false);
+    expect(PreambleOutput.safeParse({ documentNotes: null }).success).toBe(false);
+    // An ITEM is a container, not an observation: a bare string could only
+    // become one by naming it something.
+    expect(DrawingsOutput.safeParse({ items: "S-100", documentNotes: null }).success).toBe(false);
+    // An over-long array still fails loudly rather than staging a 121-dimension
+    // page as a page with none.
+    expect(drawings({ dimensions: Array.from({ length: MAX_PER_ITEM + 1 }, () => ({ labelRaw: "W", valueRaw: "1" })) }).success).toBe(false);
+  });
+});

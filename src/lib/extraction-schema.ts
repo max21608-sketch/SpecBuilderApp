@@ -234,6 +234,59 @@ export const EMAIL_TOOL = {
 const nullableText = (max: number) =>
   z.string().max(max).nullable().catch(null).default(null);
 
+// ============================================================================
+// A LIST THE MODEL WROTE AS A BARE VALUE — THE `itemCodes` PRECEDENT, APPLIED
+// EVERYWHERE IT COSTS A CHARGED CALL.
+//
+// `itemCodes` came back as a string on one real document, `z.array()` refused
+// it, and a read that had already been PAID FOR went terminal with "Expected
+// array, received string" — over a grouping hint. The lesson was written down
+// beside that one field and nowhere else, so an audit of every optional field
+// (Stage 2 variance row 2) found five more arrays with the same shape and the
+// same cost: `dimensions`, `materials`, `dimensionsCombinedRaw`, `notesRaw`,
+// and the flat `proposals` / `notes` lists. Every scalar and every enum in
+// these schemas already degrades to null; the arrays did not.
+//
+// THE RULE, AND WHERE IT STOPS. A bare value is read as a ONE-ENTRY LIST
+// wherever the element can hold it WITHOUT INVENTING ANYTHING: a list of
+// strings holds it as its own entry, and a list of observations holds it as the
+// VALUE of an unlabelled one — which is a shape both screens already render
+// (`Dimension 3`, a proposal with no attribute), so the reviewer sees the
+// wording with no claim attached to it. That is the flag: a row nobody can
+// mistake for a resolved reading.
+//
+// `items` is deliberately NOT lenient. A drawing item is a CONTAINER — a code,
+// a page and the observations under it — not an observation, so a string could
+// only become one by naming it something, and `items` being a string is a
+// failure to answer the tool rather than one malformed hint inside an answer.
+// The same goes for an over-long array, which still fails loudly: staging a
+// 41-dimension page as a page with none is the silent loss the bound exists to
+// prevent.
+//
+// A NULL ELEMENT IS DROPPED, because there is nothing in it to keep. Anything
+// else that is not the element's shape stays terminal and reported.
+// ============================================================================
+function bareValuesAsList(wrap: (scalar: string) => unknown) {
+  return (value: unknown): unknown => {
+    // Passed through untouched, so a REQUIRED array is still required: turning
+    // an absent `proposals` into an empty one would report "the document says
+    // nothing" for a model that failed to answer at all.
+    if (value === undefined || value === null) return value;
+    const list = Array.isArray(value) ? value : [value];
+    return list
+      .filter((entry) => entry !== null && entry !== undefined)
+      .map((entry) =>
+        typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean"
+          ? wrap(String(entry))
+          : entry,
+      );
+  };
+}
+
+/** A list of strings that survives being written as one string. */
+const looseTextList = (max: number, maxItems: number) =>
+  z.preprocess(bareValuesAsList((scalar) => scalar), z.array(z.string().max(max)).max(maxItems)).default([]);
+
 export const RawProposal = z.object({
   refRaw: nullableText(MAX_SHORT),
   attributeRaw: nullableText(MAX_SHORT),
@@ -264,7 +317,14 @@ export const RawProposal = z.object({
 export type RawProposal = z.infer<typeof RawProposal>;
 
 export const ExtractionOutput = z.object({
-  proposals: z.array(RawProposal).max(MAX_PROPOSALS),
+  // Lenient about SHAPE, still required to be present. A bare string becomes
+  // one observation carrying it as the value, with no attribute and no ref —
+  // which the review screen already renders as "choose which record and
+  // question this belongs to".
+  proposals: z.preprocess(
+    bareValuesAsList((scalar) => ({ valueRaw: scalar })),
+    z.array(RawProposal).max(MAX_PROPOSALS),
+  ),
   documentNotes: nullableText(MAX_NOTE),
 });
 
@@ -740,16 +800,28 @@ export const RawDrawingItem = z.object({
   itemCodeRaw: nullableText(MAX_SHORT),
   itemNameRaw: nullableText(MAX_SHORT),
   page: z.number().int().min(1).max(100_000).nullable().catch(null).default(null),
-  // NOT `.catch([])`: that turns an over-long or malformed array into an EMPTY
-  // one, so a page with 41 dimensions would stage as a page with none and
-  // nothing anywhere would say so. A schema failure is terminal and reported.
-  dimensions: z.array(RawDrawingDimension).max(MAX_PER_ITEM).default([]),
-  materials: z.array(RawDrawingMaterial).max(MAX_PER_ITEM).default([]),
-  // Same `.default([])` discipline as the arrays above, and for the same
-  // reason: an over-long combined list must fail the extraction loudly rather
-  // than stage a page as having no overall dimension at all.
-  dimensionsCombinedRaw: z.array(z.string().max(MAX_VALUE)).max(MAX_PER_ITEM).default([]),
-  notesRaw: z.array(z.string().max(MAX_VALUE)).max(MAX_PER_ITEM).default([]),
+  // STILL NOT `.catch([])`: that turns an over-long array into an EMPTY one, so
+  // a page with 41 dimensions would stage as a page with none and nothing
+  // anywhere would say so. A schema failure is terminal and reported.
+  //
+  // What `bareValuesAsList` adds is the other half of that trade: a figure the
+  // model wrote as a bare string, or one bad entry beside forty good ones, no
+  // longer kills a charged read. The figure is kept, unlabelled, and the
+  // reviewer reads it off the card.
+  dimensions: z
+    .preprocess(
+      bareValuesAsList((scalar) => ({ labelRaw: null, valueRaw: scalar })),
+      z.array(RawDrawingDimension).max(MAX_PER_ITEM),
+    )
+    .default([]),
+  materials: z
+    .preprocess(
+      bareValuesAsList((scalar) => ({ labelRaw: null, valueRaw: scalar, materialCodeRaw: null })),
+      z.array(RawDrawingMaterial).max(MAX_PER_ITEM),
+    )
+    .default([]),
+  dimensionsCombinedRaw: looseTextList(MAX_VALUE, MAX_PER_ITEM),
+  notesRaw: looseTextList(MAX_VALUE, MAX_PER_ITEM),
   confidence: z.enum(["high", "medium", "low"]).nullable().catch(null).default(null),
   // `.catch([])` HERE, unlike the observation arrays above, and the difference
   // is what each one costs when it goes wrong. Losing an over-long dimensions
@@ -770,6 +842,11 @@ export type RawDrawingMaterial = z.infer<typeof RawDrawingMaterial>;
 export type RawDrawingObservation = z.infer<typeof RawDrawingObservation>;
 
 export const DrawingsOutput = z.object({
+  // TERMINAL ON PURPOSE, and the one array `bareValuesAsList` is not applied
+  // to. An item is a container — a code, a page and the observations under it —
+  // so a bare string could only become one by naming it something, and `items`
+  // arriving as a string is a failure to answer the tool rather than one
+  // malformed hint inside an answer.
   items: z.array(RawDrawingItem).max(MAX_DRAWING_ITEMS),
   // `.catch([])` and optional, unlike `items`: a run staged before 2026-09-18
   // has none, and a malformed group must leave the grouping unstated rather
@@ -852,7 +929,13 @@ export const RawPreambleNote = z.object({
 export type RawPreambleNote = z.infer<typeof RawPreambleNote>;
 
 export const PreambleOutput = z.object({
-  notes: z.array(RawPreambleNote).max(MAX_PREAMBLE_NOTES),
+  // A bare string becomes one note carrying it as the BODY, with no topic and
+  // no title — the preamble review's own shape for a paragraph read under no
+  // heading. Required to be present, for the reason `proposals` is.
+  notes: z.preprocess(
+    bareValuesAsList((scalar) => ({ bodyRaw: scalar })),
+    z.array(RawPreambleNote).max(MAX_PREAMBLE_NOTES),
+  ),
   documentNotes: nullableText(MAX_NOTE),
 });
 
