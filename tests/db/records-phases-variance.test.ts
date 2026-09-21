@@ -27,6 +27,9 @@ import { it, expect, beforeAll, afterAll, describe } from "vitest";
 import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { loadOutstanding, loadUncategorisedRecords } from "@/lib/chase-drafts";
+import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
+import { BWS_EXPORT_COLUMNS, composeRow } from "@/lib/bws-export";
+import { CHECK_SHEET_HEADER, composeCheckSheet } from "@/lib/export-check-sheet";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -131,6 +134,45 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
       expect(levels.rows[0].level).toBe("simple");
       const outstanding = await loadOutstanding(projectId, { lineIds: [uncategorisedId] });
       expect(outstanding).toEqual([]);
+    });
+  });
+
+  describe("a record with no client ref at all (row d3)", () => {
+    it("exports a BLANK Client Code, never an invented one", async () => {
+      // The client ref is the pre-sale primary key, and the record carrying
+      // none is a real shape: a line typed by hand, or a bill whose code column
+      // was empty. A composed stand-in — the record number, the description,
+      // the run's name — would be a code the client has never heard of
+      // arriving in their BWS job.
+      const loaded = await loadExportScope(projectId, runId);
+      if (isScopeFailure(loaded)) throw new Error(loaded.error);
+      const column = BWS_EXPORT_COLUMNS.findIndex((entry) => entry.name === "Client Code");
+      const rows = new Map(
+        loaded.scope.records.map((record) => [
+          record.id,
+          composeRow(loaded.scope, record, loaded.scope.attributes, loaded.scope.answers),
+        ]),
+      );
+      expect(rows.get(ordinaryId)?.[column]).toBe("__QA S-100");
+      expect(rows.get(uncategorisedId)?.[column]).toBe("");
+    });
+
+    it("is LISTED by the check sheet, blank cell and all", async () => {
+      // The blank cell is the failure most worth catching — the pack states a
+      // code and the file lost it — so a sheet that listed only the populated
+      // cells could not find the thing it exists to find. Its Client code
+      // column is empty and its Verdict column is empty, which is the whole
+      // point: the reviewer decides whether the pack agrees.
+      const loaded = await loadExportScope(projectId, runId);
+      if (isScopeFailure(loaded)) throw new Error(loaded.error);
+      const sheet = composeCheckSheet(loaded.scope);
+      const recordColumn = CHECK_SHEET_HEADER.indexOf("Record");
+      const codeColumn = CHECK_SHEET_HEADER.indexOf("Client code");
+      const verdictColumn = CHECK_SHEET_HEADER.indexOf("Verdict");
+      const mine = sheet.rows.filter((row) => row[recordColumn]?.endsWith("-002"));
+      expect(mine.length).toBeGreaterThan(0);
+      expect(mine.every((row) => row[codeColumn] === "")).toBe(true);
+      expect(mine.every((row) => row[verdictColumn] === "")).toBe(true);
     });
   });
 });

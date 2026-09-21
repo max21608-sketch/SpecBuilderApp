@@ -194,6 +194,28 @@ function Captured({
   );
 }
 
+/**
+ * A record that carries no client ref at all — variance matrix row d3.
+ *
+ * SAID IN WORDS, not as an em dash. The client ref is the pre-sale primary key:
+ * it is what the BOQ, the FF&E schedule and every email use, and it is how the
+ * BWS job will be found later. A record without one exports a BLANK Client Code
+ * — correctly, because inventing one would be worse — so this cell is the only
+ * place anybody would notice, and an em dash there reads as "nothing to say"
+ * beside the columns that genuinely have nothing to say. The same argument as
+ * `quantity not given` on the next column but one.
+ */
+function NoClientRef() {
+  return (
+    <span
+      className="font-sans text-xs text-amber-800"
+      title="No client ref on this record, so the export ships a blank Client Code. Nothing is invented."
+    >
+      no client ref
+    </span>
+  );
+}
+
 /** What the tiles above the table can narrow it to. Null lists everything. */
 export type Focus = null | "tgq" | "waiting" | "no_category" | "no_level" | "quotable";
 
@@ -768,13 +790,13 @@ export default function SpecTable({
                       >
                         {isConfiguration ? (
                           <span className="text-neutral-500">
-                            {record.parent_refs ?? record.refs ?? "—"}{" "}
+                            {record.parent_refs ?? record.refs ?? <NoClientRef />}{" "}
                             {/* THE LETTER, coloured the way the review card
                                 colours it — A is sky on every screen. */}
                             <b className={letterColour(record.variant_label!)}>{record.variant_label}</b>
                           </span>
                         ) : (
-                          (record.refs ?? "—")
+                          (record.refs ?? <NoClientRef />)
                         )}
                       </Td>
                       <Td className={isConfiguration ? "pl-6" : ""}>

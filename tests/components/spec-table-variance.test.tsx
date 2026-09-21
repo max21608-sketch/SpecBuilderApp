@@ -201,3 +201,43 @@ describe("a levelless record on the fallback half of TGQ (row d2)", () => {
     expect(within(row).getByText("not set")).toBeTruthy();
   });
 });
+
+describe("a record with no client ref (row d3)", () => {
+  // The export ships a blank Client Code for it — correct, and invisible in a
+  // 109-column file. The phase table is where a person would notice, and an em
+  // dash there reads as "nothing to say" beside the columns that genuinely
+  // have nothing to say.
+  it("says so in words rather than printing an em dash", async () => {
+    mountWith([record({ item_description: "Typed by hand", refs: null })]);
+    const row = await rowFor("Typed by hand");
+    expect(within(row).getByText("no client ref")).toBeTruthy();
+    expect(within(row).getByTitle(/blank Client Code/i)).toBeTruthy();
+  });
+
+  it("leaves a record that has one alone", async () => {
+    mountWith([record({ item_description: "Bench", refs: "S-402" })]);
+    const row = await rowFor("Bench");
+    expect(within(row).getByText("S-402")).toBeTruthy();
+    expect(within(row).queryByText("no client ref")).toBeNull();
+  });
+
+  it("says it on a configuration too, whose ref is read through its bill line", async () => {
+    // A configuration carries no ref of its own, deliberately — it shows the
+    // parent's. If the parent has none either, the line has none, and the
+    // export reads through the parent for exactly the same reason.
+    mountWith([
+      record({ item_description: "Armchair", refs: null, variant_count: "1", id: "parent-1" }),
+      record({
+        item_description: "Armchair",
+        refs: null,
+        parent_refs: null,
+        parent_id: "parent-1",
+        variant_label: "A",
+        qty: null,
+      }),
+    ]);
+    const rows = await screen.findAllByText("Armchair");
+    const configuration = rows[rows.length - 1].closest("tr")!;
+    expect(within(configuration).getByText("no client ref")).toBeTruthy();
+  });
+});
