@@ -24,7 +24,7 @@
 // in a file every db test imports; they will be replaced by it.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, describe, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { loadOutstanding, loadUncategorisedRecords } from "@/lib/chase-drafts";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
@@ -62,7 +62,7 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90300', '__QA Records variance', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90300")}', '__QA Records variance', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
     const run = await client.query(

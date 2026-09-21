@@ -25,7 +25,7 @@
 // in something every db test imports; they will be replaced by it.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, describe, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { loadUnlinkedFinishCodes, normaliseFinishCode } from "@/lib/finishes";
 import { sql } from "@/lib/db";
@@ -68,13 +68,13 @@ describeIfDb("the finishes library, against the codes a client actually writes",
     projectId = (
       await client.query(
         `insert into projects (bws_project_number, name, client, created_by, updated_by)
-         values ('__QA P90301', '__QA Finishes variance', '__QA Example Client', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P90301")}', '__QA Finishes variance', '__QA Example Client', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
     otherProjectId = (
       await client.query(
         `insert into projects (bws_project_number, name, created_by, updated_by)
-         values ('__QA P90302', '__QA Finishes variance, other project', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P90302")}', '__QA Finishes variance, other project', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
     runId = (
