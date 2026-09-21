@@ -20,8 +20,37 @@
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb } from "./db-tier";
 import pg from "pg";
-import { parseBoqSheets, BOQ_SCHEMA_VERSION, type BoqLine } from "@/lib/boq-import";
-import { noQtyColumn } from "../fixtures/boq-shapes";
+import { parseBoqSheets, BOQ_SCHEMA_VERSION, assertBoqDocument, type BoqLine } from "@/lib/boq-import";
+import { noQtyColumn, twoRowHeader } from "../fixtures/boq-shapes";
+import { bill300Workbook, twoRowHeaderWorkbook } from "../fixtures/build-boq";
+
+/**
+ * The document store, stubbed to hand back a synthetic workbook.
+ *
+ * A BOQ registration READS the bytes — that is the whole of it, since a bill is
+ * parsed by code and no model is ever involved — so the only thing standing
+ * between this test and the real route is the store. `readTrustedBlob` is
+ * replaced and everything else in `blob-source` is the real thing, including
+ * the pathname scoping.
+ */
+const stored: { bytes: Buffer; filename: string } = { bytes: Buffer.alloc(0), filename: "" };
+vi.mock("@/lib/blob-source", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/blob-source")>();
+  return {
+    ...actual,
+    readTrustedBlob: async (pathname: string) => ({
+      bytes: stored.bytes,
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      size: stored.bytes.byteLength,
+      pathname,
+    }),
+    headTrustedBlob: async (pathname: string) => ({
+      pathname,
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      size: stored.bytes.byteLength,
+    }),
+  };
+});
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -125,6 +154,23 @@ describeIfDb("BOQ variance, through the confirm", () => {
     return POST(post({}), params(runId));
   };
 
+  /** Register a synthetic workbook as a bill, through the REAL route. */
+  async function register(bytes: Buffer, filename: string, batchId: string): Promise<Response> {
+    stored.bytes = bytes;
+    stored.filename = filename;
+    const { POST } = await import("@/app/api/imports/route");
+    return POST(
+      post({
+        projectId,
+        importType: "boq",
+        pathname: `projects/${projectId}/uploads/${filename}`,
+        filename,
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        batchId,
+      }),
+    );
+  }
+
   // -------------------------------------------------------------------------
   // ROW 2 — NO QUANTITY COLUMN. Expected: FLAGS, with `qty` null. Never 1.
   // -------------------------------------------------------------------------
@@ -165,5 +211,77 @@ describeIfDb("BOQ variance, through the confirm", () => {
       recordId,
     ]);
     expect(answers.rows[0].n).toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // ROW 9 — TWO BILLS IN ONE PACK. Expected: FLAGS. Both stage, nothing pairs.
+  // -------------------------------------------------------------------------
+  it("stages both bills of one pack, and pairs neither", async () => {
+    const batch = (
+      await client.query(
+        `insert into intake_batches (project_id, label, created_by, updated_by)
+         values ($1, '__QA two bills', 'qa', 'qa') returning id`,
+        [projectId],
+      )
+    ).rows[0].id;
+
+    // Two real workbooks, deliberately DIFFERENT bills — one 300 lines, one
+    // three — because two registrations of identical bytes would also pass a
+    // route that quietly merged them.
+    const first = await register(await bill300Workbook(), "__QA bill rev A.xlsx", batch);
+    const second = await register(await twoRowHeaderWorkbook(), "__QA bill rev B.xlsx", batch);
+    expect([first.status, second.status]).toEqual([201, 201]);
+
+    const runs = await client.query(
+      `select id, status, parsed from intake_runs
+        where batch_id = $1 and source_kind = 'boq_xlsx' order by created_at`,
+      [batch],
+    );
+    expect(runs.rows).toHaveLength(2);
+    expect(runs.rows.map((row) => row.status)).toEqual(["parsed", "parsed"]);
+
+    // NOTHING IS PAIRED. `replacesRunId` is what makes a bill a revision of a
+    // phase, it is set by the reviewer on the bill's own screen, and neither
+    // of these carries one — so both would confirm as new phases, which is
+    // what the pack screen now says out loud.
+    for (const row of runs.rows) {
+      const doc = assertBoqDocument(row.parsed);
+      expect(doc.sheets.length).toBeGreaterThan(0);
+      for (const sheet of doc.sheets) expect(sheet.replacesRunId ?? null).toBeNull();
+    }
+
+    // And each read its own bill rather than the other's.
+    const lineCounts = runs.rows.map((row) => assertBoqDocument(row.parsed).sheets[0]?.lines.length);
+    expect(lineCounts).toEqual([300, 3]);
+    // The second bill's two-row header survived the round trip through the
+    // store and the route, not only through the parser.
+    expect(assertBoqDocument(runs.rows[1]!.parsed).sheets[0]?.headerRows).toBe(2);
+
+    await client.query(`delete from intake_runs where batch_id = $1`, [batch]);
+    await client.query(`delete from intake_batches where id = $1`, [batch]);
+  });
+
+  it("refuses a bill that is not a spreadsheet, and stages nothing", async () => {
+    // Row 5's other half, through the real route: the refusal arrives before
+    // anything is parsed, and it carries the way out.
+    const { POST } = await import("@/app/api/imports/route");
+    const res = await POST(
+      post({
+        projectId,
+        importType: "boq",
+        pathname: `projects/${projectId}/uploads/__QA bill.xls`,
+        filename: "__QA bill.xls",
+        contentType: "application/vnd.ms-excel",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("Save As .xlsx");
+    const runs = await client.query(
+      `select count(*)::int as n from intake_runs where project_id = $1 and source_kind = 'boq_xlsx'`,
+      [projectId],
+    );
+    // Only the one row 2 staged. A refused bill leaves no run behind at all.
+    expect(runs.rows[0].n).toBe(1);
   });
 });
