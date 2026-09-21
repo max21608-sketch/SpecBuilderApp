@@ -22,15 +22,22 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-21
 
-### The tiles are taller than they need to be
+### The tiles are taller than they need to be — EVERYWHERE, not just the overview
 
 **Status: open. A CHANGE ASKED FOR**, in the same breath as the entry below
 and shippable with it or on its own. Max: *"you could just display line items
 503 and they can still have the same functionality, but you don't need to
-actually have 'filter to these' displayed."*
+actually have 'filter to these' displayed"*, and then, on the phase screen:
+*"the same goes for the height of the boxes here and in general — can they be
+shorter."* **It is app-wide, every `StatTile` strip**, not the two screens
+these shots happen to show.
 
 The label, the number, the sub-line and a blue *filter to these →* / *see them
-all →* / *open the library →* line make each tile four rows tall.
+all →* / *show only these →* / *open the library →* line make each tile four
+rows tall. On the phase screen (`DEMO-300 · MAIN RUN - VE`, screenshot) that
+strip is five tiles — TGQ, Waiting on a reply, No category, No level, Ready to
+quote — and it pushes the search, the three filters and the table's own header
+below the fold on a full-width monitor.
 
 **The link line costs nothing to remove.** `StatTile` renders the whole tile
 as a `<Link>` (`StatTile.tsx:87`); the `action` prop is only the blue line at
@@ -40,7 +47,11 @@ the spec table already filtered to it."*
 
 Worth deciding at the same time, since it is the other row: whether the
 sub-line stays (*"3 phases"*, *"10841 unlooked · 0 TBC"*, *"2 codes not in the
-library"*). The entry below may change what those say anyway.
+library"*). The entry below may change what those say anyway — and note that
+**the phase screen's strip already carries the item count the entry below
+asks for**, as exactly that sub-line: `TGQ 1,875` over *"102 of 118 items"*.
+Whichever of the two numbers survives, that tile is the one that already holds
+both.
 
 ### The overview's tiles count QUESTIONS, and at 503 lines the numbers stop meaning anything
 
