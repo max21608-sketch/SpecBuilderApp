@@ -47,6 +47,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                        'sourceKind', r.source_kind,
                        'documentKind', r.document_kind,
                        'status', r.status,
+                       -- Deferred by the in-flight cap, not by a person: the
+                       -- pair (no attempt, a live deadline) is written by
+                       -- nothing else, because openAttempt always writes both.
+                       'waitingForSlot', (r.status = 'pending' and r.attempt_id is null
+                                          and r.attempt_deadline_at > now()),
                        'error', r.error,
                        'filename', a.filename,
                        'createdAt', r.created_at,

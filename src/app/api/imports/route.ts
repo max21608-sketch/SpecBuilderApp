@@ -81,6 +81,7 @@ import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
+import { takeReadSlot, deferRead, WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
 import { recordMessage } from "@/lib/email-ingest";
 import { assignMessage } from "@/lib/email-registration";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
@@ -202,7 +203,13 @@ async function registerEmail(input: Registered, actor: string): Promise<Response
         sourcePreserved: true,
         // Reported rather than thrown: the file is stored and the rows exist
         // either way, and the review screen renders the failure with a Retry.
-        autoRead: assigned.dispatchError ? { dispatched: false, error: assigned.dispatchError } : { dispatched: true },
+        // A read the cap deferred is `waiting`, never `error` — it needs
+        // nobody, where a dispatch failure needs a Retry.
+        autoRead: assigned.dispatchError
+          ? { dispatched: false, error: assigned.dispatchError }
+          : assigned.waitingForSlot
+            ? { dispatched: false, waiting: true, note: WAITING_FOR_SLOT_MESSAGE }
+            : { dispatched: true },
         // What the HEADERS would have decided, so a message uploaded against
         // the wrong project is visible rather than silent.
         routing: {
@@ -280,6 +287,17 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
       `;
       if (!run[0]) throw new Error("the import was not recorded");
 
+      // AT MOST THREE OF ONE PACK ARE READ AT ONCE. Over the cap the document
+      // is still stored and still registered — it is marked as a read that has
+      // been promised and not started, and the worker that frees a slot starts
+      // it. Refusing the upload instead would tell somebody their file did not
+      // arrive when it did.
+      const scope = { projectId: input.projectId, batchId: input.batchId ?? null };
+      if (!(await takeReadSlot(txn, scope))) {
+        await deferRead(txn, String(run[0].id), actor);
+        return { importId: String(run[0].id), attemptId: null, reused: false as const };
+      }
+
       // The attempt is opened in the SAME transaction as the insert, so a run
       // can never be committed at `pending` with a message already published
       // against it. The publish itself is below, after the commit.
@@ -295,6 +313,27 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
     // one of four deliveries.
     if (result.reused) {
       return json({ ok: true, importId: result.importId, reused: true, sourcePreserved: true }, 200);
+    }
+
+    // Deferred by the cap. Nothing to publish; the document is registered and
+    // is read when one of the three in flight finishes.
+    //
+    // `waiting` and NOT `error`, though both mean "dispatched: false". The
+    // upload screen paints an error red, and this is the ordinary outcome for
+    // eight documents of an eleven-document pack — eight red rows for a pack
+    // that is working correctly is the lesson about painting a blocked thing
+    // red, applied to an upload.
+    if (!result.attemptId) {
+      return json(
+        {
+          ok: true,
+          importId: result.importId,
+          reused: false,
+          sourcePreserved: true,
+          autoRead: { dispatched: false, waiting: true, note: WAITING_FOR_SLOT_MESSAGE },
+        },
+        201,
+      );
     }
 
     // Committed. Now publish — outside the transaction, because a queue publish

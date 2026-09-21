@@ -90,6 +90,12 @@ export type ReviewProgress = {
   status: string;
   /** Null or absent where the payload does not carry one, which is not zero. */
   pendingReview?: number | null;
+  /**
+   * `pending` because the pack is already reading as many as it may, rather
+   * than because nobody has asked for it. Two different sentences: the first
+   * needs nobody, the second is a button somebody has to press.
+   */
+  waitingForSlot?: boolean | null;
 };
 
 /**
@@ -105,15 +111,25 @@ export function hasPendingReview(run: ReviewProgress): boolean {
   return typeof run.pendingReview === "number" && run.pendingReview > 0;
 }
 
+/**
+ * A document the cap deferred. `pending` covers two states now and they read
+ * differently: "Not read yet" is a document waiting for a person, and this one
+ * is waiting for a slot and will start on its own.
+ */
+export const WAITING_FOR_SLOT_LABEL = "Waiting for a slot";
+
 /** The label for a document's state, with its count where there is one. */
 export function documentReviewLabel(run: ReviewProgress): string {
   if (hasPendingReview(run)) return `${run.pendingReview} to review`;
+  if (run.status === "pending" && run.waitingForSlot) return WAITING_FOR_SLOT_LABEL;
   return intakeStatusLabel(run.status);
 }
 
 /** Its tone: anything outstanding needs a person, whatever the status says. */
 export function documentReviewTone(run: ReviewProgress): Tone {
   if (hasPendingReview(run)) return "warn";
+  // Blue, like `queued`: the app is going to do this one and nobody is wanted.
+  if (run.status === "pending" && run.waitingForSlot) return "info";
   return intakeStatusTone(run.status);
 }
 
@@ -137,6 +153,8 @@ export type PackTally = {
   failed: number;
   /** `pending`: registered, never read. Rare, and it is not progress. */
   notRead: number;
+  /** `pending` because the pack is at its in-flight cap. It starts on its own. */
+  waitingForSlot: number;
 };
 
 /**
@@ -170,9 +188,15 @@ export function packTally(runs: ReviewProgress[]): PackTally {
       else if (isIntakeRunWorking(run.status)) acc.reading += 1;
       else if (run.status === "failed") acc.failed += 1;
       else if (hasPendingReview(run) || run.status === "parsed") acc.toReview += 1;
+      // A document waiting for a slot is NOT "not read yet": the app is going
+      // to read it and nobody is wanted. Counted apart rather than folded into
+      // either neighbour, because "3 still being read · 8 not read yet" over a
+      // pack that is working through itself sends somebody looking for a Read
+      // button they must not press.
+      else if (run.status === "pending" && run.waitingForSlot) acc.waitingForSlot += 1;
       else if (run.status === "pending") acc.notRead += 1;
       return acc;
     },
-    { total: 0, reviewed: 0, toReview: 0, reading: 0, failed: 0, notRead: 0 },
+    { total: 0, reviewed: 0, toReview: 0, reading: 0, failed: 0, notRead: 0, waitingForSlot: 0 },
   );
 }

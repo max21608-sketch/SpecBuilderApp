@@ -67,6 +67,33 @@ export const MAX_DELIVERIES = 4;
 export const ATTEMPT_DEADLINE_HOURS = 24;
 
 /**
+ * How many charged reads of ONE pack may be in flight at once.
+ *
+ * ============================================================================
+ * Registration dispatches a read per specification document, so an eleven-file
+ * pack was eleven concurrent workers and eleven concurrent model calls, with
+ * nothing anywhere that sleeps. An Anthropic 429 is retryable and burns one of
+ * only four deliveries, so a rate-limited pack could reach `failed` — after
+ * paying for the calls that did land. Packs of thirty are expected.
+ *
+ * THE ARITHMETIC THIS BUYS, and its cost. A pack of N documents works through
+ * in at most ceil(N / 3) waves, each bounded by MAX_DURATION_SECONDS: eleven
+ * documents is 4 × 300s = 20 minutes in the worst case where every read uses
+ * its whole budget, against 5 minutes unbounded. Real reads finish in well
+ * under a minute, so a pack of eleven is a few minutes either way — the bound
+ * is on the pathological case, which is the one that costs money.
+ * `tests/lib/extraction-timing.test.ts` states it, so lowering the cap to 1
+ * fails a test rather than quietly making a pack of thirty an afternoon.
+ *
+ * Three rather than one because a person watching an upload should see the
+ * pack moving, and rather than ten because ten is not a limit on any rate
+ * anybody has measured. It is not a correctness invariant: a momentary fourth
+ * read costs one call, where a missing cap costs thirty.
+ * ============================================================================
+ */
+export const MAX_IN_FLIGHT_READS_PER_PACK = 3;
+
+/**
  * What a worker did with the run it was handed.
  *
  *   parsed   staged a result

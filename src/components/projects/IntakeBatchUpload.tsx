@@ -80,6 +80,13 @@ type Queued = {
   registrationRequestId: string;
   progress: number;
   error: string | null;
+  /**
+   * Stored and registered, and its read is queued behind the pack's in-flight
+   * cap. NOT `error`: this is the ordinary outcome for the fourth document
+   * onwards and it needs nobody, so it is said in slate beside the file rather
+   * than in the red reserved for a read that did not reach the queue.
+   */
+  note: string | null;
 };
 
 /** What will be used for a file: what somebody chose, else what was read. */
@@ -111,6 +118,7 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         registrationRequestId: crypto.randomUUID(),
         progress: 0,
         error: null,
+        note: null,
       })),
     ]);
   }
@@ -212,7 +220,10 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         }
 
         update(item.key, { status: "registering" });
-        const res = await apiFetch<{ importId: string; autoRead?: { dispatched: boolean; error?: string } }>("/api/imports", {
+        const res = await apiFetch<{
+          importId: string;
+          autoRead?: { dispatched: boolean; error?: string; waiting?: boolean; note?: string };
+        }>("/api/imports", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -235,10 +246,12 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         // failed upload -- the file is there and the pack screen offers the
         // retry -- so it is said next to the file rather than thrown away.
         const autoRead = res.data.autoRead;
+        const waiting = autoRead?.dispatched === false && autoRead.waiting === true;
         update(item.key, {
           status: "done",
           progress: 100,
-          error: autoRead && !autoRead.dispatched ? (autoRead.error ?? "Stored, but not queued for reading.") : null,
+          error: autoRead && !autoRead.dispatched && !waiting ? (autoRead.error ?? "Stored, but not queued for reading.") : null,
+          note: waiting ? (autoRead.note ?? null) : null,
         });
       }
 
@@ -365,6 +378,7 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
                   </p>
                 )}
                 {item.error && <p className="w-full text-xs text-red-700">{item.error}</p>}
+                {item.note && <p className="w-full text-xs text-neutral-500">{item.note}</p>}
               </li>
             );
           })}

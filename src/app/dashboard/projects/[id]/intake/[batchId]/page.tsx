@@ -42,6 +42,8 @@ type Run = {
    * not carry one must not read as a finished review.
    */
   pendingReview?: number | null;
+  /** `pending` because the pack is at its in-flight cap, not because nobody asked. */
+  waitingForSlot?: boolean | null;
 };
 
 type Batch = { id: string; label: string | null; created_at: string; created_by: string | null; runs: Run[] };

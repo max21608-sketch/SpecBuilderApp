@@ -37,7 +37,7 @@ export default function PackSummary({
   busy = false,
 }: {
   /** The pack's documents. Re-tallied on every render, so a poll moves it. */
-  runs: { status: string }[];
+  runs: { status: string; waitingForSlot?: boolean | null }[];
   /** Retries every failed read, in sequence. Absent where nothing may retry. */
   onRetryFailed?: () => void;
   busy?: boolean;
@@ -45,7 +45,8 @@ export default function PackSummary({
   const tally = packTally(runs);
   if (tally.total === 0) return null;
 
-  const counted = tally.reviewed + tally.toReview + tally.reading + tally.failed + tally.notRead;
+  const counted =
+    tally.reviewed + tally.toReview + tally.reading + tally.failed + tally.notRead + tally.waitingForSlot;
   const other = tally.total - counted;
   // With one document the state needs no number — "1 document · 1 reviewed"
   // reads as two facts about two things.
@@ -55,6 +56,8 @@ export default function PackSummary({
   if (tally.reviewed > 0) parts.push({ key: "reviewed", text: n(tally.reviewed, "reviewed") });
   if (tally.toReview > 0) parts.push({ key: "toReview", text: n(tally.toReview, "waiting for you") });
   if (tally.reading > 0) parts.push({ key: "reading", text: n(tally.reading, "still being read") });
+  if (tally.waitingForSlot > 0)
+    parts.push({ key: "waitingForSlot", text: n(tally.waitingForSlot, "waiting for a slot") });
   if (tally.notRead > 0) parts.push({ key: "notRead", text: n(tally.notRead, "not read yet") });
   if (tally.failed > 0) parts.push({ key: "failed", text: n(tally.failed, "read failed"), danger: true });
   if (other > 0) parts.push({ key: "other", text: `${other} in another state` });

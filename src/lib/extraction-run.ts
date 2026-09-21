@@ -46,6 +46,7 @@ import {
   RUN_ABORT_MS,
   type ExtractionRunOutcome,
 } from "@/lib/extraction-claim";
+import { handOffReadSlot } from "@/lib/extraction-slots";
 import { isRegisterFreeKind, normaliseUnit, type AttributeUnit, type DocumentKind } from "@/lib/spec-vocab";
 import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
 import { stagePreamble, type StagedPreamble } from "@/lib/preamble-document";
@@ -266,6 +267,10 @@ export async function runDocumentExtraction({
       // attempt now; writing anything further would clobber their result.
       return { outcome: "skipped", reason: "the claim was taken over while the document was being read" };
     }
+    // A slot has just freed. Start the next document of this pack the cap
+    // deferred, if there is one — after the write, never before, so a read
+    // that never landed cannot start another.
+    await handOffReadSlot(claim.runId, actor);
     return { outcome: "parsed" };
   } catch (cause) {
     // The model run is already paid for, so releasing re-runs it. That is still
@@ -326,6 +331,10 @@ async function fail(
     returning id
   `;
   if (!rows[0]) return { outcome: "skipped", reason: "the claim was taken over before the failure could be recorded" };
+  // A FAILED READ ALSO FREES A SLOT, and this is the branch that keeps a pack
+  // moving: eleven documents whose reads all fail must not leave eight of them
+  // waiting for a slot that nothing will ever free.
+  await handOffReadSlot(claim.runId, actor);
   return { outcome: "failed", error };
 }
 
@@ -373,7 +382,7 @@ export async function recordExtractionFailure(
   error: string,
   actor: string,
 ): Promise<void> {
-  await sql`
+  const rows = await sql`
     update intake_runs
     set status = 'failed', error = ${error}, processing_started_at = null, claim_token = null, updated_by = ${actor}
     where id = ${extractionId}
@@ -383,5 +392,11 @@ export async function recordExtractionFailure(
         status = 'queued'
         or processing_started_at < now() - make_interval(secs => ${CLAIM_EXPIRY_SECONDS})
       )
+    returning id
   `;
+  // Out of deliveries is the other way an attempt settles, and a pack whose
+  // documents die here has to go on. Only where this invocation is the one
+  // that wrote the failure: a live claim means the work is still running and
+  // its slot is still taken.
+  if (rows[0]) await handOffReadSlot(extractionId, actor);
 }

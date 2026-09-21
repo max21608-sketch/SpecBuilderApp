@@ -25,6 +25,7 @@ import { copy } from "@vercel/blob";
 import { sql } from "@/lib/db";
 import { DomainConflictError, withTransaction, type TxnSql } from "@/lib/db-transaction";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
+import { takeReadSlot, deferRead } from "@/lib/extraction-slots";
 import {
   assertMailboxScopedPathname,
   blobPathname,
@@ -194,9 +195,18 @@ async function assignInTransaction(
   if (!run[0]) throw new Error("the email import was not recorded");
   const runId = String(run[0].id);
 
-  const attemptId = randomUUID();
-  const opened = await openAttempt(txn, runId, attemptId, input.actor, "pending");
-  if (!opened) throw new Error("the email was recorded but could not be queued for reading");
+  // THE CAP COVERS AN EMAIL TOO, because it is the same money. A message has
+  // no pack, so it counts against the project's batch-less reads rather than
+  // against whatever pack happens to be uploading — holding a person's click
+  // behind eleven documents would read as the app ignoring it.
+  const scope = { projectId: input.projectId, batchId: null };
+  let opened: string | null = null;
+  if (await takeReadSlot(txn, scope)) {
+    opened = await openAttempt(txn, runId, randomUUID(), input.actor, "pending");
+    if (!opened) throw new Error("the email was recorded but could not be queued for reading");
+  } else {
+    await deferRead(txn, runId, input.actor);
+  }
 
   await txn`
     update email_messages
@@ -277,7 +287,9 @@ async function copyMimeUnderProject(input: AssignInput): Promise<string | null> 
  * screens already render it with a Retry, and telling somebody their email did
  * not arrive when it did would be worse.
  */
-export async function assignMessage(input: AssignInput): Promise<AssignResult & { dispatchError: string | null }> {
+export async function assignMessage(
+  input: AssignInput,
+): Promise<AssignResult & { dispatchError: string | null; waitingForSlot: boolean }> {
   // The copy happens FIRST and outside the transaction: a store round trip
   // inside one holds the message's row lock across a network call, and
   // db-transaction.ts forbids exactly that. It is safe to do before the guards
@@ -288,12 +300,18 @@ export async function assignMessage(input: AssignInput): Promise<AssignResult & 
 
   const result = await withTransaction((txn) => assignInTransaction(txn, input, mimePathname));
 
+  // No attempt means one of two things and they are not the same: a REPLAY,
+  // which returns the run it already made and has nothing to say, or a read
+  // the cap deferred, which starts on its own when a slot frees. Neither is a
+  // dispatch FAILURE, so neither goes in `dispatchError` — a screen that
+  // painted "it starts shortly" the way it paints "it did not reach the queue"
+  // would send somebody looking for a Retry button they must not press.
   if (!result.attemptId) {
-    return { ...result, dispatchError: null };
+    return { ...result, dispatchError: null, waitingForSlot: result.read };
   }
 
   const failure = await publishAttempt(result.runId, result.attemptId, input.actor);
-  return { ...result, dispatchError: failure ? failure.error : null };
+  return { ...result, dispatchError: failure ? failure.error : null, waitingForSlot: false };
 }
 
 /**

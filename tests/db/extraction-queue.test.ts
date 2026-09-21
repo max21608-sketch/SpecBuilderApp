@@ -449,14 +449,30 @@ describeIfDb("extraction attempts", () => {
   // upload screen may promise that: the row must be committed QUEUED with an
   // attempt, exactly once, and a dispatch that fails must not lose the file.
 
+  /**
+   * Register one document, in a pack OF ITS OWN.
+   *
+   * A fresh `intake_batches` row per call, because the in-flight cap counts a
+   * PACK's reads: four registrations into one scope leave the fourth deferred,
+   * and these tests are about the dispatch protocol rather than about the cap
+   * (`extraction-cap.test.ts` holds that). A real registration always carries
+   * a batch — the upload screen creates one per delivery — so this is also the
+   * more faithful shape.
+   */
   const registerDoc = async (requestId: string, filename = "__QA auto.pdf") => {
     const { POST } = await import("@/app/api/imports/route");
+    const batch = await client.query(
+      `insert into intake_batches (project_id, label, created_by, updated_by)
+       values ($1, '__QA auto pack', 'qa', 'qa') returning id`,
+      [projectId],
+    );
     return POST(
       new Request("http://localhost/test", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           projectId,
+          batchId: batch.rows[0].id,
           importType: "spec_document",
           documentKind: "shop_drawings",
           pathname: `projects/${projectId}/${filename}`,

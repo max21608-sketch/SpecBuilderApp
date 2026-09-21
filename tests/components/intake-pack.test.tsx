@@ -118,7 +118,15 @@ describe("VARIANCE: still uploading and reading", () => {
 describe("packTally is the one reading behind the line and the tiles", () => {
   it("counts confirmed as REVIEWED, never complete, and totals the set", () => {
     const tally = packTally(ELEVEN);
-    expect(tally).toEqual({ total: 11, reviewed: 8, toReview: 1, reading: 1, failed: 1, notRead: 0 });
+    expect(tally).toEqual({
+      total: 11,
+      reviewed: 8,
+      toReview: 1,
+      reading: 1,
+      failed: 1,
+      notRead: 0,
+      waitingForSlot: 0,
+    });
   });
 
   it("counts queued and parsing as one state, because neither wants anybody", () => {
@@ -129,6 +137,52 @@ describe("packTally is the one reading behind the line and the tiles", () => {
     const tally = packTally([{ status: "confirmed", pendingReview: 12 }, { status: "confirmed" }]);
     expect(tally.reviewed).toBe(1);
     expect(tally.toReview).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2.10.f — the in-flight cap's words.
+//
+// A pack of eleven reads three at a time, so eight documents are `pending` for
+// a reason no button can act on. "Not read yet" is the sentence for a document
+// waiting for a PERSON, and using it here sends somebody looking for a Read
+// button they must not press.
+// ---------------------------------------------------------------------------
+
+describe("a document the cap is holding", () => {
+  const waiting = { status: "pending", waitingForSlot: true };
+
+  it("is counted apart from a document nobody has asked for", () => {
+    const tally = packTally([...runs({ parsing: 3 }), waiting, waiting, { status: "pending" }]);
+    expect(tally.reading).toBe(3);
+    expect(tally.waitingForSlot).toBe(2);
+    expect(tally.notRead).toBe(1);
+  });
+
+  it("is in the pack's one line, in words, beside what is being read", () => {
+    render(<PackSummary runs={[...runs({ parsing: 3 }), waiting, waiting]} />);
+    expect(document.querySelector("p")?.textContent).toBe(
+      "5 documents · 3 still being read · 2 waiting for a slot",
+    );
+  });
+
+  it("says it is waiting for a slot, and is not painted as a failure", () => {
+    render(<DocumentState run={waiting} />);
+    expect(screen.getByText("Waiting for a slot")).toBeInTheDocument();
+    expect(screen.queryByText("Not read yet")).not.toBeInTheDocument();
+    // Blue like `queued`: the app is going to do this one, and nobody is
+    // wanted. Red would teach people to ignore red.
+    expect(documentReviewTone(waiting)).toBe("info");
+  });
+
+  it("VARIANCE: a pending document with no mark is still Not read yet", () => {
+    // The mark expires after a day, and the run then degrades to an ordinary
+    // pending document that Read all starts.
+    render(<DocumentState run={{ status: "pending" }} />);
+    expect(screen.getByText("Not read yet")).toBeInTheDocument();
+    expect(documentReviewTone({ status: "pending", waitingForSlot: false })).toBe(
+      documentReviewTone({ status: "pending" }),
+    );
   });
 });
 

@@ -12,6 +12,7 @@ import {
   MAX_CLAIMS_PER_ATTEMPT,
   MAX_DELIVERIES,
   MAX_DURATION_SECONDS,
+  MAX_IN_FLIGHT_READS_PER_PACK,
   MODEL_DEADLINE_MS,
   RUN_ABORT_MS,
   VISIBILITY_TIMEOUT_SECONDS,
@@ -39,6 +40,22 @@ describe("extraction timing contract", () => {
     // If it did, every redelivery would be a guaranteed busy no-op and the
     // recovery path would never fire.
     expect(VISIBILITY_TIMEOUT_SECONDS).toBeGreaterThan(CLAIM_EXPIRY_SECONDS);
+  });
+
+  it("lets a pack make progress at all", () => {
+    // A cap of zero registers documents nothing will ever read, and the pack
+    // screen would show eleven documents waiting for a slot that cannot free.
+    expect(MAX_IN_FLIGHT_READS_PER_PACK).toBeGreaterThanOrEqual(1);
+  });
+
+  it("bounds how long a pack of thirty can take to work through", () => {
+    // The cap trades concurrency for a rate somebody can survive, and the
+    // trade has a worst case: ceil(N / cap) waves, each bounded by the
+    // function's own limit. Stated here so lowering the cap to 1 fails a test
+    // rather than quietly making a pack of thirty two and a half hours.
+    const waves = (n: number) => Math.ceil(n / MAX_IN_FLIGHT_READS_PER_PACK);
+    expect(waves(11) * MAX_DURATION_SECONDS).toBeLessThanOrEqual(30 * 60);
+    expect(waves(30) * MAX_DURATION_SECONDS).toBeLessThanOrEqual(60 * 60);
   });
 
   it("bounds what one press of Extract can cost", () => {
