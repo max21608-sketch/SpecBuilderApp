@@ -33,6 +33,9 @@
 //   and nothing downstream questions it. A unit is taken from the email's own
 //   wording or it is left null, and `composeDimensionCell` then renders the
 //   value verbatim in a bracket saying why.
+// - It never HALF-reads a measurement. Plain inches are a unit this app holds
+//   and `18"` converts exactly; feet-and-inches is not, and `1'6"` is refused
+//   whole rather than read as its feet figure. See `imperialCompound`.
 // - It never matches a slot on a SUBSTRING. `normaliseDimensionSlot` folds the
 //   WHOLE label, so "ARM HEIGHT" is not a height and "WIDTH SEAT" is not a
 //   width. Both are printed beside values they would destroy.
@@ -42,7 +45,7 @@
 //   the figure and unit are taken out is handed back for the caller to keep as
 //   a note.
 // ============================================================================
-import { parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
+import { imperialCompound, parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
 import {
   containsPhrase,
   normaliseDimensionSlot,
@@ -115,6 +118,12 @@ function fold(raw: string | null): string {
  * "from".
  */
 function splitFigure(raw: string): { figure: string | null; unit: AttributeUnit | null; rest: string } {
+  // FEET AND INCHES IS REFUSED WHOLE, before the leading figure is taken.
+  // `1'6"` matched the regex below as a figure of ONE with `' 6"` left over as
+  // the qualifier, so an 18-inch arm height reached the reviewer as a 1 with a
+  // unit box beside it. Plain inches are NOT this case and are not touched:
+  // `in` is in the unit vocabulary and `18"` converts exactly.
+  if (imperialCompound(raw)) return { figure: null, unit: null, rest: raw.trim() };
   const match = /^\s*([0-9]+(?:[.,][0-9]+)?)\s*([A-Za-z"']+\.?)?\s*([\s\S]*)$/.exec(raw);
   if (!match || !match[1]) return { figure: null, unit: null, rest: raw.trim() };
 
@@ -154,8 +163,9 @@ export function readDimension(attributeRaw: string | null, valueRaw: string | nu
     }
     const { figure, unit, rest } = splitFigure(value);
     // A labelled slot whose value carries no leading figure is not a
-    // measurement this can read — "as existing", "match the sofa". Handing it
-    // back as null keeps it on the ordinary path rather than inventing a row.
+    // measurement this can read — "as existing", "match the sofa", or a
+    // feet-and-inches compound. Handing it back as null keeps it on the
+    // ordinary path, wording intact, rather than inventing a row.
     if (!figure) return null;
     return {
       parts: [{ slot, figure, slotSuggested: false }],

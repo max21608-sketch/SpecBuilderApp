@@ -1888,3 +1888,63 @@ describe("one item drawn twice, or two things to make", () => {
     expect([...variantLettersByItem(v1.items, v1).values()]).toEqual(["A", "B"]);
   });
 });
+
+// ============================================================================
+// IMPERIAL — Stage 2 variance row 1, the drawings half.
+//
+// The unit vocabulary holds `in`, so a page that PRINTS the inch mark is read
+// and converted. A feet compound is not in the vocabulary, and the trap the
+// project default creates is exactly this one: a figure the page states in feet
+// falls through to `projects.default_dimension_unit` and reaches BWS as a
+// number that looks like a real measurement.
+// ============================================================================
+describe("stageDrawings and imperial figures", () => {
+  it("takes an inch mark the page printed, and never guesses past it", () => {
+    const page = rawItem({
+      dimensions: [
+        { labelRaw: "WIDTH", valueRaw: '30"', slot: "width", isOverall: true },
+        { labelRaw: "HEIGHT", valueRaw: "18 in", slot: "height", isOverall: true },
+      ] as RawDrawingDimension[],
+    });
+    // `cm` as the project default, so a lost unit would be visible.
+    const item = stageDrawings([page], FIELDS, null, null, "cm").items[0]!;
+    const rows = item.observations.filter((observation) => observation.dimensionSlot !== null);
+    expect(rows.map((observation) => [observation.dimensionSlot, observation.value, observation.unit])).toEqual([
+      ["W", "30", "in"],
+      ["H", "18", "in"],
+    ]);
+    // Printed, not a suggestion: the page said it.
+    expect(rows.every((observation) => unitSourceOf(observation) === "printed")).toBe(true);
+  });
+
+  it("refuses a feet compound rather than letting the project default read it", () => {
+    const page = rawItem({
+      dimensions: [
+        { labelRaw: "SEAT HEIGHT", valueRaw: "1'6\"", slot: "seat_height", isOverall: true },
+      ] as RawDrawingDimension[],
+    });
+    const item = stageDrawings([page], FIELDS, null, null, "cm").items[0]!;
+    const row = item.observations.find((observation) => observation.dimensionSlot === "SH")!;
+    // The wording is kept exactly as the page wrote it — never converted,
+    // never dropped.
+    expect(row.value).toBe("1'6\"");
+    // It votes on nothing: `parseDimensionFigure` refuses it, so it cannot
+    // carry the page's unit guess either.
+    expect(suggestUnit(["1'6\""])).toEqual({ status: "none" });
+  });
+
+  it("does not strip a feet mark off a combined line and read what is left", () => {
+    // "5'6\" x 2'4\" x 3'" used to strip the last apostrophe as a trailing
+    // unit, leaving a readable 3 — placed, at whatever unit the page or the
+    // project offered.
+    const item = stageDrawings(
+      [rawItem({ dimensionsCombinedRaw: ["5'6\" x 2'4\" x 3'"] })],
+      FIELDS,
+      null,
+      null,
+      "cm",
+    ).items[0]!;
+    expect(item.observations.filter((observation) => observation.attrGroup === "dimension")).toEqual([]);
+    expect(item.observations.some((observation) => (observation.value ?? "").includes("3'"))).toBe(true);
+  });
+});

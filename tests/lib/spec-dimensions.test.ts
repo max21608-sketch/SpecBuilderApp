@@ -99,3 +99,39 @@ describe("readDimension", () => {
     expect(readDimension("Outside back", "UPH-07 x 2 panels")).toBeNull();
   });
 });
+
+// ============================================================================
+// IMPERIAL — Stage 2 variance row 1, the email half.
+//
+// An email writes prose, so this is the path where a compound was actually
+// half-read: `splitFigure` takes a leading figure and then an optional unit
+// word, and `1'6"` matched as a figure of ONE with `' 6"` kept as the
+// qualifier. Plain inches are a different case and still proceed.
+// ============================================================================
+describe("readDimension and imperial", () => {
+  it("reads plain inches as the unit they are", () => {
+    const reading = readDimension("Seat height", '18" from FFL');
+    expect(reading?.parts).toEqual([{ slot: "SH", figure: "18", slotSuggested: false }]);
+    expect(reading?.unit).toBe("in");
+    expect(reading?.unitSource).toBe("stated");
+    expect(reading?.qualifier).toBe("from FFL");
+
+    const spelt = readDimension("Width", "30 inches");
+    expect(spelt?.parts[0]?.figure).toBe("30");
+    expect(spelt?.unit).toBe("in");
+  });
+
+  it("refuses a feet-and-inches compound whole, rather than reading its feet", () => {
+    // 1'6" is 457mm. Read as a 1 it is whatever unit somebody picks next.
+    expect(readDimension("Seat height", "1'6\"")).toBeNull();
+    expect(readDimension("Width", "5' 6\"")).toBeNull();
+    expect(readDimension("Height", "4 ft 6 in")).toBeNull();
+    expect(readDimension("Depth", "2ft")).toBeNull();
+  });
+
+  it("refuses a compound on an overall line too, and places nothing from it", () => {
+    // Every part fails `parseDimensionFigure`, so no slot is placed and the
+    // wording stays on the ordinary path for a person to re-state.
+    expect(readDimension("Overall", "5'6\" x 2'4\" x 3'")).toBeNull();
+  });
+});

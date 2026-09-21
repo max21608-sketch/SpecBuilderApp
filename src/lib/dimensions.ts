@@ -81,6 +81,39 @@ export function sharesAScale(figures: readonly number[]): boolean {
   );
 }
 
+/**
+ * A FEET-AND-INCHES compound, which is not a unit this app holds.
+ *
+ * Inches ARE one: `in` is in `ATTRIBUTE_UNITS`, in
+ * `record_attributes_unit_check` (0007) and in `TO_MM` at 25.4, so a page or an
+ * email writing `18"` or `18 in` states a measurement this app converts
+ * exactly. A COMPOUND does not — `1'6"` is two figures and one of them is in a
+ * unit the vocabulary has never carried.
+ *
+ * WHAT IT PREVENTS, and it is not hypothetical. `splitFigure` reads a leading
+ * figure and then an optional unit word, so `1'6"` came back as a figure of
+ * ONE with `' 6"` kept as the qualifier: an 18-inch arm height recorded as a 1,
+ * ready for somebody to pick a unit beside on the review screen. On the
+ * drawings path the same value falls through to the project default, and 1cm is
+ * a number that looks exactly like a real one.
+ *
+ * So the whole value is refused rather than half-read, and the refusal is
+ * named: a reviewer is told it is imperial and not converted, with the
+ * document's own wording intact beside it. Never converted (there is no
+ * feet-to-millimetre path anywhere in this app and inventing one here would be
+ * a second composer), never dropped, never read as mm or cm.
+ *
+ * Deliberately anchored to a LEADING figure. A feet mark loose in prose is an
+ * apostrophe far more often than a measurement, and `normaliseFinishCode`'s
+ * rule applies: a reader clever enough to find a unit anywhere in a sentence is
+ * clever enough to find one that is not there.
+ */
+export function imperialCompound(value: string | null): boolean {
+  const text = (value ?? "").trim();
+  if (text === "") return false;
+  return /^[0-9]+(?:[.,][0-9]+)?\s*(?:'|\u2032|ft\b|foot\b|feet\b)/i.test(text);
+}
+
 export type DimensionFigure = { figure: number | null; tbcInline: boolean };
 
 /**
@@ -158,7 +191,13 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
   let unitRaw: string | null = null;
   const parts: CombinedPart[] = segments.map((segment, index) => {
     let body = segment.trim();
-    if (index === segments.length - 1) {
+    // A FEET MARK IS NOT A TRAILING UNIT TO STRIP. `3'` stripped to `3` is a
+    // readable figure where the segment was not one, and on the drawings path
+    // it then takes the page's own unit: a three-foot bench staged as 3cm.
+    // Left whole, `parseDimensionFigure` refuses it and the segment stays as
+    // the page wrote it. Found by "5'6\" x 2'4\" x 3'", which placed a HEIGHT
+    // of 3 and dropped the other two.
+    if (index === segments.length - 1 && !imperialCompound(body)) {
       const trailing = /^(.*?)[\s]*([a-zA-Z"']+\.?)$/.exec(body);
       // Only strip a trailing word that is NOT itself part of a slot prefix:
       // "H450mm" must lose "mm", "Dia.460" must not lose "Dia.".
@@ -288,12 +327,19 @@ export function composeDimensionCell(rows: DimensionRow[], note?: string | null)
     }
 
     if (figure === null) {
+      // AN IMPERIAL COMPOUND IS NAMED, not reported as an unreadable string.
+      // "not a number" sends a reviewer looking for a typo; `1'6"` is a
+      // perfectly good measurement in a unit this app does not hold, and the
+      // action it wants is to re-state it in millimetres.
+      const imperial = imperialCompound(row.value);
       problems.push({
         code: "not_numeric",
         slot,
-        message: `${prefix} ${quoted(row.value)} is not a measurement BWS can take.`,
+        message: imperial
+          ? `${prefix} ${quoted(row.value)} is in feet and inches, which this app does not convert. Record it in mm or cm.`
+          : `${prefix} ${quoted(row.value)} is not a measurement BWS can take.`,
       });
-      trailing.push(`[${prefix} ${quoted(row.value)} — not a number]`);
+      trailing.push(`[${prefix} ${quoted(row.value)} — ${imperial ? "imperial, not converted" : "not a number"}]`);
       continue;
     }
 
