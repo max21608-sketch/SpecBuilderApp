@@ -1553,8 +1553,27 @@ protocol and two copies would be two sets of rules about when a paid call may be
 claimed twice. Nothing is retro-active: a document already at `pending` is read
 by the pack screen's *Read all*, not by anything in registration.
 
-There is still no rate limiting anywhere in the enqueue path — see the M8
-outstanding notes.
+**A pack reads THREE documents at a time, and the rest wait for a slot**
+(`src/lib/extraction-slots.ts`, `MAX_IN_FLIGHT_READS_PER_PACK` in
+`extraction-claim.ts`, Stage 2 item 2.10.f, 2026-09-21). Registration still
+returns 201 and still stores the file; at the cap the run is DEFERRED rather
+than refused — a refused registration tells somebody their file did not
+arrive, and thirty files would mean twenty-seven Read presses. A deferred run
+is marked by `attempt_deadline_at` set with `attempt_id` NULL, a pair nothing
+else writes, so no migration was needed and no status was added; the screens
+read it as *Waiting for a slot*. The slot is taken under a
+`pg_advisory_xact_lock` on the pack (the project, for a batch-less email), not
+the project row, so a registration never queues behind a bill confirm. The
+hand-off runs where an attempt SETTLES — parsed, `fail()`, and
+`recordExtractionFailure`, which gained a `returning` so only the invocation
+that wrote the failure hands on — through the same `openAttempt` +
+`publishAttempt` protocol, commit then publish; `releaseAndThrow` keeps its
+slot because that attempt is alive and will be redelivered. `inFlight` counts
+only attempts inside their deadline, or one stuck document would shrink a
+pack's capacity for good and stop the *Read all* that is the way out. Two
+holes stand and are logged: nothing settles an attempt that passes its 24-hour
+deadline, so nothing hands its slot on at that moment; and *Read all* in the
+drawings review started reads without a slot (briefed the same day).
 
 ### An extraction attempt is owned by two identifiers
 
@@ -3348,7 +3367,9 @@ measured first (`npm run measure:outstanding`), lines shipped rather than the
 19 MB of questions, four gaps on two items filed under one meeting's change in
 nine seconds. **2.6** (the dimension note, migration 0034 on the sandbox),
 **2.8 step 1** (the project-wide fold) and the snapshot-race fix landed at
-`9715b0f`: the demo sofa reads `W1830 x D880 x H760 x SH440mm (1250 L-shaped
+`9715b0f`; **2.10.f** (three reads at a time per pack, the rest *waiting for a
+slot*) and **2.10.g** (the failure sweep: every `catch` and every fetch under
+the dashboard reaches a rendered sentence, three fixed) at `d1e56b3`: the demo sofa reads `W1830 x D880 x H760 x SH440mm (1250 L-shaped
 return)` on its Specs tab, its checklist and the BWS export after one Save,
 one change set and one version. Not accepted by anybody. **Blocked
 and saying so:** 2.1/2.2 (no BWS account for Max), 2.9 (a proposal for
@@ -3380,14 +3401,12 @@ until Max has driven 2.3 and 2.5 as the roles they are for (§7.5).
   before anything renders that table.
 - **A swatch has never been cropped from a real page.** The upload path works
   and requires the source to be named; nobody has used it.
-- **Nothing limits how many model calls a pack starts at once.** Registration
-  dispatches a read per specification document, so an eleven-file pack is eleven
-  concurrent workers and eleven concurrent model calls. There is no per-batch
-  cap, no in-flight cap and nothing that sleeps: an Anthropic 429 is retryable
-  but burns one of only four deliveries, so a rate-limited pack can reach
-  `failed`. The client uploads and registers sequentially, which staggers
-  dispatch by upload time — incidental, not a control. Watch the first real
-  Panther delivery; a per-batch cap is the fix if it bites.
+- **A pack now reads three documents at a time** (2.10.f, 2026-09-21 — see
+  the registration section). What is NOT capped yet: *Read all* on the
+  drawings review (briefed), and an attempt that passes its 24-hour deadline
+  frees its slot by ceasing to count rather than by anything handing on. The
+  cap has never been exercised against the real queue — its db tests stub the
+  publisher — so the first real Panther delivery is still the test.
 - **A combined line's W x D x H order is assumed, and a human has never checked
   one.** `parseCombinedDimensions` reads "80 x 70 x 90 cm" positionally — the
   only inference in the dimension model that the page does not state. It is

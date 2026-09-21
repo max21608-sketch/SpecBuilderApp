@@ -22,6 +22,37 @@ mark it FIXED with the date and the commit.
 
 ## 2026-09-20
 
+### *Read all* starts every document at once, past the pack's cap
+
+**Status: open — found 2026-09-21 by Coder B while building the cap (Stage 2
+item 2.10.f); briefed the same day as Coder B's round 3.** Registration now
+reads three documents of a pack at a time and defers the rest, but
+`PackDrawingsReview.readAll` loops `POST /api/imports/[id]/extract` with
+`action: "start"`, which takes no slot — one press on an eleven-document pack
+still starts eleven concurrent reads, and retrying eleven documents a 429
+storm just failed is the case the cap exists for. The review's chip also
+reads *Not read yet* for a run that is in fact waiting for a slot, because
+`loadBatchDrawings` does not carry the marker. Cause apart from observation:
+the cap was added at the two registration paths and not at the third way a
+read starts.
+
+### An attempt that passes its 24-hour deadline is settled by nothing
+
+**Status: open — pre-existing, made visible by the cap, 2026-09-21.** An
+attempt whose `attempt_deadline_at` passes stays `queued` with no worker
+coming; the screens offer *Restart*. The cap steps around it — an expired
+attempt stops counting against the pack — but nothing hands its slot on at
+the moment of expiry, so a pack whose three in-flight attempts all expire
+sits still until somebody presses Read all. The fix is a sweeper or a
+settle-on-expiry path, and it belongs with the queue, not with a screen.
+
+### The BOQ review's loading state is a discarded variable
+
+**Status: open — observation, 2026-09-21.** `src/app/dashboard/imports/[id]/page.tsx`
+has `const [, setLoading] = useState(false)`: the value is never read, so
+`setLoading` is a bare re-render and the screen shows no loading state. Harmless
+today, and the reason that screen's banner happens to survive a reload.
+
 ### A record's version number is taken without a lock, and two edits collide
 
 **FIXED 2026-09-20, `929a5b6`** (Stage 2, Coder B round 2): `snapshotRecords`
@@ -646,7 +677,11 @@ Four things a plan has to settle rather than assume:
   does not exist yet.
 - **Nothing limits how many model calls start at once** — already recorded as
   an M8 outstanding note for packs. A morning's mail arriving at once is the
-  same problem with no upload step to stagger it.
+  same problem with no upload step to stagger it. **The cap landed 2026-09-21
+  (`fb03d07`, Stage 2 item 2.10.f): three reads per pack, and a per-project
+  cap of the same size for emails, which have no pack.** The remaining
+  prerequisite for auto-assignment is Max's amendment of the gate in
+  `CLAUDE.md`.
 - **A wrong auto-assignment costs twice** — the call, and a staged run on the
   wrong project. `unassignMessage` exists and the mailbox copy is kept as the
   arrival record, so it is reversible; whether the reviewer can tell it happened
