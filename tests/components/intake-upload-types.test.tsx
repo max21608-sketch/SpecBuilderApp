@@ -13,8 +13,10 @@
 // bill nobody can read.
 // ============================================================================
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
+import { BOQ_AS_PDF } from "@/lib/document-classify";
 
 const upload = vi.fn();
 vi.mock("@vercel/blob/client", () => ({ upload: (...args: unknown[]) => upload(...args) }));
@@ -85,5 +87,47 @@ describe("an older spreadsheet is refused in the browser", () => {
     drop("Example bill.csv");
     expect(screen.queryByText("Cannot be read")).toBeNull();
     expect(startButton()).not.toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ROW 8's SCREEN HALF — a bill inside a PDF, refused after it is read.
+//
+// Unlike an `.xls`, nothing in the browser can tell a PDF bill from a PDF
+// drawing set, so this refusal necessarily arrives from the classify call. What
+// the screen has to do with it is the part worth proving: print the sentence,
+// keep the file, and register NOTHING — a registration is what dispatches the
+// charged read.
+// ---------------------------------------------------------------------------
+describe("a bill of quantities inside a PDF", () => {
+  it("prints the refusal and registers nothing", async () => {
+    upload.mockResolvedValue({ pathname: "projects/p1/uploads/bill.pdf" });
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/batches")) return { ok: true, status: 200, data: { batch: { id: "b1" } } };
+      if (url.includes("/classify")) {
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            genre: "bill_of_quantities",
+            decision: null,
+            unsupported: BOQ_AS_PDF,
+            evidence: "the first page is headed BILL OF QUANTITIES",
+          },
+        };
+      }
+      return { ok: false, status: 500, error: "nothing else should be called", data: null };
+    });
+
+    const { drop } = mount();
+    drop("Example bill.pdf");
+    await userEvent.click(startButton());
+
+    await waitFor(() => expect(screen.getByText(/a bill inside a PDF is not supported/)).toBeTruthy());
+    expect(screen.getByText("Say which")).toBeTruthy();
+    // THE POINT: no registration, so no charged read of a spreadsheet printed
+    // on paper. The file is stored and kept, and the dropdown is still open in
+    // case the reading was wrong.
+    expect(apiFetch.mock.calls.some((call) => String(call[0]) === "/api/imports")).toBe(false);
   });
 });

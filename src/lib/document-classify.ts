@@ -145,14 +145,68 @@ export type ClassifyResult =
   | {
       ok: true;
       genre: DocumentGenre;
-      /** Null when the genre is `unclear`, or when the model was not certain. */
+      /**
+       * Null when the genre is `unclear`, when the model was not certain, or
+       * when the document is a kind this app deliberately does not support —
+       * see `unsupported`, which is the only one of the three that has
+       * something to say about it.
+       */
       decision: KindDecision | null;
+      /**
+       * Why this document cannot be filed at all, in the words a person needs,
+       * or null. A REFUSAL, not a gap: a `decision` of null with nothing here
+       * means "nobody knows yet, you decide", and with a sentence here it means
+       * "this is known and it is not something this app reads".
+       */
+      unsupported: string | null;
       titleText: string | null;
       evidence: string;
       certain: boolean;
       model: string;
     }
   | { ok: false; error: string };
+
+/**
+ * A BILL OF QUANTITIES INSIDE A PDF IS REFUSED, NOT READ AS A DRAWING.
+ *
+ * ============================================================================
+ * Variance matrix §6.10.a row 8, and `CLAUDE.md`'s own excluded list: "PDF
+ * bills of quantities". A bill is a GRID and this app reads one with code, out
+ * of cells; a PDF has no cells. The two wrong answers are both available and
+ * both expensive:
+ *
+ *   `unclear` — true but useless. It leaves the dropdown empty, somebody picks
+ *   "Bill of quantities" by hand, and registration refuses it one screen later
+ *   with a sentence about file types rather than about what they just read.
+ *
+ *   `shop_drawings` — the plausible wrong answer. It IS a PDF, the prompt for
+ *   drawings would take it, and it would come back as a charged read of a
+ *   spreadsheet printed on paper, with proposals nobody can use.
+ *
+ * So the model answers what the document IS, as always, and this — the exact
+ * step, in code — decides it cannot be filed. It fires only on a CERTAIN
+ * answer: an uncertain "possibly a bill" on a PDF may well be a drawing set,
+ * which is supported, and telling somebody to export that to Excel would be a
+ * confident wrong instruction. Uncertain stays "you decide", unchanged.
+ * ============================================================================
+ */
+export const BOQ_AS_PDF =
+  "This reads as a bill of quantities, and a bill inside a PDF is not supported — this app reads a bill " +
+  "from a spreadsheet's cells. Export it to .xlsx or .csv and upload that. If it is a drawing set rather " +
+  "than a bill, say so beside the file.";
+
+/** What to file this document as, and why it cannot be filed at all. */
+export function fileDocument(
+  answer: { genre: DocumentGenre; certain: boolean },
+  sourceType: DocumentSource["type"],
+): { decision: KindDecision | null; unsupported: string | null } {
+  // UNSURE FILLS NOTHING IN, and says nothing about support either.
+  if (answer.genre === "unclear" || !answer.certain) return { decision: null, unsupported: null };
+  if (answer.genre === "bill_of_quantities" && sourceType === "pdf") {
+    return { decision: null, unsupported: BOQ_AS_PDF };
+  }
+  return { decision: KIND_FROM_GENRE[answer.genre], unsupported: null };
+}
 
 const PROMPT = `You are being shown one document from a furniture tender pack, to work out what kind of document it
 is. You are NOT reading its contents for specification values — something else does that afterwards,
@@ -237,13 +291,17 @@ export async function classifyDocument(
   if (!parsed.success) return { ok: false, error: "The model's answer did not match the expected shape." };
 
   const { genre, titleText, evidence, certain } = parsed.data;
+  // The exact step, and it is code's: `fileDocument` maps a trade genre onto
+  // this app's two fields, refuses the ones it does not support, and fills
+  // nothing in where the model was unsure — a guess nobody is confident about
+  // would spend a charged read under the wrong prompt, and the reviewer would
+  // be checking output that answers a different question.
+  const filed = fileDocument({ genre, certain }, source.type);
   return {
     ok: true,
     genre,
-    // UNSURE FILLS NOTHING IN. A guess nobody is confident about would spend a
-    // charged read under the wrong prompt, and the reviewer would be checking
-    // output that answers a different question.
-    decision: genre === "unclear" || !certain ? null : KIND_FROM_GENRE[genre],
+    decision: filed.decision,
+    unsupported: filed.unsupported,
     titleText,
     evidence,
     certain,

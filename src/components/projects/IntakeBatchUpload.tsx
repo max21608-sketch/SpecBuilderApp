@@ -206,6 +206,8 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
           update(item.key, { status: "reading" });
           const asked = await apiFetch<{
             decision: { importType: string; documentKind: string | null } | null;
+            /** Known, and not something this app reads — a bill inside a PDF. */
+            unsupported?: string | null;
             evidence?: string;
             titleText?: string | null;
           }>("/api/imports/classify", {
@@ -222,6 +224,18 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
           const evidence = asked.ok ? (asked.data.evidence ?? null) : asked.error;
           update(item.key, { suggested, evidence });
           choice = suggested;
+
+          // KNOWN, AND NOT SOMETHING THIS APP READS (§6.10.a row 8). Different
+          // from "nobody knows yet": the file stays, the dropdown stays open in
+          // case the answer was wrong, and the reason is printed as an error
+          // rather than as the grey evidence line — because there is an action
+          // in it, and it is not on this screen.
+          const unsupported = asked.ok ? (asked.data.unsupported ?? null) : null;
+          if (unsupported) {
+            update(item.key, { status: "needs-kind", error: unsupported });
+            continue;
+          }
+
           if (!choice) {
             // Uploaded and kept. A second press registers it once somebody has
             // said what it is, with no second upload and no second reading.

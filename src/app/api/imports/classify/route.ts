@@ -79,6 +79,7 @@ export async function POST(request: Request): Promise<Response> {
         ok: true,
         genre: "email",
         decision: KIND_FROM_GENRE.email,
+        unsupported: null,
         titleText: null,
         evidence: "a saved email file",
         certain: true,
@@ -108,13 +109,19 @@ export async function POST(request: Request): Promise<Response> {
   // a document is leaves the dropdown empty and a person sets it, which is
   // exactly where this app was before; failing the request would make the whole
   // upload look broken over a hint.
-  if (!result.ok) return json({ ok: true, genre: "unclear", decision: null, error: result.error, charged: true }, 200);
+  if (!result.ok) {
+    return json({ ok: true, genre: "unclear", decision: null, unsupported: null, error: result.error, charged: true }, 200);
+  }
 
   return json(
     {
       ok: true,
       genre: result.genre,
       decision: result.decision,
+      // A REFUSAL, not a gap. `decision: null` with nothing here means "you
+      // decide"; with a sentence here it means the app knows what this is and
+      // does not read it — a bill inside a PDF, today (§6.10.a row 8).
+      unsupported: result.unsupported,
       titleText: result.titleText,
       evidence: result.evidence,
       certain: result.certain,
