@@ -1,6 +1,13 @@
 // Which questions hold up a quote. Pure, so this runs in CI without a database.
 import { describe, expect, it } from "vitest";
-import { questionTier, questionTierOrNull, TIER_EMAIL_HEADINGS, TIER_LABELS } from "@/lib/tgq";
+import {
+  NO_LEVEL_EXPLANATION,
+  NO_LEVEL_LABEL,
+  questionTier,
+  questionTierOrNull,
+  TIER_EMAIL_HEADINGS,
+  TIER_LABELS,
+} from "@/lib/tgq";
 import { ITEM_LEVELS, normaliseItemLevel } from "@/lib/spec-vocab";
 
 const all = { tgqLevels: ["simple", "complex", "hero"] };
@@ -147,5 +154,32 @@ describe("questionTier with Matthew's matrix", () => {
     const q = { tgqLevels: ["simple"] };
     expect(questionTier(q, "simple")).toBe("to_quote");
     expect(questionTier(q, "hero")).toBe("later");
+  });
+});
+
+describe("a record with no level on the fallback half (row d2)", () => {
+  // The variance matrix's row d2, and the deliverable is the pin: the answer
+  // is NULL and the screen has to say what the level is needed FOR. "No level"
+  // reads as a form field somebody forgot, where the truth is that nothing on
+  // the record can be sorted into what blocks a quote and what does not.
+  it("answers null on the fallback and a tier on his matrix, for the SAME record", () => {
+    const question = { tgqLevels: ["simple", "complex", "hero"], jsonId: 3, localKey: null };
+    // Absence from the matrix map is the discriminator — he has not written
+    // this category — and the level is then required.
+    expect(questionTierOrNull(question, null, null)).toBeNull();
+    // Covered by his matrix, and no level is needed: his sheet is per
+    // category and carries no level column.
+    expect(
+      questionTierOrNull(question, null, { fields: new Set([3]), localKeys: new Set<string>() }),
+    ).toBe("to_quote");
+  });
+
+  it("says what the level is FOR, and offers the three words", () => {
+    // The label is the control; the explanation is why pressing it matters. A
+    // screen that printed only the label would be asking for a field to be
+    // filled in for no stated reason, which is what this row exists against.
+    expect(NO_LEVEL_LABEL).toBe("Set level");
+    expect(NO_LEVEL_EXPLANATION).toMatch(/blocks a quote/i);
+    expect(NO_LEVEL_EXPLANATION).toMatch(/simple, complex or hero/i);
   });
 });

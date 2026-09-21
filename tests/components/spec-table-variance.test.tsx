@@ -168,3 +168,36 @@ describe("an uncategorised record (row d1)", () => {
     expect(screen.getByText(/no checklist and nothing to count/i)).toBeTruthy();
   });
 });
+
+describe("a levelless record on the fallback half of TGQ (row d2)", () => {
+  // `/api/records` sends `to_quote_outstanding: null` for it, which is not a
+  // zero: "nothing is blocking the quote" and "nobody has said what kind of
+  // item this is" are different answers. The cell prints a dash that OPENS,
+  // because a row with no control on it is a row whose silence nobody can
+  // explain.
+  it("prints a dash rather than a zero, and the dash opens", async () => {
+    mountWith([record({ item_description: "Untiered sofa", level: null, to_quote_outstanding: null })]);
+    const row = await rowFor("Untiered sofa");
+    expect(within(row).queryByText("Can quote")).toBeNull();
+    // The dash itself, not a zero. (The Waiting column beside it does print a
+    // real 0, which is why this asks for the control rather than for the
+    // absence of the character.)
+    const control = within(row).getByRole("button", { expanded: false });
+    expect(control.textContent).toContain("—");
+    await userEvent.click(control);
+    expect(screen.getByText(/simple, complex or hero/i)).toBeTruthy();
+  });
+
+  it("says what the level is needed FOR, not merely that it is missing", async () => {
+    // Both reasons, because both are true and each answers a different
+    // objection to filling it in: it decides which questions block a quote,
+    // and it picks the BWS boilerplate the item is priced against.
+    mountWith([record({ item_description: "Untiered sofa", level: null, to_quote_outstanding: null })]);
+    const row = await rowFor("Untiered sofa");
+    await userEvent.click(within(row).getByRole("button", { expanded: false }));
+    expect(screen.getByText(/which questions block a quote/i)).toBeTruthy();
+    expect(screen.getByText(/boilerplate/i)).toBeTruthy();
+    // And the Level column offers the decision on the row itself.
+    expect(within(row).getByText("not set")).toBeTruthy();
+  });
+});
