@@ -10,7 +10,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { acceptSuggestedLevels, setLevelOnRecords, setRecordLevel } from "@/lib/record-category";
@@ -58,7 +58,7 @@ describeIfDb("item level suggestions", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00026', '__QA Levels', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00026")}', '__QA Levels', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
     const run = await client.query(

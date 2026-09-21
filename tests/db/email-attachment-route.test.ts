@@ -21,7 +21,7 @@
 // Rows are prefixed `__QA ` and deleted FK-safe.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -98,7 +98,7 @@ describeIfDb("the email attachment route", () => {
     projectId = (
       await client.query(
         `insert into projects (bws_project_number, name, client, created_by, updated_by)
-         values ('__QA P90044', '__QA Attachments', '__QA Example Client', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P90044")}', '__QA Attachments', '__QA Example Client', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
 

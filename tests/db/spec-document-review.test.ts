@@ -14,7 +14,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 import { it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import type { Proposal, StagedSpecDocument } from "@/lib/spec-document";
@@ -65,7 +65,7 @@ describeIfDb("spec document review", () => {
 
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90004', '__QA Extraction project', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90004")}', '__QA Extraction project', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 
@@ -186,7 +186,7 @@ describeIfDb("spec document review", () => {
       requirementId,
       target: {
         recordId,
-        recordLabel: "__QA P90004-9101",
+        recordLabel: `${qaNumber("P90004")}-9101`,
         recordVersion: 1,
         requirementId,
         requirementPrompt: requirementPrompts[index < 0 ? 0 : index] ?? "",
@@ -476,7 +476,7 @@ describeIfDb("spec document review", () => {
   it("refuses a record from another project, and writes nothing", async () => {
     const otherProject = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90005', '__QA Elsewhere', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90005")}', '__QA Elsewhere', 'qa', 'qa') returning id`,
     );
     const foreignRun = await client.query(
       `insert into spec_runs (project_id, name, created_by, updated_by)

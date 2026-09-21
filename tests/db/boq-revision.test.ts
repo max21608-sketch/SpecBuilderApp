@@ -18,7 +18,7 @@
 // record keeps its ID, and therefore keeps everything hanging off it.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -61,7 +61,7 @@ describeIfDb("BOQ revision", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00017', '__QA BOQ revision', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00017")}', '__QA BOQ revision', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
     const category = await client.query(`select id from item_categories order by sort_order limit 1`);

@@ -12,7 +12,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -45,7 +45,7 @@ describeIfDb("the infill routes", () => {
     projectId = (
       await client.query(
         `insert into projects (bws_project_number, name, created_by, updated_by)
-         values ('__QA P90034', '__QA Infill routes', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P90034")}', '__QA Infill routes', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
     const runId = (

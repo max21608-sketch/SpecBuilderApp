@@ -8,7 +8,7 @@
 // they are scoped to a project this test created and would otherwise leave a
 // project's whole trail behind.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { editAnswer } from "@/lib/answer-edit";
 import type { TxnSql } from "@/lib/db-transaction";
@@ -39,7 +39,7 @@ describeIfDb("0012 change sets and versions", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00012', '__QA Change history', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00012")}', '__QA Change history', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
     const run = await client.query(

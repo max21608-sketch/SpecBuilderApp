@@ -18,7 +18,7 @@
 // FK-safe order.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION, assertBoqDocument, type BoqLine } from "@/lib/boq-import";
 import { noQtyColumn } from "../fixtures/boq-shapes";
@@ -81,7 +81,7 @@ describeIfDb("BOQ variance, through the confirm", () => {
     projectId = (
       await client.query(
         `insert into projects (bws_project_number, name, client, created_by, updated_by)
-         values ('__QA P90031', '__QA BOQ variance', '__QA Example Client', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P90031")}', '__QA BOQ variance', '__QA Example Client', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
     categoryId = (

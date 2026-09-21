@@ -27,7 +27,7 @@
 // refuses a direct `delete from change_sets` outright and allows the cascade.
 // ============================================================================
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { correctAttribute } from "@/lib/attribute-correct";
@@ -142,7 +142,7 @@ describeIfDb("correcting a spec", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00033', '__QA Correcting a spec', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00033")}', '__QA Correcting a spec', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
     categoryId = (

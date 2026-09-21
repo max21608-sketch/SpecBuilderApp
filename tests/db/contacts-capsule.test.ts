@@ -6,7 +6,7 @@
 // NOTHING is written, while a manual one still succeeds. Capsule must gate the
 // link and never gate the ability to record somebody to chase.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -39,14 +39,12 @@ describeIfDb("contacts and Capsule", () => {
     // No token: the deployment state this test is about.
     delete process.env.CAPSULE_API_TOKEN;
 
-    const stale = await client.query(`select id from projects where bws_project_number = '__QA P90012'`);
-    for (const row of stale.rows) {
-      await client.query(`delete from project_contacts where project_id = $1`, [row.id]);
-      await client.query(`delete from projects where id = $1`, [row.id]);
-    }
+    // Nothing is pre-cleaned: `qaNumber` gives this process its own project
+    // number, so an aborted run's row cannot block this one. It waits for
+    // `npm run db:qa-clean`, which sweeps on the `__QA ` prefix.
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90012', '__QA Capsule project', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90012")}', '__QA Capsule project', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
   });

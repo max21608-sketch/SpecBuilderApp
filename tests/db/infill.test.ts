@@ -23,7 +23,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { editAnswer } from "@/lib/answer-edit";
@@ -49,7 +49,7 @@ describeIfDb("the infill screen's writes", () => {
     projectId = (
       await client.query(
         `insert into projects (bws_project_number, name, created_by, updated_by)
-         values ('__QA P90033', '__QA Infill', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P90033")}', '__QA Infill', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
     runId = (

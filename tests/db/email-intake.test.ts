@@ -11,7 +11,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { resolveProposals } from "@/lib/spec-document";
 import { PROPOSAL_SCHEMA_VERSION } from "@/lib/spec-document";
@@ -57,27 +57,19 @@ describeIfDb("email intake", () => {
   beforeAll(async () => {
     await client.connect();
 
-    // Clear anything a previous aborted run left behind, so this suite is
-    // re-runnable. House style: QA rows are prefixed and swept, never left for
-    // the next person to trip over.
-    const stale = await client.query(`select id from projects where bws_project_number = '__QA P90009'`);
-    for (const row of stale.rows) {
-      await client.query(`delete from email_messages where project_id = $1`, [row.id]);
-      await client.query(
-        `delete from spec_answers where record_id in (select id from spec_records where project_id = $1)`,
-        [row.id],
-      );
-      await client.query(`delete from spec_record_refs where project_id = $1`, [row.id]);
-      await client.query(`delete from spec_records where project_id = $1`, [row.id]);
-      await client.query(`delete from intake_runs where project_id = $1`, [row.id]);
-      await client.query(`delete from spec_runs where project_id = $1`, [row.id]);
-      await client.query(`delete from projects where id = $1`, [row.id]);
-    }
-    await client.query(`delete from email_messages where mailbox = 'upload' and created_by = 'qa'`);
+    // NOTHING IS PRE-CLEANED, and the delete that used to be here is the
+    // reason. `qaNumber` gives this process its own project number, so an
+    // aborted run's rows can no longer block this one -- they wait for
+    // `npm run db:qa-clean`. What stood here also swept every `mailbox =
+    // 'upload'` message created by `qa`, which is not this run's row: with two
+    // db-tier runs at once it deleted the OTHER run's message between its
+    // insert and its assertions, and that run went red on a 409 and on a
+    // missing version for a reason nothing on screen explained. Every message
+    // this file creates is now removed by its own id or by its project.
 
     const project = await client.query(
       `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
-       values ('__QA P90009', '__QA Email project', '__qa-p90009@example.test', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90009")}', '__QA Email project', '__qa-p90009@example.test', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 
@@ -201,7 +193,7 @@ describeIfDb("email intake", () => {
     // append-only and refuses a delete while its record still exists. Dropping
     // the RECORD cascades them away, which is the one sanctioned route (0014,
     // "refuse the rewrite, allow the cascade").
-    await client.query(`delete from email_messages where project_id = $1 or created_by = 'qa' and mailbox = 'upload'`, [projectId]);
+    await client.query(`delete from email_messages where project_id = $1`, [projectId]);
     await client.query(`delete from spec_answers where record_id = $1`, [recordId]);
     await client.query(`delete from spec_record_refs where project_id = $1`, [projectId]);
     await client.query(`delete from spec_records where project_id = $1`, [projectId]);
@@ -339,6 +331,11 @@ describeIfDb("email intake", () => {
     ]);
     expect(message.rows[0].intake_run_id).toBeNull();
     expect(message.rows[0].project_id).toBeNull();
+
+    // It belongs to no project, so `afterAll`'s project-scoped delete cannot
+    // reach it. Removed here by its own id rather than by a `mailbox =
+    // 'upload'` sweep, which would take a concurrent run's message with it.
+    await client.query(`delete from email_messages where id = $1`, [held.rows[0].id]);
   });
 
   it("refuses to take an email off a project once something has been applied", async () => {

@@ -13,7 +13,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { EMPTY_COMPLETION, loadProjectCompletion } from "@/lib/project-completion";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
@@ -52,7 +52,7 @@ describeIfDb("project completion", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00025', '__QA Completion', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00025")}', '__QA Completion', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
     const run = await client.query(

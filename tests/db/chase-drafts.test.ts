@@ -15,7 +15,7 @@
 // is append-only by design and a cleanup that deletes from it has broken the
 // thing under test.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -53,7 +53,7 @@ describeIfDb("chase drafts", () => {
 
     const project = await client.query(
       `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
-       values ('__QA P90001', '__QA Chase project', '__qa-inbox@example.test', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90001")}', '__QA Chase project', '__qa-inbox@example.test', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 

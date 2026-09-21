@@ -12,7 +12,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe; the PROJECT goes last.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -117,7 +117,7 @@ describeIfDb("the inbox says what an email found", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00097', '__QA Inbox found', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00097")}', '__QA Inbox found', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 

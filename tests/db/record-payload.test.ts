@@ -15,7 +15,7 @@
 // takes its change sets and versions with it (0014/0013 refuse a direct
 // delete, and a teardown that tries one leaves its fixture behind).
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -76,7 +76,7 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
 
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00099', '__QA Record payload', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00099")}', '__QA Record payload', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 
@@ -165,7 +165,7 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
       `insert into email_drafts (project_id, contact_id, contact_version, status, subject, body,
                                  project_label, recipient_name, recipient_email,
                                  sent_at, sent_by, created_by, updated_by)
-       values ($1, $2, 1, 'sent', '__QA Chase', '<p>__QA</p>', '__QA P00099', '__QA Hayley',
+       values ($1, $2, 1, 'sent', '__QA Chase', '<p>__QA</p>', '${qaNumber("P00099")}', '__QA Hayley',
                'hayley@example.test', now(), 'qa', 'qa', 'qa') returning id`,
       [projectId, contactId],
     );

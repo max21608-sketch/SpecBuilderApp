@@ -16,7 +16,7 @@
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { MAX_IN_FLIGHT_READS_PER_PACK } from "@/lib/extraction-claim";
@@ -92,7 +92,7 @@ describeIfDb("the per-pack cap on charged reads", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90014', '__QA Cap project', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90014")}', '__QA Cap project', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
   });

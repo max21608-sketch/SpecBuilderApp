@@ -14,7 +14,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe.
 import { it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import type { Proposal, StagedSpecDocument } from "@/lib/spec-document";
@@ -69,7 +69,7 @@ describeIfDb("an email's dimensions", () => {
        -- inserting the same bws_project_number race in a parallel run. The
        -- loser dies in beforeAll, its afterAll then throws on an empty id, and
        -- the project it did create is left behind to fail the NEXT run too.
-       values ('__QA P90013', '__QA Dimension project', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90013")}', '__QA Dimension project', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 

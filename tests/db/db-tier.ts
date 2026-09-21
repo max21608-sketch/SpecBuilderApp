@@ -20,6 +20,7 @@
 // : describe.skip` and nothing shared it, so the tier had twenty-five chances
 // to drift apart about what gating means. It has one now.
 // ============================================================================
+import { createHash } from "node:crypto";
 import { describe } from "vitest";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -61,3 +62,56 @@ export function describeIfDb(name: string, factory: () => void): void {
   }
   describe(name, { timeout: DB_TEST_TIMEOUT }, factory);
 }
+
+// ============================================================================
+// TWO RUNS AT ONCE CLAIMED THE SAME PROJECT NUMBER.
+//
+// `projects.bws_project_number` is unique, and every fixture here wrote its own
+// literal — `__QA P90014`, `__QA P00028`. Alone, each file passes. Two full
+// db-tier runs against the one sandbox, which is this plan's normal state with
+// two agents working, and the second to arrive dies in `beforeAll` on
+// `projects_bws_project_number_key` and then AGAIN in `afterAll` with "invalid
+// input syntax for type uuid" because `projectId` was never assigned — two red
+// messages that read as unrelated defects and send somebody hunting. Found
+// twice on 2026-09-21 before it was written down.
+//
+// So a number is asked for rather than typed, and it carries a suffix that is
+// the same for every call in ONE process and different between processes. The
+// pid is what makes two concurrent runs disjoint (no two live processes share
+// one); the start time is what stops a recycled pid from colliding with rows a
+// crashed run left behind. Within a run it is stable, so a fixture another
+// test in the same file looks up by number still finds it.
+//
+// THE `__QA ` PREFIX AND ITS SPACE SURVIVE EXACTLY, because that prefix is
+// what `tools/qa-clean.mjs` and every `like '__QA%'` predicate sweep on. The
+// suffix goes on the END for the same reason.
+//
+// The consequence, deliberately: an aborted run's rows no longer block the next
+// one, so nothing has to pre-delete them by number — they simply sit in the
+// sandbox until `npm run db:qa-clean` sweeps them, which is what that script is
+// for.
+// ============================================================================
+const QA_PREFIX = "__QA ";
+
+/**
+ * The suffix for one process, from its pid and when it started. Exported so a
+ * pure test can assert that two different processes cannot produce one suffix
+ * without having to start two.
+ */
+export function qaSuffixFor(pid: number, startedAtMs: number): string {
+  return createHash("sha1").update(`${pid}:${Math.round(startedAtMs)}`).digest("hex").slice(0, 6);
+}
+
+const RUN_SUFFIX = qaSuffixFor(process.pid, performance.timeOrigin);
+
+/**
+ * A `__QA ` identifier unique to this process. `qaNumber("P90014")` gives
+ * `__QA P90014-1f3a9c`, so two concurrent runs never claim one unique key and a
+ * single run always asks for the same value.
+ */
+export function qaNumber(base: string): string {
+  return `${QA_PREFIX}${base}-${RUN_SUFFIX}`;
+}
+
+/** This process's suffix, for a test that needs to reason about it. */
+export const QA_RUN_SUFFIX = RUN_SUFFIX;

@@ -12,7 +12,7 @@
 // A sequential narrative would not have caught it. These run on INDEPENDENT
 // connections, started before either finishes, so the database is what decides.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -43,7 +43,7 @@ describeIfDb("BOQ confirm concurrency", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90007', '__QA BOQ race', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90007")}', '__QA BOQ race', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
 

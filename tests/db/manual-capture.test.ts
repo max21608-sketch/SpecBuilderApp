@@ -12,7 +12,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { createAttribute, createRecord, createRun, editRecordDetails } from "@/lib/manual-capture";
@@ -33,7 +33,7 @@ describeIfDb("adding things by hand", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00028', '__QA Manual capture', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00028")}', '__QA Manual capture', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
     // An upholstery category, so the record gets a real checklist.
@@ -124,7 +124,7 @@ describeIfDb("adding things by hand", () => {
   it("refuses an item on a run belonging to another project", async () => {
     const other = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P00028b', '__QA Other', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P00028b")}', '__QA Other', 'qa', 'qa') returning id`,
     );
     const otherRun = await client.query(
       `insert into spec_runs (project_id, name, created_by, updated_by) values ($1, '__QA elsewhere', 'qa', 'qa') returning id`,

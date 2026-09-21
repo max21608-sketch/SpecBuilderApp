@@ -6,7 +6,7 @@
 // Every row is prefixed `__QA ` and deleted in FK-safe order. audit_log is left
 // alone: it is append-only by design.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { stageDrawings, type SpecFieldEntry } from "@/lib/drawing-document";
 import { stagePreamble } from "@/lib/preamble-document";
@@ -50,7 +50,7 @@ describeIfDb("intake routes", () => {
     projectId = (
       await client.query(
         `insert into projects (bws_project_number, name, client, created_by, updated_by)
-         values ('__QA P90010', '__QA Panther', '__QA Example Client', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P90010")}', '__QA Panther', '__QA Example Client', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
     mainRunId = (
@@ -748,7 +748,7 @@ describeIfDb("intake routes", () => {
     // than leaking that project's drawings.
     const other = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90099', '__QA Other', 'qa', 'qa') returning id`);
+       values ('${qaNumber("P90099")}', '__QA Other', 'qa', 'qa') returning id`);
     const batch = await client.query(
       `insert into intake_batches (project_id, label, created_by, updated_by)
        values ($1, '__QA elsewhere', 'qa', 'qa') returning id`, [other.rows[0].id]);
@@ -1290,9 +1290,11 @@ describeIfDb("intake routes", () => {
     expect(res.headers.get("content-type")).toMatch(/text\/csv/);
     // The allowlist keeps letters, digits, spaces, & and - and drops the rest,
     // including the QA prefix's underscores. Nothing a project name contains
-    // can reach a Content-Disposition header as a quote or a newline.
+    // can reach a Content-Disposition header as a quote or a newline. The
+    // number carries this process's suffix, so the expectation is built from
+    // `qaNumber` with the underscores taken off rather than typed out.
     expect(res.headers.get("content-disposition")).toBe(
-      'attachment; filename="QA P90010 - QA VE RUN - BWS spec fields.csv"',
+      `attachment; filename="${qaNumber("P90010").replace(/_/g, "")} - QA VE RUN - BWS spec fields.csv"`,
     );
 
     const inScope = await client.query(
@@ -1327,7 +1329,7 @@ describeIfDb("intake routes", () => {
   it("refuses a run from another project", async () => {
     const other = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA P90011', '__QA Elsewhere', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90011")}', '__QA Elsewhere', 'qa', 'qa') returning id`,
     );
     const foreignRun = await client.query(
       `insert into spec_runs (project_id, name, created_by, updated_by) values ($1, '__QA Foreign', 'qa', 'qa') returning id`,

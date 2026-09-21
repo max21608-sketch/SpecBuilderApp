@@ -23,7 +23,7 @@
 // omitted it would wipe every BWS field it holds.
 // ============================================================================
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
 
@@ -47,7 +47,7 @@ describeIfDb("a split bill line in the export scope", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, created_by, updated_by)
-       values ('__QA AP364V', '__QA Variants', 'qa', 'qa') returning id`,
+       values ('${qaNumber("AP364V")}', '__QA Variants', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
     const run = await client.query(

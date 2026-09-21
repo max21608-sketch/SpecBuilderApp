@@ -10,7 +10,7 @@
 // green run here proves nothing unless you set it. Run it against a sandbox
 // branch before trusting a schema change.
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, QA_RUN_SUFFIX } from "./db-tier";
 import pg from "pg";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -20,6 +20,22 @@ const FOUNDATION_TABLES = [
   "pick_lists", "audit_log", "schema_migrations",
 ];
 
+// THE PROBE TABLE IS NAMED FOR THIS PROCESS.
+//
+// It was plain `chassis_probe`, created and dropped in one sandbox by whoever
+// was running. Two db-tier runs at once -- this plan's normal state -- and the
+// second run's `create table` hit the first's, or worse, the first's `afterAll`
+// dropped the table the second was mid-way through testing: "relation
+// chassis_probe does not exist", which reads as a broken migration rather than
+// as two runs sharing a name. `QA_RUN_SUFFIX` is the same value `qaNumber`
+// suffixes a project with, so this table and that project belong to one run.
+//
+// A crashed run leaves its own table behind, where the shared name used to be
+// dropped by the next run. It drops cleanly by name and nothing reads it; the
+// alternative -- dropping every `chassis_probe_%` on the way in -- would take a
+// concurrent run's table with it, which is the defect this fixes.
+const PROBE = `chassis_probe_${QA_RUN_SUFFIX}`;
+
 describeIfDb("0001 foundation", () => {
   const client = new pg.Client({ connectionString: databaseUrl });
 
@@ -27,9 +43,9 @@ describeIfDb("0001 foundation", () => {
     await client.connect();
     // A scratch table with the standard shape, so the shared trigger
     // FUNCTIONS can be tested without depending on any domain table.
-    await client.query("drop table if exists chassis_probe");
+    await client.query(`drop table if exists ${PROBE}`);
     await client.query(`
-      create table chassis_probe (
+      create table ${PROBE} (
         id uuid primary key default gen_random_uuid(),
         label text not null,
         version integer not null default 1,
@@ -37,16 +53,16 @@ describeIfDb("0001 foundation", () => {
         updated_at timestamptz not null default now(),
         created_by text, updated_by text
       )`);
-    await client.query(`create trigger probe_audit after insert or update or delete on chassis_probe
+    await client.query(`create trigger probe_audit after insert or update or delete on ${PROBE}
                         for each row execute function write_audit()`);
-    await client.query(`create trigger probe_bump before update on chassis_probe
+    await client.query(`create trigger probe_bump before update on ${PROBE}
                         for each row execute function bump_version()`);
-    await client.query(`create trigger probe_touch before update on chassis_probe
+    await client.query(`create trigger probe_touch before update on ${PROBE}
                         for each row execute function set_updated_at()`);
   });
 
   afterAll(async () => {
-    await client.query("drop table if exists chassis_probe");
+    await client.query(`drop table if exists ${PROBE}`);
     await client.end();
   });
 
@@ -63,10 +79,10 @@ describeIfDb("0001 foundation", () => {
     // never survives to the mutation. Without this fallback changed_by is null
     // on every row the app ever writes.
     const { rows } = await client.query(
-      "insert into chassis_probe (label, created_by) values ('a', 'someone@benwhistler.com') returning id",
+      `insert into ${PROBE} (label, created_by) values ('a', 'someone@benwhistler.com') returning id`,
     );
     const { rows: audit } = await client.query(
-      "select action, changed_by from audit_log where table_name = 'chassis_probe' and row_id = $1",
+      `select action, changed_by from audit_log where table_name = '${PROBE}' and row_id = $1`,
       [rows[0].id],
     );
     expect(audit).toHaveLength(1);
@@ -76,17 +92,17 @@ describeIfDb("0001 foundation", () => {
 
   it("bumps version and updated_at on update, and audits the change", async () => {
     const { rows } = await client.query(
-      "insert into chassis_probe (label, created_by) values ('b', 'a@b.com') returning id, version",
+      `insert into ${PROBE} (label, created_by) values ('b', 'a@b.com') returning id, version`,
     );
     expect(rows[0].version).toBe(1);
     const { rows: updated } = await client.query(
-      "update chassis_probe set label = 'b2', updated_by = 'c@d.com' where id = $1 returning version",
+      `update ${PROBE} set label = 'b2', updated_by = 'c@d.com' where id = $1 returning version`,
       [rows[0].id],
     );
     expect(updated[0].version).toBe(2);
 
     const { rows: audit } = await client.query(
-      "select action, changed_by from audit_log where table_name = 'chassis_probe' and row_id = $1 and action = 'update'",
+      `select action, changed_by from audit_log where table_name = '${PROBE}' and row_id = $1 and action = 'update'`,
       [rows[0].id],
     );
     expect(audit[0].changed_by).toBe("c@d.com");
@@ -94,11 +110,11 @@ describeIfDb("0001 foundation", () => {
 
   it("refuses a version-mismatched update (the optimistic lock)", async () => {
     const { rows } = await client.query(
-      "insert into chassis_probe (label, created_by) values ('c', 'a@b.com') returning id",
+      `insert into ${PROBE} (label, created_by) values ('c', 'a@b.com') returning id`,
     );
     // The client believes it holds version 99; it does not.
     const stale = await client.query(
-      "update chassis_probe set label = 'nope' where id = $1 and version = 99",
+      `update ${PROBE} set label = 'nope' where id = $1 and version = 99`,
       [rows[0].id],
     );
     expect(stale.rowCount).toBe(0); // zero rows -> the route returns 409, never a silent overwrite

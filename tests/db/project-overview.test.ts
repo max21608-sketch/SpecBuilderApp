@@ -11,7 +11,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe. audit_log is left alone.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 vi.mock("@/lib/session", () => ({
@@ -63,7 +63,7 @@ describeIfDb("project overview", () => {
     await client.connect();
     const project = await client.query(
       `insert into projects (bws_project_number, name, client, created_by, updated_by)
-       values ('__QA P90002', '__QA Overview project', '__QA Client', 'qa', 'qa') returning id`,
+       values ('${qaNumber("P90002")}', '__QA Overview project', '__QA Client', 'qa', 'qa') returning id`,
     );
     projectId = project.rows[0].id;
   });
@@ -82,7 +82,7 @@ describeIfDb("project overview", () => {
     const { GET } = await import("@/app/api/projects/[id]/route");
     const body = await (await GET(new Request("http://localhost/test"), params(projectId))).json();
     expect(body.ok).toBe(true);
-    expect(body.project.bws_project_number).toBe("__QA P90002");
+    expect(body.project.bws_project_number).toBe(qaNumber("P90002"));
     expect(body.project.specs_agreed_by).toBeNull();
     expect(Array.isArray(body.documents)).toBe(true);
   });
@@ -182,7 +182,7 @@ describeIfDb("project overview", () => {
     const { PATCH } = await import("@/app/api/projects/[id]/route");
     const before = await stored();
     const res = await PATCH(
-      patch({ version: before.version, bwsProjectNumber: "__QA P99999" }),
+      patch({ version: before.version, bwsProjectNumber: qaNumber("P99999") }),
       params(projectId),
     );
     const body = await res.json();
@@ -192,7 +192,7 @@ describeIfDb("project overview", () => {
     const rows = await client.query(`select bws_project_number, version from projects where id = $1`, [
       projectId,
     ]);
-    expect(rows.rows[0].bws_project_number).toBe("__QA P90002");
+    expect(rows.rows[0].bws_project_number).toBe(qaNumber("P90002"));
     expect(rows.rows[0].version).toBe(before.version);
   });
 

@@ -6,7 +6,7 @@
 // Every row is prefixed `__QA ` and deleted in FK-safe order. audit_log is
 // left alone: it is append-only by design.
 import { it, expect, beforeAll, afterAll } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -26,13 +26,13 @@ describeIfDb("0007 intake model", () => {
     projectId = (
       await client.query(
         `insert into projects (bws_project_number, name, created_by, updated_by)
-         values ('__QA P07001', '__QA Intake project', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P07001")}', '__QA Intake project', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
     otherProjectId = (
       await client.query(
         `insert into projects (bws_project_number, name, created_by, updated_by)
-         values ('__QA P07002', '__QA Other project', 'qa', 'qa') returning id`,
+         values ('${qaNumber("P07002")}', '__QA Other project', 'qa', 'qa') returning id`,
       )
     ).rows[0].id;
     runId = (
