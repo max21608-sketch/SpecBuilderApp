@@ -579,4 +579,35 @@ describeIfDb("the per-pack cap on charged reads", () => {
     expect(documentReviewLabel(waiting)).toBe("Waiting for a slot");
     expect(documentReviewLabel(runs.find((run) => run.status === "queued")!)).not.toBe("Waiting for a slot");
   });
+
+  // And the SINGLE-document screens, which read the same fact off their own
+  // GET. They used to have nothing to read it from and said "Not read yet" —
+  // the sentence for a document waiting for a PERSON — over one the app is
+  // about to read on its own.
+  it("a single document's own review payload says it is waiting for a slot", async () => {
+    const batchId = await newBatch("single-chip");
+    const ids: string[] = [];
+    for (let n = 0; n < 5; n += 1) ids.push(await insertUnreadDoc(batchId, `single-chip-${n}`, "shop_drawings"));
+    published.length = 0;
+    for (const id of ids) await readIt(id);
+
+    const { GET } = await import("@/app/api/imports/[id]/route");
+    const payloadFor = async (id: string) => {
+      const res = await GET(new Request("http://localhost/test"), { params: Promise.resolve({ id }) });
+      return (await res.json()).import as { status: string; waitingForSlot: boolean };
+    };
+
+    // The last two of five are the ones the cap held back.
+    const deferred = await payloadFor(ids[4]!);
+    expect(deferred.status).toBe("pending");
+    expect(deferred.waitingForSlot).toBe(true);
+    expect(documentReviewLabel(deferred)).toBe("Waiting for a slot");
+
+    // A document being read is not waiting for a slot, whatever it is waiting
+    // for: the marker is the pair (no attempt, a live deadline), and a queued
+    // run holds an attempt.
+    const reading = await payloadFor(ids[0]!);
+    expect(reading.status).toBe("queued");
+    expect(reading.waitingForSlot).toBe(false);
+  });
 });

@@ -1,3 +1,4 @@
+import { MAX_IN_FLIGHT_READS_PER_PACK } from "@/lib/extraction-claim";
 import type { Tone } from "@/components/ui/tone";
 
 // What an intake run's status is called on screen.
@@ -117,6 +118,21 @@ export function hasPendingReview(run: ReviewProgress): boolean {
  * is waiting for a slot and will start on its own.
  */
 export const WAITING_FOR_SLOT_LABEL = "Waiting for a slot";
+
+/**
+ * The sentence that goes with that label.
+ *
+ * It lives here, in the leaf the screens already read their labels from, and
+ * `extraction-slots.ts` re-exports it so the two routes that return it in a 202
+ * did not change. It cannot live there: that file opens transactions and
+ * publishes queue messages, so a client component importing it would pull the
+ * database driver into the browser bundle. `MAX_IN_FLIGHT_READS_PER_PACK` comes
+ * from `extraction-claim.ts`, a leaf of constants, so the number in the
+ * sentence is the number the cap enforces rather than a second copy of it.
+ */
+export const WAITING_FOR_SLOT_MESSAGE =
+  `Waiting — ${MAX_IN_FLIGHT_READS_PER_PACK} documents of this pack are being read. ` +
+  `This one starts on its own when one of them finishes.`;
 
 /** The label for a document's state, with its count where there is one. */
 export function documentReviewLabel(run: ReviewProgress): string {

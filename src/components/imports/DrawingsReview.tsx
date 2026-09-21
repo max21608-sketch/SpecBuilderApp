@@ -38,6 +38,8 @@ import { useNextStep } from "@/lib/use-next-step";
 import PageBody from "@/components/ui/PageBody";
 import Card from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
+import DocumentState from "@/components/imports/DocumentState";
+import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
 import Tabs from "@/components/ui/Tabs";
 import { DOCUMENT_KIND_LABELS, type ItemLevel } from "@/lib/spec-vocab";
@@ -63,6 +65,13 @@ type Run = {
   claim_live: boolean | null;
   within_deadline: boolean | null;
   claim_count: number;
+  /**
+   * `pending` because the pack is already reading as many documents as it may,
+   * rather than because nobody has asked for it. Computed by the GET route off
+   * the marker the cap writes. Two different sentences on this screen, and only
+   * one of them is a button somebody has to press.
+   */
+  waitingForSlot?: boolean | null;
   parsed: StagedDrawings | null;
 };
 
@@ -208,6 +217,9 @@ export default function DrawingsReview({
   // Server-acked state is held separately from what the reviewer is typing, so
   // a reload cannot wipe an unsaved edit and an autosave cannot fight the input.
   const [drafts, setDrafts] = useState<Record<string, Partial<DrawingObservation>>>({});
+  // An action that succeeded and changed nothing yet — a read the cap deferred.
+  // Held apart from `error` so that reads blue and a refusal reads red.
+  const [notice, setNotice] = useState<string | null>(null);
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
 
   const load = useCallback(async () => {
@@ -238,9 +250,13 @@ export default function DrawingsReview({
    * happen (the refused request means this screen is out of date), so the
    * message is put back after it.
    */
-  async function reloadThen(failure: string | null) {
+  async function reloadThen(failure: string | null, notice: string | null = null) {
     await load();
     if (failure) setError(failure);
+    // An outcome that is NOT a failure — a press the cap deferred — goes through
+    // the same reload-first path, because `load()` clears whatever was set
+    // before it. In the RED banner it would paint a working pack as broken.
+    if (notice) setNotice(notice);
   }
 
   useEffect(() => {
@@ -248,7 +264,12 @@ export default function DrawingsReview({
   }, [load]);
 
   const waiting = run?.status === "queued" || run?.status === "parsing";
-  usePoll(load, { intervalMs: 3000, active: Boolean(waiting) });
+  // A DEFERRED READ STARTS ON ITS OWN, so this screen looks again rather than
+  // saying "Waiting for a slot" until somebody reloads the page. NOT folded into
+  // `waiting`, which is what selects the "Being read" body: this document is not
+  // being read, it is queued behind three that are.
+  const deferred = run?.status === "pending" && Boolean(run?.waitingForSlot);
+  usePoll(load, { intervalMs: 3000, active: Boolean(waiting || deferred) });
 
   const byItem = useMemo(() => new Map(resolution.map((entry) => [entry.id, entry])), [resolution]);
 
@@ -257,12 +278,15 @@ export default function DrawingsReview({
     setBusy("extract");
     setError(null);
     try {
-      const res = await apiFetch(`/api/imports/${importId}/extract`, {
+      const res = await apiFetch<{ waiting?: boolean; note?: string }>(`/api/imports/${importId}/extract`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: run.version, requestId: crypto.randomUUID(), action }),
       });
-      await reloadThen(res.ok ? null : res.error);
+      // 202 `waiting`: the press was right and the read is queued behind the
+      // pack's three. It reported NOTHING, so the button looked broken.
+      const held = res.ok && res.data.waiting === true;
+      await reloadThen(res.ok ? null : res.error, held ? (res.data.note ?? WAITING_FOR_SLOT_MESSAGE) : null);
     } finally {
       setBusy(null);
     }
@@ -533,27 +557,49 @@ export default function DrawingsReview({
 
   if (!run) return error ? <Note tone="danger">{error}</Note> : <Spinner label="Loading" />;
 
-  // ---- not read yet --------------------------------------------------------
+  // ---- not read yet, or waiting for a slot ---------------------------------
+  //
+  // TWO STATES UNDER ONE `pending`, and this screen said the first for both.
+  // "These drawings have not been read" beside a Read button is right for a
+  // document waiting for a PERSON; for one the cap deferred it asks for a press
+  // the app does not need. The chip is `DocumentState`, so the word here and the
+  // word on the pack screen are one reading (`documentReviewLabel`).
   if (run.status === "pending" || run.status === "failed") {
     return shell(
       undefined,
-      <Card title="These drawings have not been read">
+      <Card title={deferred ? "These drawings are waiting for a slot" : "These drawings have not been read"}>
         <p className="text-neutral-600">
           {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS.shop_drawings}
         </p>
+        <div className="mt-2">
+          <DocumentState run={{ status: run.status, waitingForSlot: run.waitingForSlot }} />
+        </div>
         {run.status === "failed" && run.error && <Note tone="danger">{run.error}</Note>}
         <p className="mt-3 text-neutral-700">
-          The item codes and dimensions on these pages are drawn, not typed — only the model reading the page as an
-          image can get them. This is the step that {run.status === "failed" ? "charges again." : "costs money."}
+          {deferred ? (
+            <>{WAITING_FOR_SLOT_MESSAGE} Reading the pages is what costs money, whenever it starts.</>
+          ) : (
+            <>
+              The item codes and dimensions on these pages are drawn, not typed — only the model reading the page as an
+              image can get them. This is the step that {run.status === "failed" ? "charges again." : "costs money."}
+            </>
+          )}
         </p>
         <Button
-          variant="primary"
+          variant={deferred ? "secondary" : "primary"}
           className="mt-3"
           onClick={() => void startExtraction("start")}
           disabled={busy !== null}
         >
-          {busy === "extract" ? "Starting…" : run.status === "failed" ? "Retry extraction" : "Read the drawings"}
+          {busy === "extract"
+            ? "Starting…"
+            : deferred
+              ? "Read it now"
+              : run.status === "failed"
+                ? "Retry extraction"
+                : "Read the drawings"}
         </Button>
+        {notice && <Note tone="info">{notice}</Note>}
         {error && <Note tone="danger">{error}</Note>}
       </Card>,
     );

@@ -13,7 +13,7 @@
 //   different row before and after an Ignore. Every operation here locates by
 //   `elem.id` in the live, locked JSON.
 import { z } from "zod";
-import { sql, json } from "@/lib/db";
+import { sql, json, type Row } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
@@ -424,8 +424,29 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     left join attachments a on a.id = r.attachment_id
     where r.id = ${id}
   `;
-  const run = rows[0];
-  if (!run) return json({ ok: false, error: "No such import." }, 404);
+  const row = rows[0];
+  if (!row) return json({ ok: false, error: "No such import." }, 404);
+
+  // ==========================================================================
+  // `pending` COVERS TWO STATES, AND THE SCREENS SAID THE WRONG ONE.
+  //
+  // A document the per-pack cap DEFERRED sits at `pending` with no attempt and
+  // a live deadline — the pair `openAttempt` never writes, because it always
+  // writes both (`src/lib/extraction-slots.ts`). The three single-document
+  // review screens read the status alone and said "has not been read", which is
+  // the sentence for a document waiting for a PERSON, over one the app is going
+  // to read on its own as soon as a slot frees.
+  //
+  // THE SAME PREDICATE IS IN SQL IN TWO PLACES — the pack screen's
+  // src/app/api/projects/[id]/batches/route.ts and the drawings step's
+  // src/lib/drawing-resolution.ts, where it has to be SQL because those
+  // aggregate over a whole pack. Here the row is already in hand and both its
+  // columns are already selected, so this reads them rather than adding a third
+  // copy of the SQL. Change one and change the others, or the pack screen and a
+  // document's own screen start disagreeing about which documents are waiting.
+  // ==========================================================================
+  const waitingForSlot = row.status === "pending" && !row.attempt_id && Boolean(row.within_deadline);
+  const run: Row = { ...row, waitingForSlot };
 
   if (run.source_kind === "spec_document" && run.document_kind === "shop_drawings") {
     // Resolution is LIVE, never stored. Confirming the pack's BOQ after this

@@ -47,6 +47,8 @@ import PageBody from "@/components/ui/PageBody";
 import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import DocumentState from "@/components/imports/DocumentState";
+import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
 import type { Tone } from "@/components/ui/tone";
 import {
@@ -71,6 +73,13 @@ export type SpecImport = {
   claim_count: number;
   within_deadline: boolean | null;
   claim_live: boolean | null;
+  /**
+   * `pending` because the pack is already reading as many documents as it may,
+   * rather than because nobody has asked for it. Computed by the GET route off
+   * the marker the cap writes. Two different sentences on this screen, and only
+   * one of them is a button somebody has to press.
+   */
+  waitingForSlot?: boolean | null;
   bws_project_number: string;
   project_name: string;
   filename: string | null;
@@ -106,6 +115,9 @@ export default function SpecDocumentReview({
   const proposals = useMemo(() => run.parsed?.lines ?? [], [run.parsed]);
 
   const [error, setError] = useState<string | null>(null);
+  // An action that succeeded and changed nothing yet — a read the cap deferred.
+  // Apart from `error`, or a pack working correctly would be painted red.
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<"pending" | "applied" | "ignored" | "message">("pending");
   // Acknowledged server state per proposal, held apart from what is being typed.
@@ -125,7 +137,11 @@ export default function SpecDocumentReview({
   const chains = useRef<Record<string, Promise<void>>>({});
 
   const waiting = run.status === "queued" || run.status === "parsing";
-  usePoll(() => void quietReload(), { intervalMs: 3000, active: waiting });
+  // A deferred read starts on its own when a slot frees, so this screen polls
+  // for it rather than saying "Waiting for a slot" until somebody reloads. NOT
+  // part of `waiting`, which selects the "Being read" body.
+  const deferred = run.status === "pending" && Boolean(run.waitingForSlot);
+  usePoll(() => void quietReload(), { intervalMs: 3000, active: waiting || deferred });
 
   const hasUnsaved = Object.keys(dirty).length > 0 || Object.keys(saveErrors).length > 0;
   useUnsavedChangesWarning(
@@ -225,14 +241,20 @@ export default function SpecDocumentReview({
   async function startExtraction(action: "start" | "retry-dispatch" | "restart-expired") {
     setBusy("extract");
     setError(null);
+    setNotice(null);
     try {
-      const res = await apiFetch(`/api/imports/${run.id}/extract`, {
+      const res = await apiFetch<{ waiting?: boolean; note?: string }>(`/api/imports/${run.id}/extract`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: run.version, requestId: crypto.randomUUID(), action }),
       });
       if (!res.ok) setError(res.error);
       await reload();
+      // AFTER the reload, which is the `reloadThen` rule on the two screens that
+      // load their own run: a message set before it is wiped by the props
+      // arriving. A 202 `waiting` is a correct press the cap deferred, and it
+      // used to report nothing at all — the button looked broken.
+      if (res.ok && res.data.waiting === true) setNotice(res.data.note ?? WAITING_FOR_SLOT_MESSAGE);
     } finally {
       setBusy(null);
     }
@@ -422,26 +444,47 @@ export default function SpecDocumentReview({
 
   // ---- the four body states ------------------------------------------------
 
+  // TWO STATES UNDER ONE `pending`, and this screen said the first for both.
+  // "Has not been read" is the sentence for a document waiting for a PERSON; one
+  // the cap deferred is waiting for a slot and starts on its own. The chip is
+  // `DocumentState`, so the word here and the word on the pack screen come from
+  // the one reading (`documentReviewLabel`).
   if (run.status === "pending" || run.status === "failed") {
     return shell(
       undefined,
-      <Card title="This document has not been read">
+      <Card title={deferred ? "This document is waiting for a slot" : "This document has not been read"}>
         <p className="text-neutral-600">
           {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS[run.document_kind] ?? run.document_kind}
         </p>
+        <div className="mt-2">
+          <DocumentState run={{ status: run.status, waitingForSlot: run.waitingForSlot }} />
+        </div>
         {run.status === "failed" && run.error && <Note tone="danger">{run.error}</Note>}
         <p className="mt-3 text-neutral-700">
-          Reading this document sends it to the model. Registering it did not; this is the step that
-          {run.status === "failed" ? " charges again." : " costs money."}
+          {deferred ? (
+            <>{WAITING_FOR_SLOT_MESSAGE} Reading it is what sends it to the model and costs money.</>
+          ) : (
+            <>
+              Reading this document sends it to the model. Registering it did not; this is the step that
+              {run.status === "failed" ? " charges again." : " costs money."}
+            </>
+          )}
         </p>
         <Button
-          variant="primary"
+          variant={deferred ? "secondary" : "primary"}
           className="mt-3"
           onClick={() => void startExtraction("start")}
           disabled={busy !== null}
         >
-          {busy === "extract" ? "Starting…" : run.status === "failed" ? "Retry extraction" : "Extract"}
+          {busy === "extract"
+            ? "Starting…"
+            : deferred
+              ? "Read it now"
+              : run.status === "failed"
+                ? "Retry extraction"
+                : "Extract"}
         </Button>
+        {notice && <Note tone="info">{notice}</Note>}
         {error && <Note tone="danger">{error}</Note>}
       </Card>,
     );

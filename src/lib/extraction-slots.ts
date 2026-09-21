@@ -196,10 +196,12 @@ export async function deferRead(txn: TxnSql, runId: string, actor: string): Prom
   `;
 }
 
-/** What a screen says about a document that is waiting for a slot. */
-export const WAITING_FOR_SLOT_MESSAGE =
-  `Waiting — ${MAX_IN_FLIGHT_READS_PER_PACK} documents of this pack are being read. ` +
-  `This one starts on its own when one of them finishes.`;
+// What a screen says about a document that is waiting for a slot. It MOVED to
+// `intake-status.ts`, beside the label the chips read, because a client
+// component cannot import this file — it holds transactions and a queue
+// publish. Re-exported here so the routes that return it in a 202 go on reading
+// it from where they always did.
+export { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 
 /**
  * Start the next deferred read of a scope, if there is one and there is room.

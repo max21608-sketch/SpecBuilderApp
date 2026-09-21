@@ -17,6 +17,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import PageBody from "@/components/ui/PageBody";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Note from "@/components/ui/Note";
+import DocumentState from "@/components/imports/DocumentState";
+import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
 import Link from "next/link";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
@@ -31,6 +33,13 @@ type Run = {
   claim_live: boolean | null;
   within_deadline: boolean | null;
   claim_count: number;
+  /**
+   * `pending` because the pack is already reading as many documents as it may,
+   * rather than because nobody has asked for it. Computed by the GET route off
+   * the marker the cap writes. Two different sentences on this screen, and only
+   * one of them is a button somebody has to press.
+   */
+  waitingForSlot?: boolean | null;
   parsed: StagedPreamble | null;
 };
 
@@ -52,6 +61,9 @@ export default function PreambleReview({
   const [run, setRun] = useState<Run | null>(null);
   const [blockers, setBlockers] = useState<{ noteId: string; message: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // An action that succeeded and changed nothing yet — a read the cap deferred.
+  // Apart from `error`, or a pack working correctly would be painted red.
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<Record<string, { title?: string | null; body?: string | null }>>({});
@@ -82,9 +94,12 @@ export default function PreambleReview({
    * request means this screen is out of date. Same rule as both drawings
    * screens and the record screen.
    */
-  async function reloadThen(failure: string | null) {
+  async function reloadThen(failure: string | null, notice: string | null = null) {
     await load();
     if (failure) setError(failure);
+    // Through the same reload-first path, for the same reason: `load()` clears
+    // what was set before it, so a message set first shows for milliseconds.
+    if (notice) setNotice(notice);
   }
 
   useEffect(() => {
@@ -92,7 +107,11 @@ export default function PreambleReview({
   }, [load]);
 
   const waiting = run?.status === "queued" || run?.status === "parsing";
-  usePoll(load, { intervalMs: 3000, active: Boolean(waiting) });
+  // A deferred read starts on its own, so the screen looks again rather than
+  // saying "Waiting for a slot" until somebody reloads. NOT part of `waiting`,
+  // which selects the "Being read" body: this document is not being read.
+  const deferred = run?.status === "pending" && Boolean(run?.waitingForSlot);
+  usePoll(load, { intervalMs: 3000, active: Boolean(waiting || deferred) });
 
   // Everything pending is selected by default: a preamble is read to be kept,
   // and the reviewer's job is to drop what does not apply rather than to pick
@@ -107,12 +126,15 @@ export default function PreambleReview({
     setBusy("extract");
     setError(null);
     try {
-      const res = await apiFetch(`/api/imports/${importId}/extract`, {
+      const res = await apiFetch<{ waiting?: boolean; note?: string }>(`/api/imports/${importId}/extract`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: run.version, requestId: crypto.randomUUID(), action }),
       });
-      await reloadThen(res.ok ? null : res.error);
+      // 202 `waiting`: the cap deferred it. Said in words, because this press
+      // used to change nothing on screen at all.
+      const held = res.ok && res.data.waiting === true;
+      await reloadThen(res.ok ? null : res.error, held ? (res.data.note ?? WAITING_FOR_SLOT_MESSAGE) : null);
     } finally {
       setBusy(null);
     }
@@ -180,25 +202,45 @@ export default function PreambleReview({
 
   if (!run) return error ? <Note tone="danger">{error}</Note> : <Spinner label="Loading" />;
 
+  // TWO STATES UNDER ONE `pending`. "Has not been read" is the sentence for a
+  // document waiting for a PERSON; one the cap deferred is waiting for a slot
+  // and starts on its own. The chip is `DocumentState`, so this screen and the
+  // pack screen use the one reading.
   if (run.status === "pending" || run.status === "failed") {
     return shell(
-      <Card title="This preamble has not been read">
+      <Card title={deferred ? "This preamble is waiting for a slot" : "This preamble has not been read"}>
         <p className="text-neutral-600">
           {run.filename ?? "This document"} · {DOCUMENT_KIND_LABELS.preamble}
         </p>
+        <div className="mt-2">
+          <DocumentState run={{ status: run.status, waitingForSlot: run.waitingForSlot }} />
+        </div>
         {run.status === "failed" && run.error && <Note tone="danger">{run.error}</Note>}
         <p className="mt-3 text-neutral-700">
-          Reading this sends it to the model, which is the step that{" "}
-          {run.status === "failed" ? "charges again." : "costs money."}
+          {deferred ? (
+            <>{WAITING_FOR_SLOT_MESSAGE} Reading it sends it to the model, which is what costs money.</>
+          ) : (
+            <>
+              Reading this sends it to the model, which is the step that{" "}
+              {run.status === "failed" ? "charges again." : "costs money."}
+            </>
+          )}
         </p>
         <Button
-          variant="primary"
+          variant={deferred ? "secondary" : "primary"}
           className="mt-3"
           onClick={() => void startExtraction("start")}
           disabled={busy !== null}
         >
-          {busy === "extract" ? "Starting…" : run.status === "failed" ? "Retry extraction" : "Read the preamble"}
+          {busy === "extract"
+            ? "Starting…"
+            : deferred
+              ? "Read it now"
+              : run.status === "failed"
+                ? "Retry extraction"
+                : "Read the preamble"}
         </Button>
+        {notice && <Note tone="info">{notice}</Note>}
         {error && <Note tone="danger">{error}</Note>}
       </Card>,
     );
