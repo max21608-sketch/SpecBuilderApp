@@ -49,6 +49,7 @@ function message(over: Record<string, unknown> = {}) {
     intake_run_id: "run-1",
     run_status: "parsed",
     run_error: null,
+    waiting_for_slot: false,
     pending_count: 4,
     applied_count: 0,
     chase_match: "confident",
@@ -77,12 +78,26 @@ const PAYLOAD = {
       id: "msg-3",
       subject: "FW: client comments - armchairs",
       routing_status: "unassigned",
-      routing_reason: "Nothing in this message names a project.",
+      routing_reason: "the sender is a contact on one project — priya.raman@example.com is a contact on this project",
+      routing_candidates: [
+        { projectId: "proj-1", signal: "sender_is_contact", evidence: "priya.raman@example.com is a contact on this project" },
+      ],
       project_id: null,
       bws_project_number: null,
       project_name: null,
       intake_run_id: null,
       run_status: null,
+      found: null,
+    }),
+    message({
+      id: "msg-4",
+      subject: "UP-101 headboard — fabric confirmed",
+      chase_match: null,
+      chaseReply: false,
+      run_status: "pending",
+      waiting_for_slot: true,
+      pending_count: 0,
+      applied_count: 0,
       found: null,
     }),
   ],
@@ -138,7 +153,52 @@ describe("the inbox", () => {
   it("prints the signal that placed it, so a wrong placement is visible", async () => {
     render(<InboxPage />);
     await screen.findByText("AC-101 lounge armchair, revised specification");
-    expect(screen.getByText(/auto · addressed to the project inbox/)).toBeInTheDocument();
+    expect(screen.getAllByText(/assigned automatically · addressed to the project inbox/).length).toBeGreaterThan(0);
     expect(screen.getByText("reply to a chase")).toBeInTheDocument();
+  });
+});
+
+// ============================================================================
+// AN AUTOMATIC ASSIGNMENT IS ACCOUNTED FOR ON ITS OWN ROW (2.11)
+//
+// The app now starts a charged read with nobody watching, for mail addressed
+// to a project's inbox. Two things have to be on the screen for that to be
+// honest: the row saying so in words with the signal that decided, and the
+// control that takes it back. The consent sentence is in the header band
+// rather than beside each row — the 2026-09-15 precedent, where asking per
+// document was found to be ceremony rather than consent.
+// ============================================================================
+describe("the inbox — an automatic assignment", () => {
+  it("says it was assigned automatically, and offers to undo it", async () => {
+    render(<InboxPage />);
+    await screen.findByText("AC-101 lounge armchair, revised specification");
+    expect(screen.getAllByText(/assigned automatically · addressed to the project inbox/).length).toBeGreaterThan(0);
+    const undo = screen.getAllByRole("button", { name: "Wrong project" })[0]!;
+    expect(undo).toHaveAttribute("title", expect.stringContaining("Unassign"));
+  });
+
+  it("states the charge once, at the top, where a morning's post is visible", async () => {
+    render(<InboxPage />);
+    await screen.findByText("AC-101 lounge armchair, revised specification");
+    expect(
+      screen.getByText(/assigned and read automatically the moment it arrives — one charged model call each/),
+    ).toBeInTheDocument();
+  });
+
+  it("names the project a weak signal pointed at, without choosing it", async () => {
+    render(<InboxPage />);
+    await screen.findByText("FW: client comments - armchairs");
+    // The held message routed by the sender alone: the project is NAMED, and
+    // the picker still reads "Choose a project…".
+    expect(screen.getByText(/Routing read it as AP401/)).toBeInTheDocument();
+    const picker = screen.getByLabelText(/Which project FW: client comments/);
+    expect(picker).toHaveValue("");
+  });
+
+  it("says a deferred read is waiting for a slot, not reading and not failed", async () => {
+    render(<InboxPage />);
+    await screen.findByText("UP-101 headboard — fabric confirmed");
+    expect(screen.getByText("Waiting for a slot")).toBeInTheDocument();
+    expect(screen.getByText(/starts on its own when one of this project/)).toBeInTheDocument();
   });
 });

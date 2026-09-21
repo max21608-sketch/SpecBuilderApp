@@ -34,6 +34,21 @@ describe("normaliseFinishCode", () => {
     // the two sets of items are now one. Merging is a button.
     expect(normaliseFinishCode("CH-01.1")).not.toBe(normaliseFinishCode("CH-01-1"));
   });
+
+  it("does not fold a dash into a space, or a dot into either (row e1)", () => {
+    // Variance matrix row e1, stated as the three pairs it is actually about.
+    // The same rule `normalisePaletteValue` carries, and for the same reason.
+    // Which of these the LIBRARY then treats as one row is the partial unique
+    // index on (project_id, code_norm), pinned in
+    // tests/db/finishes-variance.test.ts — a fold nobody applies is a fold
+    // that decides nothing.
+    expect(normaliseFinishCode("CH 01")).not.toBe(normaliseFinishCode("CH-01"));
+    expect(normaliseFinishCode("CH.01")).not.toBe(normaliseFinishCode("CH-01"));
+    expect(normaliseFinishCode("CH.01")).not.toBe(normaliseFinishCode("CH 01"));
+    // And the two it DOES fold, which is the whole of what it may do.
+    expect(normaliseFinishCode(" ch-01.1  ")).toBe(normaliseFinishCode("CH-01.1"));
+    expect(normaliseFinishCode("CH   01")).toBe(normaliseFinishCode("ch 01"));
+  });
 });
 
 describe("composeFinishCell", () => {

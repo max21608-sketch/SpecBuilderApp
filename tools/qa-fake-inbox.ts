@@ -31,9 +31,18 @@
 // ---- NOTHING IS ASSIGNED, AND THAT IS THE DESIGN -------------------------
 //
 // `recordMessage` records every message HELD. Assignment is the spend point —
-// it opens a charged model read — and it stays a person's click, exactly as it
-// would for a real message. So this script cannot cost anything, and the "On a
-// project" half of the screen fills only when somebody assigns one.
+// it opens a charged model read — and this script never calls it, so it cannot
+// cost anything, and the "On a project" half of the screen fills only when
+// somebody assigns one.
+//
+// THAT IS NOW A PROPERTY OF THIS SCRIPT RATHER THAN OF THE APP. Since
+// 2026-09-21 an ARRIVING message addressed to a project's inbox, or forwarded
+// from one, is assigned and read automatically (`autoAssignDecision`). None of
+// the messages below is addressed to a project inbox — every one routes by the
+// sender, by the subject or not at all — so every one of them would be held on
+// arrival too, and the line each prints says which. Adding an inbox-addressed
+// fixture here would be inventing correspondence that starts a charged read,
+// which is a decision about money and not a fixture.
 //
 // ---- HOW IT LEAVES NO TRACE ----------------------------------------------
 //
@@ -50,6 +59,7 @@
 import pg from "pg";
 import { del, put } from "@vercel/blob";
 import { recordMessage } from "@/lib/email-ingest";
+import { autoAssignDecision, describeAutoAssignment } from "@/lib/email-routing";
 
 // The two fields nothing renders, carrying the cleanup marker.
 const QA_MAILBOX = "__qa_inbox";
@@ -566,9 +576,18 @@ try {
 
     // What routing ACTUALLY decided, which is the only reason the expectation
     // above is worth printing.
-    const outcome =
-      recorded.routing.status === "assigned"
-        ? `would place on a project — ${recorded.routing.evidence}`
+    //
+    // "Assigned" is no longer the same answer as "would be placed on a
+    // project": since 2026-09-21 only the two strongest signals place a
+    // message by themselves, and a subject reference or a known sender is
+    // held for a person. This script records every message held either way —
+    // it calls `recordMessage` and nothing else — so what is printed is what
+    // an ARRIVING message of this shape would have done.
+    const decision = autoAssignDecision(recorded.routing);
+    const outcome = decision.assign
+      ? `${describeAutoAssignment(decision.signal)} (arriving; this script assigns nothing)`
+      : recorded.routing.status === "assigned"
+        ? `held — ${recorded.routing.evidence}; that signal is not strong enough to spend a charged read`
         : recorded.routing.status;
     console.log(`  recorded "${message.subject || "(no subject)"}" — ${outcome}`);
   }

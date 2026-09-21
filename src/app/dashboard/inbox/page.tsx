@@ -41,6 +41,7 @@ import StatTile from "@/components/ui/StatTile";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
+import { WAITING_FOR_SLOT_LABEL } from "@/lib/intake-status";
 
 /** What a read turned up. Computed in the route by `describeChange`, per 0021. */
 type Found = {
@@ -72,6 +73,8 @@ type Message = {
   intake_run_id: string | null;
   run_status: string | null;
   run_error: string | null;
+  /** `pending` because the project is already reading as many as it may. */
+  waiting_for_slot: boolean | null;
   pending_count: string | number;
   applied_count: string | number;
   chase_match: string | null;
@@ -105,9 +108,14 @@ type Tab = (typeof TABS)[number];
  * is the difference between a queue somebody watches and a queue somebody
  * believes is stuck.
  */
-function outcome(message: Message): "held" | "reading" | "failed" | "nothing" | "review" {
+function outcome(message: Message): "held" | "waiting" | "reading" | "failed" | "nothing" | "review" {
   if (message.routing_status !== "assigned") return "held";
   if (message.run_status === "failed") return "failed";
+  // WAITING FOR A SLOT IS NOT READING. The cap defers a read rather than
+  // refusing it, so this row needs nobody and will start on its own — and a
+  // message the app auto-assigned on a busy morning is the normal way to reach
+  // this state, which is why it earns a word of its own rather than an error.
+  if (message.run_status === "pending" && message.waiting_for_slot) return "waiting";
   if (!message.found) return "reading";
   if (message.found.nothingToRecord) return "nothing";
   return "review";
@@ -209,7 +217,7 @@ function InboxView() {
       all,
       held: open.filter((message) => outcome(message) === "held"),
       nothing: open.filter((message) => outcome(message) === "nothing"),
-      review: open.filter((message) => ["review", "reading", "failed"].includes(outcome(message))),
+      review: open.filter((message) => ["review", "waiting", "reading", "failed"].includes(outcome(message))),
     };
   }, [data]);
 
@@ -237,7 +245,11 @@ function InboxView() {
     <>
       <PageHeader
         title="Inbox"
-        subtitle="Mail forwarded from the project inboxes. An email the headers place on a project is assigned and read the moment it arrives — one charged model call each."
+        // THE CONSENT STATEMENT, at the top of the screen where the volume is
+        // visible, which is the 2026-09-15 precedent: asking per message was
+        // ceremony rather than consent, and the decision belongs where a
+        // morning's post can be seen at once.
+        subtitle="Mail addressed to a project's inbox, or forwarded from it, is assigned and read automatically the moment it arrives — one charged model call each. Anything placed by a subject reference or a known sender waits below for you to confirm."
         actions={
           // AN .eml IS UPLOADED ON THE PROJECT IT BELONGS TO, through the pack
           // upload, because a spec document arrives as part of a delivery and
@@ -410,6 +422,21 @@ function InboxView() {
                               ))}
                             </ul>
                           )}
+                          {/* ROUTING'S OWN SENTENCE DOES NOT NAME THE PROJECT.
+                              "the sender is a contact on this project" was
+                              written for a row that had already been placed on
+                              one; since 2026-09-21 a subject reference or a
+                              known sender is held instead, and the person being
+                              asked to choose cannot see which project routing
+                              meant. Named, and never PRESELECTED: the picker
+                              still offers every project and chooses none, for
+                              the reason the ambiguous one does. */}
+                          {message.routing_status !== "ambiguous" && candidates.length > 0 && (
+                            <span className="mt-1 block">
+                              Routing read it as {candidates.map((project) => project.bws_project_number).join(", ")} —
+                              held because that signal is not strong enough to spend a charged read on its own.
+                            </span>
+                          )}
                         </Td>
                         <Td>
                           <select
@@ -503,8 +530,11 @@ function MessageRow({
               full, and a chip 400px wide pushes the columns this screen exists
               to align. */}
           {message.routing_status === "assigned" ? (
+            // IN WORDS, not "auto": since 2026-09-21 this row is the only
+            // place a charged read nobody asked for is accounted for, and a
+            // four-letter chip is not an account of it.
             <Chip dot tone={message.assignment_kind === "auto" ? "live" : "plain"} title={message.routing_reason ?? undefined}>
-              {message.assignment_kind === "auto" ? "auto" : "by hand"}
+              {message.assignment_kind === "auto" ? "assigned automatically" : "assigned by hand"}
               {message.routing_reason ? ` · ${message.routing_reason.split(" — ")[0]}` : ""}
             </Chip>
           ) : (
@@ -553,8 +583,25 @@ function MessageRow({
             <Chip tone="danger">Read failed</Chip>
             {message.run_error && <span className="mt-1 block text-[11px] text-neutral-500">{message.run_error}</span>}
           </>
+        ) : state === "waiting" ? (
+          /* THE CAP DEFERRED IT, WHICH IS NOT AN ERROR AND NEEDS NOBODY. The
+             one word this row must not carry is a Retry: the read is promised
+             and starts when one of the project's in-flight reads finishes. */
+          <>
+            <Chip tone="info">{WAITING_FOR_SLOT_LABEL}</Chip>
+            <span className="mt-1 block text-[11px] text-neutral-500">
+              starts on its own when one of this project&apos;s reads finishes
+            </span>
+          </>
         ) : state === "reading" ? (
-          <Chip dot tone="info">Reading…</Chip>
+          <>
+            <Chip dot tone="info">Reading…</Chip>
+            {/* A dispatch that MAY not have reached the queue leaves the run
+                queued with its reason on it, rather than failing a read that
+                could still be running. Printed here, or the row claims the app
+                is working on something nothing is coming for. */}
+            {message.run_error && <span className="mt-1 block text-[11px] text-neutral-500">{message.run_error}</span>}
+          </>
         ) : message.found?.nothingToRecord ? (
           <>
             <Chip>nothing to record</Chip>
@@ -611,7 +658,19 @@ function MessageRow({
               After that the specs are on records and unassigning would leave
               them standing on a message the project no longer holds. */}
           {applied === 0 && message.routing_status === "assigned" && (
-            <Button variant="quiet" size="xs" disabled={busy} onClick={() => onAct({ action: "unassign" })}>
+            /* UNASSIGN, in the words a person uses for it. The control the
+               approved gate amendment asks for beside an automatic
+               assignment is this one, and it is offered for a hand-placed
+               message on the same terms — an automatic placement is not
+               harder to undo than a deliberate one. The arrival copy under
+               `mailbox/` survives it, which is what makes it reversible. */
+            <Button
+              variant="quiet"
+              size="xs"
+              disabled={busy}
+              title="Unassign: takes it off this project and holds it again. The message itself is kept."
+              onClick={() => onAct({ action: "unassign" })}
+            >
               Wrong project
             </Button>
           )}

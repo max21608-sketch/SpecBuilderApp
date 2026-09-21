@@ -225,3 +225,61 @@ export function describeRouting(outcome: RoutingOutcome): string {
   }
   return "Nothing in this message names a project: no project inbox in its headers, no project number or code in the subject, and the sender is not a contact on exactly one project.";
 }
+
+// ============================================================================
+// WHICH OUTCOMES MAY SPEND MONEY WITH NOBODY WATCHING
+//
+// Assignment is the spend point: it opens the charged read, copies the message
+// under the project and stages a run there. Until 2026-09-21 every assignment
+// was a person's click, and Max asked for the one case that is pure ceremony
+// to stop asking — mail that arrived at a project's own inbox, which is the
+// design of the feature, has already named its project as plainly as anything
+// can.
+//
+// THE SIMPLEST VERSION IS TO ACT ON EVERY `assigned` OUTCOME, AND IT IS WRONG.
+// `sender_is_contact` is the weakest signal in the list above: a designer who
+// works on two of our projects writes about both, and routing can only see
+// that they are a contact on one of them. A wrong auto-assignment costs a
+// charged read AND leaves a staged run of one client's specification on
+// another client's project — where the review screen that would have caught it
+// is the review screen nobody is looking at. A subject reference is the same
+// shape one step up: a reply chain carries a project number in its subject
+// long after the conversation has moved on.
+//
+// So only the two strongest signals assign themselves. The other three keep
+// exactly the behaviour they have today — HELD, with routing's own sentence and
+// the offer to place it — which costs a click and never costs the wrong
+// project.
+// ============================================================================
+
+/** The signals strong enough to start a charged read with nobody watching. */
+export const AUTO_ASSIGN_SIGNALS: readonly RoutingSignal[] = ["forwarded_from_inbox", "recipient_is_inbox"];
+
+export type AutoAssignDecision =
+  | { assign: true; projectId: string; signal: RoutingSignal }
+  /** Held, and which of the three reasons — a screen says a different sentence for each. */
+  | { assign: false; reason: "signal_too_weak" | "ambiguous" | "nothing_named_a_project" };
+
+/** The actor an automatic assignment is recorded under, in the trail and on the row. */
+export const ROUTER_ACTOR = "system:router";
+
+/**
+ * May this routing outcome place the message on a project by itself?
+ *
+ * Pure, and separate from `routeMessage` on purpose: routing answers "which
+ * project", and this answers "is that answer strong enough to spend money on".
+ * Folding the second into the first would mean the held view could no longer
+ * say which project a weak signal pointed at — which is the whole of what a
+ * person is being asked to confirm.
+ */
+export function autoAssignDecision(outcome: RoutingOutcome): AutoAssignDecision {
+  if (outcome.status === "ambiguous") return { assign: false, reason: "ambiguous" };
+  if (outcome.status === "unassigned") return { assign: false, reason: "nothing_named_a_project" };
+  if (!AUTO_ASSIGN_SIGNALS.includes(outcome.signal)) return { assign: false, reason: "signal_too_weak" };
+  return { assign: true, projectId: outcome.projectId, signal: outcome.signal };
+}
+
+/** One line for a row the app placed on its own. */
+export function describeAutoAssignment(signal: RoutingSignal): string {
+  return `assigned automatically — ${ROUTING_SIGNAL_LABELS[signal]}`;
+}

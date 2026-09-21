@@ -1,7 +1,15 @@
 // Which project an email belongs to. Pure, and the most consequential guess in
 // the feature: a wrong project writes one client's fabric onto another's sofa.
 import { describe, expect, it } from "vitest";
-import { routeMessage, type RoutingRegisters } from "@/lib/email-routing";
+import {
+  AUTO_ASSIGN_SIGNALS,
+  autoAssignDecision,
+  describeAutoAssignment,
+  routeMessage,
+  type RoutingOutcome,
+  type RoutingRegisters,
+  type RoutingSignal,
+} from "@/lib/email-routing";
 import type { EmailEnvelope } from "@/lib/email-envelope";
 
 const panther = {
@@ -205,5 +213,111 @@ describe("routeMessage — precedence and ambiguity", () => {
       projects: [panther, { ...maybourne, status: "archived" }],
     });
     expect(outcome.status).toBe("unassigned");
+  });
+});
+
+// ============================================================================
+// WHICH OUTCOMES MAY SPEND MONEY WITH NOBODY WATCHING (2.11)
+//
+// `autoAssignDecision` is a second reading of the outcome above, and the whole
+// of it is which signals are trusted to start a charged read by themselves.
+// All five signals and all three statuses are asserted here rather than the
+// two that pass, because the failure this guards is a signal quietly joining
+// the trusted list: a widened `AUTO_ASSIGN_SIGNALS` would otherwise show up as
+// a bill and a staged run on the wrong client's project.
+// ============================================================================
+describe("autoAssignDecision", () => {
+  const assigned = (signal: RoutingSignal): RoutingOutcome => ({
+    status: "assigned",
+    projectId: panther.id,
+    signal,
+    evidence: "__qa evidence",
+    candidates: [],
+  });
+
+  it("assigns a message addressed to a project inbox", () => {
+    const decision = autoAssignDecision(assigned("recipient_is_inbox"));
+    expect(decision).toEqual({ assign: true, projectId: panther.id, signal: "recipient_is_inbox" });
+  });
+
+  it("assigns a message forwarded from a project inbox", () => {
+    const decision = autoAssignDecision(assigned("forwarded_from_inbox"));
+    expect(decision).toEqual({ assign: true, projectId: panther.id, signal: "forwarded_from_inbox" });
+  });
+
+  // The trap, named three times because it is the whole point of the function.
+  // A contact who works on two projects writes about both, and a subject
+  // carries a project number long after the conversation has moved on.
+  it("holds a message placed by the subject alone", () => {
+    expect(autoAssignDecision(assigned("subject_project_number"))).toEqual({
+      assign: false,
+      reason: "signal_too_weak",
+    });
+    expect(autoAssignDecision(assigned("subject_project_code"))).toEqual({
+      assign: false,
+      reason: "signal_too_weak",
+    });
+  });
+
+  it("holds a message placed by a known sender alone", () => {
+    expect(autoAssignDecision(assigned("sender_is_contact"))).toEqual({
+      assign: false,
+      reason: "signal_too_weak",
+    });
+  });
+
+  it("never assigns an ambiguous outcome", () => {
+    expect(
+      autoAssignDecision({
+        status: "ambiguous",
+        candidates: [
+          { projectId: panther.id, signal: "recipient_is_inbox", evidence: "one" },
+          { projectId: maybourne.id, signal: "recipient_is_inbox", evidence: "two" },
+        ],
+      }),
+    ).toEqual({ assign: false, reason: "ambiguous" });
+  });
+
+  it("never assigns an outcome that named no project", () => {
+    expect(autoAssignDecision({ status: "unassigned", candidates: [] })).toEqual({
+      assign: false,
+      reason: "nothing_named_a_project",
+    });
+  });
+
+  // The two trusted signals are exactly the two, and the list is the rule.
+  it("trusts two signals and no others", () => {
+    expect([...AUTO_ASSIGN_SIGNALS]).toEqual(["forwarded_from_inbox", "recipient_is_inbox"]);
+  });
+
+  it("says in words what placed it, for the row that accounts for the charge", () => {
+    expect(describeAutoAssignment("recipient_is_inbox")).toBe(
+      "assigned automatically — addressed to the project inbox",
+    );
+  });
+});
+
+// A whole-path assertion rather than a unit one: these two are what the
+// ingestion path actually composes, so the pair is worth one test each way.
+describe("routeMessage into autoAssignDecision", () => {
+  it("reads a message to the project inbox as one to assign", () => {
+    const outcome = routeMessage(
+      envelope({ to: [{ name: null, address: "p17726@benwhistler.test" }] }),
+      registers,
+    );
+    expect(autoAssignDecision(outcome)).toEqual({
+      assign: true,
+      projectId: panther.id,
+      signal: "recipient_is_inbox",
+    });
+  });
+
+  it("reads a message from a known contact as one to hold", () => {
+    const outcome = routeMessage(
+      envelope({ from: { name: "Jane", address: "jane@designers.test" } }),
+      registers,
+    );
+    expect(outcome.status).toBe("assigned");
+    expect(autoAssignDecision(outcome)).toEqual({ assign: false, reason: "signal_too_weak" });
   });
 });

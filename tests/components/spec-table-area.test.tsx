@@ -247,7 +247,10 @@ describe("a record the bill gave no quantity for", () => {
       record({ item_description: "Armchair A", qty: null, parent_id: "rec-parent", variant_label: "A" }),
     ]);
     expect(await screen.findByText("Armchair A")).toBeTruthy();
-    expect(within(rowFor("Armchair A")).getByText("qty not set")).toBeTruthy();
+    // "not allocated", which is what the infill line and the chase line have
+    // always said. This cell read "qty not set" — the words this test's own
+    // name already disagreed with — until variance row d4.
+    expect(within(rowFor("Armchair A")).getByText("not allocated")).toBeTruthy();
     expect(within(rowFor("Armchair A")).queryByText("quantity not given")).toBeNull();
   });
 

@@ -223,6 +223,24 @@ describe("the quantity is never apportioned", () => {
     expect(only(sheet).qty).toBe("");
     expect(sheet.notes.join(" ")).toContain("keeps its quantity on the bill line");
   });
+
+  it("COUNTS the blank rows in the note, and says nothing when there are none", () => {
+    // Variance matrix row d4. The note goes IN the workbook, on its own sheet,
+    // because a caveat that lives on the screen that produced the download is
+    // one nobody reads at the moment it matters — which is when somebody opens
+    // the file next week and wonders why column E is empty on three rows. A
+    // count is what makes it checkable against the rows in front of them.
+    const two = compose({
+      records: [
+        record({ id: "rec-1", recordNo: 1, qty: null, variantLabel: "A" }),
+        record({ id: "rec-2", recordNo: 2, qty: null, variantLabel: "B" }),
+      ],
+    });
+    expect(two.notes.join(" ")).toContain("2 rows carry no quantity");
+    // And a sheet with nothing to say does not say it: a note printed on every
+    // file is a note nobody reads on the one file where it means something.
+    expect(compose().notes.join(" ")).not.toContain("no quantity");
+  });
 });
 
 describe("the item and its ref", () => {

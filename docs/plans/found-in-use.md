@@ -84,6 +84,34 @@ it (Fable's greps on 2026-09-20 returned empty for exactly this reason and it
 was blamed on a shell function), and `git diff` treated the file as binary.
 Same technique, escaped; behaviour unchanged, the template tests green.
 
+### Three screens say "quantity not allocated", and two of them say it whatever the data
+
+**Status: open — observations from Coder G's rows d3/d4, 2026-09-21.** The
+phase table conditions the words on `qty` being null; the infill line and the
+chase line print *quantity not allocated* UNCONDITIONALLY, because
+`FinishOptionGroup` carries no `qty`. True today only because nothing had set
+one — and the record's details panel CAN set one (0028), so the moment somebody
+does, three screens disagree. The fix is to carry `qty` through
+`chase-grouping.ts` into both tables. Two more from the same round: `/api/records`'s
+`refs` is every ref system while the export's Client Code is `boq_code` only, so
+a record carrying only a `bws_job` ref shows a ref on the table and exports a
+blank code; and `loadUncategorisedRecords` neither requires the run to be
+active nor excludes a split parent, so an uncategorised split bill line would
+be listed as an item to categorise when it is a heading.
+
+### After 2.11: what an automatic assignment does not yet do
+
+**Status: open — observations from Coder E, 2026-09-21.** An auto-assigned read
+that fails still needs a person to press Retry and nothing but the inbox row
+says it happened — with Graph on, that is a queue somebody must watch; a count
+on the inbox tiles is the cheap fix. `assignMessage` opens no change set, so an
+automatic assignment appears in the audit layer under `system:router` and NOT
+in a project's change trail. `tools/qa-demo-project.ts` still carries the
+stale "would place on a project" line and writes its review email as
+`assignment_kind = 'manual'` though it is addressed to the project's own
+inbox. A held row whose candidates span two tiers (subject says A, sender says
+B) prints them joined by a comma — honest, terse.
+
 ### One malformed view region discards every view region on the page
 
 **Status: open — observation from Coder D's row 2, 2026-09-21.** `viewRegions`
@@ -759,9 +787,12 @@ Three things a plan has to carry, all already written down elsewhere:
 
 ### A confidently routed email still waits for somebody to press Assign
 
-**Status: open. This one is a CHANGE ASKED FOR, not a fault** — the app is
-behaving as designed and the design is what is being changed. Read the whole
-entry before planning it: it moves one of the hard approval gates.
+**FIXED 2026-09-21, `5b2b9f3`** (Stage 2 item 2.11) — Max amended the gate
+("yes, amend") and the wording landed in `CLAUDE.md` in the same commit as the
+code: the two strongest signals assign automatically under `system:router`;
+sender and subject signals are held with the project named. Found on the way:
+the Graph path had been auto-assigning on EVERY `assigned` outcome, weakest
+signal included. The original entry follows for the reasoning.
 
 Seen on the Inbox screen (screenshot), `Not on a project (17)`. Asked for at
 the same time, and stated as project-wide: **whenever a document is uploaded it

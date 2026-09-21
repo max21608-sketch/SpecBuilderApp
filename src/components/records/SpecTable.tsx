@@ -194,6 +194,28 @@ function Captured({
   );
 }
 
+/**
+ * A record that carries no client ref at all — variance matrix row d3.
+ *
+ * SAID IN WORDS, not as an em dash. The client ref is the pre-sale primary key:
+ * it is what the BOQ, the FF&E schedule and every email use, and it is how the
+ * BWS job will be found later. A record without one exports a BLANK Client Code
+ * — correctly, because inventing one would be worse — so this cell is the only
+ * place anybody would notice, and an em dash there reads as "nothing to say"
+ * beside the columns that genuinely have nothing to say. The same argument as
+ * `quantity not given` on the next column but one.
+ */
+function NoClientRef() {
+  return (
+    <span
+      className="font-sans text-xs text-amber-800"
+      title="No client ref on this record, so the export ships a blank Client Code. Nothing is invented."
+    >
+      no client ref
+    </span>
+  );
+}
+
 /** What the tiles above the table can narrow it to. Null lists everything. */
 export type Focus = null | "tgq" | "waiting" | "no_category" | "no_level" | "quotable";
 
@@ -768,13 +790,13 @@ export default function SpecTable({
                       >
                         {isConfiguration ? (
                           <span className="text-neutral-500">
-                            {record.parent_refs ?? record.refs ?? "—"}{" "}
+                            {record.parent_refs ?? record.refs ?? <NoClientRef />}{" "}
                             {/* THE LETTER, coloured the way the review card
                                 colours it — A is sky on every screen. */}
                             <b className={letterColour(record.variant_label!)}>{record.variant_label}</b>
                           </span>
                         ) : (
-                          (record.refs ?? "—")
+                          (record.refs ?? <NoClientRef />)
                         )}
                       </Td>
                       <Td className={isConfiguration ? "pl-6" : ""}>
@@ -814,7 +836,17 @@ export default function SpecTable({
                             quantity is unallocated rather than ungiven. */}
                         {record.qty === null ? (
                           isConfiguration ? (
-                            <Chip tone="warn">qty not set</Chip>
+                            /* THE SAME WORDS THE OTHER TWO SCREENS USE. The
+                               infill line and the chase line both say "quantity
+                               not allocated"; this said "qty not set", which
+                               reads as somebody having forgotten to fill a
+                               field in — where the truth is that the bill said
+                               45 and never said how many are fabric A. Three
+                               screens describing one state in two ways is how a
+                               reader comes to believe they are two states. */
+                            <Chip tone="warn" title="The bill's quantity is never divided between configurations.">
+                              not allocated
+                            </Chip>
                           ) : (
                             <span
                               className="text-xs text-amber-800"
@@ -894,6 +926,26 @@ export default function SpecTable({
                             heading is the more useful answer. */}
                         {isHeading ? (
                           <span className="text-neutral-400">—</span>
+                        ) : !record.category_name ? (
+                          /* AN UNCATEGORISED RECORD IS NOT UNTIERED, IT IS
+                             UNASKED — variance matrix row d1. It has no
+                             checklist at all, so it scores zero outstanding,
+                             and the two readings this cell had for it were both
+                             wrong: a plain dash where a level was set (silent
+                             about why), and the LEVEL sentence where one was
+                             not, which sends somebody to choose simple or hero
+                             when a level would buy them nothing. Same control
+                             either way, and the panel says which decision is
+                             actually missing. */
+                          <button
+                            type="button"
+                            onClick={() => toggleQuestions(record.id)}
+                            aria-expanded={expanded.has(record.id)}
+                            className="text-neutral-400 hover:text-neutral-700"
+                            title="No category, so there is no checklist to count"
+                          >
+                            — <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                          </button>
                         ) : record.to_quote_outstanding === null ? (
                           /* A DASH IS NEVER A ZERO. 0 here would read as
                              ready, and the record is not unready — it is
@@ -1122,6 +1174,25 @@ function ToQuotePanel({
   showAll: boolean;
   onShowAll: () => void;
 }) {
+  // CATEGORISE FIRST, and this is said BEFORE the level. An uncategorised
+  // record has no checklist — no questions of any tier — so the level sentence
+  // below would be a true statement about the wrong decision: setting a level
+  // on it changes nothing, because there is nothing to tier. Variance matrix
+  // row d1, where the rule is that no screen may report zero outstanding on a
+  // record nobody has decided what to ask about.
+  if (!record.category_name) {
+    return (
+      <p className="text-sm text-neutral-700">
+        <b>No category</b>, so this item has no checklist and nothing to count — not nothing outstanding. Choosing a
+        category is what creates its questions. Set one on{" "}
+        <Link href={`/dashboard/records/${record.id}`} className="text-blue-700 no-underline hover:underline">
+          the record
+        </Link>
+        .
+      </p>
+    );
+  }
+
   // A LEVEL IS WHAT TIERS A QUESTION, so a record without one has no to-quote
   // set at all — under the half of TGQ that predates Matthew's matrix. The
   // sentence says what it is needed FOR, because "set a level" on its own reads
