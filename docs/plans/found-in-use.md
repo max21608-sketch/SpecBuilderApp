@@ -55,6 +55,15 @@ Seen on the project overview (screenshot), 503 line items across 3 phases:
 **Asked for: TGQ, Also outstanding and Settled should be per LINE ITEM** — how
 many items are still held at TGQ — rather than per question.
 
+**It is asked for in TWO places on the same screen.** The SPECIFICATIONS table
+below the tiles prints the identical `TGQ 8,769` with *"His matrix for 242
+items, the placeholder for 166"* beside it, and Max asked for the same change
+there — *"can it be TGQ referencing line items, not individual questions?"*
+Both read the same loader, so this is one change in two renderings, not two
+findings. Every other row of that table is ALREADY per item (No category 95,
+No level 0, Unresolved finish codes 2), which is what makes the one question
+count in the middle of them read as a fifth measure.
+
 `project-summary.ts:229-232` counts those three over ANSWER rows
 (`count(*) filter (where state in ('missing','tbc') and to_quote)` and its
 siblings), while `records` on line 205 counts records. So the strip mixes two
@@ -73,6 +82,13 @@ Two things a plan has to settle, and the second is a trap:
   an item count means *nothing outstanding at all* — a much smaller number
   than 65 answers implies. Three item tiles that no longer sum need to say
   what they each mean, or the strip trades one misleading reading for another.
+- **Two different item totals are already on the screen and neither says
+  which it is.** The tile reads `LINE ITEMS 503`; the banner under it reads
+  *"166 of these 408 items"*. 408 + the 95 with no category = 503, so the
+  table appears to be counting the CATEGORISED ones — reasonable, since an
+  uncategorised record has no questions, and invisible to a reader. Putting
+  item counts in both places without saying which population each is over is
+  how somebody subtracts one from the other.
 
 ### The checklist's Dimensions box is free text, so two of four dimensions can be marked Confirmed
 
