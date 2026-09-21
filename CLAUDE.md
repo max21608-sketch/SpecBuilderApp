@@ -3490,8 +3490,16 @@ measured first (`npm run measure:outstanding`), lines shipped rather than the
 nine seconds. **2.6** (the dimension note, migration 0034 on the sandbox),
 **2.8 step 1** (the project-wide fold) and the snapshot-race fix landed at
 `9715b0f`; **2.10.f** (three reads at a time per pack, the rest *waiting for a
-slot*) and **2.10.g** (the failure sweep: every `catch` and every fetch under
-the dashboard reaches a rendered sentence, three fixed) at `d1e56b3`: the demo sofa reads `W1830 x D880 x H760 x SH440mm (1250 L-shaped
+slot*, and since `73cf827` *Read all* too) and **2.10.g** (the failure
+sweep: every `catch` and every fetch under the dashboard reaches a rendered
+sentence, three fixed) at `d1e56b3`; **2.10's variance matrix** — 23 rows over
+bills, drawings, emails, records, phases and finishes, each proceeds / flags /
+refuses, thirteen of them changing code — and **2.11** (a confidently routed
+email assigned automatically, the gate amended by Max in the same commit)
+followed on 2026-09-21. **Stage 2 is CLOSED on staging as of 2026-09-21**
+(the plan's stage brief carries the §7.1 evidence); what stays open waits on
+a person: 2.1/2.2 the BWS account, 2.9 Matthew's tiles answer, 2.12 another
+session's plan, 2.13 the note to Tony. Still true at `9715b0f`: the demo sofa reads `W1830 x D880 x H760 x SH440mm (1250 L-shaped
 return)` on its Specs tab, its checklist and the BWS export after one Save,
 one change set and one version. Not accepted by anybody. **Blocked
 and saying so:** 2.1/2.2 (no BWS account for Max), 2.9 (a proposal for

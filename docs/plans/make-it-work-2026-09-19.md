@@ -2232,5 +2232,46 @@ outcome."* is:
 **Landed 2026-09-21 at `5b2b9f3`**, the gate amendment in the same commit
 as the code, per the plan's rule.
 
+**Stage 2 CLOSED on `staging`, 2026-09-21** — everything that could be built
+without a person's answer is on `staging`, checked with the database tier
+REQUIRED, and read back from the deployment; the four items that wait on a
+person are named. Against §7.6: the stage table re-read against §7.1, the
+baseline re-measured, the findings log swept.
+
+| §7.1 row | Evidence |
+|---|---|
+| Built · Tested | 2.3, 2.4, 2.5, 2.6 (0034), 2.7, 2.8 step 1, 2.10.a (9 rows), 2.10.b/c (6), 2.10.d/e (8), 2.10.f (both halves), 2.10.g, 2.11, plus the snapshot race, the fixture-number helper, the deferred chip and the scanned-PDF refusal — every diff reviewed against §2.3 before its checks; five items came back from review with a real finding (2.6's checklist answer, 2.10.f's *Read all*, 2.5's colleague de-duplication, 2.3's `createAttribute`, 2.10.a's code fold) and none landed until fixed |
+| Variance | 23 matrix rows driven, each proceeds / flags / refuses in code that names it; four rows changed the bills reader, five the drawings and email paths, four the records and finishes screens; three "the plan was wrong" findings recorded (a hang that was a 400, a quantity that could already be set, a limit of 100 that was 600) |
+| Findable | the infill screen is a secondary in the project and chase headers; the by-question tab is in the URL; the area select sits beside the other filters; a colleague is a tab with a chip; the phase table's cells say *no client ref*, *quantity not given*, *no checklist and nothing to count* in place of dashes |
+| Simplest | every brief named the simplest version and the trap; where complexity was kept it is in the README's decision lines for Max: no quantity on the email's item line, no Colleagues header, two table bodies over one grouping, a deferred read marked by a column pair rather than a status |
+| Looks right | the phase table, the chase screen, the infill screen (both tabs), the record's Specs and Checklist tabs and the inbox screenshotted at 1920×1080 and 1440×900 on the dev server by Fable, never by the coder; the 300-line fixture walked on the phase table, the chase screen and the infill screen |
+| Failure path | the 409 on a stale answer and the 400 `reason_required` on the infill row; a 202 `waiting` press; the walk script's step 10; `failure-surfaces.test.tsx` mocking a 500 and `text/html` on the real `apiFetch` |
+| Deployed | `spec-builder-app-rho.vercel.app` read back from `/api/auth/me` at `3f8511d`, `f288ea9`, `9715b0f`, `237e1ba`, `3594362`, `98125fc`, `526164f`, `6206e7d`; the last two commits (`52b5e39`, `36a5fe9`) at the moment of writing are building |
+| Recorded | `docs/plans/README.md` 2026-09-20 "Stage 2 opens", one row per item; `found-in-use.md`: the auto-assign change, the snapshot race, the *Read all* gap, the three review screens, the fixture collision, the chase-template NUL bytes and finding 10 step 1 all FIXED with commits; `CLAUDE.md` amended per §2.6 — the chase section, the infill section, the dimension note, the cap, the gate |
+| Accepted | **outstanding on every item**, Matthew and Max having driven none; §7.5's review of 2.3 and 2.5 is Max's before any promotion |
+
+**Re-measured (§1.1), `52b5e39` in the worktree, database tier REQUIRED:**
+lint 0 errors (the 2 warnings in the meeting-recap harvester), typecheck
+clean, **1,839 passed · 1 skipped · 0 failed** (from 1,262 at Stage 0's
+close and 1,412 at Stage 1a's), build clean. Two full database-tier passes at
+once are now green together, which they were not on the morning of the
+21st.
+
+**The walk script** (`first-session.mjs`) covers Stage 2's first six items:
+PASS 40 · FAIL 0 · SKIP 2 against the `bc1857a` deployment. Its steps for
+2.10's rows, 2.11 and the deferred read are NOT written — the next
+verifier's brief.
+
+**Not closed, and whose:** 2.1/2.2 (Max's BWS account); 2.9 (Matthew's
+answer to the tiles proposal, in the drafted message); 2.12 (another
+session's plan, sequenced after 2.3 and now unblocked); 2.13 (the note to
+Tony, drafted). Promotion to pilot: none — the pilot stays at `da863b7` until
+Max has driven 2.3 and 2.5 as the roles they are for (§7.5). Twelve findings
+were logged in the stage and stay open, the largest being that an attempt
+which passes its 24-hour deadline is settled by nothing, that the infill save
+was refused on the local dev server only, and that the demo project carries
+`__QA` litter from the infill walk. Stage 3 does not start: its items each
+wait on a named person's answer (§8).
+
 *Written 2026-09-19 against `d0c0036` on `staging`. Where this document says a
 thing exists, it means exists in the code on that commit, verified by nobody.*
