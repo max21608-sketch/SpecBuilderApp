@@ -73,7 +73,7 @@ import { z } from "zod";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
-import { intakeSourceKind } from "@/lib/intake-source-types";
+import { intakeSourceKind, spreadsheetRefusal } from "@/lib/intake-source-types";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
 import { matchName, type MatchCandidate } from "@/lib/matching";
 import { guessLevelFromBill } from "@/lib/level-guess";
@@ -368,10 +368,9 @@ async function registerBlobBoq(input: Registered, actor: string): Promise<Respon
   // says how to read its bytes. A PDF still cannot be one — it has no cells.
   const kind = intakeSourceKind(input.filename, input.contentType);
   if (kind !== "xlsx" && kind !== "csv" && kind !== "tsv") {
-    return json(
-      { ok: false, error: `A bill of quantities is read from a spreadsheet. "${input.filename}" is ${kind === "unsupported" ? "not a supported file" : `a .${kind} file`}.` },
-      400,
-    );
+    // `.xls` and its relations get the way out rather than only the refusal —
+    // see `spreadsheetRefusal`. Nothing is parsed and nothing is staged.
+    return json({ ok: false, error: spreadsheetRefusal(input.filename, kind) }, 400);
   }
 
   let blob;
@@ -432,10 +431,7 @@ async function registerDirectBoq(request: Request, actor: string): Promise<Respo
 
   const kind = intakeSourceKind(file.name, file.type);
   if (kind !== "xlsx" && kind !== "csv" && kind !== "tsv") {
-    return json(
-      { ok: false, error: `A bill of quantities is read from a spreadsheet. "${file.name}" is ${kind === "unsupported" ? "not a supported file" : `a .${kind} file`}.` },
-      400,
-    );
+    return json({ ok: false, error: spreadsheetRefusal(file.name, kind) }, 400);
   }
 
   const project = await sql`select id from projects where id = ${projectId}`;

@@ -34,7 +34,7 @@
 import { useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { apiFetch } from "@/lib/api-fetch";
-import { INTAKE_UPLOAD_ACCEPT } from "@/lib/intake-source-types";
+import { INTAKE_UPLOAD_ACCEPT, SPREADSHEET_EXTENSIONS, legacySpreadsheetAdvice } from "@/lib/intake-source-types";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { projectUploadPrefix } from "@/lib/blob-source";
 
@@ -74,7 +74,14 @@ type Queued = {
   /** What the model read it as, and why. Never applied without being shown. */
   suggested: string;
   evidence: string | null;
-  status: "waiting" | "uploading" | "reading" | "registering" | "needs-kind" | "done" | "failed";
+  /**
+   * `refused` is terminal and `failed` is not, which is the whole difference:
+   * pressing again retries a failed upload, and there is nothing to retry
+   * about a file format this app does not read (variance matrix row 5). It is
+   * also why a refused file is not in `pending` — it must not be counted in
+   * what the press is about to store, read and charge for.
+   */
+  status: "waiting" | "uploading" | "reading" | "registering" | "needs-kind" | "done" | "failed" | "refused";
   /** Kept so a file held for a kind is not uploaded a second time. */
   pathname: string | null;
   registrationRequestId: string;
@@ -111,13 +118,18 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         choice: "",
         suggested: "",
         evidence: null,
-        status: "waiting" as const,
+        // A SPREADSHEET FORMAT NOTHING READS IS REFUSED IN THE BROWSER, before
+        // a byte is stored (variance matrix row 5). The server refuses it too —
+        // this is a screen and a screen is never the guarantee — but an `.xls`
+        // that was stored, classified and then refused has spent a model call
+        // and left a file in the store for a bill nobody can read.
+        status: (legacySpreadsheetAdvice(file.name) ? "refused" : "waiting") as Queued["status"],
         pathname: null,
         // Generated ONCE per file and reused on every retry, so a lost response
         // cannot register the same upload twice.
         registrationRequestId: crypto.randomUUID(),
         progress: 0,
-        error: null,
+        error: legacySpreadsheetAdvice(file.name),
         note: null,
       })),
     ]);
@@ -126,7 +138,10 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
   const update = (key: string, patch: Partial<Queued>) =>
     setQueue((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
 
-  const pending = queue.filter((item) => item.status !== "done");
+  // A refused file is out of this count on purpose: it is not going to be
+  // stored, read or charged for, so it must not appear in the sentence that
+  // says how many will be.
+  const pending = queue.filter((item) => item.status !== "done" && item.status !== "refused");
   const held = queue.filter((item) => item.status === "needs-kind");
   const heldAndAnswered = held.filter((item) => item.choice);
 
@@ -155,6 +170,8 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
       // still land. A pack whose drawings failed is still a pack with a bill.
       for (const item of queue) {
         if (item.status === "done") continue;
+        // Nothing to retry about a format this app cannot read.
+        if (item.status === "refused") continue;
         // HELD FOR A KIND AND STILL UNANSWERED. Skipped rather than guessed at:
         // reading it under the wrong prompt spends a call on output that
         // answers a different question.
@@ -302,6 +319,14 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         <p className="text-sm text-neutral-700">
           Drop the pack here — the BOQ, the drawings, and the preamble if the project has one.
         </p>
+        {/* WHAT IT ACCEPTS, SAID BEFORE THE PRESS. Measured rather than
+            assumed (§6.10.a row 5): a bill reads from {SPREADSHEET_EXTENSIONS}
+            — .csv included, quantities and all — and `.xls` and its relations
+            are refused, here in the browser, with the way out. */}
+        <p className="mt-1 text-xs text-neutral-500">
+          A bill of quantities reads from {SPREADSHEET_EXTENSIONS.join(", ")}; drawings and specification sheets from
+          PDF; an email as a saved .eml. An older .xls has to be saved as .xlsx first.
+        </p>
         <input
           ref={fileInput}
           type="file"
@@ -358,6 +383,7 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
                   {item.status === "needs-kind" && <span className="text-amber-700">Say which</span>}
                   {item.status === "done" && "Added"}
                   {item.status === "failed" && <span className="text-red-700">Failed</span>}
+                  {item.status === "refused" && <span className="text-red-700">Cannot be read</span>}
                 </span>
 
                 {item.status !== "done" && !busy && (

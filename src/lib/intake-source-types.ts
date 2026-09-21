@@ -82,6 +82,66 @@ export function intakeSourceKind(filename: string, contentType = ""): IntakeSour
   return "unsupported";
 }
 
+// ============================================================================
+// A BILL IS READ FROM A SPREADSHEET, AND `.xls` IS NOT ONE OF THEM.
+//
+// MEASURED, 2026-09-21 (variance matrix §6.10.a row 5). `.csv` and `.tsv`
+// PROCEED — `readSpreadsheetSheets` parses both and `parseBoqSheets` reads the
+// result, quantities and all — and `.xls`, `.xlsb`, `.xlsm`, `.ods` and
+// `.numbers` all come back `unsupported`, so the bill is refused. That refusal
+// was true and useless: "is not a supported file" does not say that saving the
+// same bill as .xlsx would work, which is a ten-second fix on the client's own
+// machine.
+//
+// The wording lives HERE, beside `intakeSourceKind`, because three places need
+// the same sentence: the two BOQ registration branches, the classify route, and
+// the upload screen — which checks it in the browser so a file nobody can read
+// is never stored at all.
+// ============================================================================
+
+/** What a bill of quantities can be read from. The file picker's own list. */
+export const SPREADSHEET_EXTENSIONS = [".xlsx", ".csv", ".tsv"];
+
+/**
+ * Spreadsheet formats this app does not read, and the way out of each.
+ *
+ * Deliberately an explicit list rather than "anything not in
+ * SPREADSHEET_EXTENSIONS": a `.pdf` bill is a different answer (§6.10.a row 8
+ * — export it to Excel, and nothing here will read a PDF as a grid whatever it
+ * is renamed to), and a `.docx` is not a bill at all. Advice that fits every
+ * wrong file fits none of them.
+ */
+const LEGACY_SPREADSHEETS: Record<string, string> = {
+  ".xls": "an older Excel format",
+  ".xlsb": "Excel's binary format",
+  ".xlsm": "a macro-enabled Excel file",
+  ".ods": "an OpenDocument spreadsheet",
+  ".numbers": "an Apple Numbers file",
+};
+
+/** Null unless this filename is a spreadsheet format nothing here reads. */
+export function legacySpreadsheetAdvice(filename: string): string | null {
+  const lower = filename.toLowerCase();
+  const found = Object.entries(LEGACY_SPREADSHEETS).find(([extension]) => lower.endsWith(extension));
+  if (!found) return null;
+  const [extension, description] = found;
+  return (
+    `“${filename}” is ${description} (${extension}), which this app does not read. ` +
+    "Open it and Save As .xlsx — or export the bill as .csv, which is read just as well."
+  );
+}
+
+/** Why this file cannot be a bill of quantities, in the words a person needs. */
+export function spreadsheetRefusal(filename: string, kind: IntakeSourceKind): string {
+  const advice = legacySpreadsheetAdvice(filename);
+  if (advice) return advice;
+  const what = kind === "unsupported" ? "not a supported file" : `a .${kind} file`;
+  return (
+    `A bill of quantities is read from a spreadsheet (${SPREADSHEET_EXTENSIONS.join(", ")}). ` +
+    `“${filename}” is ${what}.`
+  );
+}
+
 export function defaultIntakeContentType(kind: Exclude<IntakeSourceKind, "unsupported">): string {
   if (kind === "pdf") return "application/pdf";
   if (kind === "xlsx") return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
