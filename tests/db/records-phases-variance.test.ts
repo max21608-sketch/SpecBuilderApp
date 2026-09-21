@@ -23,13 +23,28 @@
 // two agents editing the same helper in the same afternoon is a merge conflict
 // in a file every db test imports; they will be replaced by it.
 // ============================================================================
-import { it, expect, beforeAll, afterAll, describe } from "vitest";
+import { it, expect, beforeAll, afterAll, describe, vi } from "vitest";
 import { describeIfDb } from "./db-tier";
 import pg from "pg";
 import { loadOutstanding, loadUncategorisedRecords } from "@/lib/chase-drafts";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
 import { BWS_EXPORT_COLUMNS, composeRow } from "@/lib/bws-export";
 import { CHECK_SHEET_HEADER, composeCheckSheet } from "@/lib/export-check-sheet";
+import { GET as exportRoute } from "@/app/api/projects/[id]/export/route";
+import { GET as checkSheetRoute } from "@/app/api/projects/[id]/export/check-sheet/route";
+import { GET as recordsRoute } from "@/app/api/records/route";
+import { GET as infillRoute } from "@/app/api/projects/[id]/infill/route";
+
+// The routes are the real ones; only the session is stubbed. Nothing here
+// registers a document, so no model is called and nothing is charged.
+vi.mock("@/lib/session", () => ({
+  getSessionUser: async () => ({
+    id: "00000000-0000-0000-0000-000000000001",
+    email: "__qa@example.test",
+    name: "QA User",
+    role: "admin",
+  }),
+}));
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -173,6 +188,111 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
       expect(mine.length).toBeGreaterThan(0);
       expect(mine.every((row) => row[codeColumn] === "")).toBe(true);
       expect(mine.every((row) => row[verdictColumn] === "")).toBe(true);
+    });
+  });
+  describe("retired records and phases (row d5)", () => {
+    /** Retired the way every path in src/lib does it: all three columns. */
+    async function retireRecord(id: string) {
+      await client.query(
+        `update spec_records set status = 'retired', retired_at = now(), retired_by = 'qa', updated_by = 'qa'
+          where id = $1`,
+        [id],
+      );
+    }
+
+    it("leaves a retired record out of the phase table, and counts what it is hiding", async () => {
+      await retireRecord(uncategorisedId);
+      const listed = async (query: string) => {
+        const response = await recordsRoute(new Request(`http://localhost/api/records?${query}`));
+        expect(response.status).toBe(200);
+        return (await response.json()) as {
+          records: { id: string }[];
+          retiredCount: number;
+          includeRetired: boolean;
+        };
+      };
+
+      // OUT BY DEFAULT, because the export takes only active records and a
+      // table listing retired ones beside the rest would describe a different
+      // set from the file.
+      const byDefault = await listed(`projectId=${projectId}&runId=${runId}`);
+      expect(byDefault.records.map((row) => row.id)).toEqual([ordinaryId]);
+      // AND COUNTED, so "1 record" cannot quietly mean "1 of 2": a record
+      // retired by a bill revision is something somebody has to go and look at,
+      // because a BWS job may already exist for it.
+      expect(byDefault.retiredCount).toBe(1);
+      expect(byDefault.includeRetired).toBe(false);
+
+      // The toggle is what makes it reachable rather than gone.
+      const withRetired = await listed(`projectId=${projectId}&runId=${runId}&includeRetired=1`);
+      expect(withRetired.records.map((row) => row.id).sort()).toEqual([ordinaryId, uncategorisedId].sort());
+      expect(withRetired.includeRetired).toBe(true);
+    });
+
+    it("has no toggle on the chase or the infill screen, and should not", async () => {
+      // Deliberately different from the phase table: a retired item is not one
+      // anybody chases or fills in, so there is nothing for a toggle to reveal.
+      // `loadOutstanding` and the infill route both drop it outright.
+      expect((await loadOutstanding(projectId)).some((q) => q.recordId === uncategorisedId)).toBe(false);
+      expect((await loadUncategorisedRecords(projectId)).map((row) => row.recordId)).not.toContain(
+        uncategorisedId,
+      );
+      const response = await infillRoute(new Request("http://localhost/api/infill"), {
+        params: Promise.resolve({ id: projectId }),
+      });
+      expect(response.status).toBe(200);
+      const payload = (await response.json()) as {
+        lines: { lineId: string }[];
+        uncategorised: { recordId: string }[];
+      };
+      expect(payload.lines.map((line) => line.lineId)).not.toContain(uncategorisedId);
+      expect(payload.uncategorised.map((row) => row.recordId)).not.toContain(uncategorisedId);
+    });
+
+    it("REFUSES to export a retired phase, in words, rather than composing an empty file", async () => {
+      // THE ROW'S WHOLE POINT. The records query requires an active run, so a
+      // retired phase used to compose cleanly: a workbook named after the phase,
+      // a header row, and none of its items. A BWS import REPLACES what it is
+      // given, so that download is one upload away from wiping every field of
+      // every job in the set.
+      await client.query(
+        `update spec_runs set status = 'retired', retired_at = now(), retired_by = 'qa' where id = $1`,
+        [runId],
+      );
+
+      const failure = await loadExportScope(projectId, runId);
+      expect(isScopeFailure(failure)).toBe(true);
+      if (!isScopeFailure(failure)) throw new Error("expected a refusal");
+      expect(failure.status).toBe(409);
+      expect(failure.error).toMatch(/retired/i);
+      // Not "no such phase": it is there, and sending somebody to look for a
+      // typo in a link that is perfectly correct is its own wrong answer.
+      expect(failure.error).not.toMatch(/no such phase/i);
+
+      for (const route of [exportRoute, checkSheetRoute]) {
+        const response = await route(
+          new Request(`http://localhost/api/projects/${projectId}/export?runId=${runId}&format=csv`),
+          { params: Promise.resolve({ id: projectId }) },
+        );
+        // A 4xx IN WORDS, never a file. Both routes, because the rule lives in
+        // the loader all four outputs share rather than in any one of them.
+        expect(response.status).toBe(409);
+        expect(response.headers.get("content-type")).toContain("application/json");
+        expect(response.headers.get("content-disposition")).toBeNull();
+        const body = (await response.json()) as { ok: boolean; error: string };
+        expect(body.ok).toBe(false);
+        expect(body.error).toMatch(/retired/i);
+      }
+    });
+
+    it("still exports the PROJECT, with the retired phase simply absent", async () => {
+      // The whole-project file is untouched: a retired phase has no active
+      // records, and leaving it out is correct. Refusing the project export
+      // because one of its phases was retired would be the opposite error.
+      const loaded = await loadExportScope(projectId, null);
+      if (isScopeFailure(loaded)) throw new Error(loaded.error);
+      expect(loaded.scope.records).toEqual([]);
+      expect(loaded.scope.runName).toBeNull();
     });
   });
 });

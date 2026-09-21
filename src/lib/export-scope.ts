@@ -30,7 +30,14 @@ export type LoadedExportScope = {
   scope: ExportScope;
 };
 
-export type ScopeFailure = { error: string; status: 404 };
+/**
+ * Why no file can be composed, in words, with the status the routes return.
+ *
+ * 409 rather than 404 for a RETIRED phase: the phase is there, and saying "no
+ * such phase" about one somebody retired last week would send them looking for
+ * a typo in a link that is perfectly correct.
+ */
+export type ScopeFailure = { error: string; status: 404 | 409 };
 
 /**
  * Every active record in scope, with the attributes and confirmed answers that
@@ -46,8 +53,32 @@ export async function loadExportScope(projectId: string, runId: string | null): 
 
   let runName: string | null = null;
   if (runId) {
-    const runs = await sql`select id, name from spec_runs where id = ${runId} and project_id = ${projectId}`;
+    const runs = await sql`select id, name, status from spec_runs where id = ${runId} and project_id = ${projectId}`;
     if (!runs[0]) return { error: "No such phase on this project.", status: 404 };
+    // ============================================================================
+    // A RETIRED PHASE PRODUCES NO FILE AT ALL — variance matrix row d5.
+    //
+    // The records query below requires an ACTIVE run, so a retired phase used to
+    // compose cleanly: a workbook with a header row, no records, and the phase's
+    // own name in the filename. That is the most dangerous empty file in the
+    // product. A BWS import REPLACES what it is given rather than merging, so a
+    // download that looks like the phase it names and carries none of its items
+    // is one upload away from wiping the fields of every job in the set — the
+    // filtered-export trap with the filter set to everything.
+    //
+    // It is refused HERE rather than in the four routes, because all of them
+    // (the BWS file, the check sheet, the quote and the costing sheet) read this
+    // loader and each would otherwise need its own copy of the rule. The project
+    // -wide export is untouched: a retired phase simply has no active records,
+    // and leaving it out of the whole-project file is correct.
+    // ============================================================================
+    if (String(runs[0].status) !== "active") {
+      return {
+        error:
+          "That phase has been retired, so there is nothing to export for it. A file naming a retired phase and carrying none of its items would erase every BWS field in the set if anybody imported it. Un-retire the phase, or export a live one, or take the whole project.",
+        status: 409,
+      };
+    }
     runName = String(runs[0].name);
   }
 
