@@ -20,6 +20,43 @@ mark it FIXED with the date and the commit.
 
 ---
 
+## 2026-09-21
+
+### The drawings card's table is cut off, and a column can only be reached by scrolling sideways
+
+**Status: open.** Seen on the pack drawings review (screenshot), Ashcombe House
+— Shop Drawings Issue B, card `BT-503 Bedside table · page 1`, on a full-width
+monitor.
+
+Six columns are readable — Group, Label, Value, Unit, Dimension / BWS field,
+State — and the table is **clipped at the card's right edge with a seventh
+column past it**, reachable only by scrolling the table sideways. Max: *"I
+don't want to have to scroll to view all of the fields on the table."*
+
+**The seventh column has no heading.** `ObservationTableHead` ends with
+`<Th className="px-4" />` and every spanning panel is `colSpan={7}`
+(`src/components/imports/ObservationRows.tsx:140`), so the thing being hidden
+is the per-row action column — which makes it the hardest clipping to notice,
+because nothing in the header row goes missing.
+
+Three layout facts, stated as findings rather than as the cause:
+
+- Both cards lay out as `grid … lg:grid-cols-[minmax(0,1fr)_300px]`
+  (`DrawingItemCard.tsx:400`, `ConfigurationCard.tsx:352`) — a FIXED 300px
+  column for the picture, and the table takes what is left.
+- The table sits in `overflow-x-auto`, so it is scrolling **as built**. This
+  is not a broken container: `docs/design-language.md` allows a table wider
+  than the page inside its own `overflow-x` box, and that permission is what
+  is being overridden here.
+- Almost every cell holds a `<select>`, and a select does not shrink the way
+  text does.
+
+**Which "first one" was meant is not settled.** Max said *"all the rest seem
+to be fine … it just seems to be that first one"*, and the screenshot holds
+one card. The first CARD on the page and the first ROW of the table are both
+readable from that sentence, and they point at different fixes. Ask before
+starting. He also said he does not think it is unique to this page.
+
 ## 2026-09-20
 
 ### An answer typed on the infill screen is refused on the LOCAL dev server, and only there
