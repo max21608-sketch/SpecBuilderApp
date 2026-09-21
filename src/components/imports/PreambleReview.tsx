@@ -72,6 +72,21 @@ export default function PreambleReview({
     setBlockers(res.data.blockers ?? []);
   }, [importId]);
 
+  /**
+   * Reload first, report afterwards.
+   *
+   * `load()` clears the banner on a successful fetch, so `setError(...)`
+   * followed by `await load()` showed a refusal for a few milliseconds and
+   * then nothing at all — a 409 on a note left the row looking as though the
+   * click had not registered. The reload itself is still required: a refused
+   * request means this screen is out of date. Same rule as both drawings
+   * screens and the record screen.
+   */
+  async function reloadThen(failure: string | null) {
+    await load();
+    if (failure) setError(failure);
+  }
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -97,8 +112,7 @@ export default function PreambleReview({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: run.version, requestId: crypto.randomUUID(), action }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     } finally {
       setBusy(null);
     }
@@ -116,8 +130,7 @@ export default function PreambleReview({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ noteId: note.id, expectedVersion: note.version, changes }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     });
   }
 
@@ -132,8 +145,7 @@ export default function PreambleReview({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action, notes: notes.map((note) => ({ id: note.id, version: note.version })) }),
       });
-      if (!res.ok) setError(res.error);
-      await load();
+      await reloadThen(res.ok ? null : res.error);
     } finally {
       setBusy(null);
     }

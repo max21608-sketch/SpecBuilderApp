@@ -59,7 +59,6 @@ export default function PagePreview({
     };
   }, [importId, page]);
 
-  if (failed) return null;
   return (
     <a
       href={`/api/imports/${importId}/source${page ? `#page=${page}` : ""}`}
@@ -68,7 +67,17 @@ export default function PagePreview({
       className={`block ${className}`}
       title="Open the drawing"
     >
-      {url ? (
+      {failed ? (
+        /* A FAILURE STILL LEAVES THE WAY TO THE PAGE. This used to render
+           nothing at all, which took the LINK with it — so a page pdfjs could
+           not rasterise became a card with no route to the drawing, and
+           nothing saying why. The thumbnail is an aid; the link is the
+           provenance. */
+        <span className="flex h-40 flex-col items-center justify-center rounded border border-neutral-200 bg-white px-2 text-center text-xs text-neutral-500">
+          <span>This page could not be shown here.</span>
+          <span className="mt-0.5 text-blue-700 underline">Open page {page ?? 1} of the drawing</span>
+        </span>
+      ) : url ? (
         /* eslint-disable-next-line @next/next/no-img-element --
            a blob URL for a crop made in this browser; next/image can do
            nothing with it. */

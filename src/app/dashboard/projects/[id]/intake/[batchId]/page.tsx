@@ -212,8 +212,15 @@ export default function IntakeBatchPage({
           action,
         }),
       });
-      if (!res.ok) setError(res.error);
+      // Reload FIRST, report after: `load()` clears the banner on success, so
+      // setting it before the reload showed a refusal — "This document is
+      // already being read", the one a person most needs to see — for a few
+      // milliseconds and then nothing at all, leaving the row looking as
+      // though the click had not registered. The reload is still required: a
+      // refused request means this screen is out of date. Same rule as both
+      // drawings screens and the record screen.
       await load();
+      if (!res.ok) setError(res.error);
       return res.ok;
     } finally {
       // Always reset: an HTML error page must not leave the button spinning.
