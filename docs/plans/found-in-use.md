@@ -84,6 +84,33 @@ it (Fable's greps on 2026-09-20 returned empty for exactly this reason and it
 was blamed on a shell function), and `git diff` treated the file as binary.
 Same technique, escaped; behaviour unchanged, the template tests green.
 
+### One malformed view region discards every view region on the page
+
+**Status: open — observation from Coder D's row 2, 2026-09-21.** `viewRegions`
+and `codeGroups` parse with `.catch([])` on the whole array, so one malformed
+entry throws away its siblings. Survivable — the card proposes no picture and
+the item stays whole — but the good entries are recoverable and are not
+recovered. The `bareValuesAsList` treatment of the six other arrays (a bad
+entry dropped, the rest kept) is the shape to apply.
+
+### A dropped `.msg` still reaches the project's blob prefix before it is refused
+
+**Status: open — observation from Coder D's row 3, 2026-09-21.** The route now
+refuses an `.msg` declared as an email before anything is recorded or
+dispatched, but `INTAKE_UPLOAD_ACCEPT` is a file-picker filter that drag-drop
+bypasses and `UPLOAD_CONTENT_TYPES` admits `application/vnd.ms-outlook` for
+evidence, so the bytes are stored under the project before the refusal. No
+charge and no run; a stray blob. A client-side check in `IntakeBatchUpload`
+alongside the legacy-spreadsheet refusal closes it.
+
+### A 120-page drawing set has never been read for real
+
+**Status: open — measured on paper only, 2026-09-21.** The 600-page cap stops
+a file the model would refuse; a 120-page set under the cap may still truncate
+(`truncated` says "split it") or run to the 240 s model deadline at high
+effort. Handled in words, not measured against the API — measuring costs a
+charged call on a synthetic PDF and is a deliberate spend, not a test.
+
 ### Two database-tier runs at once collide on hard-coded `__QA` project numbers
 
 **Status: open — found 2026-09-21 by Coder C, twice in two full runs, while

@@ -2086,6 +2086,34 @@ one-entry list, and a group that still makes no sense is dropped —
 put `evidence` at `MAX_NOTE`: the model wrote 480 useful characters explaining a
 grouping and a 300-character bound silently nulled them.
 
+**The variance matrix's drawings and email rows (plan §6.10.b/c) were driven
+through these paths on 2026-09-21**, six rows, synthetic fixtures built by
+`tests/fixtures/build-pdf.mjs`. What they changed: **six ARRAYS were still
+failing a paid read over a hint** — `dimensions`, `materials`,
+`dimensionsCombinedRaw`, `notesRaw`, `proposals`, `notes` — and now go through
+`bareValuesAsList` (a bare value is a one-entry list, a null entry is dropped;
+`items`, an ABSENT required array and an over-long one stay terminal, each
+saying why). **Plain inches convert exactly** (`in` has been in
+`ATTRIBUTE_UNITS` and `TO_MM` since 0007 — `18"` is `W457mm`, and "never
+converted" would have lost a correct figure); **a feet-and-inches compound
+(`1'6"`) is refused WHOLE** on both the drawings and the email path and the
+cell says *imperial, not converted* — it used to half-read as a figure of 1.
+**A PDF over 600 pages is refused before the call**, with the number in words:
+600 is the documented ceiling for a 1M-context model, which `EXTRACTION_MODEL`
+is, and 100 for a 200k one, so `MAX_MODEL_PDF_PAGES` is a named constant with
+that sentence beside it and a test that pins it; the count is read off the
+page tree, and NULL means proceed. **A rotated page's crop maths are
+extracted (`cropGeometry`) and proved** against a four-rotation PDF rather
+than assumed. On the email side: **an `.msg` declared as an email is refused
+at registration** before anything is recorded or dispatched — it used to be
+routed and sent to the model as binary OLE — and **an email's attachments are
+listed as *not read* and downloadable** through `GET /api/imports/[id]/attachments/[index]`
+(always `attachment` + `nosniff`, registers nothing), because the bytes live
+inside the `.eml` and a one-press "register it" would be two hard gates in
+one button. Recorded, not fixed: `viewRegions` and `codeGroups` still drop
+ALL entries when one is malformed; drag-drop still lets a `.msg` reach the
+project's blob prefix before the route refuses it.
+
 **STAGED JSON IS DATA FROM THE PAST.** `assertStagedDrawings` casts rather than
 validates, and this shape changed twice in one afternoon — so every screen
 reading the first version 2 run threw `Cannot read properties of undefined`.
