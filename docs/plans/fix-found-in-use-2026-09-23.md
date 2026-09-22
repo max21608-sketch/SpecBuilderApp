@@ -134,10 +134,22 @@ another line item where the same fabric appears."*
   person's act.
 - **A conflict still links nothing**, unchanged.
 
-**Design before code (§2.4).** One screenshot of the drawings card's "file this
-as…" control and one of the record's link control, to Max, before either is
-built. The wording of an internal code is the thing to get right in front of
-somebody — it appears in the library, on the card and in the change trail.
+**Design before code (§2.4) — DONE, and APPROVED.**
+`docs/design/finish-keying-2026-09-23.html` (`5adaf1e`) shows the card asking
+for a code, the row after it is filed internally, the exact-wording match on a
+later item with a near miss beside it, the library showing both origins, and
+the record's attach control. **Max approved all four of its questions on
+2026-09-23 — "yes to all four":**
+
+1. A minted code is **`BW-F-001`** upward, per project, `F` for finish.
+2. The second control reads **"No code — file it internally"**, beside a box
+   for the client's own code.
+3. **An exact wording match links on its own** and says so, with a way out. A
+   near miss is offered and files nothing.
+4. **An internal code never reaches the BWS export, the quote or the costing
+   sheet.** They show the description alone.
+
+None of the four is open. A coder reading this builds what the mock-up shows.
 
 **Tests.** DB: an uncoded finish confirmed with a minted code creates one row
 with `code_origin = 'internal'`; the same description on a second item links to
