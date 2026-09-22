@@ -174,7 +174,18 @@ function compare(field: string, label: string, was: unknown, now: unknown): Fiel
   return a === b ? null : { field, label, was: a, now: b };
 }
 
-const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; read: (atoms: RecordAtoms) => unknown }[] = [
+/**
+ * EXPORTED FOR THE VOCABULARY GUARD, and for nothing else.
+ *
+ * `tests/lib/vocabulary-guard.test.ts` scans the two SCREEN directories, and
+ * deliberately stops short of `src/lib`, where the SQL, the error codes and
+ * the column names live -- widening the scan there would turn `run_id` and
+ * `run_retire` into an allowlist nobody reads. Its answer is to name the few
+ * `src/lib` collections a person actually READS, one by one. These labels are
+ * one of them: they head the rows of a record's version diff, and `runName`
+ * was headed "Run" for four days after the rename.
+ */
+export const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; read: (atoms: RecordAtoms) => unknown }[] = [
   { field: "itemDescription", label: "Item", read: (a) => a.record.itemDescription },
   { field: "qty", label: "Quantity", read: (a) => a.record.qty },
   { field: "area", label: "Area", read: (a) => a.record.area },
@@ -189,7 +200,18 @@ const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; read: (at
   // actually did.
   { field: "dimensionNote", label: "Dimension note", read: (a) => a.record.dimensionNote ?? null },
   { field: "status", label: "Status", read: (a) => a.status },
-  { field: "runName", label: "Run", read: (a) => a.runName },
+  // PHASE, not "Run". The 2026-09-19 rename made phase the word on every screen
+  // and in every document; the three things that deliberately keep the old word
+  // are the TABLE `spec_runs` with its `run_id`, `runId` as the API word and
+  // query parameter, and `intake_runs`, which is a document READ and was never
+  // a phase. A rendered LABEL is none of the three, and this one is rendered:
+  // a record moved between phases showed a diff line headed "Run".
+  //
+  // `field` STAYS `runName`, because nobody reads it. It names the atom it
+  // reads off `RecordAtoms` -- schema-side vocabulary, like `run_id` -- and it
+  // is the diff row's React key. Renaming a key beside a label is how the two
+  // halves of this rule get confused with each other.
+  { field: "runName", label: "Phase", read: (a) => a.runName },
   { field: "splitReason", label: "Split reason", read: (a) => a.splitReason },
   { field: "itemImage", label: "Picture", read: (a) => a.itemImage?.storagePath ?? null },
 ];
