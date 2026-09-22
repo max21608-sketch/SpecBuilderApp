@@ -33,6 +33,30 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-09-23
+
+### A seeded-prompt count test fails on clean staging — 77 where it expects 74
+
+**Status: open, and NOT caused by anything in the 2026-09-23 plan.** Found
+2026-09-23 while verifying item 4a.7's coder report, which named it as
+pre-existing; checked independently on the main checkout at `e89401c` with no
+item's changes present, and again in a clean detached worktree at `4d93816`.
+It fails identically in both, in isolation, in two seconds.
+
+`tests/db/spec-field-gates.test.ts:198` — *"a reused prompt is byte-identical"*
+— asserts `select count(distinct prompt) from requirements` is **74** and the
+sandbox now answers **77**. The test exists so a re-seed that PARAPHRASES a
+prompt instead of reusing it is caught, which is exactly the class of drift a
+count moving would indicate.
+
+**Do not fix it by editing the number.** Three readings and they are not the
+same: a re-seed genuinely added three distinct prompts (the number is right and
+the expectation is stale), or three prompts were paraphrased where they should
+have been reused (the test is doing its job), or the sandbox carries rows a
+seed did not write. `select prompt, count(*) from requirements group by prompt`
+against the seed files says which. Same discipline as the palette counts: a
+count moving is not a number to edit, it means somebody should read the diff.
+
 ## 2026-09-22
 
 ### The projects list sorts alphabetically by BWS number, and should sort by most recently worked in
@@ -416,7 +440,25 @@ reading there was; the staged shape is frozen at version 1 for that reason.
 
 ### A note is asked whether it is Stated or TBC, and nothing reads the answer
 
-**Status: open. A CHANGE ASKED FOR.** Max, on the same card: *"we don't need a
+**Status: FIXED 2026-09-23, `1dd57a7`** (plan item 4a.7), on staging. Scoped by
+a new exported predicate `asksForState` — the row carries a BWS field or a
+dimension slot, which is what "composes into a cell" means — applied to the
+`no_state` blocker AND to the state select together, so the two cannot
+disagree. Two of `isMergeableNote`'s five clauses and only two; that function
+is untouched.
+
+**Found on the way, and it would have been a 500.** The column is `not null
+default 'confirmed'`, but the insert in `confirm-drawings.ts` names `state`
+POSITIONALLY, so a null reaches Postgres as a literal NULL and violates the
+constraint instead of falling to the default — letting unstated rows past the
+blocker would have turned Confirm into a 500. `stateToWrite` names the
+default in the one place a null can arrive. `empty_value` had to move onto the
+same helper, because the database refuses a confirmed value that is blank and
+a blocker disagreeing with the insert is a 500 in place of a sentence; an
+unasked row with a blank value now gets a sentence it can act on, since it has
+no state control to reach for. The original entry follows.
+
+**Status when found: open. A CHANGE ASKED FOR.** Max, on the same card: *"we don't need a
 state on the notes, and special manufacturing instructions, and other things
 you can think of that probably don't require it."*
 
