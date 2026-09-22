@@ -678,7 +678,38 @@ children blocking a chase for a decision taken one row up."*
 
 ### Eleven files, eleven empty dropdowns — the upload asks what each document is before it has looked at any of them
 
-**Status: open. A CHANGE ASKED FOR, and one thing inside it is a defect.** Max,
+**Status: FIXED 2026-09-23, `a1e788a`** (plan item 4a.3), on staging. A pure
+leaf `document-name-guess.ts` fills each box the moment files land, flagged,
+with the evidence it read; the suggestion is a `SuggestButton`, which also
+closes the defect inside this entry — a suggestion could not be AGREED with,
+because the select already showed it and picking the same option fires no
+change event. The explanatory sentence moved above the rows and the panel's
+Tip, which still read *"Each file's kind is declared on upload"*, went with it.
+
+**Measured on the real folder rather than on this entry's list.** The curated
+Panther folder holds eleven files and the FF&E preamble this entry counted has
+never been in it, so the rule was driven against twelve. All twelve fill, none
+abstains: `BOQ` on a spreadsheet, `SHOP DRAWINGS`, `SPEC-346` and `Preamble`
+each name one. Abstentions asserted: a bare `Schedule.xlsx`, `BOQ schedule`,
+`SPEC-346 - BOQ`, `Example bill.pdf`, and `BOQ` on anything that is not a
+spreadsheet. **`FF&E` alone never names a document** — it names the package.
+
+**Two departures from the brief, both right.** A NAME never lets the press skip
+the charged call: only a person's choice or a reading of the document does, so
+accepting the suggestion is what removes the call, and the sentence counts what
+is actually left. And the kind vocabulary moved to its own leaf
+(`document-kinds.ts`, re-exported from `document-classify.ts`, the
+`record-refs.ts` precedent) because `document-classify.ts` imports the Anthropic
+SDK at module top and a client component importing it would ship the SDK to the
+browser. Checked here structurally as well as by the build: the client path is
+`document-name-guess` → `document-kinds` → `spec-vocab`, and nothing on it
+reaches the SDK.
+
+**Outstanding: a monitor-size screenshot for Max, and his acceptance.** The
+Browser pane is 560px, so a 1600px emulation scales to illegible. The original
+entry follows.
+
+**Status when found: open. A CHANGE ASKED FOR, and one thing inside it is a defect.** Max,
 on the intake upload screen of a project (screenshot, the Panther pack of 11):
 *"when you upload the document, I want it to read first and try and guess what
 the document is and then give you the option to change what it is, instead of
