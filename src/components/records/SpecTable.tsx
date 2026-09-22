@@ -441,6 +441,7 @@ export default function SpecTable({
     toQuote: records.reduce((sum, record) => sum + (record.to_quote_outstanding ?? 0), 0),
     toQuoteItems: records.filter((record) => (record.to_quote_outstanding ?? 0) > 0).length,
     waiting: records.reduce((sum, record) => sum + (record.waiting ?? 0), 0),
+    waitingItems: records.filter((record) => (record.waiting ?? 0) > 0).length,
     noCategory: records.filter((record) => !record.category_name).length,
     noLevel: records.filter((record) => !record.level).length,
     // TGQ SATISFIED, which is a smaller claim than "nothing outstanding" and
@@ -533,19 +534,43 @@ export default function SpecTable({
           narrowing the screen can never make a run look finished. */}
       {records.length > 0 && (
         <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-5">
+          {/* ==================================================================
+              EVERY TILE ON THIS STRIP COUNTS ITEMS, BECAUSE THAT IS WHAT
+              PRESSING ONE LISTS.
+
+              TGQ printed 1,879 and Waiting printed a question count, while
+              every `focus` predicate below selects RECORDS — so pressing TGQ
+              on a 118-item phase said 1,879 and produced 103 rows. Two
+              readings of one control, on the screen people judge a phase by.
+
+              It is also the same word on two screens one click apart: the
+              overview's TGQ tile is a LINK to this one, and since 2026-09-21
+              it counts items. "They are the same question, and two names for
+              it is how a reader comes to believe they are two measurements" —
+              which this file already records about TGQ, and which a reader
+              would have hit immediately. Max: "can it be TGQ referencing line
+              items, not individual questions?"
+
+              The QUESTION count is not lost and must not be: it is what a
+              chase asks for, it is what the header's Chase button counts, and
+              it is the second half of each sub-line. `RunTally` still hands
+              the header both, unchanged.
+              ================================================================== */}
           <StatTile
             label="TGQ"
             tone="danger"
-            value={tally.toQuote}
-            meaning={`${tally.toQuoteItems} of ${records.length} item${records.length === 1 ? "" : "s"}`}
+            value={tally.toQuoteItems}
+            meaning={`of ${records.length} item${records.length === 1 ? "" : "s"} · ${tally.toQuote.toLocaleString()} question${
+              tally.toQuote === 1 ? "" : "s"
+            }`}
             onPress={() => setFocus(focus === "tgq" ? null : "tgq")}
             active={focus === "tgq"}
           />
           <StatTile
             label="Waiting on a reply"
             tone="warn"
-            value={tally.waiting}
-            meaning="chased, nothing back"
+            value={tally.waitingItems}
+            meaning={`${tally.waiting.toLocaleString()} question${tally.waiting === 1 ? "" : "s"} asked, nothing back`}
             onPress={() => setFocus(focus === "waiting" ? null : "waiting")}
             active={focus === "waiting"}
           />
