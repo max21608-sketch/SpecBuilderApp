@@ -21,6 +21,46 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-22 — Promoted to pilot: Stage 1 and Stage 2, 153 commits
+
+**At Max's instruction ("merge staging to pilot").** Steps 1–3 of
+`docs/environments.md`'s checklist, done from here; steps 4–8 are Max's, at
+the console, exactly as on 2026-09-20.
+
+- **Backed up first**: `spec-builder-pilot-2026-09-22T18-35-54-115Z.sql`,
+  written outside the repo. The `Target: DATABASE_ENVIRONMENT=pilot
+  (ep-long-recipe-zata7pgb…)` line was read before it acted.
+- **The four checks green at the promoted SHA**, in a detached worktree at
+  `0bd39d2` with the DATABASE TIER REQUIRED: lint, typecheck, **1986 passed ·
+  1 skipped** over 151 files, and a clean `next build`. Exit 0.
+- **Migrations applied BEFORE the code**: `0034_dimension_note.sql` and
+  `0035_palette_option_code.sql` — "Applied 2 migration(s); 33 already
+  present", ledger now **35**. Both are purely additive (`add column` plus a
+  CHECK), which is why an empty pilot was never at risk.
+- **Re-seeded**, 11 files, for `0011_bws_palette_options.sql` — the BWS
+  capture of 2026-09-22. Pilot now reads the documented counts exactly:
+  timber 35, metal 15, seat build 27, back cushion 6, stud 13 = **96**, all
+  five `owner = 'bws'` rows carrying a `synced_at`, and **8 options carrying a
+  BWS code**. Before this it held 19 options and none of the five.
+- **Fast-forwarded** `da863b7` → `0bd39d2`, no `--force`, the SHA already on
+  `staging`. `origin/pilot` was confirmed an ancestor of `origin/staging`
+  first; 153 commits, the whole of Stage 1 and Stage 2.
+
+**The §7.5 gate was NOT met, and Max overrode it knowingly.** The Stage 2
+brief says promotion waits on his review of 2.3 and 2.5 driven as the role
+each is for, and no such review is recorded here. What makes the override
+cheap rather than risky: **the pilot database holds no projects at all** —
+`select count(*) from projects` returned 0 — so there is no stable build to
+disturb and nobody is mid-session on it. The review is still owed before
+Matthew is pointed at this.
+
+**Outstanding, and Max's**: a deployment for `0bd39d2` on
+`spec-builder-pilot`, `Ready`, `/api/auth/me` reporting `pilot`/`pilot` with
+that commit, the `PILOT` chip and the `[PILOT]` title marker, and the
+first-session script walked signed in on pilot (§7.4). The pilot URL is
+recorded nowhere in this repository and there is no Vercel CLI on this
+machine, so none of the four was probed from here.
+
 ## 2026-09-22 — Stage 2 item 2.2: the drawings review offers the palette, and the match fires zero times
 
 The last item in `make-it-work-2026-09-19.md` that could be built without a

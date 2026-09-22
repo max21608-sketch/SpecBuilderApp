@@ -3585,15 +3585,16 @@ contact. The dated evidence per item is in `docs/plans/README.md`
 first-session script (`.claude/skills/verify/files/first-session.mjs`, the
 release gate that never calls the model) ran against the `b76cfb0` deployment
 on 2026-09-20: 20 pass, 0 fail, 8 skipped by design — so **Stage 1a is
-closed on staging**. Remaining and Max's: 0033 onto pilot, the promotion, the
-script on pilot, the hand-over message. **Stage 1b is built and
+closed on staging**. Remaining and Max's: the script on pilot and the
+hand-over message; 0033 and the promotion itself are done (see below).
+**Stage 1b is built and
 deployed at `da863b7`**, at Max's instruction of 2026-09-20: packaging lines
 suggested for ignoring, one summary line on the pack, a document's state as a
 pending count, the swatch reaching page 2, a level set on the drawings card,
 and the crop investigation concluding that the prompt is the fix (deferred to
 the finishes-schedule re-read). Not accepted by anybody. The whole of Stage 1
-is therefore on staging; the pilot promotion (0033 first), the script on
-pilot and the hand-over message are Max's.
+is therefore on staging, and on PILOT since 2026-09-22; the script on pilot
+and the hand-over message are still Max's.
 
 **Stage 2 opened 2026-09-20** (its stage brief is at the end of the plan), in
 dependency order because Matthew's screenshots have not arrived. **On staging
@@ -3623,8 +3624,22 @@ return)` on its Specs tab, its checklist and the BWS export after one Save,
 one change set and one version. Not accepted by anybody. **Blocked
 and saying so:** 2.9 (a proposal for
 Matthew), 2.11 (the rate cap first, then Max's own amendment of the inbound-
-email gate above), 2.12 (another session's plan). Nothing promotes to pilot
-until Max has driven 2.3 and 2.5 as the roles they are for (§7.5).
+email gate above), 2.12 (another session's plan).
+
+**PROMOTED TO PILOT 2026-09-22, at Max's instruction, with the §7.5 gate
+KNOWINGLY OVERRIDDEN.** The stage brief said nothing promotes until Max has
+driven 2.3 and 2.5 as the roles they are for, and that review is still not
+recorded — it is still owed before Matthew is pointed at this build. What
+made the override cheap: **the pilot database held no projects at all**, so
+there was no stable build to disturb. `pilot` fast-forwarded `da863b7` →
+`0bd39d2` (153 commits, the whole of Stages 1 and 2), after a backup, the
+four checks green at that SHA with the database tier required (1986 passed,
+1 skipped, clean build), `0034` and `0035` applied BEFORE the code, and a
+re-seed that finally puts the 96 BWS palette options on pilot. Steps 4–8 of
+`docs/environments.md` — a deployment for that SHA, `Ready`, `/api/auth/me`,
+the PILOT chip, the first-session script — are Max's at the console; the
+pilot URL is recorded nowhere in this repo. Details: `docs/plans/README.md`,
+2026-09-22.
 
 **Outstanding — judgement, not code.**
 
