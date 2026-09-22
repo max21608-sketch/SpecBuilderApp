@@ -30,6 +30,67 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
+### A confirmed fabric is on the record and not in the finishes library, because it carries no code
+
+**Status: open. Half of it is a keying DECISION and half of it is a route with
+no button.** Max, comparing the two screens: *"there's a finish in the item's
+specs captured page, but it doesn't appear in the project finishes. Why is
+this? It should."*
+
+**What is on the two screens.** On the S-203 record, Specs captured: `Fabric
+reference` · *Aissa Dione, ref. Losange raphia beige et écru* · BWS field
+**COM 1**, sourced to `SPEC-346-Seating - S-203 - Armchair.pdf`. On the same
+project's **Finishes** tab: *"No finishes yet."*, and the Add box prompting for
+a code shaped like `CH-01.1`.
+
+**Why, exactly.** `project_finishes` is keyed on the CLIENT'S OWN CODE —
+unique on `(project_id, code_norm)` — and this caption carries none.
+`resolveFinishCode` (`src/lib/finishes.ts:164`) reads `materialCodeRaw`, and
+with nothing there it returns `status: "none"` before it looks at anything
+else; `confirm-drawings.ts` then writes the attribute with a null `finish_id`
+and creates no library row. *Aissa Dione* is a supplier and *Losange raphia
+beige et écru* is a product reference. Neither is a project finish code, and
+the model was right not to invent one. The project holds no finishes at all for
+the same reason: nothing confirmed so far carried a code.
+
+**So it is not a broken link — it is that there is no key to file it under.**
+And the table already has the right columns for this exact value:
+`supplier_raw`, `reference`, `description`. What the row would lack is the one
+thing the library is addressed by.
+
+Three ways to close it, each with its own trap, none of them chosen here:
+
+- **Key a code-less finish on its DESCRIPTION.** This is the
+  `normaliseFinishCode` trap moved to a field made of prose: the same fabric
+  written two ways on two pages becomes two rows, and a normaliser clever
+  enough to merge them is clever enough to merge two things somebody kept
+  apart. `CH-01.1` and `CH-01-1` are deliberately two finishes; two spellings
+  of a French fabric name are far more alike than that.
+- **Ask the reviewer for a code on the drawings card**, at confirm, where they
+  are already looking at the page. Never-invent survives — a person supplies
+  the key — and it adds a question to every uncoded finish on every card.
+- **Allow a library row with no code and a surrogate key.** That changes the
+  unique index the edit-once guarantee rests on, and every screen that says
+  "this corrects every item carrying this code" has to say something else.
+
+**And there is a real gap underneath it, found on the way: the link route
+exists and NO SCREEN CALLS IT.** `setAttributeFinish` (`finish-edit.ts:234`)
+and `POST /api/attributes/[id]/finish` are built, version-checked, reason-
+bearing, `finish_link`/`finish_unlink` change kinds and all — and `grep` finds
+no caller anywhere under `src/components` or `src/app/dashboard`. So even
+today, with a code: somebody can add `CH-01.1` to the library by hand and there
+is still no way to attach this record's COM 1 spec to it. `CLAUDE.md` already
+records the neighbouring half — *"Bring them in" on the finishes page was not
+built (`createFinish` links nothing)* — and the linking half turns out to be a
+route waiting for a button.
+
+**One consequence to keep in view when it is built.** `composeFinishCell`
+renders the LIBRARY where an attribute is linked, so linking this row would
+change what the BWS cell, the checklist answer and the record screen all say —
+from the page's own words to the library's. That is the edit-once rule working
+as designed, and it is exactly why linking has to be a person's act rather than
+something a confirm does on a description match.
+
 ### Finishes by room — NOT a defect, and a build that has to happen at some point
 
 **Status: not a fault. Recorded because it will be needed, and because the
