@@ -70,10 +70,11 @@
 // not be tested end to end without a tunnel.
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { readSpreadsheetSheets } from "@/lib/intake-source";
+import { readSpreadsheetSheets, pdfHasTextLayer } from "@/lib/intake-source";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
-import { intakeSourceKind, spreadsheetRefusal } from "@/lib/intake-source-types";
+import { intakeSourceKind, outlookMsgAdvice, spreadsheetRefusal } from "@/lib/intake-source-types";
+import { scannedPdfRefusal } from "@/lib/document-classify";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
 import { matchName, type MatchCandidate } from "@/lib/matching";
 import { guessLevelFromBill } from "@/lib/level-guess";
@@ -192,7 +193,13 @@ async function registerEmail(input: Registered, actor: string): Promise<Response
     return json(
       {
         ok: false,
-        error: `"${input.filename}" is not an email this app can read. In Outlook, save it as .eml (File → Save As) — Outlook's .msg is a binary the app does not read.`,
+        // The SAME sentence the upload screen prints when it refuses a dropped
+        // `.msg` before storing it — `outlookMsgAdvice` in intake-source-types,
+        // beside the spreadsheet one, so the two cannot drift. Anything else
+        // declared as an email gets the general form.
+        error:
+          outlookMsgAdvice(input.filename) ??
+          `"${input.filename}" is not an email this app can read. Save it as .eml and upload that.`,
         field: "filename",
       },
       400,
@@ -288,6 +295,52 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
       },
       413,
     );
+  }
+
+  // ======================================================================
+  // A SCANNED PDF IS REFUSED HERE TOO, NOT ONLY AT CLASSIFY (FIU 2026-09-21).
+  //
+  // `pdfHasTextLayer` and `scannedPdfRefusal` have existed since 91360b6 and
+  // the CLASSIFY route asks them before the model. This one never did — and
+  // classify is not on the path when somebody DECLARES the kind, which is the
+  // held row's dropdown, a second press after an unclear answer, and anything
+  // registering without the screen. So a hand-declared kind on an image-only
+  // PDF opened an attempt and SPENT THE READ: about four minutes of the model
+  // looking at pictures of pages, at full price, for a review screen with
+  // nothing on it.
+  //
+  // REFUSED OUTRIGHT (400), rather than registered and left undispatched. A
+  // `pending` run with no attempt is exactly the shape *Read all* picks up, so
+  // a scanned PDF parked that way would be one press from the charge it was
+  // just refused for — and that button's own sentence says each is charged. A
+  // row nobody may ever read is a row that only ever renders as a problem.
+  // This is what `.msg` above and the classify route both already do.
+  //
+  // "Before storage" is not available on this architecture: every intake
+  // upload is client-direct and registration is the step AFTER it. So the blob
+  // stays, unregistered, swept as an unregistered upload always has been — and
+  // the screen refuses this file in the browser where it can (see
+  // `IntakeBatchUpload`), which is the half that stops the byte being stored.
+  //
+  // CERTAIN OR PROCEED, the same rule as classify and the harder half: a
+  // filter chain it cannot decode, an unimplemented codec, or no visible page
+  // all answer NULL, and null PROCEEDS. The naive test (no `Tj` in the raw
+  // bytes) calls every compressed real drawing scanned and would refuse the
+  // whole pilot pack. Only a measured `false` refuses.
+  //
+  // The bytes are read only AFTER the size check above, so an oversize PDF is
+  // still refused on the store's own metadata without downloading it.
+  // ======================================================================
+  if (kind === "pdf") {
+    let pdf;
+    try {
+      pdf = await readTrustedBlob(input.pathname, input.projectId, { maxBytes: MAX_MODEL_PDF_BYTES });
+    } catch (cause) {
+      if (cause instanceof UntrustedBlobError) return json({ ok: false, error: cause.message }, 400);
+      throw cause;
+    }
+    const scanned = scannedPdfRefusal("pdf", pdfHasTextLayer(pdf.bytes));
+    if (scanned) return json({ ok: false, error: scanned, field: "filename" }, 400);
   }
 
   try {

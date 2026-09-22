@@ -91,6 +91,43 @@ describe("an older spreadsheet is refused in the browser", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A DROPPED `.msg` — FIU 2026-09-21 (Coder D row 3).
+//
+// The route has refused one since Stage 2, before anything is recorded or
+// dispatched. But `INTAKE_UPLOAD_ACCEPT` is the file PICKER's filter, which a
+// file DROPPED on the zone never passes through, and `UPLOAD_CONTENT_TYPES`
+// admits `application/vnd.ms-outlook` because a `.msg` is legitimate evidence
+// on a change set — so the bytes landed under the project's own prefix and were
+// refused afterwards. No charge and no run; a stray blob.
+//
+// This test drops it the way the browser does, so the picker's filter is not
+// in the way of the thing being proved.
+// ---------------------------------------------------------------------------
+describe("an Outlook .msg is refused in the browser", () => {
+  it("names the way out, and never reaches the store", () => {
+    const { drop } = mount();
+    drop("RE Fabric for S-201.msg");
+    expect(screen.getByText("Cannot be read")).toBeTruthy();
+    expect(screen.getByText(/save it as \.eml/)).toBeTruthy();
+    expect(upload).not.toHaveBeenCalled();
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it("leaves a saved .eml alone, which is the format that works", () => {
+    const { drop } = mount();
+    drop("RE Fabric for S-201.eml");
+    expect(screen.queryByText("Cannot be read")).toBeNull();
+    expect(startButton()).not.toBeDisabled();
+  });
+
+  it("is not counted in what the press is about to read", () => {
+    const { drop } = mount();
+    drop("RE Fabric.msg", "Example drawings.pdf");
+    expect(startButton().textContent).toBe("Start intake (1)");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ROW 8's SCREEN HALF — a bill inside a PDF, refused after it is read.
 //
 // Unlike an `.xls`, nothing in the browser can tell a PDF bill from a PDF

@@ -11,7 +11,9 @@ import {
   SPREADSHEET_EXTENSIONS,
   intakeSourceKind,
   legacySpreadsheetAdvice,
+  outlookMsgAdvice,
   spreadsheetRefusal,
+  unreadableUploadAdvice,
 } from "@/lib/intake-source-types";
 import { buildPdf, buildPdfOfPages } from "../fixtures/build-pdf.mjs";
 import { parseBoqSheets } from "@/lib/boq-import";
@@ -192,6 +194,47 @@ describe("a bill that is not a spreadsheet this app reads", () => {
 
   it("prefers the way out over the list when there is one", () => {
     expect(spreadsheetRefusal("bill.xls", "unsupported")).toBe(legacySpreadsheetAdvice("bill.xls"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AN OUTLOOK `.msg` — FIU 2026-09-21 (Coder D row 3).
+//
+// The route has refused one since Stage 2. What it could not stop was the
+// STORING: `INTAKE_UPLOAD_ACCEPT` is the file picker's filter, a dropped file
+// never passes through it, and the store admits `application/vnd.ms-outlook`
+// because a `.msg` is legitimate evidence on a change set — so the bytes landed
+// under the project's prefix and were refused afterwards.
+//
+// The sentence therefore has to be ONE sentence, said by the screen that stops
+// the byte and by the route that is the guarantee. Two copies is how they start
+// disagreeing about what is allowed.
+// ---------------------------------------------------------------------------
+describe("a file the browser should not store at all", () => {
+  it("names the .msg way out, in the words Outlook uses", () => {
+    const advice = outlookMsgAdvice("RE Fabric for S-201.msg");
+    expect(advice).toContain("RE Fabric for S-201.msg");
+    expect(advice).toContain(".eml");
+    expect(advice).toContain("File → Save As");
+  });
+
+  it("leaves every format this app DOES read alone", () => {
+    for (const filename of ["message.eml", "bill.xlsx", "bill.csv", "bill.tsv", "drawings.pdf"]) {
+      expect(outlookMsgAdvice(filename), filename).toBeNull();
+      expect(unreadableUploadAdvice(filename), filename).toBeNull();
+    }
+  });
+
+  it("is the one function the screen asks, covering both refusals", () => {
+    // The drop zone asks this and nothing else, so a format added to either
+    // list reaches it without a second call site being remembered.
+    expect(unreadableUploadAdvice("note.msg")).toBe(outlookMsgAdvice("note.msg"));
+    expect(unreadableUploadAdvice("bill.xls")).toBe(legacySpreadsheetAdvice("bill.xls"));
+  });
+
+  it("folds the extension's case, because a filesystem does not", () => {
+    expect(unreadableUploadAdvice("RE Fabric.MSG")).not.toBeNull();
+    expect(unreadableUploadAdvice("Bill.XLS")).not.toBeNull();
   });
 });
 

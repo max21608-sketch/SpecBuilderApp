@@ -119,6 +119,45 @@ const LEGACY_SPREADSHEETS: Record<string, string> = {
   ".numbers": "an Apple Numbers file",
 };
 
+/**
+ * Null unless this is an Outlook `.msg`, which is not an intake document.
+ *
+ * ============================================================================
+ * THE FILE PICKER'S FILTER IS NOT A CHECK, AND DRAG-DROP PROVES IT.
+ *
+ * `INTAKE_UPLOAD_ACCEPT` lists `.eml` and not `.msg`, which is the picker's
+ * suggestion and nothing more: a file DROPPED on the zone never went through
+ * it, and `UPLOAD_CONTENT_TYPES` admits `application/vnd.ms-outlook` because a
+ * `.msg` is a legitimate piece of EVIDENCE on a change set. So a dropped `.msg`
+ * was uploaded to the project's own blob prefix and only then refused by the
+ * route — no charge and no run, but a stray blob nobody asked for.
+ *
+ * The sentence lives here, beside `spreadsheetRefusal`, for the reason stated
+ * above it: the route and the upload screen must say the SAME thing, and two
+ * copies of a refusal is how they start disagreeing about what is allowed.
+ * The route is still the guarantee; the screen is what stops the byte.
+ * ============================================================================
+ */
+export function outlookMsgAdvice(filename: string): string | null {
+  if (!filename.toLowerCase().endsWith(".msg")) return null;
+  return (
+    `“${filename}” is not an email this app can read. In Outlook, save it as .eml (File → Save As) — ` +
+    "Outlook's .msg is a binary the app does not read."
+  );
+}
+
+/**
+ * Why the BROWSER should not store this file at all, or null.
+ *
+ * One function so the drop zone and the file picker refuse the same set. It is
+ * deliberately narrow — a format this app has MEASURED that it cannot read, with
+ * the way out in the sentence — and it is never the guarantee: every one of
+ * these is refused again by the route, which is where the rule actually lives.
+ */
+export function unreadableUploadAdvice(filename: string): string | null {
+  return legacySpreadsheetAdvice(filename) ?? outlookMsgAdvice(filename);
+}
+
 /** Null unless this filename is a spreadsheet format nothing here reads. */
 export function legacySpreadsheetAdvice(filename: string): string | null {
   const lower = filename.toLowerCase();
