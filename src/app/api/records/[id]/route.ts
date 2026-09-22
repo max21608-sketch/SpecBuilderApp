@@ -38,7 +38,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            r.parent_id, r.variant_label,
            p.bws_project_number, p.name as project_name, p.id as project_id,
            run.id as run_id, run.name as run_name,
-           c.name as category_name, c.family as category_family, c.requirements_authored
+           c.name as category_name, c.family as category_family, c.requirements_authored,
+           -- WHETHER THERE IS A PICTURE, so the screen does not have to find
+           -- out by asking for one and being refused. The record page rendered
+           -- an img tag at the record image route unconditionally and turned
+           -- the picture off on the error, which put an EXPECTED 404 in the
+           -- console on every record with no crop. A flag on a payload the
+           -- screen already loads costs no round trip, which was the only
+           -- argument for the optimistic version. The image route still 404s;
+           -- nothing asks it to. (No backticks in here: this is a tagged
+           -- template, and one would close it.)
+           exists (
+             select 1 from attachments a
+             where a.entity_type = 'spec_records' and a.entity_id = r.id and a.kind = 'item_image'
+           ) as has_image
     from spec_records r
     join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id

@@ -595,6 +595,15 @@ export default function ChaseQuestionTable({
             <span className="text-sm text-neutral-500">
               {preselection.preselected} to-quote question{preselection.preselected === 1 ? "" : "s"} preselected ·{" "}
               {preselection.alsoOutstanding} also outstanding, not selected
+              {/* THE THIRD BUCKET. The lines' own counts include a question
+                  already asked, because it is still outstanding; the
+                  preselection excludes it, because asking again by default is
+                  not what anybody meant. Both numbers are right and only two of
+                  the three sets were named, so the columns read 71 beside a
+                  button saying 70. */}
+              {preselection.awaitingReply > 0 && (
+                <> · {preselection.awaitingReply} awaiting a reply, not selected</>
+              )}
             </span>
           )}
           {hiddenSelected > 0 && (

@@ -82,6 +82,42 @@ export class UncertainCommitError extends Error {
 // it easy to skip.
 export type TxnSql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
 
+// The statement that was running when a transaction failed, and how long it had
+// been running. Attached to the error so `describeTransactionFailure` can say
+// WHICH of the three retryable outcomes happened and where -- a 503 reading
+// "try again" with nothing in the log behind it is a symptom nobody can chase.
+//
+// Only the TEXT is carried, never the values: this helper is a parameterised
+// tagged template, so the text holds `$1`, `$2` and no client data. That is
+// what makes it safe to log on a database holding NDA client material.
+export type FailedStatement = { statement: string; elapsedMs: number };
+
+const FAILED_STATEMENT = Symbol.for("specbuilder.failedStatement");
+
+export function failedStatementOf(cause: unknown): FailedStatement | null {
+  const carried = (cause as Record<symbol, unknown> | null)?.[FAILED_STATEMENT];
+  if (!carried || typeof carried !== "object") return null;
+  const { statement, elapsedMs } = carried as Partial<FailedStatement>;
+  if (typeof statement !== "string" || typeof elapsedMs !== "number") return null;
+  return { statement, elapsedMs };
+}
+
+function attachFailedStatement(cause: unknown, statement: string, elapsedMs: number): void {
+  if (!cause || typeof cause !== "object") return;
+  // Non-enumerable, so nothing that serialises the error into a response body
+  // can pick it up by accident -- the statement is for the log only.
+  if (failedStatementOf(cause)) return;
+  Object.defineProperty(cause, FAILED_STATEMENT, {
+    value: { statement, elapsedMs },
+    enumerable: false,
+    configurable: true,
+  });
+}
+
+// One line for the log, kept to a single statement's worth: a 15 kB query would
+// bury the SQLSTATE that is the point of the line.
+const MAX_LOGGED_STATEMENT = 400;
+
 function taggedSql(client: pg.Client): TxnSql {
   return async (strings, ...values) => {
     let text = "";
@@ -89,8 +125,14 @@ function taggedSql(client: pg.Client): TxnSql {
       text += strings[i] ?? "";
       if (i < values.length) text += `$${i + 1}`;
     }
-    const result = await client.query(text, values);
-    return result.rows as Row[];
+    const startedAt = Date.now();
+    try {
+      const result = await client.query(text, values);
+      return result.rows as Row[];
+    } catch (cause) {
+      attachFailedStatement(cause, text, Date.now() - startedAt);
+      throw cause;
+    }
   };
 }
 
@@ -167,6 +209,46 @@ export function isRetryablePostgresError(cause: unknown): boolean {
   return typeof code === "string" && RETRYABLE_PG_CODES.has(code);
 }
 
+// The three retryable outcomes are three different problems with three
+// different fixes -- a deadlock is a lock ORDER defect in this repo, a
+// lock_timeout is somebody else holding a row, and a statement_timeout is a
+// query (or a machine) that is too slow -- and until 2026-09-22 the route
+// distinguished none of them. The 503 said "try again" and the log said
+// nothing at all, which is why the infill screen's refusals on the local dev
+// server could not be told apart from contention. See found-in-use,
+// "An answer typed on the infill screen is refused on the LOCAL dev server".
+const RETRYABLE_PG_NAMES: Record<string, string> = {
+  "40001": "serialization_failure",
+  "40P01": "deadlock_detected",
+  "55P03": "lock_not_available (lock_timeout, 5s)",
+  "57014": "query_canceled (statement_timeout, 15s, or a cancel)",
+};
+
+/**
+ * One log line naming WHICH failure it was, the statement that was running and
+ * how long it had run. Pure, so the wording is testable without a database.
+ *
+ * The statement is parameterised (`$1`, `$2`) and carries no client data.
+ */
+export function describeTransactionFailure(cause: unknown): string {
+  const code = (cause as { code?: unknown } | null)?.code;
+  const sqlstate = typeof code === "string" ? code : "no SQLSTATE";
+  const name = typeof code === "string" ? (RETRYABLE_PG_NAMES[code] ?? "unrecognised") : "unrecognised";
+  const message = cause instanceof Error ? cause.message : String(cause);
+
+  const parts = [`sqlstate=${sqlstate} (${name})`, `message=${message}`];
+  const failed = failedStatementOf(cause);
+  if (failed) {
+    const statement = failed.statement.replace(/\s+/g, " ").trim();
+    const clipped =
+      statement.length > MAX_LOGGED_STATEMENT ? `${statement.slice(0, MAX_LOGGED_STATEMENT)}…` : statement;
+    parts.push(`after=${failed.elapsedMs}ms`, `statement=${clipped}`);
+  } else {
+    parts.push("statement=unknown (failed outside a tagged statement)");
+  }
+  return parts.join(" · ");
+}
+
 /**
  * Maps a failure out of `withTransaction` to a response.
  *
@@ -191,10 +273,14 @@ export function transactionErrorResponse(cause: unknown): Response {
 
   if (cause instanceof UncertainCommitError) {
     // The one case where "nothing was written" would be a lie.
+    console.error(`guarded transaction commit uncertain: ${describeTransactionFailure(cause.cause)}`);
     return json({ ok: false, code: "uncertain_commit", error: cause.message }, 503);
   }
 
   if (isRetryablePostgresError(cause)) {
+    // Logged, not returned: the reviewer gets a sentence they can act on and
+    // the log gets the SQLSTATE somebody can diagnose from.
+    console.error(`guarded transaction contended: ${describeTransactionFailure(cause)}`);
     return json(
       {
         ok: false,
@@ -207,6 +293,6 @@ export function transactionErrorResponse(cause: unknown): Response {
 
   // Never return a raw driver message: it carries table and column names, and
   // a constraint violation can carry a fragment of the value that broke it.
-  console.error("guarded transaction failed", cause);
+  console.error(`guarded transaction failed: ${describeTransactionFailure(cause)}`, cause);
   return json({ ok: false, error: "Nothing was written. The operation failed; check the logs." }, 500);
 }

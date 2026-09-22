@@ -21,6 +21,7 @@ import pg from "pg";
 import { put, del } from "@vercel/blob";
 import { randomUUID } from "node:crypto";
 import type { StagedSpecDocument } from "@/lib/spec-document";
+import { qaNumber } from "../db/db-tier";
 
 const enabled = process.env.VERIFY_MODEL === "1" && Boolean(process.env.DATABASE_URL);
 const describeIfEnabled = enabled ? describe : describe.skip;
@@ -42,10 +43,18 @@ describeIfEnabled("one real model call", () => {
     const c = new pg.Client({ connectionString: process.env.DATABASE_URL });
     await c.connect();
 
+    // Asked for rather than typed, like the other thirty fixtures: a literal
+    // `__QA P99001` collides with a concurrent run on
+    // `projects_bws_project_number_key` and dies in the fixture rather than in
+    // the thing being verified. This file is not the db tier — it is gated on
+    // VERIFY_MODEL=1 because it SPENDS MONEY — but the key it writes is the
+    // same shared one, and an aborted run of it leaves a row behind for the
+    // sweep exactly as the tier's do.
     const project = (
       await c.query(
         `insert into projects (bws_project_number, name, created_by, updated_by)
-         values ('__QA P99001','__QA Step D verification','verify','verify') returning id`,
+         values ($1,'__QA Step D verification','verify','verify') returning id`,
+        [qaNumber("P99001")],
       )
     ).rows[0];
     const projectId = String(project.id);

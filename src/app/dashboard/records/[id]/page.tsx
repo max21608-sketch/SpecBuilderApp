@@ -95,6 +95,9 @@ type SpecRecord = {
   category_name: string | null; category_family: string | null;
   /** A fabric split (0024). Both null on an ordinary record. */
   parent_id: string | null; variant_label: string | null;
+  /** Whether a crop was confirmed off the drawings, so the screen can decide
+   *  without asking `/image` and being refused. */
+  has_image: boolean;
 };
 
 /** This record's bill line and every live configuration under it, parent first. */
@@ -209,10 +212,16 @@ function RecordView() {
     fallback: "specs",
     resolve: (raw) => (RECORD_TABS.includes(raw as RecordTab) ? (raw as RecordTab) : null),
   });
-  // Optimistic: the image is requested, and the 404 for a record that has none
-  // turns it off. Asking first would be a second round trip on every record to
-  // learn something the image request itself reports.
-  const [hasImage, setHasImage] = useState(true);
+  // THE PAYLOAD SAYS WHETHER THERE IS A PICTURE.
+  //
+  // This used to be optimistic — render the `<img>`, let the 404 turn it off —
+  // on the argument that asking first would cost a second round trip. It does
+  // not: `/api/records/[id]` is loaded anyway and now carries `has_image`, so
+  // the flag is free and the console stops collecting an EXPECTED 404 on every
+  // record with no crop (found-in-use 2026-09-20). `onError` stays, for a crop
+  // whose blob has gone: the row says there is a picture and the fetch is what
+  // finds out there is not.
+  const [imageFailed, setImageFailed] = useState(false);
   // Bumped after every successful write, so the history list below reloads
   // under the edit that caused it instead of going stale until a page reload.
   const [historyKey, setHistoryKey] = useState(0);
@@ -272,8 +281,8 @@ function RecordView() {
     setHistoryKey((key) => key + 1);
   }
   // Moving from a record with no picture to one with a picture reuses this
-  // component, so a sticky `false` would hide every image after the first miss.
-  useEffect(() => { setHasImage(true); }, [id]);
+  // component, so a sticky `true` would hide every image after the first miss.
+  useEffect(() => { setImageFailed(false); }, [id]);
 
   async function save(
     answer: Answer,
@@ -453,6 +462,10 @@ function RecordView() {
   if (!data) return <PageBody><Spinner label="Loading record" /></PageBody>;
 
   const { record, refs, answers, attributes, categories } = data;
+
+  // The payload says whether a crop exists; `imageFailed` covers the one case
+  // it cannot — a row that names a blob the store no longer holds.
+  const hasImage = record.has_image && !imageFailed;
 
   // ---- the fabric split, from whichever end this record is ------------------
   //
@@ -1179,7 +1192,7 @@ function RecordView() {
                   <img
                     src={`/api/records/${record.id}/image`}
                     alt={record.item_description}
-                    onError={() => setHasImage(false)}
+                    onError={() => setImageFailed(true)}
                     className="h-auto w-full rounded"
                   />
                   <p className="mt-1.5 text-center text-[11.5px] text-neutral-500">
