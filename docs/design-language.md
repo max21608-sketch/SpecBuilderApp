@@ -39,6 +39,18 @@ Pressing a `StatTile` opens the list already narrowed to it. The tile you are
 on is outlined, and the filter is repeated as a removable chip in the filter
 row — a filter you cannot see is a filter you forget you set.
 
+**A tile is three rows and never four.** Label, number, one line saying what
+the number counts. It does NOT also say in words that it can be pressed: the
+whole tile is a `<Link>` or a `<button>`, so the pointer, the focus ring and
+the hover shadow say it already. A blue *filter to these →* line used to sit
+under every one of them, and on the phase screen a strip of five pushed the
+search, the three filters and the table's own header below the fold (Max,
+2026-09-21: *"can they be shorter"*). Where a tile is a filter on the same
+page, what those words carried was the ACTIVE state — *showing these* against
+*show these* — and that is now `active` plus the removable chip. If a filtered
+strip ever stops reading as filtered, strengthen the active state; do not put
+the line back.
+
 The rule that travels with it, from the chase screen: **a filter narrows what
 is LISTED, never what is asked or what an edit touches.** The counts on a row
 stay the row's own, with "n shown" beside them only when the list was actually
@@ -173,7 +185,7 @@ All in `src/components/ui/`. Reach for these before writing a class string.
 | `PageHeader` | the identity band: crumbs, the h1, a status `Pill` beside it, subtitle, actions, the `Tabs` | a second h1 lower on the page |
 | `PageBody` | the content column, `std` or `wide` | — |
 | `Tabs` + `useUrlTab` | a strip anything links INTO lives in the URL (`?tab=`); a strip nested in a review component keeps `useState` | a tab that reads the URL itself |
-| `StatTile` | one number and where it takes you; `href: null` renders a box, never a dead link | a number with nowhere to go and no judgement |
+| `StatTile` | one number and what it counts, in three rows; `href: null` renders a box, never a dead link | a number with nowhere to go and no judgement |
 | `Card` | a titled box; `flush` when it holds a table | wrapping a single paragraph |
 | `Table` / `Th` / `Td` / `Tr` / `GroupRow` | any list over six long | the drawings card's inner tables until Part B reaches them |
 | `Chip` | a fact about one cell: a state, a code (`mono`), a routing signal | a row's overall state |

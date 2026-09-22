@@ -20,6 +20,31 @@
 //
 // A tile with no `href` renders as a plain box rather than a dead link,
 // because a link that goes nowhere is worse than text.
+//
+// ---- AND IT DOES NOT SAY WHAT PRESSING IT DOES ----------------------------
+//
+// It used to. A blue "filter to these →" / "show these →" / "open the library
+// →" line made every tile four rows tall, and on the phase screen that strip
+// of five pushed the search, the three filters and the table's own header
+// below the fold on a full-width monitor. Max, 2026-09-21: "you could just
+// display line items 503 and they can still have the same functionality, but
+// you don't need to actually have 'filter to these' displayed", and then "the
+// same goes for the height of the boxes here and in general -- can they be
+// shorter." It was every strip in the app, not the two screens he happened to
+// be looking at.
+//
+// The line cost nothing to remove BECAUSE THE WHOLE TILE IS THE CONTROL: it
+// renders as a `<Link>` or a `<button>`, so the pointer, the focus ring and
+// the hover shadow all say it is pressable without a sentence saying so.
+//
+// WHAT THE WORDS DID CARRY, on the screens where a tile is a FILTER on the
+// same page, was the ACTIVE STATE -- "showing these" against "show these".
+// That is now `active` alone, and checked in the browser at 1920x1080 and
+// 1440x900 before the words went: the ring plus the removable filter chip the
+// drafts screen and the phase table both put in the row under the strip. If a
+// filtered strip ever stops reading as filtered, the fix is a stronger active
+// state, NOT this line coming back -- a caption that changes by one word is
+// the weakest way to say a list is narrowed.
 // ============================================================================
 import Link from "next/link";
 import { TONE, type Tone } from "./tone";
@@ -31,7 +56,6 @@ export default function StatTile({
   label,
   value,
   meaning,
-  action,
   href,
   onPress,
   tone = "plain",
@@ -41,8 +65,6 @@ export default function StatTile({
   value: string | number;
   /** The one line under the number. What it counts, not what to do about it. */
   meaning?: string;
-  /** What pressing it does, in the reader's words. Shown only when it is pressable. */
-  action?: string;
   /** Null, not just absent, so a caller with nothing to link to says so. */
   href?: string | null;
   /**
@@ -66,12 +88,14 @@ export default function StatTile({
       <span className={`mt-0.5 block text-2xl font-semibold leading-tight tracking-tight tabular-nums ${TONE[tone].text}`}>
         {typeof value === "number" ? value.toLocaleString() : value}
       </span>
-      {meaning && <span className="mt-0.5 block text-xs text-neutral-500">{meaning}</span>}
-      {action && (href || onPress) && <span className="mt-1.5 block text-xs text-blue-700">{action} →</span>}
+      {meaning && <span className="mt-0.5 block text-xs leading-snug text-neutral-500">{meaning}</span>}
     </>
   );
 
-  const shell = `relative overflow-hidden rounded-[10px] border bg-white px-3.5 py-3 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:content-[''] ${TONE[tone].edge} ${
+  // py-2 rather than py-3. The row that went is most of the height, but "can
+  // they be shorter ... in general" was about the BOX, so the padding goes too.
+  // Measured on the phase strip: 120px before, 90px after.
+  const shell = `relative overflow-hidden rounded-[10px] border bg-white px-3.5 py-2 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:content-[''] ${TONE[tone].edge} ${
     active ? "border-neutral-900 ring-1 ring-neutral-900" : "border-neutral-200"
   }`;
 

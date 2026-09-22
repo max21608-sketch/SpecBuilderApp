@@ -1565,29 +1565,53 @@ function ProjectOverview() {
                   value={summary.records}
                   meaning={`${runs.length} phase${runs.length === 1 ? "" : "s"}`}
                   href={firstRunHref}
-                  action="see them all"
                 />
+                {/* ==========================================================
+                    THESE THREE COUNT LINE ITEMS, AND THEY DO NOT ADD UP.
+
+                    Asked for on 2026-09-21 on a 503-line project, where they
+                    read 8,769 / 10,841 / 65: "these numbers are so high,
+                    they're just meaningless." The question count stays on the
+                    sub-line, because it is worth having and because it is what
+                    the chase actually asks.
+
+                    Two things every one of them has to say, or the strip
+                    trades one misleading reading for another:
+
+                      - WHICH POPULATION. An uncategorised record has no
+                        questions, so it is in none of these. `Line items` is
+                        503 and these are over the 408 with a category.
+                      - THAT THEY OVERLAP. An item clear at TGQ can still carry
+                        other questions, so it is counted twice. The caption
+                        under the strip says so in words.
+
+                    The placeholder sentence deliberately LEFT this tile: with
+                    an item count as the big number, "166 items still on the
+                    placeholder" underneath it reads as the same measure when
+                    it is a different one (which TGQ MODEL applies, not what is
+                    outstanding). It is said in full in the note and the TGQ
+                    row of the table below.
+                    ========================================================== */}
                 <StatTile
                   label="TGQ"
                   tone="danger"
-                  value={summary.toQuote}
-                  meaning={
-                    summary.tgqFromFallback === 0
-                      ? "questions blocking a quote"
-                      : `${summary.tgqFromFallback} item${summary.tgqFromFallback === 1 ? "" : "s"} still on the placeholder`
-                  }
+                  value={summary.toQuoteItems}
+                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.toQuote.toLocaleString()} questions`}
                   href={firstRunHref}
-                  action="filter to these"
                 />
                 <StatTile
                   label="Also outstanding"
                   tone="warn"
-                  value={summary.missing + summary.tbc}
-                  meaning={`${summary.missing} unlooked · ${summary.tbc} TBC`}
+                  value={summary.alsoOutstandingItems}
+                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.missing.toLocaleString()} unlooked, ${summary.tbc.toLocaleString()} TBC`}
                   href={firstRunHref}
-                  action="filter to these"
                 />
-                <StatTile label="Settled" tone="good" value={summary.settled} meaning="confirmed or N/A" />
+                <StatTile
+                  label="Settled"
+                  tone="good"
+                  value={summary.settledItems}
+                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items, nothing left on them`}
+                />
                 <StatTile
                   label="Finishes"
                   tone="info"
@@ -1602,11 +1626,12 @@ function ProjectOverview() {
                           : "all filed under a kind"
                   }
                   href={finishesHref}
-                  action="open the library"
                 />
               </div>
               <p className="mt-1.5 text-xs text-neutral-500">
-                Pressing a tile opens the spec table already filtered to it.
+                Pressing a tile opens the spec table already filtered to it. TGQ, Also outstanding and Settled count
+                LINE ITEMS, out of the {summary.itemsWithQuestions.toLocaleString()} that have a category — an item
+                can be in two of them, so they do not add up.
               </p>
             </>
           )}
@@ -1661,16 +1686,30 @@ function ProjectOverview() {
                   <tbody>
                     {/* TGQ, NOT "needed to quote". They are the same question —
                         settled on 2026-09-18 — and two names for it is how a
-                        reader comes to believe they are two measurements. */}
+                        reader comes to believe they are two measurements.
+
+                        IN ITEMS, like every other row of this table. It used to
+                        print the QUESTION count while No category, No level and
+                        Unresolved finish codes beside it were all per item,
+                        which made the one number in the middle read as a fifth
+                        measure. Asked for in the same breath as the tiles:
+                        "can it be TGQ referencing line items, not individual
+                        questions?" The questions are still named, on the
+                        meaning line, because that is what a chase asks for. */}
                     <SummaryRow
                       label="TGQ"
                       tone="danger"
-                      count={summary.toQuote}
+                      count={summary.toQuoteItems}
                       href={chaseHref}
                       meaning={
-                        summary.tgqFromFallback === 0
-                          ? "Blocks a quotation at each item's level."
-                          : `His matrix for ${summary.tgqFromMatrix} items, the placeholder for ${summary.tgqFromFallback}.`
+                        <>
+                          Items with at least one question blocking a quotation, of the{" "}
+                          {summary.itemsWithQuestions.toLocaleString()} that have a category —{" "}
+                          {summary.toQuote.toLocaleString()} question
+                          {summary.toQuote === 1 ? "" : "s"} between them.
+                          {summary.tgqFromFallback > 0 &&
+                            ` His matrix for ${summary.tgqFromMatrix} items, the placeholder for ${summary.tgqFromFallback}.`}
+                        </>
                       }
                       action={
                         <>
