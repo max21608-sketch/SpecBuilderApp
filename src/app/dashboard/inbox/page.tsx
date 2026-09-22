@@ -396,7 +396,7 @@ function InboxView() {
             <h2 className="mt-6 text-th font-bold uppercase tracking-wider text-red-700">
               Reads that failed
               <span className="font-medium normal-case tracking-normal text-neutral-500">
-                {" "}· the message is on its project and the read did not run — open it to retry
+                {" "}· the message is on its project and the read did not finish — open it to retry
               </span>
             </h2>
             <Card flush className="mt-2 border-red-200">
