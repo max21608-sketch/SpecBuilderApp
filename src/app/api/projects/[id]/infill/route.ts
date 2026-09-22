@@ -42,6 +42,7 @@ import { summariseLines, infillTotals, type InfillDimension, type InfillQuestion
 import { groupByQuestion } from "@/lib/chase-grouping";
 import { areaOptions } from "@/lib/area-filter";
 import { normaliseFinishCode } from "@/lib/finishes";
+import { loadPalettes } from "@/lib/palette-load";
 
 export const dynamic = "force-dynamic";
 
@@ -119,7 +120,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     select id, slug, family, name, requirements_authored from item_categories order by family, sort_order
   `;
 
-  const { palettes, paletteByQuestion } = await loadPalettes();
+  // ---- which palette a question offers -------------------------------------
+  //
+  // The record screen's loader, shared since 2026-09-22 rather than copied.
+  // This route's own copy of those two statements had fallen a column behind:
+  // it never gained 0035's `spec_palette_options.code`, so a value quoting a
+  // BWS option code and nothing else resolved on the record screen and not
+  // here. Nothing on either screen said so.
+  const { palettes, paletteByQuestion } = await loadPalettes(sql);
 
   return json({
     ok: true,
@@ -289,33 +297,4 @@ async function loadFinishes(projectId: string): Promise<Map<string, string>> {
     if (description) out.set(String(row.code_norm), description);
   }
   return out;
-}
-
-/**
- * The palettes, exactly as the record screen loads them.
- *
- * Two statements rather than a join, because the second is the LINK — which
- * palette a question offers, by BWS field or by the local key a readiness row
- * carries instead — and it is Matthew's gate overlay that says so.
- */
-async function loadPalettes() {
-  const palettes = await sql`
-    select p.key, p.name, p.owner, p.allows_free_text, p.source_note, p.synced_at,
-           coalesce(
-             (select json_agg(json_build_object(
-                       'value', o.value, 'label', o.label,
-                       'sortOrder', o.sort_order, 'isDefault', o.is_default)
-                      order by o.sort_order)
-                from spec_palette_options o where o.palette_key = p.key and o.active),
-             '[]'::json) as options
-      from spec_palettes p
-     order by p.key
-  `;
-  const paletteByQuestion = await sql`
-    select f.json_id, g.local_key, g.palette_key
-      from spec_field_gates g
-      left join spec_fields f on f.id = g.spec_field_id
-     where g.palette_key is not null
-  `;
-  return { palettes, paletteByQuestion };
 }

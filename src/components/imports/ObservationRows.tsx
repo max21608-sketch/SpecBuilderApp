@@ -34,6 +34,14 @@ import {
   type ItemLevel,
 } from "@/lib/spec-vocab";
 import { foldableRow, isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
+import {
+  isOfferable,
+  normalisePaletteValue,
+  offPaletteNote,
+  paletteForField,
+  unheldPaletteNote,
+  type Palette,
+} from "@/lib/palettes";
 import SwatchPicker from "@/components/imports/SwatchPicker";
 import Button from "@/components/ui/Button";
 import { Th } from "@/components/ui/Table";
@@ -70,7 +78,24 @@ export type Occupant = {
   sourcePage: number | null;
 };
 
-export type SpecField = { id: string; json_id: number; name: string; field_category: string };
+/**
+ * One BWS field, as the drawings screens thread the register.
+ *
+ * `palette` is the closed list Matthew's gate overlay points this field at,
+ * attached by `withPalettes` at read time. OPTIONAL, and absent means "this
+ * caller had no register to hand" rather than "this field has no list" -- the
+ * row then renders exactly as it did before palettes reached this screen,
+ * which is `upgradeCalloutGuesses`' rule about an empty `fields` list in a
+ * second place. A caller that degrades honestly cannot disagree with the
+ * confirm; one that invented an empty list would.
+ */
+export type SpecField = {
+  id: string;
+  json_id: number;
+  name: string;
+  field_category: string;
+  palette?: Palette | null;
+};
 
 /** The project's records, for the card that matched none of them. */
 export type RecordChoice = { id: string; label: string; itemDescription: string; runName: string };
@@ -221,6 +246,118 @@ export function OtherDimensionsToggle({
 }
 
 /**
+ * The sentinel for "not taken from the list". Same literal as
+ * `AnswerValue`'s, so the two controls cannot mean different things by it.
+ */
+const FREE_TEXT = "__other__";
+
+/**
+ * THE LIST A BWS FIELD OFFERS, BESIDE THE WORDS THE PAGE PRINTED.
+ *
+ * ============================================================================
+ * Matthew, 2026-09-18 (1:26:43): "it'd be really good if it would have stud
+ * and then it would have a go at matching with what was specified on the
+ * drawing. But if it was wrong or couldn't find it, that you'd be able to
+ * select one from the drop-down" -- and free text stays: "of course, just do
+ * it as a free text."
+ *
+ * ---- THE MATCH IS EXACT AND IT WILL ALMOST NEVER FIRE, WHICH IS CORRECT ----
+ *
+ * MEASURED on the sandbox before this was built: `npm run palette:gap` reads
+ * 98 callouts on a palette-backed BWS field over 47 staged drawings runs -- 81
+ * of them stating something, 17 stating nothing -- and ZERO match an option.
+ * That is not a defect to tune away. The BWS palettes are BW's own
+ * manufacturing range (`BW Oak Natural - Open grain 10%`); the drawings state
+ * the designer's intent (`Ceruse finish oak`, `Antique brass, machined`). They
+ * are two vocabularies at two stages of the job, and mapping one onto the
+ * other is a specification decision a person takes.
+ *
+ * So there is NO substring step, no token step, no distance step and no model
+ * call here. `normalisePaletteValue` is the whole matcher and it returns null
+ * rather than the nearest option, for the reason house/conventions.md §5
+ * gives: a fuzzy step that put `Antique brass, machined` onto `BW Antiqued
+ * Brass` would write a BW finish code the designer never specified into a
+ * field that ships to BWS, and nothing downstream would question it. A visible
+ * gap beats a plausible-looking wrong answer. `palette:gap` prints what a
+ * looser rule WOULD have written, so widening it stays a decision taken on
+ * evidence rather than a default. On this corpus it would buy nothing at all:
+ * not one unmatched callout is a substring of an option or contains one.
+ *
+ * ---- FREE TEXT IS THE DEFAULT AND IS ALWAYS REACHABLE ----------------------
+ *
+ * The value box above this is untouched: the page's own words are what the row
+ * starts with and what it keeps unless a person changes it. This control only
+ * ever writes `value`, through the autosave that already exists -- `valueRaw`
+ * still holds what the drawing said and the row already prints it underneath,
+ * which is what keeps the provenance honest and why this needs no column and
+ * no migration.
+ *
+ * `Other...` is the state the row is in whenever the value is not an option,
+ * so it cannot destroy typed text: a select already showing it fires no change
+ * event. Choosing it is only reachable FROM an option, where it means "undo
+ * that pick" and puts the drawing's own words back.
+ *
+ * A palette with no options offers no dropdown at all -- `unheldPaletteNote`
+ * says so in a sentence, because an empty select reads as broken and a
+ * reviewer who thinks a control is broken types around it. Nothing is unheld
+ * since the 2026-09-22 capture; the branch is for the next gate row pointing
+ * at a list nobody has read yet.
+ * ============================================================================
+ */
+export function PaletteChoice({
+  palette,
+  value,
+  valueRaw,
+  disabled,
+  onPick,
+}: {
+  palette: Palette;
+  /** What the row currently holds -- the reviewer's draft where there is one. */
+  value: string | null;
+  /** What the page printed, restored by "Other...". */
+  valueRaw: string | null;
+  disabled: boolean;
+  onPick: (next: string | null) => void;
+}) {
+  if (!isOfferable(palette)) {
+    return <p className="mt-1 text-xs text-slate-500">{unheldPaletteNote(palette)}</p>;
+  }
+
+  const onPalette = normalisePaletteValue(palette, value);
+  return (
+    <div className="mt-1">
+      <p className="text-[11px] text-neutral-500">{palette.name}</p>
+      <select
+        value={onPalette ?? FREE_TEXT}
+        disabled={disabled}
+        onChange={(event) => {
+          const chosen = event.target.value;
+          onPick(chosen === FREE_TEXT ? valueRaw : chosen);
+        }}
+        className="mt-0.5 w-full border border-neutral-300 rounded px-1 py-0.5 text-xs disabled:opacity-50"
+      >
+        <option value={FREE_TEXT}>Other&hellip; — keep the drawing&rsquo;s own words</option>
+        {palette.options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {/* NEUTRAL, NOT AMBER, AND NEVER A BLOCKER. On the record screen the same
+          sentence is amber, because a settled answer sitting outside its list
+          is a question. At intake it is the normal case -- every real callout
+          measured -- and amber on all of them teaches a reviewer to ignore
+          amber, which is the argument that keeps `unanswerable` slate.
+          Nothing to be off is not a mismatch, so a row with no value says
+          nothing at all. */}
+      {onPalette === null && (value ?? "").trim() !== "" && (
+        <p className="mt-0.5 text-xs text-neutral-500">{offPaletteNote(palette)}</p>
+      )}
+    </div>
+  );
+}
+
+/**
  * One observation: the seven controls a reviewer rules on it with.
  *
  * `blocked` and `guessed` are passed in rather than derived, because a shared
@@ -272,6 +409,10 @@ export function ObservationRow({
   // What this row can be given, rather than what the vocabulary holds.
   // `dimension` is never offered here: it is unwritable without a slot, and the
   // slot column sends both together.
+  // The list this row's BWS field offers, or null -- which is most rows: a
+  // dimension and a note carry no field at all, and COM 1/2/3 carry no
+  // palette, correctly, because COM is free text in BWS.
+  const palette = paletteForField(specFields, observation.specFieldId);
   const groupOptions = ATTRIBUTE_GROUPS.filter((group) => {
     if (group === observation.attrGroup) return true;
     if (group === "dimension") return false;
@@ -395,6 +536,27 @@ export function ObservationRow({
             repeated down every one of them. */}
         {observation.valueRaw !== null && observation.valueRaw !== observation.value && !(value ?? "").includes("\n") && (
           <p className="mt-0.5 text-xs text-neutral-400">drawing said: {observation.valueRaw}</p>
+        )}
+        {palette && (
+          <PaletteChoice
+            palette={palette}
+            value={value}
+            valueRaw={observation.valueRaw}
+            disabled={busy}
+            onPick={(next) => {
+              // THE DRAFT GOES FIRST. The value box is controlled by
+              // `drafts[id] ?? observation.value`, so a half-typed draft left
+              // behind would go on showing the old text over the value that
+              // was just picked -- the reload would land and the box would
+              // still disagree with it.
+              setDrafts((current) => {
+                const rest = { ...current };
+                delete rest[observation.id];
+                return rest;
+              });
+              callbacks.onChange(observation, { value: next });
+            }}
+          />
         )}
         {observation.materialCodeRaw && (
           <>

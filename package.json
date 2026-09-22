@@ -24,6 +24,7 @@
     "db:backfill-finishes": "tsx --env-file-if-exists=.env.local db/backfill-finishes.ts",
     "dump:drawings": "tsx --env-file-if-exists=.env.local tools/dump-drawing-run.ts",
     "vocab:gap": "tsx --env-file-if-exists=.env.local tools/vocab-gap.ts",
+    "palette:gap": "tsx --env-file-if-exists=.env.local tools/palette-gap.ts",
     "qa:fake-inbox": "tsx --env-file-if-exists=.env.local tools/qa-fake-inbox.ts",
     "qa:levels": "tsx --env-file-if-exists=.env.local tools/qa-levels-and-designer.ts",
     "qa:demo": "tsx --env-file-if-exists=.env.local tools/qa-demo-project.ts",

@@ -18,6 +18,7 @@ import {
 import { ITEM_LEVELS } from "@/lib/spec-vocab";
 import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
 import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
+import { loadPalettes } from "@/lib/palette-load";
 import {
   designerKey,
   loadOutstanding,
@@ -156,28 +157,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // options still comes back -- the screen says so in words rather than
   // showing an empty dropdown. None is empty since the 2026-09-22 BWS capture
   // (db/seed/0011), and the branch stays for the next one that is.
-  const palettes = await sql`
-    select p.key, p.name, p.owner, p.allows_free_text, p.source_note, p.synced_at,
-           coalesce(
-             (select json_agg(json_build_object(
-                       'value', o.value, 'label', o.label,
-                       'sortOrder', o.sort_order, 'isDefault', o.is_default,
-                       'code', o.code)
-                      order by o.sort_order)
-                from spec_palette_options o where o.palette_key = p.key and o.active),
-             '[]'::json) as options
-      from spec_palettes p
-     order by p.key
-  `;
-
-  // Which palette each question is answered from, if any. Keyed the two ways a
-  // gate row can be addressed.
-  const paletteByQuestion = await sql`
-    select f.json_id, g.local_key, g.palette_key
-      from spec_field_gates g
-      left join spec_fields f on f.id = g.spec_field_id
-     where g.palette_key is not null
-  `;
+  //
+  // ONE LOADER since 2026-09-22. These two statements used to be written out
+  // here and copied into the infill route, and the copies had already drifted:
+  // the infill one never gained 0035's option code. See src/lib/palette-load.ts.
+  const { palettes, paletteByQuestion } = await loadPalettes(sql);
 
   // ---- the gates -----------------------------------------------------------
   //

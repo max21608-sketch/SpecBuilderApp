@@ -43,6 +43,7 @@ import {
   type StagedDrawings,
 } from "@/lib/drawing-document";
 import { assertStagedPreamble, preambleNoteBlockers, type StagedPreamble } from "@/lib/preamble-document";
+import { loadPalettes, withPalettes } from "@/lib/palette-load";
 
 export const dynamic = "force-dynamic";
 
@@ -458,8 +459,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // The register FIRST: a callout the old word lists gave up on is re-read on
     // the way past (`upgradeCalloutGuesses`), and it can only claim COM 1 if it
     // is holding the field ids while it does.
-    const fields = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
-    const staged = assertStagedDrawings(run.parsed, specFieldEntries(fields));
+    const fieldRows = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
+    const staged = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
+    // ======================================================================
+    // THE PALETTE IS RESOLVED HERE, NOT WRITTEN INTO `intake_runs.parsed`.
+    //
+    // The same rule as `upgradeCalloutGuesses`: the register is read at READ
+    // time, so a pack already read gains the list on its next page load with
+    // no second model call and nothing charged again. Nothing about the
+    // document changes, and the staged JSON stays what the model said.
+    //
+    // Attached to the FIELD register the card already threads, because that
+    // is where the link lives (`spec_field_gates.spec_field_id`) and because a
+    // parallel list is one more thing a caller can forget to pass -- which
+    // would be a card offering a list the confirm never saw.
+    // ======================================================================
+    const fields = withPalettes(fieldRows, await loadPalettes(sql));
     // The same pairing the pack-wide screen uses, so the two can never disagree
     // about whether a card can commit. See src/lib/drawing-resolution.ts.
     const context = await loadDrawingContext(String(run.project_id));
