@@ -276,7 +276,38 @@ happened to be named after.
 
 ### The page prints a swatch and the intake takes no picture of it
 
-**Status: open. Asked for**, and it chains onto the entry above. Max: *"in the
+**Status: FIXED 2026-09-23, `d7461d7`** (plan item 4a.2), on staging, on top of
+4a.1. The control is no longer gated on a raw client code: it is offered
+wherever the row RESOLVES to a finish — a client code, a finish 4a.1 matched or
+the reviewer accepted, or one about to be minted at confirm. Fabric, timber and
+metal alike; `classifyCallout` already tells them apart.
+
+**It reuses 4a.1's resolution rather than writing a second one** — `readUncodedFinish`,
+the same pure function `confirm-drawings.ts` calls — so the screen and the
+confirm cannot disagree about which library row a picture belongs to. **The
+confirm path needed no change at all**: 4a.1 already built the map and the
+`swatch_has_no_finish` refusal already sat downstream of it, so the brief's
+"keep the refusal" was satisfied by tests rather than by code.
+
+A row about to be minted shows the control with **no code on it**, because the
+number is allocated under the project row lock at confirm and printing it early
+names a code another reviewer's confirm may take. An unfiled row says *"No
+swatch yet — file this finish above and the crop control appears"*, and a row
+stating no value at all (`PIPING / TBC`) says nothing, because there is nothing
+to file.
+
+**Found and fixed on the way, not in the brief:** withdrawing a filing now
+withdraws any crop held for that row. Without it, un-filing left a crop in the
+screen's ref with no control and no preview, and the confirm then refused the
+WHOLE card over a picture nobody could see. The refusal was right; discovering
+it that way was not.
+
+**Still true, and it is the DoD:** nobody has cropped the S-203 chip off a real
+page. That remains the first swatch ever taken off a real drawing, and it wants
+a VISIBLE browser — pdfjs renders nothing in a hidden or headless pane, which
+`CLAUDE.md` records. The original entry follows.
+
+**Status when found: open. Asked for**, and it chains onto the entry above. Max: *"in the
 intake, I still don't think we're taking in a crop of the fabric or metal spec
 as an image."*
 
