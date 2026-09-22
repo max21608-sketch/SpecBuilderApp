@@ -114,6 +114,18 @@ export default function DimensionAnswer({
   const [slot, setSlot] = useState<DimensionSlot | "">("");
   const [value, setValue] = useState("");
   const [unit, setUnit] = useState<AttributeUnit>("mm");
+  /**
+   * IN FLIGHT, OWNED HERE.
+   *
+   * `busy` is the caller's — the infill row's, which knows about its own
+   * refusals. The record screen has no equivalent for this write, and a second
+   * click before the first returns posts the same slot twice: the second is
+   * refused as `slot_occupied`, which reads as a defect rather than as a
+   * double-click. Cleared in a `finally`, so a non-JSON response cannot leave
+   * the button dead.
+   */
+  const [pending, setPending] = useState(false);
+  const working = busy || pending;
 
   const taken = new Map(held.filter((row) => isDimensionSlot(row.slot)).map((row) => [row.slot as DimensionSlot, row]));
 
@@ -138,7 +150,7 @@ export default function DimensionAnswer({
       <div className="flex flex-wrap items-center gap-1.5">
         <select
           value={slot}
-          disabled={busy}
+          disabled={working}
           aria-label={`Which dimension of ${subject}`}
           onChange={(event) => setSlot(event.target.value as DimensionSlot | "")}
           className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
@@ -153,7 +165,7 @@ export default function DimensionAnswer({
         </select>
         <input
           value={value}
-          disabled={busy}
+          disabled={working}
           inputMode="decimal"
           placeholder="840"
           aria-label={`Figure for ${subject}`}
@@ -162,7 +174,7 @@ export default function DimensionAnswer({
         />
         <select
           value={unit}
-          disabled={busy}
+          disabled={working}
           aria-label="Unit"
           onChange={(event) => setUnit(event.target.value as AttributeUnit)}
           className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
@@ -176,17 +188,22 @@ export default function DimensionAnswer({
         <Button
           size="xs"
           variant="secondary"
-          disabled={busy || !slot || !value.trim()}
+          disabled={working || !slot || !value.trim()}
           onClick={async () => {
             if (!slot || !value.trim()) return;
-            const ok = await onRecord({ slot, value: value.trim(), unit });
-            if (ok) {
-              setSlot("");
-              setValue("");
+            setPending(true);
+            try {
+              const ok = await onRecord({ slot, value: value.trim(), unit });
+              if (ok) {
+                setSlot("");
+                setValue("");
+              }
+            } finally {
+              setPending(false);
             }
           }}
         >
-          {busy ? "Recording…" : "Record"}
+          {working ? "Recording…" : "Record"}
         </Button>
       </div>
 

@@ -325,7 +325,7 @@ export default function RecordChecklist({
   // — field 3 through any of its slots, because all five compose into it.
   const attributeFor = (answer: ChecklistAnswer): ChecklistAttribute | null => {
     if (answer.json_id === null) return null;
-    if (answer.json_id === 3) return attributes.find((row) => row.dimension_slot) ?? null;
+    if (answer.json_id === DIMENSIONS_JSON_ID) return attributes.find((row) => row.dimension_slot) ?? null;
     return attributes.find((row) => row.json_id === answer.json_id) ?? null;
   };
   // ---- the dimensions, slot by slot ---------------------------------------

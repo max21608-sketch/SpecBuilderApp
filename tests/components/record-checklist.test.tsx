@@ -1,7 +1,7 @@
 // The checklist tab: four tiles that filter, and a right-hand column that is
 // the next action rather than provenance alone.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RecordChecklist, {
   type ChecklistAnswer,
@@ -468,6 +468,22 @@ describe("the checklist's Dimensions row", () => {
     await user.click(screen.getByRole("button", { name: "Record" }));
     expect(onRecordDimension).toHaveBeenCalledWith({ slot: "H", value: "760", unit: "mm" });
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("disables itself while the write is in flight, so one slot is not posted twice", async () => {
+    const user = userEvent.setup();
+    let release: (ok: boolean) => void = () => {};
+    const onRecordDimension = vi.fn().mockReturnValue(new Promise<boolean>((resolve) => (release = resolve)));
+    renderDimensions({ onRecordDimension });
+    await user.selectOptions(screen.getByLabelText("Which dimension of Dimensions"), "H");
+    await user.type(screen.getByLabelText("Figure for Dimensions"), "760");
+    await user.click(screen.getByRole("button", { name: "Record" }));
+    // A second click before the first returns would post H twice, and the
+    // second is refused as `slot_occupied` — which reads as a defect.
+    expect(await screen.findByRole("button", { name: "Recording…" })).toBeDisabled();
+    expect(onRecordDimension).toHaveBeenCalledTimes(1);
+    await act(async () => release(true));
+    expect(await screen.findByRole("button", { name: "Record" })).toBeInTheDocument();
   });
 
   it("keeps the composed cell honest: it is the app's one composer, note and all", () => {

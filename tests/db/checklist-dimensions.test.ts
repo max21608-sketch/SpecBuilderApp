@@ -132,6 +132,14 @@ describeIfDb("a dimension recorded from the checklist", () => {
   }, 60_000);
 
   afterAll(async () => {
+    // A FAILED `beforeAll` MUST NOT REPORT A SECOND, UNRELATED ERROR. Without
+    // this the sweep runs with an empty id and dies on "invalid input syntax
+    // for type uuid", which reads as a defect of its own and sends somebody
+    // hunting past the failure that actually happened.
+    if (!projectId) {
+      await client.end();
+      return;
+    }
     const records = `select id from spec_records where project_id = '${projectId}'`;
     await client.query(`delete from spec_answers where record_id in (${records})`);
     await client.query(`delete from record_attributes where record_id in (${records})`);
