@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "checks": "echo 'checks: lint, typecheck, the four tiers with the DATABASE TIER REQUIRED, then next build. The build overwrites .next, so stop any `npm run dev` in this directory first or its dev server serves 404s until you restart it.' && npm run lint && npm run typecheck && REQUIRE_DB_TESTS=1 node --env-file-if-exists=.env.local node_modules/vitest/vitest.mjs run && npm run build",
+    "checks:shared": "echo 'checks with the fork pool capped at 4, for a machine already running another suite. The cap lives in vitest.config.ts because --maxWorkers=4 alone conflicts with vitest 2.1 default minWorkers and runs zero tests.' && VITEST_MAX_FORKS=4 npm run checks",
     "db:migrate": "node --env-file-if-exists=.env.local db/run-migrations.mjs",
     "db:seed": "node --env-file-if-exists=.env.local db/run-seed.mjs",
     "db:backup": "node --env-file-if-exists=.env.local db/backup.mjs",
