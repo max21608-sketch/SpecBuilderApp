@@ -30,6 +30,76 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
+### Finishes by room — NOT a defect, and a build that has to happen at some point
+
+**Status: not a fault. Recorded because it will be needed, and because the
+screen that prompted it is behaving correctly.** Max, on the S-203 card
+(screenshot, with the page beside it): *"this isn't an issue, because no
+material or finish was actually stated — but at some point it raises a good
+point, that we need an option to add finishes by room, or change finishes by
+room at a later date if they're not referenced here, or change finishes from a
+finish spec doc. This will probably be a larger build, not a bug fix, but it is
+something that is going to have to be done."*
+
+**Why the screen is right.** The sheet prints `Material/ Finish:` with nothing
+after it, and under it `Area used: Refer to Argenta room by room schedule`. The
+card stages an empty `Material/ Finish` row — group Other, no BWS field, TBC —
+which is exactly what the page says: the field exists, the page left it blank,
+and the page names ANOTHER DOCUMENT for the room-by-room part. Inventing a
+finish there is the failure M8 exists to prove against; an empty row that says
+TBC is the honest reading.
+
+**So the pack itself states that a finish varies by room**, and names a
+schedule this app has never been given.
+
+**What exists today, so a build starts from the right place rather than
+rediscovering it:**
+
+- **Changing a finish later already works, project-wide.** `project_finishes`
+  is the project-scoped library and editing one row corrects every item
+  carrying that code — `composeFinishCell`'s three callers all render the
+  library, which is what makes edit-once-and-propagate true rather than
+  intended. The finishes page states the blast radius in words for that reason.
+- **Setting the library out from a list exists** (`finish-bulk.ts`, preview
+  first: which are new, which the project holds, which repeat in the paste).
+- **Typing a finish onto ONE record exists** — `POST /api/attributes`, from the
+  record's Specs tab or the infill screen — carrying no source page, honestly.
+- **By AREA: nothing at all.** `spec_records.area` is the bill's own fourth
+  column, free text, one value per record, and `area-filter.ts` is a pure
+  client-side FILTER that narrows what is LISTED and never what is written.
+  There is no path anywhere from an area to a finish.
+- **From a finishes schedule: deliberately deferred, with a stated price.**
+  `finishes_schedule` has been a `document_kind` with its own prompt since 0007,
+  and the model's output shape carries `attributeRaw`/`valueRaw` and **no field
+  for a finish code** — so pulling codes out of one means parsing them from
+  prose. Adding a code to the tool schema is the right eventual answer and
+  forces a RE-READ of every document already read (eleven billed calls for the
+  Panther pack alone). A decision with a cost, not an oversight.
+
+Four things the build has to answer, none of them answered here:
+
+- **Is a room a variant, or a new axis?** 0024 already models one bill line with
+  two finishes: configurations `S-201 A` / `B`, a letter per finish option,
+  each exported as its own job. *"Fabric A in the Signature Suites, fabric B
+  elsewhere"* is that mechanism with the room as the reason. Making the room a
+  new coordinate on `record_attributes` instead gives every composer, the
+  export scope and the check sheet one more dimension to be right about.
+- **Two things block using configurations as they stand, both already
+  recorded.** `ensureVariant` REFUSES to split a record that already holds
+  confirmed attributes — and moving existing specs onto a configuration is a
+  path that does not exist — and a quantity is never apportioned, which is
+  precisely what a room-by-room allocation would want to say.
+- **Whose word is the room?** `spec_records.area` is what the BILL wrote; the
+  Argenta room-by-room schedule is a different document that may name the same
+  rooms differently. Folding two room vocabularies is the `normaliseFinishCode`
+  trap at the scale of a whole project, and `area-filter` folds case and
+  whitespace only for exactly that reason.
+- **The BWS file has one cell per field per record.** COM 1 is one value. A
+  record holding two fabrics by room cannot be exported as one row without
+  something deciding which one BWS gets — an argument for the variant shape,
+  and a question for Matthew and for Tim's new importer rather than for this
+  repo alone.
+
 ### The same three figures are staged twice — once slotted, once as notes
 
 **Status: open, and a defect.** Max, on the S-203 drawings card (screenshot):
