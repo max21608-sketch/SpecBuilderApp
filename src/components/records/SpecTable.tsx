@@ -538,7 +538,6 @@ export default function SpecTable({
             tone="danger"
             value={tally.toQuote}
             meaning={`${tally.toQuoteItems} of ${records.length} item${records.length === 1 ? "" : "s"}`}
-            action={focus === "tgq" ? "showing these" : "show only these"}
             onPress={() => setFocus(focus === "tgq" ? null : "tgq")}
             active={focus === "tgq"}
           />
@@ -547,7 +546,6 @@ export default function SpecTable({
             tone="warn"
             value={tally.waiting}
             meaning="chased, nothing back"
-            action="filter"
             onPress={() => setFocus(focus === "waiting" ? null : "waiting")}
             active={focus === "waiting"}
           />
@@ -556,7 +554,6 @@ export default function SpecTable({
             tone={tally.noCategory > 0 ? "warn" : "plain"}
             value={tally.noCategory}
             meaning="no questions at all"
-            action="filter"
             onPress={() => setFocus(focus === "no_category" ? null : "no_category")}
             active={focus === "no_category"}
           />
@@ -565,7 +562,6 @@ export default function SpecTable({
             tone={tally.noLevel > 0 ? "warn" : "plain"}
             value={tally.noLevel}
             meaning={suggestedLevels > 0 ? `${suggestedLevels} have a suggestion` : "nothing suggested"}
-            action="filter"
             onPress={() => setFocus(focus === "no_level" ? null : "no_level")}
             active={focus === "no_level"}
           />
@@ -578,7 +574,6 @@ export default function SpecTable({
             tone="good"
             value={tally.readyToQuote}
             meaning="TGQ satisfied"
-            action="filter"
             onPress={() => setFocus(focus === "quotable" ? null : "quotable")}
             active={focus === "quotable"}
           />

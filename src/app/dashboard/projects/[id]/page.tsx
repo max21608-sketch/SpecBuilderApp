@@ -1559,7 +1559,6 @@ function ProjectOverview() {
                   value={summary.records}
                   meaning={`${runs.length} phase${runs.length === 1 ? "" : "s"}`}
                   href={firstRunHref}
-                  action="see them all"
                 />
                 {/* ==========================================================
                     THESE THREE COUNT LINE ITEMS, AND THEY DO NOT ADD UP.
@@ -1621,7 +1620,6 @@ function ProjectOverview() {
                           : "all filed under a kind"
                   }
                   href={finishesHref}
-                  action="open the library"
                 />
               </div>
               <p className="mt-1.5 text-xs text-neutral-500">

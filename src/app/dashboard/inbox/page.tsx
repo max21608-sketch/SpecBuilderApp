@@ -283,7 +283,6 @@ function InboxView() {
             tone="info"
             value={buckets.review.length}
             meaning={`${specsProposed} spec${specsProposed === 1 ? "" : "s"} proposed`}
-            action={tab === "review" ? undefined : "open the list"}
             onPress={tab === "review" ? undefined : () => setTab("review")}
             active={tab === "review"}
           />
@@ -292,7 +291,6 @@ function InboxView() {
             tone={buckets.held.length > 0 ? "warn" : "plain"}
             value={buckets.held.length}
             meaning="needs a person to say which project"
-            action={buckets.held.length > 0 && tab !== "held" ? "place them" : undefined}
             onPress={buckets.held.length > 0 && tab !== "held" ? () => setTab("held") : undefined}
             active={tab === "held"}
           />
@@ -315,7 +313,6 @@ function InboxView() {
             tone="good"
             value={data.ruledThisWeek}
             meaning="applied or dismissed"
-            action={tab === "everything" ? undefined : "show them"}
             onPress={tab === "everything" ? undefined : () => setTab("everything")}
             active={tab === "everything"}
           />

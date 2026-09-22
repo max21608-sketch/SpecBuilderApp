@@ -383,7 +383,6 @@ export default function RecordChecklist({
           tone="danger"
           value={readiness.toQuote ?? "—"}
           meaning={readiness.noLevel ? "no level, so nothing is tiered" : "blocks a price going out"}
-          action={readiness.toQuote ? "show these" : undefined}
           onPress={readiness.toQuote ? () => setFocus(focus === "tgq" ? null : "tgq") : undefined}
           active={focus === "tgq"}
         />
@@ -392,7 +391,6 @@ export default function RecordChecklist({
           tone="warn"
           value={readiness.alsoOutstanding ?? readiness.outstanding}
           meaning={`${laterSplit.unlooked} unlooked · ${laterSplit.tbc} TBC`}
-          action="show these"
           onPress={() => setFocus(focus === "later" ? null : "later")}
           active={focus === "later"}
         />
@@ -401,7 +399,6 @@ export default function RecordChecklist({
           tone="good"
           value={readiness.settled}
           meaning="confirmed against a document or a person"
-          action="show these"
           onPress={() => setFocus(focus === "settled" ? null : "settled")}
           active={focus === "settled"}
         />
@@ -410,7 +407,6 @@ export default function RecordChecklist({
           tone="plain"
           value={readiness.notApplicable}
           meaning={readiness.notApplicable === 0 ? "no question ruled out yet" : "ruled out for this item"}
-          action="show these"
           onPress={() => setFocus(focus === "na" ? null : "na")}
           active={focus === "na"}
         />

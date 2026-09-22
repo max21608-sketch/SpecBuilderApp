@@ -757,7 +757,6 @@ function DraftsView() {
             tone="danger"
             value={inventory.totals.toQuote}
             meaning="blocking a quotation"
-            action={tier === "to_quote" ? "showing these" : "show these"}
             onPress={() => setTier(tier === "to_quote" ? "all" : "to_quote")}
             active={tier === "to_quote"}
           />
@@ -766,7 +765,6 @@ function DraftsView() {
             tone="warn"
             value={inventory.totals.later}
             meaning="not holding up the quote"
-            action={tier === "later" ? "showing these" : "show these"}
             onPress={() => setTier(tier === "later" ? "all" : "later")}
             active={tier === "later"}
           />
@@ -775,7 +773,6 @@ function DraftsView() {
             tone="info"
             value={inventory.totals.waiting}
             meaning="asked, nothing back"
-            action={includeWaiting ? "hide them again" : "include them"}
             onPress={() => setIncludeWaiting((on) => !on)}
             active={includeWaiting}
           />
@@ -792,7 +789,6 @@ function DraftsView() {
                 ? `${lineTotals.settled} with nothing outstanding`
                 : "every one has something outstanding"
             }
-            action={tier !== "all" || includeWaiting ? "show all" : undefined}
             onPress={
               tier !== "all" || includeWaiting
                 ? () => {
