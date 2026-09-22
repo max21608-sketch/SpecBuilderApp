@@ -30,6 +30,64 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
+### The page prints a swatch and the intake takes no picture of it
+
+**Status: open. Asked for**, and it chains onto the entry above. Max: *"in the
+intake, I still don't think we're taking in a crop of the fabric or metal spec
+as an image."*
+
+He is right, and it is three separate things rather than one missing feature.
+
+**1. A swatch control is only offered on a row that carries a CLIENT CODE.**
+`ObservationRows.tsx:561` is a bare `observation.materialCodeRaw &&` around the
+whole `SwatchPicker`, with the reason written beside it: *"a swatch needs a
+code, because that is what `project_finishes` is keyed on. A row with no code
+has no finish to attach a picture to, so the control is not offered rather than
+offered and refused."* The reasoning is sound and the consequence is the S-203
+page: the sheet prints the woven chip directly under *Fabric reference: Aissa
+Dione, ref. Losange raphia beige et écru*, the caption carries no code, and
+there is no control on that row at all. **The swatch has nowhere to go for the
+same reason the library row does not exist** — one keying decision, two
+symptoms.
+
+**2. Nothing PROPOSES a swatch, even on a coded row.** The model is never asked
+where one is: `CLAUDE.md` records it as a priced decision, not an oversight —
+*"Swatches arrive by hand. A person uploads one and must say which document and
+page it came from. Asking the model for swatch regions is a tool-schema change,
+which means re-reading and re-paying for every document already read."* So a
+reviewer has to notice the chip, press *Drag a box*, and draw it.
+
+**The contrast with the ITEM PICTURE on the same card is the sharp part.** That
+one IS proposed: the model reports `viewRegions`, and a page that reported none
+*proposes the whole page* rather than defaulting to "no picture", because on a
+specification sheet the page is the drawing of the item. Same page, same
+`PageCropper`, two different behaviours — the photograph of the chair is
+offered ready to accept, and the fabric chip beside it is offered only if the
+caption is coded, and never proposed.
+
+**3. Nobody has ever cropped one from a real page.** Already on the M8
+outstanding list and still true: *"A swatch has never been cropped from a real
+page. The upload path works and requires the source to be named; nobody has
+used it."*
+
+Three things a plan has to settle:
+
+- **Whether the swatch waits on the keying decision or routes round it.** If a
+  code-less finish gets a library row (the entry above), the control follows
+  for free. If it does not, a swatch on an uncoded row needs somewhere else to
+  live — and the obvious somewhere, the record's own attribute, is not what
+  `project_finishes` was built for: *"a swatch belongs to the CODE, not to the
+  item"*, because `WD-05` is on three pages of the real set and cropping it
+  once should crop it for every item carrying it.
+- **Whether to pay for the tool-schema change.** Asking the model for swatch
+  regions re-reads every document already read. It is the same bill as the
+  finishes-schedule code field, and both are about the same thing — so if one
+  is paid for, both should land in that read rather than in two.
+- **A metal or timber chip is the same shape as a fabric one.** Max named both.
+  `classifyCallout` already tells a fabric from a timber from a metal, so
+  nothing new is needed to know which kind a chip belongs to — only where on
+  the page it is.
+
 ### A confirmed fabric is on the record and not in the finishes library, because it carries no code
 
 **Status: open. Half of it is a keying DECISION and half of it is a route with
