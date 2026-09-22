@@ -396,11 +396,28 @@ function FinishFilingControl({
   filing,
   busy,
   onChange,
+  onSwatch,
 }: {
   observation: DrawingObservation;
   filing: FinishFilingView;
   busy: boolean;
   onChange: RowCallbacks["onChange"];
+  /**
+   * WITHDRAWING THE FILING WITHDRAWS THE CROP WITH IT (4a.2).
+   *
+   * The crops live in a ref on the review screen, keyed by observation, and are
+   * uploaded for every row being confirmed. Un-filing a row takes its finish
+   * away, so a crop left behind would leave the screen with no swatch control,
+   * no preview and no way back — and the confirm would then refuse the whole
+   * card with `swatch_has_no_finish` over a picture nobody could see. That is
+   * the refusal working, and it is a bad way to find out.
+   *
+   * So the crop goes at the same press, which is a person's own act on the same
+   * row and the only place it is not silent. Nothing is discarded behind
+   * anybody's back: the crop was never uploaded, because nothing is uploaded
+   * until the card is confirmed.
+   */
+  onSwatch: RowCallbacks["onSwatch"];
 }) {
   const [code, setCode] = useState("");
 
@@ -415,7 +432,10 @@ function FinishFilingControl({
           size="xs"
           variant="quiet"
           disabled={busy}
-          onClick={() => onChange(observation, { finishFiling: { mode: "apart" } })}
+          onClick={() => {
+            onSwatch(observation.id, null, null);
+            onChange(observation, { finishFiling: { mode: "apart" } });
+          }}
         >
           Not the same finish?
         </Button>
@@ -434,7 +454,10 @@ function FinishFilingControl({
           size="xs"
           variant="quiet"
           disabled={busy}
-          onClick={() => onChange(observation, { finishFiling: null })}
+          onClick={() => {
+            onSwatch(observation.id, null, null);
+            onChange(observation, { finishFiling: null });
+          }}
         >
           Undo
         </Button>
@@ -491,6 +514,45 @@ function FinishFilingControl({
       </div>
     </div>
   );
+}
+
+/**
+ * WHERE A SWATCH CROPPED ON THIS ROW WOULD LAND (4a.2).
+ *
+ * ============================================================================
+ * One reading, because the confirm has its own and the two must agree. The
+ * confirm builds `finishIdByObservation` from `resolveFinishCode` where the row
+ * carries a client code, and from `readUncodedFinish` where it does not; a
+ * swatch whose row lands `null` there is REFUSED by name rather than dropped.
+ * That refusal is right — silently discarding a picture somebody cropped is how
+ * they come to believe it is stored — and it is not a substitute for the screen
+ * knowing. This says the same thing one step earlier, so the control is offered
+ * exactly where a crop has somewhere to go.
+ *
+ * THREE ANSWERS, NOT TWO. A client code names the finish now. A row filed under
+ * one of ours may already have its code (an exact wording match onto a finish
+ * this app minted) or may not (the mint happens at confirm, under the project
+ * row lock — a number printed before that is one another reviewer may take).
+ * Both of the last two resolve to exactly one library row, and the difference
+ * between them is only what the panel can print, which is why the code is
+ * nullable rather than the control being withheld.
+ *
+ * A row the reviewer has KEPT APART, or has not answered at all, reads `none`:
+ * `readUncodedFinish` files nothing for either, so there is nothing to attach.
+ * ============================================================================
+ */
+export function swatchTargetOf(
+  observation: DrawingObservation,
+  filing: FinishFilingView | undefined,
+): { kind: "none" } | { kind: "finish"; code: string | null } {
+  // The client's own code is the key wherever there is one, and stays it.
+  if (observation.materialCodeRaw?.trim()) return { kind: "finish", code: observation.materialCodeRaw };
+  if (!filing) return { kind: "none" };
+  // `link` names a row that exists; `mint` names one the confirm creates in the
+  // same transaction, before the swatch loop reads the map. Both are a finish.
+  if (filing.outcome === "link") return { kind: "finish", code: filing.code };
+  if (filing.outcome === "mint") return { kind: "finish", code: null };
+  return { kind: "none" };
 }
 
 /**
@@ -702,21 +764,7 @@ export function ObservationRow({
           />
         )}
         {observation.materialCodeRaw && (
-          <>
-            <p className="mt-0.5 text-xs text-neutral-500">code {observation.materialCodeRaw}</p>
-            {/* A SWATCH NEEDS A CODE, because that is what `project_finishes`
-                is keyed on. A row with no code has no finish to attach a
-                picture to, so the control is not offered rather than offered
-                and refused. */}
-            <SwatchPicker
-              importId={importId}
-              page={page}
-              pages={itemPages}
-              code={observation.materialCodeRaw}
-              disabled={busy}
-              onCropped={(image, croppedPage) => callbacks.onSwatch(observation.id, image, croppedPage)}
-            />
-          </>
+          <p className="mt-0.5 text-xs text-neutral-500">code {observation.materialCodeRaw}</p>
         )}
         {/* A FINISH WITH NO CODE HAS NOWHERE TO BE FILED, and that is what the
             library is addressed by. The control sits where the code prints,
@@ -727,8 +775,64 @@ export function ObservationRow({
             filing={finishFiling}
             busy={busy}
             onChange={callbacks.onChange}
+            onSwatch={callbacks.onSwatch}
           />
         )}
+        {/* ---- THE SWATCH CHIP, CROPPED OFF THE PAGE (4a.2) ----------------
+            THE GATE IS "THIS ROW RESOLVES TO A FINISH", NOT "IT CARRIES A
+            CLIENT CODE". It was the second until 4a.1 gave an uncoded finish
+            somewhere to live, and the S-203 sheet prints its woven chip
+            directly under a fabric reference that states a supplier and a
+            product name and no code at all — so the one page in the pilot pack
+            that most obviously prints a swatch was the one page with no control
+            to take it. Max, 2026-09-22: "in the intake, I still don't think
+            we're taking in a crop of the fabric or metal spec as an image."
+
+            `swatchTargetOf` is the reading, and it is deliberately the SAME
+            question the confirm asks — `finishIdByObservation` in
+            confirm-drawings.ts, built from `resolveFinishCode` for a coded row
+            and `readUncodedFinish` for one with no code. A control offered
+            where that map lands `null` is a crop the confirm REFUSES, which is
+            correct (refused, never dropped) and still a promise the screen had
+            no business making.
+
+            Fabric, timber and metal alike: `classifyCallout` has already
+            decided which a row is and `isFinishGroup` covers both groups it
+            files them under, so nothing new here decides a kind.
+
+            NOT IN SCOPE, and true of every branch: nobody asks the model where
+            the chip is. That is a tool-schema change, which re-reads and re-pays
+            for every document already read, and it rides with the
+            finishes-schedule re-read. A swatch is a reviewer's crop. */}
+        {(() => {
+          const target = swatchTargetOf(observation, finishFiling);
+          if (target.kind === "none") {
+            // Said on the row rather than left blank: "there is no control
+            // here" and "there is nothing to attach a picture to yet" look
+            // identical, and only one of them tells somebody what to do next.
+            //
+            // ONLY WHERE THE FILING CONTROL IS ACTUALLY ABOVE IT — the same
+            // condition, not a looser one. A finish row stating no value at all
+            // (`PIPING / TBC`) is absent from `finishFilings`, so there is
+            // nothing to file and nothing to press, and "file this finish
+            // above" would point at a control that is not there.
+            return finishFiling ? (
+              <p className="mt-1 text-[11px] text-neutral-500">
+                No swatch yet — file this finish above and the crop control appears.
+              </p>
+            ) : null;
+          }
+          return (
+            <SwatchPicker
+              importId={importId}
+              page={page}
+              pages={itemPages}
+              code={target.code}
+              disabled={busy}
+              onCropped={(image, croppedPage) => callbacks.onSwatch(observation.id, image, croppedPage)}
+            />
+          );
+        })()}
       </td>
       <td className="px-2 py-2 align-top">
         {observation.attrGroup === "dimension" || observation.attrGroup === "note" ? (

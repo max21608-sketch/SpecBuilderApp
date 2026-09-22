@@ -24,6 +24,15 @@
 // loud. Otherwise somebody crops the same chip five times and wonders why the
 // fifth one won.
 //
+// THE CODE MAY NOT EXIST YET (4a.2, after 4a.1). A finish the client gave no
+// code for is filed under one this app mints, and the number is allocated under
+// the project row lock at CONFIRM — so a row about to be filed internally has a
+// finish to attach a picture to and no code to print beside it. `code` is
+// therefore nullable, and the panel says the same edit-once sentence without
+// naming a number that another reviewer's confirm may take first. What it must
+// not do is fall silent: the picture still reaches every item filed under the
+// same finish, and that is the half somebody has to know before cropping.
+//
 // NOTHING IS UPLOADED UNTIL THE CARD IS CONFIRMED, exactly like the item
 // picture: a card nobody commits leaves no bytes in the store, and the finish
 // the swatch attaches to does not exist until the confirm creates it.
@@ -65,8 +74,14 @@ export default function SwatchPicker({
   page: number | null;
   /** Every page of the item this row belongs to. One page means no selector. */
   pages?: readonly number[];
-  /** The client's own finish code. A swatch has nothing to attach to without one. */
-  code: string;
+  /**
+   * The code the picture files under, where there is one to name.
+   *
+   * NULL is not "no finish" — it is a finish whose code this app has not minted
+   * yet, which happens at confirm. A caller that has nothing to attach to at all
+   * must not render this control; see the row's own gate.
+   */
+  code: string | null;
   disabled?: boolean;
   onCropped: (image: CroppedImage | null, page: number | null) => void;
 }) {
@@ -158,7 +173,7 @@ export default function SwatchPicker({
              nothing with it. */
           <img
             src={preview}
-            alt={`Swatch for ${code}`}
+            alt={code ? `Swatch for ${code}` : "Swatch for this finish"}
             className="h-10 w-10 rounded border border-neutral-300 object-cover bg-white"
           />
         ) : null}
@@ -180,7 +195,9 @@ export default function SwatchPicker({
         )}
         {preview && (
           <span className="text-[11px] text-neutral-500">
-            Saved for {code} across this project when you confirm.
+            {code
+              ? `Saved for ${code} across this project when you confirm.`
+              : "Saved when you confirm, for every item filed under the same finish on this project."}
           </span>
         )}
       </div>

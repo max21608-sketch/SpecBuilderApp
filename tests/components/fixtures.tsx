@@ -116,7 +116,7 @@ export function callbacks() {
     onReview: spy("onReview") as never,
     onReviewMany: spy("onReviewMany") as never,
     onImage: (() => undefined) as never,
-    onSwatch: (() => undefined) as never,
+    onSwatch: spy("onSwatch") as never,
     onSetLevel: spy("onSetLevel") as never,
   };
 }
