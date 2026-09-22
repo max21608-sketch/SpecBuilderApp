@@ -57,6 +57,7 @@ one agent.
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
 | `npm run dump:drawings -- --run=<id>` | read only: what a staged drawing run reduces to through the REAL read-time pipeline — measured rows, placed slots, folded rows, unit provenance, the composed BWS cell. Run it before and after a change to that pipeline; the diff is the change |
 | `npm run vocab:gap` | read only: every label the staged documents carry, which route places it (slot / BWS field / question), what is left, and — the point — what a looser rule would have wrongly written instead. Run it before seeding `requirement_aliases`, and read the NEAR MISSES before adding one |
+| `npm run palette:gap` | read only: every callout that lands on a palette-backed BWS field, how many match an option exactly, and — the point — what a SUBSTRING step would have written instead. Run it before widening the match past the exact step. On 2026-09-22 it read 98 callouts over 47 staged runs, **0 matching and 0 near misses**, which is the evidence §6.2 asked for |
 
 Tests run in FOUR tiers — pure / component / db-gated / route. **A db-tier
 fixture asks for its project number** — `qaNumber("P90010")` from
@@ -230,7 +231,7 @@ reasoning.
 | `spec_matrix_categories` / `spec_matrix_category_map` | Matthew's nine seating categories (0026) and which of our seventeen cheat sheets each one is. Many-to-many both ways; an unmapped sheet gets no gate view, which is a real answer |
 | `spec_field_gates` | His decision matrix as a seeded overlay (0026): gate, capture, BWS field or `local_key`, `dimension_slot`, `applies_to`, palette, conditional. `matrix_row` is his own `#`, so a re-issued workbook diffs |
 | `bws_boilerplates` | The 45 BWS product codes (0031), 18 of them mapped to one of Matthew's nine seating categories as a Simple/with-Metalwork pair. BW's own codes, not client material — the `spec_fields` precedent |
-| `spec_palettes` / `spec_palette_options` | The closed lists a spec field offers (0030). Five are BWS-owned and seeded with ZERO options, which is the honest state |
+| `spec_palettes` / `spec_palette_options` | The closed lists a spec field offers (0030), `option.code` since 0035. Eleven palettes; the five BWS-owned ones held ZERO options until they were READ from BWS on 2026-09-22 and seeded by `db/seed/0011` (96 options). The empty state was the honest one while it lasted, and `isOfferable`/`unheldPaletteNote` stay live for the next unheld list |
 | `spec_records.spec_description` / `.internal_notes` | 0028's two free-text columns. The first is quote-facing prose; the second never leaves this app. Neither reaches the 109-column grid |
 | audit / notes | `audit_log` + `status_history` + append-only notes, from the chassis. `audit_log.change_set_id` (0012) says which change each row belonged to |
 
@@ -1167,6 +1168,59 @@ Humid indoor" was typed eleven ways and nothing could tell `Outdoor` from
   `site_access`, `swivel`, `fr_interliner`. They are Matthew's own matrix
   wording and changing them is his call, not this repo's:
   `docs/plans/matrix-assumptions.md`.
+
+**THE DRAWINGS REVIEW OFFERS THE LIST, AND THE MATCH FIRES ZERO TIMES**
+(`src/lib/palette-load.ts`, `PaletteChoice` in
+`src/components/imports/ObservationRows.tsx`, `tools/palette-gap.ts`, Stage 2
+item 2.2, 2026-09-22). Matthew asked for it at the catchup — *"it'd be really
+good if it would have stud and then it would have a go at matching with what
+was specified on the drawing. But if it was wrong or couldn't find it, that
+you'd be able to select one from the drop-down"*, and free text stays.
+
+- **MEASURE BEFORE WIDENING THE MATCH. `npm run palette:gap` is read only.**
+  98 callouts land on a palette-backed BWS field across 47 staged drawings
+  runs and **ZERO match an option** — not by the exact fold, and not by a
+  substring step, which matches nothing on this corpus either. That is not a
+  defect to tune away: **a BWS palette is BW's own MANUFACTURING range**
+  (`BW Oak Natural - Open grain 10%`) **and a drawing states the DESIGNER'S
+  INTENT** (`Ceruse finish oak`, `Antique brass, machined`). They are two
+  vocabularies at two stages of the job, and mapping one onto the other is a
+  specification decision a person takes. So there is no substring, token,
+  distance or model step, and `normalisePaletteValue` is the whole matcher.
+  A fuzzy step putting `Antique brass, machined` onto `BW Antiqued Brass`
+  would write a BW finish code the designer never specified into a field that
+  ships to BWS, and nothing downstream would question it.
+- **ONE loader, because the two copies had already DRIFTED.** The record and
+  infill routes each carried their own copy of the two palette statements and
+  since 0035 they were not the same query — the record route selected
+  `spec_palette_options.code` and the infill route did not, so a stud quoting
+  `U1660-6031` silently stopped resolving on that screen and nothing said so.
+  `palette-load.ts` is now the one fetch and both callers use it. A register
+  copied per screen is `composeDimensionCell`'s rule one layer out.
+- **The palette is attached to the FIELD REGISTER the screens already thread**
+  (`withPalettes`), never sent beside it, so the card and the confirm cannot
+  disagree about what a row offers — and it resolves at READ time from the
+  register, so a pack already read gains the list with no second model call.
+  `palette: null` is the honest value for a field with no palette AND for
+  every field when the register could not be read, which is
+  `upgradeCalloutGuesses`' empty-`fields` rule in a second place.
+- **The confirm route is untouched, and that is what keeps provenance honest.**
+  Picking an option writes the observation's `value` through the autosave that
+  already exists; `valueRaw` still holds what the drawing said and the row
+  prints it underneath. No column and no migration. `Other…` restores the
+  drawing's own words rather than clearing the box, and it is the state the row
+  is in whenever the value is not an option, so it can never destroy typed text.
+- **The off-palette sentence is ONE implementation and the TONE is each
+  screen's own.** `offPaletteNote` is shared with `AnswerValue`, because two
+  wordings for one fact is a reviewer working out whether they mean the same;
+  it is AMBER on a settled answer sitting outside its list and NEUTRAL at
+  intake, where it is the normal case on every real callout measured. Amber on
+  all 81 teaches people to ignore amber — the argument that keeps
+  `unanswerable` slate.
+- **STILL OPEN, and Matthew's:** if a drawing's `Ceruse finish oak` is never
+  going to be a BWS palette value, is picking the BW finish a decision taken at
+  INTAKE or later? It decides whether the dropdown belongs on the drawings card
+  at all or only on the record. In the questions message, unsent.
 
 ### A spec value has a second line, and the file gets one line
 
@@ -3563,11 +3617,11 @@ refuses, thirteen of them changing code — and **2.11** (a confidently routed
 email assigned automatically, the gate amended by Max in the same commit)
 followed on 2026-09-21. **Stage 2 is CLOSED on staging as of 2026-09-21**
 (the plan's stage brief carries the §7.1 evidence); what stays open waits on
-a person: 2.1/2.2 the BWS account, 2.9 Matthew's tiles answer, 2.12 another
+a person: 2.9 Matthew's tiles answer, 2.12 another
 session's plan, 2.13 the note to Tony. Still true at `9715b0f`: the demo sofa reads `W1830 x D880 x H760 x SH440mm (1250 L-shaped
 return)` on its Specs tab, its checklist and the BWS export after one Save,
 one change set and one version. Not accepted by anybody. **Blocked
-and saying so:** 2.1/2.2 (no BWS account for Max), 2.9 (a proposal for
+and saying so:** 2.9 (a proposal for
 Matthew), 2.11 (the rate cap first, then Max's own amendment of the inbound-
 email gate above), 2.12 (another session's plan). Nothing promotes to pilot
 until Max has driven 2.3 and 2.5 as the roles they are for (§7.5).

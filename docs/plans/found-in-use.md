@@ -30,6 +30,34 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
+### The drawings card's table clears its wrapper by two pixels, over `overflow-x: hidden`
+
+**Seen:** measured, not eyeballed, while landing Stage 2 item 2.2 (`2f09f19`)
+on top of `0909fd7` (item 3a.4, which unclipped this table by joining the unit
+into the value). Pack drawings review, real Panther AP364e run `S-301`, in the
+DOM rather than from a screenshot:
+
+| Viewport | table `scrollWidth` | wrapper `clientWidth` | clipped |
+|---|---|---|---|
+| 1920x1080 | 1003px | 1005px | no |
+| 1440x900 | 1003px | 1005px | no |
+| 1024 (narrow pane) | 989px | 629px | yes |
+
+**3a.4's fix holds, including with 2.2's palette control added** — that control
+adds height rather than width, so it costs the table nothing. The finding is
+the MARGIN: two pixels at both of 3a.4's own DoD widths.
+
+**Cause, stated separately from the observation.** The wrapper computes
+`overflow-x: hidden`. A table that overflows a hidden wrapper does not offer a
+scrollbar, so the next column — or one value wider than today's — re-clips it
+**silently**, with nothing on screen to say a column is missing. That is the
+same failure 3a.4 was raised for, and it would return without any visible
+signal. The narrow-pane row is included only to show the clipping is real when
+the margin goes, not as a supported width.
+
+**Not fixed, and not 2.2's to fix.** It belongs to whoever holds that card.
+Worth knowing before another column is added to it.
+
 ### A level accepted on one phase's tab is still an unaccepted suggestion on the next, for the same client ref
 
 **Status: open. A CHANGE ASKED FOR.** Max, on the BOQ review of a multi-tab

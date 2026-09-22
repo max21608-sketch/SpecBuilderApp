@@ -21,6 +21,81 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-22 — Stage 2 item 2.2: the drawings review offers the palette, and the match fires zero times
+
+The last item in `make-it-work-2026-09-19.md` that could be built without a
+person's answer. 2.1 seeded the five BWS palettes the same day, which unblocked
+it; the record half already existed, so this is the INTAKE half Matthew asked
+for at the catchup (1:26:43) — *"it'd be really good if it would have stud and
+then it would have a go at matching with what was specified on the drawing. But
+if it was wrong or couldn't find it, that you'd be able to select one from the
+drop-down"*, and free text stays, *"of course, just do it as a free text."*
+
+**MEASURED FIRST, AND THE MEASUREMENT CHANGED THE ITEM.** The new read-only
+`npm run palette:gap` reads **98 callouts on a palette-backed BWS field across
+47 staged drawings runs, and ZERO match an option** — not by the exact fold, and
+not by the substring step §6.2 contemplated as a possible second step, which
+matches nothing on this corpus either.
+
+| The drawing says | BWS's palette holds |
+|---|---|
+| `Dark tinted wood` (x36) | `BW Beech Dark Brown 90%` |
+| `Ceruse finish oak` (x10) | `BW Oak Natural - Open grain 10%` |
+| `Antique brass, machined` | `BW Antiqued Brass` |
+
+That is not a defect to tune away. **A BWS palette is BW's own MANUFACTURING
+range; a drawing states the DESIGNER'S INTENT.** They are two vocabularies at
+two stages of the job, and mapping one onto the other is a specification
+decision a person takes. So §6.2's prose — "the staged row carries a
+`paletteMatch`, shown as a suggestion" — describes a control that would fire
+zero times on the real pack. What was built is the §6 TABLE's version of the
+same item, which is also Matthew's own words: **match, flag, dropdown, free
+text**. The dropdown is the half the prose left out and the half that does the
+work.
+
+| Item | Commit | Built · Tested | Verified in the app | Deployed |
+|---|---|---|---|---|
+| **2.2** the palette at intake | `2f09f19` (rebased over the found-in-use programme) | `palette-load.ts` as the ONE loader; `paletteFromRow`, `offPaletteNote`, `paletteForField` in `palettes.ts`; `PaletteChoice` on the drawings card; `tools/palette-gap.ts`; new pure, component and db tests. Four checks with the database tier REQUIRED: lint 0 errors, typecheck clean, **1,986 passed · 1 skipped**, build clean | the REAL Panther AP364e S-301 run: `EXPOSED WOODWORK` reads *"feet dark tinted wood as per approved sample"* with *BWS timber finish palette*, a 36-option select (35 + Other…), and *"Not one of the BWS timber finish palette options. Kept as written."* Picking `BW Oak Natural` persisted through the autosave and a reload with *drawing said: feet dark tinted wood as per approved sample* beneath it; `Other…` put the page's words back and persisted. The run was left as found and **no card was confirmed** | `2f09f19` read back from `/api/auth/me` on `spec-builder-app-rho.vercel.app`, and the control re-checked on the DEPLOYED build against the same real run |
+
+Four things are load-bearing and are in `CLAUDE.md`'s palette section:
+
+- **No substring, token, distance or model step**, and `palette:gap` exists so
+  that stays a decision taken on evidence rather than a default. A fuzzy step
+  putting `Antique brass, machined` onto `BW Antiqued Brass` would write a BW
+  finish code the designer never specified into a field that ships to BWS, and
+  nothing downstream would question it.
+- **ONE loader, because the two copies had already drifted.** The record and
+  infill routes each carried their own copy of the two palette statements, and
+  since 0035 they were no longer the same query: the record route selected
+  `spec_palette_options.code` and the infill route did not, so a stud quoting
+  `U1660-6031` had silently stopped resolving on that screen and nothing said
+  so. A third copy for the drawings review is how that becomes three answers to
+  one question. The infill screen gaining `code` is that drift closing.
+- **The palette is attached to the FIELD REGISTER the screens already thread**
+  (`withPalettes`), not sent beside it, so the card and the confirm cannot
+  disagree about what a row offers — and it resolves at READ time, so a pack
+  already read gains the list with no second model call and nothing charged.
+- **The confirm route is untouched.** Picking an option writes the observation's
+  `value` through the autosave that already exists; `valueRaw` still holds what
+  the drawing said and the row prints it underneath. No column, no migration.
+
+**Found on the way, and not this item's to fix:** after rebasing onto `0909fd7`
+(3a.4, the drawings card unclipped), the card's table measures **1003px inside
+a 1005px wrapper** at both 1440x900 and 1920x1080 — not clipped, so that fix
+holds with the palette control on top, which adds height rather than width. But
+two pixels of headroom over a wrapper that is `overflow-x: hidden` means the
+next column re-clips it silently rather than scrolling. Logged for whoever
+holds that card.
+
+**A QUESTION FOR MATTHEW falls out of the measurement**, and it has not been
+guessed at: if a drawing's `Ceruse finish oak` is never going to be a BWS
+palette value, is picking the BW finish a decision taken at INTAKE or later?
+That decides whether the dropdown belongs on the drawings card at all or only
+on the record. It goes in the undelivered questions message.
+
+**Not accepted by anybody.** Staging only; the pilot stays behind, and see
+below for what its promotion now requires.
+
 ## 2026-09-20 — Stage 2 opens: area is a filter, and the email asks each question once
 
 Stage 2 of `make-it-work-2026-09-19.md` opened the same day Stage 1 closed on

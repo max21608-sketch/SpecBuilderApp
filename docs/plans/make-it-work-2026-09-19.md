@@ -2153,7 +2153,8 @@ and **2.7** (`f288ea9`), **2.6** with migration `0034` (`f460dc9`, `fd0d7f3`),
 2.3 (`929a5b6`). In progress: **2.10.f** (the per-pack cap on charged reads,
 half-built before Max's pause of 2026-09-20 and being finished), **2.10.g**
 (the failure-surface sweep), and the first-session script gaining a step per
-Stage 2 item (the verifier). Still blocked and unchanged: 2.1/2.2, 2.9, 2.11,
+Stage 2 item (the verifier). Blocked at the time and unchanged then: 2.1/2.2
+(both since CLOSED on 2026-09-22 — see the stage close below), 2.9, 2.11,
 2.12. **Not accepted by anybody**; nothing promoted to pilot. Three judgement
 calls by the coders are recorded in the README for Max to overrule: no
 quantity on the email's item line, no "Colleagues" header in the contact
@@ -2262,11 +2263,33 @@ PASS 40 · FAIL 0 · SKIP 2 against the `bc1857a` deployment. Its steps for
 2.10's rows, 2.11 and the deferred read are NOT written — the next
 verifier's brief.
 
-**Not closed, and whose:** 2.1/2.2 (Max's BWS account); 2.9 (Matthew's
-answer to the tiles proposal, in the drafted message); 2.12 (another
-session's plan, sequenced after 2.3 and now unblocked); 2.13 (the note to
-Tony, drafted). Promotion to pilot: none — the pilot stays at `da863b7` until
-Max has driven 2.3 and 2.5 as the roles they are for (§7.5). Twelve findings
+**Not closed, and whose:** 2.9 (Matthew's answer to the tiles proposal, in
+the drafted message); 2.12 (another session's plan, sequenced after 2.3 and
+now unblocked); 2.13 (the note to Tony, drafted). Promotion to pilot: none —
+the pilot stays at `da863b7` until Max has driven 2.3 and 2.5 as the roles
+they are for (§7.5).
+
+**2.1 AND 2.2 CLOSED ON 2026-09-22, and 2.2 was the last item in this plan
+that could be built without a person's answer.** Max got a BWS account, which
+was the one blocker (0.1): all 84 fields were read read-only into
+`docs/plans/bws-palette-capture-2026-09-22.json` and the five BWS palettes
+seeded by `db/seed/0011` (96 options), then **2.2** put the palette on the
+drawings review at `2f09f19` — match, flag, dropdown, free text, over ONE
+loader that replaced two already-drifted copies of the query. Both are on
+staging with the four checks green at the database tier and both driven
+against the real Panther pack; the dated entry per item is in
+`docs/plans/README.md` (2026-09-22). **Neither is accepted by anybody.**
+
+What 2.2 measured is worth more than 2.2: `npm run palette:gap` reads 98
+callouts on a palette-backed BWS field across 47 staged drawings runs and
+**ZERO match an option**, by exact fold or by the substring step §6.2
+contemplated. A BWS palette is BW's own manufacturing range and a drawing
+states the designer's intent, so §6.2's "shown as a suggestion" describes a
+control that fires zero times — the §6 TABLE's wording (match, flag, dropdown,
+free text) is what was built, and it is also Matthew's own. **The open question
+that falls out of it is his:** is picking the BW finish for a `Ceruse finish
+oak` an intake decision or a later one? It decides whether the dropdown belongs
+on the drawings card at all. It is in the questions message, unsent. Twelve findings
 were logged in the stage and stay open, the largest being that an attempt
 which passes its 24-hour deadline is settled by nothing, that the infill save
 was refused on the local dev server only, and that the demo project carries
