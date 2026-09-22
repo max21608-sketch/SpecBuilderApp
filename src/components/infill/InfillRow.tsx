@@ -68,6 +68,23 @@ export type SaveDimension = (
   input: { slot: DimensionSlot; value: string; unit: AttributeUnit },
 ) => Promise<SaveOutcome>;
 
+/**
+ * The tick, where the caller offers one.
+ *
+ * Only the by-question view does — one value applied to the items a heading
+ * lists. `why` is what the cell says INSTEAD of a tick where the row cannot be
+ * batched: a dimension writes an attribute rather than an answer, and a settled
+ * answer is a decision a person made. A blank cell there would read as a
+ * control that is broken.
+ */
+export type RowSelection = {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  /** Null where it can be ticked. A sentence where it cannot. */
+  why: string | null;
+  label: string;
+};
+
 /** Missing blocks a quote; TBC is a person saying "not yet". The chase screen's map. */
 const STATE_TONE: Record<string, "danger" | "warn" | "plain"> = { missing: "danger", tbc: "warn" };
 
@@ -84,6 +101,7 @@ export default function InfillRow({
   columns,
   pad,
   heading = "question",
+  selection = null,
   onSaveAnswer,
   onSaveDimension,
   onReload,
@@ -102,6 +120,13 @@ export default function InfillRow({
    * — twenty questions about one headboard each repeating the headboard.
    */
   heading?: "question" | "record";
+  /**
+   * A LEADING TICK CELL, and `columns` already counts it.
+   *
+   * Null on the by-item view, which has nothing to batch: its rows are twenty
+   * different questions about one chair.
+   */
+  selection?: RowSelection | null;
   onSaveAnswer: SaveAnswer;
   onSaveDimension: SaveDimension;
   /** Re-read THIS line's questions. Called after a refusal, never after a save. */
@@ -153,7 +178,27 @@ export default function InfillRow({
   return (
     <>
       <tr className="hover:bg-neutral-50">
-        <td className={`border-b border-neutral-100 px-2 py-1.5 align-top ${pad}`}>
+        {selection && (
+          <td className={`border-b border-neutral-100 px-2 py-1.5 align-top ${pad}`}>
+            {selection.why ? (
+              /* SLATE, NEVER RED. "This one cannot be batched" is not a
+                 failure — it is the row saying which control it belongs to. */
+              <span title={selection.why} className="block text-[11px] leading-tight text-slate-500">
+                <span aria-hidden>—</span>
+                <span className="sr-only">{selection.why}</span>
+              </span>
+            ) : (
+              <input
+                type="checkbox"
+                checked={selection.checked}
+                aria-label={selection.label}
+                onChange={(event) => selection.onChange(event.target.checked)}
+                className="mt-1 h-3.5 w-3.5 align-middle accent-blue-700"
+              />
+            )}
+          </td>
+        )}
+        <td className={`border-b border-neutral-100 px-2 py-1.5 align-top ${selection ? "" : pad}`}>
           <span
             aria-hidden
             title={

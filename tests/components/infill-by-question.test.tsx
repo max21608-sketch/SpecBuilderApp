@@ -8,7 +8,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import QuestionGroups, { type QuestionSummary } from "@/components/infill/QuestionGroups";
+import QuestionGroups, { type ApplyToRows, type QuestionSummary } from "@/components/infill/QuestionGroups";
 import { NO_FILTERS, type Filters } from "@/components/infill/InfillTable";
 import type { InfillQuestion } from "@/lib/infill";
 
@@ -62,11 +62,13 @@ function Harness({
   ],
   rowsByQuestion = {},
   onOpenQuestion = vi.fn(),
+  onApply = vi.fn(async () => ({ ok: true as const, message: "Recorded." })),
 }: {
   questions: QuestionSummary[];
   areas?: { key: string; label: string; count: number }[];
   rowsByQuestion?: Record<string, InfillQuestion[]>;
   onOpenQuestion?: (group: QuestionSummary) => void;
+  onApply?: ApplyToRows;
 }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   return (
@@ -83,6 +85,7 @@ function Harness({
       paletteFor={() => null}
       onSaveAnswer={async () => ({ ok: true, message: "Recorded." })}
       onSaveDimension={async () => ({ ok: true, message: "Recorded." })}
+      onApply={onApply}
     />
   );
 }
@@ -167,5 +170,132 @@ describe("QuestionGroups", () => {
     render(<Harness questions={[group()]} />);
     await user.type(screen.getByLabelText("Search the questions"), "nothing like this");
     expect(screen.getByText("Nothing matches those filters.")).toBeInTheDocument();
+  });
+});
+
+// ============================================================================
+// THE APPLY-TO-ALL BAR (FIU 2026-09-22)
+//
+// "Access has been approved for everything." What these assert is the part
+// that turns this into a worse screen if it is got wrong: what "all" MEANS —
+// the rows drawn under the heading, never the ones a filter is hiding — that
+// the bar says which number that is, that unticking one takes it out of the
+// press, and that a dimension heading offers no tick at all.
+// ============================================================================
+describe("QuestionGroups — one value on the ticked items", () => {
+  const access = () =>
+    group({ key: "field:6", heading: "Access", fieldLabel: "Access", toQuote: 3, rows: 3, records: 3, areas: ["Signature Suite", "Lobby"] });
+
+  /** Three items owing Access, two of them in the Signature Suite. */
+  const accessRows = () => [
+    row({ recordId: "rec-1", requirementId: "req-a", recordLabel: "DEMO-300-001", jsonId: 6, prompt: "Is access ok?" }),
+    row({ recordId: "rec-2", requirementId: "req-a", recordLabel: "DEMO-300-002", jsonId: 6, prompt: "Is access ok?" }),
+    row({
+      recordId: "rec-3",
+      requirementId: "req-b",
+      recordLabel: "DEMO-300-003",
+      jsonId: 6,
+      prompt: "Is access ok?",
+      area: "Lobby",
+    }),
+  ];
+
+  it("ticks only the LOADED, VISIBLE rows, and says which number that is", async () => {
+    const user = userEvent.setup();
+    render(<Harness questions={[access()]} rowsByQuestion={{ "field:6": accessRows() }} />);
+    await user.click(screen.getByText("Access"));
+
+    await user.click(screen.getByLabelText("Select every item shown under Access"));
+    expect(screen.getByText(/3 of the 3 items shown here are ticked/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Record on 3 items" })).toBeInTheDocument();
+  });
+
+  it("A FILTER NARROWS WHAT SELECT-ALL REACHES, AND THE BAR SAYS SO", async () => {
+    const user = userEvent.setup();
+    const apply = vi.fn<ApplyToRows>(async () => ({ ok: true as const, message: "Recorded." }));
+    render(<Harness questions={[access()]} rowsByQuestion={{ "field:6": accessRows() }} onApply={apply} />);
+    await user.click(screen.getByText("Access"));
+    await user.selectOptions(screen.getByLabelText("Filter by area"), "signature suite");
+
+    await user.click(screen.getByLabelText("Select every item shown under Access"));
+    // Two on screen, one hidden — and the hidden one is NOT written.
+    expect(screen.getByText(/2 of the 2 items shown here are ticked/)).toBeInTheDocument();
+    expect(screen.getByText(/1 more owe this question and is hidden by your filters/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Record on 2 items" }));
+    expect(apply).toHaveBeenCalledTimes(1);
+    const sent = apply.mock.calls[0]![0];
+    expect(sent.map((entry) => entry.recordId)).toEqual(["rec-1", "rec-2"]);
+  });
+
+  it("unticking one takes it out of the press", async () => {
+    const user = userEvent.setup();
+    const apply = vi.fn<ApplyToRows>(async () => ({ ok: true as const, message: "Recorded." }));
+    render(<Harness questions={[access()]} rowsByQuestion={{ "field:6": accessRows() }} onApply={apply} />);
+    await user.click(screen.getByText("Access"));
+    await user.click(screen.getByLabelText("Select every item shown under Access"));
+    await user.click(screen.getByLabelText("Include DEMO-300-002"));
+
+    expect(screen.getByText(/2 of the 3 items shown here are ticked/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Record on 2 items" }));
+    const sent = apply.mock.calls[0]![0];
+    expect(sent.map((entry) => entry.recordId)).toEqual(["rec-1", "rec-3"]);
+  });
+
+  it("sends the value that is in the box, and reports what came back", async () => {
+    const user = userEvent.setup();
+    const apply = vi.fn<ApplyToRows>(async () => ({
+      ok: true as const,
+      message: "Recorded on 3 items, under one change. 1 left alone: DEMO-300-009 — already answered.",
+    }));
+    render(<Harness questions={[access()]} rowsByQuestion={{ "field:6": accessRows() }} onApply={apply} />);
+    await user.click(screen.getByText("Access"));
+    await user.click(screen.getByLabelText("Select every item shown under Access"));
+    await user.type(screen.getAllByPlaceholderText("Value")[0]!, "Approved");
+    await user.click(screen.getByRole("button", { name: "Record on 3 items" }));
+
+    expect(apply.mock.calls[0]![1]).toEqual({ value: "Approved", state: "confirmed" });
+    expect(screen.getByText(/1 left alone: DEMO-300-009 — already answered\./)).toBeInTheDocument();
+  });
+
+  it("NEVER ON A DIMENSION HEADING, and says why instead", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        questions={[group()]}
+        rowsByQuestion={{ "field:3": [row(), row({ recordId: "rec-2", recordLabel: "DEMO-300-002" })] }}
+      />,
+    );
+    await user.click(screen.getByText("Dimensions"));
+    expect(screen.queryByLabelText(/Select every item shown/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Include DEMO-300-001")).not.toBeInTheDocument();
+    expect(screen.getByText(/Dimensions are recorded one item at a time/)).toBeInTheDocument();
+  });
+
+  it("offers no tick on an answer already settled", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        questions={[access()]}
+        rowsByQuestion={{
+          "field:6": [
+            row({ recordId: "rec-1", requirementId: "req-a", recordLabel: "DEMO-300-001", jsonId: 6 }),
+            row({
+              recordId: "rec-2",
+              requirementId: "req-a",
+              recordLabel: "DEMO-300-002",
+              jsonId: 6,
+              state: "confirmed",
+              currentValue: "Approved",
+            }),
+          ],
+        }}
+      />,
+    );
+    await user.click(screen.getByText("Access"));
+    expect(screen.getByLabelText("Include DEMO-300-001")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Include DEMO-300-002")).not.toBeInTheDocument();
+    expect(screen.getByText("already answered — change that one on its own")).toBeInTheDocument();
+    expect(screen.getByText(/1 cannot be included and say why on the row/)).toBeInTheDocument();
   });
 });

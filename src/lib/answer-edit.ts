@@ -48,6 +48,8 @@ export async function editAnswer(
     reason,
     evidence,
     actor,
+    changeSetId: attachTo,
+    snapshot = true,
   }: {
     answerId: string;
     value: string | null;
@@ -58,6 +60,38 @@ export async function editAnswer(
     reason?: string | null;
     evidence?: UploadedEvidence | null;
     actor: string;
+    /**
+     * An ALREADY OPEN change to attach this edit to, instead of opening one.
+     *
+     * For a caller that answers several questions as ONE act — applying one
+     * value to the items a by-question heading lists. Without it every answer
+     * opens its own change set and 26 items answered in one press become 26
+     * entries in the project trail, which is the failure `editFinish` names in
+     * the same words and `acceptSuggestedLevels` avoids by calling
+     * `changeSetForEdit` once. The caller owns the change and the reason on it.
+     *
+     * Supplying one also SATISFIES the reason rule, exactly as an open change
+     * does on the single-edit path: the "why" is on the change, not on the row.
+     * A caller that means to override settled answers therefore has to have
+     * decided that deliberately — `POST /answers/apply` does not, and skips
+     * every settled row rather than passing the decision down here.
+     */
+    changeSetId?: string;
+    /**
+     * FALSE where the CALLER will version the records itself.
+     *
+     * `snapshotRecords` batches: one lock, one `loadRecordAtoms` over every
+     * record, then two statements each. Called per answer it re-locks and
+     * re-loads the whole time — measured on the sandbox, 2026-09-22, at 13.6s
+     * for 26 answers in one press, which is a screen somebody stops using.
+     * A batch caller passes false and calls it ONCE with every record it
+     * touched, which is the same version and a tenth of the round trips.
+     *
+     * A caller that passes false and then forgets is caught by
+     * `tests/db/change-history.test.ts`, which reads the WHOLE database and
+     * fails any change set with spec-content audit rows and no version.
+     */
+    snapshot?: boolean;
   },
 ): Promise<EditAnswerResult> {
   const rows = await txn`
@@ -89,13 +123,15 @@ export async function editAnswer(
     String(existing.state) !== state;
   const overriding = settled && changing;
 
-  const { changeSetId, attached } = await changeSetForEdit(txn, {
-    projectId: String(existing.project_id),
-    actor,
-    kind: "manual_edit",
-    reason,
-    evidence,
-  });
+  const { changeSetId, attached } = attachTo
+    ? { changeSetId: attachTo, attached: true }
+    : await changeSetForEdit(txn, {
+        projectId: String(existing.project_id),
+        actor,
+        kind: "manual_edit",
+        reason,
+        evidence,
+      });
 
   // Checked AFTER the change set is resolved, because an open change is one of
   // the two ways to satisfy it.
@@ -134,7 +170,9 @@ export async function editAnswer(
     );
   }
 
-  const snapshots = await snapshotRecords(txn, [String(existing.record_id)], changeSetId);
+  const snapshots = snapshot
+    ? await snapshotRecords(txn, [String(existing.record_id)], changeSetId)
+    : new Map<string, number>();
 
   return {
     answer: {

@@ -281,6 +281,93 @@ function InfillView() {
   );
 
   /**
+   * Record ONE value on the items a person ticked.
+   *
+   * ========================================================================
+   * ONE PRESS IS ONE CHANGE SET, WHICH IS WHY IT IS ONE REQUEST.
+   *
+   * Twenty-eight `PATCH /api/answers/[id]` calls would be twenty-eight change
+   * sets and twenty-eight entries in the project trail — the failure
+   * `editFinish` had until `changeSetId` was threaded through it. The route
+   * locks the set, plans it, opens ONE change and writes under it.
+   *
+   * IT IS NOT SERIALISED THROUGH `enqueue`, because it is already one
+   * transaction: the snapshot race that queue exists for is two overlapping
+   * WRITES to one record, and there is only one here. It still goes ON the
+   * queue so it cannot overlap a row save somebody started a moment earlier.
+   *
+   * WHAT COMES BACK IS PATCHED, NOT RELOADED. A filled gap leaves
+   * `loadOutstanding`, so reloading would make 26 rows vanish at once — which
+   * reads as the press having wiped the list rather than answered it.
+   * ========================================================================
+   */
+  const applyToRows = useCallback(
+    async (
+      rows: InfillQuestion[],
+      input: { value: string | null; state: "confirmed" | "tbc" },
+    ): Promise<{ ok: true; message: string } | { ok: false; error: string }> => {
+      const payload = rows
+        .filter((row) => row.answerId && row.answerVersion !== null)
+        .map((row) => ({
+          recordId: row.recordId,
+          requirementId: row.requirementId,
+          answerId: row.answerId!,
+          version: row.answerVersion!,
+        }));
+      if (payload.length === 0) return { ok: false, error: "Nothing was ticked." };
+
+      const res = await enqueue(() =>
+        apiFetch<{
+          filed: { recordId: string; requirementId: string; value: string | null; state: string; version: number }[];
+          skipped: { recordId: string; requirementId: string; label: string; why: string }[];
+        }>(`/api/projects/${encodeURIComponent(projectId)}/answers/apply`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ value: input.value, state: input.state, rows: payload }),
+        }),
+      );
+      if (!res.ok) return { ok: false, error: res.error };
+
+      const written = new Map(
+        res.data.filed.map((row) => [`${row.recordId}:${row.requirementId}`, row] as const),
+      );
+      const patch = (row: InfillQuestion) => {
+        const hit = written.get(`${row.recordId}:${row.requirementId}`);
+        return hit ? { ...row, state: hit.state, currentValue: hit.value, answerVersion: hit.version } : row;
+      };
+      setQuestionsByLine((prev) =>
+        Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.map(patch)])),
+      );
+      setRowsByQuestion((prev) =>
+        Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.map(patch)])),
+      );
+      // Counted against the items themselves, so the sitting's total is right
+      // whichever tab the values were recorded on.
+      setAnswered((prev) => {
+        const next = { ...prev };
+        for (const row of res.data.filed) next[row.recordId] = (next[row.recordId] ?? 0) + 1;
+        return next;
+      });
+
+      const n = res.data.filed.length;
+      const head =
+        input.state === "tbc"
+          ? `Recorded as TBC on ${n} item${n === 1 ? "" : "s"}, under one change.`
+          : `Recorded on ${n} item${n === 1 ? "" : "s"}, under one change.`;
+      // EVERY SKIPPED ROW IS NAMED. A count alone leaves somebody believing
+      // they answered 28 when they answered 26.
+      const tail =
+        res.data.skipped.length > 0
+          ? ` ${res.data.skipped.length} left alone: ${res.data.skipped
+              .map((row) => `${row.label} — ${row.why}`)
+              .join("; ")}.`
+          : "";
+      return { ok: true, message: head + tail };
+    },
+    [projectId, enqueue],
+  );
+
+  /**
    * Record one dimension.
    *
    * NOT the answer. The composed Dimensions cell is a projection of the
@@ -457,6 +544,7 @@ function InfillView() {
             paletteFor={paletteFor}
             onSaveAnswer={saveAnswer}
             onSaveDimension={saveDimension}
+            onApply={applyToRows}
           />
         ) : (
         <InfillTable
