@@ -966,7 +966,34 @@ Things a plan has to settle rather than assume:
 
 ### Eight of the fourteen observation tables have no scroll box, so the NEXT wide column clips silently
 
-**Status: open — measured 2026-09-22 on the staging deployment (`2f09f19`),
+**Status: FIXED 2026-09-23, `d98857d`** (plan item 4b.2), on staging. An
+`overflow-x-auto` wrapper around the per-configuration table inside
+`ConfigurationSection` — two functional lines. The band's `overflow-hidden` and
+`border-l-4` are untouched (the wrapper is INSIDE it), and the wrapper is not
+itself `overflow-hidden`, which would make it the sticky scroll container and
+put the header over a row.
+
+**Measured both ways off the same render**, on the real staged Panther-d pack,
+by neutralising the new wrappers in the live DOM:
+
+| Viewport | table | box | before | after |
+|---|---|---|---|---|
+| 1440×900 | 1003–1008px | 1005–1008px | 0 of 14 overflow; **8 land on the hidden band** | 0 overflow, 0 without a scroll box |
+| 1920×1080 | 1003–1008px | 1005–1008px | identical | identical |
+| 1024×900 | 961–987px | **629px** | **8 clip with no scrollbar** | 13 overflow and **all 13 scroll**, `scrollLeft` reaching its own max |
+
+**The count of eight was right**, counted independently twice — eight wrappers
+added, eight tables that had been landing on a hidden box. 3a.4's fix is intact:
+nothing clips at either supported width. The entry's 989/629 reads as 987/629
+now; the 2px is the palette control, which adds height and not width.
+
+**Left alone deliberately, and recorded as its own concern:** that table is
+`w-full text-sm` where the other two are `w-full border-collapse text-cell`.
+`text-cell` is 13px against `text-sm`'s 14px, so normalising it would move every
+figure above it. It looks like drift rather than a decision — but it is a
+separate one. The original entry follows.
+
+**Status when found: open — measured 2026-09-22 on the staging deployment (`2f09f19`),
 found immediately after 3a.4 closed, and NOT fixed.** Nothing is clipped
 today; this is about what happens the next time that card grows.
 
