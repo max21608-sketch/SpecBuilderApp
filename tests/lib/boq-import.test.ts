@@ -166,6 +166,67 @@ describe("parseBoqSheets", () => {
     expect(typeof staged.metadata.date).toBe("string");
   });
 
+  // A DATE-TYPED CELL IS WHAT THE WORKBOOK SHOWS, NOT A TIMESTAMP. The Panther
+  // bill's revision read `0 · 2026-09-15T00:00:00.000Z` on the review screen
+  // and in the phase subtitle, over a cell a person reading the workbook sees
+  // as 15/09/2026. `read-excel-file` hands a serial number over as a Date at
+  // UTC midnight, so the day is the UTC day and it stays a STRING either way.
+  it("formats a date-typed cell as the day, never as an ISO timestamp", () => {
+    const staged = one(
+      parseBoqSheets(
+        sheet([
+          ["Revision: ", "0", null, null, null, null],
+          ["Date: ", new Date(Date.UTC(2026, 8, 15)), null, null, null, null],
+          HEADER,
+          ["A", "S", "E-1", "Sofa", null, 1],
+        ]),
+      ),
+    );
+    expect(staged.metadata.date).toBe("2026-09-15");
+    expect(staged.metadata.date).not.toMatch(/T|Z|\.\d{3}/);
+  });
+
+  it("does not move a date-typed cell a day, whatever the machine's timezone", () => {
+    // The instant is UTC midnight and the calendar read is the UTC one. Local
+    // getters west of Greenwich would render the 14th; `toISOString` on a
+    // LOCAL-midnight date would do the same, which is the TOE-dates trap and
+    // the reason neither is used.
+    const staged = one(
+      parseBoqSheets(
+        sheet([
+          ["Date: ", new Date(Date.UTC(2026, 0, 1)), null, null, null, null],
+          HEADER,
+          ["A", "S", "E-1", "Sofa", null, 1],
+        ]),
+      ),
+    );
+    expect(staged.metadata.date).toBe("2026-01-01");
+  });
+
+  it("keeps a time where a cell carries one, rather than dropping half of it", () => {
+    const staged = one(
+      parseBoqSheets(
+        sheet([
+          ["Date: ", new Date(Date.UTC(2026, 8, 15, 14, 30)), null, null, null, null],
+          HEADER,
+          ["A", "S", "E-1", "Sofa", null, 1],
+        ]),
+      ),
+    );
+    expect(staged.metadata.date).toBe("2026-09-15 14:30");
+  });
+
+  it("formats a date-typed cell in an ITEM column too, not only above the header", () => {
+    // `text()` reads every cell, so a bill with a date in its product-reference
+    // column had the same timestamp in a record's own field.
+    const staged = one(
+      parseBoqSheets(
+        sheet([HEADER, ["A", "S", "E-1", "Sofa", new Date(Date.UTC(2026, 8, 15)), 1]]),
+      ),
+    );
+    expect(staged.lines[0]?.productReference).toBe("2026-09-15");
+  });
+
   it("reads an inline 'Revision: 2' as well as a split one", () => {
     const staged = one(
       parseBoqSheets(sheet([["Revision: 2", null, null, null, null, null], HEADER, ["A", "S", "E-1", "Sofa", null, 1]])),
