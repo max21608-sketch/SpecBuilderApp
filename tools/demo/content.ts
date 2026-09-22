@@ -627,7 +627,13 @@ export type DemoMessage = {
   daysAgo: number;
   hour: number;
   body: string;
-  /** What routing is EXPECTED to do. Printed beside what it actually did. */
+  /**
+   * What routing is EXPECTED to do, as a note beside the message it describes.
+   *
+   * "Assigned" stopped meaning "placed" on 2026-09-21: only the project inbox
+   * in the forwarding headers or in To/Cc places a message by itself, and a
+   * subject reference or a known sender is held. These say which of the two.
+   */
   expect: string;
 };
 
@@ -649,7 +655,7 @@ export const INBOX: DemoMessage[] = [
       "",
       "Priya",
     ].join("\n"),
-    expect: "assigned — the project inbox is in To",
+    expect: "assigned automatically on arrival — the project inbox is in To",
   },
   {
     key: "headboard-query",
@@ -711,7 +717,7 @@ export const INBOX: DemoMessage[] = [
       "",
       "Dominic",
     ].join("\n"),
-    expect: "assigned — the project inbox is in To",
+    expect: "assigned automatically on arrival — the project inbox is in To",
   },
 ];
 

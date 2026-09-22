@@ -98,6 +98,22 @@ function unreadRuns(runs: Run[]): Run[] {
   return runs.filter((run) => run.status === "failed" || (run.status === "pending" && !run.waitingForSlot));
 }
 
+/**
+ * One press of Read on one document, through the route that takes a slot.
+ *
+ * Its own function so `readAll` can repeat it with a freshly read version
+ * without a second copy of the body — and so the retry cannot drift from the
+ * first press, which is how a bulk action starts asking for something subtly
+ * different from what a single press asks for.
+ */
+function pressRead(importId: string, expectedVersion: number, requestId: string) {
+  return apiFetch<{ waiting?: boolean }>(`/api/imports/${importId}/extract`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedVersion, requestId, action: "start" }),
+  });
+}
+
 /** What one press of *Read all* did, in words. Null when it did nothing. */
 function readAllSummary(reading: number, waiting: number): string | null {
   if (reading + waiting === 0) return null;
@@ -552,23 +568,26 @@ export default function PackDrawingsReview({
       let reading = 0;
       let waiting = 0;
       for (const run of unread) {
-        // Version read fresh per run: the extract route refuses a mismatch
-        // rather than starting a second attempt, and this screen holds no
-        // version of its own.
-        const current = await apiFetch<{ import: { version: number } }>(`/api/imports/${run.importId}`);
-        if (!current.ok) {
-          failure = current.error;
-          break;
+        // ONE ROUND TRIP PER DOCUMENT, NOT TWO.
+        //
+        // This loop used to GET the run first, purely to read a version it
+        // already holds: `Run.version` comes off the payload this screen polls,
+        // so thirty documents meant sixty serial calls and a very long
+        // "Starting…". The version can of course be stale — something else
+        // touched the run since the last poll — and that is what the retry
+        // below is for, rather than a fetch nobody usually needs.
+        // One id per DOCUMENT, reused by the retry below, because that retry is
+        // the same press of the same button: the route treats a repeat of an id
+        // it already holds as the same logical attempt rather than a second one.
+        const requestId = crypto.randomUUID();
+        let res = await pressRead(run.importId, run.version, requestId);
+        if (!res.ok && String(res.data?.code ?? "") === "import_version_stale") {
+          // The one case worth a second call: re-read THIS run's version and
+          // press once more. Never more than once — a version that moves twice
+          // while a bulk press is running is something to look at, not to race.
+          const current = await apiFetch<{ import: { version: number } }>(`/api/imports/${run.importId}`);
+          if (current.ok) res = await pressRead(run.importId, current.data.import.version, requestId);
         }
-        const res = await apiFetch<{ waiting?: boolean }>(`/api/imports/${run.importId}/extract`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            expectedVersion: current.data.import.version,
-            requestId: crypto.randomUUID(),
-            action: "start",
-          }),
-        });
         if (!res.ok) {
           failure = res.error;
           break;
