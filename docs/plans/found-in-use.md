@@ -37,8 +37,30 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ### `db:qa-clean` cannot sweep a `__QA` category, so one failed teardown breaks the tier for everybody
 
-**Status: open, and it is the one worth fixing.** Found 2026-09-23 by the chain
-above.
+**Status: FIXED 2026-09-23** — the sweep now has an `item_categories` step, and
+it was fixed mid-stage because the litter REGENERATED and cost a third coder
+time. Verified after: 0 `__QA` categories, **17 categories still there** (the
+cheat sheets, which is the guard that matters), `count(distinct prompt)` back to
+74, and `tests/db/spec-field-gates.test.ts` green.
+
+Two things in the fix are deliberate. The early `process.exit(0)` on "nothing
+left behind" is gone, because it ran before the category step and would have
+skipped it on exactly the run where only a category was orphaned. And the match
+is `left(name, 5) = '__QA '`, **not** `like '__QA%'`: in SQL LIKE an underscore
+is a single-character wildcard, so that pattern matches anything carrying QA in
+the third and fourth places. The queries above it have always been written that
+way and are safe because they also key on a project — a DELETE against
+`item_categories` is not, and a sweep able to reach a seeded category would be a
+script capable of emptying the requirement matrix.
+
+**Seen once and not reproduced:** the first sweep aborted on a `spec_runs`
+RESTRICT for a project that no longer existed by the time it was looked up —
+almost certainly another coder's suite deleting rows underneath it, since one
+was running. Re-running swept cleanly. Not recorded as a defect without
+evidence; worth remembering if a sweep aborts on a quiet machine.
+
+The original entry follows. **Status when found: open.** Found 2026-09-23 by the
+chain above.
 
 `tools/qa-clean.mjs` sweeps **by project**: it walks `email_drafts`,
 `project_contacts`, `spec_answers`, `spec_record_refs`, `record_attributes`,
@@ -646,7 +668,36 @@ of the component actually have it.
 
 ### A level accepted on one phase's tab is still an unaccepted suggestion on the next, for the same client ref
 
-**Status: open. A CHANGE ASKED FOR.** Max, on the BOQ review of a multi-tab
+**Status: FIXED 2026-09-23, `5cc39a9`** (plan item 4a.5), on staging. A category
+or a level decided on one tab reaches the same normalised ref on every other
+non-ignored sheet, marked **`carried from MUR`** under the cell, and the source
+tab says how many other lines it filled in. It arrives as `levelStatus:
+"chosen"`, so the confirm writes `spec_records.level` rather than the advisory
+column — which is what it is, a person's decision, carried.
+
+**One operation, not N patches**, and the reason is the item's own: a loop of
+requests that half-fails leaves the bill saying two things about one item, which
+is the state this fixes. The staged path opens no change set — nothing canonical
+is written until the confirm — so what stands in for "one press is one change
+set" is **one press is one commit**: the row is locked, `planCarry` runs against
+the live `parsed`, and the source plus every receiver merge inside one
+transaction.
+
+**Two decisions inside it that Max did not settle**, both flagged rather than
+buried: **a clear does not carry** — `— not set —` is "I do not know yet", and
+pushing that across tabs nobody opened would destroy values with no decision
+behind it; and `duplicateGroups`/`isDuplicated` moved into `boq-carry.ts` and
+now fold with `normaliseRef` instead of the screen's own looser fold, so `S-201`
+and `S.201` on one tab are named as the duplicates `boq-reconcile` has always
+read them as. Keeping two folds would have let the amber panel and the carry
+disagree about which rows are ambiguous.
+
+**The `carried from` line and the source-tab notice have not been seen by
+anybody** — the coder could not sign in to the sandbox from its worktree. The
+behaviour is proved through the real route by the db tier. The original entry
+follows.
+
+**Status when found: open. A CHANGE ASKED FOR.** Max, on the BOQ review of a multi-tab
 bill (two screenshots): *"when I've confirmed the level in the first phase they
 don't automatically fill in on the next phase — if they're the same reference
 number they should automatically be filled in, and any adjustment to a category

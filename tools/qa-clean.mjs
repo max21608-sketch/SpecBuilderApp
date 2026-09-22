@@ -38,8 +38,7 @@ try {
     `select id, bws_project_number from projects where bws_project_number like '__QA%' or name like '__QA%'`,
   );
   if (projects.rows.length === 0) {
-    console.log("Nothing left behind.");
-    process.exit(0);
+    console.log("No leftover projects.");
   }
   for (const project of projects.rows) {
     const id = project.id;
@@ -58,7 +57,54 @@ try {
     await client.query(`delete from projects where id = $1`, [id]);
     console.log(`  swept ${project.bws_project_number}`);
   }
-  console.log(`Swept ${projects.rows.length} leftover project(s).`);
+  if (projects.rows.length > 0) console.log(`Swept ${projects.rows.length} leftover project(s).`);
+
+  // ==========================================================================
+  // A `__QA ` CATEGORY IS NOT REACHABLE FROM A PROJECT, AND THAT IS WHY THIS
+  // IS HERE.
+  //
+  // Everything above is keyed on a project id. `tests/db/chase-drafts.test.ts`
+  // creates its own `item_categories` row and three `requirements` against it,
+  // and a run whose teardown fails under concurrent-run contention leaves them
+  // behind — where nothing could ever sweep them, because they hang off no
+  // project.
+  //
+  // That is worse than an orphan row. `requirements` is SEED data every
+  // category reads, so three leftovers moved a project-wide count and failed
+  // `tests/db/spec-field-gates.test.ts` on every later run, in every worktree,
+  // for every agent — reading as a seed regression in whatever commit happened
+  // to be under test. It cost three separate coders time on 2026-09-23 before
+  // the cause was found.
+  //
+  // MATCHED ON `left(name, 5)`, NOT ON `like '__QA%'`. In SQL LIKE an
+  // underscore is a single-character wildcard, so `'__QA%'` matches anything
+  // with QA in the third and fourth places. The queries above have always been
+  // written that way and are safe because they also key on a project; a DELETE
+  // against `item_categories` is not, and the seventeen cheat sheets are the
+  // requirement matrix this whole app reads. A sweep that could reach one would
+  // be a script capable of emptying that register.
+  // ==========================================================================
+  const categories = await client.query(`select id, name from item_categories where left(name, 5) = '__QA '`);
+  for (const category of categories.rows) {
+    const id = category.id;
+    // Answers before requirements before the category: the FK chain, deepest
+    // first, so a failure names the row it could not delete rather than a
+    // constraint two tables away.
+    await client.query(
+      `delete from spec_answers where requirement_id in (select id from requirements where category_id = $1)`,
+      [id],
+    );
+    await client.query(`delete from requirements where category_id = $1`, [id]);
+    await client.query(`delete from item_category_aliases where category_id = $1`, [id]).catch(() => undefined);
+    await client.query(`delete from spec_matrix_category_map where category_id = $1`, [id]).catch(() => undefined);
+    await client.query(`delete from item_categories where id = $1`, [id]);
+    console.log(`  swept category ${category.name}`);
+  }
+  if (categories.rows.length > 0) {
+    console.log(`Swept ${categories.rows.length} leftover categor${categories.rows.length === 1 ? "y" : "ies"}.`);
+  }
+
+  if (projects.rows.length === 0 && categories.rows.length === 0) console.log("Nothing left behind.");
 } finally {
   await client.end();
 }
