@@ -34,6 +34,14 @@ import {
   type ItemLevel,
 } from "@/lib/spec-vocab";
 import { foldableRow, isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
+import {
+  isOfferable,
+  normalisePaletteValue,
+  offPaletteNote,
+  paletteForField,
+  unheldPaletteNote,
+  type Palette,
+} from "@/lib/palettes";
 import SwatchPicker from "@/components/imports/SwatchPicker";
 import Button from "@/components/ui/Button";
 import { Th } from "@/components/ui/Table";
@@ -70,7 +78,24 @@ export type Occupant = {
   sourcePage: number | null;
 };
 
-export type SpecField = { id: string; json_id: number; name: string; field_category: string };
+/**
+ * One BWS field, as the drawings screens thread the register.
+ *
+ * `palette` is the closed list Matthew's gate overlay points this field at,
+ * attached by `withPalettes` at read time. OPTIONAL, and absent means "this
+ * caller had no register to hand" rather than "this field has no list" -- the
+ * row then renders exactly as it did before palettes reached this screen,
+ * which is `upgradeCalloutGuesses`' rule about an empty `fields` list in a
+ * second place. A caller that degrades honestly cannot disagree with the
+ * confirm; one that invented an empty list would.
+ */
+export type SpecField = {
+  id: string;
+  json_id: number;
+  name: string;
+  field_category: string;
+  palette?: Palette | null;
+};
 
 /** The project's records, for the card that matched none of them. */
 export type RecordChoice = { id: string; label: string; itemDescription: string; runName: string };
@@ -135,11 +160,49 @@ export function orderRows(pending: DrawingObservation[]): {
 const GROUP_ORDER: AttributeGroup[] = ["dimension", "material", "finish", "hardware", "other", "note"];
 
 /**
+ * How many columns a spanning panel covers.
+ *
+ * ONE CONSTANT, because the number was written out four times — the two toggle
+ * rows, the replace acknowledgement and the blocker panel — and a column added
+ * or removed has to reach every one of them. A `colSpan` one short leaves the
+ * panel ending before the last column; one over widens the row past the table.
+ * Both are silent.
+ */
+export const OBSERVATION_COLUMNS = 6;
+
+/**
  * The table head every observation table shares.
  *
  * `Th` rather than a hand-rolled `<th>`, so this table's header reads the same
  * as every other table in the app. The CELLS below stay as they are: they hold
  * a select in almost every column and `Td`'s padding is built for text.
+ *
+ * ============================================================================
+ * THE UNIT IS NOT A COLUMN. IT IS THE SECOND HALF OF THE VALUE.
+ *
+ * It was one, and the card was CLIPPED: `PageBody` is capped at 1400px and the
+ * picture sidebar takes a fixed 300 of it, so the table gets 1010px at 1920
+ * AND at 1440 — the viewport makes no difference — while the seven columns
+ * wanted up to 1091. What went past the edge was the unheaded ACTION column,
+ * so nothing in the header row went missing to say so, and *Ignore* was
+ * reachable only by scrolling the table sideways. Max, 2026-09-21: "I don't
+ * want to have to scroll to view all of the fields on the table."
+ *
+ * A column had to go, and Unit is the one that costs least. It was 99px wide
+ * and held an em-dash on every row that is not a measurement — on a sheet of
+ * fifteen REMARKS that is 99px of nothing. A figure and its unit are ONE
+ * statement, which is how `composeDimensionCell` writes them (`840` + `mm`),
+ * and the unit's provenance line — printed on the page, guessed from the
+ * figures, the project default — is about the figure, so it belongs beside it.
+ * Every control survives with the same behaviour; only the cell it sits in
+ * changed.
+ *
+ * Do not solve this by making the wrapper `overflow-hidden` (it becomes the
+ * sticky scroll container and the header then covers a row) or by giving a
+ * spanning panel an extra `<td>` beside the data cells (the row becomes
+ * columns × 3 slots wide and the browser squeezes the acknowledgement into a
+ * ribbon). Both are recorded traps this card has already paid for.
+ * ============================================================================
  */
 export function ObservationTableHead() {
   return (
@@ -148,7 +211,6 @@ export function ObservationTableHead() {
         <Th className="px-4">Group</Th>
         <Th className="px-2">Label</Th>
         <Th className="px-2">Value</Th>
-        <Th className="px-2">Unit</Th>
         <Th className="px-2">Dimension / BWS field</Th>
         <Th className="px-2">State</Th>
         <Th className="px-4" />
@@ -170,7 +232,7 @@ export function OtherDimensionsToggle({
 }) {
   return (
     <tr className="border-t border-neutral-200 bg-neutral-50">
-      <td colSpan={7} className="px-4 py-2">
+      <td colSpan={OBSERVATION_COLUMNS} className="px-4 py-2">
         <Button size="xs" variant="quiet" onClick={onToggle}>
           {shown ? `Hide the other ${count} dimensions` : `${label ?? "Other dimensions"} (${count}) — show`}
         </Button>
@@ -180,6 +242,118 @@ export function OtherDimensionsToggle({
         </span>
       </td>
     </tr>
+  );
+}
+
+/**
+ * The sentinel for "not taken from the list". Same literal as
+ * `AnswerValue`'s, so the two controls cannot mean different things by it.
+ */
+const FREE_TEXT = "__other__";
+
+/**
+ * THE LIST A BWS FIELD OFFERS, BESIDE THE WORDS THE PAGE PRINTED.
+ *
+ * ============================================================================
+ * Matthew, 2026-09-18 (1:26:43): "it'd be really good if it would have stud
+ * and then it would have a go at matching with what was specified on the
+ * drawing. But if it was wrong or couldn't find it, that you'd be able to
+ * select one from the drop-down" -- and free text stays: "of course, just do
+ * it as a free text."
+ *
+ * ---- THE MATCH IS EXACT AND IT WILL ALMOST NEVER FIRE, WHICH IS CORRECT ----
+ *
+ * MEASURED on the sandbox before this was built: `npm run palette:gap` reads
+ * 98 callouts on a palette-backed BWS field over 47 staged drawings runs -- 81
+ * of them stating something, 17 stating nothing -- and ZERO match an option.
+ * That is not a defect to tune away. The BWS palettes are BW's own
+ * manufacturing range (`BW Oak Natural - Open grain 10%`); the drawings state
+ * the designer's intent (`Ceruse finish oak`, `Antique brass, machined`). They
+ * are two vocabularies at two stages of the job, and mapping one onto the
+ * other is a specification decision a person takes.
+ *
+ * So there is NO substring step, no token step, no distance step and no model
+ * call here. `normalisePaletteValue` is the whole matcher and it returns null
+ * rather than the nearest option, for the reason house/conventions.md §5
+ * gives: a fuzzy step that put `Antique brass, machined` onto `BW Antiqued
+ * Brass` would write a BW finish code the designer never specified into a
+ * field that ships to BWS, and nothing downstream would question it. A visible
+ * gap beats a plausible-looking wrong answer. `palette:gap` prints what a
+ * looser rule WOULD have written, so widening it stays a decision taken on
+ * evidence rather than a default. On this corpus it would buy nothing at all:
+ * not one unmatched callout is a substring of an option or contains one.
+ *
+ * ---- FREE TEXT IS THE DEFAULT AND IS ALWAYS REACHABLE ----------------------
+ *
+ * The value box above this is untouched: the page's own words are what the row
+ * starts with and what it keeps unless a person changes it. This control only
+ * ever writes `value`, through the autosave that already exists -- `valueRaw`
+ * still holds what the drawing said and the row already prints it underneath,
+ * which is what keeps the provenance honest and why this needs no column and
+ * no migration.
+ *
+ * `Other...` is the state the row is in whenever the value is not an option,
+ * so it cannot destroy typed text: a select already showing it fires no change
+ * event. Choosing it is only reachable FROM an option, where it means "undo
+ * that pick" and puts the drawing's own words back.
+ *
+ * A palette with no options offers no dropdown at all -- `unheldPaletteNote`
+ * says so in a sentence, because an empty select reads as broken and a
+ * reviewer who thinks a control is broken types around it. Nothing is unheld
+ * since the 2026-09-22 capture; the branch is for the next gate row pointing
+ * at a list nobody has read yet.
+ * ============================================================================
+ */
+export function PaletteChoice({
+  palette,
+  value,
+  valueRaw,
+  disabled,
+  onPick,
+}: {
+  palette: Palette;
+  /** What the row currently holds -- the reviewer's draft where there is one. */
+  value: string | null;
+  /** What the page printed, restored by "Other...". */
+  valueRaw: string | null;
+  disabled: boolean;
+  onPick: (next: string | null) => void;
+}) {
+  if (!isOfferable(palette)) {
+    return <p className="mt-1 text-xs text-slate-500">{unheldPaletteNote(palette)}</p>;
+  }
+
+  const onPalette = normalisePaletteValue(palette, value);
+  return (
+    <div className="mt-1">
+      <p className="text-[11px] text-neutral-500">{palette.name}</p>
+      <select
+        value={onPalette ?? FREE_TEXT}
+        disabled={disabled}
+        onChange={(event) => {
+          const chosen = event.target.value;
+          onPick(chosen === FREE_TEXT ? valueRaw : chosen);
+        }}
+        className="mt-0.5 w-full border border-neutral-300 rounded px-1 py-0.5 text-xs disabled:opacity-50"
+      >
+        <option value={FREE_TEXT}>Other&hellip; — keep the drawing&rsquo;s own words</option>
+        {palette.options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {/* NEUTRAL, NOT AMBER, AND NEVER A BLOCKER. On the record screen the same
+          sentence is amber, because a settled answer sitting outside its list
+          is a question. At intake it is the normal case -- every real callout
+          measured -- and amber on all of them teaches a reviewer to ignore
+          amber, which is the argument that keeps `unanswerable` slate.
+          Nothing to be off is not a mismatch, so a row with no value says
+          nothing at all. */}
+      {onPalette === null && (value ?? "").trim() !== "" && (
+        <p className="mt-0.5 text-xs text-neutral-500">{offPaletteNote(palette)}</p>
+      )}
+    </div>
   );
 }
 
@@ -235,6 +409,10 @@ export function ObservationRow({
   // What this row can be given, rather than what the vocabulary holds.
   // `dimension` is never offered here: it is unwritable without a slot, and the
   // slot column sends both together.
+  // The list this row's BWS field offers, or null -- which is most rows: a
+  // dimension and a note carry no field at all, and COM 1/2/3 carry no
+  // palette, correctly, because COM is free text in BWS.
+  const palette = paletteForField(specFields, observation.specFieldId);
   const groupOptions = ATTRIBUTE_GROUPS.filter((group) => {
     if (group === observation.attrGroup) return true;
     if (group === "dimension") return false;
@@ -314,10 +492,71 @@ export function ObservationRow({
             className="w-full border border-neutral-300 rounded px-2 py-1 text-sm"
           />
         )}
+        {/* THE UNIT, BESIDE THE FIGURE IT BELONGS TO. See the head above for
+            why it is no longer a column of its own.
+
+            A TEXT NOTE IS NEVER ASKED FOR ONE. "REMARKS: SUBMIT SHOP DRAWINGS
+            FOR REVIEW" is not a measurement, and an empty select beside
+            fifteen of them reads as fifteen unanswered questions where there
+            are none — nothing blocks a unitless note.
+            A MEASURED note is offered one whether or not it already carries
+            one: a wrong mm on `ARM HEIGHT 520` must be correctable without
+            promoting the row to a slot, and a figure staged with no unit at
+            all must be answerable at all. Not amber — only a dimension is
+            being asked. */}
+        {(observation.attrGroup === "dimension" || isMeasuredRow(observation)) && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+            <select
+              value={observation.unit ?? ""}
+              onChange={(event) => callbacks.onChange(observation, { unit: event.target.value || null })}
+              aria-label="Unit"
+              className={`border rounded px-1 py-0.5 text-xs ${
+                observation.unit === null && observation.attrGroup === "dimension"
+                  ? "border-amber-400 bg-amber-50"
+                  : "border-neutral-300"
+              }`}
+            >
+              <option value="">Choose…</option>
+              {ATTRIBUTE_UNITS.map((unit) => (
+                <option key={unit} value={unit}>
+                  {unit}
+                </option>
+              ))}
+            </select>
+            {/* A printed unit is NOT a guess and must not be labelled as one —
+                that is the whole reason provenance is tracked. */}
+            {unitSourceOf(observation) === "printed" && <span className="text-xs text-neutral-500">printed on the page</span>}
+            {unitSourceOf(observation) === "figures" && <span className="text-xs text-amber-700">guessed from the figures</span>}
+            {unitSourceOf(observation) === "project_default" && (
+              <span className="text-xs text-amber-700">the project default</span>
+            )}
+          </div>
+        )}
         {/* Not for a block: its raw form is the same lines with the heading
             repeated down every one of them. */}
         {observation.valueRaw !== null && observation.valueRaw !== observation.value && !(value ?? "").includes("\n") && (
           <p className="mt-0.5 text-xs text-neutral-400">drawing said: {observation.valueRaw}</p>
+        )}
+        {palette && (
+          <PaletteChoice
+            palette={palette}
+            value={value}
+            valueRaw={observation.valueRaw}
+            disabled={busy}
+            onPick={(next) => {
+              // THE DRAFT GOES FIRST. The value box is controlled by
+              // `drafts[id] ?? observation.value`, so a half-typed draft left
+              // behind would go on showing the old text over the value that
+              // was just picked -- the reload would land and the box would
+              // still disagree with it.
+              setDrafts((current) => {
+                const rest = { ...current };
+                delete rest[observation.id];
+                return rest;
+              });
+              callbacks.onChange(observation, { value: next });
+            }}
+          />
         )}
         {observation.materialCodeRaw && (
           <>
@@ -335,44 +574,6 @@ export function ObservationRow({
               onCropped={(image, croppedPage) => callbacks.onSwatch(observation.id, image, croppedPage)}
             />
           </>
-        )}
-      </td>
-      <td className="px-2 py-2 align-top">
-        {/* A TEXT NOTE IS NEVER ASKED FOR A UNIT. "REMARKS: SUBMIT SHOP
-            DRAWINGS FOR REVIEW" is not a measurement, and an empty select
-            beside fifteen of them reads as fifteen unanswered questions where
-            there are none — nothing blocks a unitless note.
-            A MEASURED note is offered one whether or not it already carries
-            one: a wrong mm on `ARM HEIGHT 520` must be correctable without
-            promoting the row to a slot, and a figure staged with no unit at all
-            must be answerable at all. Not amber — only a dimension is being
-            asked. */}
-        {observation.attrGroup === "dimension" || isMeasuredRow(observation) ? (
-          <select
-            value={observation.unit ?? ""}
-            onChange={(event) => callbacks.onChange(observation, { unit: event.target.value || null })}
-            className={`border rounded px-1 py-0.5 text-xs ${
-              observation.unit === null && observation.attrGroup === "dimension"
-                ? "border-amber-400 bg-amber-50"
-                : "border-neutral-300"
-            }`}
-          >
-            <option value="">Choose…</option>
-            {ATTRIBUTE_UNITS.map((unit) => (
-              <option key={unit} value={unit}>
-                {unit}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="text-xs text-neutral-400">—</span>
-        )}
-        {/* A printed unit is NOT a guess and must not be labelled as one — that
-            is the whole reason provenance is tracked. */}
-        {unitSourceOf(observation) === "printed" && <p className="mt-0.5 text-xs text-neutral-500">printed on the page</p>}
-        {unitSourceOf(observation) === "figures" && <p className="mt-0.5 text-xs text-amber-700">guessed from the figures</p>}
-        {unitSourceOf(observation) === "project_default" && (
-          <p className="mt-0.5 text-xs text-amber-700">the project default</p>
         )}
       </td>
       <td className="px-2 py-2 align-top">
@@ -503,7 +704,7 @@ export function ReplacePanel({
   if (occupants.length === 0) return null;
   return (
     <tr className={blocked ? "bg-amber-50/40" : undefined}>
-      <td colSpan={7} className="px-4 pb-2">
+      <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2">
         <div className="border border-amber-300 bg-amber-50 rounded px-2 py-1.5 text-xs">
           {heading && <p className="mb-1 font-medium text-amber-900">{heading}</p>}
           <p className="text-amber-900">
@@ -562,7 +763,7 @@ export function RowNotes({ blockers, warnings }: { blockers: RowBlocker[]; warni
   if (blockers.length === 0 && warnings.length === 0) return null;
   return (
     <tr className="bg-amber-50/40">
-      <td colSpan={7} className="px-4 pb-2 text-xs text-amber-900">
+      <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2 text-xs text-amber-900">
         {blockers.map((blocker) => blocker.message).join(" ")}
         {/* Said out loud, because an amber row that still commits looks like a
             bug otherwise. */}

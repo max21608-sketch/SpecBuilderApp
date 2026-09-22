@@ -61,6 +61,46 @@ export type Palette = {
   options: PaletteOption[];
 };
 
+/**
+ * A `spec_palettes` row as the database names its columns — and as two screens
+ * already read it out of their payloads.
+ *
+ * Kept apart from `Palette` on purpose. `src/lib/palette-load.ts` returns this
+ * shape because the record and infill screens fold it themselves and changing
+ * their payload is a change to those screens, not a refactor of the loader.
+ */
+export type PaletteRow = {
+  key: string;
+  name: string;
+  owner: PaletteOwner;
+  allows_free_text: boolean;
+  source_note: string | null;
+  synced_at: string | null;
+  options: PaletteOption[] | null;
+};
+
+/**
+ * The one fold from the row to the domain type.
+ *
+ * It exists so that a caller which wants a `Palette` -- the drawings review,
+ * which is handed one attached to its field register -- does not write a third
+ * copy of this mapping. `options` is coalesced to an empty array by the query
+ * and again here: a palette with no options is a real state the screens have
+ * to say out loud, and `undefined` there would make `isOfferable` throw
+ * instead.
+ */
+export function paletteFromRow(row: PaletteRow): Palette {
+  return {
+    key: row.key,
+    name: row.name,
+    owner: row.owner,
+    allowsFreeText: Boolean(row.allows_free_text),
+    sourceNote: row.source_note,
+    syncedAt: row.synced_at,
+    options: row.options ?? [],
+  };
+}
+
 /** A palette this app can actually offer as a list. */
 export function isOfferable(palette: Palette): boolean {
   return palette.options.length > 0;
@@ -90,6 +130,48 @@ export function sentenceCasePaletteName(name: string): string {
   if (!first) return name;
   const isAcronym = first.length > 1 && first === first.toUpperCase() && /[A-Z]/.test(first);
   return [isAcronym ? first : first.toLowerCase(), ...rest.map((w) => w.toLowerCase())].join(" ");
+}
+
+/**
+ * What a screen says about a written value the palette does not hold.
+ *
+ * ONE SENTENCE, TWO SCREENS. The record's `AnswerValue` has said this since
+ * 0030 and the drawings review says it from 2026-09-22, and they must say it
+ * identically: a reviewer who reads "Kept as written" on one screen and
+ * something else on the other has to work out whether the two mean the same
+ * thing. The TONE is each screen's own -- amber where a settled answer sits
+ * outside its list, neutral at intake, where it is the normal case and not a
+ * problem: `npm run palette:gap` on the sandbox, 2026-09-22, reads 0 of 81
+ * value-bearing callouts matching an option.
+ */
+export function offPaletteNote(palette: Palette): string {
+  return `Not one of the ${sentenceCasePaletteName(palette.name)} options. Kept as written.`;
+}
+
+/**
+ * The palette a staged row's BWS field offers, or null.
+ *
+ * ============================================================================
+ * THE LINK IS THE FIELD, AND THE FIELD REGISTER IS WHERE IT IS CARRIED.
+ *
+ * A drawings observation carries a `spec_fields.id` -- never a requirement, a
+ * category or a local key, because a callout is what a PAGE said and not an
+ * answer to a checklist question. The palette is attached to the field
+ * register the screen already threads (`withPalettes` in `palette-load.ts`),
+ * so this is a lookup and not a second resolution.
+ *
+ * A ROW WITH NO FIELD GETS NOTHING, which is most of them: a note, an
+ * unplaced callout and every dimension have no BWS field, and COM 1/2/3 have
+ * no palette. Null here means the row renders exactly as it did before
+ * palettes reached this screen.
+ * ============================================================================
+ */
+export function paletteForField(
+  fields: readonly { id: string; palette?: Palette | null }[],
+  specFieldId: string | null | undefined,
+): Palette | null {
+  if (!specFieldId) return null;
+  return fields.find((field) => field.id === specFieldId)?.palette ?? null;
 }
 
 /** The value a control preselects. NEVER an answer: `missing` means nobody has looked. */

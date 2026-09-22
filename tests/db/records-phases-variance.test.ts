@@ -190,6 +190,177 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
       expect(mine.every((row) => row[verdictColumn] === "")).toBe(true);
     });
   });
+  // ==========================================================================
+  // WHAT IS LISTED AS "GO AND CATEGORISE THIS" MUST BE CATEGORISABLE TO ANY
+  // PURPOSE. `loadUncategorisedRecords` required only an active record, so it
+  // named a split bill line -- a HEADING, whose configurations are the jobs --
+  // and a record on a retired phase. Neither is in the export's scope and
+  // neither is in `loadOutstanding`'s, so categorising either changes nothing
+  // anybody can see. Both clauses are `loadExportScope`'s, and this is where
+  // the three readings are pinned together.
+  // ==========================================================================
+  describe("what the uncategorised list may NOT name", () => {
+    let headingId = "";
+    let configurationId = "";
+    let retiredPhaseRecordId = "";
+    let retiredPhaseId = "";
+
+    beforeAll(async () => {
+      const heading = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, item_description, qty, status,
+                                   created_by, updated_by)
+         values ($1, $2, 20, '__QA Split heading', 45, 'active', 'qa', 'qa') returning id`,
+        [projectId, runId],
+      );
+      headingId = heading.rows[0].id;
+      const configuration = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, item_description, qty, status,
+                                   parent_id, depth, split_reason, variant_label, created_by, updated_by)
+         values ($1, $2, 21, '__QA Split heading', null, 'active', $3, 1, 'fabric', 'A', 'qa', 'qa')
+         returning id`,
+        [projectId, runId, headingId],
+      );
+      configurationId = configuration.rows[0].id;
+
+      const retiredPhase = await client.query(
+        `insert into spec_runs (project_id, name, status, retired_at, retired_by, created_by, updated_by)
+         values ($1, '__QA Retired phase', 'retired', now(), 'qa', 'qa', 'qa') returning id`,
+        [projectId],
+      );
+      retiredPhaseId = retiredPhase.rows[0].id;
+      const stranded = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, item_description, qty, status,
+                                   created_by, updated_by)
+         values ($1, $2, 22, '__QA Left on a retired phase', 1, 'active', 'qa', 'qa') returning id`,
+        [projectId, retiredPhaseId],
+      );
+      retiredPhaseRecordId = stranded.rows[0].id;
+    });
+
+    afterAll(async () => {
+      await client.query(`delete from spec_records where id = $1`, [configurationId]);
+      await client.query(`delete from spec_records where id in ($1, $2)`, [headingId, retiredPhaseRecordId]);
+      await client.query(`delete from spec_runs where id = $1`, [retiredPhaseId]);
+    });
+
+    it("leaves out a split bill line and names its configuration instead", async () => {
+      const named = (await loadUncategorisedRecords(projectId)).map((row) => row.recordId);
+      // The heading is not work: its configurations are what the export ships.
+      expect(named).not.toContain(headingId);
+      // The configuration IS, and carries no category of its own.
+      expect(named).toContain(configurationId);
+      // And the predicate is the export's: the heading is out of that too.
+      const loaded = await loadExportScope(projectId, runId);
+      if (isScopeFailure(loaded)) throw new Error(loaded.error);
+      const inScope = loaded.scope.records.map((record) => record.id);
+      expect(inScope).not.toContain(headingId);
+      expect(inScope).toContain(configurationId);
+    });
+
+    it("leaves out a record on a retired phase, which no chase and no file reaches", async () => {
+      const named = (await loadUncategorisedRecords(projectId)).map((row) => row.recordId);
+      expect(named).not.toContain(retiredPhaseRecordId);
+      // `loadOutstanding` has always dropped it; the two now agree.
+      const outstanding = await loadOutstanding(projectId);
+      expect(outstanding.some((question) => question.recordId === retiredPhaseRecordId)).toBe(false);
+    });
+
+    it("still names the ordinary uncategorised record", async () => {
+      // The clauses narrow what cannot be acted on and nothing else. A list
+      // that had quietly lost the record it exists for would be worse than the
+      // one that named two it should not.
+      expect((await loadUncategorisedRecords(projectId)).map((row) => row.recordId)).toContain(uncategorisedId);
+    });
+  });
+
+  // ==========================================================================
+  // THE CODE COLUMN AND THE FILE'S CLIENT CODE ARE ONE STATEMENT.
+  //
+  // `spec_record_refs` carries five ref systems and the export's Client Code
+  // reads ONE of them, so a record holding only a `bws_job` ref used to print
+  // that job number in the phase table's Code column and ship a blank code --
+  // and `NoClientRef`, the only place in the app anybody would have noticed,
+  // never fired. Two readings of one predicate disagreeing is exactly what
+  // this file exists to pin, which is why it is here and not in a component
+  // test: neither clause can be reached without the database.
+  // ==========================================================================
+  describe("a record whose only ref is a BWS job number", () => {
+    // ON ITS OWN PHASE, and torn down when this block finishes. The retired-
+    // phase rows below assert the project's EXACT membership, so a fixture
+    // left lying in the main phase fails a test about something else --
+    // which is the same collision the per-process project number prevents
+    // between two agents, one describe further in.
+    let jobRunId = "";
+    let jobOnlyId = "";
+
+    beforeAll(async () => {
+      const run = await client.query(
+        `insert into spec_runs (project_id, name, created_by, updated_by)
+         values ($1, '__QA Job-ref phase', 'qa', 'qa') returning id`,
+        [projectId],
+      );
+      jobRunId = run.rows[0].id;
+      const record = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, qty, level,
+                                   status, created_by, updated_by)
+         values ($1, $2, 9, $3, '__QA Job-number-only bench', 2, 'simple', 'active', 'qa', 'qa') returning id`,
+        [projectId, jobRunId, categoryId],
+      );
+      jobOnlyId = record.rows[0].id;
+      await client.query(
+        `insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, created_by)
+         values ($1, $2, 'bws_job', '__QA J-4471', '__qa j-4471', 'qa')`,
+        [jobOnlyId, projectId],
+      );
+    });
+
+    afterAll(async () => {
+      await client.query(`delete from spec_answers where record_id = $1`, [jobOnlyId]);
+      await client.query(`delete from spec_record_refs where record_id = $1`, [jobOnlyId]);
+      await client.query(`delete from spec_records where id = $1`, [jobOnlyId]);
+      await client.query(`delete from spec_runs where id = $1`, [jobRunId]);
+    });
+
+    it("says it has no client ref, and shows the job apart", async () => {
+      const response = await recordsRoute(
+        new Request(`http://localhost/api/records?projectId=${projectId}&runId=${jobRunId}`),
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        records: { id: string; refs: string | null; client_code: string | null }[];
+      };
+      const row = body.records.find((entry) => entry.id === jobOnlyId);
+      // The Code column reads `client_code`, which is empty here — so the
+      // table says "no client ref", the same thing the file says.
+      expect(row?.client_code).toBeNull();
+      // The job number is not LOST: it is still on the payload, still
+      // searchable, and printed beneath the code rather than as it.
+      expect(row?.refs).toBe("__QA J-4471");
+    });
+
+    it("keeps the two readings identical on a record that HAS a client code", async () => {
+      const response = await recordsRoute(
+        new Request(`http://localhost/api/records?projectId=${projectId}&runId=${runId}`),
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { records: { id: string; client_code: string | null }[] };
+      expect(body.records.find((entry) => entry.id === ordinaryId)?.client_code).toBe("__QA S-100");
+    });
+
+    it("exports a blank Client Code for it, which is what the table now says", async () => {
+      const loaded = await loadExportScope(projectId, jobRunId);
+      if (isScopeFailure(loaded)) throw new Error(loaded.error);
+      const column = BWS_EXPORT_COLUMNS.findIndex((entry) => entry.name === "Client Code");
+      const record = loaded.scope.records.find((entry) => entry.id === jobOnlyId);
+      expect(record).toBeDefined();
+      const cells = composeRow(loaded.scope, record!, loaded.scope.attributes, loaded.scope.answers);
+      expect(cells[column]).toBe("");
+      // A BWS job ref belongs to the record that earned it and is not a client
+      // code; nothing composes it into that cell.
+      expect(cells[column]).not.toContain("J-4471");
+    });
+  });
+
   describe("retired records and phases (row d5)", () => {
     /** Retired the way every path in src/lib does it: all three columns. */
     async function retireRecord(id: string) {

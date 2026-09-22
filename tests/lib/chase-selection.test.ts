@@ -79,7 +79,7 @@ describe("selectionSummary", () => {
       [question(), question(), question({ tier: "later" }), question({ tier: "later" }), question({ tier: "later" })],
       "c-1",
     );
-    expect(summary).toEqual({ contactChosen: true, preselected: 2, alsoOutstanding: 3 });
+    expect(summary).toEqual({ contactChosen: true, preselected: 2, alsoOutstanding: 3, awaitingReply: 0 });
   });
 
   it("counts neither half for a question the preselection could not consider", () => {
@@ -88,13 +88,12 @@ describe("selectionSummary", () => {
     const summary = selectionSummary(
       [
         question({ requirementKind: "readiness", tier: "later" }),
-        question({ waiting: { draftId: "d-1" }, tier: "later" }),
         question({ contactId: "c-2", tier: "later" }),
         question({ tier: null }),
       ],
       "c-1",
     );
-    expect(summary).toEqual({ contactChosen: true, preselected: 0, alsoOutstanding: 0 });
+    expect(summary).toEqual({ contactChosen: true, preselected: 0, alsoOutstanding: 0, awaitingReply: 0 });
   });
 
   it("says no contact is chosen rather than counting everybody's", () => {
@@ -102,6 +101,60 @@ describe("selectionSummary", () => {
       contactChosen: false,
       preselected: 0,
       alsoOutstanding: 0,
+      awaitingReply: 0,
     });
+  });
+
+  // ---- the third bucket ----------------------------------------------------
+  //
+  // Chasing Priya Raman on the sandbox demo project, the lines' to-quote column
+  // summed to 71 and the button said 70 (found-in-use 2026-09-20). The one was
+  // a to-quote question already asked: the line counts it because it is still
+  // outstanding, the preselection excludes it because asking again by default
+  // is not what anybody meant. Both right; only two of the three sets were
+  // named.
+  it("counts a question already awaiting a reply as its own bucket", () => {
+    const summary = selectionSummary(
+      [
+        question(),
+        question({ waiting: { draftId: "d-1", sentAt: null, contactName: "Claire" } }),
+        question({ tier: "later", waiting: { draftId: "d-2" } }),
+      ],
+      "c-1",
+    );
+    expect(summary).toEqual({ contactChosen: true, preselected: 1, alsoOutstanding: 0, awaitingReply: 2 });
+  });
+
+  it("makes the three numbers add up to every tiered question this contact owes", () => {
+    const questions = [
+      question(),
+      question(),
+      question({ tier: "later" }),
+      question({ waiting: { draftId: "d-1" } }),
+      // Not this contact's, not a specification question, and not tiered: none
+      // of the three counts it, and the lines do not attribute it here either.
+      question({ contactId: "c-2" }),
+      question({ requirementKind: "readiness" }),
+      question({ tier: null }),
+    ];
+    const summary = selectionSummary(questions, "c-1");
+    expect(summary.preselected + summary.alsoOutstanding + summary.awaitingReply).toBe(4);
+  });
+
+  it("does not count a readiness question or somebody else's as awaiting a reply", () => {
+    const summary = selectionSummary(
+      [
+        question({ requirementKind: "readiness", waiting: { draftId: "d-1" } }),
+        question({ contactId: "c-2", waiting: { draftId: "d-2" } }),
+        question({ tier: null, waiting: { draftId: "d-3" } }),
+      ],
+      "c-1",
+    );
+    expect(summary.awaitingReply).toBe(0);
+  });
+
+  it("still ticks nothing that is awaiting a reply — the counts changed, the selection did not", () => {
+    const waiting = question({ waiting: { draftId: "d-1" } });
+    expect(defaultSelection([waiting], "c-1").size).toBe(0);
   });
 });

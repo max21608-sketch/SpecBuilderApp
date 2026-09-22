@@ -27,7 +27,7 @@ import {
   isOfferable,
   unheldPaletteNote,
   defaultOption,
-  sentenceCasePaletteName,
+  offPaletteNote,
   type Palette,
 } from "@/lib/palettes";
 
@@ -73,14 +73,20 @@ export default function AnswerValue({
         {offPalette && palette && (
           <p className="mt-0.5 text-xs text-amber-800">
             {/*
-              Lower-cased so the name reads as part of the sentence, EXCEPT
-              where it starts with an acronym: "the bws timber finish palette"
-              is a typo on screen. This branch was unreachable for the five BWS
-              palettes until they were seeded on 2026-09-22 -- isOffPalette
-              returns false where there is nothing to be off -- so "BWS" is the
-              first name it has had to print.
+              THE SENTENCE MOVED TO `offPaletteNote` on 2026-09-22, because the
+              drawings review now says the same thing about a callout and two
+              wordings for one fact is a reviewer working out whether they mean
+              the same. The TONE stays here: amber on a settled answer sitting
+              outside its list, neutral at intake where it is the normal case.
+
+              It lower-cases the palette's name so it reads inside the
+              sentence, EXCEPT where the name opens with an acronym -- "the bws
+              timber finish palette" is a typo on screen. This branch was
+              unreachable for the five BWS palettes until they were seeded on
+              2026-09-22 (isOffPalette returns false where there is nothing to
+              be off), so "BWS" is the first name it has had to print.
             */}
-            Not one of the {sentenceCasePaletteName(palette.name)} options. Kept as written.
+            {offPaletteNote(palette)}
           </p>
         )}
       </div>

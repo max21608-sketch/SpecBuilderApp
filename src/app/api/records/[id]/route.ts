@@ -18,6 +18,7 @@ import {
 import { ITEM_LEVELS } from "@/lib/spec-vocab";
 import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
 import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
+import { loadPalettes } from "@/lib/palette-load";
 import {
   designerKey,
   loadOutstanding,
@@ -38,7 +39,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            r.parent_id, r.variant_label,
            p.bws_project_number, p.name as project_name, p.id as project_id,
            run.id as run_id, run.name as run_name,
-           c.name as category_name, c.family as category_family, c.requirements_authored
+           c.name as category_name, c.family as category_family, c.requirements_authored,
+           -- WHETHER THERE IS A PICTURE, so the screen does not have to find
+           -- out by asking for one and being refused. The record page rendered
+           -- an img tag at the record image route unconditionally and turned
+           -- the picture off on the error, which put an EXPECTED 404 in the
+           -- console on every record with no crop. A flag on a payload the
+           -- screen already loads costs no round trip, which was the only
+           -- argument for the optimistic version. The image route still 404s;
+           -- nothing asks it to. (No backticks in here: this is a tagged
+           -- template, and one would close it.)
+           exists (
+             select 1 from attachments a
+             where a.entity_type = 'spec_records' and a.entity_id = r.id and a.kind = 'item_image'
+           ) as has_image
     from spec_records r
     join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id
@@ -99,6 +113,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            q.tgq_levels, q.local_key,
            f.name as field_name, f.json_id, f.field_category,
            a.id as answer_id, a.value, a.qualifier,
+           -- WHO STATED IT. A manual or email answer is a person's own
+           -- decision and is out of reach of every recomposition (see
+           -- promote-answers.ts), which the composed dimensions cell has to be
+           -- able to SAY: a cell somebody typed goes on disagreeing with the
+           -- slots underneath it for good, and a screen that cannot tell the
+           -- two apart reports a measurement where there is a sentence.
+           -- (No backticks in here: one closes the tagged template.)
+           a.source_kind,
            -- NO ANSWER ROW AT ALL IS MISSING, not null. This drives off
            -- the requirements table with a left join, so a question added to a
            -- category after this record was categorised has no answer row and
@@ -135,28 +157,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // options still comes back -- the screen says so in words rather than
   // showing an empty dropdown. None is empty since the 2026-09-22 BWS capture
   // (db/seed/0011), and the branch stays for the next one that is.
-  const palettes = await sql`
-    select p.key, p.name, p.owner, p.allows_free_text, p.source_note, p.synced_at,
-           coalesce(
-             (select json_agg(json_build_object(
-                       'value', o.value, 'label', o.label,
-                       'sortOrder', o.sort_order, 'isDefault', o.is_default,
-                       'code', o.code)
-                      order by o.sort_order)
-                from spec_palette_options o where o.palette_key = p.key and o.active),
-             '[]'::json) as options
-      from spec_palettes p
-     order by p.key
-  `;
-
-  // Which palette each question is answered from, if any. Keyed the two ways a
-  // gate row can be addressed.
-  const paletteByQuestion = await sql`
-    select f.json_id, g.local_key, g.palette_key
-      from spec_field_gates g
-      left join spec_fields f on f.id = g.spec_field_id
-     where g.palette_key is not null
-  `;
+  //
+  // ONE LOADER since 2026-09-22. These two statements used to be written out
+  // here and copied into the infill route, and the copies had already drifted:
+  // the infill one never gained 0035's option code. See src/lib/palette-load.ts.
+  const { palettes, paletteByQuestion } = await loadPalettes(sql);
 
   // ---- the gates -----------------------------------------------------------
   //

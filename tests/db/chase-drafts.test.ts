@@ -69,28 +69,50 @@ describeIfDb("chase drafts", () => {
     );
     contactId = contact.rows[0].id;
 
-    // A category with at least three requirements, so coverage is plural —
-    // and one Matthew's matrix does NOT cover, which is load-bearing rather
-    // than incidental.
+    // ---- THIS SUITE'S OWN CATEGORY AND ITS OWN QUESTIONS --------------------
     //
-    // TGQ is one name over two models (CLAUDE.md, and `tgq.ts`). Where
-    // `spec_matrix_category_map` reaches a category his matrix decides the
-    // tier and NO LEVEL IS NEEDED; where it does not, 0019's `tgq_levels`
-    // fallback applies and a level is required. The tier tests below are
-    // about the FALLBACK — a level-less record refused, a question struck off
-    // a level demoted — so the fixture has to sit on an uncovered sheet or it
-    // is asserting the fallback against a category that never reaches it.
-    // Unqualified, this query returned `sofas-bed-daybeds`, one of his nine.
+    // NO PER-RUN PROJECT NUMBER FIXES SHARED SEED. A test below strikes a level
+    // off `requirements.tgq_levels` to prove a question lands in the email's
+    // second half, and it used to do that to a SEEDED row — one of the 728 the
+    // whole sandbox shares. It puts it back in a `finally`, but a concurrent
+    // db-tier run reading that requirement in the window between reads `later`
+    // where it expects `to_quote`, and fails for a reason that has nothing to
+    // do with what it covers (found-in-use 2026-09-21). `qaNumber` cannot help:
+    // the collision is not on a unique key, it is on a row two runs both read.
+    //
+    // So the fixture owns its rows. Three consequences, all wanted:
+    //
+    //  * Matthew's matrix cannot reach a category invented here, so 0019's
+    //    `tgq_levels` FALLBACK applies and a level is required — which is what
+    //    the tier tests below are about. That used to be arranged by a `not
+    //    exists` against `spec_matrix_category_map` and a comment explaining
+    //    it, and it is now true by construction.
+    //  * The three questions are this file's to strike, demote and restore.
+    //  * `on delete cascade` from the category takes the requirements with it,
+    //    so teardown is one more delete.
+    //
+    // The `__QA ` prefix and its space survive exactly, because that is what
+    // the sweep matches on.
     const category = await client.query(
-      `select c.id from item_categories c
-       join requirements q on q.category_id = c.id
-       where not exists (
-         select 1 from spec_matrix_category_map m where m.item_category_id = c.id
-       )
-       group by c.id having count(q.id) >= 3
-       order by c.id limit 1`,
+      `insert into item_categories (slug, family, name, requirements_authored, sort_order, created_by, updated_by)
+       values ($1, 'upholstery', $2, true, 9001, 'qa', 'qa') returning id`,
+      [qaNumber("chase-drafts-category").toLowerCase().replace(/\s+/g, "-"), qaNumber("Chase drafts category")],
     );
     categoryId = category.rows[0].id;
+
+    // Three spec-field questions, each on a DIFFERENT BWS field: 0002's
+    // `requirements_category_field_idx` allows one row per field per category,
+    // because the export has no rule for which answer would win otherwise.
+    const fields = await client.query(
+      `select id from spec_fields order by json_id limit 3`,
+    );
+    for (const [index, field] of (fields.rows as { id: string }[]).entries()) {
+      await client.query(
+        `insert into requirements (category_id, kind, spec_field_id, prompt, section, sort_order, created_by, updated_by)
+         values ($1, 'spec_field', $2, $3, '__QA section', $4, 'qa', 'qa')`,
+        [categoryId, field.id, `__QA question ${index + 1}`, index + 1],
+      );
+    }
 
     // Every record belongs to a run (0007).
     const run = await client.query(
@@ -145,6 +167,9 @@ describeIfDb("chase drafts", () => {
     await client.query(`delete from spec_runs where project_id = $1`, [projectId]);
     await client.query(`delete from project_contacts where project_id = $1`, [projectId]);
     await client.query(`delete from projects where id = $1`, [projectId]);
+    // Takes this suite's three requirements with it (`on delete cascade`), so
+    // nothing it invented outlives it.
+    if (categoryId) await client.query(`delete from item_categories where id = $1`, [categoryId]);
     await client.end();
   });
 
@@ -538,6 +563,12 @@ describeIfDb("chase drafts", () => {
   it("puts a question its level does not need into the second half of the email", async () => {
     // Strike the first question off every level but hero, then ask it of a
     // complex item: outstanding, but not holding up the quote.
+    //
+    // THE ROW BEING STRUCK IS THIS SUITE'S OWN (see `beforeAll`). It used to be
+    // one of the 728 seeded requirements the whole sandbox shares, so a
+    // concurrent run could read `later` here where it expected `to_quote`. The
+    // `finally` still puts it back, because a test that leaves its own fixture
+    // altered is a test the next one in this file inherits.
     await resetAnswers();
     await client.query(`update requirements set tgq_levels = array['hero'] where id = $1`, [String(requirementIds[0])]);
     try {

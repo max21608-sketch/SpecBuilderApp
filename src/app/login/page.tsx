@@ -9,10 +9,20 @@
 // question people get wrong before they sign in, not after, and until
 // 2026-09-18 it was answered by the full-width banner in the root layout. That
 // banner is gone, so the chip is placed here explicitly rather than inherited.
+//
+// AND IT IS WHERE A MISCONFIGURED DEPLOYMENT SAYS SO. The chip answers "which
+// build is this"; it cannot answer "is this build pointed at the right
+// database", and on 2026-09-19 a pilot deployment reading the sandbox printed
+// a correct PILOT chip over a form that could not sign anybody in. Middleware
+// now refuses a mismatched pair everywhere else, and it deliberately does not
+// run here — protecting the way in locks everybody out — so this page asks the
+// same non-throwing question itself. No database is touched either way.
 import EnvironmentChip from "@/components/layout/EnvironmentChip";
 import LoginForm from "@/components/auth/LoginForm";
+import { environmentProblemMessage } from "@/lib/env";
 
 export default function LoginPage() {
+  const misconfigured = environmentProblemMessage();
   return (
     <div className="flex min-h-screen items-center justify-center bg-stone-50 px-4">
       <div className="w-full max-w-[370px]">
@@ -22,6 +32,14 @@ export default function LoginPage() {
           <div className="text-[17px] font-semibold text-neutral-900">Project Spec Builder</div>
           <div className="mt-0.5 text-xs text-neutral-500">Ben Whistler</div>
         </div>
+
+        {/* ABOVE the form, not under it: the point is that nobody spends a
+            minute on a password that was never going to be checked. */}
+        {misconfigured && (
+          <p className="mb-3 rounded-[10px] border border-red-200 bg-red-50 px-3 py-2.5 text-[12.5px] leading-snug text-red-800">
+            {misconfigured}
+          </p>
+        )}
 
         <LoginForm />
 

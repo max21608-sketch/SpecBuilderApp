@@ -56,7 +56,8 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(.
 let n = 0;
 function record(over: Partial<SpecRecord> = {}): SpecRecord {
   n += 1;
-  return {
+  const row: SpecRecord = {
+    client_code: null,
     id: `rec-${n}`,
     record_no: n,
     item_description: `Item ${n}`,
@@ -98,6 +99,11 @@ function record(over: Partial<SpecRecord> = {}): SpecRecord {
     gates: null,
     ...over,
   };
+  // MOST RECORDS CARRY ONE REF AND IT IS THEIR BOQ CODE, which is what the
+  // export's Client Code reads and what the Code column now prints. So
+  // `client_code` follows `refs` unless a test sets them APART, which is the
+  // case the column exists for: a record holding only a `bws_job` ref.
+  return over.client_code === undefined ? { ...row, client_code: row.refs } : row;
 }
 
 const RECORDS = () => [
@@ -164,14 +170,23 @@ describe("the area select", () => {
     mountWith(RECORDS(), (tally) => summaries.push(tally));
     await screen.findByLabelText("Filter by area");
     // The tile, not the table's TGQ column header, which carries the same word.
+    //
+    // The tile's big number is ITEMS — 4 of the 4 records carry a to-quote
+    // question — and its sub-line carries the 12 QUESTIONS behind them. Both
+    // are asserted, because this test's guarantee is that a filter moves
+    // NEITHER, and checking only the one that happens to be large would let
+    // the other drift.
     const tgq = screen
       .getAllByRole("button")
       .find((button) => (button.textContent ?? "").startsWith("TGQ"))!;
-    expect(within(tgq).getByText("12")).toBeTruthy();
+    expect(within(tgq).getByText("4")).toBeTruthy();
+    expect(tgq.textContent).toContain("12 questions");
 
     await userEvent.selectOptions(screen.getByLabelText("Filter by area"), "living room");
-    expect(within(tgq).getByText("12")).toBeTruthy();
-    // And nothing was reported up a second time with a narrower number.
+    expect(within(tgq).getByText("4")).toBeTruthy();
+    expect(tgq.textContent).toContain("12 questions");
+    // And nothing was reported up a second time with a narrower number. The
+    // header still receives the QUESTION count, unchanged by the tile's unit.
     expect(summaries.every((tally) => tally.records === 4 && tally.toQuote === 12)).toBe(true);
   });
 
@@ -183,7 +198,23 @@ describe("the area select", () => {
     expect(screen.queryByText("Desk chair")).toBeNull();
   });
 
-  it("renders every area on a 300-line phase", async () => {
+  // ===========================================================================
+  // A 15s WAIT INSIDE A 5s TEST CAN NEVER SPEND ITS BUDGET.
+  //
+  // The `findByLabelText` below already asks for 15s, and the test itself was
+  // still on vitest's 5s default — so under a full concurrent run the bound
+  // that fired was the one nobody had thought about. Measured: ~3.0s alone
+  // (found-in-use 2026-09-20), and it timed out on two of this repo's shared
+  // runs.
+  //
+  // 30s, deliberately, and the same number and the same reasoning as
+  // `boq-review-variance.test.tsx` and `tests/db/db-tier.ts`: a bound here
+  // exists to catch a hang or an accidental O(n squared) blow-up, not to police
+  // a machine that is busy. It is ON THIS TEST and not on the tier, because
+  // every other test in this file paints a handful of rows and should still say
+  // so in five seconds.
+  // ===========================================================================
+  it("renders every area on a 300-line phase", { timeout: 30_000 }, async () => {
     const many = Array.from({ length: 300 }, (_, index) =>
       record({ area: `Area ${String(index % 35).padStart(2, "0")}`, item_description: `Line ${index}` }),
     );

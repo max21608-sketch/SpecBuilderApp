@@ -163,3 +163,46 @@ describe("currentEnvLabel", () => {
     expect(env.currentEnvLabel()).toBe("PILOT");
   });
 });
+
+// ============================================================================
+// SAYING SO RATHER THAN DYING OF IT
+//
+// The pilot deployment of 2026-09-19 served its sign-in page with the right
+// chip and answered the sign-in POST with a bodyless 500, because the pair was
+// checked only when `db.ts` was first called. These two are what the middleware
+// and the sign-in page ask instead, so a mismatch is visible before anybody
+// types a password.
+// ============================================================================
+describe("environmentProblem", () => {
+  it("is null when the pair is allowed, and never throws when it is not", async () => {
+    const fine = await load("staging", "sandbox");
+    expect(fine.environmentProblem()).toBeNull();
+    expect(fine.environmentProblemMessage()).toBeNull();
+
+    const broken = await load("pilot", "sandbox");
+    expect(() => broken.environmentProblem()).not.toThrow();
+    expect(broken.environmentProblem()).toMatch(/Refusing to start/);
+  });
+
+  it("names both variables on a non-production build, so the reason is on the screen", async () => {
+    const env = await load("pilot", "sandbox");
+    const message = env.environmentProblemMessage() ?? "";
+    // The generic half tells an administrator what to do; the detail tells them
+    // which of the two to change, which is the half that was missing.
+    expect(message).toContain("APP_ENV and DATABASE_ENVIRONMENT");
+    expect(message).toContain("APP_ENV=pilot");
+    expect(message).toContain("DATABASE_ENVIRONMENT=sandbox");
+  });
+
+  it("withholds the detail on production, and still says what is wrong", async () => {
+    const env = await load("production", "sandbox");
+    const message = env.environmentProblemMessage() ?? "";
+    expect(message).toBe(env.ENVIRONMENT_MISCONFIGURED);
+    expect(message).not.toContain("DATABASE_ENVIRONMENT=sandbox");
+  });
+
+  it("reports an UNSET pair too, which is the same accident one step earlier", async () => {
+    const env = await load(undefined, undefined);
+    expect(env.environmentProblemMessage()).toMatch(/APP_ENV is not set to a recognized value/);
+  });
+});

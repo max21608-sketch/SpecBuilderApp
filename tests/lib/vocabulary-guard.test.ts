@@ -39,6 +39,7 @@ import { describe, expect, it } from "vitest";
 import { CHANGE_SET_KIND_LABELS } from "@/lib/change-sets";
 import { SPECS_SHEET_HEADER } from "@/lib/bws-export";
 import { CHECK_SHEET_HEADER } from "@/lib/export-check-sheet";
+import { CORE_FIELDS } from "@/lib/snapshot-diff";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DIRS = ["src/components", "src/app/dashboard"];
@@ -132,13 +133,29 @@ describe("screen vocabulary: a sub-quote is a phase", () => {
     expect(stale, `Allowlisted strings no longer in the source — delete them: ${stale.join(", ")}`).toEqual([]);
   });
 
-  // THE THREE NAMES `src/lib` PUTS IN FRONT OF A PERSON, held one by one.
+  // THE NAMES `src/lib` PUTS IN FRONT OF A PERSON, held one by one.
   //
-  // The scan above deliberately stops at the two screen directories, because
-  // `src/lib` is where the SQL, the error codes and the column names live and
-  // widening it would turn `run_id` and `run_retire` into an allowlist nobody
-  // reads. These three are the exceptions worth naming: two workbook headings
-  // somebody reads in Excel, and the labels on the project's change trail.
+  // THE SCAN IS NOT WIDENED TO `src/lib`, AND THAT IS THE DECISION, NOT AN
+  // OMISSION (re-taken 2026-09-22, when the versions diff was found labelling
+  // a phase "Run"). `src/lib` is where the SQL, the error codes, the column
+  // names and the change-set KINDS live, and every one of them says "run"
+  // correctly and permanently: `spec_runs`, `run_id`, `runId` as the API word
+  // and the query parameter every link written before the rename points at,
+  // `intake_runs` -- a document READ, which was never a phase and whose
+  // screens say "read" or "document". A scanner over that directory reports
+  // hundreds of hits, of which the handful that matter would be found by
+  // reading an allowlist nobody maintains; the guard's own header makes that
+  // argument and it still holds. A pattern loose enough to miss those is loose
+  // enough to miss the regression.
+  //
+  // So the rule here is: every `src/lib` collection a person READS is named in
+  // this test, explicitly. Four of them now -- two workbook headings somebody
+  // reads in Excel, the labels on the project's change trail, and the headings
+  // on a record's version diff, which is where "Run" survived four days after
+  // the rename because nothing was looking at it.
+  //
+  // ADDING A RENDERED NAME SET TO `src/lib` MEANS ADDING A LINE HERE. That is
+  // the cost of not scanning, stated so the next person pays it deliberately.
   it("names a phase, not a run, in the trail and in the two long-form sheets", () => {
     const run = /\brun\b/i;
     const labels = Object.entries(CHANGE_SET_KIND_LABELS).filter(([, label]) => run.test(label));
@@ -148,6 +165,23 @@ describe("screen vocabulary: a sub-quote is a phase", () => {
     // The keys are the schema's and must NOT have been renamed with the label.
     expect(CHANGE_SET_KIND_LABELS.run_retire).toBe("Phase retired");
     expect(CHANGE_SET_KIND_LABELS.run_create).toBe("Phase added by hand");
+  });
+
+  it("names a phase, not a run, on a record's version diff", () => {
+    const run = /\brun\b/i;
+    const offenders = CORE_FIELDS.filter((entry) => run.test(entry.label)).map((entry) => entry.label);
+    expect(
+      offenders,
+      `A version diff's row headings are read by a person: ${offenders.join(", ")}`,
+    ).toEqual([]);
+    // The one that was wrong, named, so the fix cannot be undone by a rename
+    // that happens to avoid the word.
+    expect(CORE_FIELDS.find((entry) => entry.field === "runName")?.label).toBe("Phase");
+    // AND THE KEY IS UNTOUCHED. `field` names the atom it reads off
+    // `RecordAtoms` and is the diff row's React key; nobody reads it, and
+    // renaming it beside the label is how the two halves of this rule get
+    // confused with each other.
+    expect(CORE_FIELDS.some((entry) => entry.field === "runName")).toBe(true);
   });
 
   it("reads the screens it claims to read", () => {

@@ -26,6 +26,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { loadBatchDrawings } from "@/lib/drawing-resolution";
 import { duplicateTargets, repeatedObservations, type PackCard } from "@/lib/drawing-document";
+import { loadPalettes, withPalettes } from "@/lib/palette-load";
 
 export const dynamic = "force-dynamic";
 
@@ -81,7 +82,12 @@ export async function GET(
     }
   }
 
-  const fields = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
+  // The field register, with each field's palette attached. Read at READ time
+  // from the register, exactly as the single-document screen does it and for
+  // the same reason: a pack already read gains the list with no second model
+  // call. See src/lib/palette-load.ts.
+  const fieldRows = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
+  const fields = withPalettes(fieldRows, await loadPalettes(sql));
 
   return json({
     ok: true,

@@ -33,13 +33,24 @@ const params = (id: string) => ({ params: Promise.resolve({ id }) });
 type Bucket = { toQuote: number; alsoOutstanding: number; noTier: number; records?: number };
 type ProjectPayload = {
   ok: boolean;
+  unlinkedFinishCodes: { code: string; records: number }[];
+  failedDocuments: number;
+  designerCodes: Record<string, number>;
+};
+
+/**
+ * The "Owes us" tally, which MOVED OUT of the project payload on 2026-09-22
+ * so the overview stops loading every outstanding question in the project
+ * before it can paint. Same loader, same grouping, same numbers — which is
+ * what these tests go on asserting, against its own route now.
+ */
+type ContactsOutstandingPayload = {
+  ok: boolean;
   contactsOutstanding: {
     byContact: (Bucket & { contactId: string; contactName: string })[];
     unassigned: Bucket;
     noLevel: Bucket;
   };
-  unlinkedFinishCodes: { code: string; records: number }[];
-  failedDocuments: number;
 };
 
 type DraftsPayload = {
@@ -164,6 +175,14 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     return body;
   }
 
+  async function readOwed(): Promise<ContactsOutstandingPayload> {
+    const { GET } = await import("@/app/api/projects/[id]/contacts-outstanding/route");
+    const response = await GET(new Request("http://localhost/test"), params(projectId));
+    const body = (await response.json()) as ContactsOutstandingPayload;
+    expect(body.ok).toBe(true);
+    return body;
+  }
+
   async function readDrafts(): Promise<DraftsPayload> {
     const { GET } = await import("@/app/api/drafts/route");
     const response = await GET(new Request(`http://localhost/api/drafts?projectId=${projectId}`));
@@ -173,11 +192,11 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
   }
 
   it("owes the same number the chase screen shows for the same contact", async () => {
-    const [project, drafts] = await Promise.all([readProject(), readDrafts()]);
+    const [owed, drafts] = await Promise.all([readOwed(), readDrafts()]);
 
     const group = drafts.inventory.groups.find((g) => g.contact.id === contactId);
     expect(group).toBeTruthy();
-    const row = project.contactsOutstanding.byContact.find((entry) => entry.contactId === contactId);
+    const row = owed.contactsOutstanding.byContact.find((entry) => entry.contactId === contactId);
     expect(row).toBeTruthy();
 
     // The same grouping and the same tiers, reached by two routes. A copy of
@@ -188,23 +207,23 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
   });
 
   it("keeps unassigned and level-less apart, and neither is a contact's debt", async () => {
-    const project = await readProject();
+    const owed = await readOwed();
     // A designer code nobody has been named for: a real question with nobody
     // to ask, which is a blocker rather than a contact's column.
-    expect(project.contactsOutstanding.unassigned.records).toBe(1);
+    expect(owed.contactsOutstanding.unassigned.records).toBe(1);
     expect(
-      project.contactsOutstanding.unassigned.toQuote + project.contactsOutstanding.unassigned.alsoOutstanding,
+      owed.contactsOutstanding.unassigned.toQuote + owed.contactsOutstanding.unassigned.alsoOutstanding,
     ).toBeGreaterThan(0);
     // And a record with a contact and no level. Folding it into `unassigned`
     // would say nobody owns it; dropping it would leave the table short of the
     // project's own total.
-    expect(project.contactsOutstanding.noLevel.records).toBe(1);
+    expect(owed.contactsOutstanding.noLevel.records).toBe(1);
     // Its questions may be TIERED even so: where Matthew's matrix covers the
     // category it answers without a level, because his matrix carries no level
     // column. `groupByContact` still holds the record back — the level is what
     // the BWS boilerplate reads — so the bucket has to count all three columns
     // rather than assume a level-less record is untiered.
-    const bucket = project.contactsOutstanding.noLevel;
+    const bucket = owed.contactsOutstanding.noLevel;
     expect(bucket.toQuote + bucket.alsoOutstanding + bucket.noTier).toBeGreaterThan(0);
   });
 
@@ -218,6 +237,21 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     // `__QAMOR005` are one code on both pages.
     expect(project.unlinkedFinishCodes).toEqual(library.unlinked);
     expect(project.unlinkedFinishCodes.map((row) => row.code)).toContain("__QAMOR005");
+  });
+
+  it("names the designer codes its records carry, with the item count behind each", async () => {
+    // THE OVERVIEW USED TO READ THESE OFF /api/records, which loads every
+    // outstanding question and every sent coverage row for the whole project
+    // to compute a Waiting column the overview never renders — so the screen
+    // ran `loadOutstanding` twice. A group-by is the right shape here and is
+    // not a second copy of anything: a designer code carries no staleness
+    // rule, no tier and no gate.
+    const project = await readProject();
+    // Two records carry 'qahay' (the contact's) and one carries 'QANOBODY',
+    // and the fold is the panel's own: trimmed and upper-cased, so a record
+    // written 'qahay' and one written 'QAHAY' are one code.
+    expect(project.designerCodes.QAHAY).toBe(2);
+    expect(project.designerCodes.QANOBODY).toBe(1);
   });
 
   it("counts the documents that could not be read", async () => {

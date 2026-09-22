@@ -1,7 +1,7 @@
 // The checklist tab: four tiles that filter, and a right-hand column that is
 // the next action rather than provenance alone.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RecordChecklist, {
   type ChecklistAnswer,
@@ -31,15 +31,28 @@ const ANSWERS: ChecklistAnswer[] = [
   answer({ requirement_id: "q4", prompt: "Delivery week", state: "na", section: "Commercial" }),
 ];
 
-const ATTRIBUTES: ChecklistAttribute[] = [
-  {
-    json_id: 3,
-    dimension_slot: "W",
-    finish_state: null,
-    source_run_id: "run-1",
-    source_page: 4,
-    source_filename: "Issue A.pdf",
-  },
+const attribute = (over: Partial<ChecklistAttribute> = {}): ChecklistAttribute => ({
+  json_id: 3,
+  dimension_slot: "W",
+  value: "720",
+  unit: "mm",
+  state: "confirmed",
+  finish_state: null,
+  source_run_id: "run-1",
+  source_page: 4,
+  source_filename: "Issue A.pdf",
+  ...over,
+});
+
+const ATTRIBUTES: ChecklistAttribute[] = [attribute()];
+
+/** Matthew's rows 4-7: one BWS id, four slots. Row 32 re-checks the whole cell. */
+const DIMENSION_MATRIX = [
+  { gate: "TGQ" as const, jsonId: 3, localKey: null, fieldName: "Width - W", dimensionSlot: "W" as const },
+  { gate: "TGQ" as const, jsonId: 3, localKey: null, fieldName: "Depth - D", dimensionSlot: "D" as const },
+  { gate: "TGQ" as const, jsonId: 3, localKey: null, fieldName: "Height - H", dimensionSlot: "H" as const },
+  { gate: "TGQ" as const, jsonId: 3, localKey: null, fieldName: "Seat height - SH", dimensionSlot: "SH" as const },
+  { gate: "TG1" as const, jsonId: 3, localKey: null, fieldName: "Dimensions confirmed", dimensionSlot: null },
 ];
 
 const READINESS = {
@@ -53,6 +66,7 @@ const READINESS = {
 
 function renderChecklist(over: Partial<Parameters<typeof RecordChecklist>[0]> = {}) {
   const onSave = vi.fn();
+  const onRecordDimension = vi.fn().mockResolvedValue(true);
   render(
     <RecordChecklist
       recordId="rec-1"
@@ -61,8 +75,8 @@ function renderChecklist(over: Partial<Parameters<typeof RecordChecklist>[0]> = 
       level="simple"
       tgqMatrix={null}
       matrixFields={[
-        { gate: "TGQ", jsonId: 3, localKey: null, fieldName: "Dimensions" },
-        { gate: "TG1", jsonId: 3, localKey: null, fieldName: "Dimensions" },
+        { gate: "TGQ", jsonId: 3, localKey: null, fieldName: "Dimensions", dimensionSlot: null },
+        { gate: "TG1", jsonId: 3, localKey: null, fieldName: "Dimensions", dimensionSlot: null },
       ]}
       palettes={[]}
       paletteByQuestion={[]}
@@ -72,11 +86,13 @@ function renderChecklist(over: Partial<Parameters<typeof RecordChecklist>[0]> = 
       readiness={READINESS}
       savingId={null}
       reloadKey={0}
+      dimensionNote={null}
       onSave={onSave}
+      onRecordDimension={onRecordDimension}
       {...over}
     />,
   );
-  return { onSave };
+  return { onSave, onRecordDimension };
 }
 
 describe("the record checklist", () => {
@@ -352,5 +368,173 @@ describe("the checklist reached by an anchor", () => {
       }),
     ).not.toThrow();
     expect(screen.getByText("Something new")).toBeInTheDocument();
+  });
+});
+
+// ============================================================================
+// THE DIMENSIONS ROW IS ANSWERED SLOT BY SLOT, AND NEVER IN A BOX
+//
+// FIU 2026-09-21, the most consequential finding in the file: the Answer cell
+// was a plain text box, `W1900 x D1400mm` was typed into it and marked
+// Confirmed on an item with no height and no seat height, and the TGQ tile
+// read 0. The string carries no W/D/H/SH, so nothing downstream could say the
+// other two were never taken — and a typed answer is written `manual`, which
+// puts the cell out of reach of every later drawing or email confirm.
+//
+// These hold the screen's half: the box is gone, the slots are listed with
+// what the category needs, and a value somebody already typed is NAMED rather
+// than replaced.
+// ============================================================================
+describe("the checklist's Dimensions row", () => {
+  const DIMENSIONS_ONLY = [
+    answer({ requirement_id: "q1", prompt: "Dimensions", json_id: 3, state: "confirmed", value: "W1900 x D1400mm" }),
+  ];
+  const READY = { ...READINESS, toQuote: 0, alsoOutstanding: 0, outstanding: 0, settled: 1, notApplicable: 0 };
+
+  const renderDimensions = (over: Partial<Parameters<typeof RecordChecklist>[0]> = {}) =>
+    renderChecklist({
+      answers: DIMENSIONS_ONLY,
+      readiness: READY,
+      matrixFields: DIMENSION_MATRIX,
+      attributes: [
+        attribute({ dimension_slot: "W", value: "1900" }),
+        attribute({ dimension_slot: "D", value: "1400" }),
+      ],
+      ...over,
+    });
+
+  it("offers the five slots and NO free-text box for the composed cell", () => {
+    renderDimensions();
+    // The cell is a projection, so it is shown and not edited — once as the
+    // answer on record, once as what the slots now compose to. They can
+    // legitimately differ, which is why both are printed.
+    expect(screen.getAllByText("W1900 x D1400mm")).toHaveLength(2);
+    expect(screen.queryByPlaceholderText("Value")).not.toBeInTheDocument();
+    const slots = screen.getByLabelText("Which dimension of Dimensions");
+    for (const label of ["Width", "Depth", "Height", "Seat height", "Diameter"]) {
+      expect(within(slots).getByRole("option", { name: new RegExp(`^${label}`) })).toBeInTheDocument();
+    }
+    // A slot already on record cannot be recorded twice.
+    expect(within(slots).getByRole("option", { name: /Width — already recorded/ })).toBeDisabled();
+  });
+
+  it("marks the slots MATTHEW'S MATRIX asks of this category, and counts what is on record", () => {
+    renderDimensions();
+    // W and D are on record; H and SH are named as missing, Dia is not asked.
+    expect(screen.getByText("2 of the 4 this item needs are on record")).toBeInTheDocument();
+    const list = screen.getByRole("list", { name: "Dimension slots for Dimensions" });
+    const items = within(list)
+      .getAllByRole("listitem")
+      .map((node) => node.textContent?.replace(/\s+/g, " ").trim());
+    expect(items).toEqual([
+      "Width 1900mm",
+      "Depth 1400mm",
+      "Height not measured",
+      "Seat height not measured",
+      "Diameter —",
+    ]);
+  });
+
+  it("requires NONE where his matrix does not reach the category, and says why", () => {
+    // `gatesForRecord`'s rule in a second place: null is not an empty set.
+    // "All four, always" would report a missing seat height on a bedside table.
+    renderDimensions({ matrixFields: null });
+    const list = screen.getByRole("list", { name: "Dimension slots for Dimensions" });
+    expect(within(list).queryByText("not measured")).not.toBeInTheDocument();
+    expect(screen.queryByText(/this item needs are on record/)).not.toBeInTheDocument();
+    expect(screen.getByText(/matrix does not cover this category/)).toBeInTheDocument();
+    // Still five slots to record, because nothing says they are wrong.
+    expect(within(list).getAllByRole("listitem")).toHaveLength(5);
+  });
+
+  it("NAMES a value somebody typed with nothing behind it, and does not overwrite it", () => {
+    // A person's own statement. Their next Record supersedes it; nothing else.
+    renderDimensions({
+      attributes: [],
+      answers: [
+        answer({
+          requirement_id: "q1",
+          prompt: "Dimensions",
+          json_id: 3,
+          state: "confirmed",
+          value: "W1900 x D1400mm",
+          source_kind: "manual",
+        }),
+      ],
+    });
+    // ONCE only: there is nothing measured for the composer to work from, and
+    // the gap between the two is the whole finding.
+    expect(screen.getAllByText("W1900 x D1400mm")).toHaveLength(1);
+    expect(screen.getByText("typed, with no measurements behind it")).toBeInTheDocument();
+    expect(screen.getByText("0 of the 4 this item needs are on record")).toBeInTheDocument();
+    // Nothing on the row can rewrite it: there is no box, and no control that
+    // clears it.
+    expect(screen.queryByPlaceholderText("Value")).not.toBeInTheDocument();
+  });
+
+  it("writes a slot, a figure and a unit — an ATTRIBUTE, never the answer", async () => {
+    const user = userEvent.setup();
+    const { onSave, onRecordDimension } = renderDimensions();
+    await user.selectOptions(screen.getByLabelText("Which dimension of Dimensions"), "H");
+    await user.type(screen.getByLabelText("Figure for Dimensions"), "760");
+    await user.click(screen.getByRole("button", { name: "Record" }));
+    expect(onRecordDimension).toHaveBeenCalledWith({ slot: "H", value: "760", unit: "mm" });
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("disables itself while the write is in flight, so one slot is not posted twice", async () => {
+    const user = userEvent.setup();
+    let release: (ok: boolean) => void = () => {};
+    const onRecordDimension = vi.fn().mockReturnValue(new Promise<boolean>((resolve) => (release = resolve)));
+    renderDimensions({ onRecordDimension });
+    await user.selectOptions(screen.getByLabelText("Which dimension of Dimensions"), "H");
+    await user.type(screen.getByLabelText("Figure for Dimensions"), "760");
+    await user.click(screen.getByRole("button", { name: "Record" }));
+    // A second click before the first returns would post H twice, and the
+    // second is refused as `slot_occupied` — which reads as a defect.
+    expect(await screen.findByRole("button", { name: "Recording…" })).toBeDisabled();
+    expect(onRecordDimension).toHaveBeenCalledTimes(1);
+    await act(async () => release(true));
+    expect(await screen.findByRole("button", { name: "Record" })).toBeInTheDocument();
+  });
+
+  it("DERIVES the state and does not offer it: the cell's state is a projection too", () => {
+    renderDimensions();
+    // No select on this row. A select here is the same hole the free-text box
+    // was, reached by a different control: Confirmed over two of four slots,
+    // written `manual`, and the cell locked out of every recomposition.
+    expect(screen.queryByLabelText("State of Dimensions")).not.toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+    expect(screen.getByText("follows the measurements")).toBeInTheDocument();
+    // Every other question keeps its control, because TBC and N/A are real
+    // answers to a question a person answers.
+    renderChecklist({ readiness: { ...READINESS, toQuote: 0 } });
+    expect(screen.getByLabelText("State of Seat upholstery build")).toBeInTheDocument();
+  });
+
+  it("says when the state was SET BY HAND, and that it no longer follows the slots", () => {
+    // The sandbox's one real row: a confirmed cell somebody typed, with two of
+    // four slots underneath it that it can never be recomposed from.
+    renderDimensions({
+      answers: [
+        answer({
+          requirement_id: "q1",
+          prompt: "Dimensions",
+          json_id: 3,
+          state: "confirmed",
+          value: "W1900 x D1400mm x H1000m",
+          source_kind: "manual",
+        }),
+      ],
+    });
+    expect(screen.getByText("set by hand")).toBeInTheDocument();
+    expect(screen.getByText("typed — it no longer follows the measurements below")).toBeInTheDocument();
+    // And the slots still say what is actually measured.
+    expect(screen.getByText("2 of the 4 this item needs are on record")).toBeInTheDocument();
+  });
+
+  it("keeps the composed cell honest: it is the app's one composer, note and all", () => {
+    renderDimensions({ dimensionNote: "1250 L-shaped return" });
+    expect(screen.getByText("W1900 x D1400mm (1250 L-shaped return)")).toBeInTheDocument();
   });
 });

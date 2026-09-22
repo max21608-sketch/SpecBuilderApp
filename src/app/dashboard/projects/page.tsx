@@ -290,7 +290,6 @@ function ProjectsView() {
             tone={totals.toQuote > 0 ? "danger" : "good"}
             value={totals.toQuote}
             meaning={`across ${totals.withWork} project${totals.withWork === 1 ? "" : "s"}`}
-            action={totals.withWork > 0 ? "show those projects" : undefined}
             onPress={totals.withWork > 0 ? () => setFocus(focus === "to_quote" ? null : "to_quote") : undefined}
             active={focus === "to_quote"}
           />
@@ -299,7 +298,6 @@ function ProjectsView() {
             tone={totals.overdue > 0 ? "danger" : "plain"}
             value={totals.overdue}
             meaning="past specs-agreed-by"
-            action={totals.overdue > 0 ? "show them" : undefined}
             onPress={totals.overdue > 0 ? () => setFocus(focus === "overdue" ? null : "overdue") : undefined}
             active={focus === "overdue"}
           />
@@ -308,7 +306,6 @@ function ProjectsView() {
             tone="info"
             value={totals.waiting}
             meaning="chases sent, nothing back"
-            action={totals.waiting > 0 ? "show them" : undefined}
             onPress={totals.waiting > 0 ? () => setFocus(focus === "waiting" ? null : "waiting") : undefined}
             active={focus === "waiting"}
           />
@@ -323,7 +320,6 @@ function ProjectsView() {
             value={unplacedMail}
             meaning="could not be auto-assigned"
             href="/dashboard/inbox"
-            action="open the inbox"
           />
         </div>
       )}

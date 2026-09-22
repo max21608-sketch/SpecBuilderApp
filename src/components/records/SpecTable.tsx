@@ -66,7 +66,20 @@ export type SpecRecord = {
   id: string; record_no: number; item_description: string; product_reference: string | null;
   status: string; retired_at: string | null; retired_by: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
-  refs: string | null; run_id: string; run_name: string; attribute_count: string;
+  /**
+   * EVERY ref system this record holds. Searchable, and NOT what the Code
+   * column prints: see `client_code`.
+   */
+  refs: string | null;
+  /**
+   * The `boq_code` refs, read through a configuration's parent — the export's
+   * own Client Code clause, identically. The Code column prints THIS, because
+   * the column is a claim about what the file will carry and `refs` is not:
+   * a record holding only a `bws_job` ref used to show that job number here
+   * and ship a blank code.
+   */
+  client_code: string | null;
+  run_id: string; run_name: string; attribute_count: string;
   /** A fabric split (0024): the bill line this configuration belongs to. */
   parent_id: string | null;
   variant_label: string | null;
@@ -212,6 +225,32 @@ function NoClientRef() {
       title="No client ref on this record, so the export ships a blank Client Code. Nothing is invented."
     >
       no client ref
+    </span>
+  );
+}
+
+/**
+ * The refs a record holds that are NOT its client code.
+ *
+ * `spec_record_refs` carries five systems and the export's Client Code is one
+ * of them, so a `bws_job` number, a `design_code` or a `cos_code` has nowhere
+ * else on this screen to be. Printing them inside the Code cell would be the
+ * defect again; printing them beneath it, named as what they are, keeps the
+ * column a true statement about the file and loses nothing.
+ */
+function OtherRefs({ clientCode, refs }: { clientCode: string | null; refs: string | null }) {
+  const client = new Set((clientCode ?? "").split(",").map((part) => part.trim()).filter(Boolean));
+  const others = (refs ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part && !client.has(part));
+  if (others.length === 0) return null;
+  return (
+    <span
+      className="block font-sans text-xs text-neutral-500"
+      title="Other refs on this record. The export's Client Code carries the client's BOQ code only."
+    >
+      also {others.join(", ")}
     </span>
   );
 }
@@ -441,6 +480,7 @@ export default function SpecTable({
     toQuote: records.reduce((sum, record) => sum + (record.to_quote_outstanding ?? 0), 0),
     toQuoteItems: records.filter((record) => (record.to_quote_outstanding ?? 0) > 0).length,
     waiting: records.reduce((sum, record) => sum + (record.waiting ?? 0), 0),
+    waitingItems: records.filter((record) => (record.waiting ?? 0) > 0).length,
     noCategory: records.filter((record) => !record.category_name).length,
     noLevel: records.filter((record) => !record.level).length,
     // TGQ SATISFIED, which is a smaller claim than "nothing outstanding" and
@@ -533,21 +573,43 @@ export default function SpecTable({
           narrowing the screen can never make a run look finished. */}
       {records.length > 0 && (
         <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-5">
+          {/* ==================================================================
+              EVERY TILE ON THIS STRIP COUNTS ITEMS, BECAUSE THAT IS WHAT
+              PRESSING ONE LISTS.
+
+              TGQ printed 1,879 and Waiting printed a question count, while
+              every `focus` predicate below selects RECORDS — so pressing TGQ
+              on a 118-item phase said 1,879 and produced 103 rows. Two
+              readings of one control, on the screen people judge a phase by.
+
+              It is also the same word on two screens one click apart: the
+              overview's TGQ tile is a LINK to this one, and since 2026-09-21
+              it counts items. "They are the same question, and two names for
+              it is how a reader comes to believe they are two measurements" —
+              which this file already records about TGQ, and which a reader
+              would have hit immediately. Max: "can it be TGQ referencing line
+              items, not individual questions?"
+
+              The QUESTION count is not lost and must not be: it is what a
+              chase asks for, it is what the header's Chase button counts, and
+              it is the second half of each sub-line. `RunTally` still hands
+              the header both, unchanged.
+              ================================================================== */}
           <StatTile
             label="TGQ"
             tone="danger"
-            value={tally.toQuote}
-            meaning={`${tally.toQuoteItems} of ${records.length} item${records.length === 1 ? "" : "s"}`}
-            action={focus === "tgq" ? "showing these" : "show only these"}
+            value={tally.toQuoteItems}
+            meaning={`of ${records.length} item${records.length === 1 ? "" : "s"} · ${tally.toQuote.toLocaleString()} question${
+              tally.toQuote === 1 ? "" : "s"
+            }`}
             onPress={() => setFocus(focus === "tgq" ? null : "tgq")}
             active={focus === "tgq"}
           />
           <StatTile
             label="Waiting on a reply"
             tone="warn"
-            value={tally.waiting}
-            meaning="chased, nothing back"
-            action="filter"
+            value={tally.waitingItems}
+            meaning={`${tally.waiting.toLocaleString()} question${tally.waiting === 1 ? "" : "s"} asked, nothing back`}
             onPress={() => setFocus(focus === "waiting" ? null : "waiting")}
             active={focus === "waiting"}
           />
@@ -556,7 +618,6 @@ export default function SpecTable({
             tone={tally.noCategory > 0 ? "warn" : "plain"}
             value={tally.noCategory}
             meaning="no questions at all"
-            action="filter"
             onPress={() => setFocus(focus === "no_category" ? null : "no_category")}
             active={focus === "no_category"}
           />
@@ -565,7 +626,6 @@ export default function SpecTable({
             tone={tally.noLevel > 0 ? "warn" : "plain"}
             value={tally.noLevel}
             meaning={suggestedLevels > 0 ? `${suggestedLevels} have a suggestion` : "nothing suggested"}
-            action="filter"
             onPress={() => setFocus(focus === "no_level" ? null : "no_level")}
             active={focus === "no_level"}
           />
@@ -578,7 +638,6 @@ export default function SpecTable({
             tone="good"
             value={tally.readyToQuote}
             meaning="TGQ satisfied"
-            action="filter"
             onPress={() => setFocus(focus === "quotable" ? null : "quotable")}
             active={focus === "quotable"}
           />
@@ -788,16 +847,27 @@ export default function SpecTable({
                         mono
                         className={`font-medium ${retired ? "text-neutral-400 line-through" : "text-neutral-900"}`}
                       >
+                        {/* THE CODE COLUMN SAYS WHAT THE FILE WILL SAY. It
+                            printed `refs` — every ref system — while the
+                            export's Client Code is `boq_code` alone, so a
+                            record carrying only a `bws_job` ref showed a code
+                            here and exported a blank one, and `NoClientRef`
+                            never fired on the one row it exists for. Any OTHER
+                            ref the record holds is still printed, apart and
+                            labelled, because it is real and this screen is the
+                            only place it shows. `client_code` already reads
+                            through a configuration's parent. */}
                         {isConfiguration ? (
                           <span className="text-neutral-500">
-                            {record.parent_refs ?? record.refs ?? <NoClientRef />}{" "}
+                            {record.client_code ?? <NoClientRef />}{" "}
                             {/* THE LETTER, coloured the way the review card
                                 colours it — A is sky on every screen. */}
                             <b className={letterColour(record.variant_label!)}>{record.variant_label}</b>
                           </span>
                         ) : (
-                          (record.refs ?? <NoClientRef />)
+                          (record.client_code ?? <NoClientRef />)
                         )}
+                        <OtherRefs clientCode={record.client_code} refs={record.refs} />
                       </Td>
                       <Td className={isConfiguration ? "pl-6" : ""}>
                         <Link

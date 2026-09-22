@@ -46,6 +46,20 @@ type Payload = {
     noLevel: boolean;
   };
   matrixFields: { matrixRow: number; gate: string; fieldName: string }[] | null;
+  record: { id: string; has_image: boolean };
+  /**
+   * DELIBERATELY TYPED THE WAY THE DATABASE COULD ANSWER, not the way the
+   * screen's own type does. `Answer.state` in `dashboard/records/[id]/page.tsx`
+   * says `AnswerState` -- non-null -- and nothing but the route's coalesce
+   * makes that true. A fixture that asserted a non-null type would be asserting
+   * its own cast.
+   */
+  answers: {
+    requirement_id: string;
+    answer_id: string | null;
+    state: string | null | undefined;
+    value: string | null;
+  }[];
 };
 
 describeIfDb("record payload — waiting, who to ask, and quote readiness", () => {
@@ -295,6 +309,62 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
     expect(levellessPayload.quoteReadiness.outstanding).toBeGreaterThan(0);
   });
 
+  // ==========================================================================
+  // A QUESTION WITH NO ANSWER ROW IS `missing`, AND ONLY THIS HOLDS IT.
+  //
+  // The payload's `state` is typed `AnswerState` -- non-null -- and the ONLY
+  // thing making that true is `coalesce(a.state, 'missing')` in the route. The
+  // query drives off `requirements` with a LEFT JOIN to `spec_answers`, so a
+  // requirement added to a category AFTER a record was categorised has no
+  // answer row at all; before the coalesce it came back `state: null`, every
+  // filtered view of the checklist dropped the row silently, and the `#q-`
+  // anchor path -- which clears the filter so the target is on the page --
+  // reached `TONE[ANSWER_STATE_TONE[null]].chip` and took the record screen
+  // WHITE (fixed at both ends in `be8539d`; this is the half that was left
+  // open).
+  //
+  // A type cannot hold it, which is why this is a route test and not a
+  // narrower one: deleting the coalesce compiles, and only a real LEFT JOIN
+  // over a real requirement with no answer shows it.
+  // ==========================================================================
+  it("answers a requirement with NO spec_answers row as missing, never as null", async () => {
+    const payload = await read(chasedRecordId);
+    expect(payload.answers.length).toBeGreaterThan(0);
+
+    // The fixture's chased question deliberately has no answer row — the
+    // commonest thing on a real record, and exactly the shape that crashed.
+    const noRow = payload.answers.find((answer) => answer.requirement_id === chasedRequirementId);
+    expect(noRow).toBeTruthy();
+    expect(noRow?.answer_id).toBeNull();
+    expect(noRow?.state).toBe("missing");
+
+    // And the row that HAS one is untouched: the coalesce must not be reading
+    // over a real state.
+    const settled = payload.answers.find((answer) => answer.requirement_id === settledRequirementId);
+    expect(settled?.answer_id).not.toBeNull();
+    expect(settled?.state).toBe("confirmed");
+  });
+
+  it("holds the payload's own type: no answer on any record carries a null state", async () => {
+    // THE WHOLE PAYLOAD, not one row. A single-row assertion passes over a
+    // question shape nobody wrote a fixture for, and the defect was a shape
+    // nobody had a fixture for. Every record the file makes is read.
+    const states = new Set<unknown>();
+    for (const recordId of [chasedRecordId, levellessRecordId]) {
+      const payload = await read(recordId);
+      for (const answer of payload.answers) {
+        expect(answer.state, `requirement ${answer.requirement_id} came back with no state`).not.toBeNull();
+        expect(answer.state).not.toBeUndefined();
+        states.add(answer.state);
+      }
+    }
+    // And what comes back is the controlled vocabulary, not some third thing.
+    const { ANSWER_STATES } = await import("@/lib/spec-vocab");
+    for (const state of states) expect(ANSWER_STATES as readonly string[]).toContain(state as string);
+    // A guard that read zero answers would pass for ever.
+    expect(states.size).toBeGreaterThan(0);
+  });
+
   it("returns no matrix rows for a category his matrix does not cover", async () => {
     const payload = await read(chasedRecordId);
     // Null, never an empty list: an empty list computes as "nothing
@@ -324,5 +394,30 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
     // A mapped category answers without a level, so this one is tiered even
     // though nobody set a level on it — his matrix carries no level column.
     expect(payload.quoteReadiness.noLevel).toBe(false);
+  });
+
+  // ---- the picture the screen used to find out about by being refused -------
+  //
+  // The record page rendered the image route unconditionally and turned the
+  // picture off on the 404, so every record with no crop logged an EXPECTED
+  // 404 (found-in-use 2026-09-20). The payload now says, and it costs no round
+  // trip because the screen loads this payload anyway.
+  it("says a record with no crop has no image, without anybody asking for one", async () => {
+    const payload = await read(chasedRecordId);
+    expect(payload.record.has_image).toBe(false);
+  });
+
+  it("says a record WITH a crop has one", async () => {
+    await client.query(
+      `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, uploaded_by)
+       values ('spec_records', $1, 'item_image', $2, '__QA crop.png', 'image/png', 'qa')`,
+      [chasedRecordId, `projects/${projectId}/__qa-crop.png`],
+    );
+    const payload = await read(chasedRecordId);
+    expect(payload.record.has_image).toBe(true);
+    await client.query(
+      `delete from attachments where entity_type = 'spec_records' and entity_id = $1 and kind = 'item_image'`,
+      [chasedRecordId],
+    );
   });
 });

@@ -70,6 +70,7 @@ import { formatDay } from "@/lib/format-day";
 import {
   allQuestions,
   countOutstanding,
+  finishOptionQtyLabel,
   groupIntoLines,
   type FurnitureLine,
   type GroupableQuestion,
@@ -595,6 +596,15 @@ export default function ChaseQuestionTable({
             <span className="text-sm text-neutral-500">
               {preselection.preselected} to-quote question{preselection.preselected === 1 ? "" : "s"} preselected ·{" "}
               {preselection.alsoOutstanding} also outstanding, not selected
+              {/* THE THIRD BUCKET. The lines' own counts include a question
+                  already asked, because it is still outstanding; the
+                  preselection excludes it, because asking again by default is
+                  not what anybody meant. Both numbers are right and only two of
+                  the three sets were named, so the columns read 71 beside a
+                  button saying 70. */}
+              {preselection.awaitingReply > 0 && (
+                <> · {preselection.awaitingReply} awaiting a reply, not selected</>
+              )}
             </span>
           )}
           {hiddenSelected > 0 && (
@@ -831,8 +841,12 @@ function LineRows({
                     {option.name.slice(0, option.name.length - option.label.length)}
                     <b className={letterColour(option.label)}>{option.label}</b>
                   </span>
-                  {/* The bill says 45 and never says how many are fabric A. */}
-                  <span className="text-neutral-500"> · quantity not allocated</span>
+                  {/* The bill says 45 and never says how many are fabric A —
+                      but a person CAN set a configuration's own quantity
+                      (0028), and this said "not allocated" whatever the row
+                      held. Nothing is apportioned either way: the number is
+                      read, never divided. */}
+                  <span className="text-neutral-500"> · {finishOptionQtyLabel(option.qty)}</span>
                 </Td>
                 <Td num className="text-neutral-400">—</Td>
                 <Td />

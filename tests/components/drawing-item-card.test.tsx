@@ -154,7 +154,11 @@ describe("the unit control", () => {
     renderCard([observationNote()]);
     const row = rowFor("SUBMIT SHOP DRAWINGS FOR REVIEW");
     expect(within(row).queryByRole("option", { name: "mm" })).toBeNull();
-    expect(within(row).getByText("—")).toBeInTheDocument();
+    // It used to assert the em-dash placeholder the Unit COLUMN printed here.
+    // The column is gone -- it was 99px of em-dash on every row that is not a
+    // measurement, and losing it is what stopped the card being clipped -- so
+    // the unit is simply absent, which says the same thing more quietly.
+    expect(within(row).queryByLabelText("Unit")).toBeNull();
   });
 
   it("offers the bulk mm/cm control whenever the page holds a measurement", () => {
@@ -169,6 +173,62 @@ describe("the unit control", () => {
 function observationNote() {
   return figure("REMARKS", "SUBMIT SHOP DRAWINGS FOR REVIEW", { attrGroup: "note" });
 }
+
+describe("the table's width", () => {
+  // WHY THIS IS TESTED AT ALL. The card was CLIPPED on a full-width monitor:
+  // `PageBody` caps at 1400px and the picture sidebar takes a fixed 300 of it,
+  // so the table gets ~1010px at 1920 AND at 1440, while seven columns wanted
+  // up to 1091. What fell off the edge was the ACTION column, which carries no
+  // heading -- so nothing in the header row went missing to say so and *Ignore*
+  // was reachable only by scrolling sideways. jsdom lays nothing out, so the
+  // widths themselves are a browser check (done, both sizes, on a real staged
+  // Panther run). What CAN be held here is the count: one column fewer is what
+  // bought the room, and a `colSpan` that does not match it is the trap that
+  // squeezed the replace acknowledgement into a ribbon once already.
+  it("has six columns, and every spanning panel covers all six", () => {
+    resetIds();
+    const rows = [
+      figure("FRONT", "640", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm" }),
+      observationNote(),
+    ];
+    renderCard(rows, {
+      blockers: [{ code: "unit_missing", message: "Choose millimetres or centimetres.", observationId: rows[0]!.id }],
+    });
+    const headings = screen.getAllByRole("columnheader");
+    expect(headings).toHaveLength(6);
+    expect(headings.map((cell) => cell.textContent?.trim())).toEqual([
+      "Group",
+      "Label",
+      "Value",
+      "Dimension / BWS field",
+      "State",
+      "",
+    ]);
+
+    // A spanning panel is its OWN `<tr>` with ONE cell, and that cell spans
+    // every column. Short and the panel stops before the last column; long and
+    // the row is wider than the table it is in.
+    const spanning = [...document.querySelectorAll("td[colspan]")];
+    expect(spanning.length).toBeGreaterThan(0);
+    for (const cell of spanning) {
+      expect(cell.getAttribute("colspan")).toBe("6");
+      expect(cell.parentElement?.children).toHaveLength(1);
+    }
+  });
+
+  it("keeps the unit beside the figure it belongs to, with its provenance", () => {
+    // It was a column of its own. Folded into the value cell, the select and
+    // the sentence that says where the unit came from have to travel with it --
+    // "printed on the page" is not decoration, it is the difference between a
+    // measurement and a guess.
+    resetIds();
+    renderCard([figure("FRONT", "640", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm", unitSource: "printed" })]);
+    const row = rowFor("640");
+    const valueCell = row.querySelectorAll("td")[2]!;
+    expect(within(valueCell).getByLabelText("Unit")).toHaveValue("mm");
+    expect(within(valueCell).getByText("printed on the page")).toBeInTheDocument();
+  });
+});
 
 describe("confirming", () => {
   it("is refused while a blocker stands, and says how many specs it would write", () => {

@@ -44,9 +44,9 @@ export default function DesignShowcase() {
 
       <Card title="2 · A summary tile is a filter">
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-          <StatTile label="TGQ" value={312} meaning="across 38 items" action="showing these" tone="danger" active={filter === "tgq"} onPress={() => setFilter(filter === "tgq" ? null : "tgq")} />
-          <StatTile label="Also outstanding" value={1587} meaning="not blocking a quote" action="filter to these" tone="warn" onPress={() => setFilter(null)} />
-          <StatTile label="Settled" value={641} meaning="confirmed or N/A" action="filter to these" tone="good" onPress={() => setFilter(null)} />
+          <StatTile label="TGQ" value={312} meaning="across 38 items" tone="danger" active={filter === "tgq"} onPress={() => setFilter(filter === "tgq" ? null : "tgq")} />
+          <StatTile label="Also outstanding" value={1587} meaning="not blocking a quote" tone="warn" onPress={() => setFilter(null)} />
+          <StatTile label="Settled" value={641} meaning="confirmed or N/A" tone="good" onPress={() => setFilter(null)} />
         </div>
         <div className="mt-3 flex items-center gap-2 text-xs text-neutral-500">
           {filter && (
@@ -54,7 +54,11 @@ export default function DesignShowcase() {
               <Chip tone="danger">TGQ ✕</Chip>
             </button>
           )}
-          <span>The tile you are on is outlined; the filter is repeated as a chip you can remove. A filter narrows what is LISTED, never what is asked or what an edit touches.</span>
+          <span>
+            Three rows, never four: the whole tile is the control, so it does not also say in words that it can be
+            pressed. The tile you are on is outlined; the filter is repeated as a chip you can remove. A filter
+            narrows what is LISTED, never what is asked or what an edit touches.
+          </span>
         </div>
       </Card>
 

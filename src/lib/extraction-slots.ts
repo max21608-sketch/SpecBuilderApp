@@ -71,13 +71,14 @@
 // the pack for ever — including for *Read all*, which is the recovery path,
 // and which would then defer every document it was pressed for.
 //
-// IT IS NOT A SWEEPER, AND THE HOLE IT LEAVES IS REAL. Nothing settles an
-// attempt that passes its deadline: the row stays `queued` with no worker
-// coming, which is a pre-existing hole (the screens offer *Restart*, and
-// `explainFailedClaim` names it). What this clause fixes is only that such a
-// row stops holding a slot. Nothing HANDS the slot on at the moment it
-// expires, so a pack whose three in-flight attempts all expire sits still
-// until somebody presses Read all or another of its documents settles.
+// IT IS NOT A SWEEPER, AND THE HOLE IT LEFT WAS REAL. What this clause does is
+// only that such a row stops HOLDING a slot; nothing here hands the slot on at
+// the moment it expires, so a pack whose three in-flight attempts all expired
+// sat still until somebody pressed *Read all*. That half is now
+// `src/lib/extraction-sweep.ts`, on an hourly cron: it closes the expired
+// attempt — fenced, and never by starting a read of its own — and then calls
+// `dispatchNextWaiting` below, which is why the hand-off protocol did not need
+// a second copy.
 //
 // ---- THE SCOPE IS THE PACK, AND AN EMAIL HAS NO PACK ----------------------
 //
@@ -179,6 +180,19 @@ export async function takeReadSlot(txn: TxnSql, scope: ReadScope): Promise<boole
  * decision: every caller holds the row already — the two registration paths
  * through their own insert, the extract route through `for update` — so a
  * no-match cannot happen and nothing is returned for a caller to check.
+ *
+ * A DEFERRAL ALREADY IN PLACE IS NOT EXTENDED, and that is the whole of the
+ * `case` below. The deadline is the marker's expiry as well as its identity:
+ * once it passes, the run is an ordinary unread document again, which is the
+ * resting state the whole design falls back to. Rewriting it on every press
+ * meant a document somebody pressed Read on twice a day never reached that
+ * state — *Read all* would go on skipping it as "already promised" and, now
+ * that a sweeper exists, nothing would ever find it either. So a run that is
+ * ALREADY marked keeps the deadline of the promise it is under; a fresh
+ * deferral — a `failed` run being retried, or a `pending` one whose marker has
+ * expired — gets a new one, because that is a new promise. The `set` list
+ * reads the row's OLD values, so the three conditions describe the row as it
+ * was before this statement.
  */
 export async function deferRead(txn: TxnSql, runId: string, actor: string): Promise<void> {
   await txn`
@@ -189,7 +203,11 @@ export async function deferRead(txn: TxnSql, runId: string, actor: string): Prom
         claim_count = 0,
         processing_started_at = null,
         error = null,
-        attempt_deadline_at = now() + make_interval(hours => ${ATTEMPT_DEADLINE_HOURS}),
+        attempt_deadline_at = case
+          when status = 'pending' and attempt_id is null and attempt_deadline_at > now()
+            then attempt_deadline_at
+          else now() + make_interval(hours => ${ATTEMPT_DEADLINE_HOURS})
+        end,
         updated_by = ${actor}
     where id = ${runId}
       and (status = 'failed' or (status = 'pending' and attempt_id is null))

@@ -287,6 +287,35 @@ function bareValuesAsList(wrap: (scalar: string) => unknown) {
 const looseTextList = (max: number, maxItems: number) =>
   z.preprocess(bareValuesAsList((scalar) => scalar), z.array(z.string().max(max)).max(maxItems)).default([]);
 
+/**
+ * The same rule for a list whose element CANNOT hold a bare value.
+ *
+ * `bareValuesAsList` keeps a scalar by wrapping it, because a dimension or a
+ * proposal has an obvious place to put one — the value, with nothing else
+ * claimed. A VIEW REGION has none: it is a box on a page, and a string is not a
+ * box, so wrapping one would have to invent a page or a bbox. A CODE GROUP has
+ * none either: it is a statement that these pages are one item or several, and
+ * a bare code carries no such statement.
+ *
+ * So the entry is DROPPED and its siblings are kept, which is the half that
+ * was missing. Both arrays sat behind `.catch([])` on the WHOLE list, so one
+ * malformed entry threw away every good one beside it — three usable view
+ * regions lost because a fourth came back as a string. Survivable (the card
+ * proposes no picture and the item stays whole) and recoverable, and it was
+ * not being recovered.
+ *
+ * The `.catch([])` STAYS behind this, for the case it was actually written
+ * for: an over-long array. What it can no longer be reached by is one bad
+ * entry.
+ */
+function objectEntriesAsList(value: unknown): unknown {
+  // Untouched, so an absent optional array stays absent rather than becoming
+  // an empty one that claims the model answered.
+  if (value === undefined || value === null) return value;
+  const list = Array.isArray(value) ? value : [value];
+  return list.filter((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry));
+}
+
 export const RawProposal = z.object({
   refRaw: nullableText(MAX_SHORT),
   attributeRaw: nullableText(MAX_SHORT),
@@ -832,7 +861,15 @@ export const RawDrawingItem = z.object({
   // Optional in the INFERRED type as well, like `unitRaw`: most callers and
   // every fixture describe an item that proposes no picture, and making them
   // write `viewRegions: []` to say the ordinary thing is noise.
-  viewRegions: z.array(RawViewRegion).max(MAX_VIEW_REGIONS).catch([]).optional(),
+  //
+  // `objectEntriesAsList` in front of it so ONE malformed region no longer
+  // takes its siblings with it. A region cannot hold a bare value, so a
+  // non-object entry is dropped rather than wrapped; the `.catch([])` behind
+  // it is still there for the over-long case it was written for.
+  viewRegions: z
+    .preprocess(objectEntriesAsList, z.array(RawViewRegion).max(MAX_VIEW_REGIONS))
+    .catch([])
+    .optional(),
 });
 
 export type RawDrawingItem = z.infer<typeof RawDrawingItem>;
@@ -852,7 +889,18 @@ export const DrawingsOutput = z.object({
   // has none, and a malformed group must leave the grouping unstated rather
   // than fail a paid call. Unstated means the reviewer is asked, which is the
   // safe end of this particular question.
-  codeGroups: z.array(RawCodeGroup).max(MAX_DRAWING_ITEMS).catch([]).optional(),
+  //
+  // `objectEntriesAsList` in front of it for the same reason as `viewRegions`:
+  // ONE malformed group used to leave the WHOLE document ungrouped, so a
+  // second page that names its item differently stopped being read as the same
+  // item. A bare entry is dropped rather than wrapped — a code on its own is
+  // not a statement about a relationship, and `relationship` would default to
+  // `unclear`, which letters nothing, so keeping it would add a group that
+  // says nothing while implying the model grouped something.
+  codeGroups: z
+    .preprocess(objectEntriesAsList, z.array(RawCodeGroup).max(MAX_DRAWING_ITEMS))
+    .catch([])
+    .optional(),
   documentNotes: nullableText(MAX_NOTE),
 });
 

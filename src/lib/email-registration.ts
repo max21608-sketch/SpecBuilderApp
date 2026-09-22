@@ -12,6 +12,45 @@
 // headers, or by a person from the inbox screen — is what starts the read, and
 // both screens say so.
 //
+// ---- AND IT OPENS NO CHANGE SET. DECIDED, NOT OVERLOOKED -----------------
+//
+// Since 2.11 the app assigns confidently routed mail itself, so a charged read
+// can start with nobody watching — and a charged read a person did not ask for
+// is exactly the kind of thing a trail ought to carry. It is still not a
+// `change_sets` row, for four reasons, and the fourth is the one that decides
+// it:
+//
+//   1. A change set is a change to a project's SPECIFICATION CONTENT — who,
+//      when, why, and the document that caused it — and `record_snapshots` is
+//      its output. Assignment writes none: it sets `email_messages.project_id`
+//      and inserts an `intake_runs` row. There is nothing to version, and the
+//      whole-database coverage assertion in `tests/db/change-history.test.ts`
+//      is built on a change and a version being the same fact.
+//   2. The email's EFFECT on the project already opens one. Confirming a
+//      proposal off it opens an `email_confirm` change whose
+//      `evidence_attachment_id` is the `.eml` itself, which is what answers
+//      "the client says they never asked for this". An assignment-time entry
+//      would be a second entry, for the same email, at a moment when nothing
+//      had changed.
+//   3. Most assigned mail records nothing — the inbox has a tab for exactly
+//      that outcome. A change set per arrival fills the project trail with
+//      entries for reads that changed nothing, on the one screen whose value
+//      is that a named baseline or a key date stands out from forty rows.
+//   4. What the gate asks is that the read be ACCOUNTED FOR, and it is, in a
+//      fuller way than a trail row: the inbox row says "assigned automatically"
+//      with the signal that decided and Unassign beside it; `audit_log` carries
+//      every write under `system:router` through `updated_by`; and the inbox
+//      tiles count the reads that FAILED, which is the half nobody could see
+//      before. The account belongs on the screen for mail, next to the control
+//      that undoes it.
+//
+// If that is overruled, the shape is an `email_assigned` kind opened inside
+// `assignInTransaction` (already a transaction), reason naming the sender, the
+// date and the subject, evidence the `.eml` this function attaches, actor
+// `system:router`. It costs a migration that re-lists the whole CHECK from the
+// LIVE constraint (the 0032 lesson) and a re-reading of the coverage test,
+// because such a change set would carry no version by design.
+//
 // ---- THE PROTOCOL IS THE DOCUMENT ONE, UNCHANGED -------------------------
 //
 // `openAttempt` inside the transaction that inserts the run; `publishAttempt`

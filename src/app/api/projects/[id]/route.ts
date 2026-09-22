@@ -20,7 +20,6 @@ import { loadProjectSummary } from "@/lib/project-summary";
 import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
 import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
-import { groupByContact, loadOutstanding, type ProjectContact } from "@/lib/chase-drafts";
 import { loadUnlinkedFinishCodes } from "@/lib/finishes";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
@@ -183,67 +182,27 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // the export's scope. They share that scope and nothing else.
   const summary = await loadProjectSummary(id);
 
-  // ---- who owes us what ----------------------------------------------------
+  // ---- who owes us what ---------------------------------------------------
   //
-  // The Contacts table's "Owes us" column. It is the CHASE SCREEN'S OWN
-  // grouping: `loadOutstanding` tiers every question through `questionTier`,
-  // and `groupByContact` decides which contact each record's free-text designer
-  // resolves to. Both are called here rather than reproduced, so this column
-  // and the chase screen cannot report different numbers for one contact —
-  // which is what would happen the moment a second copy of `designerKey`'s
-  // folding, or of the split-line predicate, drifted by a character.
+  // MOVED OUT, 2026-09-22, and the move is the fix rather than a tidy-up.
   //
-  // THREE BUCKETS, BECAUSE TWO WOULD NOT ADD UP. `groupByContact` also holds
-  // back a record with no LEVEL, which belongs to a contact and still cannot be
-  // chased; folding those into `unassigned` would say nobody owns them, and
-  // dropping them would leave the table short of the project's own total. The
-  // bucket a question falls in is read off `blocked`'s own reason, never
-  // re-decided here.
-  const contactRows = await sql`
-    select id, name, email, organisation, role, designer_code, version
-    from project_contacts where project_id = ${id} order by role, name
-  `;
-  const contacts: ProjectContact[] = contactRows.map((row) => ({
-    id: String(row.id),
-    name: String(row.name),
-    email: row.email === null || row.email === undefined ? null : String(row.email),
-    organisation: row.organisation === null || row.organisation === undefined ? null : String(row.organisation),
-    role: String(row.role) as ProjectContact["role"],
-    designerCode: row.designer_code === null || row.designer_code === undefined ? null : String(row.designer_code),
-    version: Number(row.version),
-  }));
-  const outstanding = await loadOutstanding(id);
-  const { groups, blocked } = groupByContact(outstanding, contacts);
-
-  // A tier of null is its own count. `questionTierOrNull` refuses to pick a
-  // reading where the fallback model has no level, so adding those into either
-  // column would be this route answering a question only a person can.
-  const tally = (questions: { tier: string | null }[]) => ({
-    toQuote: questions.filter((q) => q.tier === "to_quote").length,
-    alsoOutstanding: questions.filter((q) => q.tier === "later").length,
-    noTier: questions.filter((q) => q.tier === null).length,
-  });
-  const recordsWithNoContact = new Set(
-    blocked.filter((row) => row.reason !== "no level on the record").map((row) => row.recordId),
-  );
-  const recordsWithNoLevel = new Set(
-    blocked.filter((row) => row.reason === "no level on the record").map((row) => row.recordId),
-  );
-  const contactsOutstanding = {
-    byContact: groups.map((group) => ({
-      contactId: group.contact.id,
-      contactName: group.contact.name,
-      ...tally(group.questions),
-    })),
-    unassigned: {
-      ...tally(outstanding.filter((question) => recordsWithNoContact.has(question.recordId))),
-      records: blocked.filter((row) => row.reason !== "no level on the record").length,
-    },
-    noLevel: {
-      ...tally(outstanding.filter((question) => recordsWithNoLevel.has(question.recordId))),
-      records: recordsWithNoLevel.size,
-    },
-  };
+  // The tally is the CHASE SCREEN'S OWN grouping — `loadOutstanding` tiers
+  // every question through `questionTier` and `groupByContact` resolves each
+  // record's free-text designer — and it must stay those functions rather than
+  // a second copy, or this column and the chase screen report different numbers
+  // for one contact. That has not changed. What changed is WHEN it runs.
+  //
+  // Measured on the sandbox's 300-line project, 2026-09-22: `loadOutstanding`
+  // returns 19,655 questions and 19.2 MB to produce three integers per contact,
+  // and it was inside the request that paints the whole screen. The tiles, the
+  // documents, the phases and the notes waited on it. It is now
+  // `GET /api/projects/[id]/contacts-outstanding`, fetched alongside, and the
+  // Contacts table's "Owes us" column says it is still counting until it lands.
+  //
+  // Lazy, not cheaper: the same loader, the same grouping, the same numbers.
+  // The alternative — counting it in SQL — is the one thing that must not
+  // happen here, because `designerKey`'s folding and the split-line predicate
+  // would then exist twice.
 
   // The finishes library's own list, from the library's own function. Named
   // rather than counted, because an unlinked code is a job and a number is a
@@ -258,8 +217,43 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const failedDocuments = documents.filter((row) => String(row.status) === "failed").length;
 
   const record = rows[0] as Record<string, unknown>;
+  // THE DESIGNER CODES THIS PROJECT'S RECORDS CARRY, with the count of items
+  // behind each, for the contacts panel's "JGD is on 11 items and has no
+  // contact".
+  //
+  // It is HERE rather than read off `/api/records` — which is what the overview
+  // used to do — because that route loads every outstanding question and every
+  // sent coverage row for the whole project to compute a Waiting column this
+  // screen never renders. The overview was therefore running `loadOutstanding`
+  // TWICE, once in this route and once in that one: measured 2026-09-22 on the
+  // sandbox's 300-line project, 19,655 questions and 19.2 MB, to produce a
+  // handful of integers.
+  //
+  // A group-by is the right shape for this and not a second copy of anything.
+  // A designer code carries no staleness rule, no tier and no gate — it is a
+  // free-text column on the record, folded the way the panel already folds it
+  // (trimmed and upper-cased), and there is no second implementation to drift
+  // from. That is exactly what distinguishes it from the Waiting count, which
+  // stays in the loader.
+  //
+  // Scoped like the export: active records on active runs. A code that only a
+  // retired record carries is not a gap anybody has to fill.
+  const designerRows = await sql`
+    select upper(trim(r.designer)) as code, count(*)::int as n
+      from spec_records r
+      join spec_runs run on run.id = r.run_id
+     where r.project_id = ${id}
+       and r.status = 'active' and run.status = 'active'
+       and r.designer is not null and trim(r.designer) <> ''
+     group by upper(trim(r.designer))
+     order by upper(trim(r.designer))
+  `;
+  const designerCodes: Record<string, number> = {};
+  for (const row of designerRows) designerCodes[String(row.code)] = Number(row.n);
+
   return json({
     ok: true,
+    designerCodes,
     project: {
       ...record,
       order_date: asDate(record.order_date),
@@ -272,7 +266,6 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     documents,
     runs,
     notes,
-    contactsOutstanding,
     unlinkedFinishCodes,
     failedDocuments,
   });

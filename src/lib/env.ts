@@ -102,6 +102,57 @@ export function isSandboxDatabase(): boolean {
   return getEnvironment().databaseEnvironment === "sandbox";
 }
 
+// ============================================================================
+// SAYING SO, RATHER THAN DYING OF IT
+//
+// The guard above is a throw, and a throw inside a route handler is a BODYLESS
+// 500. On the first pilot deployment (2026-09-19) that is exactly what it was:
+// `/login` rendered with its PILOT chip, `/api/auth/me` answered a clean 401,
+// `/` redirected to login — and signing in returned a 500 with no body, because
+// the login POST is the first thing on a fresh deployment that touches `db.ts`.
+// A person went to look at the database string; the database was fine. The
+// deployment looked healthy on every page a signed-out person could reach.
+//
+// So the two things that meet somebody BEFORE they are signed in — the
+// middleware and the sign-in page — ask this instead of finding out by failing.
+// It is non-throwing, like the label readers below, and it names the two
+// variables and nothing else: the messages `getEnvironment` throws contain no
+// secret by construction, which is what makes them safe to print.
+//
+// ON PRODUCTION THE DETAIL IS WITHHELD, for the reason every other environment
+// detail is: the generic half already tells an administrator what to do, and
+// nobody debugging production is reading the sign-in page for it.
+// ============================================================================
+
+/** What a misconfigured deployment says instead of nothing at all. */
+export const ENVIRONMENT_MISCONFIGURED =
+  "This deployment is not configured correctly, so it cannot reach its database. " +
+  "An administrator has to set APP_ENV and DATABASE_ENVIRONMENT to a matching pair and redeploy.";
+
+/**
+ * The environment guard's own complaint, or null when the pair is fine.
+ *
+ * Never throws — that is the whole point of it.
+ */
+export function environmentProblem(): string | null {
+  try {
+    getEnvironment();
+    return null;
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+/**
+ * What to show a person, or null when there is nothing wrong. The detail is
+ * appended on every build except production.
+ */
+export function environmentProblemMessage(): string | null {
+  const problem = environmentProblem();
+  if (!problem) return null;
+  return currentAppEnvIsProduction() ? ENVIRONMENT_MISCONFIGURED : `${ENVIRONMENT_MISCONFIGURED} ${problem}`;
+}
+
 // Non-throwing read of APP_ENV, for cosmetic UI (banner/title) that must
 // never crash rendering or `next build` if the var isn't set yet — the real
 // enforcement (refusing to run) lives in getEnvironment() above, called from

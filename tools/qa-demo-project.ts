@@ -85,6 +85,7 @@ import { confirmPreambleNotes } from "@/lib/confirm-preamble";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { resolveProposals, PROPOSAL_SCHEMA_VERSION } from "@/lib/spec-document";
 import { recordMessage } from "@/lib/email-ingest";
+import { autoAssignDecision, describeAutoAssignment, ROUTER_ACTOR } from "@/lib/email-routing";
 import { createFinish } from "@/lib/finish-edit";
 import { openChangeSet } from "@/lib/change-sets";
 import { takeBaseline } from "@/lib/baselines";
@@ -910,7 +911,15 @@ say("drawings issue B", `${DRAWINGS_B.length} sheets staged, left on the reviewe
 //
 // Every message goes through `recordMessage`, so the inbox screen shows what
 // routing ACTUALLY decided rather than what this script hoped it would. The
-// five below are HELD: assignment is the spend point, and it stays a click.
+// five below are HELD: none of them carries a signal strong enough to place
+// itself, and placing one is the spend point.
+//
+// "ASSIGNED" IS NOT THE SAME ANSWER AS "WOULD BE PLACED", and this script said
+// it was until 2026-09-22. Since 2.11 only the two strongest signals assign
+// themselves — the project inbox in the forwarding headers, or in To/Cc — and a
+// subject reference or a known sender is held for a person. `autoAssignDecision`
+// is the one reading of that rule, so the line printed below asks it rather than
+// looking at the routing status, exactly as `qa-fake-inbox.ts` does.
 //
 // The sixth is the exception, and it is assigned by reproducing what
 // `assignMessage` writes rather than by calling it — that function publishes a
@@ -981,9 +990,14 @@ for (const message of INBOX) {
     mimeSize: bytes.byteLength,
     actor: ACTOR,
   });
-  const outcome =
-    recorded.routing.status === "assigned"
-      ? `would place on a project — ${recorded.routing.evidence}`
+  // What an ARRIVING message of this shape would have done. This script assigns
+  // nothing here, so the line is a statement about the app's rule, not about
+  // what it just did.
+  const decision = autoAssignDecision(recorded.routing);
+  const outcome = decision.assign
+    ? `${describeAutoAssignment(decision.signal)} (arriving; this script assigns nothing)`
+    : recorded.routing.status === "assigned"
+      ? `held — ${recorded.routing.evidence}; that signal is not strong enough to spend a charged read`
       : recorded.routing.status;
   say(`  ${message.subject.slice(0, 40)}`, outcome);
 }
@@ -1034,11 +1048,18 @@ say("inbox", `${INBOX.length} messages, all held`);
             ${`email:${recorded.id}`}, ${ACTOR}, ${ACTOR})
     returning id
   `;
+  // ASSIGNED AUTOMATICALLY, BECAUSE THAT IS WHAT WOULD HAVE HAPPENED. This
+  // message is addressed to the project's own inbox, which is one of the two
+  // signals that place a message by themselves (2.11) — so a demo row reading
+  // "assigned by hand" showed a walkthrough audience the one path this message
+  // would never have taken, and hid the chip and the Unassign control that
+  // account for a charged read nobody pressed anything for. `assigned_by` moves
+  // with it: an automatic placement was the router's decision, not the seed's.
   await sql`
     update email_messages
-       set project_id = ${projectId}, routing_status = 'assigned', assigned_by = ${ACTOR}, assigned_at = now(),
-           assignment_kind = 'manual', mime_attachment_id = ${attachment[0]?.id}, intake_run_id = ${run[0]?.id},
-           updated_by = ${ACTOR}
+       set project_id = ${projectId}, routing_status = 'assigned', assigned_by = ${ROUTER_ACTOR}, assigned_at = now(),
+           assignment_kind = 'auto', mime_attachment_id = ${attachment[0]?.id}, intake_run_id = ${run[0]?.id},
+           updated_by = ${ROUTER_ACTOR}
      where id = ${recorded.id}
   `;
   const placed = staged.lines.filter((line) => line.recordId).length;

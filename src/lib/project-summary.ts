@@ -67,6 +67,34 @@ export type ProjectSummary = {
   tbc: number;
   /** Confirmed or not-applicable. */
   settled: number;
+  /**
+   * THE SAME THREE THINGS IN LINE ITEMS, WHICH IS THE UNIT A PERSON THINKS IN.
+   *
+   * Asked for on 2026-09-21 on a 503-line project, where the tiles read TGQ
+   * 8,769 and Also outstanding 10,841: "these numbers are so high, they're
+   * just meaningless." The question counts stay, because a sub-line saying how
+   * many questions are behind an item count is worth having; what changed is
+   * which number is the big one.
+   *
+   * TWO THINGS ABOUT THEM A SCREEN MUST SAY OUT LOUD.
+   *
+   * They do NOT sum. Every answer is exactly one of to-quote /
+   * also-outstanding / settled, so `toQuote + missing + tbc + settled` is the
+   * whole of the work; an ITEM can be clear at TGQ and still carry other
+   * questions, so it is counted by two tiles at once. `settledItems` is
+   * therefore "nothing outstanding at all" and is much smaller than `settled`
+   * suggests.
+   *
+   * They are over a DIFFERENT POPULATION from `records`. An uncategorised
+   * record has no questions at all, so it appears in none of them:
+   * `itemsWithQuestions` is that population, and `records - uncategorised` is
+   * what it is short of. Printing an item count beside `records` without
+   * naming which is how somebody subtracts one from the other.
+   */
+  itemsWithQuestions: number;
+  toQuoteItems: number;
+  alsoOutstandingItems: number;
+  settledItems: number;
   /** Finish codes in the project's library. */
   finishes: number;
   /** Of those, how many nobody has filed under a kind. */
@@ -105,6 +133,10 @@ export const EMPTY_SUMMARY: ProjectSummary = {
   missing: 0,
   tbc: 0,
   settled: 0,
+  itemsWithQuestions: 0,
+  toQuoteItems: 0,
+  alsoOutstandingItems: 0,
+  settledItems: 0,
   finishes: 0,
   finishesNoKind: 0,
   documentsReading: 0,
@@ -176,6 +208,10 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
     mapped_cats as (select distinct item_category_id from spec_matrix_category_map),
     answers as (
       select s.project_id,
+             -- The RECORD this answer belongs to. Carried so the same pass can
+             -- count both units: a question count partitions, an item count
+             -- does not. See the item columns further down this query.
+             s.id as record_id,
              -- No answer row at all is MISSING, not satisfied, which is why
              -- this drives off the requirements table with a left join.
              -- (No backticks in here: one closes the tagged template.)
@@ -229,7 +265,23 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
              count(*) filter (where state in ('missing', 'tbc') and to_quote)::int as to_quote,
              count(*) filter (where state = 'missing' and not to_quote)::int as missing,
              count(*) filter (where state = 'tbc' and not to_quote)::int as tbc,
-             count(*) filter (where state in ('confirmed', 'na'))::int as settled
+             count(*) filter (where state in ('confirmed', 'na'))::int as settled,
+             -- ---- THE SAME THREE THINGS COUNTED IN LINE ITEMS ---------------
+             -- These do NOT sum, and the four above do. Every answer is exactly
+             -- one of to-quote / also-outstanding / settled, so the question
+             -- counts partition the work. An ITEM can be clear at TGQ and still
+             -- carry other questions, so it belongs to two of these at once --
+             -- which is why each is reported against the population below
+             -- rather than beside its siblings as though they added up.
+             count(distinct record_id)::int as items_with_questions,
+             count(distinct record_id) filter (where state in ('missing', 'tbc') and to_quote)::int as to_quote_items,
+             count(distinct record_id) filter (where state in ('missing', 'tbc') and not to_quote)::int as also_outstanding_items,
+             -- SETTLED AS AN ITEM COUNT IS "NOTHING OUTSTANDING AT ALL", not
+             -- "has a settled answer" -- which would be true of almost every
+             -- item and would say nothing. It is therefore the population minus
+             -- everything carrying anything, never a filter of its own.
+             (count(distinct record_id)
+              - count(distinct record_id) filter (where state in ('missing', 'tbc')))::int as settled_items
         from answers group by project_id
     ),
     fin as (
@@ -258,6 +310,10 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
            coalesce(ans.missing, 0) as missing,
            coalesce(ans.tbc, 0) as tbc,
            coalesce(ans.settled, 0) as settled,
+           coalesce(ans.items_with_questions, 0) as items_with_questions,
+           coalesce(ans.to_quote_items, 0) as to_quote_items,
+           coalesce(ans.also_outstanding_items, 0) as also_outstanding_items,
+           coalesce(ans.settled_items, 0) as settled_items,
            coalesce(fin.finishes, 0) as finishes,
            coalesce(fin.finishes_no_kind, 0) as finishes_no_kind,
            coalesce(docs.documents_reading, 0) as documents_reading,
@@ -279,6 +335,10 @@ function toSummary(row: SummaryRow): ProjectSummary {
     missing: Number(row.missing ?? 0),
     tbc: Number(row.tbc ?? 0),
     settled: Number(row.settled ?? 0),
+    itemsWithQuestions: Number(row.items_with_questions ?? 0),
+    toQuoteItems: Number(row.to_quote_items ?? 0),
+    alsoOutstandingItems: Number(row.also_outstanding_items ?? 0),
+    settledItems: Number(row.settled_items ?? 0),
     finishes: Number(row.finishes ?? 0),
     finishesNoKind: Number(row.finishes_no_kind ?? 0),
     documentsReading: Number(row.documents_reading ?? 0),

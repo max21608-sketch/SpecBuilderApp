@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   allQuestions,
   countOutstanding,
+  finishOptionQtyLabel,
   groupByQuestion,
   groupIntoLines,
   type GroupableQuestion,
@@ -67,6 +68,21 @@ describe("groupIntoLines", () => {
     expect(lines[0]!.code).toBe("S-301");
     expect(lines[0]!.qty).toBe(45);
     expect(lines[0]!.recordLabel).toBe("AP364c-011");
+  });
+
+  // A FINISH OPTION CARRIES ITS OWN QUANTITY THROUGH, AND NOTHING DERIVES ONE.
+  // It used not to carry one at all, so both tables printed "quantity not
+  // allocated" over a configuration somebody had set a quantity on — 0028's
+  // details panel has accepted one since it landed. The parent's 45 is never
+  // divided and never falls through to the option.
+  it("carries a finish option's own quantity, and never the parent's", () => {
+    const lines = groupIntoLines([
+      question({ recordId: "v1", variantLabel: "A", parentId: "r1", refs: "", parentRefs: "S-301", qty: 12, parentQty: 45 }),
+      question({ recordId: "v2", variantLabel: "B", parentId: "r1", refs: "", parentRefs: "S-301", qty: null, parentQty: 45 }),
+    ]);
+    expect(lines[0]!.options.map((option) => option.qty)).toEqual([12, null]);
+    // The bill line still reads its own 45, undivided.
+    expect(lines[0]!.qty).toBe(45);
   });
 
   it("keeps a heading's own questions beside its finish options", () => {
@@ -219,5 +235,16 @@ describe("groupByQuestion", () => {
     const byLine = groupIntoLines(rows).reduce((n, line) => n + allQuestions(line).length, 0);
     expect(byQuestion).toBe(rows.length);
     expect(byLine).toBe(rows.length);
+  });
+});
+
+describe("finishOptionQtyLabel", () => {
+  it("says NOT ALLOCATED for a null and the number for anything else", () => {
+    // Null is "the bill said 45 and never said how many are fabric A", which
+    // is a different statement from a bill line's "quantity not given".
+    expect(finishOptionQtyLabel(null)).toBe("quantity not allocated");
+    expect(finishOptionQtyLabel(12)).toBe("qty 12");
+    // A zero is a number somebody wrote down, not an absence.
+    expect(finishOptionQtyLabel(0)).toBe("qty 0");
   });
 });

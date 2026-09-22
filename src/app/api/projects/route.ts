@@ -12,7 +12,13 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { EMPTY_COMPLETION, loadProjectCompletion, projectState } from "@/lib/project-completion";
 import { EMPTY_SUMMARY, loadProjectSummaries } from "@/lib/project-summary";
-import { loadOutstanding, loadSentCoverage, waitingByQuestion, questionKey } from "@/lib/chase-drafts";
+import {
+  lineIdsForRecords,
+  loadOutstanding,
+  loadSentCoverage,
+  waitingByQuestion,
+  questionKey,
+} from "@/lib/chase-drafts";
 
 // Needed the moment this route started reading a query string: without it Next
 // caches the default (active-only) response and the "include archived" toggle
@@ -68,11 +74,38 @@ export async function GET(request: Request): Promise<Response> {
   //
   // So it is the real functions, called ONCE for every project on the page
   // rather than once per row: two queries for the list instead of two per
-  // project. It is not free — `loadOutstanding` returns every outstanding
-  // question across every project — and if this list ever gets long that is
-  // the thing to make lazy.
+  // project.
+  //
+  // SCOPED TO WHAT COULD POSSIBLY BE WAITING, which is not an approximation.
+  //
+  // `waitingByQuestion` walks the COVERAGE rows and looks each one up among the
+  // outstanding questions; a question with no sent coverage row against it can
+  // never be waiting, so it can never be in the answer. Loading the rest was
+  // the whole cost of this route: measured 2026-09-22 against the sandbox,
+  // `loadOutstanding(everything)` returned 27,487 questions and 26.4 MB to
+  // produce one integer per row, from 28 coverage rows.
+  //
+  // It stays the SAME loader and the SAME `isCoverageFresh`, narrowed by the
+  // scope parameter that already exists -- a WHERE clause on one query, never a
+  // second loader and never a second copy of the staleness rule. That rule
+  // compares a frozen context snapshot with `canonicalJson` and cannot become a
+  // SQL count; expressing it twice is how this list and the chase screen would
+  // come to report different numbers.
+  //
+  // The scope is LINE ids, not the coverage rows' record ids: the predicate
+  // matches `coalesce(parent_id, id)`, so a coverage row on a configuration
+  // would match nothing and read as not waiting. `lineIdsForRecords` is that
+  // one lookup.
   const ids = rows.map((row) => String(row.id));
-  const [outstanding, coverage] = await Promise.all([loadOutstanding(ids), loadSentCoverage(ids)]);
+  const coverage = await loadSentCoverage(ids);
+  const coveredLines = await lineIdsForRecords([...new Set(coverage.map((row) => row.recordId))]);
+  const outstanding =
+    coverage.length === 0
+      ? []
+      : await loadOutstanding(ids, {
+          lineIds: coveredLines,
+          requirementIds: [...new Set(coverage.map((row) => row.requirementId))],
+        });
   const waitingKeys = waitingByQuestion(outstanding, coverage);
   const projectOfQuestion = new Map(
     outstanding.map((question) => [questionKey(question.recordId, question.requirementId, 0), question.projectId]),

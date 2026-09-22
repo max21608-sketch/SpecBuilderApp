@@ -219,6 +219,45 @@ describe("finish options", () => {
     expect(screen.getAllByText(/quantity not allocated/).length).toBe(2);
   });
 
+  // A CONFIGURATION'S QUANTITY IS READ, NEVER APPORTIONED — and never assumed
+  // absent either. This row printed "quantity not allocated" unconditionally,
+  // which was true only for as long as nothing had set one; `PATCH
+  // /api/records/[id]`'s `details` has accepted a configuration's qty since
+  // 0028, and the phase table has always shown it. Three screens disagreeing
+  // about one number is the finding this holds closed.
+  it("says the quantity somebody set on a finish option, and still divides nothing", async () => {
+    render(
+      <Harness
+        questions={[
+          question({ variantCount: 2 }),
+          question({
+            recordId: "opt-a",
+            variantLabel: "A",
+            parentId: "line-1",
+            refs: "",
+            parentRefs: "S-301",
+            qty: 12,
+            parentQty: 45,
+          }),
+          question({
+            recordId: "opt-b",
+            variantLabel: "B",
+            parentId: "line-1",
+            refs: "",
+            parentRefs: "S-301",
+            qty: null,
+            parentQty: 45,
+          }),
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByText("Desk chair"));
+    expect(within(optionRow("S-301 A")).getByText(/qty 12/)).toBeTruthy();
+    expect(within(optionRow("S-301 B")).getByText(/quantity not allocated/)).toBeTruthy();
+    // Nothing anywhere says 33, or 22.5, or any other share of the bill's 45.
+    expect(screen.queryByText(/33/)).toBeNull();
+  });
+
   it("ticks one finish option without ticking the other", async () => {
     render(<Harness questions={withOptions()} />);
     await userEvent.click(screen.getByText("Desk chair"));
@@ -483,6 +522,32 @@ describe("what the screen ticked for you", () => {
     expect(screen.getByText(/Nothing needed to quote for this contact/)).toBeTruthy();
     expect(screen.getByText(/tick a question below to ask it anyway/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Draft it" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // The 71-beside-70 finding (found-in-use 2026-09-20). The line's own column
+  // counts a question already asked, because it is still outstanding; the
+  // preselection excludes it. Both right, and the footer named only two of the
+  // three sets.
+  it("names the questions it left because somebody is already waiting on a reply", () => {
+    render(
+      <Harness
+        seed
+        contactId="c-1"
+        questions={[
+          question(),
+          question({ waiting: { draftId: "d-1", sentAt: null, contactName: "Claire" } }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/1 to-quote question preselected/)).toBeTruthy();
+    expect(screen.getByText(/1 awaiting a reply, not selected/)).toBeTruthy();
+    // The SELECTION did not move. Only what the footer says did.
+    expect(screen.getByText(/1 question ticked/)).toBeTruthy();
+  });
+
+  it("says nothing about a third bucket when there is not one", () => {
+    render(<Harness seed contactId="c-1" questions={[question(), question({ tier: "later" })]} />);
+    expect(screen.queryByText(/awaiting a reply, not selected/)).toBeNull();
   });
 
   it("asks for a contact before it ticks anything", () => {

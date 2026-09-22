@@ -33,6 +33,7 @@ import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
   ATTRIBUTE_UNITS,
+  DIMENSION_SLOT_LABELS,
   type AnswerState,
   type AttributeGroup,
   type AttributeState,
@@ -95,6 +96,9 @@ type SpecRecord = {
   category_name: string | null; category_family: string | null;
   /** A fabric split (0024). Both null on an ordinary record. */
   parent_id: string | null; variant_label: string | null;
+  /** Whether a crop was confirmed off the drawings, so the screen can decide
+   *  without asking `/image` and being refused. */
+  has_image: boolean;
 };
 
 /** This record's bill line and every live configuration under it, parent first. */
@@ -209,10 +213,16 @@ function RecordView() {
     fallback: "specs",
     resolve: (raw) => (RECORD_TABS.includes(raw as RecordTab) ? (raw as RecordTab) : null),
   });
-  // Optimistic: the image is requested, and the 404 for a record that has none
-  // turns it off. Asking first would be a second round trip on every record to
-  // learn something the image request itself reports.
-  const [hasImage, setHasImage] = useState(true);
+  // THE PAYLOAD SAYS WHETHER THERE IS A PICTURE.
+  //
+  // This used to be optimistic — render the `<img>`, let the 404 turn it off —
+  // on the argument that asking first would cost a second round trip. It does
+  // not: `/api/records/[id]` is loaded anyway and now carries `has_image`, so
+  // the flag is free and the console stops collecting an EXPECTED 404 on every
+  // record with no crop (found-in-use 2026-09-20). `onError` stays, for a crop
+  // whose blob has gone: the row says there is a picture and the fetch is what
+  // finds out there is not.
+  const [imageFailed, setImageFailed] = useState(false);
   // Bumped after every successful write, so the history list below reloads
   // under the edit that caused it instead of going stale until a page reload.
   const [historyKey, setHistoryKey] = useState(0);
@@ -272,8 +282,8 @@ function RecordView() {
     setHistoryKey((key) => key + 1);
   }
   // Moving from a record with no picture to one with a picture reuses this
-  // component, so a sticky `false` would hide every image after the first miss.
-  useEffect(() => { setHasImage(true); }, [id]);
+  // component, so a sticky `true` would hide every image after the first miss.
+  useEffect(() => { setImageFailed(false); }, [id]);
 
   async function save(
     answer: Answer,
@@ -313,6 +323,43 @@ function RecordView() {
     } finally {
       setSavingId(null);
     }
+  }
+
+  /**
+   * One dimension, recorded as an ATTRIBUTE off the Checklist tab.
+   *
+   * NOT an answer. The composed Dimensions cell is a projection of these rows
+   * — see `src/components/records/DimensionAnswer.tsx` — so a value written
+   * straight into the answer carries no slots behind it, and is marked
+   * `manual`, which puts the cell out of reach of every later recomposition.
+   * `createAttribute` joins the actor's open change, as everywhere else.
+   */
+  async function recordDimension(input: {
+    slot: DimensionSlot;
+    value: string;
+    unit: AttributeUnit;
+  }): Promise<boolean> {
+    setError(null);
+    const res = await apiFetch("/api/attributes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        recordId: id,
+        attrGroup: "dimension",
+        // The slot's own name, so the row reads as what it is on the Specs tab
+        // and in the long-form sheet.
+        label: DIMENSION_SLOT_LABELS[input.slot],
+        value: input.value,
+        unit: input.unit,
+        dimensionSlot: input.slot,
+        state: "confirmed",
+      }),
+    });
+    // Reload first, report afterwards — a refusal (an occupied slot, a stale
+    // screen) means this screen is out of date, and `load()` would otherwise
+    // clear the sentence that explains it.
+    await reloadThen(res.ok ? null : res.error);
+    return res.ok;
   }
 
   async function setLevel(next: string) {
@@ -453,6 +500,10 @@ function RecordView() {
   if (!data) return <PageBody><Spinner label="Loading record" /></PageBody>;
 
   const { record, refs, answers, attributes, categories } = data;
+
+  // The payload says whether a crop exists; `imageFailed` covers the one case
+  // it cannot — a row that names a blob the store no longer holds.
+  const hasImage = record.has_image && !imageFailed;
 
   // ---- the fabric split, from whichever end this record is ------------------
   //
@@ -1179,7 +1230,7 @@ function RecordView() {
                   <img
                     src={`/api/records/${record.id}/image`}
                     alt={record.item_description}
-                    onError={() => setHasImage(false)}
+                    onError={() => setImageFailed(true)}
                     className="h-auto w-full rounded"
                   />
                   <p className="mt-1.5 text-center text-[11.5px] text-neutral-500">
@@ -1330,7 +1381,9 @@ function RecordView() {
             readiness={readiness}
             savingId={savingId}
             reloadKey={historyKey}
+            dimensionNote={record.dimension_note}
             onSave={(answer, value, state) => void save(answer as Answer, value, state)}
+            onRecordDimension={recordDimension}
           />
         )}
 
