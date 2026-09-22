@@ -14,9 +14,13 @@
 // through `POST /api/attributes`, and the answer follows from
 // `recomposeAnswers`. Everything else writes the answer.
 //
-// `composeDimensionCell` is called here to show what the cell now reads. That
-// is the SINGLE composer — the export, the record screen and the drawings
-// review all call it too — not a second implementation.
+// THE CONTROL ITSELF LIVES IN `@/components/records/DimensionAnswer`, because
+// the record's Checklist tab needs the same one: it had a free-text box, which
+// let two of four dimensions be marked Confirmed (`found-in-use.md`,
+// 2026-09-21). Two tables sharing one control is acceptable; two controls
+// writing one cell is the `composeDimensionCell` trap in a new place. That
+// component composes the preview through the app's SINGLE composer — the one
+// the export, the record screen and the drawings review all call.
 //
 // ---- WHAT A SAVE DOES ON SCREEN -------------------------------------------
 //
@@ -39,17 +43,13 @@ import { TONE } from "@/components/ui/tone";
 import AnswerValue from "@/components/records/AnswerValue";
 import { Td } from "@/components/ui/Table";
 import { letterColour } from "@/components/records/letter-colours";
-import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
+import DimensionAnswer from "@/components/records/DimensionAnswer";
 import { formatDay } from "@/lib/format-day";
 import { rowKind, type InfillDimension, type InfillQuestion } from "@/lib/infill";
 import type { Palette } from "@/lib/palettes";
 import {
   ANSWER_STATE_LABELS,
-  DIMENSION_SLOTS,
-  DIMENSION_SLOT_LABELS,
-  isDimensionSlot,
   type AnswerState,
-  type AttributeState,
   type AttributeUnit,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
@@ -70,9 +70,6 @@ export type SaveDimension = (
 
 /** Missing blocks a quote; TBC is a person saying "not yet". The chase screen's map. */
 const STATE_TONE: Record<string, "danger" | "warn" | "plain"> = { missing: "danger", tbc: "warn" };
-
-/** The two a person types off a drawing or a tape measure. */
-const UNITS: AttributeUnit[] = ["mm", "cm"];
 
 function askedOn(sentAt: string): string {
   const at = new Date(sentAt);
@@ -237,9 +234,13 @@ export default function InfillRow({
               </Link>
             </span>
           ) : kind === "dimension" ? (
-            <DimensionWriter
-              question={question}
-              recorded={recorded}
+            <DimensionAnswer
+              subject={question.recordLabel}
+              /* THE ROW'S OWN, plus what it has just written. A saved row stays
+                 on screen until the next deliberate reload, so the control has
+                 to know about a slot the payload does not yet carry or the
+                 same one could be offered twice. */
+              held={[...(question.dimensions ?? []), ...recorded]}
               busy={busy}
               onRecord={async (input) => {
                 const outcome = await run(() => onSaveDimension(question, input));
@@ -341,112 +342,5 @@ export default function InfillRow({
         </tr>
       )}
     </>
-  );
-}
-
-/**
- * Slot, figure, unit — and never a free-text dimension.
- *
- * 0011's biconditional is that `attr_group = 'dimension'` MEANS one of the
- * five slots, which is what makes `composeDimensionCell` total. A box that
- * took "840 wide" would have to parse it, and the unit-resolution order exists
- * because a wrong unit reads as a real measurement and nothing downstream
- * questions it. So the person says which slot and which unit, and the app
- * infers nothing at all.
- */
-function DimensionWriter({
-  question,
-  recorded,
-  busy,
-  onRecord,
-}: {
-  question: InfillQuestion;
-  recorded: InfillDimension[];
-  busy: boolean;
-  onRecord: (input: { slot: DimensionSlot; value: string; unit: AttributeUnit }) => Promise<boolean>;
-}) {
-  const [slot, setSlot] = useState<DimensionSlot | "">("");
-  const [value, setValue] = useState("");
-  const [unit, setUnit] = useState<AttributeUnit>("mm");
-
-  const held = [...(question.dimensions ?? []), ...recorded];
-  const taken = new Set(held.map((row) => row.slot));
-
-  // What the cell reads now, through the app's ONE composer. Composing it here
-  // rather than asking the server for it is not a second implementation: it is
-  // the same function the export and the record screen call.
-  const rows: DimensionRow[] = held
-    .filter((row) => isDimensionSlot(row.slot))
-    .map((row, index) => ({
-      slot: row.slot as DimensionSlot,
-      value: row.value,
-      unit: (row.unit ?? null) as AttributeUnit | null,
-      state: row.state as AttributeState,
-      sortOrder: index,
-    }));
-  const cell = rows.length > 0 ? composeDimensionCell(rows).text : null;
-
-  return (
-    <div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <select
-          value={slot}
-          disabled={busy}
-          aria-label={`Which dimension of ${question.recordLabel}`}
-          onChange={(event) => setSlot(event.target.value as DimensionSlot | "")}
-          className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
-        >
-          <option value="">— which —</option>
-          {DIMENSION_SLOTS.map((option) => (
-            <option key={option} value={option} disabled={taken.has(option)}>
-              {DIMENSION_SLOT_LABELS[option]}
-              {taken.has(option) ? " — already recorded" : ""}
-            </option>
-          ))}
-        </select>
-        <input
-          value={value}
-          disabled={busy}
-          inputMode="decimal"
-          placeholder="840"
-          aria-label={`Figure for ${question.recordLabel}`}
-          onChange={(event) => setValue(event.target.value)}
-          className="w-24 rounded border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
-        />
-        <select
-          value={unit}
-          disabled={busy}
-          aria-label="Unit"
-          onChange={(event) => setUnit(event.target.value as AttributeUnit)}
-          className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
-        >
-          {UNITS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-        <Button
-          size="xs"
-          variant="secondary"
-          disabled={busy || !slot || !value.trim()}
-          onClick={async () => {
-            if (!slot || !value.trim()) return;
-            const ok = await onRecord({ slot, value: value.trim(), unit });
-            if (ok) {
-              setSlot("");
-              setValue("");
-            }
-          }}
-        >
-          {busy ? "Recording…" : "Record"}
-        </Button>
-      </div>
-      {cell && (
-        <p className="mt-1 text-[11px] text-neutral-600">
-          Dimensions now read <span className="font-mono text-neutral-900">{cell}</span>
-        </p>
-      )}
-    </div>
   );
 }
