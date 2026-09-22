@@ -18,6 +18,14 @@ and where you do name a cause, say so separately, because a wrong diagnosis
 written as fact is what sends the fix to the wrong file. Never delete an entry;
 mark it FIXED with the date and the commit.
 
+**Reconciled 2026-09-22** against the tree at `553b8bf`, after Max asked
+whether the file was current as of the Stage 2 build. Every status was checked
+in the SOURCE rather than against the stage lists in `CLAUDE.md` — a stage
+list records what was built, not what reached the screen, and an entry closed
+on a list somebody else wrote is exactly the "fixed on paper" state this file
+exists to prevent. Anything that could not be confirmed that way was left
+open. Do the same on the next pass, and say in the entry what you checked.
+
 ---
 
 ## 2026-09-21
@@ -463,7 +471,10 @@ when their coder is done.
 
 ### Two dark controls on the drawings review and the BOQ review
 
-### The two dark controls on the review screens — FIXED same day
+**Status: FIXED 2026-09-20, `9b626eb`**, the same day it was seen. The
+heading, the fix and the observation had drifted into two headings with one
+`Status: open` under them, so the entry contradicted itself; merged
+2026-09-22, with both halves kept word for word.
 
 `9b626eb`: the next-step action renders only in the *Review complete* state on
 both drawings screens, and the BOQ review's confirmed box no longer draws a
@@ -471,7 +482,7 @@ disabled Confirm in the primary's fill. The pack screen's duplicated
 "Review all 9 drawings together" (header and card) is item 1.6's territory.
 
 
-**Status: open — seen in the §7.4a screenshots of the `3b6d9db` deployment,
+**What was seen — the §7.4a screenshots of the `3b6d9db` deployment,
 2026-09-20, at both 1920×1080 and 1440×900.** On a drawings review that is
 still being reviewed, the page carries the card's `Confirm S-100 (2
 configurations)` AND item 1.11's next step `Review 9 documents` — and this
@@ -711,7 +722,31 @@ measured at the route.
 
 ### Seen in the catchup demo of 2026-09-18 — fifteen things, all small
 
-**Status: all open.** Found by driving the Panther pack live in front of
+**Status: THIRTEEN OF THE FIFTEEN CLOSED, 2 and 3 still open** — reconciled
+2026-09-22 against the tree at `553b8bf`, after Max asked whether this file was
+current as of the Stage 2 build. Each was checked in the source rather than
+taken from CLAUDE.md's stage lists, and the numbered items below are left
+exactly as they were written, because what was SEEN does not change:
+
+| # | Where it stands |
+|---|---|
+| 1 | CLOSED — `describeHeader` is the single wording for the sheet sentence, and the comment beside it names this defect |
+| 2 | CLOSED — `src/lib/non-furniture-guess.ts`, which cites "found-in-use 2" in its own header. A suggestion, never a decision |
+| 3 | **STILL OPEN**, and Max re-raised it on 2026-09-21 from the other end. See the two tile entries at the top of this file: the numbers are questions where they should be line items, and the boxes are taller than they need to be |
+| 4 | CLOSED — a document's state on the pack screen is a pending count, not a tick for having been opened |
+| 5 | CLOSED — one summary line (`n items still to review`) in place of the per-document banner stack |
+| 6 | **STILL OPEN** — investigated in Stage 1b and concluded the PROMPT is the fix, which is deferred to the finishes-schedule re-read because it re-reads every document already read. A cost, not an oversight |
+| 7 | CLOSED — `splitTbcMarker` in `drawing-document.ts`; the marker is a state, not part of the value |
+| 8 | CLOSED — `SwatchPicker` takes `pages`, the union of the item's staged pages and the model's code group, defaulting to the row's own |
+| 9 | CLOSED — no BWS ordinal renders in `ObservationRows` |
+| 10 | CLOSED — `src/lib/checklist-sections.ts`; the project-wide section folds last and closed |
+| 11 | CLOSED — `/dashboard/projects/[id]/infill` is the route from a confirmed intake to answering line by line |
+| 12 | CLOSED, and worth reading before ticking: the phase table's gate count is now a `<Link>` to the record's Gates tab, with the outstanding number on the chip. The count OPENS onto the fields; it still does not list them on the phase table itself. If that was the ask, reopen it |
+| 13 | CLOSED — each chase count says what it counts, and the header button counts what a chase will ask |
+| 14 | CLOSED — `attribute-correct.ts` and `/api/attributes/[id]/correct`, migration 0033 |
+| 15 | CLOSED — `defaultSelection` in `chase-selection.ts`, preselecting the TGQ set for the chosen contact |
+
+Found by driving the Panther pack live in front of
 Matthew, Sebastian, Steve and Tony. The full record of that call — what was
 said, by whom, with timestamps — is `docs/plans/catchup-2026-09-18.md`; this
 entry exists so the defects are in the place defects live, and nothing here
@@ -905,8 +940,16 @@ S-100 card, where the level is already decided on 3 of 3 and the panel says
 so. The level GUESS rules are still this repo's judgement and Matthew has not
 seen them.
 
-**Status: open. A CHANGE ASKED FOR, and its first half is still to be
-confirmed by Max** — "I'm going to check up on this, but I'm pretty sure".
+**Status: the REQUEST is FIXED; the QUESTION behind it is still open.**
+Reconciled 2026-09-22. Part 2 below — a way to set the level at the drawings
+stage — was built as Stage 1b item 1.15: `LevelControl` renders on the item
+card and the configuration card
+(`src/components/imports/DrawingItemCard.tsx:42`), writing
+`spec_records.level` through the levels route under one `level_set` change set
+per click, one write per record of a fan-out. Part 1 — whether a level can
+only really be DETERMINED at the drawing stage, and therefore whether guessing
+at BOQ intake is worth doing at all — is unchanged and still Max's to check
+with Matthew: *"I'm going to check up on this, but I'm pretty sure"*.
 
 Seen on the BOQ review screen (screenshot), `MAIN RUN`, 14 lines. Every row
 reads **Simple · guessed**, including `PACK · Packaging` and `DEL · Delivery`,
