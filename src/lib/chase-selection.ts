@@ -113,6 +113,25 @@ export type SelectionSummary = {
   preselected: number;
   /** How many `later` ones it deliberately left. */
   alsoOutstanding: number;
+  /**
+   * THE THIRD BUCKET, AND THE REASON THE FOOTER USED TO NOT ADD UP.
+   *
+   * A question already asked and awaiting a reply is not asked again by
+   * default — `chaseable` refuses it — but the LINE still counts it, because
+   * it is still outstanding. On the sandbox demo project (found-in-use
+   * 2026-09-20) that read as the lines' to-quote column summing to 71 beside a
+   * button saying 70, with nothing on screen naming the one. Both numbers were
+   * right and the footer named only two of the three sets.
+   *
+   * Counted over BOTH tiers, so the three numbers partition every tiered
+   * specification question this contact owes — which is what makes the
+   * arithmetic close rather than nearly close.
+   *
+   * It changes NOTHING about what is selected. The Waiting toggle is still the
+   * only way one of these is asked again, and a filter narrows what is LISTED,
+   * never what is ASKED.
+   */
+  awaitingReply: number;
 };
 
 /**
@@ -127,10 +146,17 @@ export type SelectionSummary = {
 export function selectionSummary(questions: readonly SelectableQuestion[], contactId: string): SelectionSummary {
   let preselected = 0;
   let alsoOutstanding = 0;
+  let awaitingReply = 0;
   for (const question of questions) {
+    // The waiting ones fail `chaseable` for that reason alone, so they are
+    // counted against the SAME other three tests rather than a looser set.
+    if (question.waiting && chaseable({ ...question, waiting: null }, contactId)) {
+      if (question.tier === "to_quote" || question.tier === "later") awaitingReply += 1;
+      continue;
+    }
     if (!chaseable(question, contactId)) continue;
     if (question.tier === "to_quote") preselected += 1;
     else if (question.tier === "later") alsoOutstanding += 1;
   }
-  return { contactChosen: Boolean(contactId), preselected, alsoOutstanding };
+  return { contactChosen: Boolean(contactId), preselected, alsoOutstanding, awaitingReply };
 }

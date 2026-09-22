@@ -485,6 +485,32 @@ describe("what the screen ticked for you", () => {
     expect((screen.getByRole("button", { name: "Draft it" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  // The 71-beside-70 finding (found-in-use 2026-09-20). The line's own column
+  // counts a question already asked, because it is still outstanding; the
+  // preselection excludes it. Both right, and the footer named only two of the
+  // three sets.
+  it("names the questions it left because somebody is already waiting on a reply", () => {
+    render(
+      <Harness
+        seed
+        contactId="c-1"
+        questions={[
+          question(),
+          question({ waiting: { draftId: "d-1", sentAt: null, contactName: "Claire" } }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/1 to-quote question preselected/)).toBeTruthy();
+    expect(screen.getByText(/1 awaiting a reply, not selected/)).toBeTruthy();
+    // The SELECTION did not move. Only what the footer says did.
+    expect(screen.getByText(/1 question ticked/)).toBeTruthy();
+  });
+
+  it("says nothing about a third bucket when there is not one", () => {
+    render(<Harness seed contactId="c-1" questions={[question(), question({ tier: "later" })]} />);
+    expect(screen.queryByText(/awaiting a reply, not selected/)).toBeNull();
+  });
+
   it("asks for a contact before it ticks anything", () => {
     // The Everyone tab: one press would draft an email to each of them.
     render(<Harness seed questions={[question(), question({ contactId: "c-2" })]} />);
