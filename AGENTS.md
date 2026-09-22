@@ -445,6 +445,24 @@ people have TYPED (`self-piped`, thirteen times), and somebody had already been
 caught by it. Never-invent still stands — this is a read of BWS's own list, not
 a list we made up.
 
+**THE SCRAPE IS DONE (2026-09-22) AND THE APP STILL HOLDS NONE OF THEM.** All
+84 fields were read read-only from Max's own session — 59 palettes, 413 option
+lines — into `docs/plans/bws-palette-capture-2026-09-22.json`, with
+`docs/plans/bws-palette-capture-2026-09-22.md` as the capture note. Do not
+scrape again; diff against that file. The five are all populated (timber 35,
+metal 15, seat build 27, back cushion 6, stud 13), the three timber lists and
+the two metal lists are byte-identical to each other, and **seeding them is
+still item 2.1** — until it lands, `spec_palette_options` is empty for the five
+and the sentence above stays true. Three variances the seed must handle are in
+the note: a bare `--------` divider line is not an option, the stud codes sit
+after a pipe INSIDE the label, and three `free_text_only` fields still carry
+leftover palette text, so seed on `field_type` and never on the box being
+non-empty. The note also records two things for Matthew, not for this repo:
+row 23 may be pointing at the wrong field (BWS has a separate `Seat Cushion
+build`, id 18, that we do not hold), and six palettes seeded as `owner = 'app'`
+have a real BWS list behind them whose wording differs — `stitching` shares
+only one of its three options with BWS's.
+
 ### The gates BUILD ON EACH OTHER, and only the chained reading is called satisfied
 
 `src/lib/gates.ts` (`GATES`, `chainGates`, `GateFieldsStatus`),
