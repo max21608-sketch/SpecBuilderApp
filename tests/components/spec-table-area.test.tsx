@@ -164,14 +164,23 @@ describe("the area select", () => {
     mountWith(RECORDS(), (tally) => summaries.push(tally));
     await screen.findByLabelText("Filter by area");
     // The tile, not the table's TGQ column header, which carries the same word.
+    //
+    // The tile's big number is ITEMS — 4 of the 4 records carry a to-quote
+    // question — and its sub-line carries the 12 QUESTIONS behind them. Both
+    // are asserted, because this test's guarantee is that a filter moves
+    // NEITHER, and checking only the one that happens to be large would let
+    // the other drift.
     const tgq = screen
       .getAllByRole("button")
       .find((button) => (button.textContent ?? "").startsWith("TGQ"))!;
-    expect(within(tgq).getByText("12")).toBeTruthy();
+    expect(within(tgq).getByText("4")).toBeTruthy();
+    expect(tgq.textContent).toContain("12 questions");
 
     await userEvent.selectOptions(screen.getByLabelText("Filter by area"), "living room");
-    expect(within(tgq).getByText("12")).toBeTruthy();
-    // And nothing was reported up a second time with a narrower number.
+    expect(within(tgq).getByText("4")).toBeTruthy();
+    expect(tgq.textContent).toContain("12 questions");
+    // And nothing was reported up a second time with a narrower number. The
+    // header still receives the QUESTION count, unchanged by the tile's unit.
     expect(summaries.every((tally) => tally.records === 4 && tally.toQuote === 12)).toBe(true);
   });
 
