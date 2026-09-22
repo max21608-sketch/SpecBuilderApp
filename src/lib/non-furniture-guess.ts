@@ -75,6 +75,57 @@ const DESCRIPTION_WORDS = [
   "attendance",
 ];
 
+/**
+ * The other kind of line that is not an item: a SUBTOTAL that carries text.
+ *
+ * ---- WHY THIS IS HERE AT ALL (FIU 2026-09-21) -----------------------------
+ *
+ * A code-less subtotal row is already skipped by the reader and the review says
+ * how many. A section or subtotal row that carries TEXT in the description
+ * column is not: it becomes a spec record, with the SUBTOTAL'S FIGURE as its
+ * quantity — an item to make, 47 off, called "Subtotal" — and nothing suggested
+ * ignoring it. On a 300-line bill the Include checkbox was the only way out,
+ * one line at a time.
+ *
+ * ---- WHY PHRASES, AND NOT WORDS ------------------------------------------
+ *
+ * `total` on its own is the trap this whole module exists to refuse. A real
+ * bill line reads "Sofa, total width 2400" and "Total Look dining chair", and a
+ * bare word rule puts both behind a suggestion nobody expected — the
+ * `DEL-01 Delivery table` failure in a second place. So these match as WHOLE
+ * WORD SEQUENCES against the folded description: `sectional sofa` does not
+ * match `section`, and `forward facing armchair` does not match
+ * `carried forward`.
+ *
+ * `TOTAL` alone is the one bare word, and only where it is the WHOLE
+ * description — `["total"]` after folding, so "TOTAL £12,450" fires and
+ * "total width" does not. A subtotal row headed "TOTAL BEDROOM SEATING"
+ * therefore gets no suggestion, and that is the safe end: a miss a person can
+ * still untick, rather than a real bench suggested for ignoring.
+ *
+ * ---- AND IT IS STILL A SUGGESTION ----------------------------------------
+ *
+ * Everything the header says holds unchanged. Nothing here writes, nothing is
+ * ignored on its own, the evidence prints beside the button, and the Include
+ * checkbox is the way back. Extending this list stays Max and Matthew's
+ * decision; what is added here is the wording the found-in-use entry named and
+ * nothing beyond it.
+ */
+const SUBTOTAL_PHRASES = [
+  "subtotal",
+  "sub total",
+  "section total",
+  "page total",
+  "carried forward",
+  "brought forward",
+  "carried to summary",
+  "carried to collection",
+  "collection total",
+];
+
+/** The one bare word, and only as the WHOLE description. */
+const TOTAL_ALONE = "total";
+
 /** The code's leading run of letters, uppercased. `DEL-01` → `DEL`, `12A` → ``. */
 function codePrefix(code: string | null | undefined): string {
   const match = /^[A-Za-z]+/.exec((code ?? "").trim());
@@ -83,12 +134,33 @@ function codePrefix(code: string | null | undefined): string {
 
 /** The description's words, folded, so `Delivery,` and `DELIVERY` are one word. */
 function descriptionWords(text: string | null | undefined): Set<string> {
-  return new Set(
-    (text ?? "")
-      .toLowerCase()
-      .split(/[^a-z]+/)
-      .filter(Boolean),
-  );
+  return new Set(descriptionTokens(text));
+}
+
+/** The same folding, IN ORDER, because a phrase is a sequence and a word is not. */
+function descriptionTokens(text: string | null | undefined): string[] {
+  return (text ?? "")
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+}
+
+/**
+ * Which subtotal phrases this description states, as WHOLE word sequences.
+ *
+ * Padded on both sides and searched with spaces around it, which is the whole
+ * of the near-miss guard: `sectional sofa` folds to ` sectional sofa ` and does
+ * not contain ` section `, and `Sofa, total width 2400` contains neither
+ * ` sub total ` nor ` page total `.
+ */
+function subtotalPhrases(text: string | null | undefined): string[] {
+  const tokens = descriptionTokens(text);
+  if (tokens.length === 0) return [];
+  // `TOTAL` on its own is a subtotal row; `total` inside a description is a
+  // measurement, a product name or a sentence. Only the first is read.
+  if (tokens.length === 1 && tokens[0] === TOTAL_ALONE) return [TOTAL_ALONE];
+  const folded = ` ${tokens.join(" ")} `;
+  return SUBTOTAL_PHRASES.filter((phrase) => folded.includes(` ${phrase} `));
 }
 
 /**
@@ -124,6 +196,20 @@ export function guessNonFurniture(line: NonFurnitureInput): NonFurnitureGuess | 
       rule: "words",
       matched: words,
       reason: `the description says ${words.map((word) => `“${word}”`).join(" and ")}${supporting}`,
+    };
+  }
+
+  // A SUBTOTAL ROW THAT CARRIES TEXT. Last, so the reason a reviewer reads is
+  // still the first thing that decided — a line saying "Delivery subtotal"
+  // fires on `delivery` and says so, which is the wording nearer to what it is.
+  const phrases = subtotalPhrases(line.itemDescription);
+  if (phrases.length > 0) {
+    return {
+      rule: "words",
+      matched: phrases,
+      reason: `the description says ${phrases.map((phrase) => `“${phrase}”`).join(" and ")}, which reads as a totals row${
+        unmatched ? ", and no category matched it" : ""
+      }`,
     };
   }
 

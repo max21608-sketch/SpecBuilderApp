@@ -34,7 +34,7 @@
 import { useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { apiFetch } from "@/lib/api-fetch";
-import { INTAKE_UPLOAD_ACCEPT, SPREADSHEET_EXTENSIONS, legacySpreadsheetAdvice } from "@/lib/intake-source-types";
+import { INTAKE_UPLOAD_ACCEPT, SPREADSHEET_EXTENSIONS, unreadableUploadAdvice } from "@/lib/intake-source-types";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { projectUploadPrefix } from "@/lib/blob-source";
 
@@ -118,18 +118,25 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         choice: "",
         suggested: "",
         evidence: null,
-        // A SPREADSHEET FORMAT NOTHING READS IS REFUSED IN THE BROWSER, before
-        // a byte is stored (variance matrix row 5). The server refuses it too —
-        // this is a screen and a screen is never the guarantee — but an `.xls`
-        // that was stored, classified and then refused has spent a model call
-        // and left a file in the store for a bill nobody can read.
-        status: (legacySpreadsheetAdvice(file.name) ? "refused" : "waiting") as Queued["status"],
+        // A FORMAT NOTHING READS IS REFUSED IN THE BROWSER, before a byte is
+        // stored (variance matrix row 5). The server refuses it too — this is a
+        // screen and a screen is never the guarantee — but an `.xls` that was
+        // stored, classified and then refused has spent a model call and left a
+        // file in the store for a bill nobody can read.
+        //
+        // AND AN OUTLOOK `.msg` (FIU 2026-09-21). `INTAKE_UPLOAD_ACCEPT` below
+        // is the file PICKER's filter, which a file dropped on the zone never
+        // passes through, and the store admits `.msg` because it is legitimate
+        // evidence on a change set — so a dropped one reached the project's own
+        // blob prefix and was refused only by the route. No charge and no run;
+        // a stray blob.
+        status: (unreadableUploadAdvice(file.name) ? "refused" : "waiting") as Queued["status"],
         pathname: null,
         // Generated ONCE per file and reused on every retry, so a lost response
         // cannot register the same upload twice.
         registrationRequestId: crypto.randomUUID(),
         progress: 0,
-        error: legacySpreadsheetAdvice(file.name),
+        error: unreadableUploadAdvice(file.name),
         note: null,
       })),
     ]);
