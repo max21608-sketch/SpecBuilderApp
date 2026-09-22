@@ -194,11 +194,36 @@ describeIfDb("the seeded gate overlay", () => {
     // asked for), +6 from db/seed/0009 (Matthew's rows with no BWS field at
     // all). This number moves only when a seed adds a question, and it should
     // fail when one is paraphrased instead of reused.
-    const [{ n }] = await q("select count(distinct prompt)::int n from requirements");
+    // ======================================================================
+    // SEEDED ROWS ONLY, AND THAT IS THE POINT OF THE PREDICATE.
+    //
+    // Everything above is about the seed files, and this counted every row in
+    // the table. A db-tier fixture that creates its own category and its own
+    // questions — `tests/db/chase-drafts.test.ts` does, correctly, per-process
+    // suffixed — therefore moved a number this test reads as seed state, and a
+    // run whose teardown failed left them behind and failed THIS test on every
+    // later run, in every worktree, for every agent: 77 where it expects 74,
+    // reading as a seed regression in whatever commit happened to be under
+    // test. It cost five runs on 2026-09-23 before the chain was understood.
+    //
+    // A `__QA ` category is not seed data, so it is not what this assertion is
+    // about. Scoping it here removes the whole class rather than the one
+    // instance — `db:qa-clean` sweeping those categories (fixed the same day)
+    // is the other half, and neither replaces the other: the sweep stops the
+    // litter accumulating, this stops litter ever being read as seed.
+    // ======================================================================
+    const [{ n }] = await q(`
+      select count(distinct r.prompt)::int n
+        from requirements r
+        join item_categories c on c.id = r.category_id
+       where left(c.name, 5) <> '__QA '`);
     expect(n).toBe(74);
     const perField = await q(`
       select f.json_id, count(distinct r.prompt)::int n
-        from requirements r join spec_fields f on f.id = r.spec_field_id
+        from requirements r
+        join spec_fields f on f.id = r.spec_field_id
+        join item_categories c on c.id = r.category_id
+       where left(c.name, 5) <> '__QA '
        group by f.json_id having count(distinct r.prompt) > 1`);
     expect(perField).toEqual([]);
   });

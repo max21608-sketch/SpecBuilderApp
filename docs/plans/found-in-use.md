@@ -35,6 +35,35 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-23
 
+### `chase-drafts`'s teardown fails under a full run, and nothing says why
+
+**Status: open. The SYMPTOMS are closed and the cause is not.** Recorded
+2026-09-23 after the stage-4b gate run.
+
+`npm run checks` on `291d8d4` failed two files for one chain:
+`tests/db/chase-drafts.test.ts` teardown threw *"update or delete on table
+`item_categories` violates RESTRICT setting of foreign key constraint
+`spec_records_category_id_fkey`"* at its `delete from item_categories`, so the
+category survived, so `spec-field-gates` read 77.
+
+**What was checked, and what it rules out.** Immediately afterwards **nothing at
+all referenced that category** — zero `spec_records` — so whatever held it was
+gone by the time it was looked at. The obvious suspect is ruled out:
+`boq-revision.test.ts` picks a category with `order by sort_order limit 1` and
+the QA one is 9001, so it lands on a seeded row. The suite's own second record
+(9002) is on the same project and a SEEDED category, and the teardown deletes
+`spec_records where project_id` before the category.
+
+**No cause is named here, deliberately.** Concurrency during an eight-fork run
+is the likeliest reading and is unproven, and a guessed cause written as fact is
+what sends a fix to the wrong file. What a fix wants is a reproduction under
+load, not a theory.
+
+**Both consequences are now closed independently**, which is why this is not
+urgent: the sweep can reach an orphaned category, and the seed assertion no
+longer reads QA rows. A failed teardown now leaves a row that the next sweep
+removes, instead of failing the tier for everybody.
+
 ### `db:qa-clean` cannot sweep a `__QA` category, so one failed teardown breaks the tier for everybody
 
 **Status: FIXED 2026-09-23** — the sweep now has an `item_categories` step, and
@@ -92,9 +121,25 @@ shared key a fixture writes"*.
 
 ### A seeded-prompt count test fails on clean staging — 77 where it expects 74
 
-**Status: the SYMPTOM is resolved and the CAUSE it exposed is open, below.**
-The count is back to 74 and the test passes (verified 2026-09-23 on the
-sandbox: zero `__QA` categories, `count(distinct prompt)` = 74).
+**Status: FIXED 2026-09-23 — the whole class, not the instance.** The
+assertion now counts SEEDED requirements only, excluding any `__QA ` category.
+Everything the test's own comment describes is about the seed files, and it was
+counting every row in the table, so a db-tier fixture's own questions could fail
+it — which they did, on five separate runs that day, reading each time as a seed
+regression in whatever commit was under test.
+
+**Proved both ways rather than observed after a sweep.** A `__QA ` category with
+one requirement was planted deliberately: the OLD assertion fails on it (75
+against 74) and the NEW one passes. The probe was then swept, leaving 17
+categories and 74 prompts.
+
+This and the sweep fix below are two halves and neither replaces the other: the
+sweep stops litter accumulating, the predicate stops litter ever being READ as
+seed.
+
+**The teardown race itself is NOT diagnosed, and is recorded as open below.**
+The count was also back to 74 after the earlier hand-sweep (verified on the
+sandbox).
 
 **My first diagnosis here was wrong and is kept rather than deleted.** I wrote
 this entry as three possible readings of a seed drift. It was none of them: the
