@@ -35,13 +35,65 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-23
 
+### `db:qa-clean` cannot sweep a `__QA` category, so one failed teardown breaks the tier for everybody
+
+**Status: open, and it is the one worth fixing.** Found 2026-09-23 by the chain
+above.
+
+`tools/qa-clean.mjs` sweeps **by project**: it walks `email_drafts`,
+`project_contacts`, `spec_answers`, `spec_record_refs`, `record_attributes`,
+`attachments`, `spec_records`, `project_notes`, `spec_runs`, `intake_runs`,
+`intake_batches` and finally `projects`, all keyed on a project id. There is
+**no `item_categories` step and no `requirements` step**, so a `__QA` category
+a fixture created and failed to drop is invisible to the sweep and stays for
+ever.
+
+**Why that is worse than an orphan row.** `requirements` is SEED data that
+every category reads, so three leftover rows moved a project-wide count and
+failed `tests/db/spec-field-gates.test.ts` on **every later run, in every
+worktree, for every agent** — and it failed in a way that reads as a seed
+regression in whatever commit is under test. Two agents lost time to it on
+2026-09-23 before the cause was found.
+
+**What the fix has to be careful about.** The sweep must match the `__QA `
+prefix WITH its trailing space, as everything else does, and must delete the
+requirements before the category. It must never touch a category that is not
+`__QA` prefixed: the seventeen cheat sheets are the requirement matrix, and a
+sweep that could reach one would be a script capable of emptying the register
+this app is built on. `qa-clean` already refuses production outright and that
+stays.
+
+**Not adjacent work, whatever it looks like.** A cleanup script that cannot
+clean up what the tier creates is the same class of defect as a fixture writing
+a shared key — the rule `CLAUDE.md` states as *"the same goes for any other
+shared key a fixture writes"*.
+
 ### A seeded-prompt count test fails on clean staging — 77 where it expects 74
 
-**Status: open, and NOT caused by anything in the 2026-09-23 plan.** Found
-2026-09-23 while verifying item 4a.7's coder report, which named it as
-pre-existing; checked independently on the main checkout at `e89401c` with no
-item's changes present, and again in a clean detached worktree at `4d93816`.
-It fails identically in both, in isolation, in two seconds.
+**Status: the SYMPTOM is resolved and the CAUSE it exposed is open, below.**
+The count is back to 74 and the test passes (verified 2026-09-23 on the
+sandbox: zero `__QA` categories, `count(distinct prompt)` = 74).
+
+**My first diagnosis here was wrong and is kept rather than deleted.** I wrote
+this entry as three possible readings of a seed drift. It was none of them: the
+database was carrying LITTER. `tests/db/chase-drafts.test.ts` creates its own
+`__QA` category and three requirements in `beforeAll`; a run whose teardown
+failed under concurrent-run contention left `__QA Chase drafts
+category-fbfd6e` and its three requirements behind, and those three prompts are
+the 77. Found by 4a.6's coder, who deleted the orphan by hand on a quiet
+machine; checked here afterwards rather than taken on trust.
+
+**One thing that coder reported is NOT right**, and it matters because it would
+send the fix to the wrong file: the fixture's category IS per-process suffixed
+— `qaNumber("Chase drafts category")`, `tests/db/chase-drafts.test.ts:96-101`,
+which is why the leftover row carries `-fbfd6e`. The fixture is following the
+rule. What failed is teardown, and what made a failed teardown permanent is the
+sweep — see the entry below.
+
+The original reading follows, wrong, as written. Checked independently on the
+main checkout at `e89401c` with no item's changes present, and in a clean
+detached worktree at `4d93816`; it failed identically in both, which was true
+and told me nothing, because the litter was in the database they share.
 
 `tests/db/spec-field-gates.test.ts:198` — *"a reused prompt is byte-identical"*
 — asserts `select count(distinct prompt) from requirements` is **74** and the
@@ -61,7 +113,19 @@ count moving is not a number to edit, it means somebody should read the diff.
 
 ### The projects list sorts alphabetically by BWS number, and should sort by most recently worked in
 
-**Status: open. A CHANGE ASKED FOR.** Max, on the projects list: *"we should
+**Status: FIXED 2026-09-23, `44a714d`** (plan item 4a.6), on staging. Sorted by
+`greatest(max(change_sets.created_at), p.created_at) desc` through a `left join
+lateral`, with active-first and the `bws_project_number` tiebreak both kept.
+EXPLAIN confirms `change_sets_project_idx` is used — one index-only search per
+project, zero heap fetches — and the lateral is there rather than a scalar
+subquery because inline it is evaluated per reference, which is two searches
+per row for one fact. The sandbox reordered to `p4353453` (worked in 16:41),
+`DEMO-300` (14:18), `DEMO-TEST-01`, `AP364c`… against the old alphabetical
+`AP364c, AP364d, AP364e, DEMO-300`. The `updated_at` trap is written into the
+query's own comment. Nobody has looked at the reordered list on a screen. The
+original entry follows.
+
+**Status when found: open. A CHANGE ASKED FOR.** Max, on the projects list: *"we should
 automatically sort projects by most recent — and that should be most recently
 worked in, or edited, or added."*
 
