@@ -191,6 +191,89 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
     });
   });
   // ==========================================================================
+  // WHAT IS LISTED AS "GO AND CATEGORISE THIS" MUST BE CATEGORISABLE TO ANY
+  // PURPOSE. `loadUncategorisedRecords` required only an active record, so it
+  // named a split bill line -- a HEADING, whose configurations are the jobs --
+  // and a record on a retired phase. Neither is in the export's scope and
+  // neither is in `loadOutstanding`'s, so categorising either changes nothing
+  // anybody can see. Both clauses are `loadExportScope`'s, and this is where
+  // the three readings are pinned together.
+  // ==========================================================================
+  describe("what the uncategorised list may NOT name", () => {
+    let headingId = "";
+    let configurationId = "";
+    let retiredPhaseRecordId = "";
+    let retiredPhaseId = "";
+
+    beforeAll(async () => {
+      const heading = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, item_description, qty, status,
+                                   created_by, updated_by)
+         values ($1, $2, 20, '__QA Split heading', 45, 'active', 'qa', 'qa') returning id`,
+        [projectId, runId],
+      );
+      headingId = heading.rows[0].id;
+      const configuration = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, item_description, qty, status,
+                                   parent_id, depth, split_reason, variant_label, created_by, updated_by)
+         values ($1, $2, 21, '__QA Split heading', null, 'active', $3, 1, 'fabric', 'A', 'qa', 'qa')
+         returning id`,
+        [projectId, runId, headingId],
+      );
+      configurationId = configuration.rows[0].id;
+
+      const retiredPhase = await client.query(
+        `insert into spec_runs (project_id, name, status, retired_at, retired_by, created_by, updated_by)
+         values ($1, '__QA Retired phase', 'retired', now(), 'qa', 'qa', 'qa') returning id`,
+        [projectId],
+      );
+      retiredPhaseId = retiredPhase.rows[0].id;
+      const stranded = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, item_description, qty, status,
+                                   created_by, updated_by)
+         values ($1, $2, 22, '__QA Left on a retired phase', 1, 'active', 'qa', 'qa') returning id`,
+        [projectId, retiredPhaseId],
+      );
+      retiredPhaseRecordId = stranded.rows[0].id;
+    });
+
+    afterAll(async () => {
+      await client.query(`delete from spec_records where id = $1`, [configurationId]);
+      await client.query(`delete from spec_records where id in ($1, $2)`, [headingId, retiredPhaseRecordId]);
+      await client.query(`delete from spec_runs where id = $1`, [retiredPhaseId]);
+    });
+
+    it("leaves out a split bill line and names its configuration instead", async () => {
+      const named = (await loadUncategorisedRecords(projectId)).map((row) => row.recordId);
+      // The heading is not work: its configurations are what the export ships.
+      expect(named).not.toContain(headingId);
+      // The configuration IS, and carries no category of its own.
+      expect(named).toContain(configurationId);
+      // And the predicate is the export's: the heading is out of that too.
+      const loaded = await loadExportScope(projectId, runId);
+      if (isScopeFailure(loaded)) throw new Error(loaded.error);
+      const inScope = loaded.scope.records.map((record) => record.id);
+      expect(inScope).not.toContain(headingId);
+      expect(inScope).toContain(configurationId);
+    });
+
+    it("leaves out a record on a retired phase, which no chase and no file reaches", async () => {
+      const named = (await loadUncategorisedRecords(projectId)).map((row) => row.recordId);
+      expect(named).not.toContain(retiredPhaseRecordId);
+      // `loadOutstanding` has always dropped it; the two now agree.
+      const outstanding = await loadOutstanding(projectId);
+      expect(outstanding.some((question) => question.recordId === retiredPhaseRecordId)).toBe(false);
+    });
+
+    it("still names the ordinary uncategorised record", async () => {
+      // The clauses narrow what cannot be acted on and nothing else. A list
+      // that had quietly lost the record it exists for would be worse than the
+      // one that named two it should not.
+      expect((await loadUncategorisedRecords(projectId)).map((row) => row.recordId)).toContain(uncategorisedId);
+    });
+  });
+
+  // ==========================================================================
   // THE CODE COLUMN AND THE FILE'S CLIENT CODE ARE ONE STATEMENT.
   //
   // `spec_record_refs` carries five ref systems and the export's Client Code

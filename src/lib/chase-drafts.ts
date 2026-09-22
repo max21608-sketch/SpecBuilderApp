@@ -826,6 +826,20 @@ export async function loadQuestionsByKey(
  * no checklist to measure them against. Reported alongside the blocked list
  * rather than counted as complete -- `0 of 0` renders green, which is exactly
  * backwards.
+ *
+ * ITS SCOPE IS `loadOutstanding`'S, AND IT WAS NOT. This query required only
+ * an active record, so it listed two kinds of record that no chase and no
+ * export will ever reach: one on a RETIRED phase, and a SPLIT BILL LINE,
+ * which is a heading whose configurations are the jobs. Both read on screen
+ * as an item somebody has to go and categorise, and categorising either
+ * changes nothing -- the export still ships the configurations, and the
+ * retired phase still ships nothing. Reporting work that cannot be done is
+ * the same failure as reporting a gate satisfied that is not: it is confident
+ * and it is wrong.
+ *
+ * A split parent that carries no category loses nothing by going: its
+ * configurations are separate active records and are listed on their own
+ * account.
  */
 export async function loadUncategorisedRecords(projectId: string): Promise<
   { recordId: string; recordLabel: string; itemDescription: string; version: number }[]
@@ -834,7 +848,21 @@ export async function loadUncategorisedRecords(projectId: string): Promise<
     select r.id, r.record_no, r.item_description, r.version, p.bws_project_number
     from spec_records r
     join projects p on p.id = r.project_id
-    where r.project_id = ${projectId} and r.status = 'active' and r.category_id is null
+    join spec_runs run on run.id = r.run_id
+    where r.project_id = ${projectId}
+      and r.status = 'active'
+      -- loadExportScope's two clauses, word for word, the way loadOutstanding
+      -- already carries them. A retired phase is a tab somebody put away; a
+      -- correlated not-exists on an ACTIVE configuration is what makes a
+      -- heading a heading, never a stored has-been-split flag -- retire both
+      -- configurations and the line is an item again. (No backticks in here:
+      -- one closes the tagged template.)
+      and run.status = 'active'
+      and not exists (
+        select 1 from spec_records v
+        where v.parent_id = r.id and v.status = 'active'
+      )
+      and r.category_id is null
     order by r.record_no
   `;
   return rows.map((row) => ({
