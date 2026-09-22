@@ -135,11 +135,49 @@ export function orderRows(pending: DrawingObservation[]): {
 const GROUP_ORDER: AttributeGroup[] = ["dimension", "material", "finish", "hardware", "other", "note"];
 
 /**
+ * How many columns a spanning panel covers.
+ *
+ * ONE CONSTANT, because the number was written out four times — the two toggle
+ * rows, the replace acknowledgement and the blocker panel — and a column added
+ * or removed has to reach every one of them. A `colSpan` one short leaves the
+ * panel ending before the last column; one over widens the row past the table.
+ * Both are silent.
+ */
+export const OBSERVATION_COLUMNS = 6;
+
+/**
  * The table head every observation table shares.
  *
  * `Th` rather than a hand-rolled `<th>`, so this table's header reads the same
  * as every other table in the app. The CELLS below stay as they are: they hold
  * a select in almost every column and `Td`'s padding is built for text.
+ *
+ * ============================================================================
+ * THE UNIT IS NOT A COLUMN. IT IS THE SECOND HALF OF THE VALUE.
+ *
+ * It was one, and the card was CLIPPED: `PageBody` is capped at 1400px and the
+ * picture sidebar takes a fixed 300 of it, so the table gets 1010px at 1920
+ * AND at 1440 — the viewport makes no difference — while the seven columns
+ * wanted up to 1091. What went past the edge was the unheaded ACTION column,
+ * so nothing in the header row went missing to say so, and *Ignore* was
+ * reachable only by scrolling the table sideways. Max, 2026-09-21: "I don't
+ * want to have to scroll to view all of the fields on the table."
+ *
+ * A column had to go, and Unit is the one that costs least. It was 99px wide
+ * and held an em-dash on every row that is not a measurement — on a sheet of
+ * fifteen REMARKS that is 99px of nothing. A figure and its unit are ONE
+ * statement, which is how `composeDimensionCell` writes them (`840` + `mm`),
+ * and the unit's provenance line — printed on the page, guessed from the
+ * figures, the project default — is about the figure, so it belongs beside it.
+ * Every control survives with the same behaviour; only the cell it sits in
+ * changed.
+ *
+ * Do not solve this by making the wrapper `overflow-hidden` (it becomes the
+ * sticky scroll container and the header then covers a row) or by giving a
+ * spanning panel an extra `<td>` beside the data cells (the row becomes
+ * columns × 3 slots wide and the browser squeezes the acknowledgement into a
+ * ribbon). Both are recorded traps this card has already paid for.
+ * ============================================================================
  */
 export function ObservationTableHead() {
   return (
@@ -148,7 +186,6 @@ export function ObservationTableHead() {
         <Th className="px-4">Group</Th>
         <Th className="px-2">Label</Th>
         <Th className="px-2">Value</Th>
-        <Th className="px-2">Unit</Th>
         <Th className="px-2">Dimension / BWS field</Th>
         <Th className="px-2">State</Th>
         <Th className="px-4" />
@@ -170,7 +207,7 @@ export function OtherDimensionsToggle({
 }) {
   return (
     <tr className="border-t border-neutral-200 bg-neutral-50">
-      <td colSpan={7} className="px-4 py-2">
+      <td colSpan={OBSERVATION_COLUMNS} className="px-4 py-2">
         <Button size="xs" variant="quiet" onClick={onToggle}>
           {shown ? `Hide the other ${count} dimensions` : `${label ?? "Other dimensions"} (${count}) — show`}
         </Button>
@@ -314,6 +351,46 @@ export function ObservationRow({
             className="w-full border border-neutral-300 rounded px-2 py-1 text-sm"
           />
         )}
+        {/* THE UNIT, BESIDE THE FIGURE IT BELONGS TO. See the head above for
+            why it is no longer a column of its own.
+
+            A TEXT NOTE IS NEVER ASKED FOR ONE. "REMARKS: SUBMIT SHOP DRAWINGS
+            FOR REVIEW" is not a measurement, and an empty select beside
+            fifteen of them reads as fifteen unanswered questions where there
+            are none — nothing blocks a unitless note.
+            A MEASURED note is offered one whether or not it already carries
+            one: a wrong mm on `ARM HEIGHT 520` must be correctable without
+            promoting the row to a slot, and a figure staged with no unit at
+            all must be answerable at all. Not amber — only a dimension is
+            being asked. */}
+        {(observation.attrGroup === "dimension" || isMeasuredRow(observation)) && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+            <select
+              value={observation.unit ?? ""}
+              onChange={(event) => callbacks.onChange(observation, { unit: event.target.value || null })}
+              aria-label="Unit"
+              className={`border rounded px-1 py-0.5 text-xs ${
+                observation.unit === null && observation.attrGroup === "dimension"
+                  ? "border-amber-400 bg-amber-50"
+                  : "border-neutral-300"
+              }`}
+            >
+              <option value="">Choose…</option>
+              {ATTRIBUTE_UNITS.map((unit) => (
+                <option key={unit} value={unit}>
+                  {unit}
+                </option>
+              ))}
+            </select>
+            {/* A printed unit is NOT a guess and must not be labelled as one —
+                that is the whole reason provenance is tracked. */}
+            {unitSourceOf(observation) === "printed" && <span className="text-xs text-neutral-500">printed on the page</span>}
+            {unitSourceOf(observation) === "figures" && <span className="text-xs text-amber-700">guessed from the figures</span>}
+            {unitSourceOf(observation) === "project_default" && (
+              <span className="text-xs text-amber-700">the project default</span>
+            )}
+          </div>
+        )}
         {/* Not for a block: its raw form is the same lines with the heading
             repeated down every one of them. */}
         {observation.valueRaw !== null && observation.valueRaw !== observation.value && !(value ?? "").includes("\n") && (
@@ -335,44 +412,6 @@ export function ObservationRow({
               onCropped={(image, croppedPage) => callbacks.onSwatch(observation.id, image, croppedPage)}
             />
           </>
-        )}
-      </td>
-      <td className="px-2 py-2 align-top">
-        {/* A TEXT NOTE IS NEVER ASKED FOR A UNIT. "REMARKS: SUBMIT SHOP
-            DRAWINGS FOR REVIEW" is not a measurement, and an empty select
-            beside fifteen of them reads as fifteen unanswered questions where
-            there are none — nothing blocks a unitless note.
-            A MEASURED note is offered one whether or not it already carries
-            one: a wrong mm on `ARM HEIGHT 520` must be correctable without
-            promoting the row to a slot, and a figure staged with no unit at all
-            must be answerable at all. Not amber — only a dimension is being
-            asked. */}
-        {observation.attrGroup === "dimension" || isMeasuredRow(observation) ? (
-          <select
-            value={observation.unit ?? ""}
-            onChange={(event) => callbacks.onChange(observation, { unit: event.target.value || null })}
-            className={`border rounded px-1 py-0.5 text-xs ${
-              observation.unit === null && observation.attrGroup === "dimension"
-                ? "border-amber-400 bg-amber-50"
-                : "border-neutral-300"
-            }`}
-          >
-            <option value="">Choose…</option>
-            {ATTRIBUTE_UNITS.map((unit) => (
-              <option key={unit} value={unit}>
-                {unit}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="text-xs text-neutral-400">—</span>
-        )}
-        {/* A printed unit is NOT a guess and must not be labelled as one — that
-            is the whole reason provenance is tracked. */}
-        {unitSourceOf(observation) === "printed" && <p className="mt-0.5 text-xs text-neutral-500">printed on the page</p>}
-        {unitSourceOf(observation) === "figures" && <p className="mt-0.5 text-xs text-amber-700">guessed from the figures</p>}
-        {unitSourceOf(observation) === "project_default" && (
-          <p className="mt-0.5 text-xs text-amber-700">the project default</p>
         )}
       </td>
       <td className="px-2 py-2 align-top">
@@ -503,7 +542,7 @@ export function ReplacePanel({
   if (occupants.length === 0) return null;
   return (
     <tr className={blocked ? "bg-amber-50/40" : undefined}>
-      <td colSpan={7} className="px-4 pb-2">
+      <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2">
         <div className="border border-amber-300 bg-amber-50 rounded px-2 py-1.5 text-xs">
           {heading && <p className="mb-1 font-medium text-amber-900">{heading}</p>}
           <p className="text-amber-900">
@@ -562,7 +601,7 @@ export function RowNotes({ blockers, warnings }: { blockers: RowBlocker[]; warni
   if (blockers.length === 0 && warnings.length === 0) return null;
   return (
     <tr className="bg-amber-50/40">
-      <td colSpan={7} className="px-4 pb-2 text-xs text-amber-900">
+      <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2 text-xs text-amber-900">
         {blockers.map((blocker) => blocker.message).join(" ")}
         {/* Said out loud, because an amber row that still commits looks like a
             bug otherwise. */}

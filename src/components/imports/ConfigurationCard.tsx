@@ -48,6 +48,7 @@ import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
 import {
   ObservationRow,
+  OBSERVATION_COLUMNS,
   ObservationTableHead,
   OtherDimensionsToggle,
   ReplacePanel,
@@ -447,7 +448,7 @@ export default function ConfigurationCard({
                               />
                               {row.missingOn.length > 0 && (
                                 <tr>
-                                  <td colSpan={7} className="px-4 pb-1 text-xs text-neutral-500">
+                                  <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-1 text-xs text-neutral-500">
                                     Not drawn on {row.missingOn.join(" or ")} — nothing is written there for this
                                     measurement.
                                   </td>
