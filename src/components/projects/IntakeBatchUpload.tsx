@@ -22,6 +22,25 @@
 // it is, fills the box in and reads it — and every answer is FLAGGED with the
 // evidence it was read from, because the reviewer is the one who decides.
 //
+// AND THE NAMES ARE READ THE MOMENT THE FILES LAND (FIU 2026-09-22). All of the
+// above was already true and the screen asked for the work anyway: eleven rows,
+// eleven unset boxes, and the sentence explaining that the press does it at the
+// BOTTOM in small grey text. Max: "I want it to read first and try and guess
+// what the document is and then give you the option to change it … if we have
+// 300 items, someone having to go through and do all of that manually is a real
+// pain." His decision, the same day: a FILENAME rule, on drop.
+//
+// A NAME COSTS NOTHING AND SETTLES NOTHING. `guessKindFromName` fills the box
+// before a byte is stored, flagged, with what it read quoted beside it — and
+// the charged look at the document still happens at the press, where the
+// sentence saying what that spends lives. So a name never lets the press skip
+// the model: only a PERSON accepting the guess, or choosing a kind, does that,
+// and the sentence counts the calls that are actually left. That is the
+// `level_suggested` rule — the app guesses, shows what it read, and a person's
+// action is what files it — and the acceptance is a `SuggestButton`, because
+// picking the option a select is already showing fires no change event and the
+// flag could never be cleared by agreeing with it.
+//
 // A FILE THE MODEL CANNOT SETTLE IS HELD, not guessed at. It stays on this
 // screen with an empty box and nothing is read for it, which costs nothing.
 // Choosing one by hand always wins over the suggestion.
@@ -37,6 +56,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { INTAKE_UPLOAD_ACCEPT, SPREADSHEET_EXTENSIONS, unreadableUploadAdvice } from "@/lib/intake-source-types";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { projectUploadPrefix } from "@/lib/blob-source";
+import { guessKindFromName } from "@/lib/document-name-guess";
+import SuggestButton from "@/components/ui/SuggestButton";
 
 /** What a person calls the thing, in the order a pack is read. */
 const CHOICES: { value: string; label: string; importType: "boq" | "spec_document"; documentKind: DocumentKind | null }[] = [
@@ -66,14 +87,36 @@ function choiceFor(decision: { importType: string; documentKind: string | null }
   );
 }
 
+/**
+ * The kind in two or three words, for the suggestion button.
+ *
+ * Read off `DOCUMENT_KIND_LABELS`, which is the app's own word for each kind,
+ * rather than from a fourth list: the select's labels carry an explanation in
+ * brackets ("Bill of quantities (creates the records)") and a button that long
+ * wraps the row. A bill has no `documentKind` and is named here, once.
+ */
+function shortLabel(value: string): string {
+  const choice = CHOICES.find((option) => option.value === value);
+  if (!choice) return value;
+  return choice.documentKind ? DOCUMENT_KIND_LABELS[choice.documentKind] : "Bill of quantities";
+}
+
 type Queued = {
   key: string;
   file: File;
   /** A person's own choice, which always beats the suggestion. */
   choice: string;
-  /** What the model read it as, and why. Never applied without being shown. */
+  /** What it was read as, and why. Never applied without being shown. */
   suggested: string;
   evidence: string | null;
+  /**
+   * WHICH READING IT CAME FROM, and it decides one thing: whether the press
+   * may act on it without looking at the document. `model` means the file has
+   * been looked at and asking again would spend a second call for the same
+   * answer; `name` means only the filename has been read, which is free, and
+   * is not a reason to skip the charged look.
+   */
+  suggestedFrom: "name" | "model" | null;
   /**
    * `refused` is terminal and `failed` is not, which is the whole difference:
    * pressing again retries a failed upload, and there is nothing to retry
@@ -99,6 +142,48 @@ type Queued = {
 /** What will be used for a file: what somebody chose, else what was read. */
 const kindOf = (item: Queued) => item.choice || item.suggested;
 
+/**
+ * The kind the press may act on WITHOUT looking at the document.
+ *
+ * A person's choice, or a reading of the document itself. A NAME GUESS IS
+ * DELIBERATELY NOT IN HERE: it fills the box so that a pack of eleven does not
+ * meet somebody as eleven mandatory-looking questions, and that is all it does.
+ * Letting it skip the classify call would make a filename decide which prompt a
+ * charged read uses — and a file called "… - BOQ - …" whose contents are a
+ * schedule is exactly the asymmetric case the classify prompt already guards.
+ */
+const settledKind = (item: Queued) => item.choice || (item.suggestedFrom === "model" ? item.suggested : "");
+
+/**
+ * WHAT THE PRESS HAS DONE SO FAR, counted once.
+ *
+ * `packTally`'s shape one screen earlier, and for its reason: the pack screen
+ * prints this line and is reached by a redirect that only fires when nothing is
+ * held, so on the pack where something needs a person the progress of the other
+ * ten was exactly where nobody looked.
+ *
+ * A file can be counted in more than one column and that is right — a stored
+ * file is still stored once it is being read. This is a progress line, not a
+ * partition, and each number answers its own question.
+ */
+function uploadTally(queue: Queued[]) {
+  return queue.reduce(
+    (acc, item) => {
+      if (item.pathname) acc.stored += 1;
+      if (item.status !== "refused" && kindOf(item)) acc.identified += 1;
+      if (item.status === "registering" || (item.status === "done" && !item.note)) acc.beingRead += 1;
+      // Registered, and its read is queued behind the pack's in-flight cap. It
+      // starts on its own and needs nobody, which is why it is not in the
+      // column that says somebody is wanted.
+      if (item.status === "done" && item.note) acc.waitingForSlot += 1;
+      if (item.status === "needs-kind") acc.waitingForYou += 1;
+      if (item.status === "failed") acc.failed += 1;
+      return acc;
+    },
+    { stored: 0, identified: 0, beingRead: 0, waitingForSlot: 0, waitingForYou: 0, failed: 0 },
+  );
+}
+
 export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId: string; onUploaded?: () => void }) {
   const [queue, setQueue] = useState<Queued[]>([]);
   const [busy, setBusy] = useState(false);
@@ -112,12 +197,19 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
     setError(null);
     setQueue((current) => [
       ...current,
-      ...Array.from(files).map((file) => ({
+      ...Array.from(files).map((file) => {
+        // READ THE NAME NOW, because it costs nothing. It abstains wherever two
+        // kinds are possible — a bare "schedule" could be FF&E, finishes or
+        // fabric — and an abstention leaves the row exactly as it has always
+        // been, which is held rather than wrong.
+        const named = unreadableUploadAdvice(file.name) ? null : guessKindFromName(file.name);
+        return {
         key: `${file.name}-${file.size}-${crypto.randomUUID()}`,
         file,
         choice: "",
-        suggested: "",
-        evidence: null,
+        suggested: named ? choiceFor(named.decision) : "",
+        evidence: named ? named.evidence : null,
+        suggestedFrom: (named ? "name" : null) as Queued["suggestedFrom"],
         // A FORMAT NOTHING READS IS REFUSED IN THE BROWSER, before a byte is
         // stored (variance matrix row 5). The server refuses it too — this is a
         // screen and a screen is never the guarantee — but an `.xls` that was
@@ -138,7 +230,8 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         progress: 0,
         error: unreadableUploadAdvice(file.name),
         note: null,
-      })),
+        };
+      }),
     ]);
   }
 
@@ -206,9 +299,11 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
           continue;
         }
 
-        // WHAT IS IT? Only where nobody has said. A person's choice is never
-        // second-guessed, and a file already classified is never re-read.
-        let choice = kindOf(item);
+        // WHAT IS IT? Only where nobody has said and nothing has LOOKED at it.
+        // A person's choice is never second-guessed and a document is never
+        // classified twice — but a NAME is not a reading, so a file the
+        // filename rule guessed at is still looked at here.
+        let choice = settledKind(item);
         if (!choice) {
           update(item.key, { status: "reading" });
           const asked = await apiFetch<{
@@ -227,10 +322,24 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
               contentType: item.file.type,
             }),
           });
-          const suggested = asked.ok ? choiceFor(asked.data.decision) : "";
+          const read = asked.ok ? choiceFor(asked.data.decision) : "";
           const evidence = asked.ok ? (asked.data.evidence ?? null) : asked.error;
-          update(item.key, { suggested, evidence });
-          choice = suggested;
+          if (read) {
+            // THE DOCUMENT BEATS THE NAME, and the evidence moves with it: a
+            // suggestion and the sentence under it are one reading, or the row
+            // cites a cover page for something it worked out from a filename.
+            update(item.key, { suggested: read, evidence, suggestedFrom: "model", note: null });
+          } else {
+            // IT LOOKED AND COULD NOT TELL. A name guess is KEPT — it is still
+            // one click from being accepted — and what the document said goes
+            // beside it in slate rather than replacing it.
+            const named = item.suggestedFrom === "name";
+            update(item.key, {
+              evidence: named ? item.evidence : evidence,
+              note: named && evidence ? `Looked at the document and could not tell: ${evidence}` : null,
+            });
+          }
+          choice = read;
 
           // KNOWN, AND NOT SOMETHING THIS APP READS (§6.10.a row 8). Different
           // from "nobody knows yet": the file stays, the dropdown stays open in
@@ -310,6 +419,15 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
     }
   }
 
+  // WHAT THE PRESS STILL HAS TO PAY TO IDENTIFY. Not `pending.length`: a file
+  // whose kind a person has said, or whose document has already been read, is
+  // not asked about again — so a pack whose suggestions were all accepted costs
+  // nothing to identify, and the sentence has to be able to say so.
+  const toIdentify = pending.filter((item) => !settledKind(item)).length;
+  const namedFromFilename = queue.filter((item) => item.suggestedFrom === "name" && !item.choice).length;
+  const tally = uploadTally(queue);
+  const showTally = busy || queue.some((item) => item.pathname);
+
   const label = busy
     ? "Working…"
     : held.length > 0
@@ -369,6 +487,60 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         </button>
       </div>
 
+      {/* WHAT THE PRESS DOES, ABOVE THE ROWS (FIU 2026-09-22). It used to be
+          the last thing on the component, below the button, in grey — so what a
+          person MET was eleven boxes that looked mandatory, and the sentence
+          saying the app fills them in was read afterwards if at all.
+
+          It is still stated before the press, because the press is what spends
+          the money, and it is deliberately not a confirm dialog: every document
+          in a tender pack is going to be read, and a modal per pack is ceremony
+          rather than a decision. */}
+      <p className="mt-3 text-xs text-neutral-500">
+        {pending.length === 0 ? (
+          <>Drop the pack above. Nothing is read, and nothing is charged, until you press.</>
+        ) : (
+          <>
+            {namedFromFilename > 0 && (
+              <>
+                {namedFromFilename === 1 ? "One file has been" : `${namedFromFilename} files have been`} filled in from{" "}
+                {namedFromFilename === 1 ? "its" : "their"} name — that reads nothing, stores nothing and costs nothing.
+                Accept each one or change it.{" "}
+              </>
+            )}
+            {toIdentify === 0 ? (
+              <>
+                One press: each file is stored and read. Every file already has a kind, so there is nothing to spend on
+                working that out — just a full charged read for every specification document, and a bill of quantities
+                is read by code and costs nothing.
+              </>
+            ) : (
+              <>
+                One press: each file is stored, looked at to work out what it is, and then read. That is{" "}
+                {toIdentify === 1 ? "one small call" : `${toIdentify} small calls`} to identify{" "}
+                {toIdentify === 1 ? "it" : "them"}, and a full charged read for every specification document — a bill of
+                quantities is read by code and costs nothing.
+              </>
+            )}{" "}
+            Anything the app cannot identify waits for you rather than being guessed at. What it decides is shown with
+            its reasons, and reviewing what comes back is still yours.
+          </>
+        )}
+      </p>
+
+      {/* HOW FAR IT HAS GOT. The pack screen's own line, one screen earlier,
+          because the redirect to it only fires when nothing is held — so on the
+          pack where something needs a person, the reading progress of the rest
+          was on a screen nobody was looking at. */}
+      {showTally && (
+        <p className="mt-2 text-xs text-neutral-600">
+          {tally.stored} stored · {tally.identified} identified · {tally.beingRead} being read · {tally.waitingForYou}{" "}
+          waiting for you
+          {tally.waitingForSlot > 0 && <> · {tally.waitingForSlot} waiting for a slot</>}
+          {tally.failed > 0 && <span className="text-red-700"> · {tally.failed} could not be stored</span>}
+        </p>
+      )}
+
       {queue.length > 0 && (
         <ul className="mt-3 divide-y divide-neutral-100 border border-neutral-200 rounded">
           {queue.map((item) => {
@@ -417,12 +589,27 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
                   </button>
                 )}
 
-                {/* WHAT IT WAS READ FROM, so the suggestion can be checked
-                    against the file rather than taken on trust. */}
-                {item.evidence && (
-                  <p className={`w-full text-xs ${unchecked ? "text-amber-700" : "text-neutral-500"}`}>
-                    {item.evidence}
-                  </p>
+                {/* AGREEING WITH IT HAS TO BE POSSIBLE, and before this it was
+                    not: the select's value IS the suggestion and its `onChange`
+                    is the only thing that records a choice, so picking the
+                    option already showing fired nothing and the amber flag
+                    could never be cleared by agreeing with it. That is the
+                    level-picker trap in a second place, and the answer is the
+                    app's own primitive — dashed blue, its evidence required
+                    beside it, one click to accept. The select stays, because
+                    changing it to something else is the other half. */}
+                {unchecked ? (
+                  <SuggestButton
+                    className="w-full"
+                    value={shortLabel(item.suggested)}
+                    evidence={item.evidence ?? ""}
+                    onAccept={() => update(item.key, { choice: item.suggested })}
+                    disabled={busy || item.status === "done"}
+                  />
+                ) : (
+                  // WHAT IT WAS READ FROM, so a filed answer can still be
+                  // checked against the file rather than taken on trust.
+                  item.evidence && <p className="w-full text-xs text-neutral-500">{item.evidence}</p>
                 )}
                 {item.error && <p className="w-full text-xs text-red-700">{item.error}</p>}
                 {item.note && <p className="w-full text-xs text-neutral-500">{item.note}</p>}
@@ -450,23 +637,6 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         )}
       </div>
 
-      {/* Stated before the press, because the press is what spends the money.
-          Deliberately not a confirm dialog: every document in a tender pack is
-          going to be read, and a modal per pack is ceremony rather than a
-          decision. */}
-      <p className="mt-2 text-xs text-neutral-500">
-        {pending.length === 0 ? (
-          <>Drop the pack above. Nothing is read, and nothing is charged, until you press.</>
-        ) : (
-          <>
-            One press: each file is stored, looked at to work out what it is, and then read. That is{" "}
-            {pending.length === 1 ? "one small call" : `${pending.length} small calls`} to identify{" "}
-            {pending.length === 1 ? "it" : "them"}, and a full charged read for every specification document — a bill of
-            quantities is read by code and costs nothing. Anything the app cannot identify waits for you rather than
-            being guessed at. What it decides is shown with its reasons, and reviewing what comes back is still yours.
-          </>
-        )}
-      </p>
     </div>
   );
 }

@@ -25,13 +25,23 @@
 // THE EXACT STEP IS STILL CODE'S. The model answers in DOCUMENT terms — what
 // the thing is called in the trade — and `KIND_FROM_GENRE` maps that onto this
 // app's `importType` and `DocumentKind`. The model is never shown
-// `ffe_schedule` or `spec_document`, so a vocabulary change here is a change to
-// a table in this file rather than to a prompt nothing can test.
+// `ffe_schedule` or `spec_document`, so a vocabulary change is a change to ONE
+// table — in the leaf `document-kinds.ts`, which this file re-exports so the
+// upload screen's filename rule answers in the same terms — rather than to a
+// prompt nothing can test.
 // ============================================================================
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { DocumentSource } from "@/lib/intake-source";
-import type { DocumentKind } from "@/lib/spec-vocab";
+import { DOCUMENT_GENRES, KIND_FROM_GENRE, type DocumentGenre, type KindDecision } from "@/lib/document-kinds";
+
+// THE GENRE VOCABULARY AND ITS MAP LIVE IN A LEAF, and are re-exported here so
+// that every caller of this file is unchanged. They moved because the upload
+// screen answers the same question from a FILENAME, for nothing, before a byte
+// is stored — and a client component importing this file would pull the
+// Anthropic SDK into the browser bundle. One vocabulary, two readers.
+export { DOCUMENT_GENRES, KIND_FROM_GENRE };
+export type { DocumentGenre, KindDecision };
 
 /**
  * Fast and cheap, deliberately, and NOT the extraction model.
@@ -45,44 +55,6 @@ export const CLASSIFY_MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 2_000;
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_EVIDENCE = 400;
-
-/** What a person in the trade would call the document. Not this app's vocabulary. */
-export const DOCUMENT_GENRES = [
-  "bill_of_quantities",
-  "shop_drawings",
-  "specification_sheets",
-  "ffe_schedule",
-  "finishes_schedule",
-  "fabric_schedule",
-  "specification_bible",
-  "preamble",
-  "email",
-  "unclear",
-] as const;
-export type DocumentGenre = (typeof DOCUMENT_GENRES)[number];
-
-export type KindDecision = { importType: "boq" | "spec_document"; documentKind: DocumentKind | null };
-
-/**
- * The exact step: a trade genre becomes this app's own two fields.
- *
- * `specification_sheets` and `shop_drawings` both land on `shop_drawings`
- * because this app has one prompt for both and the Panther pack contains both —
- * nine SPEC-346 sheets and one shop-drawing set, all read the same way. The
- * genre is kept apart from the kind so that stops being true without a prompt
- * change.
- */
-export const KIND_FROM_GENRE: Record<Exclude<DocumentGenre, "unclear">, KindDecision> = {
-  bill_of_quantities: { importType: "boq", documentKind: null },
-  shop_drawings: { importType: "spec_document", documentKind: "shop_drawings" },
-  specification_sheets: { importType: "spec_document", documentKind: "shop_drawings" },
-  ffe_schedule: { importType: "spec_document", documentKind: "ffe_schedule" },
-  finishes_schedule: { importType: "spec_document", documentKind: "finishes_schedule" },
-  fabric_schedule: { importType: "spec_document", documentKind: "fabric_schedule" },
-  specification_bible: { importType: "spec_document", documentKind: "spec_bible" },
-  preamble: { importType: "spec_document", documentKind: "preamble" },
-  email: { importType: "spec_document", documentKind: "email" },
-};
 
 export const CLASSIFY_TOOL_NAME = "record_document_kind";
 

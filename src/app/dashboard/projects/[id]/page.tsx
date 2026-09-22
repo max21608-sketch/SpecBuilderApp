@@ -883,8 +883,13 @@ function ProjectOverview() {
         <>
           Source documents
           <Tip>
-            Each file&rsquo;s kind is declared on upload — a BOQ and a schedule are both spreadsheets and the bytes
-            cannot say which is which.
+            {/* IT SAID "each file's kind is declared on upload", which is the
+                impression 4a.3 exists to remove: the name is read the moment a
+                file lands, the document is read at the press, and what a person
+                picks beats both. The declaring still happens — at registration,
+                where it always has. */}
+            Drop a pack and the app works out what each file is — from its name straight away, then from the document
+            itself when you press. Every answer says what it was read from, and your own choice always wins.
           </Tip>
         </>
       }
