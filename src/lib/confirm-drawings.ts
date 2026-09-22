@@ -41,6 +41,7 @@ import {
   targetRecordIds,
   canonicalCode,
   variantLettersByItem,
+  stateToWrite,
   type DrawingItem,
   type DrawingObservation,
   type OccupiedSlots,
@@ -657,7 +658,14 @@ export async function confirmDrawingItem(
            ${observation.unit}, ${observation.materialCodeRaw},
            ${finishIdByObservation.get(observation.id) ?? null},
            ${observation.specFieldId},
-           ${observation.state}, ${runId}, ${item.page}, ${sortOrder}, ${actor}, ${actor})
+           -- NO BACKTICKS IN A SQL TEMPLATE -- one closes the literal.
+           -- A row nothing reads the state of is never ASKED for one, so it
+           -- arrives here null; the state column is not null default
+           -- confirmed, and this insert names it positionally, so the default
+           -- would never fire. stateToWrite is that default, shared with the
+           -- empty_value blocker so the two cannot disagree. A row that WAS
+           -- asked writes exactly what the reviewer chose.
+           ${stateToWrite(observation)}, ${runId}, ${item.page}, ${sortOrder}, ${actor}, ${actor})
         returning id
       `;
       const attributeId = String(inserted[0]?.id ?? "");

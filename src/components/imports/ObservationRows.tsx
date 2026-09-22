@@ -33,7 +33,7 @@ import {
   type DimensionSlot,
   type ItemLevel,
 } from "@/lib/spec-vocab";
-import { foldableRow, isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
+import { asksForState, foldableRow, isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
 import {
   isOfferable,
   normalisePaletteValue,
@@ -641,20 +641,37 @@ export function ObservationRow({
           </select>
         )}
       </td>
+      {/* STATED OR TBC IS ASKED ONLY WHERE SOMETHING READS THE ANSWER.
+
+          `asksForState` is the blocker's own predicate, so the control and
+          `no_state` cannot disagree — narrowing one alone would either leave a
+          select that sets a state nothing ever checks, or a card blocked by a
+          question with no control to answer it. The unit select two cells back
+          is the precedent and the argument is the same: an empty amber select
+          beside fifteen merged REMARKS reads as fifteen unanswered questions
+          where there are none.
+
+          The cell stays, so the columns line up and the head still reads
+          across; it holds an em-dash, as the Unit column did before it moved. */}
       <td className="px-2 py-2 align-top">
-        <select
-          value={observation.state ?? ""}
-          onChange={(event) =>
-            callbacks.onChange(observation, { state: (event.target.value || null) as AttributeState | null })
-          }
-          className={`border rounded px-1 py-0.5 text-xs ${
-            observation.state === null ? "border-amber-400 bg-amber-50" : "border-neutral-300"
-          }`}
-        >
-          <option value="">Choose…</option>
-          <option value="confirmed">Stated</option>
-          <option value="tbc">TBC</option>
-        </select>
+        {asksForState(observation) ? (
+          <select
+            value={observation.state ?? ""}
+            onChange={(event) =>
+              callbacks.onChange(observation, { state: (event.target.value || null) as AttributeState | null })
+            }
+            aria-label="State"
+            className={`border rounded px-1 py-0.5 text-xs ${
+              observation.state === null ? "border-amber-400 bg-amber-50" : "border-neutral-300"
+            }`}
+          >
+            <option value="">Choose…</option>
+            <option value="confirmed">Stated</option>
+            <option value="tbc">TBC</option>
+          </select>
+        ) : (
+          <span className="text-xs text-neutral-400">—</span>
+        )}
       </td>
       <td className="px-4 py-2 align-top text-right">
         <Button size="xs" variant="quiet" onClick={() => callbacks.onIgnore(observation)}>

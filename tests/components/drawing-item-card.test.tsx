@@ -174,6 +174,50 @@ function observationNote() {
   return figure("REMARKS", "SUBMIT SHOP DRAWINGS FOR REVIEW", { attrGroup: "note" });
 }
 
+describe("the state control", () => {
+  /**
+   * The S-203 general-conditions block: fifteen lines merged into one row, no
+   * BWS field, no dimension slot, and `mergeNoteBlocks` leaving it unruled
+   * because one of the fifteen was.
+   */
+  const mergedBlock = () =>
+    figure("Remarks", "REMARKS: SUBMIT SHOP DRAWINGS FOR REVIEW\nSUPPLIER: TO BID", {
+      attrGroup: "note",
+      state: null,
+    });
+
+  it("is not offered on a merged note block, which composes into nothing", () => {
+    // Its state is written and never read, so `Choose…` beside it was a
+    // question with no consequence that still held the card.
+    resetIds();
+    renderCard([mergedBlock()]);
+    // By its label cell, not by its value: a merged block renders in a
+    // textarea, whose display value does not match a newline literally.
+    const row = screen.getAllByRole("row").find((candidate) => candidate.textContent?.includes("SUPPLIER: TO BID"));
+    if (!row) throw new Error("the merged block did not render");
+    expect(within(row).queryByLabelText("State")).toBeNull();
+    expect(within(row).queryByRole("option", { name: "Stated" })).toBeNull();
+  });
+
+  it("is offered on a row carrying a BWS field, whatever its group", () => {
+    // `renderAttributeValue` puts this row's TBC marker into the exported
+    // cell, so the state is read there and the question is a real one.
+    resetIds();
+    renderCard([callout("ARMCHAIR", "Woven raffia", "UPH-07", { specFieldId: "field-com1" })]);
+    const row = rowFor("Woven raffia");
+    expect(within(row).getByLabelText("State")).toBeInTheDocument();
+    expect(within(row).getByRole("option", { name: "TBC" })).toBeInTheDocument();
+  });
+
+  it("is offered on a row carrying a dimension slot", () => {
+    resetIds();
+    renderCard([
+      figure("FRONT", "840", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm", state: null }),
+    ]);
+    expect(within(rowFor("840")).getByLabelText("State")).toBeInTheDocument();
+  });
+});
+
 describe("the table's width", () => {
   // WHY THIS IS TESTED AT ALL. The card was CLIPPED on a full-width monitor:
   // `PageBody` caps at 1400px and the picture sidebar takes a fixed 300 of it,

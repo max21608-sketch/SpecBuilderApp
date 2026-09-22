@@ -547,6 +547,97 @@ describe("drawingItemBlockers", () => {
     expect(blockers.some((b) => b.code === "no_state")).toBe(true);
   });
 
+  // ==========================================================================
+  // STATED OR TBC IS ASKED ONLY WHERE SOMETHING READS THE ANSWER.
+  //
+  // The S-203 general-conditions block — fifteen lines merged into one row —
+  // held its card because `mergeNoteBlocks` takes the most cautious state of
+  // the lines it joins, so one unruled line left the whole block unruled. The
+  // row composes into nothing: no BWS field, no dimension slot. Max,
+  // 2026-09-22: "we don't need a state on the notes".
+  //
+  // The test is what the row REACHES, not the word "note", which is why the
+  // two rows below still block.
+  // ==========================================================================
+  const stateless = (over: Partial<DrawingObservation>): DrawingItem => ({
+    id: "item-1",
+    version: 1,
+    page: 1,
+    itemCodeRaw: "X-100",
+    itemNameRaw: "Sofa",
+    confidence: "high",
+    targets: null,
+    observations: [
+      {
+        id: "obs-1",
+        version: 1,
+        attrGroup: "note",
+        labelRaw: "Remarks",
+        value: "REMARKS: SUBMIT SHOP DRAWINGS FOR REVIEW\nSUPPLIER: TO BID",
+        valueRaw: "REMARKS: SUBMIT SHOP DRAWINGS FOR REVIEW",
+        unit: null,
+        unitSuggested: false,
+        materialCodeRaw: null,
+        specFieldId: null,
+        dimensionSlot: null,
+        state: null,
+        stateReason: null,
+        reviewStatus: "pending",
+        reviewedAt: null,
+        reviewedBy: null,
+        applied: null,
+        ...over,
+      },
+    ],
+  });
+
+  const codesFor = (item: DrawingItem) =>
+    drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), NO_OCCUPANCY).map((b) => b.code);
+
+  it("does not ask a row that reaches nothing whether it is stated or TBC", () => {
+    // The whole point: the card CONFIRMS with its general-conditions block
+    // unruled. This lets rows through the confirm that are refused today, and
+    // `drawingItemBlockers` is re-checked inside that transaction.
+    expect(codesFor(stateless({}))).toEqual([]);
+  });
+
+  it("still asks a stateless row that carries a BWS field", () => {
+    // A note-group row CAN carry one, and then `renderAttributeValue` puts its
+    // TBC marker into the exported cell, where the state is read and matters.
+    expect(codesFor(stateless({ specFieldId: "f-com1" }))).toContain("no_state");
+  });
+
+  it("still asks a stateless row that carries a dimension slot", () => {
+    expect(codesFor(stateless({ attrGroup: "dimension", dimensionSlot: "W", value: "840", unit: "mm" }))).toContain(
+      "no_state",
+    );
+  });
+
+  it("refuses a blank value on an unasked row, in words it can act on", () => {
+    // `empty_value` reads `stateToWrite`, not the row: an unasked row is
+    // written with the column's default and the database refuses a confirmed
+    // value that is blank. "Mark it TBC" would be advice with no control
+    // behind it, so the sentence differs.
+    const blockers = drawingItemBlockers(
+      stateless({ value: null }),
+      resolveDrawingTargets("X-100", [record()]),
+      NO_OCCUPANCY,
+    );
+    expect(blockers.map((b) => b.code)).toEqual(["empty_value"]);
+    expect(blockers[0]?.message).toMatch(/ignore the row/);
+    expect(blockers[0]?.message).not.toMatch(/TBC/);
+  });
+
+  it("keeps the old sentence where the row does have a state to set", () => {
+    const blockers = drawingItemBlockers(
+      stateless({ specFieldId: "f-com1", state: "confirmed", value: "  " }),
+      resolveDrawingTargets("X-100", [record()]),
+      NO_OCCUPANCY,
+    );
+    expect(blockers.map((b) => b.code)).toEqual(["empty_value"]);
+    expect(blockers[0]?.message).toMatch(/mark it TBC/);
+  });
+
   const occupant = (overrides: Partial<OccupiedSlot> = {}): OccupiedSlot => ({
     attributeId: "attr-old",
     attributeVersion: 1,

@@ -1010,6 +1010,62 @@ export function acknowledgedReplacements(observation: DrawingObservation): Map<s
 }
 
 /**
+ * Whether Stated-or-TBC is a question this row can be asked.
+ *
+ * ============================================================================
+ * THE TEST IS WHAT THE ROW REACHES, NOT THE WORD "NOTE".
+ *
+ * A state is read where it composes into something: `renderAttributeValue`
+ * puts a TBC marker into the exported cell of a row carrying a BWS field, and
+ * `composeDimensionCell` and `planAnswerFills` read the state behind a
+ * dimension slot. A row that carries NEITHER composes into nothing, so its
+ * state is written, never read, and asking for it is a question with no
+ * consequence. Max on the S-203 card, 2026-09-22: "we don't need a state on
+ * the notes, and special manufacturing instructions, and other things that
+ * probably don't require it."
+ *
+ * It bites hardest on a merged block, because `mergeNoteBlocks` takes the most
+ * cautious state of the lines it joins — ONE unruled line leaves a fifteen-line
+ * general-conditions block unruled, and the card cannot confirm.
+ *
+ * This is the argument `unit_missing` has carried since the note-block merge —
+ * "a note is never ASKED for one … an empty select beside fifteen of them reads
+ * as fifteen unanswered questions where there are none" — applied to the other
+ * column, where it was always equally true.
+ *
+ * TWO CLAUSES, AND ONLY TWO. `isMergeableNote` tests five; its other three are
+ * about MERGING and mean nothing here. `labelRaw === "Note"` is there for merge
+ * idempotence; `unit === null` would excuse exactly the unit-bearing measured
+ * rows this must still guard; and `attrGroup === "note"` is weaker than the two
+ * that matter, because a note-group row that carries a BWS field reaches the
+ * file and must still be asked.
+ * ============================================================================
+ */
+export function asksForState(observation: DrawingObservation): boolean {
+  return Boolean(observation.specFieldId) || Boolean(observation.dimensionSlot);
+}
+
+/**
+ * The state a row is WRITTEN with, which is not always a state anybody chose.
+ *
+ * `record_attributes.state` is `not null default 'confirmed'` (0007), and the
+ * insert in `confirm-drawings.ts` names the column positionally — so a null
+ * reaches Postgres as a NULL and violates the constraint rather than falling to
+ * the default. A row `asksForState` says nothing about therefore needs the
+ * default naming here, in the one place a null can arrive. It is the column's
+ * own value, not a decision: the page STATES "SUPPLIER: TO BID", and writing
+ * `tbc` over it would claim somebody had deferred it.
+ *
+ * ONE IMPLEMENTATION, TWO CALLERS: the insert and `empty_value`. The database
+ * refuses `state = 'confirmed'` with a null value
+ * (`record_attributes_confirmed_has_value`), so a blocker reading a different
+ * state from the one the insert writes is a 500 in place of a sentence.
+ */
+export function stateToWrite(observation: DrawingObservation): AttributeState {
+  return observation.state ?? "confirmed";
+}
+
+/**
  * Computed on every read, never stored.
  *
  * A stored blocker is stale by the first edit: confirming the BOQ creates the
@@ -1053,18 +1109,27 @@ export function drawingItemBlockers(
   }
 
   for (const observation of pending) {
-    if (observation.state === null) {
+    // Only a row that REACHES something is asked — see `asksForState`. A
+    // general-conditions block composes into nothing, so nothing reads the
+    // answer and the card is no longer held for one.
+    if (asksForState(observation) && observation.state === null) {
       blockers.push({
         code: "no_state",
         observationId: observation.id,
         message: observation.stateReason ?? "Say whether this is stated or still TBC.",
       });
     }
-    if (observation.state === "confirmed" && !observation.value?.trim()) {
+    // Read through `stateToWrite`, not off the row: an unasked row is written
+    // with the column's default, and the database refuses a confirmed value
+    // that is blank. The way out differs, because an unasked row has no state
+    // control to reach for.
+    if (stateToWrite(observation) === "confirmed" && !observation.value?.trim()) {
       blockers.push({
         code: "empty_value",
         observationId: observation.id,
-        message: "A stated value cannot be blank. Give the value or mark it TBC.",
+        message: asksForState(observation)
+          ? "A stated value cannot be blank. Give the value or mark it TBC."
+          : "This row has nothing to record. Give the value back, or ignore the row.",
       });
     }
     if (observation.attrGroup === "dimension" && observation.unit === null && observation.value?.trim()) {
