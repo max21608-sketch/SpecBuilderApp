@@ -268,6 +268,22 @@ observation tables:
   a configuration card gets the auto wrapper; the per-configuration finish
   tables do not.
 
+**And the clipping is real, not hypothetical — one measurement proves it.**
+The reading that this entry corrects also took a NARROW pane, and it is the
+most useful number either session produced, so it is kept here rather than
+lost with the entry it arrived in:
+
+| Viewport | table | box | clipped |
+|---|---|---|---|
+| 1920×1080 | 1003px | 1005px | no |
+| 1440×900 | 1003px | 1005px | no |
+| 1024 (narrow pane) | 989px | 629px | **yes** |
+
+1024 is not a supported width and is not the point. The point is that once the
+content wins, these tables DO clip — so the eight without a scroll box are not
+a theoretical fragility waiting on a hypothetical column, they are the same
+card already failing at a width somebody could drag a pane to.
+
 **Why it matters, stated apart from the measurement.** Those eight are one
 column — or one long finish description — away from clipping **with no
 scrollbar**, which is strictly worse than the state Max reported on
