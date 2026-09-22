@@ -46,6 +46,7 @@ type Payload = {
     noLevel: boolean;
   };
   matrixFields: { matrixRow: number; gate: string; fieldName: string }[] | null;
+  record: { id: string; has_image: boolean };
 };
 
 describeIfDb("record payload — waiting, who to ask, and quote readiness", () => {
@@ -324,5 +325,30 @@ describeIfDb("record payload — waiting, who to ask, and quote readiness", () =
     // A mapped category answers without a level, so this one is tiered even
     // though nobody set a level on it — his matrix carries no level column.
     expect(payload.quoteReadiness.noLevel).toBe(false);
+  });
+
+  // ---- the picture the screen used to find out about by being refused -------
+  //
+  // The record page rendered the image route unconditionally and turned the
+  // picture off on the 404, so every record with no crop logged an EXPECTED
+  // 404 (found-in-use 2026-09-20). The payload now says, and it costs no round
+  // trip because the screen loads this payload anyway.
+  it("says a record with no crop has no image, without anybody asking for one", async () => {
+    const payload = await read(chasedRecordId);
+    expect(payload.record.has_image).toBe(false);
+  });
+
+  it("says a record WITH a crop has one", async () => {
+    await client.query(
+      `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, uploaded_by)
+       values ('spec_records', $1, 'item_image', $2, '__QA crop.png', 'image/png', 'qa')`,
+      [chasedRecordId, `projects/${projectId}/__qa-crop.png`],
+    );
+    const payload = await read(chasedRecordId);
+    expect(payload.record.has_image).toBe(true);
+    await client.query(
+      `delete from attachments where entity_type = 'spec_records' and entity_id = $1 and kind = 'item_image'`,
+      [chasedRecordId],
+    );
   });
 });
