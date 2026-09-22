@@ -89,6 +89,20 @@ const PAYLOAD = {
       run_status: null,
       found: null,
     }),
+    // AN AUTO-ASSIGNED READ THAT FAILED. Nobody pressed anything to start it,
+    // so nobody is waiting for its result and nothing else on any screen says
+    // it happened.
+    message({
+      id: "msg-5",
+      subject: "S-301 desk chair — timber finish",
+      chase_match: null,
+      chaseReply: false,
+      run_status: "failed",
+      run_error: "The model could not be reached.",
+      pending_count: 0,
+      applied_count: 0,
+      found: null,
+    }),
     message({
       id: "msg-4",
       subject: "UP-101 headboard — fabric confirmed",
@@ -200,5 +214,30 @@ describe("the inbox — an automatic assignment", () => {
     await screen.findByText("UP-101 headboard — fabric confirmed");
     expect(screen.getByText("Waiting for a slot")).toBeInTheDocument();
     expect(screen.getByText(/starts on its own when one of this project/)).toBeInTheDocument();
+  });
+
+  // ==========================================================================
+  // A READ THE APP STARTED AND LOST IS A QUEUE, NOT A ROW (3c.4)
+  //
+  // Before this, the only thing that said an automatic read had failed was the
+  // row's own chip, inside a list of everything else waiting for a person. With
+  // Graph on that is a queue somebody has to watch and nothing counted it.
+  // ==========================================================================
+  it("counts a failed read on a tile of its own", async () => {
+    render(<InboxPage />);
+    await screen.findByText("S-301 desk chair — timber finish");
+    // Twice on the screen: the tile and the table it heads. The count's own
+    // line is the half only the tile carries.
+    expect(screen.getAllByText("Reads that failed").length).toBeGreaterThan(0);
+    expect(screen.getByText("each needs a person to retry it")).toBeInTheDocument();
+  });
+
+  it("puts it in its own table under the default tab, never behind one", async () => {
+    render(<InboxPage />);
+    await screen.findByRole("heading", { name: /Reads that failed/ });
+    // The default tab is "To review", and this row is not one of those: nobody
+    // is waiting for a result that never came.
+    expect(screen.getByText("Read failed")).toBeInTheDocument();
+    expect(screen.getByText("The model could not be reached.")).toBeInTheDocument();
   });
 });

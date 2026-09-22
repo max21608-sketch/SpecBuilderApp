@@ -217,7 +217,15 @@ function InboxView() {
       all,
       held: open.filter((message) => outcome(message) === "held"),
       nothing: open.filter((message) => outcome(message) === "nothing"),
-      review: open.filter((message) => ["review", "waiting", "reading", "failed"].includes(outcome(message))),
+      // A FAILED READ IS ITS OWN QUEUE, and it came out of "to review" when
+      // assignment stopped being something a person always did. Since 2.11 the
+      // app places mail on a project by itself and starts the charged read, so
+      // a read that failed is work nobody asked for, that nobody is waiting
+      // on, and that only a person pressing Retry will move. Left inside the
+      // review bucket it was one row among a morning's post, and the only
+      // thing saying it had happened was that row.
+      failed: open.filter((message) => outcome(message) === "failed"),
+      review: open.filter((message) => ["review", "waiting", "reading"].includes(outcome(message))),
     };
   }, [data]);
 
@@ -277,7 +285,7 @@ function InboxView() {
       <PageBody>
         {error && <Note tone="danger">{error}</Note>}
 
-        <div className="mt-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        <div className="mt-4 grid grid-cols-2 gap-2.5 lg:grid-cols-5">
           <StatTile
             label="Read, waiting for you"
             tone="info"
@@ -295,6 +303,20 @@ function InboxView() {
             action={buckets.held.length > 0 && tab !== "held" ? "place them" : undefined}
             onPress={buckets.held.length > 0 && tab !== "held" ? () => setTab("held") : undefined}
             active={tab === "held"}
+          />
+          {/* THE READS NOBODY IS COMING BACK FOR.
+              Since 2.11 the app assigns confidently routed mail by itself and
+              starts the charged read, so this is the only count on any screen
+              that says something the app did on its own did not work. It is a
+              QUEUE rather than an incident — with Graph on, one of these is a
+              document to retry and three in a morning is a mailbox to look at —
+              which is why it earns a tile and not a chip on one row. Slate at
+              zero: red for an empty queue teaches people to ignore red. */}
+          <StatTile
+            label="Reads that failed"
+            tone={buckets.failed.length > 0 ? "danger" : "plain"}
+            value={buckets.failed.length}
+            meaning={buckets.failed.length === 0 ? "nothing waiting on a retry" : "each needs a person to retry it"}
           />
           {/* THE SERVER'S COUNT, over every message rather than the 200 this
               screen holds. What is said UNDER it is about the held ones, which
@@ -361,6 +383,48 @@ function InboxView() {
                 </Table>
               </Card>
             )}
+          </>
+        )}
+
+        {/* A FAILED READ IS NEVER HIDDEN BY A TAB EITHER, for the reason held
+            mail is not. It is the second state on this screen that silently
+            stops work, and since 2.11 it is the one nobody chose: the app
+            placed the message and started the read on its own, so there is no
+            person waiting for the result who would notice it never came. The
+            row is the same one the main list renders — Open goes to the review
+            screen, where Retry lives and where the cost of pressing it is
+            stated. */}
+        {buckets.failed.length > 0 && (
+          <>
+            <h2 className="mt-6 text-th font-bold uppercase tracking-wider text-red-700">
+              Reads that failed
+              <span className="font-medium normal-case tracking-normal text-neutral-500">
+                {" "}· the message is on its project and the read did not run — open it to retry
+              </span>
+            </h2>
+            <Card flush className="mt-2 border-red-200">
+              <Table>
+                <thead>
+                  <tr>
+                    <Th className="w-[42%]">Subject</Th>
+                    <Th className="w-[16%]">Project</Th>
+                    <Th className="w-[18%]">What it found</Th>
+                    <Th className="w-[14%]">Arrived</Th>
+                    <Th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {buckets.failed.map((message) => (
+                    <MessageRow
+                      key={message.id}
+                      message={message}
+                      busy={busy === message.id}
+                      onAct={(body) => void act(message, body)}
+                    />
+                  ))}
+                </tbody>
+              </Table>
+            </Card>
           </>
         )}
 
