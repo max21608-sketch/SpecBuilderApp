@@ -18,6 +18,11 @@ and where you do name a cause, say so separately, because a wrong diagnosis
 written as fact is what sends the fix to the wrong file. Never delete an entry;
 mark it FIXED with the date and the commit.
 
+**The plan that acts on what is open here is
+`docs/plans/fix-found-in-use-2026-09-23.md`** (sixteen items in five stages,
+seven more waiting on a person). Its predecessor,
+`fix-found-in-use-2026-09-22.md`, closed the entries marked FIXED below.
+
 **Reconciled 2026-09-22** against the tree at `553b8bf`, after Max asked
 whether the file was current as of the Stage 2 build. Every status was checked
 in the SOURCE rather than against the stage lists in `CLAUDE.md` — a stage
