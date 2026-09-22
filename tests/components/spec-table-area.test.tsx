@@ -56,7 +56,8 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(.
 let n = 0;
 function record(over: Partial<SpecRecord> = {}): SpecRecord {
   n += 1;
-  return {
+  const row: SpecRecord = {
+    client_code: null,
     id: `rec-${n}`,
     record_no: n,
     item_description: `Item ${n}`,
@@ -98,6 +99,11 @@ function record(over: Partial<SpecRecord> = {}): SpecRecord {
     gates: null,
     ...over,
   };
+  // MOST RECORDS CARRY ONE REF AND IT IS THEIR BOQ CODE, which is what the
+  // export's Client Code reads and what the Code column now prints. So
+  // `client_code` follows `refs` unless a test sets them APART, which is the
+  // case the column exists for: a record holding only a `bws_job` ref.
+  return over.client_code === undefined ? { ...row, client_code: row.refs } : row;
 }
 
 const RECORDS = () => [

@@ -63,6 +63,9 @@ export type InfillOptionSummary = {
   label: string;
   /** `S-301 A`: the ref is the client's, the letter is ours. */
   name: string;
+  /** The option's OWN quantity, read and never apportioned. Null is "not
+   *  allocated" — a different statement from a bill line's "not given". */
+  qty: number | null;
   counts: InfillCounts;
 };
 
@@ -118,6 +121,7 @@ export function summariseLines<Q extends GroupableQuestion & { area?: string | n
         recordId: option.recordId,
         label: option.label,
         name: option.name,
+        qty: option.qty,
         counts: countOutstanding(option.questions),
       })),
     };

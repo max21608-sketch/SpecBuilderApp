@@ -169,7 +169,7 @@ describe("InfillTable", () => {
         lines={[
           line({
             optionCount: 2,
-            options: [{ recordId: "opt-a", label: "A", name: "S-301 A", counts: { toQuote: 2, later: 0, waiting: 0 } }],
+            options: [{ recordId: "opt-a", label: "A", name: "S-301 A", qty: null, counts: { toQuote: 2, later: 0, waiting: 0 } }],
           }),
         ]}
       />,
@@ -185,7 +185,7 @@ describe("InfillTable", () => {
         lines={[
           line({
             optionCount: 1,
-            options: [{ recordId: "opt-a", label: "A", name: "S-301 A", counts: { toQuote: 1, later: 0, waiting: 0 } }],
+            options: [{ recordId: "opt-a", label: "A", name: "S-301 A", qty: null, counts: { toQuote: 1, later: 0, waiting: 0 } }],
           }),
         ]}
         questionsByLine={{ "line-1": [question({ recordId: "opt-a", variantLabel: "A" })] }}
@@ -193,6 +193,28 @@ describe("InfillTable", () => {
     );
     await user.click(screen.getByText("Desk chair"));
     expect(screen.getByText(/quantity not allocated/)).toBeInTheDocument();
+  });
+
+  // THE SAME FINDING AS THE CHASE TABLE'S. The row said "quantity not
+  // allocated" whatever the record held, which was true only while nothing had
+  // set one — and 0028's details panel sets one. Nothing here divides the
+  // bill's 45; the option's own number is read.
+  it("says the quantity somebody set on a finish option", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        lines={[
+          line({
+            optionCount: 1,
+            options: [{ recordId: "opt-a", label: "A", name: "S-301 A", qty: 12, counts: { toQuote: 1, later: 0, waiting: 0 } }],
+          }),
+        ]}
+        questionsByLine={{ "line-1": [question({ recordId: "opt-a", variantLabel: "A" })] }}
+      />,
+    );
+    await user.click(screen.getByText("Desk chair"));
+    expect(screen.getByText(/qty 12/)).toBeInTheDocument();
+    expect(screen.queryByText(/quantity not allocated/)).not.toBeInTheDocument();
   });
 
   it("AN AREA FILTER NARROWS WHAT IS LISTED AND CHANGES NO COUNT", async () => {

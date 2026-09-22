@@ -178,6 +178,7 @@ function record(over: Record<string, unknown> = {}) {
     area: "Signature Suite",
     boq_category: null,
     refs: "S-201",
+    client_code: "S-201",
     run_id: RUN,
     run_name: "MAIN RUN",
     attribute_count: "0",

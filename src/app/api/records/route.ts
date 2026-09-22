@@ -136,6 +136,22 @@ export async function GET(request: Request): Promise<Response> {
       c.requirements_authored,
       (select string_agg(x.ref_value, ', ' order by x.ref_value)
          from spec_record_refs x where x.record_id = r.id) as refs,
+      -- THE CLIENT CODE IS WHAT THE FILE WILL CARRY, and the refs column
+      -- above is not it. That one is EVERY ref system this record holds --
+      -- boq code, design code, cos code, compound and bws job -- while the
+      -- export's Client Code is the boq code alone, read through a
+      -- configuration's parent. A record carrying only a bws job ref
+      -- therefore showed that job number in the table's Code column and
+      -- exported a BLANK code, and NoClientRef, the one place anybody would
+      -- have noticed, never fired. This is loadRecordAtoms' own clause,
+      -- deliberately identical: the table has to say what the file says, or
+      -- the Code column is a claim nothing keeps.
+      -- (No backticks in here: this is a tagged template and one would close
+      -- it, which is its own load-bearing section.)
+      (select string_agg(x.ref_value, ', ' order by x.ref_value)
+         from spec_record_refs x
+        where x.record_id = coalesce(r.parent_id, r.id)
+          and x.ref_system = 'boq_code') as client_code,
       count(q.id) filter (where q.kind = 'spec_field') as spec_total,
       count(q.id) filter (where q.kind = 'spec_field' and a.state in ('confirmed','na')) as spec_settled,
       count(q.id) filter (where q.kind = 'spec_field' and a.state = 'tbc') as spec_tbc,

@@ -210,15 +210,57 @@ const COLUMN_LABEL: Record<ColumnKey, string> = {
   qtyUnit: "unit",
 };
 
+/**
+ * A DATE-TYPED CELL, AS A PERSON READING THE WORKBOOK WOULD SEE IT.
+ *
+ * `toISOString()` was what both readers did with one, so the Panther bill's
+ * revision arrived as `0 · 2026-09-15T00:00:00.000Z` on the review screen and
+ * in the phase subtitle, over a cell the workbook prints as `15/09/2026`. A
+ * timestamp, to the millisecond, on a value nothing computes with.
+ *
+ * TWO THINGS ABOUT IT ARE TRAPS RATHER THAN PREFERENCES.
+ *
+ * The value stays TEXT, which is right and was never what was wrong:
+ * `spec_runs.boq_revision` and `.boq_date` are text columns on purpose, and
+ * parsing "14-Sep-26" into a `date` is the TOE-dates trap for a value nothing
+ * computes with. Nothing here produces a `Date`; it reads one and writes a
+ * string.
+ *
+ * And the FIGURES are read in UTC, deliberately. `read-excel-file` turns a
+ * serial number into "a javascript Date in UTC+0 timezone with time set to
+ * 00:00" -- its own words -- so the day is the UTC day, and local getters
+ * would render the day BEFORE anywhere west of Greenwich. This is the TOE
+ * rule pointed the other way: there, a `date` column parsed to LOCAL midnight
+ * and `toISOString()` moved it back a day in British Summer Time; here the
+ * instant is already UTC midnight and the local calendar is the wrong one to
+ * ask.
+ *
+ * A cell carrying a TIME as well keeps it. A bill would not normally, but
+ * silently dropping half of what a cell said is how a "14:00 delivery" becomes
+ * a date.
+ */
+function sheetDate(value: Date): string {
+  const day = [
+    String(value.getUTCFullYear()).padStart(4, "0"),
+    String(value.getUTCMonth() + 1).padStart(2, "0"),
+    String(value.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+  const minutes = value.getUTCHours() * 60 + value.getUTCMinutes();
+  const seconds = value.getUTCSeconds();
+  if (minutes === 0 && seconds === 0) return day;
+  const clock = `${String(value.getUTCHours()).padStart(2, "0")}:${String(value.getUTCMinutes()).padStart(2, "0")}`;
+  return seconds === 0 ? `${day} ${clock}` : `${day} ${clock}:${String(seconds).padStart(2, "0")}`;
+}
+
 function norm(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const text = value instanceof Date ? value.toISOString() : String(value);
+  const text = value instanceof Date ? sheetDate(value) : String(value);
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function text(value: unknown): string | null {
   if (value === null || value === undefined) return null;
-  const out = (value instanceof Date ? value.toISOString() : String(value)).replace(/\s+/g, " ").trim();
+  const out = (value instanceof Date ? sheetDate(value) : String(value)).replace(/\s+/g, " ").trim();
   return out === "" ? null : out;
 }
 

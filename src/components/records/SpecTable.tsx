@@ -66,7 +66,20 @@ export type SpecRecord = {
   id: string; record_no: number; item_description: string; product_reference: string | null;
   status: string; retired_at: string | null; retired_by: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
-  refs: string | null; run_id: string; run_name: string; attribute_count: string;
+  /**
+   * EVERY ref system this record holds. Searchable, and NOT what the Code
+   * column prints: see `client_code`.
+   */
+  refs: string | null;
+  /**
+   * The `boq_code` refs, read through a configuration's parent — the export's
+   * own Client Code clause, identically. The Code column prints THIS, because
+   * the column is a claim about what the file will carry and `refs` is not:
+   * a record holding only a `bws_job` ref used to show that job number here
+   * and ship a blank code.
+   */
+  client_code: string | null;
+  run_id: string; run_name: string; attribute_count: string;
   /** A fabric split (0024): the bill line this configuration belongs to. */
   parent_id: string | null;
   variant_label: string | null;
@@ -212,6 +225,32 @@ function NoClientRef() {
       title="No client ref on this record, so the export ships a blank Client Code. Nothing is invented."
     >
       no client ref
+    </span>
+  );
+}
+
+/**
+ * The refs a record holds that are NOT its client code.
+ *
+ * `spec_record_refs` carries five systems and the export's Client Code is one
+ * of them, so a `bws_job` number, a `design_code` or a `cos_code` has nowhere
+ * else on this screen to be. Printing them inside the Code cell would be the
+ * defect again; printing them beneath it, named as what they are, keeps the
+ * column a true statement about the file and loses nothing.
+ */
+function OtherRefs({ clientCode, refs }: { clientCode: string | null; refs: string | null }) {
+  const client = new Set((clientCode ?? "").split(",").map((part) => part.trim()).filter(Boolean));
+  const others = (refs ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part && !client.has(part));
+  if (others.length === 0) return null;
+  return (
+    <span
+      className="block font-sans text-xs text-neutral-500"
+      title="Other refs on this record. The export's Client Code carries the client's BOQ code only."
+    >
+      also {others.join(", ")}
     </span>
   );
 }
@@ -788,16 +827,27 @@ export default function SpecTable({
                         mono
                         className={`font-medium ${retired ? "text-neutral-400 line-through" : "text-neutral-900"}`}
                       >
+                        {/* THE CODE COLUMN SAYS WHAT THE FILE WILL SAY. It
+                            printed `refs` — every ref system — while the
+                            export's Client Code is `boq_code` alone, so a
+                            record carrying only a `bws_job` ref showed a code
+                            here and exported a blank one, and `NoClientRef`
+                            never fired on the one row it exists for. Any OTHER
+                            ref the record holds is still printed, apart and
+                            labelled, because it is real and this screen is the
+                            only place it shows. `client_code` already reads
+                            through a configuration's parent. */}
                         {isConfiguration ? (
                           <span className="text-neutral-500">
-                            {record.parent_refs ?? record.refs ?? <NoClientRef />}{" "}
+                            {record.client_code ?? <NoClientRef />}{" "}
                             {/* THE LETTER, coloured the way the review card
                                 colours it — A is sky on every screen. */}
                             <b className={letterColour(record.variant_label!)}>{record.variant_label}</b>
                           </span>
                         ) : (
-                          (record.refs ?? <NoClientRef />)
+                          (record.client_code ?? <NoClientRef />)
                         )}
+                        <OtherRefs clientCode={record.client_code} refs={record.refs} />
                       </Td>
                       <Td className={isConfiguration ? "pl-6" : ""}>
                         <Link
