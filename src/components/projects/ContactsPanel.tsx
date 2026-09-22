@@ -303,7 +303,15 @@ export default function ContactsPanel({
                   {/* THE NUMBER THAT SAYS WHY YOU OPENED THIS CARD. Red, and a
                       link to the chase screen — reading it is never the end of
                       the errand. */}
-                  {row === undefined ? (
+                  {/* STILL COUNTING IS NOT THE SAME AS NOTHING. The tally is
+                      fetched alongside the project rather than inside it (it
+                      loads every outstanding question in the project), so for
+                      the first moment there is genuinely no answer yet — and an
+                      em dash there reads as "this contact owes us nothing",
+                      which is the one thing it must not say. */}
+                  {outstanding === null || outstanding === undefined ? (
+                    <span className="text-xs font-normal text-neutral-400">counting…</span>
+                  ) : row === undefined ? (
                     <span className="text-neutral-400">—</span>
                   ) : row.toQuote > 0 ? (
                     <>

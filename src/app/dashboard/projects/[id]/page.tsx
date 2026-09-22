@@ -399,9 +399,9 @@ function ProjectOverview() {
       documents: DocumentRun[];
       runs: SpecRun[];
       notes: ProjectNote[];
-      contactsOutstanding: ContactsOutstanding;
       unlinkedFinishCodes: { code: string; records: number }[];
       failedDocuments: number;
+      designerCodes: Record<string, number>;
     }>(`/api/projects/${encodeURIComponent(projectId)}`);
     if (!res.ok) {
       setError(res.error);
@@ -415,9 +415,14 @@ function ProjectOverview() {
     setDocuments(res.data.documents);
     setRuns(res.data.runs ?? []);
     setNotes(res.data.notes ?? []);
-    setContactsOutstanding(res.data.contactsOutstanding ?? null);
     setUnlinkedFinishCodes(res.data.unlinkedFinishCodes ?? []);
     setFailedDocuments(Number(res.data.failedDocuments ?? 0));
+    // The designer codes come with the project now. See the route: reading
+    // them off /api/records made this screen load every outstanding question
+    // in the project a second time.
+    const counts = res.data.designerCodes ?? {};
+    setCodeCounts(counts);
+    setSuggestedCodes(Object.keys(counts).sort());
     setForm(formOf(res.data.project));
   }, [projectId]);
 
@@ -488,6 +493,25 @@ function ProjectOverview() {
     }
   }
 
+  /**
+   * WHO OWES US WHAT, fetched ALONGSIDE the project rather than inside it.
+   *
+   * It is the chase screen's own `loadOutstanding` + `groupByContact`, which
+   * loads every outstanding question in the project — 19,655 of them on the
+   * 300-line project, measured 2026-09-22 — to produce three integers per
+   * contact. Inside the project request it made the tiles, the documents, the
+   * phases and the notes wait for it. Split out, the screen paints and this
+   * column fills a moment later; `null` is "still counting", which the table
+   * says in words, and is why it is not defaulted to zeros.
+   */
+  const loadContactsOutstanding = useCallback(async () => {
+    const res = await apiFetch<{ contactsOutstanding: ContactsOutstanding }>(
+      `/api/projects/${encodeURIComponent(projectId)}/contacts-outstanding`,
+    );
+    if (!res.ok) return; // the column says it could not count; the screen is still usable
+    setContactsOutstanding(res.data.contactsOutstanding ?? null);
+  }, [projectId]);
+
   const loadContacts = useCallback(async () => {
     const res = await apiFetch<{
       contacts: {
@@ -525,31 +549,13 @@ function ProjectOverview() {
     );
   }, [projectId]);
 
-  // The designer codes this project's records carry that nobody is yet, read
-  // off the records list so the contacts panel can show the gap — WITH the
-  // count of items behind each, because "JGD has no contact" is a fact and
-  // "JGD is on 11 items and has no contact" is a reason to act.
-  const loadCodes = useCallback(async () => {
-    const res = await apiFetch<{ records: { designer: string | null }[] }>(
-      `/api/records?projectId=${encodeURIComponent(projectId)}`,
-    );
-    if (!res.ok) return; // a missing hint is not worth an error banner
-    const counts: Record<string, number> = {};
-    for (const record of res.data.records) {
-      const code = (record.designer ?? "").trim().toUpperCase();
-      if (code === "") continue;
-      counts[code] = (counts[code] ?? 0) + 1;
-    }
-    setCodeCounts(counts);
-    setSuggestedCodes(Object.keys(counts).sort());
-  }, [projectId]);
 
   useEffect(() => {
     if (!projectId) return;
     void load();
     void loadContacts();
-    void loadCodes();
-  }, [projectId, load, loadContacts, loadCodes]);
+    void loadContactsOutstanding();
+  }, [projectId, load, loadContacts, loadContactsOutstanding]);
 
   // Runs grouped into the packs they arrived in, newest first, each pack's own
   // runs oldest first so they read in the order the work happens.
@@ -1826,6 +1832,7 @@ function ProjectOverview() {
                 onChanged={() => {
                   void loadContacts();
                   void load();
+                  void loadContactsOutstanding();
                 }}
               />
             )}

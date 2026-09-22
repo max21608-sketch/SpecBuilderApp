@@ -859,6 +859,28 @@ export async function loadUncategorisedRecords(projectId: string): Promise<
  * path that does not exist. Dropped from the predicate here; the column goes
  * in a later migration, once the screen has been accepted.
  */
+/**
+ * THE LINES a set of records belong to, for `OutstandingScope.lineIds`.
+ *
+ * `loadOutstanding`'s scope matches on `coalesce(r.parent_id, r.id)` -- the
+ * LINE, not the record -- because a finish option is listed under its bill
+ * line. So a caller holding record ids (a coverage row names a record, and
+ * that record may be a configuration) cannot pass them straight through: a
+ * variant's own id equals no line id, and every one of its questions would be
+ * silently dropped. One lookup, and the caller passes what the scope means.
+ *
+ * Loading a line also loads its sibling configurations' questions, which is
+ * harmless: every caller here looks each question up by its exact key.
+ */
+export async function lineIdsForRecords(recordIds: string[]): Promise<string[]> {
+  if (recordIds.length === 0) return [];
+  const rows = await sql`
+    select distinct coalesce(parent_id, id) as line_id
+      from spec_records where id = any(${recordIds}::uuid[])
+  `;
+  return rows.map((row) => String(row.line_id));
+}
+
 export async function loadSentCoverage(project: string | string[]): Promise<
   (CoverageSnapshot & { draftId: string; sentAt: string | null; contactName: string })[]
 > {
