@@ -30,6 +30,75 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
+### A level accepted on one phase's tab is still an unaccepted suggestion on the next, for the same client ref
+
+**Status: open. A CHANGE ASKED FOR.** Max, on the BOQ review of a multi-tab
+bill (two screenshots): *"when I've confirmed the level in the first phase they
+don't automatically fill in on the next phase — if they're the same reference
+number they should automatically be filled in, and any adjustment to a category
+or a level should affect that item no matter where it was."*
+
+**What is on the screen.** Two tabs of one bill. On **MUR** (4 lines) the Level
+cell reads a green **Simple** with *Change* beside it — accepted. On **MAIN
+RUN** (14 lines) the same cell is the dashed blue **Simple ?** suggestion, with
+*12 have a suggested level* and *Accept all 12 ?* above the table. `S-100` is on
+BOTH tabs: accepted on one, still asking on the other.
+
+**The two tabs already agree about the guess; what does not carry is the
+agreement.** Both print `Simple` with the same reason — *"the bill names no
+metalwork and nothing calls it a hero piece"* — because `level-guess` runs per
+bill line and both lines say the same thing. So the asked-for change is to carry
+a DECISION across tabs, not to make a second inference.
+
+**Nothing in the bill path looks at another sheet, at any stage.** Checked in
+the source: every review edit is addressed `(sheetIndex, index)` and patches
+exactly that line's JSON at `parsed->'sheets'->i->'lines'->j`
+(`PATCH /api/imports/[id]`); `acceptAllLevels(sheetIndex, lines)` is per tab by
+name; `confirm-boq.ts` reads each sheet's own lines and `levelDecision` is a
+pure function of one staged line. After the confirm it is the same: a phase's
+records are their own rows, `PATCH /api/records/[id]` sets one record's category
+or level, and `acceptSuggestedLevels` covers one run.
+
+**The app already holds the rule Max is asking for — in the drawings path.**
+*One drawing, several runs: the item card is the unit of commit* — a code
+matching one record PER RUN is a FAN-OUT and the confirm writes to all of them;
+the same code matching TWO records in ONE run is the `SX11A` case and stays
+ambiguous. The bill review is the same question (one client ref, several
+phases) answered the other way round, and the ambiguity half of it is already
+computed on this very screen: `duplicateGroups()` and `isDuplicated()` find a
+ref carried by two rows of one tab and name the rows.
+
+Four things a plan has to settle rather than assume:
+
+- **A VE phase may legitimately differ, and a category almost never does.** A
+  value-engineered phase quotes the same code at a cheaper build, so *hero on
+  MAIN RUN, simple on VE* can be a true statement rather than a missed tick —
+  and that is exactly the level that picks the BWS boilerplate the item is
+  priced against. A sofa is a sofa on every tab. Whether the fan-out covers
+  both fields, or the level only OFFERS on the other tabs where the category
+  writes, is Max's call.
+- **A ref repeated inside one tab must fan out to nothing.** `SX11A` is on the
+  pilot bill twice with different quantities. `findRecordsByRef`'s rule — offer
+  the candidates, choose none — is the one that applies, and the screen already
+  knows which refs those are.
+- **At edit time, not at confirm.** Carrying the decision into the other tabs'
+  staged rows makes it visible and overridable before anything is written;
+  doing it inside the confirm would write a level onto phases the reviewer
+  never opened, which is *never commit a card somebody did not see whole* in a
+  new place. The tab that receives it should say where it came from, the way
+  every other suggestion on this screen says what it was read from.
+- **"No matter where it was" also covers life after the confirm, and that is a
+  bigger change.** Changing a category on one phase's record today leaves the
+  same ref on the other phases as it was. A category change creates and removes
+  that record's checklist answer rows, so fanning one out reaches answers on
+  records the person is not looking at — a different item from this one, and it
+  should be planned as its own.
+
+The precedent for inheritance already exists one level down: `ensureVariant`
+copies a parent's level to a configuration, decision as decision and suggestion
+as suggestion, for this reason — *"a split hero item produced level-less
+children blocking a chase for a decision taken one row up."*
+
 ### Eleven files, eleven empty dropdowns — the upload asks what each document is before it has looked at any of them
 
 **Status: open. A CHANGE ASKED FOR, and one thing inside it is a defect.** Max,
