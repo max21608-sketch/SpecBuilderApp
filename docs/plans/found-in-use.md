@@ -198,6 +198,54 @@ Things a plan has to settle rather than assume:
   documents read is looking at whichever screen the redirect happened to leave
   them on.
 
+### Eight of the fourteen observation tables have no scroll box, so the NEXT wide column clips silently
+
+**Status: open — measured 2026-09-22 on the staging deployment (`2f09f19`),
+found immediately after 3a.4 closed, and NOT fixed.** Nothing is clipped
+today; this is about what happens the next time that card grows.
+
+Raised by the pilot-readiness session after it rebased its palette control
+onto `0909fd7`, in the form "the table is 1003px in a 1005px wrapper, and the
+wrapper is `overflow-x: hidden`". Both halves of that turned out to be wrong,
+and the thing underneath is worse, so it is written here as measured rather
+than as reported.
+
+**What the source says.** Both table wrappers are `overflow-x-auto`, not
+hidden — `DrawingItemCard.tsx:403` and `ConfigurationCard.tsx:402`. So the
+declared wrapper is right and 3a.4's fix is intact.
+
+**What the DOM says**, at 1440×900 on the real staged Panther-d pack, 14
+observation tables:
+
+- **0 of 14 overflow.** 3a.4 holds, including with the palette control added,
+  which adds height rather than width.
+- **The headroom is not 2px, it is 0** — and that is not fragility, it is
+  `table.w-full` sizing itself to its box. A `w-full` table does not overflow
+  until its own min-content width exceeds the box, so the figure to watch is
+  the content, not the gap.
+- **8 of the 14 have NO `.overflow-x-auto` ancestor at all.** Their effective
+  x-overflow box is `overflow-hidden` at 1005px — `ConfigurationCard.tsx:789`,
+  the configuration band, which is `overflow-hidden` so its rounded corners
+  and coloured left border clip cleanly. Only the shared-geometry table inside
+  a configuration card gets the auto wrapper; the per-configuration finish
+  tables do not.
+
+**Why it matters, stated apart from the measurement.** Those eight are one
+column — or one long finish description — away from clipping **with no
+scrollbar**, which is strictly worse than the state Max reported on
+2026-09-21: he could at least scroll to the hidden column and knew something
+was there. A silently truncated cell on a card whose whole job is deciding
+what a document said is the failure `overflow-x-auto` exists to prevent, and
+`docs/design-language.md` permits a wide table only *inside its own overflow-x
+box*.
+
+**Not fixed, deliberately.** The band's `overflow-hidden` is load-bearing for
+its own rounding, so the fix is an auto wrapper around each of those eight
+tables rather than loosening the band — and nothing overflows today, so this
+is a trap to close before the next column lands on that card, not a defect on
+screen now. Whoever adds a column to `OBSERVATION_COLUMNS` should close it in
+the same change.
+
 ### Everything open in this file was worked through; here is what closed and what did not
 
 **Status: a pass, not a finding.** `docs/plans/fix-found-in-use-2026-09-22.md`
