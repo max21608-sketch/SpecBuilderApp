@@ -572,7 +572,47 @@ Four things the build has to answer, none of them answered here:
 
 ### The same three figures are staged twice — once slotted, once as notes
 
-**Status: open, and a defect.** Max, on the S-203 drawings card (screenshot):
+**Status: FIXED 2026-09-23, `ac96caa`** (plan item 4b.1), on staging.
+`redundantOverallRows` drops a SLOTLESS OVERALL row whose figure and unit the
+item already states on a SLOTTED row, called from `dedupeMeasured` at READ time
+— so every pack already staged is reduced with no second model call and no
+re-staging, the `upgradeCalloutGuesses` discipline.
+
+**MEASURED, AND THE TOOL COULD NOT SEE IT UNTIL IT WAS TAUGHT TO.**
+`measure:drawings` had no counter for this, so a before-and-after diff would
+have come back empty and read as "no change". The counter went in FIRST,
+computed by calling `redundantOverallRows` itself rather than by a second
+opinion about it, the measurement was taken, and only then was the drop wired
+in:
+
+| | before | after |
+|---|---|---|
+| Panther | 3 | 0 |
+| Panther-d | 3 | 0 |
+| **every project** | **6** | **0** |
+
+The diff of the two full reports shows those three lines **and nothing else** —
+234 rows placed, 162 suggested, 34 inline with no figure, 0 label
+contradictions, 22 lettered groups, all unchanged. Re-run here after the
+cherry-pick: 0 across every project, same 234 and 22. With `--detail` the six
+are named and they are exactly the rows in the screenshot: `S-203 "Dimension
+4" = 80cm`, `5 = 70cm`, `6 = 90cm`, twice.
+
+**The guards are what the tests are for.** Nine pure-tier tests; with the drop
+removed SIX fail and three still pass, which are the three that must hold
+either way — a `schemaVersion: 1` run untouched (version 1 is frozen: before
+the model was asked which figure was which, the combined line's parts were the
+only reading there was), a row the model said is NOT overall left alone
+(`ARM HEIGHT 80` beside a real width of 80), and two paths reading different
+units kept apart. Figures compare through `parseDimensionFigure`, so `80` and
+`80 TBC` are one measurement; the unit is half the key; the match is consumed
+one for one, so `80 x 80 x 90` collapses two bare parts against two slotted
+rows rather than over-collapsing.
+
+**Nobody has re-opened the S-203 card in a browser.** The evidence is the
+measurement and the tests. The original entry follows.
+
+**Status when found: open, and a defect.** Max, on the S-203 drawings card (screenshot):
 *"Why are the dimensions getting duplicated? They shouldn't be."*
 
 **What is on the screen.** Three yellow rows — `Overall Dimensions 80 cm →
