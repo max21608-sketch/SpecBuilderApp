@@ -30,6 +30,78 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
+### The by-question tab needs an apply-to-all, and Access is the question that proves it
+
+**Status: open. A CHANGE ASKED FOR — and it is the trigger condition on
+something that was deliberately parked.** Max, on *Fill in what we know* → **By
+question**: *"we need basically an apply-to-all box. For access, most likely it
+is going to be the same for everything. Even better would be a tick box with an
+option to select all, but then you can untick some. This screen doesn't really
+make sense if they have to go through every single one — it's 'no, access has
+been approved for everything', and we just go in quick and give access to every
+item."*
+
+**What is on the screen.** `Access - Select option` · *asked by 4 categories* ·
+**ITEMS 28** · **TGQ 28**, opened to 28 rows — `p4353453-001 Headboard`,
+`-002 Headboard`, `-003 Sofa`, … — each with `— not answered —`, `TBC`,
+`Missing`, and each carrying the identical prompt *"Is access ok? Lift info (is
+there a lift or lift size) Standard door (740 x 1900 mm)"*.
+
+**That question is ALREADY classified as project-wide, and step 2 was parked
+waiting for exactly this ask.** `db/seed/0003_requirements.sql` seeds it — BWS
+field 6 — with `section = 'Project / commercial'` on all seventeen sheets, and
+`src/lib/checklist-sections.ts` says in its own header that step 2, *"a column
+(`scope = 'project'`) and answer it once for the whole project"*, is
+**deliberately not built**, *"because folding the section is what Matthew asked
+to see first and a fan-out is a data model change nobody has agreed."* The
+recorded condition for building it was somebody asking again.
+
+**The ask is BROADER than that section, and the two must not be run together.**
+
+- **Answer once per PROJECT** is a data-model change: a scope column, one
+  answer row for eighteen questions, and every screen that reads
+  `spec_answers` learning that some answers belong to no record. It covers the
+  Project / commercial section and nothing else.
+- **Apply one value to the items on screen** is a UI batch over writes that
+  already exist. It covers ANY question — a metalwork finish that happens to be
+  the same on forty items, not just the eighteen — and it is what the
+  screenshot asks for.
+
+The second is much the smaller change and is not a substitute for the first: a
+project-scoped answer stays right when a 29th item is added, and a batch
+applied to 28 does not.
+
+Five things the batch version has to get right, each already learned somewhere
+in this repo:
+
+- **One press is ONE change set.** `editFinish` filed eleven codes as eleven
+  entries in the trail until `changeSetId` was threaded through it. Twenty-eight
+  answers are one change and one version per record, not twenty-eight of each.
+- **"All" must mean what the screen is SHOWING, and say so in words.** This
+  screen carries an area filter, a state filter and a search, and prints
+  `58 of 58 questions shown`. *A filter narrows what is LISTED, never what is
+  asked or written* — an apply-to-all that quietly reached rows the filter is
+  hiding would break that rule in the most expensive direction there is. The
+  select-all-then-untick shape Max describes fixes it by making the set
+  visible, which is the argument for building that one rather than a bare
+  button.
+- **It must not silently overwrite an answer somebody already gave.** A
+  person's own answer is the single thing `applyAnswerFills` has never been
+  allowed to touch. The control can offer to, and has to say how many.
+- **Never on a dimension row.** `rowKind` reads `jsonId === 3` and writes an
+  ATTRIBUTE rather than an answer, because the Dimensions cell is a projection
+  of the attributes — applying one width to 28 items is the one case where
+  apply-to-all is certainly wrong.
+- **Twenty-eight writes are twenty-eight requests today**, each with its own
+  optimistic lock, and a single row reloads itself on a 409. A bulk route has
+  to keep that: a batch that half-lands with one banner leaves nobody knowing
+  which half.
+
+The fan-out target is not in doubt: `groupByQuestion` already carries
+`requirementIds` — every `requirements` row folded into the heading — so each
+item is written against its OWN category's row rather than the one the heading
+happened to be named after.
+
 ### The page prints a swatch and the intake takes no picture of it
 
 **Status: open. Asked for**, and it chains onto the entry above. Max: *"in the
