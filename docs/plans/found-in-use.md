@@ -204,8 +204,47 @@ what the list does by default.
 
 ### The by-question tab needs an apply-to-all, and Access is the question that proves it
 
-**Status: open. A CHANGE ASKED FOR — and it is the trigger condition on
-something that was deliberately parked.** Max, on *Fill in what we know* → **By
+**Status: FIXED 2026-09-23, `5dbbda6`** (plan item 4a.4), on staging, and the
+only item of the stage a person has actually DRIVEN. On `p4353453`, *Access -
+Select option*: 28 items, select-all, two unticked, a palette option chosen —
+**26 answers written under ONE `manual_edit` change set, 26 snapshots over 26
+distinct records, the two left `missing`.** Pressing again read *"Record on 0
+items"*, which is the settled-row rule working. On DEMO-300 the same heading is
+408 items and **Dimensions offers no tick at all**, printing the slate note.
+Everything written was reverted; the sandbox is back to 28 `missing`.
+
+**"All" means the rows DRAWN under the opened heading** — not the loaded set and
+not the heading's own count — so every tick is visible to be taken off again.
+The bar says which number it is in words, including *"2 more owe this question
+and are hidden by your filters — a filter never changes what is written"*, and
+the heading's own ITEMS/TGQ counts never move.
+
+**A skipped row is named, never silently dropped.** The route returns
+`{ filed, skipped }` and each skipped row carries its label and a reason —
+*somebody changed it since this screen loaded*, *already answered — change that
+one on its own*, *a dimension is recorded per item, not in a batch*, *it has
+been retired*. Nothing appliable at all is a 409 naming every row.
+
+**Two things beyond the brief, both kept.** `editAnswer` gained a `snapshot`
+opt-out because `snapshotRecords` batches its lock and its `loadRecordAtoms`,
+and calling it per answer re-does both: **13.6s → 6.9s for 26 answers**, one
+version pass at the end. A caller that passes `false` and forgets is caught by
+`tests/db/change-history.test.ts`, which reads the whole database — re-run here
+after the cherry-pick and green. And an OPEN change wins over the route's own
+reason, because `changeSetForEdit` opens a fresh change whenever a reason is
+supplied, which would have detached the press from the meeting's `OpenChangeBar`.
+
+**Measured and NOT done: a 408-row press has never been driven.** 26 rows is
+6.9s, so 408 is roughly two minutes — inside the 300s budget, under a `MAX_ROWS`
+of 500, and untested. Writing 408 answers into DEMO-300 would have spoiled a
+TEST project kept in a demonstrable state.
+
+**Still not built, and not replaced by this:** answering a project-wide question
+ONCE per project. A batch applied to 28 does not stay right when a 29th item is
+added — that remains Matthew's question. The original entry follows.
+
+**Status when found: open. A CHANGE ASKED FOR — and it is the trigger condition
+on something that was deliberately parked.** Max, on *Fill in what we know* → **By
 question**: *"we need basically an apply-to-all box. For access, most likely it
 is going to be the same for everything. Even better would be a tick box with an
 option to select all, but then you can untick some. This screen doesn't really
