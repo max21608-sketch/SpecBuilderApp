@@ -30,6 +30,116 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
+### The same three figures are staged twice — once slotted, once as notes
+
+**Status: open, and a defect.** Max, on the S-203 drawings card (screenshot):
+*"Why are the dimensions getting duplicated? They shouldn't be."*
+
+**What is on the screen.** Three yellow rows — `Overall Dimensions 80 cm →
+Width`, `70 → Depth`, `90 → Height`, each with the model's evidence, *"first of
+three in the printed line 80 x 70 x 90 cm under Overall Dimensions"* — and then,
+four rows below, `Dimension 4 = 80 cm`, `Dimension 5 = 70 cm`, `Dimension 6 =
+90 cm`, filed as notes, same unit, same page. Six rows for three measurements.
+
+**The cause, read in `stageDrawings` (`src/lib/drawing-document.ts`), and the
+comment beside it already states the intent.** Two paths stage the same line:
+
+- The model's own `dimensions` array. On a version 2 read it says which figure
+  fills which slot AND what it read that from — and here it read all three off
+  the printed combined line, which is what its evidence says.
+- The combined line itself. `dimensionsCombinedRaw` is parsed by
+  `parseCombinedDimensions` and each part is pushed as its own observation. A
+  part the LINE prefixed (`W1520`, `Dia.460`) keeps that slot; a BARE figure
+  gets no slot — and is still pushed, as a note.
+
+The second loop's own comment says why the bare part must not claim a slot:
+*"the model reports the same figure in `dimensions` with its slot and the
+evidence for it, so a reviewer sees one answer with a reason rather than two
+answers."* That reasoning is right and only half-applied — the bare part is
+stopped from competing for the SLOT and is not stopped from becoming a ROW.
+
+**`dedupeMeasured` cannot catch it, and not because of a bug.** A slotted row
+is keyed `slot|figure|unit`; a note is keyed by `measuredKey`, which is
+`view|figure|unit` with the view emptied for a positional label. So the pair is
+`width|80|cm` against `|80|cm` — two different keys in two different sets. The
+two paths never meet. The de-duplicator's own header states the rule this
+breaks: *"One measurement stated twice is one measurement."*
+
+**And they cannot fold away either.** The combined line's parts are staged
+`isOverall: true` — correctly, it is the overall size — and `foldableRow` reads
+`isOverall`, so the three phantom rows sit INLINE beside the four that matter
+rather than under the "everything else this page measures" toggle. The fold
+exists to keep exactly this kind of row out of the way.
+
+**It reaches the record, not just the card.** Both paths are observations, so a
+confirm writes six `record_attributes` rows where the page made three
+statements. The composed cell is unaffected — `W800 x D700 x H900mm` is right
+in the screenshot, because a note carries no slot — so this is noise and a
+false count rather than a wrong measurement.
+
+Two things a fix has to get right rather than assume:
+
+- **A combined line may state a figure the model did not report.** Dropping
+  every bare part would lose it. The narrow rule is to drop a bare part whose
+  figure and unit already appear among that item's OVERALL rows — which is
+  `measuredKey`'s question asked across the two paths instead of within one.
+- **Two slots may legitimately share a figure** (`80 x 80 x 90`). Matching on
+  figure and unit collapses two bare parts against two slotted rows, one for
+  one, which is right — a rule that deduped by figure alone would not.
+
+**Version 1 runs are not affected and must not be changed.** Before the model
+was asked which figure was which, the combined line's parts were the only
+reading there was; the staged shape is frozen at version 1 for that reason.
+
+### A note is asked whether it is Stated or TBC, and nothing reads the answer
+
+**Status: open. A CHANGE ASKED FOR.** Max, on the same card: *"we don't need a
+state on the notes, and special manufacturing instructions, and other things
+you can think of that probably don't require it."*
+
+**What is on the screen.** The merged general-conditions block — *Overall
+Dimensions: REFER TO JACQUES GRANGE DRAWINGS · Supplier: TO BID · Description:
+ARMCHAIR STRIKE OFF · Quantity: Argenta to confirm · Required Submittals: …* —
+with its state select reading **Choose…**, the red line *"Say whether this is
+stated or still TBC."* under it, and the card refusing to confirm until it is
+answered.
+
+**The rule already exists one blocker away, for the unit.** `CLAUDE.md`:
+*"A note is never ASKED for a unit: nothing blocks a unitless note, so an empty
+amber select beside fifteen remarks reads as fifteen unanswered questions where
+there are none."* In `drawingItemBlockers`, `unit_missing` (`:1072`) is
+scoped to `attrGroup === "dimension"`; `no_state` (`:1058`), fourteen lines
+above it in the same loop, has no group test at all. The argument is written down and applied to one of
+the two columns.
+
+**It is a review rule, not a schema one.** `record_attributes.state` is
+`text not null default 'confirmed'` (0007), so a row nobody ruled has a column
+to land in and no migration is involved.
+
+**Why this block is unruled at all, which is the part that makes it bite.**
+`mergeNoteBlocks` takes the most cautious state of the lines it joins — one
+line nobody ruled leaves the whole block `null`. The merge exists so that
+fifteen REMARKS lines are not fifteen states to choose; the blocker turns them
+back into one question, about a paragraph of general conditions, and that
+question is what stands between the card and its confirm.
+
+**The line to draw is what a row REACHES, not the word "note".** A note-group
+row can still carry a BWS `spec_field_id` — `isMergeableNote` excludes exactly
+those — and then `renderAttributeValue` puts the TBC marker into the exported
+cell, where the state is read and matters. A row with no BWS field and no
+dimension slot composes into no cell at all: the export, the check sheet and
+`promote-answers` all reach it through one or the other, so its state is asked
+for and never read. That predicate — no field, no slot — is the one to scope
+the blocker with, and it is already written in `isMergeableNote`.
+
+**What else to look at in the same pass**, since Max asked for "other things
+you can think of": every control a row that reaches nothing still offers. The unit
+select is not even RENDERED for a text note — `ObservationRows.tsx:507` offers
+one to a dimension or a measured row and to nothing else, under a comment
+making this exact argument — while the state select is rendered for every row
+there is. And `empty_value` — *"a stated value cannot be blank"* — only
+fires on `state === "confirmed"`, so it inherits whatever is decided here.
+
 ### CORRECTED — "the drawings card's table clears its wrapper by two pixels"
 
 **This entry named a cause as fact and the cause was wrong.** Kept rather than
