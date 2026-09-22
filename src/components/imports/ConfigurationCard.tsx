@@ -830,7 +830,10 @@ function ConfigurationSection({
            pack: nothing overflows at 1440 or 1920, but at a narrow pane the
            same card was a 989px table in a 629px box with nothing to scroll,
            which is worse than the state Max reported on 2026-09-21 — there he
-           could at least reach the hidden column. `docs/design-language.md`
+           could at least reach the hidden column. Re-measured 2026-09-23 as
+           987px in the same 629px box: the 2px is the palette control, which
+           adds height and not width. Both figures are in the entry, so a
+           later reader who measures a third number knows what moved. `docs/design-language.md`
            permits a wide table only inside its own overflow-x box, and the
            other two observation tables (`DrawingItemCard` and the shared
            geometry above) have had one all along.
