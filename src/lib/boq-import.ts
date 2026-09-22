@@ -81,6 +81,22 @@ export type StagedBoqLine = BoqLine & {
   levelStatus?: "suggested" | "chosen";
   levelReason?: string | null;
   /**
+   * WHICH TAB THIS DECISION WAS TAKEN ON, where it was not this one.
+   *
+   * A bill's tabs are PHASES quoting the SAME codes, so accepting a level on
+   * `S-100` in MUR is a decision about the item and `src/lib/boq-carry.ts`
+   * lands it on `S-100` wherever else the bill lists it. It arrives as
+   * `chosen` — it is a person's decision — and this is what says whose tab
+   * they took it on, so the receiving row can print it and the next carry can
+   * tell it apart from a decision somebody took HERE, which always wins.
+   *
+   * The confirm reads neither: `levelStatus` decides which column is written,
+   * exactly as before. OPTIONAL, and absent on every bill staged before
+   * 2026-09-23 as well as on every row nothing carried into.
+   */
+  levelCarriedFrom?: string | null;
+  categoryCarriedFrom?: string | null;
+  /**
    * "This does not look like furniture" — a question, with what it was read
    * from, stored at staging so the review screen and anything reading the
    * staged bill see the same one. It decides NOTHING: `ignored` below is the

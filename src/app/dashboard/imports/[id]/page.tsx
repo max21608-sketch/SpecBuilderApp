@@ -33,6 +33,12 @@ import { describeHeader } from "@/lib/boq-import";
 // acts on. The page NEVER decides either for itself — one function behind the
 // count on the button and the loop behind it.
 import { linesToIgnore, nonFurnitureOf, type NonFurnitureGuess } from "@/lib/non-furniture-guess";
+// Pure: the refs one tab carries twice, and — the same set, which is why it is
+// one module — the rows a decision on this tab reaches on the others. The
+// duplicate panel used to compute its own fold here; the carry must use
+// `normaliseRef`, and two folds is how the amber panel and the carry come to
+// disagree about which rows are ambiguous.
+import { duplicateGroups, isDuplicated } from "@/lib/boq-carry";
 import { formatDay } from "@/lib/format-day";
 import PageBody from "@/components/ui/PageBody";
 import Tabs from "@/components/ui/Tabs";
@@ -47,41 +53,22 @@ type Line = {
   // Guessed at parse time, corrected here. `chosen` is what makes it a
   // decision the quote gate may read; see db/migrations/0025.
   level?: string | null; levelStatus?: string; levelReason?: string | null;
+  /**
+   * WHICH TAB THIS VALUE WAS DECIDED ON, where it was not this one.
+   *
+   * A bill's tabs are phases quoting the same codes, so a decision about
+   * `S-100` on MUR is a decision about the item — see `src/lib/boq-carry.ts`.
+   * A carried value arrives as `chosen`, because that is what it is; this is
+   * what keeps it honest about whose tab it was taken on, and it is what
+   * protects a person's own choice here from the next carry.
+   *
+   * OPTIONAL, and absent is the ordinary state: nothing carried into this row.
+   */
+  levelCarriedFrom?: string | null; categoryCarriedFrom?: string | null;
   // "This may not be furniture", asked at staging. ABSENT on a bill staged
   // before the question existed, which `nonFurnitureOf` answers at read time.
   nonFurnitureSuggested?: NonFurnitureGuess | null;
 };
-
-function isDuplicated(sheet: { lines: Line[] }, line: Line): boolean {
-  if (line.ignored || !line.code?.trim()) return false;
-  const key = line.code.trim().toUpperCase().replace(/\s+/g, " ");
-  return (
-    sheet.lines.filter(
-      (other) => !other.ignored && other.code?.trim().toUpperCase().replace(/\s+/g, " ") === key,
-    ).length > 1
-  );
-}
-
-
-/**
- * The duplicate refs of one sheet, with the rows that carry each.
- *
- * The ROWS are the point. "One client ref appears on more than one line" sends
- * somebody hunting up the table; "Rows 17 and 18 carry the same ref" is the
- * answer, and it goes under the rows it is about rather than in a banner at the
- * top of the page.
- */
-function duplicateGroups(sheet: { lines: Line[] }): { code: string; lineNos: number[] }[] {
-  const seen = new Map<string, { code: string; lineNos: number[] }>();
-  for (const line of sheet.lines) {
-    if (line.ignored || !line.code?.trim()) continue;
-    const key = line.code.trim().toUpperCase().replace(/\s+/g, " ");
-    const entry = seen.get(key) ?? { code: line.code.trim(), lineNos: [] };
-    entry.lineNos.push(line.lineNo);
-    seen.set(key, entry);
-  }
-  return [...seen.values()].filter((entry) => entry.lineNos.length > 1);
-}
 
 /** "17 and 18", "17, 18 and 19" — a list a person reads rather than parses. */
 function listOf(values: number[]): string {
@@ -99,6 +86,28 @@ function Field({ label, tip, children }: { label: string; tip?: string; children
       </span>
       <span className="mt-1.5 block font-mono text-[13px] text-neutral-900">{children}</span>
     </div>
+  );
+}
+
+/**
+ * WHERE A VALUE WAS DECIDED, where it was not decided here.
+ *
+ * A bill's tabs are PHASES quoting the same codes, so accepting a level on
+ * `S-100` in MUR is a decision about the item and it lands on `S-100` wherever
+ * else the bill lists it. The receiving row says so, because a decision that
+ * appeared on a tab nobody was looking at is one nobody can check — and it can
+ * be changed here, which is what makes the carry safe for a value-engineered
+ * phase that genuinely differs.
+ *
+ * It renders nothing at all on the ordinary row, so the column does not grow a
+ * line of grey text on every item in the bill.
+ */
+function CarriedFrom({ tab }: { tab?: string | null }) {
+  if (!tab) return null;
+  return (
+    <span className="mt-1 block text-[10.5px] text-neutral-500">
+      carried from <span className="font-mono">{tab}</span>
+    </span>
   );
 }
 
@@ -142,14 +151,17 @@ function LevelCell({
 
   if (chosen && !editing) {
     return (
-      <span className="inline-flex flex-wrap items-center gap-1.5">
-        <Chip tone="good">{ITEM_LEVEL_LABELS[line.level as keyof typeof ITEM_LEVEL_LABELS] ?? line.level}</Chip>
-        {editable && (
-          <Button variant="quiet" size="xs" onClick={() => setEditing(true)}>
-            Change
-          </Button>
-        )}
-      </span>
+      <>
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <Chip tone="good">{ITEM_LEVEL_LABELS[line.level as keyof typeof ITEM_LEVEL_LABELS] ?? line.level}</Chip>
+          {editable && (
+            <Button variant="quiet" size="xs" onClick={() => setEditing(true)}>
+              Change
+            </Button>
+          )}
+        </span>
+        <CarriedFrom tab={line.levelCarriedFrom} />
+      </>
     );
   }
 
@@ -266,6 +278,13 @@ export default function ReviewImportPage() {
    */
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * WHAT A PRESS DID ON THE TABS THE REVIEWER IS NOT LOOKING AT.
+   *
+   * Not an error and not a suggestion: a decision they took, reported where
+   * they took it. It clears on the next action, like the banner above it.
+   */
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** Which sheet is shown. A BOQ tab is a sub-quote, so a tab each. */
   const [sheetTab, setSheetTab] = useState(0);
@@ -346,12 +365,25 @@ export default function ReviewImportPage() {
     },
   ) {
     setError(null);
-    const res = await apiFetch(`/api/imports/${id}`, {
+    setNotice(null);
+    const res = await apiFetch<{ carried?: number; carriedTo?: string }>(`/api/imports/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sheetIndex, index, ...patch }),
     });
     if (!res.ok) { setError(res.error); return; }
+    // WHAT IT DID SOMEWHERE ELSE, SAID OUT LOUD. The receiving row carries the
+    // sentence, but the person is looking at the tab they decided on — so
+    // without this a press that changed three tabs looks like a press that
+    // changed one cell.
+    const carried = res.data?.carried ?? 0;
+    if (carried > 0) {
+      setNotice(
+        `Also filled in on ${carried} line${carried === 1 ? "" : "s"} carrying the same client ref${
+          res.data?.carriedTo ? ` — ${res.data.carriedTo}` : ""
+        }. Each says where it came from and can be changed there.`,
+      );
+    }
     await load();
   }
 
@@ -382,10 +414,15 @@ export default function ReviewImportPage() {
   async function acceptAllLevels(sheetIndex: number, lines: Line[]) {
     setBusy(true);
     setError(null);
+    setNotice(null);
+    // Each accepted level carries to the same client ref on the other tabs, so
+    // the sentence at the end is the TOTAL — one count for one press, rather
+    // than twelve notices the last of which is the only one anybody reads.
+    let carried = 0;
     try {
       for (const line of lines) {
         if (!line.level) continue;
-        const res = await apiFetch(`/api/imports/${id}`, {
+        const res = await apiFetch<{ carried?: number }>(`/api/imports/${id}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ sheetIndex, index: line.index, level: line.level }),
@@ -394,6 +431,13 @@ export default function ReviewImportPage() {
           setError(res.error);
           break;
         }
+        carried += res.data?.carried ?? 0;
+      }
+      if (carried > 0) {
+        setNotice(
+          `Also filled in on ${carried} line${carried === 1 ? "" : "s"} on the other phases carrying the same client ` +
+            `refs. Each says where it came from and can be changed there.`,
+        );
       }
       await load();
     } finally {
@@ -679,6 +723,8 @@ export default function ReviewImportPage() {
             This import has already been confirmed.
           </Note>
         )}
+
+        {notice && !error && <Note tone="info">{notice}</Note>}
 
         {error && (
           <Note tone="danger">
@@ -1042,6 +1088,7 @@ export default function ReviewImportPage() {
                                   {STATUS_LABEL[line.categoryStatus]}
                                 </span>
                               )}
+                              <CarriedFrom tab={line.categoryCarriedFrom} />
                             </Td>
                             {/* THE LEVEL, GUESSED AND ONE CLICK FROM A DECISION.
                                 A record with no level cannot be tiered at all,

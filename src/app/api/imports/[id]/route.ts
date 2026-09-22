@@ -34,6 +34,10 @@ import {
   isItemLevel,
 } from "@/lib/spec-vocab";
 import { assertBoqDocument } from "@/lib/boq-import";
+// Pure: which rows on the OTHER tabs a decision reaches, and what lands on
+// them. The screen reads the same module for its duplicate panel, so the rows
+// it calls ambiguous and the rows the carry refuses are one set.
+import { planCarry, listTabs, type CarryDecision, type CarrySheet } from "@/lib/boq-carry";
 import { reconcileSheet, type ExistingRecord, type RevisedLine } from "@/lib/boq-reconcile";
 import {
   assertStagedDrawings,
@@ -775,24 +779,130 @@ async function patchBoqLine(
   }
   if (Object.keys(patch).length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
 
-  const rows = await sql`
-    update intake_runs
-    set parsed = jsonb_set(
-          parsed,
-          array['sheets', ${String(sheetIndex)}, 'lines', ${String(index)}],
-          coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
-            || ${JSON.stringify(patch)}::jsonb
-        ),
-        updated_by = ${actor}
-    where id = ${id}
-      and status = 'parsed'
-      and parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int) is not null
-    returning version
-  `;
-  if (!rows[0]) {
-    return json({ ok: false, error: "That line is no longer in this import, or the import is already confirmed." }, 409);
+  // WHAT THIS PRESS CARRIES TO THE OTHER TABS.
+  // ==========================================================================
+  // A bill's tabs are PHASES quoting the same codes, so `S-100` is a line on
+  // every one of them and a decision about it is a decision about the item.
+  // Only a DECISION carries, and only a positive one: clearing a level or a
+  // category is "I do not know yet", and pushing that across tabs nobody opened
+  // would destroy values with no decision behind it. See `src/lib/boq-carry.ts`
+  // for the rules and for Max's caveat about a value-engineered phase.
+  const decision: CarryDecision | null =
+    typeof patch.level === "string"
+      ? { field: "level", level: patch.level }
+      : typeof patch.categoryId === "string"
+        ? { field: "category", categoryId: patch.categoryId }
+        : null;
+  // Setting a value HERE makes it this row's own decision, whatever carried
+  // into it before. Without this a row that received a carry would go on
+  // claiming it after somebody overrode it on its own tab — and, worse, would
+  // stay overwritable by the next carry, because the marker is what protects a
+  // person's own choice.
+  if (decision?.field === "level") patch.levelCarriedFrom = null;
+  if (decision?.field === "category") patch.categoryCarriedFrom = null;
+
+  const setLine = (targetSheet: number, targetIndex: number, targetPatch: Record<string, unknown>) => ({
+    sheetPath: String(targetSheet),
+    linePath: String(targetIndex),
+    body: JSON.stringify(targetPatch),
+  });
+
+  // The ordinary edit: ONE statement, merged into whatever is live at that
+  // address rather than writing back an array the client sent.
+  if (!decision) {
+    const rows = await sql`
+      update intake_runs
+      set parsed = jsonb_set(
+            parsed,
+            array['sheets', ${String(sheetIndex)}, 'lines', ${String(index)}],
+            coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
+              || ${JSON.stringify(patch)}::jsonb
+          ),
+          updated_by = ${actor}
+      where id = ${id}
+        and status = 'parsed'
+        and parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int) is not null
+      returning version
+    `;
+    if (!rows[0]) {
+      return json(
+        { ok: false, error: "That line is no longer in this import, or the import is already confirmed." },
+        409,
+      );
+    }
+    return json({ ok: true, version: rows[0].version });
   }
-  return json({ ok: true, version: rows[0].version });
+
+  // A DECISION: the row and everything it reaches, in ONE transaction.
+  //
+  // There is no change set on this path — the staged bill is `intake_runs.parsed`
+  // and nothing canonical is written until the confirm — so the guarantee that
+  // stands in for "one press is one change set" is that one press is one commit.
+  // A source row set and its receivers missed would leave the bill saying two
+  // different things about one item, which is precisely the state this item
+  // exists to end.
+  //
+  // The row is locked before `parsed` is read because the targets are computed
+  // from it: another tab's autosave landing in between would make the plan
+  // describe a bill that no longer exists. Every write is still a MERGE into
+  // the live value at one line's address — never a snapshot rewrite.
+  try {
+    const result = await withTransaction(async (txn) => {
+      const staged = await txn`
+        select parsed, status from intake_runs where id = ${id} for update
+      `;
+      if (!staged[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
+      if (staged[0].status !== "parsed") {
+        throw new DomainConflictError("confirmed", "This import is already confirmed.");
+      }
+      const sheets = ((staged[0].parsed as { sheets?: CarrySheet[] } | null)?.sheets ?? []) as CarrySheet[];
+      const targets = planCarry(sheets, { sheetIndex, index }, decision);
+
+      const primary = setLine(sheetIndex, index, patch);
+      const updated = await txn`
+        update intake_runs
+        set parsed = jsonb_set(
+              parsed,
+              array['sheets', ${primary.sheetPath}, 'lines', ${primary.linePath}],
+              coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
+                || ${primary.body}::jsonb
+            ),
+            updated_by = ${actor}
+        where id = ${id}
+          and status = 'parsed'
+          and parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int) is not null
+        returning version
+      `;
+      if (!updated[0]) {
+        throw new DomainConflictError("gone", "That line is no longer in this import.");
+      }
+
+      let version = updated[0].version as number;
+      for (const target of targets) {
+        const write = setLine(target.sheetIndex, target.index, target.patch);
+        const rows = await txn`
+          update intake_runs
+          set parsed = jsonb_set(
+                parsed,
+                array['sheets', ${write.sheetPath}, 'lines', ${write.linePath}],
+                coalesce(
+                  parsed->'sheets'->(${target.sheetIndex}::int)->'lines'->(${target.index}::int),
+                  '{}'::jsonb
+                ) || ${write.body}::jsonb
+              ),
+              updated_by = ${actor}
+          where id = ${id} and status = 'parsed'
+          returning version
+        `;
+        if (!rows[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+        version = rows[0].version as number;
+      }
+      return { version, carried: targets.length, tabs: listTabs(targets) };
+    });
+    return json({ ok: true, version: result.version, carried: result.carried, carriedTo: result.tabs });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
 }
 
 // ---- a proposal's autosave --------------------------------------------------
