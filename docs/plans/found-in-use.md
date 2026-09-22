@@ -30,6 +30,63 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
+### The projects list sorts alphabetically by BWS number, and should sort by most recently worked in
+
+**Status: open. A CHANGE ASKED FOR.** Max, on the projects list: *"we should
+automatically sort projects by most recent — and that should be most recently
+worked in, or edited, or added."*
+
+**What is on the screen.** `AP364c`, `AP364d`, `AP364e`, `DEMO-300`,
+`DEMO-TEST-01`, `P17231` — fourteen projects in BWS-number order.
+`src/app/api/projects/route.ts:44` is `order by case p.status when 'active'
+then 0 else 1 end, p.bws_project_number`, so the list is alphabetical inside
+each status and nothing about it moves when somebody spends a day in a project.
+
+**The obvious column is the wrong one, and that is the whole of this entry.**
+`projects.updated_at` exists and moves only when the PROJECT ROW is written —
+renaming the client, setting the TOE dates. Confirming a hundred specs, running
+an intake, filing a chase or correcting a finish never touches it, because
+recording that something happened deliberately never writes the row it happened
+to (the `bump_version` rule). Sorting on it would rank a project somebody
+renamed above one somebody worked in all afternoon, and it would look right
+until it mattered.
+
+**`change_sets` is the honest source, and the index is already there.** Every
+consequential act opens one and carries its project: a confirm, an answer, a
+correction, a retire, a level accepted, a finish edited. `max(created_at) group
+by project_id` is served by `change_sets_project_idx (project_id, created_at
+desc)`, which 0012 already creates — so the sort key costs an index lookup per
+project rather than a scan over the fastest-growing table in the schema, which
+matters here: this database has run out of space once already, and the culprit
+was `audit_log`.
+
+Four things to settle rather than assume:
+
+- **"Or added" is a second term in the same key.** A project created this
+  morning with nothing done in it has no change set at all and would sort last
+  — the opposite of what the ask says. The key is
+  `greatest(max(change_sets.created_at), p.created_at)`, and the column that
+  answers "when" has to be the one the row is sorted by, or the list and its
+  own caption disagree.
+- **Not everything that is "work" opens a change set**, and the two exceptions
+  are recorded. `assignMessage` opens none — an automatic assignment carries
+  `system:router` through the audit layer's `updated_by` instead — and there is
+  deliberately no trigger refusing writes made outside a change set, because
+  db-tier fixtures and hand fixes with `psql` write rows directly. So a project
+  whose only recent event was mail arriving will not move. Whether a delivery
+  into the inbox counts as working in the project is Max's call, not a
+  technical one.
+- **Active-first has to survive.** The current order puts active above archived
+  when *All* is shown, so archiving a project moves it out of the way even for
+  somebody looking at everything. A recency sort replaces the second term of
+  that order, never the first.
+- **Keep a stable tiebreak.** Two projects with no activity and the same
+  creation second would otherwise shuffle between reloads; `bws_project_number`
+  stays as the last term, where it can do no harm.
+
+**Not asked for and not to be inferred:** sortable column headers. The ask is
+what the list does by default.
+
 ### The by-question tab needs an apply-to-all, and Access is the question that proves it
 
 **Status: open. A CHANGE ASKED FOR — and it is the trigger condition on
