@@ -1334,8 +1334,17 @@ the route's coalesce makes that true. A route-tier assertion would hold it.
 
 ### iCloud writes " 2" copies into `.next`, and typecheck reads them
 
-**Status: open — environment, not code. Seen 2026-09-20 on the Stage 1a
-checks.** `npm run typecheck` failed with `TS2300 Duplicate identifier` on
+**Status: the iCloud half is RESOLVED 2026-09-22 — by moving the checkout,
+not by a commit.** It now lives at `~/Documents/SpecBuilderApp`, outside
+`Mobile Documents/com~apple~CloudDocs`, so nothing syncs `.next` and no
+conflict copy can be written into it; `find . -name "* 2.*"` outside
+`node_modules` returns nothing. **The second half of this entry is NOT
+resolved**: the `manual-capture` timeout below is the concurrent-run
+contention class, which has its own entries and stands. The rule the iCloud
+half taught stands too — a check is judged by its own exit code, because this
+one failed in a way that read as a regression in the commit under test.
+Original status, seen 2026-09-20 on the Stage 1a checks: **open — environment,
+not code.** `npm run typecheck` failed with `TS2300 Duplicate identifier` on
 `.next/types/cache-life.d 2.ts`, a conflict copy iCloud Drive made while the
 dev server and a worktree build both wrote `.next`; `routes-manifest 2.json`
 and three siblings appeared beside it. The build passed, so the failure read as
@@ -1532,9 +1541,14 @@ measured at the route.
 
 ### Seen in the catchup demo of 2026-09-18 — fifteen things, all small
 
-**Status: THIRTEEN OF THE FIFTEEN CLOSED, 2 and 3 still open** — reconciled
-2026-09-22 against the tree at `553b8bf`, after Max asked whether this file was
-current as of the Stage 2 build. Each was checked in the source rather than
+**Status: FOURTEEN OF THE FIFTEEN CLOSED, 6 still open** — re-checked
+2026-09-22 (second pass, at `0bd39d2`) after Max asked for the stale statuses
+to be fixed. Item **3 closed** when the two tile entries it pointed at were
+fixed earlier the same day, and this header was itself wrong before that: it
+read *"2 and 3 still open"* where the table below it said 2 CLOSED and 3 and 6
+open. The table is what was checked; the header had the wrong two numbers in
+it. First reconciled 2026-09-22 against the tree at `553b8bf`, after Max asked
+whether this file was current as of the Stage 2 build. Each was checked in the source rather than
 taken from CLAUDE.md's stage lists, and the numbered items below are left
 exactly as they were written, because what was SEEN does not change:
 
@@ -1542,7 +1556,7 @@ exactly as they were written, because what was SEEN does not change:
 |---|---|
 | 1 | CLOSED — `describeHeader` is the single wording for the sheet sentence, and the comment beside it names this defect |
 | 2 | CLOSED — `src/lib/non-furniture-guess.ts`, which cites "found-in-use 2" in its own header. A suggestion, never a decision |
-| 3 | **STILL OPEN**, and Max re-raised it on 2026-09-21 from the other end. See the two tile entries at the top of this file: the numbers are questions where they should be line items, and the boxes are taller than they need to be |
+| 3 | CLOSED 2026-09-22, by the two tile entries it pointed at — the numbers count line items rather than questions (`4c5b4bf` + `0b27318`) and the boxes lost their link line (`0b27318`), both on staging at `3f851b3`. Checked at the source as well as at the entries: the tile Matthew read aloud is gone, and every tile now on either strip names something to act on — TGQ, Waiting on a reply, No category, No level, Ready to quote on a phase; Line items, TGQ, Also outstanding, Settled, Finishes on the overview |
 | 4 | CLOSED — a document's state on the pack screen is a pending count, not a tick for having been opened |
 | 5 | CLOSED — one summary line (`n items still to review`) in place of the per-document banner stack |
 | 6 | **STILL OPEN** — investigated in Stage 1b and concluded the PROMPT is the fix, which is deferred to the finishes-schedule re-read because it re-reads every document already read. A cost, not an oversight |
