@@ -25,7 +25,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // schedule. Each finish carries the items that use it: "which line items
   // does this apply on" is the question the library exists to answer.
   const finishes = await sql`
-    select f.id, f.code, f.code_norm, f.kind, f.description, f.supplier_raw, f.reference, f.colour,
+    select f.id, f.code, f.code_norm, f.code_origin, f.kind, f.description, f.supplier_raw, f.reference, f.colour,
            f.notes, f.state, f.status, f.version, f.retired_at, f.retired_by, f.updated_at, f.updated_by,
            (select at.id from attachments at
              where at.entity_type = 'project_finishes' and at.entity_id = f.id and at.kind = 'finish_swatch'

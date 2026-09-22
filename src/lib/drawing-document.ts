@@ -37,6 +37,8 @@
 import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
 import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
+// Type only: `finishes.ts` is a leaf here and imports nothing from this file.
+import type { FinishFiling } from "@/lib/finishes";
 import {
   DIMENSION_SLOT_LABELS,
   normaliseDimensionSlot,
@@ -63,6 +65,18 @@ export type DrawingObservation = {
   labelRaw: string | null;
   valueRaw: string | null;
   materialCodeRaw: string | null;
+  /**
+   * What the reviewer said to do with a finish the client gave NO code for
+   * (4a.1). Absent on every run staged before this existed, and absent means
+   * "nobody has been asked yet" — which is the state the card shows the *file
+   * this as…* controls for. Never a decision this app took on its own:
+   * `createFinish` is a register write and only a press sets this.
+   *
+   * OPTIONAL and it must stay optional, for the reason `unitSource` is: a
+   * required key would mean rewriting every `schemaVersion: 1` row sitting in
+   * `intake_runs.parsed`.
+   */
+  finishFiling?: FinishFiling | null;
   /** The reviewer's value. Starts as the drawing's own. */
   value: string | null;
   unit: AttributeUnit | null;

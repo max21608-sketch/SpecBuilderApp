@@ -68,7 +68,7 @@ type UsedOn = {
   attributeLabel: string;
 };
 type Finish = {
-  id: string; code: string; code_norm: string; kind: FinishKind | null;
+  id: string; code: string; code_norm: string; code_origin: string; kind: FinishKind | null;
   description: string | null; supplier_raw: string | null; reference: string | null; colour: string | null;
   notes: string | null; state: "confirmed" | "tbc"; status: "active" | "retired";
   version: number; retired_at: string | null; retired_by: string | null;
@@ -447,6 +447,15 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
           </Td>
           <Td>
             <span className="font-mono font-semibold text-neutral-900">{finish.code}</span>
+            {/* WHOSE CODE IT IS (0036). `BW-F-001` was minted by this app
+                because the client's document gave the finish no code, and it
+                never reaches the BWS export, the quote or the costing sheet —
+                those show the description alone. A reader scanning the library
+                against a client schedule has to be able to tell which codes
+                they will not find on it. */}
+            {finish.code_origin === "internal" && (
+              <span className="mt-0.5 block text-[11px] text-neutral-500">ours — the client gave no code</span>
+            )}
           </Td>
           <Td>
             {/* FILED, SUGGESTED, OR NOTHING TO SAY — three different states and

@@ -21,7 +21,7 @@
 // each configuration still carries its own attribute, from its own page, with
 // its own source page. Nothing here knows which of those it is doing.
 // ============================================================================
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
@@ -43,6 +43,10 @@ import {
   type Palette,
 } from "@/lib/palettes";
 import SwatchPicker from "@/components/imports/SwatchPicker";
+import SuggestButton from "@/components/ui/SuggestButton";
+import Chip from "@/components/ui/Chip";
+import { isFinishGroup } from "@/lib/finishes";
+import type { FinishFilingView } from "@/lib/drawing-resolution";
 import Button from "@/components/ui/Button";
 import { Th } from "@/components/ui/Table";
 import type { CroppedImage } from "@/lib/pdf-crop";
@@ -358,6 +362,138 @@ export function PaletteChoice({
 }
 
 /**
+ * FILING A FINISH THE CLIENT GAVE NO CODE FOR — item 4a.1, Max 2026-09-22.
+ *
+ * ============================================================================
+ * The S-203 sheet states `Fabric reference: Aissa Dione, ref. Losange raphia
+ * beige et écru` and prints no code. `project_finishes` is keyed on the
+ * client's code, so the fabric landed on the record and the project's finishes
+ * library stayed empty — nothing to correct once, nothing to hang a swatch on.
+ * Max: *"reviewer supplies a code at confirm; if [one does not] exist create an
+ * internal one and then use this again if it matches in another line item."*
+ *
+ * ---- NOTHING HERE FILES ANYTHING ON ITS OWN, WITH ONE EXCEPTION ----------
+ *
+ * Creating a library row is a REGISTER WRITE, so it waits for a press: the
+ * client's own code typed in the box, or *No code — file it internally*. The
+ * exception is Max's approval 3 — wording that folds EXACTLY onto a finish
+ * this app already minted links by itself and says which one, with a way out
+ * beside it. Linking to a row that exists is not a register write, and asking
+ * the same question about the same fabric on every item is the ceremony the
+ * whole entry is about.
+ *
+ * A NEAR MISS IS OFFERED AND FILES NOTHING. `readUncodedFinish` is the one
+ * reading, called here and by the confirm route, so what this chip promises is
+ * what the confirm does.
+ *
+ * WHAT THE CODE IS is not shown before the confirm, deliberately. It is minted
+ * under the project row lock at that moment, and a number printed here is one
+ * another reviewer's confirm may take first.
+ * ============================================================================
+ */
+function FinishFilingControl({
+  observation,
+  filing,
+  busy,
+  onChange,
+}: {
+  observation: DrawingObservation;
+  filing: FinishFilingView;
+  busy: boolean;
+  onChange: RowCallbacks["onChange"];
+}) {
+  const [code, setCode] = useState("");
+
+  if (filing.outcome === "link") {
+    return (
+      <div className="mt-1 text-xs">
+        <Chip mono tone="info">
+          {filing.code} · ours
+        </Chip>
+        <span className="ml-1.5 text-neutral-500">{filing.why}.</span>{" "}
+        <Button
+          size="xs"
+          variant="quiet"
+          disabled={busy}
+          onClick={() => onChange(observation, { finishFiling: { mode: "apart" } })}
+        >
+          Not the same finish?
+        </Button>
+      </div>
+    );
+  }
+
+  if (filing.outcome === "mint") {
+    return (
+      <div className="mt-1 text-xs">
+        <Chip tone="info">ours — a code on confirm</Chip>
+        <span className="ml-1.5 text-neutral-500">
+          The client gave no code. Confirming files this in the finishes library under one of ours.
+        </span>{" "}
+        <Button
+          size="xs"
+          variant="quiet"
+          disabled={busy}
+          onClick={() => onChange(observation, { finishFiling: null })}
+        >
+          Undo
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1 text-xs">
+      <p className="text-neutral-500">
+        Not in the finishes library — the page prints no code.
+        {filing.why ? ` ${filing.why}.` : ""}
+      </p>
+      {filing.suggestion && (
+        <div className="mt-1">
+          <SuggestButton
+            value={filing.suggestion.code}
+            evidence={`${filing.suggestion.why}. Nothing filed.`}
+            busy={busy}
+            onAccept={() =>
+              onChange(observation, {
+                finishFiling: { mode: "link", codeNorm: filing.suggestion!.codeNorm },
+              })
+            }
+          />
+        </div>
+      )}
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        <input
+          value={code}
+          disabled={busy}
+          onChange={(event) => setCode(event.target.value)}
+          placeholder="client's code"
+          aria-label="The client's own code for this finish"
+          className="w-36 border border-neutral-300 rounded px-2 py-1 text-xs"
+        />
+        <Button
+          size="xs"
+          disabled={busy || !code.trim()}
+          onClick={() => onChange(observation, { materialCode: code.trim() })}
+        >
+          File
+        </Button>
+        {/* SECOND, and quiet: a client code is the better answer wherever one
+            exists, and this is what to press when there is not one. */}
+        <Button
+          size="xs"
+          variant="quiet"
+          disabled={busy}
+          onClick={() => onChange(observation, { finishFiling: { mode: "internal" } })}
+        >
+          No code — file it internally
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * One observation: the seven controls a reviewer rules on it with.
  *
  * `blocked` and `guessed` are passed in rather than derived, because a shared
@@ -375,6 +511,7 @@ export function ObservationRow({
   busy,
   blocked,
   guessWhy,
+  finishFiling,
   callbacks,
 }: {
   observation: DrawingObservation;
@@ -393,6 +530,12 @@ export function ObservationRow({
   busy: boolean;
   blocked: boolean;
   guessWhy: string | undefined;
+  /**
+   * How this row would file, when it is a FINISH the client gave no code for.
+   * Absent for every other row, and for a row that already carries a code —
+   * where the code is the key and stays the key.
+   */
+  finishFiling?: FinishFilingView;
   callbacks: RowCallbacks;
 }) {
   const draft = drafts[observation.id] ?? {};
@@ -574,6 +717,17 @@ export function ObservationRow({
               onCropped={(image, croppedPage) => callbacks.onSwatch(observation.id, image, croppedPage)}
             />
           </>
+        )}
+        {/* A FINISH WITH NO CODE HAS NOWHERE TO BE FILED, and that is what the
+            library is addressed by. The control sits where the code prints,
+            because it is the same question answered the other way round. */}
+        {!observation.materialCodeRaw && isFinishGroup(observation.attrGroup) && finishFiling && (
+          <FinishFilingControl
+            observation={observation}
+            filing={finishFiling}
+            busy={busy}
+            onChange={callbacks.onChange}
+          />
         )}
       </td>
       <td className="px-2 py-2 align-top">

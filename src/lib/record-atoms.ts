@@ -33,7 +33,7 @@ import {
   type AnswerState,
   type RequirementKind,
 } from "@/lib/spec-vocab";
-import { isFinishKind } from "@/lib/finishes";
+import { isFinishCodeOrigin, isFinishKind } from "@/lib/finishes";
 import type { ExportAnswer, ExportAttribute, ExportRecord, ExportScope } from "@/lib/bws-export";
 
 /** Both drivers satisfy this: `sql` from db.ts and `TxnSql` from db-transaction.ts. */
@@ -126,6 +126,7 @@ export function toExportAttribute(row: Row): ExportAttribute {
           id: String(row.finish_id),
           code: String(row.finish_code),
           codeNorm: String(row.finish_code_norm),
+          codeOrigin: isFinishCodeOrigin(row.finish_code_origin) ? row.finish_code_origin : "client",
           kind: isFinishKind(row.finish_kind) ? row.finish_kind : null,
           description: text(row.finish_description),
           supplierRaw: text(row.finish_supplier_raw),
@@ -280,7 +281,8 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
   const attributeRows = await exec`
     select a.id, a.record_id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code,
            a.state, a.sort_order, a.source_page, f.json_id, at.filename as source_filename,
-           a.finish_id, fin.code as finish_code, fin.code_norm as finish_code_norm, fin.kind as finish_kind,
+           a.finish_id, fin.code as finish_code, fin.code_norm as finish_code_norm,
+           fin.code_origin as finish_code_origin, fin.kind as finish_kind,
            fin.description as finish_description, fin.supplier_raw as finish_supplier_raw,
            fin.reference as finish_reference, fin.colour as finish_colour, fin.state as finish_state
     from record_attributes a

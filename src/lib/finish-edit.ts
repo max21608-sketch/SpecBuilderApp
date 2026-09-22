@@ -30,7 +30,14 @@ import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit, openChangeSet, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
-import { normaliseFinishCode, isFinishKind, type FinishKind } from "@/lib/finishes";
+import {
+  normaliseFinishCode,
+  isFinishKind,
+  formatInternalFinishCode,
+  internalFinishNumber,
+  type FinishCodeOrigin,
+  type FinishKind,
+} from "@/lib/finishes";
 import type { AttributeState } from "@/lib/spec-vocab";
 
 export type FinishFields = {
@@ -59,6 +66,34 @@ function clean(value: string | null | undefined): string | null {
   return text === "" ? null : text;
 }
 
+/**
+ * The next `BW-F-nnn` for this project, allocated under the PROJECT ROW LOCK.
+ *
+ * The `record_no` rule (`variant-create.ts`), for the reason that defect was
+ * found: two reviewers confirming two cards at once read the same maximum and
+ * both take `BW-F-001`, and one of them dies on `project_finishes_code_key`
+ * (0018's partial unique index on `(project_id, code_norm)`) with a violation
+ * the screen reports as "nothing was written". The lock serialises the read.
+ *
+ * It counts RETIRED rows and CLIENT-origin ones too. A retired code is a code
+ * somebody may have quoted in an email and must go on meaning that — the
+ * variant-letter rule — and a client schedule that happens to print `BW-F-002`
+ * would otherwise collide with the next mint.
+ */
+export async function mintInternalFinishCode(txn: TxnSql, projectId: string): Promise<string> {
+  await txn`select id from projects where id = ${projectId} for update`;
+  const rows = await txn`
+    select code from project_finishes
+     where project_id = ${projectId} and code ~* '^BW-F-[0-9]+$'
+  `;
+  let highest = 0;
+  for (const row of rows) {
+    const n = internalFinishNumber(String(row.code));
+    if (n !== null && n > highest) highest = n;
+  }
+  return formatInternalFinishCode(highest + 1);
+}
+
 /** Creates a finish. Used by the library screen and by the drawings confirm. */
 export async function createFinish(
   txn: TxnSql,
@@ -66,18 +101,25 @@ export async function createFinish(
     projectId,
     fields,
     actor,
-  }: { projectId: string; fields: FinishFields & { code: string }; actor: string },
+  }: {
+    projectId: string;
+    fields: FinishFields & { code: string; codeOrigin?: FinishCodeOrigin };
+    actor: string;
+  },
 ): Promise<string> {
   const code = fields.code.trim();
   if (!code) throw new DomainConflictError("code_required", "A finish needs the client's own code.", { status: 400 });
   const codeNorm = normaliseFinishCode(code);
+  // `client` unless a caller says otherwise: every caller that existed before
+  // minting did is filing a code a document carried.
+  const codeOrigin: FinishCodeOrigin = fields.codeOrigin ?? "client";
 
   const rows = await txn`
     insert into project_finishes
-      (project_id, code, code_norm, kind, description, supplier_raw, reference, colour, notes, state,
+      (project_id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, notes, state,
        created_by, updated_by)
     values
-      (${projectId}, ${code}, ${codeNorm}, ${fields.kind ?? null}, ${clean(fields.description)},
+      (${projectId}, ${code}, ${codeNorm}, ${codeOrigin}, ${fields.kind ?? null}, ${clean(fields.description)},
        ${clean(fields.supplierRaw)}, ${clean(fields.reference)}, ${clean(fields.colour)}, ${clean(fields.notes)},
        ${fields.state ?? "tbc"}, ${actor}, ${actor})
     on conflict do nothing

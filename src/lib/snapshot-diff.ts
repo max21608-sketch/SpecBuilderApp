@@ -48,6 +48,10 @@ const AtomAttribute = z.object({
       id: z.string(),
       code: z.string(),
       codeNorm: z.string(),
+      // Added at 0036, and OPTIONAL for the reason `finish` itself is: a
+      // snapshot written before internal codes existed holds no such key,
+      // and every one of those finishes was a code a document carried.
+      codeOrigin: z.enum(["client", "internal"]).nullish().transform((value) => value ?? "client"),
       kind: z.string().nullable(),
       description: z.string().nullable(),
       supplierRaw: z.string().nullable(),

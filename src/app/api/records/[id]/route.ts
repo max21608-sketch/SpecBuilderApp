@@ -74,6 +74,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            a.sort_order, a.version, a.source_page, a.source_run_id, a.created_at, a.created_by,
            f.name as field_name, f.json_id, f.field_category,
            a.finish_id, fin.code as finish_code, fin.description as finish_description, fin.state as finish_state,
+           fin.code_origin as finish_code_origin,
            src.filename as source_filename, src.document_kind as source_document_kind
     from record_attributes a
     left join spec_fields f on f.id = a.spec_field_id
@@ -147,6 +148,23 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // field nobody can select is a spec value nobody can record.
   const specFields = await sql`
     select id, name, json_id from spec_fields order by sort_order
+  `;
+
+  // ---- the project's finishes library, for the Attach control --------------
+  //
+  // `POST/PATCH /api/attributes/[id]/finish` has existed since 0018, version-
+  // checked and reason-bearing, and NO SCREEN CALLED IT — found while tracing
+  // why an uncoded fabric never reached the library (found-in-use.md,
+  // 2026-09-22). The Specs tab is where a person is looking at the spec that
+  // needs attaching, and this is also the recovery path for anything the
+  // drawings card's automatic matching gets wrong.
+  //
+  // Active rows only: a retired finish is not something to newly attach to.
+  const finishes = await sql`
+    select id, code, code_origin, kind, description, state
+    from project_finishes
+    where project_id = ${record.project_id} and status = 'active'
+    order by code
   `;
 
   // ---- the palettes a question may offer ----------------------------------
@@ -342,6 +360,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     answers,
     categories,
     specFields,
+    finishes,
     palettes,
     paletteByQuestion,
     family,

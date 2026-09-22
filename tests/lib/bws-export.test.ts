@@ -243,6 +243,7 @@ describe("composeRow", () => {
       id: "fin-1",
       code: "UPH-07",
       codeNorm: "uph-07",
+      codeOrigin: "client" as const,
       kind: null,
       description: "Example Collective Fabric AB01234 - 01",
       supplierRaw: null,
@@ -438,5 +439,77 @@ describe("the qualifier — the return line", () => {
       [],
     );
     for (const cell of withNote) expect(cell).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe("an internal finish code never reaches the file", () => {
+  /**
+   * ========================================================================
+   * THE TEST 4a.1 EXISTS FOR.
+   *
+   * `BW-F-001` is a code this app minted (0036) because the client's document
+   * named a fabric and gave it no code. It is how the finishes library is
+   * addressed, so it appears in the library, on the drawings card and in the
+   * change trail — and it must NEVER appear in the BWS file, which the
+   * importer treats as the complete dataset for a job, nor in the quote or the
+   * check sheet that are composed by the same function. A client asked to
+   * confirm `BW-F-001` would be being asked about a code they have never seen.
+   *
+   * Asserted over the WHOLE row rather than the one cell, for the reason the
+   * export is never filtered: a composer that learned to write the code
+   * somewhere else would pass a test pinned to field 1.
+   * ========================================================================
+   */
+  const ours = {
+    id: "fin-ours",
+    code: "BW-F-001",
+    codeNorm: "BW-F-001",
+    codeOrigin: "internal" as const,
+    kind: null,
+    description: "Aissa Dione, ref. Losange raphia beige et écru",
+    supplierRaw: null,
+    reference: null,
+    colour: null,
+    state: "tbc" as const,
+  };
+
+  it("writes the description alone, in every cell of the row", () => {
+    const attributes = [
+      attribute({ specFieldJsonId: 1, value: "Aissa Dione, ref. Losange raphia beige et écru", finish: ours }),
+      attribute({
+        id: "attr-2",
+        specFieldJsonId: 4,
+        attrGroup: "finish",
+        label: "LEGS",
+        value: "Dark tinted oak",
+        finish: { ...ours, id: "fin-2", code: "BW-F-002", codeNorm: "BW-F-002", description: "Dark tinted oak" },
+      }),
+    ];
+    const row = composeRow(scope({ attributes }), record(), attributes, []);
+    expect(row.some((cell) => cell.includes("BW-F-"))).toBe(false);
+    expect(row[indexOfField(1)]).toBe("Aissa Dione, ref. Losange raphia beige et écru TBC");
+    expect(row[indexOfField(4)]).toBe("Dark tinted oak TBC");
+  });
+
+  it("still leads with a CLIENT's code, which is the whole point of the distinction", () => {
+    const attributes = [
+      attribute({
+        specFieldJsonId: 1,
+        value: "Yarn Tessarae",
+        finish: { ...ours, codeOrigin: "client" as const, code: "CH-01.1", codeNorm: "CH-01.1", description: "Yarn Tessarae" },
+      }),
+    ];
+    const row = composeRow(scope({ attributes }), record(), attributes, []);
+    expect(row[indexOfField(1)]).toBe("CH-01.1; Yarn Tessarae TBC");
+  });
+
+  it("falls back to the page's own words when an internal finish has none", () => {
+    // Otherwise clearing a TBC finish's description on the library screen
+    // would empty the cell on every item carrying it.
+    const attributes = [
+      attribute({ specFieldJsonId: 1, value: "Aissa Dione raffia", finish: { ...ours, description: null } }),
+    ];
+    const row = composeRow(scope({ attributes }), record(), attributes, []);
+    expect(row[indexOfField(1)]).toBe("Aissa Dione raffia TBC");
   });
 });

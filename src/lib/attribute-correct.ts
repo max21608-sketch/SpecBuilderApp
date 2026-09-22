@@ -47,7 +47,7 @@
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
-import { isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
+import { isFinishCodeOrigin, isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
 import type { AttributeState, AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
@@ -207,7 +207,7 @@ export async function correctAttribute(
   let finishUnlinked = false;
   if (finishId) {
     const finishRows = await txn`
-      select id, code, code_norm, kind, description, supplier_raw, reference, colour, state
+      select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state
       from project_finishes where id = ${finishId}
     `;
     const row = finishRows[0];
@@ -216,6 +216,7 @@ export async function correctAttribute(
         id: String(row.id),
         code: String(row.code),
         codeNorm: String(row.code_norm),
+        codeOrigin: isFinishCodeOrigin(row.code_origin) ? row.code_origin : "client",
         kind: isFinishKind(row.kind) ? row.kind : null,
         description: row.description === null || row.description === undefined ? null : String(row.description),
         supplierRaw: row.supplier_raw === null || row.supplier_raw === undefined ? null : String(row.supplier_raw),

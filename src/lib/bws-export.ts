@@ -353,7 +353,12 @@ export function renderAttributeValue(attribute: {
   // it. One composer, called here, by the record screen and by
   // promote-answers — see src/lib/finishes.ts for why all three must agree.
   const finish = attribute.finish ?? null;
-  const value = finish ? composeFinishCell(finish) : (attribute.value?.trim() ?? "");
+  // An INTERNAL finish composes to its description alone (it has no code the
+  // file may carry), so where somebody has cleared that description there is
+  // nothing to emit — and this page's own words are what the cell said before
+  // the library could hold this fabric at all. Falls back to them rather than
+  // shipping a blank.
+  const value = (finish ? composeFinishCell(finish) : "") || (attribute.value?.trim() ?? "");
   const state = finish ? combineFinishState(attribute.state, finish) : attribute.state;
   const withUnit = value && attribute.unit ? `${value}${attribute.unit}` : value;
   // THE QUALIFIER GOES ON LAST, AFTER the TBC marker. A placement is not part

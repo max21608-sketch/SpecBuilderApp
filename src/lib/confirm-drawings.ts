@@ -53,7 +53,15 @@ import type { RecordEntry } from "@/lib/spec-document";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 import { openChangeSet } from "@/lib/change-sets";
 import { guessLevelFromAttributes } from "@/lib/level-guess";
-import { isFinishKind, resolveFinishCode, type Finish } from "@/lib/finishes";
+import {
+  isFinishCodeOrigin,
+  isFinishGroup,
+  isFinishKind,
+  normaliseFinishCode,
+  readUncodedFinish,
+  resolveFinishCode,
+  type Finish,
+} from "@/lib/finishes";
 
 /** A swatch chip cropped off the page, keyed by the row it was cropped for. */
 export type SwatchCrop = {
@@ -73,7 +81,7 @@ export type SwatchCrop = {
   size?: number | null;
 };
 
-import { createFinish } from "@/lib/finish-edit";
+import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
 import { ensureVariant } from "@/lib/variant-create";
 import { snapshotRecords } from "@/lib/record-snapshot";
 
@@ -467,13 +475,14 @@ export async function confirmDrawingItem(
   // anything unresolvable becomes a visible flag, never a plausible-looking
   // wrong answer.
   const libraryRows = await txn`
-    select id, code, code_norm, kind, description, supplier_raw, reference, colour, state
+    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state
     from project_finishes where project_id = ${run.projectId} and status = 'active'
   `;
   const library: Finish[] = libraryRows.map((row) => ({
     id: String(row.id),
     code: String(row.code),
     codeNorm: String(row.code_norm),
+    codeOrigin: isFinishCodeOrigin(row.code_origin) ? row.code_origin : "client",
     kind: isFinishKind(row.kind) ? row.kind : null,
     description: row.description === null || row.description === undefined ? null : String(row.description),
     supplierRaw: row.supplier_raw === null || row.supplier_raw === undefined ? null : String(row.supplier_raw),
@@ -503,6 +512,7 @@ export async function confirmDrawingItem(
         id: finishId,
         code: resolution.code,
         codeNorm: resolution.codeNorm,
+        codeOrigin: "client",
         kind: null,
         description: observation.value,
         supplierRaw: null,
@@ -511,6 +521,58 @@ export async function confirmDrawingItem(
         state: "tbc",
       });
       finishIdByObservation.set(observation.id, finishId);
+    } else if (resolution.status === "none" && isFinishGroup(observation.attrGroup)) {
+      // ====================================================================
+      // A FINISH THE CLIENT GAVE NO CODE FOR (4a.1, Max 2026-09-22).
+      //
+      // `resolveFinishCode` answers `none` before it looks at anything else
+      // when there is no `materialCodeRaw`, which is why the S-203 fabric sat
+      // on the record while the project's library stayed empty. There was no
+      // key to file it under, and Max's answer is that the app mints one.
+      //
+      // THE SAME PURE FUNCTION THE REVIEW SCREEN CALLS. The card shows what
+      // will happen and this does it; a second reading here is how a card
+      // comes to promise something the confirm does not deliver — the
+      // `proposalBlockers()` rule.
+      //
+      // MINTING IS THE ONLY THING HERE THAT NEEDS A PERSON. Linking to an
+      // exact wording already in the library is not a register write, so it
+      // happens on its own and the card says so. Creating a row does not: it
+      // waits for the press that sets `finishFiling`.
+      // ====================================================================
+      const reading = readUncodedFinish(observation.value, library, observation.finishFiling ?? null);
+      if (reading.outcome === "link" && reading.finish) {
+        finishIdByObservation.set(observation.id, reading.finish.id);
+      } else if (reading.outcome === "mint") {
+        const code = await mintInternalFinishCode(txn, run.projectId);
+        const finishId = await createFinish(txn, {
+          projectId: run.projectId,
+          fields: {
+            code,
+            codeOrigin: "internal",
+            // What THIS page said, which is the only thing the library knows
+            // about it — and the wording a later item is matched on.
+            description: observation.value,
+            state: "tbc",
+          },
+          actor,
+        });
+        library.push({
+          id: finishId,
+          code,
+          codeNorm: normaliseFinishCode(code),
+          codeOrigin: "internal",
+          kind: null,
+          description: observation.value,
+          supplierRaw: null,
+          reference: null,
+          colour: null,
+          state: "tbc",
+        });
+        finishIdByObservation.set(observation.id, finishId);
+      } else {
+        finishIdByObservation.set(observation.id, null);
+      }
     } else {
       finishIdByObservation.set(observation.id, null);
     }

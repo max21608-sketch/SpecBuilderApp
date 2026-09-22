@@ -36,7 +36,7 @@ import {
   SPLIT_REASONS,
 } from "@/lib/spec-vocab";
 import { CHANGE_SET_KINDS, REASON_REQUIRED_KINDS } from "@/lib/change-sets";
-import { FINISH_KINDS } from "@/lib/finishes";
+import { FINISH_CODE_ORIGINS, FINISH_KINDS } from "@/lib/finishes";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -72,6 +72,11 @@ const VOCABULARIES: {
   { name: "SPLIT_REASONS", constraint: "spec_records_split_reason_check", values: SPLIT_REASONS },
   { name: "REQUIREMENT_KINDS", constraint: "requirements_kind_check", values: REQUIREMENT_KINDS },
   { name: "FINISH_KINDS", constraint: "project_finishes_kind_check", values: FINISH_KINDS },
+  {
+    name: "FINISH_CODE_ORIGINS",
+    constraint: "project_finishes_code_origin_check",
+    values: FINISH_CODE_ORIGINS,
+  },
 ];
 
 /** Every single-quoted literal in a constraint definition. */

@@ -35,6 +35,13 @@ import {
   type StagedDrawings,
 } from "@/lib/drawing-document";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
+import {
+  isFinishCodeOrigin,
+  isFinishGroup,
+  isFinishKind,
+  readUncodedFinish,
+  type Finish,
+} from "@/lib/finishes";
 
 export type ResolvedItem = {
   id: string;
@@ -56,7 +63,85 @@ export type ResolvedItem = {
    * record number it cannot yet name.
    */
   writesTo: Record<string, string>;
+  /**
+   * Per pending observation that is a FINISH the client gave no code for: what
+   * filing it would do, and what is offered.
+   *
+   * Computed by `readUncodedFinish`, which the confirm route also calls — one
+   * implementation, two callers, so the chip on the card and what the confirm
+   * writes cannot disagree. A row carrying a client code is absent from this
+   * map entirely: the code is the key there and stays the key.
+   */
+  finishFilings: Record<string, FinishFilingView>;
 };
+
+/** What the card shows about one uncoded finish. Compact: it crosses the wire. */
+export type FinishFilingView = {
+  outcome: "none" | "link" | "mint";
+  finishId: string | null;
+  /** The code it links to. An internal one, always, and never exported. */
+  code: string | null;
+  why: string | null;
+  /** Offered and NOT taken. Pressing it is what files anything. */
+  suggestion: { code: string; codeNorm: string; why: string } | null;
+};
+
+/** The project's finishes library, as the pure resolver wants it. */
+export async function loadFinishLibrary(projectId: string): Promise<Finish[]> {
+  const rows = await sql`
+    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state
+    from project_finishes where project_id = ${projectId} and status = 'active'
+  `;
+  return rows.map((row) => ({
+    id: String(row.id),
+    code: String(row.code),
+    codeNorm: String(row.code_norm),
+    codeOrigin: isFinishCodeOrigin(row.code_origin) ? row.code_origin : "client",
+    kind: isFinishKind(row.kind) ? row.kind : null,
+    description: row.description === null || row.description === undefined ? null : String(row.description),
+    supplierRaw: row.supplier_raw === null || row.supplier_raw === undefined ? null : String(row.supplier_raw),
+    reference: row.reference === null || row.reference === undefined ? null : String(row.reference),
+    colour: row.colour === null || row.colour === undefined ? null : String(row.colour),
+    state: String(row.state) as Finish["state"],
+  }));
+}
+
+/**
+ * The uncoded finishes on one card, read against the library.
+ *
+ * The library is read ONCE for the whole run and is NOT grown as this walks:
+ * two identical uncoded fabrics on one card both read "nothing filed yet" on
+ * screen, and the confirm — which does grow it — mints one code and links the
+ * second to it. Showing two mints would be wrong about the second; showing the
+ * first's code beside the second would name a code that does not exist yet.
+ */
+export function finishFilingsFor(
+  item: StagedDrawings["items"][number],
+  library: readonly Finish[],
+): Record<string, FinishFilingView> {
+  const out: Record<string, FinishFilingView> = {};
+  for (const observation of item.observations) {
+    if (observation.reviewStatus !== "pending") continue;
+    if (!isFinishGroup(observation.attrGroup)) continue;
+    if (observation.materialCodeRaw?.trim()) continue;
+    if (!observation.value?.trim()) continue;
+    const reading = readUncodedFinish(observation.value, library, observation.finishFiling ?? null);
+    out[observation.id] = {
+      outcome: reading.outcome,
+      finishId: reading.finish?.id ?? null,
+      code: reading.finish?.code ?? null,
+      why: reading.why,
+      suggestion: reading.suggestion
+        ? {
+            code: reading.suggestion.finish.code,
+            codeNorm: reading.suggestion.finish.codeNorm,
+            why: reading.suggestion.why,
+          }
+        : null,
+    };
+  }
+  return out;
+}
 
 /**
  * Which BWS fields and which dimension slots are already spoken for, per record.
@@ -114,12 +199,13 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
 
 /** The registers a drawings screen needs, read once for any number of runs. */
 export async function loadDrawingContext(projectId: string) {
-  const [registers, occupied, variants] = await Promise.all([
+  const [registers, occupied, variants, finishes] = await Promise.all([
     loadExtractionRegisters(projectId),
     loadOccupiedSlots(projectId),
     loadVariants(projectId),
+    loadFinishLibrary(projectId),
   ]);
-  return { records: registers.records, occupied, variants };
+  return { records: registers.records, occupied, variants, finishes };
 }
 
 /**
@@ -207,6 +293,7 @@ export function resolveStagedRun(
       occupants: occupantsFor(item, targets, occupied),
       variantLabel,
       writesTo: Object.fromEntries(writesTo),
+      finishFilings: finishFilingsFor(item, context.finishes),
     };
   });
 }

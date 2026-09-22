@@ -844,6 +844,7 @@ function ConfigurationSection({
                     busy={busy}
                     blocked={blockers.length > 0 || warnings.length > 0}
                     guessWhy={undefined}
+                    finishFiling={member.resolution?.finishFilings?.[observation.id]}
                     callbacks={callbacks}
                   />
                   <ReplacePanel

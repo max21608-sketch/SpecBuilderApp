@@ -29,7 +29,7 @@
 // look at rather than for this code to decide.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { isFinishKind } from "@/lib/finishes";
+import { isFinishCodeOrigin, isFinishKind } from "@/lib/finishes";
 import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import {
@@ -53,7 +53,8 @@ export type RetireAttributeResult = {
 export async function loadPromotable(txn: TxnSql, recordId: string): Promise<PromotableAttribute[]> {
   const rows = await txn`
     select a.attr_group, a.dimension_slot, a.spec_field_id, a.value, a.qualifier, a.unit, a.state, a.sort_order, a.source_run_id,
-           a.finish_id, f.code as finish_code, f.code_norm as finish_code_norm, f.kind as finish_kind,
+           a.finish_id, f.code as finish_code, f.code_norm as finish_code_norm,
+           f.code_origin as finish_code_origin, f.kind as finish_kind,
            f.description as finish_description, f.supplier_raw as finish_supplier_raw,
            f.reference as finish_reference, f.colour as finish_colour, f.state as finish_state
     from record_attributes a
@@ -76,6 +77,7 @@ export async function loadPromotable(txn: TxnSql, recordId: string): Promise<Pro
           id: String(row.finish_id),
           code: String(row.finish_code),
           codeNorm: String(row.finish_code_norm),
+          codeOrigin: isFinishCodeOrigin(row.finish_code_origin) ? row.finish_code_origin : "client",
           kind: isFinishKind(row.finish_kind) ? row.finish_kind : null,
           description: row.finish_description === null || row.finish_description === undefined ? null : String(row.finish_description),
           supplierRaw: row.finish_supplier_raw === null || row.finish_supplier_raw === undefined ? null : String(row.finish_supplier_raw),

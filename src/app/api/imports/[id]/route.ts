@@ -18,6 +18,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { loadDrawingContext, recordChoices, resolveStagedRun } from "@/lib/drawing-resolution";
+import { normaliseFinishCode } from "@/lib/finishes";
 import {
   buildTargetSnapshot,
   suggestState,
@@ -164,6 +165,23 @@ const DrawingPatch = z
         specFieldId: z.string().uuid().nullable().optional(),
         state: z.enum(ATTRIBUTE_STATES).nullable().optional(),
         label: z.string().max(300).optional(),
+        // THE CLIENT'S OWN CODE FOR A FINISH THE SHEET PRINTED NONE FOR, typed
+        // on the card. The library is keyed on it, so with no code there is
+        // nothing to file a fabric under — which is why the S-203 armchair's
+        // fabric was on the record and the project's library was empty.
+        materialCode: z.string().max(200).nullable().optional(),
+        // AND THE OTHER ANSWER: there is no client code, file it under one of
+        // ours. It records the DECISION; the code itself is minted at confirm,
+        // under the project row lock, because a number shown before that is a
+        // number another reviewer may take.
+        finishFiling: z
+          .union([
+            z.object({ mode: z.literal("internal") }).strict(),
+            z.object({ mode: z.literal("link"), codeNorm: z.string().min(1).max(200) }).strict(),
+            z.object({ mode: z.literal("apart") }).strict(),
+          ])
+          .nullable()
+          .optional(),
         // Which occupied slot, on which record, this observation replaces.
         // Per (observation, RECORD): a card fans out one record per run, and
         // the mock-up run's COM 1 may hold a different old value from the main
@@ -296,6 +314,25 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
           ...(changes.specFieldId !== undefined ? { specFieldId: changes.specFieldId } : {}),
           ...(changes.state !== undefined ? { state: changes.state, stateReason: null } : {}),
           ...(changes.label !== undefined ? { labelRaw: changes.label } : {}),
+          // A CLIENT CODE SUPERSEDES THE INTERNAL DECISION, and clears it in
+          // the same patch. Otherwise a reviewer who pressed "no code" and
+          // then found one would leave a row that mints `BW-F-002` for a
+          // fabric the client calls `CH-01.1`.
+          ...(changes.materialCode !== undefined
+            ? { materialCodeRaw: changes.materialCode?.trim() || null, finishFiling: null }
+            : {}),
+          ...(changes.finishFiling !== undefined
+            ? {
+                finishFiling:
+                  changes.finishFiling === null
+                    ? null
+                    : changes.finishFiling.mode === "link"
+                      ? { mode: "link" as const, codeNorm: normaliseFinishCode(changes.finishFiling.codeNorm) }
+                      : changes.finishFiling.mode === "apart"
+                        ? { mode: "apart" as const }
+                        : { mode: "internal" as const },
+              }
+            : {}),
           ...(changes.replaces !== undefined ? { replaces: changes.replaces } : {}),
         };
         // Refused by the database; caught here so the reviewer gets a

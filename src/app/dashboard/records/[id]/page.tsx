@@ -43,6 +43,7 @@ import {
   ITEM_LEVEL_LABELS,
   normaliseItemLevel,
 } from "@/lib/spec-vocab";
+import { isFinishGroup } from "@/lib/finishes";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
@@ -113,6 +114,8 @@ type Attribute = {
   qualifier: string | null;
   finish_id: string | null; finish_code: string | null; finish_description: string | null;
   finish_state: string | null;
+  /** `internal` = a code this app minted (0036). It never reaches the export. */
+  finish_code_origin: string | null;
   dimension_slot: DimensionSlot | null;
   material_code: string | null; state: AttributeState; sort_order: number; version: number;
   source_page: number | null; source_run_id: string | null; created_by: string | null;
@@ -143,6 +146,11 @@ export type Payload = {
   answers: Answer[];
   categories: Category[];
   specFields: { id: string; name: string; json_id: number }[];
+  /** The project's finishes library, for the Attach control on the Specs tab. */
+  finishes: {
+    id: string; code: string; code_origin: string; kind: string | null;
+    description: string | null; state: string;
+  }[];
   /** Every palette, options included. A BWS-owned one arrives with none. */
   palettes: (Omit<Palette, "options"> & { allows_free_text: boolean; source_note: string | null; synced_at: string | null; options: Palette["options"] })[];
   /** Which palette a question offers, by BWS field id or by local key. */
@@ -254,6 +262,11 @@ function RecordView() {
   const [correctState, setCorrectState] = useState<AttributeState>("confirmed");
   const [correctReason, setCorrectReason] = useState("");
   const [correctBusy, setCorrectBusy] = useState(false);
+  /** The spec whose finishes-library link is being changed, and what to. */
+  const [attaching, setAttaching] = useState<Attribute | null>(null);
+  const [attachTo, setAttachTo] = useState("");
+  const [attachReason, setAttachReason] = useState("");
+  const [attachBusy, setAttachBusy] = useState(false);
   // The header's "Add a spec by hand" opens the form beside the specs it adds
   // to. One action, one button: the page-level action lives in the band.
   const [addingSpec, setAddingSpec] = useState(false);
@@ -475,6 +488,54 @@ function RecordView() {
     } finally {
       // Always, so an HTML error page cannot leave the Save button dead.
       setCorrectBusy(false);
+    }
+  }
+
+  /**
+   * LINKING ONE SPEC TO THE FINISHES LIBRARY, or letting it stand on its own
+   * words.
+   *
+   * ==========================================================================
+   * `PATCH /api/attributes/[id]/finish` has been built since 0018 — version-
+   * checked, reason-bearing, with its own `finish_link` / `finish_unlink`
+   * change kinds — and no screen called it. Found while tracing why the S-203
+   * fabric never reached the library (found-in-use.md, 2026-09-22): half of
+   * that entry was a keying decision and half was a route with no button.
+   *
+   * LINKING CHANGES WHAT THE FILE SAYS. `composeFinishCell` renders the
+   * LIBRARY wherever an attribute is linked, so the BWS cell, the checklist
+   * answer and this screen all move from the page's own words to the
+   * library's. That is edit-once working as designed, and it is exactly why
+   * this is a person's act with a sentence beside it rather than something a
+   * confirm does on a resemblance.
+   * ==========================================================================
+   */
+  async function attach() {
+    if (!attaching) return;
+    const unlinking = attachTo === "";
+    if (unlinking && !attachReason.trim()) return;
+    setAttachBusy(true);
+    try {
+      const res = await apiFetch(`/api/attributes/${encodeURIComponent(attaching.id)}/finish`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          finishId: unlinking ? null : attachTo,
+          version: attaching.version,
+          ...(attachReason.trim() ? { reason: attachReason.trim() } : {}),
+        }),
+      });
+      // Reload first, report after — this screen clears its banner on a
+      // successful load, so a 409 set beforehand flashes and vanishes.
+      await reloadThen(res.ok ? null : res.error);
+      if (res.ok) {
+        setAttaching(null);
+        setAttachTo("");
+        setAttachReason("");
+      }
+    } finally {
+      // Always, so an HTML error page cannot leave the button dead.
+      setAttachBusy(false);
     }
   }
 
@@ -938,6 +999,14 @@ function RecordView() {
                                   >
                                     <Chip mono tone={attribute.finish_state === "tbc" ? "warn" : "plain"}>
                                       {attribute.finish_code ?? attribute.material_code}
+                                      {/* WHOSE CODE IT IS (0036). `BW-F-001`
+                                          is ours, minted because the client
+                                          gave none, and it never reaches the
+                                          BWS file — so a reader has to be able
+                                          to tell it from a code they could go
+                                          and look up on the client's own
+                                          schedule. */}
+                                      {attribute.finish_code_origin === "internal" ? " · ours" : ""}
                                       {attribute.finish_state === "tbc" ? " TBC" : ""}
                                     </Chip>
                                   </Link>
@@ -947,6 +1016,14 @@ function RecordView() {
                                       <Chip mono>{attribute.material_code}</Chip>
                                     </span>
                                   )
+                                )}
+                                {/* A FINISH ON NO LIBRARY ROW follows no
+                                    correction: editing the code later reaches
+                                    every item carrying it and not this one.
+                                    Said in words, because the row otherwise
+                                    looks exactly like a linked one. */}
+                                {!attribute.finish_id && isFinishGroup(attribute.attr_group) && (
+                                  <span className="mt-0.5 block text-xs text-neutral-500">Not in the finishes library</span>
                                 )}
                               </Td>
                               <Td muted>
@@ -998,6 +1075,28 @@ function RecordView() {
                                   {/* Kept, never deleted — the row stays as
                                       evidence that a document said this, with who
                                       took it off and why. */}
+                                  {/* THE LINK ROUTE HAS EXISTED SINCE 0018 AND
+                                      HAD NO BUTTON. This is it, and it is also
+                                      the recovery path for anything the
+                                      drawings card's automatic matching got
+                                      wrong. */}
+                                  {isFinishGroup(attribute.attr_group) && (
+                                    <Button
+                                      variant="quiet"
+                                      size="xs"
+                                      title="Link this spec to the project's finishes library, or let it stand on its own words"
+                                      onClick={() => {
+                                        setAttaching(attribute);
+                                        setAttachTo(attribute.finish_id ?? "");
+                                        setAttachReason("");
+                                      }}
+                                    >
+                                      {attribute.finish_id ? "Change the finish…" : "Attach to a finish…"}
+                                    </Button>
+                                  )}
+                                  {/* Kept, never deleted — the row stays as
+                                      evidence that a document said this, with who
+                                      took it off and why. */}
                                   <Button
                                     variant="quiet"
                                     size="xs"
@@ -1017,6 +1116,75 @@ function RecordView() {
                                 the row ten column slots wide and the browser
                                 squeezes the editor into a ribbon beside the
                                 value it is editing. */}
+                            {attaching?.id === attribute.id && (
+                              <tr className="bg-blue-50/50">
+                                <td colSpan={5} className="border-b border-blue-200 px-4 py-3">
+                                  <p className="text-sm font-medium text-neutral-900">
+                                    Which finish is “{attribute.label}”?
+                                  </p>
+                                  <p className="mt-0.5 text-xs text-neutral-600">
+                                    A linked spec reads as the LIBRARY says it is — on this screen, in the checklist
+                                    answer and in the BWS file — so correcting the finish once corrects every item
+                                    carrying it. Unlinking leaves this item standing on its own words, and a later
+                                    correction will not reach it.
+                                  </p>
+                                  <div className="mt-2 flex flex-wrap items-end gap-3">
+                                    <label className="flex flex-col gap-0.5 text-xs text-neutral-600">
+                                      Finish
+                                      <select
+                                        value={attachTo}
+                                        onChange={(event) => setAttachTo(event.target.value)}
+                                        className="min-w-[20rem] rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+                                      >
+                                        <option value="">Not in the library — stand on this page&rsquo;s words</option>
+                                        {data.finishes.map((finish) => (
+                                          <option key={finish.id} value={finish.id}>
+                                            {finish.code}
+                                            {finish.code_origin === "internal" ? " (ours)" : ""}
+                                            {finish.description ? ` — ${finish.description}` : ""}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <label className="flex flex-1 flex-col gap-0.5 text-xs text-neutral-600">
+                                      {/* REQUIRED TO UNLINK and optional to link, which is the
+                                          route's own rule: unlinking is the one direction that
+                                          takes an item out of reach of a later correction. */}
+                                      Why{attachTo === "" ? "" : " (optional)"}
+                                      <input
+                                        value={attachReason}
+                                        onChange={(event) => setAttachReason(event.target.value)}
+                                        placeholder={
+                                          attachTo === ""
+                                            ? "This item's fabric is not the one the code names"
+                                            : "Same fabric as S-203, filed under one code"
+                                        }
+                                        className="w-full min-w-[16rem] rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+                                      />
+                                    </label>
+                                  </div>
+                                  {data.finishes.length === 0 && (
+                                    <p className="mt-2 text-xs text-neutral-600">
+                                      This project&rsquo;s finishes library is empty. A finish is filed when a drawings
+                                      card is confirmed, or by hand on the project&rsquo;s Finishes tab.
+                                    </p>
+                                  )}
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <Button
+                                      variant="primary"
+                                      size="sm"
+                                      disabled={attachBusy || (attachTo === "" && !attachReason.trim())}
+                                      onClick={() => void attach()}
+                                    >
+                                      {attachBusy ? "Saving…" : attachTo === "" ? "Unlink it" : "Link it"}
+                                    </Button>
+                                    <Button variant="quiet" size="sm" onClick={() => setAttaching(null)}>
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
                             {correcting?.id === attribute.id && (
                               <tr className="bg-amber-50/60">
                                 <td colSpan={5} className="border-b border-amber-200 px-4 py-3">

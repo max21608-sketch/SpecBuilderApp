@@ -190,7 +190,9 @@ export function planAnswerFills(attributes: PromotableAttribute[], dimensionNote
     // it that way too, through the same function — the two must not be able to
     // disagree. `value_raw` keeps what this page said, which is what makes the
     // answer checkable against its drawing.
-    const value = finish ? composeFinishCell(finish) : raw;
+    // An internal finish with its description cleared composes to nothing;
+    // this page's own words stand rather than an empty answer.
+    const value = (finish ? composeFinishCell(finish) : "") || raw;
     if (value === "") continue;
     const state = combineFinishState(attribute.state, finish);
     fills.push({

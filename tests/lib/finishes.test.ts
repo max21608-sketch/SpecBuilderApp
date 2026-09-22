@@ -3,7 +3,10 @@ import { describe, it, expect } from "vitest";
 import {
   combineFinishState,
   composeFinishCell,
+  formatInternalFinishCode,
+  internalFinishNumber,
   normaliseFinishCode,
+  readUncodedFinish,
   resolveFinishCode,
   type Finish,
 } from "@/lib/finishes";
@@ -13,6 +16,7 @@ const finish = (over: Partial<Finish> = {}): Finish => ({
   id: "fin-1",
   code: "CH-01.1",
   codeNorm: "CH-01.1",
+  codeOrigin: "client",
   kind: "fabric",
   description: "Yarn Collective Tessarae",
   supplierRaw: null,
@@ -63,6 +67,139 @@ describe("composeFinishCell", () => {
 
   it("is just the code when nothing else is known yet", () => {
     expect(composeFinishCell(finish({ description: null, reference: null }))).toBe("CH-01.1");
+  });
+
+  it("NEVER emits a code this app minted", () => {
+    // `BW-F-001` is ours, minted because the client gave no code (0036). The
+    // cell leads with the code, so emitting it would put a code the client has
+    // never seen at the front of a BWS cell, a quote line and a check sheet
+    // row, exactly where their own schedule reference goes. The description is
+    // what the page said, which is what those files carried before the library
+    // could hold this fabric at all.
+    const ours = finish({
+      code: "BW-F-001",
+      codeNorm: "BW-F-001",
+      codeOrigin: "internal",
+      description: "Aissa Dione, ref. Losange raphia beige et écru",
+      reference: null,
+    });
+    expect(composeFinishCell(ours)).toBe("Aissa Dione, ref. Losange raphia beige et écru");
+    expect(composeFinishCell(ours)).not.toContain("BW-F-");
+  });
+
+  it("returns nothing at all for an internal finish with no words left", () => {
+    // Reachable only by clearing a TBC finish's description on the library
+    // screen. Every caller falls back to the attribute's own words rather than
+    // shipping a blank — and a bare `BW-F-001` is the one thing that must not
+    // happen here.
+    expect(
+      composeFinishCell(
+        finish({ code: "BW-F-002", codeOrigin: "internal", description: null, reference: null, colour: null }),
+      ),
+    ).toBe("");
+  });
+});
+
+describe("internal finish codes", () => {
+  it("round-trips a number through the printed form", () => {
+    expect(formatInternalFinishCode(1)).toBe("BW-F-001");
+    expect(formatInternalFinishCode(1234)).toBe("BW-F-1234");
+    expect(internalFinishNumber("BW-F-001")).toBe(1);
+    expect(internalFinishNumber("bw-f-042")).toBe(42);
+  });
+
+  it("reads nothing out of a client's own code", () => {
+    expect(internalFinishNumber("CH-01.1")).toBeNull();
+    expect(internalFinishNumber("BW-F-")).toBeNull();
+    expect(internalFinishNumber("BW-F-001A")).toBeNull();
+  });
+});
+
+describe("readUncodedFinish", () => {
+  const AISSA = "Aissa Dione, ref. Losange raphia beige et écru";
+  const ours = (over: Partial<Finish> = {}): Finish =>
+    finish({
+      id: "fin-ours",
+      code: "BW-F-001",
+      codeNorm: "BW-F-001",
+      codeOrigin: "internal",
+      description: AISSA,
+      reference: null,
+      state: "tbc",
+      ...over,
+    });
+
+  it("asks, and files nothing, when the library holds nothing like it", () => {
+    const reading = readUncodedFinish(AISSA, [], null);
+    expect(reading.outcome).toBe("none");
+    expect(reading.suggestion).toBeNull();
+  });
+
+  it("links on EXACTLY the same wording, folding case and whitespace only", () => {
+    const reading = readUncodedFinish(`  aissa dione,   ref. Losange raphia beige et écru `, [ours()], null);
+    expect(reading.outcome).toBe("link");
+    expect(reading.finish?.code).toBe("BW-F-001");
+    expect(reading.why).toBe("Same wording as BW-F-001");
+  });
+
+  it("links NOTHING one character apart, and offers the candidate instead", () => {
+    // `écru` against `ecru`. This is the trap found-in-use.md names in this
+    // very entry: a normaliser clever enough to merge two spellings is clever
+    // enough to merge two fabrics somebody kept apart. It is OFFERED, and a
+    // person's press is what files anything.
+    const reading = readUncodedFinish("Aissa Dione, ref. Losange raphia beige et ecru", [ours()], null);
+    expect(reading.outcome).toBe("none");
+    expect(reading.finish).toBeNull();
+    expect(reading.suggestion?.finish.code).toBe("BW-F-001");
+  });
+
+  it("never lets a description reach a CLIENT-coded finish", () => {
+    // Where the client issued a code, the code is the key and stays the key.
+    const clientRow = finish({ description: AISSA, reference: null });
+    const reading = readUncodedFinish(AISSA, [clientRow], null);
+    expect(reading.outcome).toBe("none");
+    expect(reading.suggestion).toBeNull();
+  });
+
+  it("mints only when a person has said there is no client code", () => {
+    expect(readUncodedFinish(AISSA, [], { mode: "internal" }).outcome).toBe("mint");
+    expect(readUncodedFinish(AISSA, [], null).outcome).toBe("none");
+  });
+
+  it("joins the existing row rather than minting a second code for one fabric", () => {
+    // Max's whole request: "use this again if it matches in another line item
+    // where the same fabric appears". A press on the second item must not mint
+    // BW-F-002 for the fabric BW-F-001 already names.
+    const reading = readUncodedFinish(AISSA, [ours()], { mode: "internal" });
+    expect(reading.outcome).toBe("link");
+    expect(reading.finish?.code).toBe("BW-F-001");
+  });
+
+  it("takes a near miss the reviewer accepted, by code", () => {
+    const reading = readUncodedFinish("Aissa Dione, ref. Losange raphia beige et ecru", [ours()], {
+      mode: "link",
+      codeNorm: "BW-F-001",
+    });
+    expect(reading.outcome).toBe("link");
+    expect(reading.finish?.code).toBe("BW-F-001");
+  });
+
+  it("files nothing when the accepted candidate has gone", () => {
+    const reading = readUncodedFinish("something else", [ours()], { mode: "link", codeNorm: "BW-F-009" });
+    expect(reading.outcome).toBe("none");
+  });
+
+  it("lets a person overrule the automatic link", () => {
+    // The one automatic step in this item is the one that most needs a way
+    // out: two fabrics can read identically and be different.
+    const reading = readUncodedFinish(AISSA, [ours()], { mode: "apart" });
+    expect(reading.outcome).toBe("none");
+    expect(reading.why).toContain("Kept apart");
+  });
+
+  it("says nothing about a row with no words", () => {
+    expect(readUncodedFinish(null, [ours()], { mode: "internal" }).outcome).toBe("none");
+    expect(readUncodedFinish("   ", [ours()], { mode: "internal" }).outcome).toBe("none");
   });
 });
 
