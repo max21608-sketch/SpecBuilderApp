@@ -207,7 +207,7 @@ export default function DimensionAnswer({
               ? "The five dimensions"
               : `${onRecordCount} of the ${required.length} this item needs are on record`}
           </p>
-          <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+          <ul aria-label={`Dimension slots for ${subject}`} className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
             {DIMENSION_SLOTS.map((option) => {
               const row = taken.get(option);
               const needed = required !== null && required.includes(option);

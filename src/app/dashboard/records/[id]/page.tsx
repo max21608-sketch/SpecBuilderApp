@@ -33,6 +33,7 @@ import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
   ATTRIBUTE_UNITS,
+  DIMENSION_SLOT_LABELS,
   type AnswerState,
   type AttributeGroup,
   type AttributeState,
@@ -313,6 +314,43 @@ function RecordView() {
     } finally {
       setSavingId(null);
     }
+  }
+
+  /**
+   * One dimension, recorded as an ATTRIBUTE off the Checklist tab.
+   *
+   * NOT an answer. The composed Dimensions cell is a projection of these rows
+   * — see `src/components/records/DimensionAnswer.tsx` — so a value written
+   * straight into the answer carries no slots behind it, and is marked
+   * `manual`, which puts the cell out of reach of every later recomposition.
+   * `createAttribute` joins the actor's open change, as everywhere else.
+   */
+  async function recordDimension(input: {
+    slot: DimensionSlot;
+    value: string;
+    unit: AttributeUnit;
+  }): Promise<boolean> {
+    setError(null);
+    const res = await apiFetch("/api/attributes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        recordId: id,
+        attrGroup: "dimension",
+        // The slot's own name, so the row reads as what it is on the Specs tab
+        // and in the long-form sheet.
+        label: DIMENSION_SLOT_LABELS[input.slot],
+        value: input.value,
+        unit: input.unit,
+        dimensionSlot: input.slot,
+        state: "confirmed",
+      }),
+    });
+    // Reload first, report afterwards — a refusal (an occupied slot, a stale
+    // screen) means this screen is out of date, and `load()` would otherwise
+    // clear the sentence that explains it.
+    await reloadThen(res.ok ? null : res.error);
+    return res.ok;
   }
 
   async function setLevel(next: string) {
@@ -1330,7 +1368,9 @@ function RecordView() {
             readiness={readiness}
             savingId={savingId}
             reloadKey={historyKey}
+            dimensionNote={record.dimension_note}
             onSave={(answer, value, state) => void save(answer as Answer, value, state)}
+            onRecordDimension={recordDimension}
           />
         )}
 

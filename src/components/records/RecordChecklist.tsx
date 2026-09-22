@@ -43,6 +43,8 @@ import {
   ANSWER_STATE_LABELS,
   answerStateTone,
   type AnswerState,
+  type AttributeUnit,
+  type DimensionSlot,
   type ItemLevel,
 } from "@/lib/spec-vocab";
 import { questionTierOrNull, TIER_LABELS } from "@/lib/tgq";
@@ -51,6 +53,8 @@ import { formatDay } from "@/lib/format-day";
 import type { Palette } from "@/lib/palettes";
 import type { Gate, GateField } from "@/lib/gates";
 import AnswerValue from "@/components/records/AnswerValue";
+import DimensionAnswer, { requiredSlots, type HeldDimension } from "@/components/records/DimensionAnswer";
+import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import StatTile from "@/components/ui/StatTile";
@@ -76,17 +80,28 @@ export type ChecklistAnswer = {
   version: number;
 };
 
-/** Only the parts of a captured spec this screen reads — its page, and its finish. */
+/**
+ * Only the parts of a captured spec this screen reads — its page, its finish,
+ * and, for a dimension, the figure itself.
+ *
+ * The figure is here because the Dimensions row is now answered SLOT BY SLOT:
+ * the cell is a projection of these rows, so the row has to be able to say
+ * which of them exist and what each one says.
+ */
 export type ChecklistAttribute = {
   json_id: number | null;
   dimension_slot: string | null;
+  value: string | null;
+  unit: string | null;
+  /** `confirmed` or `tbc` — a document saying "TBC" is not a measurement. */
+  state: string;
   finish_state: string | null;
   source_run_id: string | null;
   source_page: number | null;
   source_filename: string | null;
 };
 
-type MatrixField = Pick<GateField, "localKey" | "fieldName"> & {
+type MatrixField = Pick<GateField, "localKey" | "fieldName" | "dimensionSlot"> & {
   gate: Gate;
   jsonId: number | null;
 };
@@ -152,7 +167,9 @@ export default function RecordChecklist({
   readiness,
   savingId,
   reloadKey,
+  dimensionNote,
   onSave,
+  onRecordDimension,
 }: {
   projectId: string;
   answers: ChecklistAnswer[];
@@ -180,7 +197,22 @@ export default function RecordChecklist({
   };
   savingId: string | null;
   reloadKey: number;
+  /** 0034's one qualifier for the whole cell, composed IN and never beside. */
+  dimensionNote: string | null;
   onSave: (answer: ChecklistAnswer, value: string, state: AnswerState) => void;
+  /**
+   * Writes one dimension ATTRIBUTE and reloads. True where it landed.
+   *
+   * Not an answer, and that is the whole of `DimensionAnswer`'s docblock: the
+   * composed cell is a projection of these rows, so a value typed into the
+   * answer is a string with no slots behind it and is out of reach of every
+   * later recomposition.
+   */
+  onRecordDimension: (input: {
+    slot: DimensionSlot;
+    value: string;
+    unit: AttributeUnit;
+  }) => Promise<boolean>;
   recordId: string;
 }) {
   // Opens on the questions that hold up a price, which is the only reading of
@@ -296,6 +328,32 @@ export default function RecordChecklist({
     if (answer.json_id === 3) return attributes.find((row) => row.dimension_slot) ?? null;
     return attributes.find((row) => row.json_id === answer.json_id) ?? null;
   };
+  // ---- the dimensions, slot by slot ---------------------------------------
+  //
+  // THE CELL IS A PROJECTION OF THESE ROWS, which is why the Dimensions
+  // question is no longer answered in a text box. `W1900 x D1400mm` was typed
+  // into that box and marked Confirmed on an item whose height and seat height
+  // nobody had — and, because a typed answer is written `manual`, no later
+  // drawing or email confirm could ever have recomposed it
+  // (`found-in-use.md`, 2026-09-21).
+  const heldDimensions: HeldDimension[] = attributes
+    .filter((row) => row.dimension_slot)
+    .map((row) => ({
+      slot: String(row.dimension_slot),
+      value: row.value ?? null,
+      unit: row.unit ?? null,
+      state: row.state ?? "confirmed",
+    }));
+  /**
+   * Which slots this category needs — NULL where his matrix does not reach it.
+   *
+   * Null and the empty list are two different statements, and the control
+   * renders them differently: "nobody has written the rules for cabinetry yet"
+   * is not "this item needs no dimensions". `gatesForRecord`'s rule, in a
+   * second place.
+   */
+  const neededSlots = requiredSlots(matrixFields);
+
   /** Every gate of Matthew's matrix that asks for this question's field. */
   const gatesFor = (answer: ChecklistAnswer): Gate[] => {
     if (!matrixFields) return [];
@@ -507,6 +565,9 @@ export default function RecordChecklist({
               const tier = tierOf(answer);
               const attribute = attributeFor(answer);
               const gates = gatesFor(answer);
+              // ALL FIVE SLOTS COMPOSE INTO FIELD 3, so this one question is
+              // answered by the slot control and never by a box.
+              const isDimensions = answer.json_id === DIMENSIONS_JSON_ID;
               return (
                 <div
                   key={answer.requirement_id}
@@ -556,19 +617,46 @@ export default function RecordChecklist({
                   </div>
 
                   <div className="px-4 py-2.5">
-                    {/* A DROPDOWN ONLY WHERE THIS APP HOLDS THE LIST. Five of
-                        Matthew's eleven palettes are BWS-owned and we have none
-                        of them; those stay free text and say so in one line,
-                        because an empty select reads as broken. The control is
-                        re-keyed on every reload so it always shows what the
-                        SERVER holds. */}
-                    <AnswerValue
-                      palette={paletteFor(answer)}
-                      value={answer.value}
-                      disabled={savingId === answer.answer_id}
-                      inputKey={`${answer.answer_id}:${answer.version}:${reloadKey}`}
-                      onCommit={(next) => onSave(answer, next, next ? "confirmed" : "missing")}
-                    />
+                    {isDimensions ? (
+                      /* NO FREE-TEXT BOX HERE, EVER. The composed cell is what
+                         the slots below add up to, so it is shown and not
+                         edited: a string typed over it carries no W/D/H/SH,
+                         and writing it marks the answer `manual`, which puts
+                         the cell out of reach of every later recomposition. */
+                      <>
+                        {answer.value ? (
+                          <span className="font-mono text-[12.5px] text-neutral-900">{answer.value}</span>
+                        ) : (
+                          <span className="text-[12.5px] text-neutral-400">nothing composed yet</span>
+                        )}
+                        {/* NAMED, NEVER OVERWRITTEN. A value with no dimension
+                            rows behind it is somebody's own statement, and
+                            replacing it silently is exactly what this app does
+                            not do. Their next Record supersedes it; nothing
+                            else does. */}
+                        {answer.value && heldDimensions.length === 0 && (
+                          <span className={`mt-1 block text-[11px] ${TONE.warn.text}`}>
+                            typed, with no measurements behind it
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {/* A DROPDOWN ONLY WHERE THIS APP HOLDS THE LIST. Five of
+                            Matthew's eleven palettes are BWS-owned and we have none
+                            of them; those stay free text and say so in one line,
+                            because an empty select reads as broken. The control is
+                            re-keyed on every reload so it always shows what the
+                            SERVER holds. */}
+                        <AnswerValue
+                          palette={paletteFor(answer)}
+                          value={answer.value}
+                          disabled={savingId === answer.answer_id}
+                          inputKey={`${answer.answer_id}:${answer.version}:${reloadKey}`}
+                          onCommit={(next) => onSave(answer, next, next ? "confirmed" : "missing")}
+                        />
+                      </>
+                    )}
                     {/* THE RETURN LINE (0029): the spec on top, where it goes
                         underneath. The exported cell joins them with a hyphen
                         and a reader checking against a page has to be able to
@@ -618,6 +706,26 @@ export default function RecordChecklist({
                       </span>
                     )}
                   </div>
+
+                  {/* ---- THE SLOTS, UNDER THE ROW THEY COMPOSE ---------------
+                      Its own full-width grid child rather than a fifth cell,
+                      the record screen's version of "a spanning panel is its
+                      own `<tr>`": four columns of which one is 110px cannot
+                      hold a slot picker and five figures, and a browser given
+                      a wide child in a narrow track squeezes the control that
+                      matters rather than the text beside it. */}
+                  {isDimensions && (
+                    <div className="border-t border-dashed border-neutral-200 bg-[#fcfcfc] px-4 py-2.5 min-[760px]:col-span-4">
+                      <DimensionAnswer
+                        subject={answer.prompt}
+                        held={heldDimensions}
+                        busy={savingId === answer.answer_id}
+                        note={dimensionNote}
+                        required={neededSlots}
+                        onRecord={onRecordDimension}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
