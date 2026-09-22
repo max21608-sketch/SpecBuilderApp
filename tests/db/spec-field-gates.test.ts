@@ -108,7 +108,7 @@ describeIfDb("the seeded gate overlay", () => {
     expect(seatHeight.map((r) => r.slug)).toContain("sofas-bed-daybeds");
   });
 
-  it("the five BWS-owned palettes are named and EMPTY, not invented", async () => {
+  it("the five BWS-owned palettes are synced from BWS, not invented", async () => {
     const palettes = await q(
       "select distinct palette_key from spec_field_gates where palette_key like 'bws_%' order by palette_key",
     );
@@ -120,26 +120,54 @@ describeIfDb("the seeded gate overlay", () => {
       "bws_timber_finish",
     ]);
 
-    // 0030 gave them a register to live in and they are STILL empty, which is
-    // the whole point: a row with no options and a null `synced_at` says "this
-    // vocabulary exists, BWS owns it, we have never had it" — a question
-    // somebody can answer. Five invented finish lists is the one kind of wrong
-    // answer nothing downstream would question (FMT-GEN-01).
+    // These were EMPTY on purpose until 2026-09-22 — a row with no options and
+    // a null `synced_at` said "this vocabulary exists, BWS owns it, we have
+    // never had it", which is a question somebody can answer, where five
+    // invented finish lists is the one kind of wrong answer nothing downstream
+    // would question (FMT-GEN-01). Max got a BWS account and they were
+    // captured read-only from the Palette options box on each field's /edit
+    // page (db/seed/0011, docs/plans/bws-palette-capture-2026-09-22.json).
+    //
+    // So the assertion inverts, and what it now holds is the SYNC: the counts
+    // are the capture's, and a re-seed that quietly drops or invents options
+    // fails here. A number moving is not a bug to fix by editing this test —
+    // it means BWS changed, and the sync rule is that a person reads the diff
+    // and decides. An option a live answer already uses is kept and flagged,
+    // never deleted.
     const owned = await q(`
       select p.key, p.synced_at, count(o.id)::int as options
         from spec_palettes p left join spec_palette_options o on o.palette_key = p.key
        where p.owner = 'bws' group by p.key, p.synced_at order by p.key`);
-    expect(owned.map((r) => r.key)).toEqual([
-      "bws_back_cushion",
-      "bws_metal_finish",
-      "bws_seat_build",
-      "bws_stud",
-      "bws_timber_finish",
+    expect(owned.map((r) => ({ key: r.key, options: r.options }))).toEqual([
+      { key: "bws_back_cushion", options: 6 },
+      { key: "bws_metal_finish", options: 15 },
+      { key: "bws_seat_build", options: 27 },
+      { key: "bws_stud", options: 13 },
+      { key: "bws_timber_finish", options: 35 },
     ]);
     for (const row of owned) {
-      expect(row.options).toBe(0);
-      expect(row.synced_at).toBeNull();
+      // A claim of a sync with nothing behind it is the thing the old
+      // emptiness rule was really guarding against, and it still fails.
+      expect(row.synced_at).not.toBeNull();
+      expect(new Date(row.synced_at as string).toISOString().slice(0, 10)).toBe("2026-09-22");
     }
+
+    // The divider BWS uses to separate the indoor block from the OUTDOOR one
+    // is a rule in a textarea, not an option. If one is ever seeded it appears
+    // in a dropdown as "------" and nothing else would catch it.
+    const dividers = await q(
+      `select palette_key, value from spec_palette_options where btrim(value) ~ '^-{3,}$'`,
+    );
+    expect(dividers).toEqual([]);
+
+    // Only Stud spec prints a BWE code inside its label, 8 of 13. The label
+    // keeps the whole string; `code` carries the code as well, for a document
+    // that quotes it alone. A code appearing on another palette means the
+    // parse widened.
+    const coded = await q(`
+      select palette_key, count(*)::int as n from spec_palette_options
+       where code is not null group by palette_key order by palette_key`);
+    expect(coded).toEqual([{ palette_key: "bws_stud", n: 8 }]);
 
     // Every palette the matrix names has a row, so a gate can never point at a
     // key nothing holds.

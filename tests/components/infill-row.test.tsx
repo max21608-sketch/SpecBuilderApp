@@ -49,8 +49,8 @@ function palette(over: Partial<Palette> = {}): Palette {
     sourceNote: null,
     syncedAt: null,
     options: [
-      { value: "Indoor", label: "Indoor", sortOrder: 1, isDefault: false },
-      { value: "Outdoor", label: "Outdoor", sortOrder: 2, isDefault: false },
+      { value: "Indoor", label: "Indoor", sortOrder: 1, isDefault: false, code: null },
+      { value: "Outdoor", label: "Outdoor", sortOrder: 2, isDefault: false, code: null },
     ],
     ...over,
   };

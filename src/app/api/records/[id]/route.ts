@@ -131,15 +131,17 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   //
   // The link is the GATE OVERLAY: Matthew's matrix is what says "Stitching
   // spec is one of these three", so the palette a question offers is looked up
-  // by the BWS field it points at, or by its local key. A palette owned by BWS
-  // comes back with no options, deliberately, and the screen says so in words
-  // rather than showing an empty dropdown.
+  // by the BWS field it points at, or by its local key. A palette with no
+  // options still comes back -- the screen says so in words rather than
+  // showing an empty dropdown. None is empty since the 2026-09-22 BWS capture
+  // (db/seed/0011), and the branch stays for the next one that is.
   const palettes = await sql`
     select p.key, p.name, p.owner, p.allows_free_text, p.source_note, p.synced_at,
            coalesce(
              (select json_agg(json_build_object(
                        'value', o.value, 'label', o.label,
-                       'sortOrder', o.sort_order, 'isDefault', o.is_default)
+                       'sortOrder', o.sort_order, 'isDefault', o.is_default,
+                       'code', o.code)
                       order by o.sort_order)
                 from spec_palette_options o where o.palette_key = p.key and o.active),
              '[]'::json) as options

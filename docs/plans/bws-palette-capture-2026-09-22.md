@@ -1,8 +1,14 @@
 # The BWS palette capture, 2026-09-22
 
 The scrape item 0.1 was blocking. Max logged into BWS and asked for it; this is
-what came back. **It is a capture, not a sync** — nothing is seeded yet, and
-item 2.1 is still open.
+what came back.
+
+**SEEDED the same day.** `db/migrations/0035_palette_option_code.sql` and
+`db/seed/0011_bws_palette_options.sql` put the five into
+`spec_palette_options` — 96 options — and set `synced_at` to 2026-09-22. This
+file stays as the capture's own record: the raw artefact beside it is what a
+re-sync diffs against, and the two findings for Matthew at the foot are now
+also in `docs/plans/matrix-assumptions.md`.
 
 - **Source:** `bws.whistlercloud.com/standard_specification_fields` and, per
   field, `/standard_specification_fields/<id>/edit`, the **Palette options**
@@ -146,16 +152,31 @@ palette is 16 options: Beech, Oak, Ash, Australian, Walnut, Mahogany, Iroko,
 Kambala, Sapele, Ebony Macassar, Chestnut, Eucalyptus, Maple, Teak, Rosewood,
 MDF. It is `show_on_specifications_only` and not searchable.
 
-## Before this is seeded
+## What the seed did
 
-- **`docs/plans/matrix-assumptions.md` gains the two questions above** —
-  seat cushion (23 → 11 or 18?) and the six app-owned palettes.
-- The db-tier test asserting the five BWS palettes are **empty** is what makes
-  today's state honest. It is replaced, in the same commit as the seed, with
-  one asserting they are populated and unchanged since `synced_at`.
-- A removed option that an answer already holds is **kept and flagged**, never
-  deleted. Nothing holds one today — the five have never had options — so the
-  first sync cannot hit it, but the second can.
+- `spec_palette_options` gains 96 rows across the five, in BWS's own order.
+- `spec_palette_options.code` (0035) carries the eight stud BWE codes; the
+  label keeps the whole string.
+- `synced_at` is set in the same file as the options, so the claim cannot
+  outrun the evidence.
+- `db/seed/0008`'s guard flipped from "a BWS palette must have NO options" to
+  "options on a BWS palette need a `synced_at` behind them" — the durable half
+  of the same rule.
+- The db-tier test that asserted the five were empty now asserts the capture's
+  exact counts, that no divider was seeded, and that only stud carries codes.
+
+## Still outstanding
+
+- **The two questions are with Matthew**, written up in
+  `docs/plans/matrix-assumptions.md` — seat cushion (row 23 → field 11 or 18?)
+  and the six app-owned palettes.
+- **Nobody has used the dropdowns.** The seed, the counts and the render logic
+  are covered by the four checks with the database tier running; a person
+  choosing a BWS timber finish on a real record is not done.
+- A removed option that an answer already holds must be **kept and flagged**,
+  never deleted, on the next sync. Nothing holds one today, so the first sync
+  could not hit it; the second can, and no code enforces it yet — the sync is
+  a person re-scraping and diffing, not a job.
 - Two option strings name outside parties: five Metal Finish options read
   `And Objects - … as per sample #64278`, and Client Code (136) offers
   `Argent` / `KPL`. They are BWS's own vocabulary, same as the 56 field names

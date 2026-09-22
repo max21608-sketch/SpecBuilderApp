@@ -445,23 +445,19 @@ people have TYPED (`self-piped`, thirteen times), and somebody had already been
 caught by it. Never-invent still stands — this is a read of BWS's own list, not
 a list we made up.
 
-**THE SCRAPE IS DONE (2026-09-22) AND THE APP STILL HOLDS NONE OF THEM.** All
-84 fields were read read-only from Max's own session — 59 palettes, 413 option
-lines — into `docs/plans/bws-palette-capture-2026-09-22.json`, with
-`docs/plans/bws-palette-capture-2026-09-22.md` as the capture note. Do not
-scrape again; diff against that file. The five are all populated (timber 35,
-metal 15, seat build 27, back cushion 6, stud 13), the three timber lists and
-the two metal lists are byte-identical to each other, and **seeding them is
-still item 2.1** — until it lands, `spec_palette_options` is empty for the five
-and the sentence above stays true. Three variances the seed must handle are in
-the note: a bare `--------` divider line is not an option, the stud codes sit
-after a pipe INSIDE the label, and three `free_text_only` fields still carry
-leftover palette text, so seed on `field_type` and never on the box being
-non-empty. The note also records two things for Matthew, not for this repo:
-row 23 may be pointing at the wrong field (BWS has a separate `Seat Cushion
-build`, id 18, that we do not hold), and six palettes seeded as `owner = 'app'`
-have a real BWS list behind them whose wording differs — `stitching` shares
-only one of its three options with BWS's.
+**THE GAP IS CLOSED (2026-09-22, item 2.1).** All 84 fields were read
+read-only from Max's own session — 59 palettes, 413 option lines — into
+`docs/plans/bws-palette-capture-2026-09-22.json`, with
+`docs/plans/bws-palette-capture-2026-09-22.md` as the capture note, and the
+five are seeded by `db/seed/0011_bws_palette_options.sql` (96 options; timber
+35, metal 15, seat build 27, back cushion 6, stud 13). Do not scrape again;
+re-scrape only to RE-sync, and diff against that file. The paragraph above is
+the history, not the state — the section below carries the rules that now hold
+it. Two things the capture recorded and this repo did NOT act on, both
+Matthew's: row 23 may be pointing at the wrong field (BWS has a separate
+`Seat Cushion build`, id 18, that we do not hold and that parallels row 24's
+field 25), and the six palettes seeded as `owner = 'app'` each have a real BWS
+list behind them whose wording differs.
 
 ### The gates BUILD ON EACH OTHER, and only the chained reading is called satisfied
 
@@ -1072,11 +1068,13 @@ coverage only.
 drawing set? the designer's own sheet?), and whether Matthew wants `Tags` to go
 on receiving pasted prose once the app composes a real cell there.
 
-### A palette this app does not hold is a row with no options
+### A palette BWS owns is READ from BWS, and never invented
 
-`db/migrations/0030_spec_palettes.sql`, `db/seed/0008_spec_palettes.sql`,
+`db/migrations/0030_spec_palettes.sql`, `db/migrations/0035_palette_option_code.sql`,
+`db/seed/0008_spec_palettes.sql`, `db/seed/0011_bws_palette_options.sql`,
 `db/seed/0009_requirements_local_keys.sql`, `src/lib/palettes.ts`,
-`src/components/records/AnswerValue.tsx`
+`src/components/records/AnswerValue.tsx`,
+`docs/plans/bws-palette-capture-2026-09-22.md`
 
 Eleven of Matthew's 35 fields carry a palette, and answering a spec question
 had always been a bare `<input placeholder="Value">` — so "Indoor | Outdoor |
@@ -1087,19 +1085,54 @@ Humid indoor" was typed eleven ways and nothing could tell `Outdoor` from
   UI, and its shape carries no spec-field link, no free-text flag, no default
   and no sync provenance. Reviving the wrong shape to save one `create table`
   is how a schema ends up with two overlapping registers.
-- **Six palettes are ours and FIVE ARE NOT.** Timber finish, metal finish, seat
-  build, back cushion and stud all say "From the BWS … palette" and **this app
-  holds none of them**. They are seeded as rows with **zero options** and a null
-  `synced_at`, the field stays free text, and the screen says so in a sentence.
-  That row is the honest representation — "this vocabulary exists, BWS owns it,
-  we have never had it" is a question somebody can answer, where five invented
-  finish lists is the one kind of wrong answer nothing downstream questions.
-  A db-tier test asserts they are still empty.
+- **Six palettes are ours and FIVE ARE BWS'S, captured 2026-09-22.** Timber
+  finish, metal finish, seat build, back cushion and stud all say "From the BWS
+  … palette". For four months this app held none of them: they were rows with
+  **zero options** and a null `synced_at`, the field stayed free text, and the
+  screen said so in a sentence — the honest representation, because "this
+  vocabulary exists, BWS owns it, we have never had it" is a question somebody
+  can answer, where five invented finish lists is the one kind of wrong answer
+  nothing downstream questions. Max got a BWS account and they were READ:
+  timber 35, metal 15, seat build 27, back cushion 6, stud 13, seeded by
+  `db/seed/0011` from `docs/plans/bws-palette-capture-2026-09-22.json`.
+  **The rule did not change, the evidence did.** What holds it now:
+  `synced_at` is set in the same file as the options, so a sync cannot be
+  claimed by a run that inserted none; `0008`'s guard refuses options on a
+  BWS palette with no `synced_at`; and the db-tier test that asserted the five
+  were EMPTY now asserts the capture's exact counts, so a re-seed that drops
+  or invents options fails. A count moving is not a number to edit — it means
+  BWS changed, and a person reads the diff.
+- **Do NOT scrape a field's *Values* page.** The palette is the **Palette
+  options** box on `/standard_specification_fields/<id>/edit`; `/values` is
+  what people have TYPED (`self-piped`, thirteen times). They are one click
+  apart and somebody had already been caught by it.
+- **The unheld branch stays live.** `isOfferable` and `unheldPaletteNote` are
+  unreachable today and must not be deleted: the next gate row pointing at a
+  BWS palette is unheld between landing and its sync, and a screen that has
+  forgotten how to say so renders an empty dropdown, which reads as broken and
+  gets typed around.
+- **A divider is not an option, and `field_type` is what says a field has a
+  palette.** BWS separates the indoor block from the `OUTDOOR -` block with a
+  bare `--------` of varying length in the same textarea; seeded, it becomes a
+  selectable answer called "------", and both the seed and the db test refuse
+  one. And three of BWS's `free_text_only` fields still hold leftover text in
+  their palette box (COM 1 and COM 3 both offer `COM / BW Supplied COM`), so
+  anything widening the seed reads `field_type`, never "the box is non-empty".
+- **The option's own code is parsed out AND left in the label** (0035). Stud
+  spec alone prints `Standard - French Natural | BWE Code: U1660-6031`; eight
+  of thirteen carry a code, five do not, and two carry a further qualifier
+  after it. Storing only the code loses the half a reviewer recognises and
+  storing only the prose loses the half a purchase order is raised against, so
+  `value`/`label` keep BWS's line whole and `spec_palette_options.code` carries
+  the code as well. `normalisePaletteValue` matches it — still the EXACT step,
+  because a drawing quoting `U1660-6031` is naming exactly one stud.
 - **`normalisePaletteValue` returns null rather than the nearest option.** The
   exact step, separate from the fuzzy one (house §6). It folds case,
-  whitespace and the degree sign, and **does not fold a dash into a space** —
-  the `normaliseFinishCode` rule: a normaliser clever enough to merge two
-  spellings is clever enough to merge two things somebody kept apart.
+  whitespace, the degree sign and dash VARIANTS onto a hyphen, and **does not
+  fold a dash into a space** — the `normaliseFinishCode` rule: a normaliser
+  clever enough to merge two spellings is clever enough to merge two things
+  somebody kept apart. BWS's own wording is stored verbatim, en dashes, curly
+  quotes, double spaces and all, so a value stays checkable against BWS.
 - **Every offered list carries "Other…"**, even where Matthew's is closed. A
   list with no way out makes somebody pick the nearest wrong option, which is
   §5's plausible-looking wrong answer wearing a dropdown. A value already off
@@ -1120,6 +1153,14 @@ Humid indoor" was typed eleven ways and nothing could tell `Outdoor` from
   describes where the value comes from — "derived automatically: if MF1 or MF2
   is populated" — not a list the app offers. Caught by the assertion that every
   gate's palette key resolves to a palette.
+- **The SIX "ours" all have a BWS list behind them too, and the wording
+  differs.** Found by the same capture and NOT acted on: `stitching` shares
+  only Plain Stitch with BWS, which offers Top Stitch and Saddle Stitch where
+  this app has Channelling and Fluting — so a value chosen here is one BWS does
+  not accept. `assembly_guide` lacks BWS's **TBC**. Also `environment`,
+  `site_access`, `swivel`, `fr_interliner`. They are Matthew's own matrix
+  wording and changing them is his call, not this repo's:
+  `docs/plans/matrix-assumptions.md`.
 
 ### A spec value has a second line, and the file gets one line
 

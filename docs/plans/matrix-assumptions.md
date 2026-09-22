@@ -470,5 +470,72 @@ node --env-file=.env.local ./node_modules/.bin/vitest run tests/db/spec-field-ga
 
 The db-tier test asserts the 35 rows, both widenings, that every mapped
 category can answer every field its gates name, that the eight cabinetry sheets
-get no gate view, and that the five BWS palettes are still empty. If Matthew
-changes an answer, that test is what tells you what else moves.
+get no gate view, and that the five BWS palettes hold exactly what the
+2026-09-22 capture said. If Matthew changes an answer, that test is what tells
+you what else moves.
+
+
+---
+
+## Two questions the BWS palette capture raised, 2026-09-22
+
+Both came out of reading BWS's own field register while scraping the five
+palettes (`bws-palette-capture-2026-09-22.md`). Neither is answered here and
+neither was acted on; both are Matthew's, because he wrote the matrix.
+
+### A. Row 23 may be pointing at the wrong field
+
+Row 23 is labelled **"Seat cushion type"** and `db/seed/0006` points it at
+**field 11, Seat Upholstery Build**, whose options are build specifications —
+`SEAT.01 – Webbed seats, +22cm off seat rail`. Row 24, **"Back cushion type"**,
+points at **field 25, Back Cushion Build**, whose options are cushion depths —
+`2.5"`, `3.5"`, `4"`.
+
+BWS has a **separate field 18, "Seat Cushion build"**, options
+`4" / 4.5" / 5" / 6"`. That is the exact parallel of field 25, and this app
+does not hold it — it is not one of our seeded 56, because it is not in the
+export grid.
+
+So the two rows are asymmetrical: back cushion lands on a cushion field, seat
+cushion lands on a build field. Either row 23's label is loose and 11 is right
+(the seat's BUILD is the more consequential of the two, and there is no
+equivalent "Back Upholstery Build" row in his matrix, which argues he chose
+deliberately), or it should be 18 and this app needs a 57th field.
+
+**What it changes if he says 18:** a seed row, a new `spec_fields` row, and the
+`bws-export.ts` constant's field count — which a test pins. **Reversing it** is
+the same edit back. Nothing is written against field 11 by any live record
+today, so the cost is a migration, not a backfill.
+
+### B. The six "our own" palettes each have a BWS list behind them
+
+`db/seed/0008` seeds six palettes as `owner = 'app'` on the grounds that they
+are Matthew's own words from the matrix rather than a BWS vocabulary. Every one
+of them is a `palette`-type field in BWS with its own option list, and every
+one differs.
+
+| Our key | Ours | BWS field | BWS's own |
+|---|---|---|---|
+| `stitching` | Plain stitch · **Channelling** · **Fluting** | 37 Stitching spec | Plain Stitch · **Top Stitch** · **Saddle Stitch** |
+| `environment` | Indoor · Outdoor · Humid indoor | 130 Outdoor | No · Yes; FULL OUTDOOR · No but HUMID INDOOR |
+| `site_access` | 4 of his own | 6 Access - Select option | 5, including two marked `[TBC]` |
+| `assembly_guide` | No (default) · Yes | 191 Assy guide required | **TBC** · No · Yes |
+| `swivel` | None · 360 non-return · 180 return | 232 Swivel Mechs | 360 º Non-Return · 180º Self-Return w/ wood block |
+| `fr_interliner` | Required · Not required | 74 FR Interliner | 4, splitting Residential/Commercial with label colour and BS7176 |
+
+**`stitching` is the one that costs something.** Two of our three values do not
+exist in BWS and two of BWS's three do not exist here, so a value chosen in
+this app is one the BWS import would not accept. This is the exact failure
+`external-vocabulary-sync` is written to prevent, sitting inside a palette this
+repo believed it owned.
+
+**`assembly_guide` is second**: BWS offers TBC and we do not, so there is
+nowhere to record the one state `CLAUDE.md` insists is real and distinct from
+missing.
+
+**What it changes if he says "use BWS's":** each becomes `owner = 'bws'`,
+re-seeded from the capture with a `synced_at`, plus a backfill for any answer
+holding one of our spellings — the four-edit rule in the
+`external-vocabulary-sync` skill. **If he says "keep mine"**, the right change
+is a sentence in `db/seed/0008` saying the divergence is deliberate and that a
+BWS import will need mapping, so the next reader does not re-open it.
