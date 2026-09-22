@@ -28,6 +28,107 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-09-22
+
+### Eleven files, eleven empty dropdowns — the upload asks what each document is before it has looked at any of them
+
+**Status: open. A CHANGE ASKED FOR, and one thing inside it is a defect.** Max,
+on the intake upload screen of a project (screenshot, the Panther pack of 11):
+*"when you upload the document, I want it to read first and try and guess what
+the document is and then give you the option to change what it is, instead of
+having to manually select what it is first … if we have 300 items, someone
+having to go through and do all of that manually is a real pain."*
+
+**What is on the screen.** The drop zone, then eleven rows, each one a filename
+beside a select reading **What is this?** with nothing chosen, then *Remove*.
+`AP364 - Apx 2 - Panther - BOQ - Seating.xlsx`, seven `SPEC-346-Seating`
+sheets, two `SPEC-346-Upholstery` headboards, `AP364 - Apx 1b - Argenta FF&E
+Preamble.pdf`. Under them, **Start intake (11)**. No row carries a suggestion,
+a colour or a status, because nothing has been uploaded or looked at yet.
+
+**Asked for, and restated as system-wide** — the same rule as the inbox entry
+of 2026-09-18 below, which Max also gave as project-wide: *"it's in keeping
+with, I've said it before, system-wide: we upload documents, read first,
+suggest, and have an option."* In his words, the flow should be — press **Start
+intake** once, the files download into the app, they are scanned, **a progress
+tracker says what has been scanned and what is still being read**, each one
+then **pops up with what it is**, and anything the app is unsure of **comes up
+in yellow with a suggested button, one click to switch**.
+
+**Most of that order is already what the press does, and the screen never says
+so where it is being read.** Checked in `src/components/projects/IntakeBatchUpload.tsx`:
+`start()` uploads each file, calls `/api/imports/classify`, writes the answer
+into the select, prints the evidence under the row, registers it and — for a
+specification document — starts the charged read. A file the model cannot
+settle is held with an empty box and nothing is read for it. The sentence
+saying all of this is at the BOTTOM of the component (`:450`), below the Start
+intake button, in `text-xs text-neutral-500`. What a person meets first is
+eleven required-looking questions above it. **This is the finding**: the
+behaviour is right and the screen asks for the work anyway.
+
+Four things behind it that are true in the source, and each is separate:
+
+- **A SUGGESTION ON THIS SCREEN CANNOT BE AGREED WITH.** The select is
+  `value={kindOf(item)}` — the person's choice, else the suggestion — and its
+  `onChange` is the only thing that sets `choice` (`:377`–`:379`). Picking the
+  option the box is already showing fires no change event, so `choice` stays
+  empty, so `unchecked` (`:370`) stays true and the row stays amber for ever.
+  The only way to clear the flag the screen raises is to choose a DIFFERENT
+  kind. **This is the trap `CLAUDE.md` already names for the level picker** —
+  *"a select already reading 'No' fires no change event when somebody chooses
+  No, so the one action recording their agreement would do nothing"* — in a
+  second place, and it is why the asked-for one-click switch is not a
+  refinement of what is there.
+- **This screen suggests with a nine-option select where the app's own
+  primitive is a button.** `SuggestButton` is dashed blue, carries a REQUIRED
+  evidence prop and accepts in one click; it is what the drawings card, the
+  finishes library and the level panel all use. The upload screen predates none
+  of that and uses an amber-bordered `<select>` instead, so the same idea reads
+  as two different things in two places.
+- **There is no progress tracker on this screen, and the loop is sequential.**
+  `for (const item of queue)` (`:171`) uploads, classifies and registers ONE
+  file before starting the next, so eleven documents are eleven round trips in
+  series with a 24px status word per row (*Looking…*, *Registering…*, *Added*).
+  The pack-level line Max is describing does exist — `PackSummary` prints
+  *"11 documents · 8 reviewed · 1 still being read · 2 waiting for a slot"* and
+  the pack screen polls it every three seconds — but it is on the NEXT screen,
+  reached by a redirect (`:293`) that only fires once nothing is held or
+  failed. So on the pack where something needs a person, the reading progress
+  of the other ten is exactly where nobody looks.
+- **The filename is not evidence, and the filenames here say it outright.**
+  `/api/imports/classify` takes `filename` only to work out the source type and
+  to refuse an `.xls`; `classifyDocument` sends the document bytes and the
+  prompt, and the name never reaches the model (`src/lib/document-classify.ts`).
+  Max's *"it's clearly in the name what it is"* is a description of this
+  screenshot: `- BOQ - Seating.xlsx`, `SPEC-346-Seating - S-100 - Sofa.pdf`,
+  `FF&E Preamble.pdf`. The old grey filename hint was removed for a stated
+  reason — *"a filename is not the only evidence a document carries"* — which
+  is not the same as it being no evidence.
+
+Things a plan has to settle rather than assume:
+
+- **Classifying on drop would spend money before the press that says it spends
+  money.** The charge statement lives on Start intake, deliberately (2026-09-15:
+  consent moved up to where the volume is visible). A FILENAME rule costs
+  nothing and could fill the boxes in the moment the files land; a model call
+  could not, without moving that statement. Which of the two Max means by
+  "scan on upload" is his call. The precedent for a free answer already exists:
+  a `.eml` is answered `charged: false` with no model call at all.
+- **Whether a name may DECIDE or only pre-select.** The classify prompt already
+  guards the asymmetric case — a bill and an FF&E schedule are both `.xlsx` and
+  a wrong bill is a project's worth of wrong records — and a file called
+  `… - BOQ - …` whose contents are a schedule is that case wearing a helpful
+  name. Pre-selecting is cheap and reversible; deciding is not.
+- **A progress tracker is only worth having if the work is concurrent.** Made
+  parallel, it meets the pack's own cap — three reads at a time per pack
+  (2.10.f) — so the tracker has to be able to say *waiting for a slot*, which
+  `packTally` can already count.
+- **Where the tracker lives.** Either this screen stops redirecting and grows
+  the pack line, or the redirect becomes unconditional and the held files are
+  answered on the pack screen. Today it is neither, and a person watching eleven
+  documents read is looking at whichever screen the redirect happened to leave
+  them on.
+
 ## 2026-09-21
 
 ### The tiles are taller than they need to be — EVERYWHERE, not just the overview
