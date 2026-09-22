@@ -1,0 +1,168 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Filing a finish that has no client code — 4a.1</title>
+<style>
+:root{
+  --ink:#171717; --ink-2:#404040; --ink-3:#737373; --ink-4:#a3a3a3;
+  --line:#e5e5e5; --line-2:#d4d4d4; --bg:#fafaf9; --card:#fff;
+  --red:#b91c1c; --red-bg:#fef2f2; --red-line:#fecaca;
+  --amber:#a16207; --amber-bg:#fffbeb; --amber-line:#fde68a;
+  --green:#15803d; --green-bg:#f0fdf4; --green-line:#bbf7d0;
+  --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-line:#bfdbfe;
+  --violet:#6d28d9; --violet-bg:#f5f3ff; --violet-line:#ddd6fe;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.wrap{max-width:1100px;margin:0 auto;padding:0 20px 80px}
+h1{font-size:20px;font-weight:650;margin:22px 0 2px;letter-spacing:-.01em}
+h2{font-size:15px;font-weight:650;margin:34px 0 4px}
+.sub{font-size:12.5px;color:var(--ink-3);margin:3px 0 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-top:10px}
+.lab{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--ink-3);text-transform:uppercase}
+.btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;padding:6px 12px;border-radius:6px;
+  border:1px solid var(--line-2);background:#fff;color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn.sm{padding:3px 9px;font-size:12px}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+.btn.suggest{border-style:dashed;border-color:#93c5fd;background:var(--blue-bg);color:var(--blue)}
+.btn.quiet{border-color:transparent;background:transparent;color:var(--ink-2)}
+input.t{border:1px solid var(--line-2);border-radius:6px;padding:5px 9px;font-size:13px;width:150px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 8px;border-radius:5px;border:1px solid var(--line-2);background:#fafafa;color:var(--ink-2)}
+.chip.internal{color:var(--violet);background:var(--violet-bg);border-color:var(--violet-line)}
+.chip.client{color:var(--ink-2)}
+.note{font-size:12.5px;border-radius:8px;padding:9px 11px;margin-top:8px;border:1px solid}
+.note.blue{color:var(--blue);background:var(--blue-bg);border-color:var(--blue-line)}
+.note.amber{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
+.note.green{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
+.note.red{color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:10.5px;letter-spacing:.06em;color:var(--ink-3);text-transform:uppercase;font-weight:700;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid #f5f5f4;vertical-align:top}
+.ev{font-size:12px;color:var(--ink-3);margin-top:3px}
+.q{background:#fff;border:1px solid var(--line);border-left:3px solid var(--ink);border-radius:8px;padding:12px 14px;margin-top:10px}
+.q .ttl{font-weight:650}
+.q .rec{font-size:12.5px;color:var(--green);margin-top:5px}
+.q .cost{font-size:12.5px;color:var(--ink-3);margin-top:3px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+</style>
+<div class="wrap">
+
+<h1>Filing a finish that has no client code</h1>
+<p class="sub">Item 4a.1 · design pass before code · 2026-09-23. Four wordings to approve. Nothing below is built.</p>
+
+<div class="note amber"><b>The problem, in one line.</b> The S-203 sheet states
+<span class="mono">Fabric reference: Aissa Dione, ref. Losange raphia beige et écru</span> and no code.
+<span class="mono">project_finishes</span> is keyed on the client's code, so that fabric is on the record and
+the project's finishes library is empty — and the swatch control, which is keyed the same way, is not offered at all.</p>
+
+<h2>1 · On the drawings card, at review — an uncoded finish</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:170px">Label</th><th>Value</th><th style="width:110px">BWS field</th><th style="width:230px">Finishes library</th></tr>
+    <tr>
+      <td>Fabric reference</td>
+      <td>Aissa Dione, ref. Losange raphia beige et écru
+        <div class="ev">read from page 1 · no finish code printed</div></td>
+      <td>COM 1</td>
+      <td>
+        <div class="row">
+          <input class="t" placeholder="client's code"><button class="btn sm">File</button>
+        </div>
+        <div style="margin-top:6px"><button class="btn sm quiet">No code — file it internally</button></div>
+      </td>
+    </tr>
+  </table>
+  <div class="note blue"><b>Why it asks.</b> The library is how one correction reaches every item carrying the same
+  finish. A code is what it is addressed by — the client's where there is one, ours where there is not.</div>
+</div>
+
+<h2>2 · After filing internally</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:170px">Label</th><th>Value</th><th style="width:110px">BWS field</th><th style="width:230px">Finishes library</th></tr>
+    <tr>
+      <td>Fabric reference</td>
+      <td>Aissa Dione, ref. Losange raphia beige et écru</td>
+      <td>COM 1</td>
+      <td><span class="chip internal">BW-F-001 · ours</span>
+        <div class="ev">Filed by you, 23 Sept. The client gave no code.</div></td>
+    </tr>
+  </table>
+  <div class="note green"><b>What it does NOT do.</b> <span class="mono">BW-F-001</span> never reaches BWS. The export
+  writes the fabric as the page said it — <span class="mono">Aissa Dione, ref. Losange raphia beige et écru</span> —
+  because a code we invented must not arrive in the file looking like one the client issued.</div>
+</div>
+
+<h2>3 · The same fabric on a later item</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:170px">Label</th><th>Value</th><th style="width:110px">BWS field</th><th style="width:230px">Finishes library</th></tr>
+    <tr>
+      <td>Fabric reference</td>
+      <td>Aissa Dione, ref. Losange raphia beige et écru</td>
+      <td>COM 1</td>
+      <td><span class="chip internal">BW-F-001 · ours</span>
+        <div class="ev">Same wording as S-203. <a href="#">Not the same fabric?</a></div></td>
+    </tr>
+    <tr>
+      <td>Fabric reference</td>
+      <td>Aissa Dione, ref. Losange raphia beige et ecru</td>
+      <td>COM 2</td>
+      <td><button class="btn sm suggest">BW-F-001 ?</button>
+        <div class="ev">Nearly the same wording — one character apart. Nothing filed.</div></td>
+    </tr>
+  </table>
+  <div class="note amber"><b>The line.</b> Wording that matches exactly — ignoring case and spacing — links on its own
+  and says so. Anything less is offered and files nothing, because a normaliser clever enough to merge two spellings is
+  clever enough to merge two fabrics somebody kept apart.</div>
+</div>
+
+<h2>4 · The finishes library</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:150px">Code</th><th>Description</th><th style="width:90px">Kind</th><th style="width:90px">Used on</th><th style="width:120px">Swatch</th></tr>
+    <tr><td><span class="chip client mono">CH-01.1</span></td><td>Chenille, colour TBC</td><td>Fabric</td><td>3 items</td><td><button class="btn sm quiet">Crop one</button></td></tr>
+    <tr><td><span class="chip internal mono">BW-F-001</span> <span class="ev" style="display:inline">ours</span></td>
+        <td>Aissa Dione, ref. Losange raphia beige et écru</td><td>Fabric</td><td>2 items</td><td><button class="btn sm quiet">Crop one</button></td></tr>
+  </table>
+  <div class="note blue"><b>Once every finish has a code, the swatch control follows for free</b> — it is keyed on the
+  library row, which is why an uncoded fabric could never take a picture. Fabric, timber and metal alike.</div>
+</div>
+
+<h2>5 · On the record, for a spec already confirmed</h2>
+<div class="card">
+  <div class="lab">Specs captured</div>
+  <table>
+    <tr><th style="width:170px">Label</th><th>Value</th><th style="width:110px">BWS field</th><th style="width:230px">Finishes library</th></tr>
+    <tr><td>Fabric reference</td><td>Aissa Dione, ref. Losange raphia beige et écru</td><td>COM 1</td>
+      <td><button class="btn sm">Attach to a finish…</button>
+      <div class="ev">Not in the library</div></td></tr>
+  </table>
+  <div class="note green"><b>This route is already built and has no button.</b>
+  <span class="mono">POST /api/attributes/[id]/finish</span> — version-checked, reason-bearing, with its own change
+  kinds. It is also the recovery path for everything the automatic matching gets wrong.</div>
+</div>
+
+<h2>Four things to approve</h2>
+
+<div class="q"><div class="ttl">1 · Is <span class="mono">BW-F-001</span> the right shape for a code we mint?</div>
+  <div class="rec">Proposed: <span class="mono">BW-F-001</span> upward, per project, F for finish.</div>
+  <div class="cost">It appears in the library, on the card and in the change trail. It never reaches BWS.</div></div>
+
+<div class="q"><div class="ttl">2 · Is “No code — file it internally” the right words?</div>
+  <div class="rec">Proposed as shown, beside a box for the client's own code.</div>
+  <div class="cost">The alternative is filing silently with no question, which puts a register entry on the record
+  without anybody agreeing to it.</div></div>
+
+<div class="q"><div class="ttl">3 · Should an exact wording match link on its own?</div>
+  <div class="rec">Proposed: yes for an exact fold, with “Same wording as S-203” and a way out. Near misses are offered
+  and file nothing.</div>
+  <div class="cost">You asked for “use this again if it matches”. This is that, with the line drawn at exact.</div></div>
+
+<div class="q"><div class="ttl">4 · Does an internal code belong in the quote and the costing sheet?</div>
+  <div class="rec">Proposed: no — same rule as the BWS export. They show the description alone.</div>
+  <div class="cost">Say if you want it visible internally on the costing sheet; that is one line either way.</div></div>
+
+</div>
