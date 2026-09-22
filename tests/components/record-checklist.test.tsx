@@ -449,7 +449,19 @@ describe("the checklist's Dimensions row", () => {
 
   it("NAMES a value somebody typed with nothing behind it, and does not overwrite it", () => {
     // A person's own statement. Their next Record supersedes it; nothing else.
-    renderDimensions({ attributes: [] });
+    renderDimensions({
+      attributes: [],
+      answers: [
+        answer({
+          requirement_id: "q1",
+          prompt: "Dimensions",
+          json_id: 3,
+          state: "confirmed",
+          value: "W1900 x D1400mm",
+          source_kind: "manual",
+        }),
+      ],
+    });
     // ONCE only: there is nothing measured for the composer to work from, and
     // the gap between the two is the whole finding.
     expect(screen.getAllByText("W1900 x D1400mm")).toHaveLength(1);
@@ -484,6 +496,41 @@ describe("the checklist's Dimensions row", () => {
     expect(onRecordDimension).toHaveBeenCalledTimes(1);
     await act(async () => release(true));
     expect(await screen.findByRole("button", { name: "Record" })).toBeInTheDocument();
+  });
+
+  it("DERIVES the state and does not offer it: the cell's state is a projection too", () => {
+    renderDimensions();
+    // No select on this row. A select here is the same hole the free-text box
+    // was, reached by a different control: Confirmed over two of four slots,
+    // written `manual`, and the cell locked out of every recomposition.
+    expect(screen.queryByLabelText("State of Dimensions")).not.toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+    expect(screen.getByText("follows the measurements")).toBeInTheDocument();
+    // Every other question keeps its control, because TBC and N/A are real
+    // answers to a question a person answers.
+    renderChecklist({ readiness: { ...READINESS, toQuote: 0 } });
+    expect(screen.getByLabelText("State of Seat upholstery build")).toBeInTheDocument();
+  });
+
+  it("says when the state was SET BY HAND, and that it no longer follows the slots", () => {
+    // The sandbox's one real row: a confirmed cell somebody typed, with two of
+    // four slots underneath it that it can never be recomposed from.
+    renderDimensions({
+      answers: [
+        answer({
+          requirement_id: "q1",
+          prompt: "Dimensions",
+          json_id: 3,
+          state: "confirmed",
+          value: "W1900 x D1400mm x H1000m",
+          source_kind: "manual",
+        }),
+      ],
+    });
+    expect(screen.getByText("set by hand")).toBeInTheDocument();
+    expect(screen.getByText("typed — it no longer follows the measurements below")).toBeInTheDocument();
+    // And the slots still say what is actually measured.
+    expect(screen.getByText("2 of the 4 this item needs are on record")).toBeInTheDocument();
   });
 
   it("keeps the composed cell honest: it is the app's one composer, note and all", () => {

@@ -77,6 +77,12 @@ export type ChecklistAnswer = {
   value: string | null;
   qualifier: string | null;
   state: AnswerState;
+  /**
+   * Who stated it. `manual` and `email` are a person's own decision and are
+   * out of reach of `applyAnswerFills` for good — which the composed
+   * dimensions cell has to be able to say out loud.
+   */
+  source_kind?: string | null;
   version: number;
 };
 
@@ -568,6 +574,13 @@ export default function RecordChecklist({
               // ALL FIVE SLOTS COMPOSE INTO FIELD 3, so this one question is
               // answered by the slot control and never by a box.
               const isDimensions = answer.json_id === DIMENSIONS_JSON_ID;
+              // A CELL A PERSON STATED, which the composition can no longer
+              // reach. It is not a hypothetical: one row in the sandbox is
+              // exactly this, and it is the finding.
+              const typedOverride =
+                isDimensions &&
+                Boolean(answer.value) &&
+                (answer.source_kind === "manual" || answer.source_kind === "email");
               return (
                 <div
                   key={answer.requirement_id}
@@ -629,14 +642,17 @@ export default function RecordChecklist({
                         ) : (
                           <span className="text-[12.5px] text-neutral-400">nothing composed yet</span>
                         )}
-                        {/* NAMED, NEVER OVERWRITTEN. A value with no dimension
-                            rows behind it is somebody's own statement, and
-                            replacing it silently is exactly what this app does
-                            not do. Their next Record supersedes it; nothing
-                            else does. */}
-                        {answer.value && heldDimensions.length === 0 && (
+                        {/* NAMED, NEVER OVERWRITTEN. A value a person stated is
+                            their own statement, and replacing it silently is
+                            exactly what this app does not do. Their next
+                            Record supersedes it; nothing else can, which is
+                            the half worth saying out loud where the slots
+                            below already disagree with it. */}
+                        {typedOverride && (
                           <span className={`mt-1 block text-[11px] ${TONE.warn.text}`}>
-                            typed, with no measurements behind it
+                            {heldDimensions.length === 0
+                              ? "typed, with no measurements behind it"
+                              : "typed — it no longer follows the measurements below"}
                           </span>
                         )}
                       </>
@@ -667,6 +683,31 @@ export default function RecordChecklist({
                   </div>
 
                   <div className="px-4 py-2.5 min-[760px]:text-center">
+                    {isDimensions ? (
+                      /* ---- DERIVED, NOT OFFERED -------------------------------
+                         The composed cell is a projection of the attributes, so
+                         its STATE is one too: `planAnswerFills` already writes
+                         it as the WEAKER of the rows behind it, and a TBC
+                         measurement can never compose a confirmed cell. A select
+                         here is the same hole the free-text box was, reached by
+                         a different control — somebody marks Confirmed over two
+                         of four slots, `editAnswer` writes `manual`, and the
+                         cell is locked out of every later recomposition.
+                         Disabling Confirm while slots are missing would leave
+                         that bypass in place and guard it; removing the control
+                         is what closes it. The cost, stated: there is no way to
+                         call this question N/A, which on a dimensions cell would
+                         be claiming the item has no size. Nothing in the sandbox
+                         has ever done so. */
+                      <>
+                        <Chip tone={answerStateTone(answer.state)}>
+                          {ANSWER_STATE_LABELS[answer.state as AnswerState] ?? answer.state}
+                        </Chip>
+                        <p className="mt-1 text-[10.5px] text-neutral-500">
+                          {typedOverride ? "set by hand" : "follows the measurements"}
+                        </p>
+                      </>
+                    ) : (
                     <select
                       value={answer.state}
                       disabled={savingId === answer.answer_id}
@@ -682,6 +723,7 @@ export default function RecordChecklist({
                         </option>
                       ))}
                     </select>
+                    )}
                     {/* A TBC finish can never produce a confirmed answer,
                         whatever the drawing said — so where the TBC came from
                         the library rather than from this question, say so. */}

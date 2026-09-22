@@ -99,6 +99,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            q.tgq_levels, q.local_key,
            f.name as field_name, f.json_id, f.field_category,
            a.id as answer_id, a.value, a.qualifier,
+           -- WHO STATED IT. A manual or email answer is a person's own
+           -- decision and is out of reach of every recomposition (see
+           -- promote-answers.ts), which the composed dimensions cell has to be
+           -- able to SAY: a cell somebody typed goes on disagreeing with the
+           -- slots underneath it for good, and a screen that cannot tell the
+           -- two apart reports a measurement where there is a sentence.
+           -- (No backticks in here: one closes the tagged template.)
+           a.source_kind,
            -- NO ANSWER ROW AT ALL IS MISSING, not null. This drives off
            -- the requirements table with a left join, so a question added to a
            -- category after this record was categorised has no answer row and
