@@ -443,6 +443,29 @@ a note carrying a BWS field still asks.
 
 ## 2. Stage 4b — wrong answers found beside them
 
+> **CLOSED ON STAGING, 2026-09-23.** Both items landed and the assembled result
+> at `7a0ea72` passes `npm run checks` with the database tier required — lint 0
+> errors, **2,129 tests passed, 1 skipped**, build green.
+>
+> | Item | Landed | Evidence |
+> |---|---|---|
+> | 4b.1 the same three figures staged twice | `ac96caa` | `measure:drawings` 6 → **0** across every project, the rest of the report byte-identical |
+> | 4b.2 eight tables with no scroll box | `d98857d` | at 1024: 8 clipping with no scrollbar → 13 overflowing and **all 13 scrolling**; nothing clips at either supported width |
+>
+> **4b.1 had to teach the measurement tool to see the defect first.**
+> `measure:drawings` had no counter for it, so a before-and-after would have
+> come back empty and read as "no change". The counter went in first, computed
+> by calling the new function itself, and the before figure was taken with the
+> drop not yet wired in.
+>
+> **Fixed at the gate, because it failed the gate:** `spec-field-gates` counted
+> every requirement in the table where everything it asserts is about the seed,
+> so a fixture's own questions could fail it. Now scoped to seeded rows, proved
+> by planting litter — the old assertion fails on it, the new one passes.
+>
+> **Human acceptance is outstanding on both.** Nobody has re-opened the S-203
+> card or the configuration cards in a browser since.
+
 ### 4b.1 The same three figures are staged twice — FIU 2026-09-22 · **M**
 
 **Seen.** Three yellow rows — `Overall Dimensions 80 cm → Width`, `70 → Depth`,
