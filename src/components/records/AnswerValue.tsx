@@ -22,7 +22,14 @@
 // records their agreement would do nothing at all — the same trap the level
 // picker documents. The default is shown as a hint beside the control instead.
 // ============================================================================
-import { isOffPalette, isOfferable, unheldPaletteNote, defaultOption, type Palette } from "@/lib/palettes";
+import {
+  isOffPalette,
+  isOfferable,
+  unheldPaletteNote,
+  defaultOption,
+  sentenceCasePaletteName,
+  type Palette,
+} from "@/lib/palettes";
 
 const OTHER = "__other__";
 
@@ -65,7 +72,15 @@ export default function AnswerValue({
         )}
         {offPalette && palette && (
           <p className="mt-0.5 text-xs text-amber-800">
-            Not one of the {palette.name.toLowerCase()} options. Kept as written.
+            {/*
+              Lower-cased so the name reads as part of the sentence, EXCEPT
+              where it starts with an acronym: "the bws timber finish palette"
+              is a typo on screen. This branch was unreachable for the five BWS
+              palettes until they were seeded on 2026-09-22 -- isOffPalette
+              returns false where there is nothing to be off -- so "BWS" is the
+              first name it has had to print.
+            */}
+            Not one of the {sentenceCasePaletteName(palette.name)} options. Kept as written.
           </p>
         )}
       </div>

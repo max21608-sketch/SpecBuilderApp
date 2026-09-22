@@ -7,6 +7,7 @@ import {
   isOfferable,
   normalisePaletteValue,
   unheldPaletteNote,
+  sentenceCasePaletteName,
   type Palette,
 } from "@/lib/palettes";
 
@@ -151,5 +152,24 @@ describe("comparisonKey", () => {
   it("is the one key every call site uses", () => {
     expect(comparisonKey("  Indoor  ")).toBe("indoor");
     expect(comparisonKey(null)).toBe("");
+  });
+});
+
+describe("sentenceCasePaletteName", () => {
+  it("lower-cases a name so it reads mid-sentence", () => {
+    expect(sentenceCasePaletteName("Swivel mechanism")).toBe("swivel mechanism");
+    expect(sentenceCasePaletteName("Indoor / Outdoor")).toBe("indoor / outdoor");
+  });
+
+  it("leaves a leading acronym alone, because BWS owns five of the eleven", () => {
+    // "Not one of the bws timber finish palette options" is a typo on screen,
+    // and this branch was unreachable for those five until they were seeded.
+    expect(sentenceCasePaletteName("BWS timber finish palette")).toBe("BWS timber finish palette");
+    expect(sentenceCasePaletteName("BWS stud palette")).toBe("BWS stud palette");
+  });
+
+  it("does not mistake a one-letter or empty first word for an acronym", () => {
+    expect(sentenceCasePaletteName("A list")).toBe("a list");
+    expect(sentenceCasePaletteName("")).toBe("");
   });
 });

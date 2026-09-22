@@ -77,6 +77,21 @@ export function unheldPaletteNote(palette: Palette): string {
   return `${palette.name} — BWS owns this list and it is not loaded here, so this stays free text.`;
 }
 
+/**
+ * A palette's name folded into the middle of a sentence.
+ *
+ * Lower-cased, so "Not one of the swivel mechanism options" reads, EXCEPT
+ * where the name opens with an acronym -- "the bws timber finish palette"
+ * is a typo on screen, and BWS owns five of the eleven. Only the first word
+ * is examined: it is the only one the sentence position affects.
+ */
+export function sentenceCasePaletteName(name: string): string {
+  const [first, ...rest] = name.split(" ");
+  if (!first) return name;
+  const isAcronym = first.length > 1 && first === first.toUpperCase() && /[A-Z]/.test(first);
+  return [isAcronym ? first : first.toLowerCase(), ...rest.map((w) => w.toLowerCase())].join(" ");
+}
+
 /** The value a control preselects. NEVER an answer: `missing` means nobody has looked. */
 export function defaultOption(palette: Palette): PaletteOption | null {
   return palette.options.find((option) => option.isDefault) ?? null;
