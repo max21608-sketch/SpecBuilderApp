@@ -40,11 +40,47 @@ export async function GET(request: Request): Promise<Response> {
            (select count(*) from spec_runs sr where sr.project_id = p.id and sr.status = 'active') as run_count,
            (select count(*) from spec_records r where r.project_id = p.id) as record_count
     from projects p
+    -- WHEN SOMEBODY LAST WORKED IN THIS PROJECT, and it is NOT the project's
+    -- own updated_at column. (Columns are named in plain words here: a backtick
+    -- inside a sql template literal closes it, and esbuild then reports the
+    -- syntax error thirty lines away.)
+    --
+    -- updated_at is the column somebody will reach for and it is the wrong one:
+    -- it moves only when the project ROW is written — a rename, the TOE dates —
+    -- because recording that something happened deliberately never writes the
+    -- row it happened to (the bump_version rule, which is what keeps every
+    -- extraction snapshot and chase coverage row valid). Confirming a hundred
+    -- specs, running an intake, filing a chase or correcting a finish never
+    -- touches it, so sorting on it ranks a project somebody renamed above one
+    -- somebody worked in all afternoon — and it looks right until it matters.
+    --
+    -- change_sets is the honest source: every consequential act opens one and
+    -- carries its project. The index change_sets_project_idx (project_id,
+    -- created_at desc) from 0012 already serves this, so it is one index lookup
+    -- per project rather than a scan over the fastest-growing table in the
+    -- schema.
+    --
+    -- A LATERAL rather than a scalar subquery so the key is computed ONCE and
+    -- has a name: written inline it is evaluated per reference, and the moment
+    -- anything selects it as well as sorting by it that is two index searches
+    -- per row for one fact.
+    left join lateral (
+      select max(cs.created_at) as at from change_sets cs where cs.project_id = p.id
+    ) worked on true
     where (${includeArchived} or p.status = 'active')
     order by
       -- Active first when both are shown, so archiving a project moves it out
-      -- of the way even for somebody who asked to see everything.
+      -- of the way even for somebody who asked to see everything. A recency
+      -- sort replaces the SECOND term of this order, never the first.
       case p.status when 'active' then 0 else 1 end,
+      -- Most recently worked in, or added. The project's own created_at is the
+      -- second term of the KEY, not a fallback branch: a project added this
+      -- morning has no change set at all, and ordering on the max alone would
+      -- sort it last — the opposite of what was asked for. Postgres' greatest
+      -- ignores nulls, so a project with no change set is ranked by when it was
+      -- created.
+      greatest(worked.at, p.created_at) desc,
+      -- A stable tiebreak, or two untouched projects shuffle between reloads.
       p.bws_project_number
   `;
 
