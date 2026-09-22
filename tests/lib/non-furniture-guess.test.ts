@@ -59,6 +59,94 @@ describe("guessNonFurniture — the WORDS rule", () => {
   });
 });
 
+// ============================================================================
+// A SUBTOTAL ROW THAT CARRIES TEXT — FIU 2026-09-21.
+//
+// A code-less subtotal row is already skipped and counted. One that carries
+// text in the description column became a spec record with the subtotal's own
+// FIGURE as its quantity, and nothing suggested ignoring it — on a 300-line
+// bill, the Include checkbox one line at a time was the only way out.
+//
+// It is still a SUGGESTION. These tests are as much about what must NOT fire:
+// `total` is a word real furniture descriptions use, and a rule that read it
+// bare would put a real bench behind a button somebody presses in bulk.
+// ============================================================================
+describe("guessNonFurniture — a subtotal row that carries a description", () => {
+  const guess = (itemDescription: string) => guessNonFurniture({ code: null, itemDescription });
+
+  it("reads the wording a bill actually prints on a totals row", () => {
+    for (const wording of [
+      "Subtotal",
+      "SUBTOTAL",
+      "Sub-total",
+      "Sub total carried",
+      "Section total",
+      "Page total",
+      "Carried forward",
+      "Total carried forward",
+      "Brought forward",
+      "Carried to collection",
+      "Carried to summary",
+      "Collection total",
+      "Subtotal — Bedroom seating",
+      "TOTAL",
+      "Total £12,450.00",
+    ]) {
+      expect(guess(wording), wording).not.toBeNull();
+      expect(guess(wording)?.reason, wording).toContain("totals row");
+    }
+  });
+
+  it("names exactly the phrase it matched, so the reviewer can check it", () => {
+    expect(guess("Carried forward")?.matched).toEqual(["carried forward"]);
+    expect(guess("Section total")?.matched).toEqual(["section total"]);
+    expect(guess("TOTAL")?.matched).toEqual(["total"]);
+  });
+
+  it("NEVER fires on a real item whose description merely contains the word", () => {
+    // Every one of these is a thing somebody ordered. A bare `total` rule puts
+    // all of them behind *Ignore all suggested*, which is pressed in bulk.
+    for (const wording of [
+      "Sofa, total width 2400",
+      "Armchair — total height 900mm",
+      "Total Look dining chair",
+      "Sectional sofa, three parts",
+      "Section of banquette seating",
+      "Forward facing armchair",
+      "Occasional table, sub assembly",
+      "Totally bespoke headboard",
+      "Bench with collection of cushions",
+    ]) {
+      expect(guess(wording), wording).toBeNull();
+    }
+  });
+
+  it("matches a PHRASE, never its words apart", () => {
+    // `carried` and `forward` each appear; the sequence does not.
+    expect(guess("Chair carried by two, forward tilt")).toBeNull();
+    expect(guess("Page of the bill, total shown elsewhere")).toBeNull();
+  });
+
+  it("still lets the first rule that decided do the talking", () => {
+    // A line reading "Delivery subtotal" is a delivery line before it is a
+    // totals row, and the reason a reviewer reads should be the nearer one.
+    const both = guessNonFurniture({ code: null, itemDescription: "Delivery subtotal" });
+    expect(both?.matched).toEqual(["delivery"]);
+    // And the CODE still beats both.
+    expect(guessNonFurniture({ code: "PACK-01", itemDescription: "Subtotal" })?.rule).toBe("code");
+  });
+
+  it("is a suggestion, not a decision: nothing is ignored and the line stays included", () => {
+    // The whole point. `linesToIgnore` names it for the button; the line's own
+    // `ignored` flag is untouched until somebody presses it.
+    const line = { code: null, itemDescription: "Subtotal", ignored: false };
+    expect(linesToIgnore([line])).toEqual([line]);
+    expect(line.ignored).toBe(false);
+    // Already unticked, so it is out of the set rather than sent again.
+    expect(linesToIgnore([{ ...line, ignored: true }])).toEqual([]);
+  });
+});
+
 describe("guessNonFurniture — the category is SUPPORTING evidence only", () => {
   it("never fires on its own", () => {
     // A bench with a name no alias knows. This is the whole reason the third
@@ -91,14 +179,17 @@ describe("VARIANCE (a): a bill where every line is furniture", () => {
 });
 
 describe("VARIANCE (c): a subtotal or section row", () => {
-  // MEASURED RATHER THAN ASSUMED, and the answer is half what was expected.
-  // `parseBoqSheets` skips a row carrying neither a code nor a description —
-  // so a bare totals row never reaches the guess at all. A totals row whose
-  // DESCRIPTION column says "TOTAL" is staged as a line, and always has been
-  // (`boq-import.test.ts`: "four items + the TOTAL row, which has a
-  // description"). That is a separate question from this one, and what matters
-  // here is that the suggester fires on NEITHER shape: it suggests only on a
-  // packaging code or a packaging word, and "TOTAL" is neither.
+  // MEASURED RATHER THAN ASSUMED. `parseBoqSheets` skips a row carrying
+  // neither a code nor a description — so a bare totals row never reaches the
+  // guess at all. A totals row whose DESCRIPTION column says "TOTAL" is staged
+  // as a line, and always has been (`boq-import.test.ts`: "four items + the
+  // TOTAL row, which has a description").
+  //
+  // THIS TEST USED TO ASSERT THAT THE SUGGESTER FIRED ON NEITHER SHAPE, and
+  // that assertion was the gap rather than the guarantee: the staged one became
+  // a spec record with the subtotal's own figure as its quantity, with nothing
+  // offering to ignore it (FIU 2026-09-21). The skipped shape is still skipped;
+  // the staged one is now SUGGESTED, and still only suggested.
   const data: SheetData = [
     ["Code", "Item Description", "Total Qty"],
     ["S-100", "Sofa", 4],
@@ -113,12 +204,17 @@ describe("VARIANCE (c): a subtotal or section row", () => {
     expect(parsed.sheets[0]?.skippedRows).toBe(1);
   });
 
-  it("and the suggester fires on none of what IS staged", () => {
+  it("and the staged totals rows are suggested, while the sofa is not", () => {
     const parsed = parseBoqSheets([{ sheet: "Bill", data }]);
     if (!parsed.ok) throw new Error(parsed.error);
     const lines = parsed.sheets[0]?.lines ?? [];
     expect(lines.map((line) => line.itemDescription)).toEqual(["Sofa", "TOTAL", "Subtotal — seating"]);
-    expect(lines.map((line) => guessNonFurniture(line))).toEqual([null, null, null]);
+    expect(lines.map((line) => guessNonFurniture(line)?.matched ?? null)).toEqual([null, ["total"], ["subtotal"]]);
+    // Suggested, never decided: both are still included until somebody presses.
+    expect(linesToIgnore(lines.map((line) => ({ ...line, ignored: false }))).map((line) => line.itemDescription)).toEqual([
+      "TOTAL",
+      "Subtotal — seating",
+    ]);
   });
 });
 
