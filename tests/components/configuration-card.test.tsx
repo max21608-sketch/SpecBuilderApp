@@ -296,3 +296,55 @@ describe("a card that is not splitting anything", () => {
     expect(screen.getAllByText("S-200 A").length).toBeGreaterThan(0);
   });
 });
+
+// ===========================================================================
+// EVERY OBSERVATION TABLE IS INSIDE ITS OWN SCROLL BOX
+//
+// Measured 2026-09-22 on the staged Panther-d pack: 8 of 14 observation tables
+// had no `.overflow-x-auto` ancestor at all. Their effective x-overflow box was
+// the configuration band, which is `overflow-hidden` for its rounded corners
+// and its `border-l-4` colour -- so once the content wins those tables clip
+// WITH NO SCROLLBAR, which is worse than the state Max reported on 2026-09-21,
+// where the hidden column was at least reachable.
+//
+// This asserts the shape rather than a width, because jsdom lays nothing out:
+// what a browser can then be trusted to do is scroll, and what it cannot
+// recover from is there being nowhere to scroll.
+describe("a wide observation table has somewhere to scroll", () => {
+  const bandOf = (table: HTMLTableElement) => table.closest<HTMLElement>("div.border-l-4");
+
+  it("gives every observation table an overflow-x-auto ancestor", () => {
+    renderConfigurations(twoPages());
+    const tables = Array.from(document.querySelectorAll("table"));
+    // The shared geometry plus one per configuration; each configuration's
+    // fabric differs, so each has rows of its own.
+    expect(tables.length).toBeGreaterThanOrEqual(3);
+    for (const table of tables) {
+      expect(table.closest(".overflow-x-auto")).not.toBeNull();
+    }
+  });
+
+  it("does not reach for the scroll box by loosening the band", () => {
+    // The band's `overflow-hidden` is load-bearing: it is what makes the
+    // rounded corners and the coloured left border clip cleanly. The wrapper
+    // goes INSIDE it.
+    renderConfigurations(twoPages());
+    const bands = Array.from(document.querySelectorAll("table"))
+      .map(bandOf)
+      .filter((band): band is HTMLElement => band !== null);
+    expect(bands.length).toBeGreaterThan(0);
+    for (const band of bands) {
+      expect(band.className).toContain("overflow-hidden");
+    }
+  });
+
+  it("never makes the scroll box itself overflow-hidden", () => {
+    // `overflow-hidden` on the wrapper makes it the sticky scroll container and
+    // the header then covers a row -- a defect this repo has already had once.
+    renderConfigurations(twoPages());
+    for (const table of Array.from(document.querySelectorAll("table"))) {
+      const box = table.closest<HTMLElement>(".overflow-x-auto")!;
+      expect(box.className).not.toContain("overflow-hidden");
+    }
+  });
+});

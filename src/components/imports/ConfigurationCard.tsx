@@ -822,45 +822,67 @@ function ConfigurationSection({
       />
 
       {own.length > 0 && (
-        <table className="w-full text-sm">
-          <ObservationTableHead />
-          <tbody>
-            {own.map((observation) => {
-              const blockers = member.resolution?.blockers.filter((b) => b.observationId === observation.id) ?? [];
-              const warnings = member.resolution?.warnings?.filter((w) => w.observationId === observation.id) ?? [];
-              const occupants = member.resolution?.occupants?.[observation.id] ?? [];
-              const isExtra = extras.some((extra) => extra.id === observation.id);
-              if (isExtra && !showExtras) return null;
-              return (
-                <Fragment key={observation.id}>
-                  <ObservationRow
-                    observation={observation}
-                    page={member.item.page}
-                    itemPages={card.pages}
-                    importId={importId}
-                    specFields={specFields}
-                    drafts={drafts}
-                    setDrafts={setDrafts}
-                    busy={busy}
-                    blocked={blockers.length > 0 || warnings.length > 0}
-                    guessWhy={undefined}
-                    finishFiling={member.resolution?.finishFilings?.[observation.id]}
-                    callbacks={callbacks}
-                  />
-                  <ReplacePanel
-                    observation={observation}
-                    occupants={occupants}
-                    runs={member.resolution?.resolution.runs ?? []}
-                    busy={busy}
-                    blocked={blockers.length > 0 || warnings.length > 0}
-                    onChange={(target, changes) => void onSaveObservation(member.item, target, changes)}
-                  />
-                  <RowNotes blockers={blockers} warnings={warnings} />
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
+        /* THIS TABLE NEEDS ITS OWN SCROLL BOX, because the band above it does
+           not give it one. The band is `overflow-hidden` — load-bearing, for
+           its rounded corners and its `border-l-4` colour — so without this
+           wrapper the table's effective x-overflow box is a box that CLIPS
+           WITH NO SCROLLBAR. Measured 2026-09-22 on the staged Panther-d
+           pack: nothing overflows at 1440 or 1920, but at a narrow pane the
+           same card was a 989px table in a 629px box with nothing to scroll,
+           which is worse than the state Max reported on 2026-09-21 — there he
+           could at least reach the hidden column. `docs/design-language.md`
+           permits a wide table only inside its own overflow-x box, and the
+           other two observation tables (`DrawingItemCard` and the shared
+           geometry above) have had one all along.
+
+           `overflow-x-auto`, NEVER `overflow-hidden`: hidden makes this the
+           sticky scroll container and the header then covers a row. It is the
+           WRAPPER that is copied from the other two, not the table — this one
+           is `text-sm` with no `border-collapse` where they are
+           `border-collapse text-cell`, and normalising that changes every
+           measurement this entry rests on, so it is left as it was and
+           recorded as a separate question. */
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <ObservationTableHead />
+            <tbody>
+              {own.map((observation) => {
+                const blockers = member.resolution?.blockers.filter((b) => b.observationId === observation.id) ?? [];
+                const warnings = member.resolution?.warnings?.filter((w) => w.observationId === observation.id) ?? [];
+                const occupants = member.resolution?.occupants?.[observation.id] ?? [];
+                const isExtra = extras.some((extra) => extra.id === observation.id);
+                if (isExtra && !showExtras) return null;
+                return (
+                  <Fragment key={observation.id}>
+                    <ObservationRow
+                      observation={observation}
+                      page={member.item.page}
+                      itemPages={card.pages}
+                      importId={importId}
+                      specFields={specFields}
+                      drafts={drafts}
+                      setDrafts={setDrafts}
+                      busy={busy}
+                      blocked={blockers.length > 0 || warnings.length > 0}
+                      guessWhy={undefined}
+                      finishFiling={member.resolution?.finishFilings?.[observation.id]}
+                      callbacks={callbacks}
+                    />
+                    <ReplacePanel
+                      observation={observation}
+                      occupants={occupants}
+                      runs={member.resolution?.resolution.runs ?? []}
+                      busy={busy}
+                      blocked={blockers.length > 0 || warnings.length > 0}
+                      onChange={(target, changes) => void onSaveObservation(member.item, target, changes)}
+                    />
+                    <RowNotes blockers={blockers} warnings={warnings} />
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {extras.length > 0 && (
