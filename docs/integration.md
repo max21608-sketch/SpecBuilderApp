@@ -40,6 +40,26 @@ impact, so it should not be a button someone can find.
    The secret expires — note the expiry date in `docs/plans/README.md`, because
    nothing here will warn you.
 
+### The secret expires, and the expiry is the silent failure
+
+Requested at **two years**, which is the practical maximum in Entra and what
+was asked of IT on 2026-09-17. A tenant app management policy may cap it
+shorter; whatever it ends up as, **the date is the thing to record**, in the
+credential table in `docs/plans/README.md`.
+
+The reason this gets its own heading rather than a line in the list: an expired
+secret is indistinguishable, from the outside, from a quiet week. The
+integration fails closed, no alert fires, nothing appears in the app saying the
+credential is dead, and the symptom is specification email that never becomes a
+staged record. Whoever is waiting for the information notices, days later, and
+they will not think of the client secret.
+
+So renewal is a DIARY entry, held in two places because neither is reliable
+alone: IT's own reminder about a month before the date, and the credential
+table in the decision log. Rotating it is `Add-MgApplicationPassword` again
+plus `GRAPH_CLIENT_SECRET` in every hosted environment and a fresh build — a
+variable change does not alter a running deployment.
+
 ### Scope it as narrowly as the provider allows
 
 Request the least permission that works, and scope it to the single mailbox /

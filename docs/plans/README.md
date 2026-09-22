@@ -1652,6 +1652,168 @@ session had no signed-in browser to drive.
 - **No finish option exists in the sandbox**, so the nested level has been
   exercised by tests and by a mock-up, never against real data.
 
+## 2026-09-17 — one mailbox for the app, and the credential behind it
+
+Settled by Max while drafting the request to IT. It changes what M5 asks for
+and it is smaller than what `docs/integration.md` still describes.
+
+- **The app has ONE mailbox, and each project's inbox forwards into it.**
+  Project inboxes sit outside this app — something else creates them — and
+  redirect to the app's own mailbox, proposed as `specbuilder@benwhistler.com`.
+  The app therefore never holds access to a project inbox, now or as projects
+  multiply: one mailbox, one grant, permanently. `src/lib/email-routing.ts`
+  was already written to this design ("the project inbox forwarding to the app
+  mailbox is the design"), so no code changes.
+- **`projects.shared_inbox` is unaffected** and still means the PROJECT's
+  address. It is what routing matches a forwarded message against; it was never
+  a mailbox this app connected to.
+- **The forwarding rule must be a REDIRECT, not a forward.** Redirect keeps the
+  original From and stamps `X-MS-Exchange-Inbox-Rules-Loop`; forward replaces
+  From with the project mailbox and leaves the real sender in the body only.
+  Both are handled, but contact matching and the chase-reply hint need the
+  sender to survive. Whatever creates project inboxes has to use `-RedirectTo`.
+
+### The Graph credential — when it has to be redone
+
+| Item | Value | Where |
+|---|---|---|
+| App registration | Its own, never the fabric-ordering app's | Entra |
+| Permission | `Mail.Read`, application, admin-consented | Entra |
+| Scope | Application access policy, that one mailbox | Exchange Online |
+| Secret lifetime | **Requested 2 years** from creation | `GRAPH_CLIENT_SECRET` |
+| **Expiry date** | **NOT YET KNOWN — the mailbox does not exist.** Fill this in the day IT reports it | here |
+| Renewal reminder | Asked of IT, ~1 month ahead | IT's own diary |
+
+The expiry row is the one that matters and it is deliberately loud. An expired
+secret fails closed with no alert and no in-app symptom: specification email
+simply stops becoming staged records, and the person waiting for it finds out
+days later without ever thinking about a credential. Nothing in this repo will
+warn anybody. Until the row is filled in, **nobody knows when this breaks.**
+
+Rotating it: `Add-MgApplicationPassword` again, then `GRAPH_CLIENT_SECRET` in
+every hosted environment, then a fresh build — a variable change does not alter
+a running deployment.
+
+### Still open
+
+- **The mailbox does not exist.** The request to IT was drafted 2026-09-17 and
+  is Max's to send; nothing is created, no app is registered, and
+  `MAIL_INGESTION_MODE` stays `disabled`.
+- **`docs/integration.md` still describes the OLD model** in its opening
+  paragraph, its `GRAPH_MAILBOX` example and its verification checklist — one
+  shared *project* mailbox, `p17231@benwhistler.com`. The renewal section added
+  today is correct; the surrounding architecture is not, and a doc describing a
+  design that is not the design is worse than none. Rewriting it is a separate
+  pass.
+- **The Panther project inbox is unconfirmed**, as is the app mailbox's own
+  name. `specbuilder@benwhistler.com` is a proposal in an unsent email.
+
+## 2026-09-18 — the intake reads the document; the app stops guessing (Step 0)
+
+Three defects reported on one pack in one sitting: **S-203** composing
+`W900 x D800 x H700mm` off a page printing `80 x 70 x 90 cm`; **S-201** burying
+its four real dimensions among blank `TBC` rows; **S-200**, one armchair, shown
+as two configurations about to become two BWS jobs. Max: *"it's not always as
+simple as one item per page … I think we need a total overhaul here, because it
+seems that this issue keeps occurring."*
+
+Three faces of one thing. In each case code inferred something the model could
+have been asked to read off the page — magnitude sorting, view-word lists, page
+counting, positional reads, filename hints — and every one of those rules was
+tuned against this single pack.
+
+### The before-state, measured not asserted
+
+`npm run measure:drawings` (new, read only) calls `assertStagedDrawings`, the
+same function the GET route calls, and counts what comes back. **18 staged
+drawings runs, 70 items, across every project on the sandbox:**
+
+| | |
+|---|---|
+| dimension rows placed | **183, of which 141 are suggested — 77%** |
+| items whose slots were sorted **by size** | 19 (27%) |
+| items raising a measurement dispute | 45 (64%) |
+| rows whose own LABEL disagrees with their slot | **3** — the S-203 transposition |
+| a code stated on more than one source | 15 groups, 38 items lettered |
+| dimension rows printed inline that state no figure | 53 — the S-201 sprawl |
+| unit provenance | 137 `figures`, 42 `printed`, 4 chosen |
+
+On **Panther-d**, the pack in the screenshots: 10 of 14 items slotted by size,
+**every** item raising a dispute, and S-203's three rows named exactly —
+`"Width" = 80 → D`, `"Depth" = 70 → H`, `"Height" = 90 → W`.
+
+Three quarters of every dimension this app holds is a guess. That is the answer
+to "how many lines have this issue".
+
+106. **No string rule can decide whether two sources are one item, and this was
+     measured rather than assumed.** The obvious fix for S-200 was a
+     `compareFinishes` beside `compareGeometry` — split only where the finishes
+     differ. It does not work, and S-200 is the counter-example. Page 1 states
+     `FABRIC REFERENCE = Tibor Blob Amber Fern` and
+     `EXPOSED WOODWORK = DARK TINTED WOOD AS PER APPROVED SAMPLE`; page 2 states
+     `FABRIC / CLO003 A = Tibor Blob Amber Fern` and
+     `SOFA FEET / CLO003 WD = Dark tinted wood`. Same chair, same cloth, same
+     timber, two vocabularies. Comparing CODES calls the group split (9 groups
+     flagged across the sandbox); comparing DESCRIPTIONS calls it split too (3
+     groups), because one page adds "as per approved sample". **Both proxies
+     miss the one case we know the answer to by hand.** Whether two sources
+     describe one item is a judgement about the pages, and it belongs to the
+     model with its evidence shown — not to a diff.
+
+### The after-state, same command, 2026-09-18
+
+Panther-d re-read for **ten charged calls** (one wasted — see below):
+
+| | before | after |
+|---|---|---|
+| items whose slots were sorted BY SIZE | 10 of 14 | **0** |
+| items raising a measurement dispute | 14 of 14 | **0** |
+| rows whose own LABEL disagrees with their slot | 3 | **0** |
+| items lettered as configurations | 4 | **0** |
+| dimension rows printed inline stating no figure | 25 | **3** |
+
+S-203 composed `W900 x D800 x H700mm` off a page printing `80 x 70 x 90 cm`; it
+now reads **`W800 x D700 x H900mm`**, each row naming its place in the printed
+line. S-200 is one item on two pages, both `W840 x D790 x H720 x SH460mm`.
+S-100's second page carried NO CODE — a card that can never commit — and now
+groups with S-100 through the title block the shop drawing actually carries.
+
+107. **The reasons are better than any rule this repo could have written.**
+     S-201: *"page 1 explicitly instructs 'ITEM: REFER TO JACQUES GRANGE
+     DRAWINGS' and 'OVERALL DIMENSIONS: REFER TO JACQUES GRANGE DRAWINGS', tying
+     the two pages to the same armchair."* It followed a cross-reference printed
+     on the page. That is the argument for the whole change in one sentence.
+108. **A strict schema killed a paid run.** S-100 returned `itemCodes` as a bare
+     string, `z.array()` refused it, and a document already read and charged for
+     went terminal with "Expected array, received string" — over a grouping
+     hint. Every `.catch` on this path now lands on the answer that asks a
+     person. The same rule had already thrown away the best output of an earlier
+     run: 480 characters explaining a grouping, silently nulled by a
+     300-character bound.
+109. **A measurement with its own copy of the rule it measures is worthless.**
+     The sprawl count had its own idea of what the card folds and reported
+     25 → 23 while the card had gone to 3. `foldableRow` moved into
+     `drawing-document.ts`; the card and the tool call it.
+110. **Staged JSON is data from the past.** `assertStagedDrawings` casts rather
+     than validates, and the code-group shape changed twice in one afternoon —
+     so every screen reading the first version 2 run threw `Cannot read
+     properties of undefined`. Read a staged field defensively, or a schema
+     iteration is an outage.
+
+### Still open, 2026-09-18
+
+- **Nobody has accepted any of it.** The three cards were checked in the browser
+  against the sandbox; Max has not seen them.
+- **The intake classification path has never been driven with real files.** The
+  route, the mapping and the screen are built and unit-tested; no pack has been
+  dropped on it.
+- **Nine staged runs on other projects are still version 1** and still read by
+  the guessing pipeline, which is what versioning the staged shape is for. The
+  whole `applyViewGuesses` branch goes when the last one has been re-read.
+- **The unit vote is still a magnitude guess** where a page prints no unit. Kept
+  deliberately, flagged, one-click correctable — see the load-bearing section —
+  but it is the last inference of its kind in the dimension path.
+
 ## 2026-09-18 — the app is what was signed off: the design language
 
 Max drew sixteen mock-ups of the app (`docs/design/spec-builder-mockups.html`,
