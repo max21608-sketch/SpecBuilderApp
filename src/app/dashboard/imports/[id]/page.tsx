@@ -249,7 +249,22 @@ export default function ReviewImportPage() {
     runs: ProjectRun[];
     reconciliation: Record<number, Reconciliation>;
   } | null>(null);
-  const [, setLoading] = useState(false);
+  /**
+   * WHETHER A RELOAD IS IN FLIGHT, and it is now RENDERED.
+   *
+   * This was `const [, setLoading] = useState(false)` — the value discarded,
+   * so `setLoading` was a bare re-render and the screen showed nothing while
+   * it reloaded (found-in-use 2026-09-21). Most actions here do not set
+   * `busy`: changing a line's category or a tab's name just awaits `load()`,
+   * which takes a second or two against the sandbox and gave no feedback at
+   * all.
+   *
+   * IT IS NOT WHAT MAKES THE BANNER SURVIVE A RELOAD, which the entry
+   * suspected. `load()` on this screen never clears `error` on success — the
+   * drawings screens' `reloadThen` exists because THEIR loader does — so the
+   * message survives whatever this state does.
+   */
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** Which sheet is shown. A BOQ tab is a sub-quote, so a tab each. */
@@ -538,6 +553,9 @@ export default function ReviewImportPage() {
             Parsed by code, not by a model — nothing here was charged. {sheets.length} tab
             {sheets.length === 1 ? "" : "s"}
             {revisionLabel && <> · {revisionLabel}</>}
+            {/* A reload after an action. Inline rather than a spinner over the
+                table: the rows stay readable and nothing on the page moves. */}
+            {loading && <> · <span className="text-neutral-500">reloading…</span></>}
             {run.parsed?.sourcePreserved !== false && (
               <>
                 {" · "}
