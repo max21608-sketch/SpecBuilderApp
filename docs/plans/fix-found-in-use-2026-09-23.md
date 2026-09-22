@@ -66,6 +66,32 @@ where a code was available. Those are the four ways every item below could be
 
 ## 1. Stage 4a — the seven Max raised on 2026-09-22
 
+> **CLOSED ON STAGING, 2026-09-23.** All seven landed, each cherry-picked after
+> its own checks and re-verified here. The assembled result at `eb89a96`:
+> `npm run checks` **exit 0** with the database tier required — lint 0 errors,
+> typecheck clean, **2,117 tests passed, 1 skipped**, `next build` green.
+> Migration **0036** applied to the sandbox.
+>
+> | Item | Landed |
+> |---|---|
+> | 4a.1 finish keying, minted internal codes | `e1d167a` |
+> | 4a.2 swatch for any finish that resolves | `d7461d7` |
+> | 4a.3 the upload guesses from the name | `a1e788a` |
+> | 4a.4 apply-to-all on the by-question tab | `5dbbda6` |
+> | 4a.5 a decision carries across phase tabs | `5cc39a9` |
+> | 4a.6 the projects list sorts by recency | `44a714d` |
+> | 4a.7 a note is asked for a state only where one is read | `1dd57a7` |
+>
+> **Fixed mid-stage because it blocked the stage:** `db:qa-clean` could not
+> sweep an orphaned `__QA` category, and the litter failed `spec-field-gates`
+> for three separate coders in three separate worktrees. Its own entry in
+> `found-in-use.md` carries the fix and the guard.
+>
+> **HUMAN ACCEPTANCE IS OUTSTANDING ON ALL SEVEN.** Only 4a.4 was driven in a
+> browser by the agent that built it. Nobody has cropped the S-203 chip off a
+> real page, seen the `carried from` line, or watched the upload fill its own
+> boxes. §8.6 stands: nothing here is accepted by passing.
+
 Each was seen on a real screen with real data, and four decisions inside them
 were taken by Max in the planning session on 2026-09-22. Where a decision
 overruled a caveat this plan raised, the item says so — the caveat is recorded
