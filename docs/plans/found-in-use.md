@@ -312,8 +312,45 @@ Three things a plan has to settle:
 
 ### A confirmed fabric is on the record and not in the finishes library, because it carries no code
 
-**Status: open. Half of it is a keying DECISION and half of it is a route with
-no button.** Max, comparing the two screens: *"there's a finish in the item's
+**Status: FIXED 2026-09-23, `e1d167a`** (plan item 4a.1), on staging, with
+migration **0036** applied to the sandbox. A finish the document named without a
+code is filed under a minted `BW-F-001`, allocated per project under the project
+row lock — the `record_no` rule — scanning retired and client-origin rows too,
+so a code somebody quoted in an email never comes back and a client schedule
+printing `BW-F-002` cannot collide. `project_finishes.code_origin` says whose
+code it is, as a COLUMN and never as a reading of the spelling. The same wording
+on a later item links to the same row; a near miss is offered and files nothing;
+a third answer files it APART, because otherwise the one automatic step in the
+item is the one nobody can undo. And the link route that was built with no
+caller is wired to the record's Specs tab.
+
+**The guard that matters passes:** no cell anywhere in `composeRow` contains
+`BW-F-` (`tests/lib/bws-export.test.ts:489`), over a row carrying two internal
+finishes. `composeFinishCell` returns the description alone for an internal
+finish and every caller falls back to the attribute's own words — checked
+caller by caller: the BWS export, the quote, the check sheet, the checklist
+answer, the version diff, and the record screen. The costing sheet does not call
+it. Concurrency is asserted by opening two transactions before either commits.
+
+**Five departures from the approved mock-up**, each with its reason in the
+commit: the control sits under the value rather than in a new column
+(`OBSERVATION_COLUMNS` is load-bearing); the chip reads *"ours — a code on
+confirm"* before the number exists, because printing `BW-F-001` early names a
+code another reviewer's confirm may take first; the evidence line says *"Same
+wording as BW-F-001"* rather than naming the item, which would be a second query
+per observation; a near miss is a loose fold (accents and punctuation dropped,
+so `écru`/`ecru` is offered) rather than an edit-distance threshold; and the
+chip is blue rather than the mock's violet, because `tone.ts` is the only place
+a colour may come from. **The last two are worth Max's eye** — the mock he
+approved said *"Same wording as S-203"*, and what counts as a near miss was
+never specified.
+
+**Not done: the swatch control is still gated on a raw client code** — that is
+4a.2, which this unblocks — and nobody has walked it in a browser. The original
+entry follows.
+
+**Status when found: open. Half of it is a keying DECISION and half of it is a
+route with no button.** Max, comparing the two screens: *"there's a finish in the item's
 specs captured page, but it doesn't appear in the project finishes. Why is
 this? It should."*
 
