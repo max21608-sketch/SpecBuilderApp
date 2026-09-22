@@ -30,33 +30,43 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-22
 
-### The drawings card's table clears its wrapper by two pixels, over `overflow-x: hidden`
+### CORRECTED — "the drawings card's table clears its wrapper by two pixels"
 
-**Seen:** measured, not eyeballed, while landing Stage 2 item 2.2 (`2f09f19`)
-on top of `0909fd7` (item 3a.4, which unclipped this table by joining the unit
-into the value). Pack drawings review, real Panther AP364e run `S-301`, in the
-DOM rather than from a screenshot:
+**This entry named a cause as fact and the cause was wrong.** Kept rather than
+deleted, per this file's own rule, because the mistake is the useful part: it
+is exactly what the preamble warns about, and a reader who saw only the
+correction would not know this reading had been in circulation.
 
-| Viewport | table `scrollWidth` | wrapper `clientWidth` | clipped |
-|---|---|---|---|
-| 1920x1080 | 1003px | 1005px | no |
-| 1440x900 | 1003px | 1005px | no |
-| 1024 (narrow pane) | 989px | 629px | yes |
+**What was actually measured** (while landing Stage 2 item 2.2, `2f09f19`, on
+top of `0909fd7`), on the real Panther AP364e `S-301` run, and what is still
+true: the observation table is **1003px** against a box of **1005px** at both
+1920x1080 and 1440x900, so **3a.4's fix holds and item 2.2's palette control
+costs the table nothing** — it adds height, not width.
 
-**3a.4's fix holds, including with 2.2's palette control added** — that control
-adds height rather than width, so it costs the table nothing. The finding is
-the MARGIN: two pixels at both of 3a.4's own DoD widths.
+**What was wrong, in three ways**, each found by the coder who owns that card
+and recorded properly in *"Eight of the fourteen observation tables have no
+scroll box, so the NEXT wide column clips silently"* (`b3d147d`), which is the
+entry to act on:
 
-**Cause, stated separately from the observation.** The wrapper computes
-`overflow-x: hidden`. A table that overflows a hidden wrapper does not offer a
-scrollbar, so the next column — or one value wider than today's — re-clips it
-**silently**, with nothing on screen to say a column is missing. That is the
-same failure 3a.4 was raised for, and it would return without any visible
-signal. The narrow-pane row is included only to show the clipping is real when
-the margin goes, not as a supported width.
+- The declared wrappers **are `overflow-x-auto`**, not hidden
+  (`DrawingItemCard.tsx:403`, `ConfigurationCard.tsx:402`). This entry read
+  `table.parentElement` in the DOM and reported whatever that happened to be,
+  which is not the declared wrapper.
+- **The headroom is 0, not 2px, and headroom is the wrong thing to watch.**
+  `table.w-full` sizes itself to its box, so 1003-against-1005 is not slack
+  about to run out. The number that matters is the table's own min-content
+  width against the box.
+- **8 of the 14 tables have no `.overflow-x-auto` ancestor at all.** Their
+  effective box is the configuration band (`ConfigurationCard.tsx:789`), which
+  is `overflow-hidden` for its rounded corners and coloured border. So the risk
+  is real but larger and elsewhere: those eight clip with **no scrollbar**,
+  which is worse than what Max reported on 21 Sept, where he could at least
+  scroll to the column he could not see.
 
-**Not fixed, and not 2.2's to fix.** It belongs to whoever holds that card.
-Worth knowing before another column is added to it.
+**The lesson worth keeping:** measuring `getComputedStyle(el.parentElement)` in
+a browser answers a question about the DOM you happened to land on, not about
+the component. Read the declared class in source, and count how many instances
+of the component actually have it.
 
 ### A level accepted on one phase's tab is still an unaccepted suggestion on the next, for the same client ref
 
