@@ -79,13 +79,20 @@ describe("summariseLines", () => {
     expect(lines[0]!.options[0]!.name).toBe("S-301 A");
   });
 
+  // THE OPTION CARRIES ITS OWN QUANTITY AND NOTHING DERIVES ONE. This used to
+  // assert that the option had no `qty` AT ALL, which is how the screen came
+  // to print "quantity not allocated" over a configuration somebody had set a
+  // quantity on (0028's details panel accepts one). Not apportioning is not
+  // the same as not knowing: the parent's 45 stays the parent's.
   it("never apportions a quantity across finish options", () => {
     const lines = summariseLines([
       question({ recordId: "line", variantCount: 2, qty: 45 }),
       question({ recordId: "a", parentId: "line", variantLabel: "A", qty: null, parentQty: 45, requirementId: "q2" }),
+      question({ recordId: "b", parentId: "line", variantLabel: "B", qty: 12, parentQty: 45, requirementId: "q3" }),
     ]);
     expect(lines[0]!.qty).toBe(45);
-    expect(lines[0]!.options[0]).not.toHaveProperty("qty");
+    // A never had one set; B has 12. Neither inherits a share of 45.
+    expect(lines[0]!.options.map((option) => option.qty)).toEqual([null, 12]);
   });
 
   it("lists a line with no area rather than dropping it", () => {

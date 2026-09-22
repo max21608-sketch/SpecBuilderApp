@@ -48,6 +48,7 @@ import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { letterColour } from "@/components/records/letter-colours";
 import AreaSelect from "@/components/ui/AreaSelect";
 import { areaOptions, matchesArea } from "@/lib/area-filter";
+import { finishOptionQtyLabel } from "@/lib/chase-grouping";
 import InfillRow, { type SaveAnswer, type SaveDimension } from "@/components/infill/InfillRow";
 import type { InfillLineSummary, InfillQuestion } from "@/lib/infill";
 import type { Palette } from "@/lib/palettes";
@@ -440,8 +441,11 @@ function LineRows({
                   {option.name.slice(0, option.name.length - option.label.length)}
                   <b className={letterColour(option.label)}>{option.label}</b>
                 </span>
-                {/* The bill says 45 and never says how many are fabric A. */}
-                <span className="text-neutral-500"> · quantity not allocated</span>
+                {/* The bill says 45 and never says how many are fabric A — but
+                    a person CAN set a configuration's own quantity (0028), and
+                    this said "not allocated" whatever the row held. Nothing is
+                    apportioned either way: the number is read, never divided. */}
+                <span className="text-neutral-500"> · {finishOptionQtyLabel(option.qty)}</span>
               </Td>
               <Td num>
                 <span className={option.counts.toQuote > 0 ? "font-semibold text-red-700" : "text-neutral-400"}>

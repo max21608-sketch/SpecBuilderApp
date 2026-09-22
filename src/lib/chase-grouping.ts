@@ -57,6 +57,17 @@ export type FinishOptionGroup<Q> = {
   label: string;
   /** What a person says out loud: `S-301 A`. The ref is the client's, the letter is ours. */
   name: string;
+  /**
+   * THE FINISH OPTION'S OWN QUANTITY, AND NOTHING IS APPORTIONED TO GET IT.
+   * A configuration is created with `qty = null` — the bill says 45 of S-201
+   * and never says how many are fabric A — and `PATCH /api/records/[id]`'s
+   * `details` has accepted one since 0028, so a person may have set it. Null
+   * is therefore *not allocated*, which is a different statement from the
+   * bill line's own *quantity not given*, and it is read off the record
+   * rather than computed: dividing the parent's 45 is the one thing no screen
+   * in this app may do.
+   */
+  qty: number | null;
   questions: Q[];
 };
 
@@ -148,6 +159,7 @@ export function groupIntoLines<Q extends GroupableQuestion>(questions: readonly 
           recordId: question.recordId,
           label: question.variantLabel,
           name: `${(question.parentRefs || line.code || line.recordLabel).trim()} ${question.variantLabel}`.trim(),
+          qty: question.qty,
           questions: [],
         };
         options.set(question.recordId, option);
@@ -176,6 +188,24 @@ export function groupIntoLines<Q extends GroupableQuestion>(questions: readonly 
   }
 
   return [...lines.values()];
+}
+
+/**
+ * What a finish option's row says about its quantity, in ONE place.
+ *
+ * The infill line and the chase line print this beside the letter, and they
+ * printed *quantity not allocated* unconditionally until 2026-09-22 — true
+ * only for as long as nothing had set one, which 0028 has allowed since it
+ * landed. The phase table says the same two things in its own Chip; three
+ * screens wording one state two ways is how a reader comes to believe they
+ * are two states, which is the whole of the finding behind this function.
+ *
+ * It reads a number and never derives one. `unallocatedQty` is what states
+ * the GAP, on the screens that own that question, and it deliberately does
+ * not clamp a negative.
+ */
+export function finishOptionQtyLabel(qty: number | null): string {
+  return qty === null ? "quantity not allocated" : `qty ${qty}`;
 }
 
 /** Every question on a line, its finish options included. */

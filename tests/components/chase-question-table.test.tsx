@@ -219,6 +219,45 @@ describe("finish options", () => {
     expect(screen.getAllByText(/quantity not allocated/).length).toBe(2);
   });
 
+  // A CONFIGURATION'S QUANTITY IS READ, NEVER APPORTIONED — and never assumed
+  // absent either. This row printed "quantity not allocated" unconditionally,
+  // which was true only for as long as nothing had set one; `PATCH
+  // /api/records/[id]`'s `details` has accepted a configuration's qty since
+  // 0028, and the phase table has always shown it. Three screens disagreeing
+  // about one number is the finding this holds closed.
+  it("says the quantity somebody set on a finish option, and still divides nothing", async () => {
+    render(
+      <Harness
+        questions={[
+          question({ variantCount: 2 }),
+          question({
+            recordId: "opt-a",
+            variantLabel: "A",
+            parentId: "line-1",
+            refs: "",
+            parentRefs: "S-301",
+            qty: 12,
+            parentQty: 45,
+          }),
+          question({
+            recordId: "opt-b",
+            variantLabel: "B",
+            parentId: "line-1",
+            refs: "",
+            parentRefs: "S-301",
+            qty: null,
+            parentQty: 45,
+          }),
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByText("Desk chair"));
+    expect(within(optionRow("S-301 A")).getByText(/qty 12/)).toBeTruthy();
+    expect(within(optionRow("S-301 B")).getByText(/quantity not allocated/)).toBeTruthy();
+    // Nothing anywhere says 33, or 22.5, or any other share of the bill's 45.
+    expect(screen.queryByText(/33/)).toBeNull();
+  });
+
   it("ticks one finish option without ticking the other", async () => {
     render(<Harness questions={withOptions()} />);
     await userEvent.click(screen.getByText("Desk chair"));
