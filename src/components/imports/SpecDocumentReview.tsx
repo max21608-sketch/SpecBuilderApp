@@ -227,8 +227,12 @@ export default function SpecDocumentReview({
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        setError(res.error);
+        // Reload FIRST, report after — the rule the two paths below already
+        // follow. A refused confirm means this screen is out of date, so the
+        // reload is required; setting the banner before it is what makes a
+        // 409 flash for a few milliseconds and leave nothing behind.
         await reload();
+        setError(res.error);
         return;
       }
       setVersions({});
@@ -248,13 +252,19 @@ export default function SpecDocumentReview({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: run.version, requestId: crypto.randomUUID(), action }),
       });
-      if (!res.ok) setError(res.error);
+      // EVERYTHING AFTER THE RELOAD, which is the `reloadThen` rule on the two
+      // screens that load their own run: a message set before it is wiped by
+      // the props arriving. The notice half was already right and the FAILURE
+      // half was not — `setError` ran first and the reload then cleared it, so
+      // a refused press showed its reason for a few milliseconds and the card
+      // looked as though the click had not registered. It survived this long
+      // only because this component holds its own error state; a screen that
+      // loaded its banner from the server would have shown nothing at all.
       await reload();
-      // AFTER the reload, which is the `reloadThen` rule on the two screens that
-      // load their own run: a message set before it is wiped by the props
-      // arriving. A 202 `waiting` is a correct press the cap deferred, and it
-      // used to report nothing at all — the button looked broken.
-      if (res.ok && res.data.waiting === true) setNotice(res.data.note ?? WAITING_FOR_SLOT_MESSAGE);
+      if (!res.ok) setError(res.error);
+      // A 202 `waiting` is a correct press the cap deferred, and it used to
+      // report nothing at all — the button looked broken.
+      else if (res.data.waiting === true) setNotice(res.data.note ?? WAITING_FOR_SLOT_MESSAGE);
     } finally {
       setBusy(null);
     }
