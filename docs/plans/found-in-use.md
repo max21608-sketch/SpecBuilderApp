@@ -28,11 +28,81 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-09-22
+
+### Everything open in this file was worked through; here is what closed and what did not
+
+**Status: a pass, not a finding.** `docs/plans/fix-found-in-use-2026-09-22.md`
+took every open entry, in four stages, seven Opus coders in worktrees. On
+staging at **`3f851b3`**: `npm run lint`, `npm run typecheck`, **1,947 tests
+passing with the database tier REQUIRED** (0 failing, 1 skipped) and
+`next build`. The four Max raised on 2026-09-21 are verified in a browser at
+1440×900 and 1920×1080 and marked FIXED below, each with what was measured.
+
+**Closed by their own entries below:** the three unconditional *quantity not
+allocated* screens; `/api/records`' Code column saying what the file will
+carry; the uncategorised list naming a heading or a retired phase; the ISO
+bill date; the versions diff calling a phase a phase; the record payload's
+non-null `state` (now a route-tier assertion); one malformed view region no
+longer discarding its siblings; a subtotal row suggested for ignoring;
+registration refusing a scanned PDF; a dropped `.msg` refused before the blob;
+the attempt past its deadline (an hourly sweeper that NEVER republishes —
+there is no exactly-once billing guarantee, so it settles and hands the slot
+on, and starting a read stays a person's press); `deferRead` no longer
+refreshing its own deadline; *Read all* at one call per document; the
+auto-assignment queue count; the `reloadThen` trap in `SpecDocumentReview`;
+the misconfigured deployment now failing on the sign-in page rather than at
+the first query; the `/image` 404; the configuration card's 409 read as a
+notice; the BOQ review's loading state (rendered, not deleted — and the
+entry's guess about why the banner survives was wrong, see it); the chase
+footer's third bucket; `chase-drafts.test.ts`'s shared-seed mutation; and
+`verify-model`'s literal project number.
+
+**THE WORKER-FLAG ADVICE WAS UNFOLLOWABLE, and that is the finding worth
+keeping.** `CLAUDE.md` told a second concurrent `checks` to carry
+`--maxWorkers=4`. It cannot work in this repo and never could: vitest leaves
+`minWorkers` at the CPU count, tinypool throws `options.minThreads and
+options.maxThreads must not conflict`, and **zero tests run** behind a
+non-zero exit. Anybody who followed it got a green-looking nothing. It is now
+`npm run checks:shared` (`VITEST_MAX_FORKS=4`, capped in `vitest.config.ts`
+so both ends move together), and both instruction files are corrected.
+
+**Measured and NOT fixed — the honest half of Stage 3d.** The projects list's
+`loadOutstanding` went from **27,487 questions / 26.4 MB** to **49 rows /
+49 KB** by scoping to what could possibly be waiting (provably equivalent: 14
+waiting either way, asserted in `tests/db/projects-list-waiting.test.ts`,
+which also holds the trap that the scope keys on the LINE and a coverage row
+names a RECORD that may be a configuration). The overview's 6.7 s contacts
+tally moved off the critical path, and the overview stopped loading
+`loadOutstanding` TWICE — it was fetching `/api/records` only to count
+designer codes. **What remains is `loadProjectSummaries` at ~1.6 s**, and it
+is NOT the correlated `exists` that looked like the culprit: rewriting it to
+precompute per question measured 1584 ms against 1652 ms over five runs each
+— noise — so the rewrite was REVERTED rather than carried as unproven risk.
+The next person should profile before touching that query. `npm run
+measure:screens` is the read-only tool; run it before and after.
+
+**Still open and untouched:** everything in §6 of the plan (Product code,
+whether a level is only knowable at the drawing stage, the crop prompt, the
+sandbox audit log) — each waits on a named person, not on code. The 120-page
+drawing set is still unread for real, and the 300-line overview is faster but
+not yet under the two seconds §7.4a asks for.
+
+**Not accepted by anybody.** Human acceptance is outstanding on every screen.
+
 ## 2026-09-21
 
 ### The tiles are taller than they need to be — EVERYWHERE, not just the overview
 
-**Status: open. A CHANGE ASKED FOR**, in the same breath as the entry below
+**Status: FIXED 2026-09-22, `0b27318` on staging at `3f851b3`.** The `action`
+prop and its blue line are gone from `StatTile` and from all 27 call sites;
+`py-3` → `py-2`. Measured in the browser: 120px → 90px on the phase strip.
+At 1440×900 the phase screen's tiles, search, three filters, table header AND
+five data rows are above the fold (thead at y=446 of 900). The filtered state
+still reads as filtered without the words — checked filtered and unfiltered at
+both sizes — so the `active` ring did not need strengthening. The sub-line
+STAYS: it is where the entry below names the population each count is over.
+Original entry: **A CHANGE ASKED FOR**, in the same breath as the entry below
 and shippable with it or on its own. Max: *"you could just display line items
 503 and they can still have the same functionality, but you don't need to
 actually have 'filter to these' displayed"*, and then, on the phase screen:
@@ -63,7 +133,18 @@ both.
 
 ### The overview's tiles count QUESTIONS, and at 503 lines the numbers stop meaning anything
 
-**Status: open. A CHANGE ASKED FOR**, not a fault — the tiles are counting
+**Status: FIXED 2026-09-22, `4c5b4bf` + `0b27318`, on staging at `3f851b3`.**
+On DEMO-300 the overview now reads **TGQ 408 items** (was 8,769 questions),
+*Also outstanding* **243**, *Settled* **0**, each sub-line naming the
+population (`of 409 items · 8,773 questions`) and a caption saying they do not
+add up and why. The Specifications table's TGQ row reads 408 too, the same
+unit as the No-category 94 beside it. `tests/db/project-summary.test.ts` is
+NEW — this loader's agreement with `loadExportScope` had never been held —
+and two of its cases assert the item counts deliberately do NOT sum.
+**And the phase strip followed**, which was not in the original ask and had to:
+its TGQ tile said 1,879 while every `focus` predicate on that strip selects
+RECORDS, so pressing it produced 103 rows. Tile and filter now both say 103.
+Original entry: **A CHANGE ASKED FOR**, not a fault — the tiles are counting
 what they were built to count. Max, on a 503-line project: *"these numbers are
 so high, they're just meaningless."*
 
@@ -111,7 +192,25 @@ Two things a plan has to settle, and the second is a trap:
 
 ### The checklist's Dimensions box is free text, so two of four dimensions can be marked Confirmed
 
-**Status: open. The most consequential thing found so far** — it lets an item
+**Status: FIXED 2026-09-22, `91c9a6f`…`960af4d`, on staging at `3f851b3`.**
+Field 3 no longer renders a free-text answer at all. The row is the infill
+screen's slot writer, EXTRACTED into `src/components/records/DimensionAnswer.tsx`
+so there is one control and not two, writing ATTRIBUTES through
+`POST /api/attributes` with the answer following from `promote-answers`. Under
+it, the breakdown Max asked for, from `matrixFields` (already on the payload):
+on the demo bench, *0 of the 4 this item needs are on record* with
+*Width not measured · Depth not measured · Height not measured · Seat height
+not measured · Diameter —*, and the sentence *"Recording the cell is not the
+same as measuring it: each of these is a separate figure, and the gate reads
+the figures."* Where his matrix does not reach the category, five slots are
+offered and NONE is required, said in words — `gatesForRecord`'s null rule in
+a second place. **The state select went too**, in a second pass: it let
+somebody mark the row Confirmed by hand, which wrote `manual` and locked the
+cell out of recomposition for good — the same end state by a different
+control. The state is now DERIVED and shown (*follows the measurements*),
+because the composed cell is a projection of the attributes and so is its
+state. Verified in the browser at 1440×900.
+Original entry: **The most consequential thing found so far** — it lets an item
 reach a quotation with a key dimension nobody has, and nothing downstream
 says so. Max, on finding it: *"eventually someone's going to realise, oh
 wait, we don't have this key dimension … because someone's said it's
@@ -172,7 +271,20 @@ elsewhere:
 
 ### The drawings card's table is cut off, and a column can only be reached by scrolling sideways
 
-**Status: open.** Seen on the pack drawings review (screenshot), Ashcombe House
+**Status: FIXED 2026-09-22, `0909fd7`, on staging at `3f851b3`.** Measured
+before choosing: `PageBody` caps at 1400px and the picture sidebar is a fixed
+300px track, so the table gets **1010px at 1920 AND at 1440 alike** — the
+viewport never mattered, which is why "it's fine on the others" was never
+about screen size. 14 of the 16 observation tables overflowed, by 51–86px, and
+what fell off was the headingless ACTION column. The UNIT column was folded
+into the value (a figure and its unit are one statement, and it held an em
+dash on every row that is not a measurement), and the four hand-written
+`colSpan={7}`s became `OBSERVATION_COLUMNS` so a column added or removed
+cannot leave a spanning panel short. Verified in the browser on the real
+staged Panther-d pack: **16 tables, 0 overflowing** at 1440×900, and 14 of 14
+at 1920×1080. The "which first one" question never had to be answered — both
+readings are covered, because no card clips at either size.
+Original entry: Seen on the pack drawings review (screenshot), Ashcombe House
 — Shop Drawings Issue B, card `BT-503 Bedside table · page 1`, on a full-width
 monitor.
 

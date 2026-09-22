@@ -67,10 +67,16 @@ the plan's normal state and a literal `'__QA P90010'` in two runs collides on
 again in `afterAll` with an empty uuid (2026-09-21, found three times in one
 day). The same goes for any other shared key a fixture writes — a mailbox, a
 subscription id, a scratch table, a `shared_inbox`. Two things it does NOT
-cover, both logged: `chase-drafts.test.ts` mutates the seeded
-`requirements.tgq_levels`, and the COMPONENT tier times out under machine
+cover, both logged: the COMPONENT tier times out under machine
 saturation (two unbounded runs are sixteen forks on eight CPUs), so a second
-concurrent `checks` should carry `--maxWorkers=4`. The database
+concurrent `checks` runs as **`npm run checks:shared`** (`VITEST_MAX_FORKS=4`,
+read by `vitest.config.ts`). **`--maxWorkers=4` on its own does NOT work here**
+and never did: vitest leaves `minWorkers` at the CPU count, tinypool throws
+`options.minThreads and options.maxThreads must not conflict`, and ZERO tests
+run behind a non-zero exit — advice that could not be followed, corrected
+2026-09-22. `chase-drafts.test.ts` no longer mutates the seeded
+`requirements.tgq_levels`; it inserts its own category and requirement rows,
+so a concurrent run cannot read `later` where it expects `to_quote`. The database
 tiers skip without `DATABASE_URL`, which is the correct state for pure-library
 work; the component tier (`tests/components/`, jsdom + React Testing Library)
 runs always and is scoped by PATH in `vitest.config.ts`, never by a per-file
