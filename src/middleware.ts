@@ -9,8 +9,25 @@
 //
 // Each mutating route handler still re-checks auth itself via getSessionUser().
 // This middleware is the first line, not the only line.
+//
+// IT ALSO ENFORCES THE ENVIRONMENT PAIR, which `src/lib/env.ts` has claimed
+// since the scaffold and which this file never did. The consequence was
+// measured on the first pilot deployment (2026-09-19): APP_ENV is read
+// non-throwingly for the chip and the title, the session check touches no
+// database, and the pair was therefore checked only when `db.ts` was first
+// called — the login POST. A deployment with APP_ENV=pilot against the sandbox
+// database looked healthy on every page a signed-out person could reach and
+// died at the first thing they did, with a bodyless 500.
+//
+// The check is two environment variables compared, which is all it needs and
+// all it may be: NOTHING HERE MAY IMPORT THE DATABASE DRIVER. Middleware runs
+// on the edge runtime and `src/lib/env.ts` is edge-safe on purpose.
+//
+// It is a deliberate 503 with the reason in it, never a throw: a throw here is
+// the bodyless 500 again, one layer further out.
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { environmentProblemMessage } from "@/lib/env";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -20,6 +37,19 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const WRITER_ROLES = new Set(["admin", "editor"]);
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
+  // BEFORE THE SESSION CHECK, because a deployment that cannot serve anybody
+  // should not first decide who they are. This is the only thing in this
+  // function that runs ahead of authorisation, and it can only ever refuse.
+  const misconfigured = environmentProblemMessage();
+  if (misconfigured) {
+    return req.nextUrl.pathname.startsWith("/api/")
+      ? NextResponse.json({ ok: false, code: "environment_misconfigured", error: misconfigured }, { status: 503 })
+      : new NextResponse(misconfigured, {
+          status: 503,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
+  }
+
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const user = token ? await verifySessionToken(token) : null;
 
@@ -57,7 +87,11 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 //
 // Everything not excluded below requires a session. The exclusions are:
 //   _next/*, favicon  - static assets
-//   /login, api/auth/login - the way in; protecting these locks everyone out
+//   /login, api/auth/login - the way in; protecting these locks everyone out.
+//                       They are therefore the two places the environment
+//                       guard above cannot reach, and each asks it itself:
+//                       the page renders the reason over the form, and the
+//                       route answers 503 rather than a bodyless 500.
 //   api/queues/*      - queue consumers. They have no session by design and
 //                       authenticate with the queue's own signed protocol.
 //                       Adding them here would break every background job.
