@@ -3,6 +3,7 @@
 // client finish codes, a TBC marker — with invented codes and materials. No
 // client document content is in this repo.
 import { describe, it, expect } from "vitest";
+import type { DimensionSlot } from "@/lib/spec-vocab";
 import {
   resolveDrawingTargets,
   targetRecordIds,
@@ -28,6 +29,7 @@ import {
   classifyCallout,
   variantLettersByItem,
   hasPendingObservations,
+  isMeasuredRow,
   mergeNoteBlocks,
   type DrawingItem,
   type OccupiedSlots,
@@ -1893,6 +1895,188 @@ describe("the model's own reading of a page", () => {
     expect(row.dimensionSlot ?? null).toBeNull();
     expect(row.attrGroup).toBe("note");
     expect(row.value).toBe("520");
+  });
+
+  // ==========================================================================
+  // ONE PRINTED LINE, ONE SET OF ROWS (FIU 2026-09-22, item 4b.1)
+  //
+  // Max, on the S-203 card: *"why are the dimensions getting duplicated? They
+  // shouldn't be."* Three yellow rows off the model — 80 → Width, 70 → Depth,
+  // 90 → Height, each with its evidence — and four rows below, `Dimension 4 =
+  // 80 cm`, `Dimension 5 = 70`, `Dimension 6 = 90`, filed as notes off the same
+  // printed line. Six rows for three measurements, and six `record_attributes`
+  // rows at confirm.
+  //
+  // The reduction is in `dedupeMeasured`, which runs at READ time, so a pack
+  // already staged gains it with no second model call.
+  // ==========================================================================
+  describe("the same printed line staged by both paths", () => {
+    const s203 = () =>
+      rawItem({
+        dimensionsCombinedRaw: ["80 x 70 x 90 cm"],
+        dimensions: [
+          dim({ labelRaw: "Width", valueRaw: "80", unitRaw: "cm", slot: "width", slotEvidence: "first of three in the printed line", isOverall: true }),
+          dim({ labelRaw: "Depth", valueRaw: "70", unitRaw: "cm", slot: "depth", slotEvidence: "second of three in the printed line", isOverall: true }),
+          dim({ labelRaw: "Height", valueRaw: "90", unitRaw: "cm", slot: "height", slotEvidence: "third of three in the printed line", isOverall: true }),
+        ],
+      });
+
+    const measured = (doc: StagedDrawings) =>
+      doc.items[0]!.observations.filter((o) => isMeasuredRow(o)).map((o) => `${o.labelRaw}:${o.value}:${o.dimensionSlot ?? "-"}`);
+
+    it("reduces the S-203 shape from six rows to three", () => {
+      expect(measured(read(s203()))).toEqual(["Width:80:W", "Depth:70:D", "Height:90:H"]);
+    });
+
+    it("keeps a bare part the model never reported", () => {
+      // Four segments have no convention, so `parseCombinedDimensions` slots
+      // none of them and all four stage as notes. The model placed three. The
+      // fourth is the only reading of that figure there is, and dropping every
+      // bare part would lose it.
+      const doc = read(
+        rawItem({
+          dimensionsCombinedRaw: ["80 x 70 x 90 x 45 cm"],
+          dimensions: s203().dimensions,
+        }),
+      );
+      expect(measured(doc)).toEqual(["Width:80:W", "Depth:70:D", "Height:90:H", "Dimension 7:45:-"]);
+    });
+
+    it("reads 80 against 80 TBC as one measurement", () => {
+      // The combined path deliberately keeps the page's TBC inside `value`
+      // while the model path stores the split figure, so comparing the two as
+      // STRINGS would leave the duplicate on the card.
+      const doc = read(
+        rawItem({
+          dimensionsCombinedRaw: ["80 TBC x 70 x 90 cm"],
+          dimensions: s203().dimensions,
+        }),
+      );
+      expect(measured(doc)).toEqual(["Width:80:W", "Depth:70:D", "Height:90:H"]);
+    });
+
+    it("collapses two slots sharing a figure one for one", () => {
+      const doc = read(
+        rawItem({
+          dimensionsCombinedRaw: ["80 x 80 x 90 cm"],
+          dimensions: [
+            dim({ labelRaw: "Width", valueRaw: "80", unitRaw: "cm", slot: "width", slotEvidence: "first of three", isOverall: true }),
+            dim({ labelRaw: "Depth", valueRaw: "80", unitRaw: "cm", slot: "depth", slotEvidence: "second of three", isOverall: true }),
+            dim({ labelRaw: "Height", valueRaw: "90", unitRaw: "cm", slot: "height", slotEvidence: "third of three", isOverall: true }),
+          ],
+        }),
+      );
+      expect(measured(doc)).toEqual(["Width:80:W", "Depth:80:D", "Height:90:H"]);
+    });
+
+    it("drops ONE slotless row per slotted row that states the figure", () => {
+      // The multiset, asserted directly. One slotted 80 answers for one
+      // slotless 80; a second slotless 80 the item states under its own label
+      // is a measurement nothing has accounted for and stays.
+      const doc = read(
+        rawItem({
+          dimensions: [
+            dim({ labelRaw: "Width", valueRaw: "80", unitRaw: "cm", slot: "width", slotEvidence: "labelled", isOverall: true }),
+            dim({ labelRaw: "Overall across the arms", valueRaw: "80", unitRaw: "cm", isOverall: true }),
+            dim({ labelRaw: "Overall across the back", valueRaw: "80", unitRaw: "cm", isOverall: true }),
+          ],
+        }),
+      );
+      expect(measured(doc)).toEqual(["Width:80:W", "Overall across the back:80:-"]);
+    });
+
+    it("never touches a row the model said is not overall", () => {
+      // ARM HEIGHT is the label the dimension invariant names as the one a
+      // loose rule destroys, and 80 is also the item's width.
+      const doc = read(
+        rawItem({
+          dimensions: [
+            dim({ labelRaw: "Width", valueRaw: "80", unitRaw: "cm", slot: "width", slotEvidence: "labelled", isOverall: true }),
+            dim({ labelRaw: "ARM HEIGHT", valueRaw: "80", unitRaw: "cm", isOverall: false }),
+          ],
+        }),
+      );
+      expect(measured(doc)).toEqual(["Width:80:W", "ARM HEIGHT:80:-"]);
+    });
+
+    it("keeps the figure where the two paths read different units", () => {
+      // 80 millimetres and 80 centimetres are not one measurement, and
+      // `measuredKey` keeps both for that reason: collapsing them would hide a
+      // disagreement rather than settle it. The unit is half this key too.
+      const doc = read(
+        rawItem({
+          dimensionsCombinedRaw: ["80 x 70 x 90 cm"],
+          dimensions: [dim({ labelRaw: "Width", valueRaw: "80", unitRaw: "mm", slot: "width", slotEvidence: "labelled", isOverall: true })],
+        }),
+      );
+      expect(measured(doc).filter((row) => row.includes(":80:"))).toEqual(["Width:80:W", "Dimension 2:80:-"]);
+    });
+
+    it("leaves a schemaVersion 1 run exactly as it is", () => {
+      // FROZEN. Before the model was asked which figure was which, the combined
+      // line's parts were the only reading of the overall size there was, so
+      // reducing them would delete the only copy. `isOverall` is set on every
+      // row here, so the VERSION is the only thing holding the pass back.
+      const row = (id: string, labelRaw: string, value: string, slot: DimensionSlot | null): DrawingObservation => ({
+        id,
+        version: 1,
+        attrGroup: slot ? "dimension" : "note",
+        labelRaw,
+        value,
+        valueRaw: value,
+        unit: "cm",
+        unitSuggested: true,
+        unitSource: "figures",
+        materialCodeRaw: null,
+        specFieldId: null,
+        dimensionSlot: slot,
+        isOverall: true,
+        state: "confirmed",
+        stateReason: null,
+        reviewStatus: "pending",
+        reviewedAt: null,
+        reviewedBy: null,
+        applied: null,
+      });
+      const doc = assertStagedDrawings({
+        schemaVersion: 1,
+        kind: "shop_drawings",
+        filename: "set.pdf",
+        documentNotes: null,
+        items: [
+          {
+            id: "item-1",
+            version: 1,
+            page: 5,
+            itemCodeRaw: "S-203",
+            itemNameRaw: "ARMCHAIR",
+            confidence: "high",
+            targets: null,
+            observations: [
+              row("obs-0", "Width", "80", "W"),
+              row("obs-1", "Depth", "70", "D"),
+              row("obs-2", "Height", "90", "H"),
+              row("obs-3", "Dimension 4", "80", null),
+              row("obs-4", "Dimension 5", "70", null),
+              row("obs-5", "Dimension 6", "90", null),
+            ],
+          },
+        ],
+      });
+      expect(doc.items[0]!.observations.map((o) => o.id)).toEqual([
+        "obs-0", "obs-1", "obs-2", "obs-3", "obs-4", "obs-5",
+      ]);
+    });
+
+    it("keeps the FIRST of each group, so ids are stable across reads", () => {
+      const staged = stageDrawings([s203()], FIELDS, null, null, null, []);
+      const once = assertStagedDrawings(staged, FIELDS);
+      const twice = assertStagedDrawings(staged, FIELDS);
+      expect(once.items[0]!.observations.map((o) => o.id)).toEqual(twice.items[0]!.observations.map((o) => o.id));
+      expect(once.items[0]!.observations.map((o) => o.id)).toEqual(
+        staged.items[0]!.observations.slice(0, 3).map((o) => o.id),
+      );
+    });
   });
 });
 

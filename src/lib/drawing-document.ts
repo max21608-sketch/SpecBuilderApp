@@ -2178,7 +2178,7 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
     // block: a pack staged before this existed holds fifteen REMARKS rows, and
     // a reviewer would face them a page at a time. Ids are stable, so the
     // screen and the confirm route agree about what the card holds.
-    const observations = dedupeMeasured(mergeNoteBlocks(slotted));
+    const observations = dedupeMeasured(mergeNoteBlocks(slotted), doc.schemaVersion === 2);
     // Identity, not length: a lone `SUPPLIER: TO BID` is rewritten in place to
     // a Supplier row, and a length check would throw that away.
     if (observations.length !== slotted.length || observations.some((row, index) => row !== slotted[index])) {
@@ -2243,6 +2243,86 @@ export function measuredKey(observation: DrawingObservation): string | null {
 }
 
 /**
+ * THE SAME PRINTED FIGURE, STAGED BY BOTH PATHS — the rows to drop.
+ *
+ * S-203 prints its overall size as ONE line, `80 x 70 x 90 cm`, and a version 2
+ * read stages that line twice. The model reports all three figures in
+ * `dimensions`, each with its slot and the evidence it read the slot from
+ * ("first of three in the printed line 80 x 70 x 90 cm"); `stageDrawings` also
+ * walks `dimensionsCombinedRaw` through `parseCombinedDimensions` and pushes
+ * each part as its own observation. A part the LINE prefixed (`W1520`) keeps
+ * its slot and already collapses against its model twin on `dedupeMeasured`'s
+ * slot key. A BARE part is deliberately stripped of its positional slot, so it
+ * becomes a note keyed `view|figure|unit` with the view blanked — a different
+ * key in a different set, which is why the two paths never met. Six rows on the
+ * card for three measurements, and six `record_attributes` rows at confirm.
+ *
+ * The comment beside that second loop already states the intent — *"the model
+ * reports the same figure in `dimensions` with its slot and the evidence for
+ * it, so a reviewer sees one answer with a reason rather than two answers"* —
+ * and it was only half applied: the bare part was stopped from claiming the
+ * SLOT, not from becoming a ROW.
+ *
+ * Four things this is careful about, each of which a looser rule gets wrong:
+ *
+ * - **It MATCHES, it does not assume.** A combined line may state a figure the
+ *   model never reported, and that figure is the only reading of it there is.
+ *   Only a bare part whose figure the item ALREADY states with a slot goes.
+ * - **Figures are compared through `parseDimensionFigure`, never as strings.**
+ *   The combined path deliberately keeps the page's `TBC` inside `value`
+ *   (`composeDimensionCell` reads it back out) while the model path stores the
+ *   split figure, so `80` and `80 TBC` are one measurement said twice.
+ * - **The unit is half the key**, for `measuredKey`'s own reason: 79 in
+ *   centimetres and 790 in millimetres are a disagreement to show, not a
+ *   duplicate to hide.
+ * - **It is a MULTISET, consumed one for one.** `80 x 80 x 90` places 80 in two
+ *   slots, and two bare parts of 80 answer to them one each. A rule that only
+ *   asked "is this figure slotted anywhere" would drop a third 80 the item
+ *   states once.
+ *
+ * `isOverallRow` is what keeps `ARM HEIGHT 520` out of it: a row the model said
+ * is not overall, and any row on a `schemaVersion: 1` run (where `isOverall`
+ * was never asked and falls back to "does it carry a slot"), can never match.
+ *
+ * Exported so `tools/measure-drawing-reading.ts` counts what the app drops
+ * rather than its own idea of it — the rule this whole file is about.
+ */
+export function redundantOverallRows(observations: DrawingObservation[]): Set<string> {
+  const slotted = new Map<string, number>();
+  for (const observation of observations) {
+    if (!observation.dimensionSlot) continue;
+    const key = figureAndUnitKey(observation);
+    if (key === null) continue;
+    slotted.set(key, (slotted.get(key) ?? 0) + 1);
+  }
+  const redundant = new Set<string>();
+  if (slotted.size === 0) return redundant;
+  for (const observation of observations) {
+    // A row that carries a slot is the statement being kept.
+    if (observation.dimensionSlot) continue;
+    if (!isOverallRow(observation)) continue;
+    // `isMeasuredRow` is also what keeps an APPLIED row out of this: it is
+    // history, its `record_attributes` row already exists, and nothing here
+    // removes one.
+    if (!isMeasuredRow(observation)) continue;
+    const key = figureAndUnitKey(observation);
+    if (key === null) continue;
+    const remaining = slotted.get(key) ?? 0;
+    if (remaining === 0) continue;
+    slotted.set(key, remaining - 1);
+    redundant.add(observation.id);
+  }
+  return redundant;
+}
+
+/** `figure|unit`, or null where the row states no figure. */
+function figureAndUnitKey(observation: DrawingObservation): string | null {
+  const figure = parseDimensionFigure(observation.value ?? observation.valueRaw).figure;
+  if (figure === null) return null;
+  return `${figure}|${observation.unit ?? ""}`;
+}
+
+/**
  * One measurement stated twice is one measurement.
  *
  * WITHIN A VIEW this has always collapsed: a front elevation prints 5, 5, 27,
@@ -2265,11 +2345,19 @@ export function measuredKey(observation: DrawingObservation): string | null {
  * SAME SLOT, DIFFERENT FIGURE IS NEVER COLLAPSED. That is two views disagreeing
  * about the size of the chair, and it has to reach the card, where
  * `composeDimensionCell` raises `duplicate_slot` and a person decides.
+ *
+ * AND ONE MEASUREMENT STATED BY BOTH STAGING PATHS IS ALSO ONE MEASUREMENT —
+ * `redundantOverallRows`, above, which is why `readByModel` is a parameter. It
+ * runs over what this pass already kept, so a bare part answers to a slotted
+ * row that survived rather than to one that was itself a repeat. It is gated on
+ * `schemaVersion: 2` because version 1 runs are FROZEN: before the model was
+ * asked which figure was which, the combined line's parts were the only reading
+ * of the overall size there was, and reducing them would delete the only copy.
  */
-function dedupeMeasured(observations: DrawingObservation[]): DrawingObservation[] {
+function dedupeMeasured(observations: DrawingObservation[], readByModel: boolean): DrawingObservation[] {
   const seen = new Set<string>();
   const slotSeen = new Set<string>();
-  return observations.filter((observation) => {
+  const kept = observations.filter((observation) => {
     if (observation.dimensionSlot) {
       const figure = parseDimensionFigure(observation.value ?? observation.valueRaw).figure;
       if (figure !== null) {
@@ -2285,6 +2373,9 @@ function dedupeMeasured(observations: DrawingObservation[]): DrawingObservation[
     seen.add(key);
     return true;
   });
+  if (!readByModel) return kept;
+  const redundant = redundantOverallRows(kept);
+  return redundant.size === 0 ? kept : kept.filter((observation) => !redundant.has(observation.id));
 }
 
 /**

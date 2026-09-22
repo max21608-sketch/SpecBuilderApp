@@ -49,6 +49,7 @@ import {
   variantLettersByItem,
   foldableRow,
   measuredRows,
+  redundantOverallRows,
   unitSourceOf,
   type DrawingItem,
   type DrawingObservation,
@@ -121,6 +122,13 @@ type Counts = {
   letteredGroups: number;
   falseSplitGroups: number;
   unfoldableDimensionRows: number;
+  /**
+   * The same printed figure staged TWICE — once slotted with the model's
+   * evidence, once as a bare part of the combined line filed as a note. Counted
+   * with `redundantOverallRows`, the app's own rule, so this reads what the
+   * card drops rather than a second opinion about it.
+   */
+  duplicateOverallRows: number;
   /** Item 1.9 — see the header. Counted by its own pure module. */
   regions: RegionCounts;
 };
@@ -129,7 +137,7 @@ function blank(): Counts {
   return {
     runs: 0, runsV2: 0, items: 0, itemsNoCode: 0, placedRows: 0, suggestedRows: 0,
     magnitudeItems: 0, disputeItems: 0, labelContradictions: 0, unit: {},
-    lettered: 0, letteredGroups: 0, falseSplitGroups: 0, unfoldableDimensionRows: 0,
+    lettered: 0, letteredGroups: 0, falseSplitGroups: 0, unfoldableDimensionRows: 0, duplicateOverallRows: 0,
     regions: blankRegionCounts(),
   };
 }
@@ -230,6 +238,21 @@ function measure(staged: StagedDrawings, counts: Counts, label: string, notes: s
       }
     }
 
+    // Version 2 only, exactly as the read-time pass is gated: a version 1 run
+    // never had `isOverall` asked of it, and the combined line's parts were the
+    // only reading of the overall size it had.
+    if (!guesses) {
+      const duplicates = redundantOverallRows(item.observations);
+      counts.duplicateOverallRows += duplicates.size;
+      if (detail && duplicates.size > 0) {
+        for (const row of item.observations.filter((o) => duplicates.has(o.id))) {
+          notes.push(
+            `  STAGED TWICE ${label}  ${item.itemCodeRaw ?? "(no code)"}  "${row.labelRaw ?? ""}" = ${row.value ?? row.valueRaw ?? ""}${row.unit ?? ""}`,
+          );
+        }
+      }
+    }
+
     const rows = pending(item);
     for (const o of rows) {
       if (o.dimensionSlot) {
@@ -284,6 +307,7 @@ function report(title: string, c: Counts): void {
   console.log(`  ...saying the SAME finishes ${c.falseSplitGroups} groups   <- split on nothing`);
   console.log("");
   console.log(`  dimension rows inline that state no figure  ${c.unfoldableDimensionRows}   <- the sprawl`);
+  console.log(`  overall figures staged TWICE                ${c.duplicateOverallRows}   <- the duplicate`);
   console.log("");
   console.log(`  unit provenance on placed rows:`);
   for (const [source, n] of Object.entries(c.unit).sort((a, b) => b[1] - a[1])) {
