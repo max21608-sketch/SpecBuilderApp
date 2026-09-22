@@ -190,6 +190,94 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
       expect(mine.every((row) => row[verdictColumn] === "")).toBe(true);
     });
   });
+  // ==========================================================================
+  // THE CODE COLUMN AND THE FILE'S CLIENT CODE ARE ONE STATEMENT.
+  //
+  // `spec_record_refs` carries five ref systems and the export's Client Code
+  // reads ONE of them, so a record holding only a `bws_job` ref used to print
+  // that job number in the phase table's Code column and ship a blank code --
+  // and `NoClientRef`, the only place in the app anybody would have noticed,
+  // never fired. Two readings of one predicate disagreeing is exactly what
+  // this file exists to pin, which is why it is here and not in a component
+  // test: neither clause can be reached without the database.
+  // ==========================================================================
+  describe("a record whose only ref is a BWS job number", () => {
+    // ON ITS OWN PHASE, and torn down when this block finishes. The retired-
+    // phase rows below assert the project's EXACT membership, so a fixture
+    // left lying in the main phase fails a test about something else --
+    // which is the same collision the per-process project number prevents
+    // between two agents, one describe further in.
+    let jobRunId = "";
+    let jobOnlyId = "";
+
+    beforeAll(async () => {
+      const run = await client.query(
+        `insert into spec_runs (project_id, name, created_by, updated_by)
+         values ($1, '__QA Job-ref phase', 'qa', 'qa') returning id`,
+        [projectId],
+      );
+      jobRunId = run.rows[0].id;
+      const record = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, qty, level,
+                                   status, created_by, updated_by)
+         values ($1, $2, 9, $3, '__QA Job-number-only bench', 2, 'simple', 'active', 'qa', 'qa') returning id`,
+        [projectId, jobRunId, categoryId],
+      );
+      jobOnlyId = record.rows[0].id;
+      await client.query(
+        `insert into spec_record_refs (record_id, project_id, ref_system, ref_value, ref_value_norm, created_by)
+         values ($1, $2, 'bws_job', '__QA J-4471', '__qa j-4471', 'qa')`,
+        [jobOnlyId, projectId],
+      );
+    });
+
+    afterAll(async () => {
+      await client.query(`delete from spec_answers where record_id = $1`, [jobOnlyId]);
+      await client.query(`delete from spec_record_refs where record_id = $1`, [jobOnlyId]);
+      await client.query(`delete from spec_records where id = $1`, [jobOnlyId]);
+      await client.query(`delete from spec_runs where id = $1`, [jobRunId]);
+    });
+
+    it("says it has no client ref, and shows the job apart", async () => {
+      const response = await recordsRoute(
+        new Request(`http://localhost/api/records?projectId=${projectId}&runId=${jobRunId}`),
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        records: { id: string; refs: string | null; client_code: string | null }[];
+      };
+      const row = body.records.find((entry) => entry.id === jobOnlyId);
+      // The Code column reads `client_code`, which is empty here — so the
+      // table says "no client ref", the same thing the file says.
+      expect(row?.client_code).toBeNull();
+      // The job number is not LOST: it is still on the payload, still
+      // searchable, and printed beneath the code rather than as it.
+      expect(row?.refs).toBe("__QA J-4471");
+    });
+
+    it("keeps the two readings identical on a record that HAS a client code", async () => {
+      const response = await recordsRoute(
+        new Request(`http://localhost/api/records?projectId=${projectId}&runId=${runId}`),
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { records: { id: string; client_code: string | null }[] };
+      expect(body.records.find((entry) => entry.id === ordinaryId)?.client_code).toBe("__QA S-100");
+    });
+
+    it("exports a blank Client Code for it, which is what the table now says", async () => {
+      const loaded = await loadExportScope(projectId, jobRunId);
+      if (isScopeFailure(loaded)) throw new Error(loaded.error);
+      const column = BWS_EXPORT_COLUMNS.findIndex((entry) => entry.name === "Client Code");
+      const record = loaded.scope.records.find((entry) => entry.id === jobOnlyId);
+      expect(record).toBeDefined();
+      const cells = composeRow(loaded.scope, record!, loaded.scope.attributes, loaded.scope.answers);
+      expect(cells[column]).toBe("");
+      // A BWS job ref belongs to the record that earned it and is not a client
+      // code; nothing composes it into that cell.
+      expect(cells[column]).not.toContain("J-4471");
+    });
+  });
+
   describe("retired records and phases (row d5)", () => {
     /** Retired the way every path in src/lib does it: all three columns. */
     async function retireRecord(id: string) {

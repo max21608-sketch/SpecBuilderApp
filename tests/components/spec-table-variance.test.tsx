@@ -57,7 +57,8 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(.
 let n = 0;
 function record(over: Partial<SpecRecord> = {}): SpecRecord {
   n += 1;
-  return {
+  const row: SpecRecord = {
+    client_code: null,
     id: `rec-${n}`,
     record_no: n,
     item_description: `Item ${n}`,
@@ -99,6 +100,11 @@ function record(over: Partial<SpecRecord> = {}): SpecRecord {
     gates: null,
     ...over,
   };
+  // MOST RECORDS CARRY ONE REF AND IT IS THEIR BOQ CODE, which is what the
+  // export's Client Code reads and what the Code column now prints. So
+  // `client_code` follows `refs` unless a test sets them APART, which is the
+  // case the column exists for: a record holding only a `bws_job` ref.
+  return over.client_code === undefined ? { ...row, client_code: row.refs } : row;
 }
 
 function mountWith(records: SpecRecord[]) {
@@ -239,6 +245,25 @@ describe("a record with no client ref (row d3)", () => {
     const row = await rowFor("Bench");
     expect(within(row).getByText("S-402")).toBeTruthy();
     expect(within(row).queryByText("no client ref")).toBeNull();
+  });
+
+  // A `bws_job` NUMBER IS NOT A CLIENT CODE. `refs` is every ref system and
+  // the export's Client Code is the boq code alone, so this row used to print
+  // the job number in the Code column and ship a blank code — the one row
+  // `NoClientRef` exists for, and the one row it never fired on.
+  it("does not let another ref system stand in for the client code", async () => {
+    mountWith([record({ item_description: "Job-numbered bench", refs: "J-4471", client_code: null })]);
+    const row = await rowFor("Job-numbered bench");
+    expect(within(row).getByText("no client ref")).toBeTruthy();
+    // And the job number is not lost — it is printed apart, named as other.
+    expect(within(row).getByText(/also J-4471/)).toBeTruthy();
+  });
+
+  it("prints no 'also' line where the only ref IS the client code", async () => {
+    mountWith([record({ item_description: "Plain bench", refs: "S-402", client_code: "S-402" })]);
+    const row = await rowFor("Plain bench");
+    expect(within(row).getByText("S-402")).toBeTruthy();
+    expect(within(row).queryByText(/also /)).toBeNull();
   });
 
   it("says it on a configuration too, whose ref is read through its bill line", async () => {
