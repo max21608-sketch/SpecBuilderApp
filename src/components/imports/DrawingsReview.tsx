@@ -52,6 +52,7 @@ import ItemCard, {
 } from "@/components/imports/DrawingItemCard";
 import ConfigurationCard from "@/components/imports/ConfigurationCard";
 import { cardHasPending, configurationCards } from "@/lib/configuration-cards";
+import { describePartialConfirm } from "@/lib/confirm-partial";
 
 type Run = {
   id: string;
@@ -479,16 +480,15 @@ export default function DrawingsReview({
       for (const [index, entry] of entries.entries()) {
         const failure = await confirmItem(entry.item, entry.observations, "confirm");
         if (failure) {
-          const notAttempted = entries.slice(index + 1).map((rest) => rest.label);
-          await reloadThen(
-            [
-              done.length > 0 ? `${done.join(" and ")} confirmed.` : null,
-              `${entry.label} refused: ${failure} Nothing was written for it.`,
-              notAttempted.length > 0 ? `${notAttempted.join(" and ")} ${notAttempted.length === 1 ? "was" : "were"} not attempted.` : null,
-            ]
-              .filter(Boolean)
-              .join(" "),
-          );
+          // A PARTIAL IS NOT A FAILURE. See `describePartialConfirm`: with
+          // nothing confirmed this is the red banner, and with something
+          // confirmed it is a notice naming what is left to press.
+          const said = describePartialConfirm({
+            done,
+            refused: { label: entry.label, reason: failure },
+            notAttempted: entries.slice(index + 1).map((rest) => rest.label),
+          });
+          await reloadThen(said.failure, said.notice);
           return;
         }
         done.push(entry.label);
