@@ -167,6 +167,86 @@ describe("a malformed optional field never fails a paid run", () => {
     });
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.items[0]?.dimensions).toEqual([{ labelRaw: "W", valueRaw: "1900" }]);
+    // The region beside it SURVIVES. It used to be thrown away with the null:
+    // `.catch([])` sat on the whole array, so one bad entry emptied it.
+    expect(parsed.success && parsed.data.items[0]?.viewRegions).toEqual([
+      { viewType: "front", page: 1, bbox: [0, 0, 1, 1] },
+    ]);
+  });
+
+  it("ONE malformed view region no longer discards the good ones beside it", () => {
+    // FIU 2026-09-21. Survivable either way -- the card proposes no picture and
+    // the item stays whole -- but the good regions are recoverable and were not
+    // being recovered. A region cannot hold a bare value (a string is not a box
+    // on a page), so the bad entry is DROPPED rather than wrapped: nothing is
+    // invented and nothing else is lost.
+    const parsed = drawings({
+      viewRegions: [
+        "the photo top left",
+        { viewType: "photo", page: 1, bbox: [0.1, 0.1, 0.5, 0.5] },
+        [0, 0, 1, 1],
+        { viewType: "front", page: 2, bbox: [0, 0, 1, 1] },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items[0]?.viewRegions).toEqual([
+      { viewType: "photo", page: 1, bbox: [0.1, 0.1, 0.5, 0.5] },
+      { viewType: "front", page: 2, bbox: [0, 0, 1, 1] },
+    ]);
+
+    // A region written as ONE object rather than a list of one is read as the
+    // list it meant -- the `itemCodes` precedent.
+    const single = drawings({ viewRegions: { viewType: "render", page: 3, bbox: [0, 0, 1, 1] } });
+    expect(single.success && single.data.items[0]?.viewRegions).toHaveLength(1);
+
+    // And an entry whose OWN fields are malformed still degrades rather than
+    // being dropped: every field on a region already carries its own `.catch`,
+    // so the region survives with the cautious answer.
+    const inner = drawings({ viewRegions: [{ viewType: "elevation", page: "one", bbox: [0, 0] }] });
+    expect(inner.success && inner.data.items[0]?.viewRegions).toEqual([
+      { viewType: "other", page: null, bbox: null },
+    ]);
+  });
+
+  it("ONE malformed code group no longer leaves the whole document ungrouped", () => {
+    // The grouping is what reads a second page titled `MUR.2 ARMCHAIR` as the
+    // same item as `S-200`. Losing every group over one bad entry unpicks that
+    // for the whole document.
+    const parsed = DrawingsOutput.safeParse({
+      items: [item()],
+      codeGroups: [
+        null,
+        "S-100",
+        { itemCodes: ["S-200", "MUR.2 ARMCHAIR"], pages: [3, 4], relationship: "one_item", evidence: null },
+      ],
+      documentNotes: null,
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.codeGroups).toHaveLength(1);
+    expect(parsed.success && parsed.data.codeGroups?.[0]?.itemCodes).toEqual(["S-200", "MUR.2 ARMCHAIR"]);
+  });
+
+  it("an OVER-LONG array of regions or groups still empties, which is what the catch is for", () => {
+    // The bound is the thing that stops a page staging as something it is not,
+    // and `objectEntriesAsList` must not become a way round it. Emptying is
+    // safe HERE and only here: a card with no picture proposed is visible on
+    // screen and fixable by dragging a box, and an ungrouped document asks a
+    // person. That is the trade the comment beside `dimensions` refuses.
+    const region = { viewType: "photo", page: 1, bbox: [0, 0, 1, 1] };
+    const parsed = drawings({ viewRegions: Array.from({ length: 200 }, () => region) });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items[0]?.viewRegions).toEqual([]);
+  });
+
+  it("an ABSENT optional array stays absent rather than becoming an empty answer", () => {
+    // `viewRegions` omitted means "this loader did not report one", which is
+    // not the same statement as "there are none" -- the card reads the absence
+    // and proposes the whole page.
+    const parsed = drawings({});
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items[0]?.viewRegions).toBeUndefined();
+    const ungrouped = DrawingsOutput.safeParse({ items: [item()], documentNotes: null });
+    expect(ungrouped.success && ungrouped.data.codeGroups).toBeUndefined();
   });
 
   it("a STRING where a list of strings belongs is read as a one-entry list", () => {
