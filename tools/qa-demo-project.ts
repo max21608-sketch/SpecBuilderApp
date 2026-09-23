@@ -149,18 +149,43 @@ const BILL_LINES = expandBill(BILL, requestedLines);
  * choose at five to nine on the morning of a call. It keeps the `DEMO` prefix,
  * so `--clear --apply` still takes both.
  */
+const DEMO_NUMBER = requestedLines > BILL.length ? `DEMO-${requestedLines}` : PROJECT.number;
 const DEMO = {
   ...PROJECT,
-  ...(requestedLines > BILL.length
-    ? {
-        number: `DEMO-${requestedLines}`,
-        name: `${PROJECT.name} — ${requestedLines} lines`,
-        // Its own mailbox, so its correspondence does not collide with the
-        // walkthrough's on `email_messages`' (mailbox, graph_message_id).
-        inbox: `demo-${requestedLines}@ashcombe.example.com`,
-      }
-    : {}),
+  number: DEMO_NUMBER,
+  ...(requestedLines > BILL.length ? { name: `${PROJECT.name} — ${requestedLines} lines` } : {}),
+  // Derived, never written out per variant -- see `inboxFor` below.
+  inbox: inboxFor(DEMO_NUMBER),
 };
+
+/**
+ * ONE MAILBOX PER DEMO PROJECT, AND IT FOLLOWS THE PROJECT NUMBER.
+ *
+ * `email_messages` is unique on (mailbox, graph_message_id) and this script's
+ * message keys are fixed strings, so two demo projects sharing a mailbox
+ * collide on the first message — found the expensive way, 400 seconds into the
+ * 300-line build, after 492 pictures had been stored.
+ *
+ * That was first closed by hanging a second inbox off the `--lines` branch,
+ * which fixed the case in hand and left the next one open: the NUMBER is what
+ * makes a demo project distinct, so anything else this script learns to build
+ * would have had to remember to give itself a mailbox. Deriving it here means
+ * it cannot be forgotten, and `slugFor` does the ids as well, so even two
+ * projects that somehow shared an address would not collide.
+ *
+ * The walkthrough keeps the address written into the fixture, because that is
+ * the one that gets read out on a call and appears in its own correspondence.
+ * Every other demo gets one derived from its number.
+ *
+ * It takes the NUMBER rather than the project row, so `--clear` can compute
+ * the same two things for a project it is about to delete.
+ */
+function slugFor(number: string): string {
+  return number.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+function inboxFor(number: string): string {
+  return number === PROJECT.number ? PROJECT.inbox : `${slugFor(number)}@ashcombe.example.com`;
+}
 
 if (process.argv.includes("--help")) {
   console.log(`npm run qa:demo -- [--apply] [--clear] [--lines=N] [--no-checklist]
@@ -264,10 +289,9 @@ async function sweep(): Promise<void> {
   const projects = await client.query<{ id: string; bws_project_number: string }>(
     `select id, bws_project_number from projects where bws_project_number like 'DEMO%'`,
   );
-  if (projects.rows.length === 0) {
-    console.log("Nothing to remove — no project numbered DEMO%.");
-    return;
-  }
+  // Not a return: a held message outlives the project it never had, so the
+  // orphan pass below still has something to do when there is no project left.
+  if (projects.rows.length === 0) console.log("No project numbered DEMO%.");
   for (const project of projects.rows) {
     const id = project.id;
     if (!apply) {
@@ -283,9 +307,20 @@ async function sweep(): Promise<void> {
           or (entity_type = 'email_messages' and entity_id in (select id from email_messages where project_id = $1))`,
       [id],
     );
+    // ITS OWN MAILBOX, COMPUTED THE SAME WAY THE BUILD COMPUTED IT.
+    //
+    // This used to read `mailbox like 'demo@%'`, which was the constant the
+    // mailbox WAS until it started following the project. Since then it
+    // matches neither address this script writes, and a HELD message carries
+    // no project_id, so neither half of the predicate reached one. Measured on
+    // the sandbox, 2026-09-23: DEMO-300's five held messages survive a
+    // `--clear --apply`, and the next build of it dies on the first
+    // `recordMessage` — a plain insert against (mailbox, graph_message_id)
+    // with no upsert. The legacy address is what the orphan pass below is for.
+    const mailboxAddress = inboxFor(project.bws_project_number);
     const mailbox = await client.query<{ mailbox_storage_path: string | null }>(
-      `select mailbox_storage_path from email_messages where mailbox like 'demo@%' or project_id = $1`,
-      [id],
+      `select mailbox_storage_path from email_messages where mailbox = $2 or project_id = $1`,
+      [id, mailboxAddress],
     );
     for (const path of [
       ...files.rows.map((row) => row.storage_path),
@@ -304,7 +339,7 @@ async function sweep(): Promise<void> {
     await client.query(`delete from email_drafts where project_id = $1`, [id]);
     // Email messages are not on the project's cascade either — a held message
     // never had a project — so they go by their mailbox as well as by project.
-    await client.query(`delete from email_messages where mailbox like 'demo@%' or project_id = $1`, [id]);
+    await client.query(`delete from email_messages where mailbox = $2 or project_id = $1`, [id, mailboxAddress]);
     await client.query(`delete from project_contacts where project_id = $1`, [id]);
     // A finish is RESTRICTed by the attributes that point at it, and the order
     // in which two cascades fire is not something to rely on. Unlinked first,
@@ -317,6 +352,35 @@ async function sweep(): Promise<void> {
     await client.query(`delete from projects where id = $1`, [id]);
     console.log(`  removed ${project.bws_project_number} and its files`);
   }
+
+  // AND ANY HELD MESSAGE IN A MAILBOX NO CURRENT DEMO DERIVES.
+  //
+  // `--clear` is all-or-nothing — it takes every `DEMO%` project — so after
+  // that loop nothing this script wrote should remain. What can remain is a
+  // held message from an EARLIER version of this file, when the mailbox was a
+  // constant rather than a function of the number: those rows carry no
+  // project_id and no mailbox any derivation produces, so both halves of the
+  // per-project predicate miss them and the id prefix is the only thing that
+  // still identifies them. Safe as a final pass and NOT inside the loop, where
+  // it would let clearing one demo delete another's correspondence.
+  const orphans = await client.query<{ mailbox_storage_path: string | null }>(
+    `select mailbox_storage_path from email_messages
+      where project_id is null and graph_message_id like 'demo\\_%'`,
+  );
+  if (orphans.rows.length === 0) return;
+  if (!apply) {
+    console.log(`  would remove ${orphans.rows.length} held demo messages`);
+    return;
+  }
+  for (const row of orphans.rows) {
+    if (row.mailbox_storage_path) {
+      await del(row.mailbox_storage_path, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch(() => undefined);
+    }
+  }
+  const swept = await client.query(
+    `delete from email_messages where project_id is null and graph_message_id like 'demo\\_%'`,
+  );
+  console.log(`  removed ${swept.rowCount} held demo messages`);
 }
 
 if (clear) {
@@ -926,13 +990,28 @@ say("drawings issue B", `${DRAWINGS_B.length} sheets staged, left on the reviewe
 // queue attempt, which is a paid model read, and this script is going to be
 // re-run. Its staged output is written straight in, from `resolveProposals`.
 // ===========================================================================
-// THE PROJECT'S OWN INBOX, not a constant shared with the walkthrough.
+// THE PROJECT'S OWN INBOX, ITS OWN MESSAGE IDS, AND ITS OWN RECIPIENTS.
 //
-// `email_messages` is unique on (mailbox, graph_message_id) and the demo's
-// message ids are fixed strings, so a SECOND demo project under the same
-// mailbox fails on the first message — found by building the 300-line fixture
-// beside DEMO-TEST-01, 400 seconds in, after 492 pictures had been stored.
+// All three are derived from the project number by `inboxFor`/`slugFor` above,
+// so any number of demo projects coexist without any of them having to
+// remember to say so. The mailbox alone would be enough for the unique index;
+// the ids are namespaced as well because two things that must not collide are
+// cheaper to keep apart than to debug 400 seconds into a build.
 const MAILBOX = DEMO.inbox;
+/** `demo_<project>_<key>`, unique per project even inside one mailbox. */
+const graphIdFor = (key: string) => `demo_${slugFor(DEMO.number)}_${key}`;
+
+// AND THE RECIPIENTS FOLLOW, which the first fix did not do.
+//
+// `demo/content.ts` writes `to: [PROJECT.inbox]` on the two messages whose
+// whole point is `recipient_is_inbox`, and on the review email. Under a second
+// demo those named the WALKTHROUGH'S inbox — so the signal the fixture exists
+// to demonstrate pointed at the other project, or at nothing. Every recipient
+// that is the fixture's inbox is rewritten with this project's own.
+function addressedHere<T extends { to: string[]; cc?: string[] }>(message: T): T {
+  const swap = (address: string) => (address === PROJECT.inbox ? MAILBOX : address);
+  return { ...message, to: message.to.map(swap), ...(message.cc ? { cc: message.cc.map(swap) } : {}) };
+}
 
 function rfc2822(date: Date): string {
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -976,7 +1055,8 @@ function mailboxPath(key: string, received: Date): string {
   return `mailbox/${MAILBOX.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}/${yyyy}/${mm}/demo-${key}.eml`;
 }
 
-for (const message of INBOX) {
+for (const raw of INBOX) {
+  const message = addressedHere(raw);
   const received = receivedAt(message);
   const { bytes } = eml(message);
   const storagePath = mailboxPath(message.key, received);
@@ -984,7 +1064,7 @@ for (const message of INBOX) {
   const recorded = await recordMessage({
     mailbox: MAILBOX,
     origin: "graph",
-    graphMessageId: `demo_${message.key}`,
+    graphMessageId: graphIdFor(message.key),
     bytes,
     storagePath,
     mimeSize: bytes.byteLength,
@@ -1005,14 +1085,15 @@ say("inbox", `${INBOX.length} messages, all held`);
 
 // ---- the one that is on the project, staged and waiting to be reviewed -----
 {
-  const received = receivedAt(REVIEW_EMAIL);
-  const { bytes } = eml(REVIEW_EMAIL);
-  const storagePath = mailboxPath(REVIEW_EMAIL.key, received);
+  const reviewEmail = addressedHere(REVIEW_EMAIL);
+  const received = receivedAt(reviewEmail);
+  const { bytes } = eml(reviewEmail);
+  const storagePath = mailboxPath(reviewEmail.key, received);
   await store(storagePath, bytes, "message/rfc822");
   const recorded = await recordMessage({
     mailbox: MAILBOX,
     origin: "graph",
-    graphMessageId: `demo_${REVIEW_EMAIL.key}`,
+    graphMessageId: graphIdFor(reviewEmail.key),
     bytes,
     storagePath,
     mimeSize: bytes.byteLength,
@@ -1027,15 +1108,15 @@ say("inbox", `${INBOX.length} messages, all held`);
   const registers = await loadExtractionRegisters(projectId);
   const staged = {
     schemaVersion: PROPOSAL_SCHEMA_VERSION,
-    lines: resolveProposals(REVIEW_EMAIL.proposals, registers, randomUUID),
-    documentNotes: REVIEW_EMAIL.documentNotes,
-    filename: `${REVIEW_EMAIL.subject}.eml`,
+    lines: resolveProposals(reviewEmail.proposals, registers, randomUUID),
+    documentNotes: reviewEmail.documentNotes,
+    filename: `${reviewEmail.subject}.eml`,
   };
 
   const attachment = await sql`
     insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
     values ('email_messages', ${recorded.id}, 'mime', ${projectPath},
-            ${`${REVIEW_EMAIL.subject.replace(/[^\w .-]+/g, " ").trim()}.eml`}, 'message/rfc822',
+            ${`${reviewEmail.subject.replace(/[^\w .-]+/g, " ").trim()}.eml`}, 'message/rfc822',
             ${bytes.byteLength}, ${ACTOR})
     returning id
   `;
