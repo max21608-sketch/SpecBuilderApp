@@ -125,7 +125,7 @@ under step 5). v1 and v2 reads stay frozen; nothing parses old labels.
 Simplest version: configurations are variants, which already exist (0024); no
 new table. Trap avoided: a string rule reading `- Type 2` out of labels, which
 is the inference the 2026-09-18 overhaul removed.
-**Browser DoD (local):** read the invented S-301 sheet; the card shows five
+**Browser DoD (local):** read the real S-301 sheet (local copy); the card shows five
 chips `TYPE 1`–`TYPE 5`, four bands, each input once, "creates 10 records";
 confirm; the phase table shows ten configurations under S-301; each record's
 Specs tab shows its own cloth in COM 1 and the shared `W550 x D565 x H735 x
@@ -198,8 +198,8 @@ Also recorded, NOT built: `CH-01.1` is a position code on this pack (four
 cloths under one code), and the finishes library is keyed on the code; the
 CONFLICT rule already leaves the extras unlinked, which is safe. That is Max's
 call on another day.
-**Browser DoD (local):** confirm the invented spec sheet (five records), then
-the invented drawing set: `TYPO 3` / `TYPO 4` pair with no question, `MUR 1 &
+**Browser DoD (local):** confirm the real S-301 spec sheet (five records), then
+the real drawing set (fetched read-only from SharePoint): `TYPO 3` / `TYPO 4` pair with no question, `MUR 1 &
 TYPO 5` and `MUR 2` ask; pairing `MUR 2` with `TYPE 2` shows both cloths and
 requires the acknowledgement; the record keeps the replaced value under *show
 retired*.
@@ -207,7 +207,7 @@ retired*.
 
 ## Step 6 — the status moves on its own (FIU 2026-09-23)
 
-Reproduce first, on the local stack, with a pack of five invented documents
+Reproduce first, on the local stack, with five of the real specification sheets
 (more than the three-at-a-time cap), noting which screen was open. The source
 names two candidates, neither proven: the pack screen stops polling when every
 unfinished document is *waiting for a slot* (its predicate counts only `queued`
@@ -230,7 +230,7 @@ stays as the recovery path, and its sentence stays true.
 
 Measure before and after: count, per staged run, items with no view region by
 template (spec sheet or shop drawing). That count has never been taken.
-**Browser DoD (local, then real in §8):** the invented spec sheet's card
+**Browser DoD (local, then real in §8):** the real S-301 card
 proposes the corner photograph, not the page.
 ~1 h coder (inside step 2's prompt work), measured in §8.
 
