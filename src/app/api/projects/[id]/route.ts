@@ -118,6 +118,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            -- recorded the name it was given; fall back to it.
            coalesce(a.filename, r.parsed->>'filename') as filename,
            (r.attachment_id is not null) as source_preserved,
+           -- Whether a model has read this bill's columns yet (any-bill Step 2).
+           ((r.model_metadata->'structureRead'->'sheets') is not null) as structure_read,
            -- A BILL waiting for somebody to say which column is which (v4
            -- needsColumns on a live sheet). Its row offers "Set the columns",
            -- never a Try again: a bill is not read by a model. THE SAME
@@ -128,6 +130,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
               ) as s
               where s->>'needsColumns' = 'true' and coalesce(s->>'ignored', 'false') <> 'true'
            )) as needs_columns,
+           -- A CONFIRMED BILL's specification read, where one was asked for:
+           -- registered from the bill's own file under a request id derived
+           -- from the bill's run (src/lib/bill-specifications.ts).
+           (select x.id from intake_runs x
+             where x.registration_request_id = 'boq-specs:' || r.id::text) as bill_specs_run_id,
            r.batch_id,
            b.label as batch_label,
            -- Deferred by the pack's in-flight cap, not by a person. THE SAME

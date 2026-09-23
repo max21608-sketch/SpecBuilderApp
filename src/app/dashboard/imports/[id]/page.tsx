@@ -7,7 +7,7 @@
 // and an ambiguous match offers candidates rather than picking one. A line the
 // matcher could not resolve stays blank — a plausible guess in a field a human
 // skims past is worse than an obvious gap.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -15,7 +15,7 @@ import SpecDocumentReview, { type Registers, type SpecImport } from "@/component
 import { type EmailMessage } from "@/components/imports/EmailHeader";
 import DrawingsReview from "@/components/imports/DrawingsReview";
 import PreambleReview from "@/components/imports/PreambleReview";
-import Button from "@/components/ui/Button";
+import Button, { buttonClass } from "@/components/ui/Button";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
@@ -28,7 +28,17 @@ import Tip from "@/components/ui/Tip";
 import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
-import { describeHeader, sheetsNeedingColumns } from "@/lib/boq-import";
+import { describeHeader, sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-import";
+// Pure: the one rule about what a row is, what stops a fabric line, and what
+// the Confirm button says it will write — the same functions the confirm runs.
+import {
+  boqConfirmCounts,
+  boqConfirmLabel,
+  rowKindProblems,
+  type BoqRowKind,
+  type RowKindFields,
+} from "@/lib/boq-row-kinds";
+import BoqRowKindCell from "@/components/imports/BoqRowKindCell";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
 // function the confirm writes it with, so the table shows what will be written.
 import { effectiveArea } from "@/lib/boq-reconcile";
@@ -75,7 +85,7 @@ type Line = {
   // "This may not be furniture", asked at staging. ABSENT on a bill staged
   // before the question existed, which `nonFurnitureOf` answers at read time.
   nonFurnitureSuggested?: NonFurnitureGuess | null;
-};
+} & RowKindFields;
 
 /** "17 and 18", "17, 18 and 19" — a list a person reads rather than parses. */
 function listOf(values: number[]): string {
@@ -245,8 +255,29 @@ type Import = {
   bws_project_number: string; project_name: string; filename: string | null;
   /** Whether the original is stored, so a failed bill can be read again from it. */
   has_source?: boolean;
+  /** What a model's structure read left on the run (`/suggest-columns`). */
+  model_metadata?: { structureRead?: StructureReadState } | null;
   parsed: { schemaVersion: 3 | 4; filename: string | null; sourcePreserved?: boolean; sheets: Sheet[] } | null;
 };
+
+/** The parts of `model_metadata.structureRead` the screen reads. */
+type StructureReadState = {
+  pending?: { requestId: string; at: string; sheets: string[] } | null;
+  sheets?: Record<string, { at: string; ok: boolean; outcome: string }>;
+};
+
+/** A claim this old is a request that died, and the screen stops waiting on it. */
+const STRUCTURE_CLAIM_MS = 330_000;
+
+function structurePending(state: StructureReadState | undefined): boolean {
+  const pending = state?.pending;
+  return Boolean(pending && Date.now() - new Date(pending.at).getTime() < STRUCTURE_CLAIM_MS);
+}
+
+/** A reason sentence joined into another, without its own full stop. */
+function asClause(text: string): string {
+  return text.trim().replace(/[.!\s]+$/, "");
+}
 
 const STATUS_LABEL: Record<string, string> = {
   confident: "matched",
@@ -269,6 +300,7 @@ export default function ReviewImportPage() {
     message: EmailMessage | null;
     runs: ProjectRun[];
     reconciliation: Record<number, Reconciliation>;
+    billSpecs: { id: string; status: string } | null;
   } | null>(null);
   /**
    * WHETHER A RELOAD IS IN FLIGHT, and it is now RENDERED.
@@ -314,6 +346,17 @@ export default function ReviewImportPage() {
    * which is the way back either way.
    */
   const [pack, setPack] = useState<{ id: string; created_at: string; drawings: number } | null>(null);
+  /**
+   * THE MODEL IS READING THIS BILL'S COLUMNS, from this tab — `all` for the
+   * automatic read, or the sheet a panel's button asked about. A read another
+   * tab started shows the same sentence, from the server's own claim.
+   */
+  const [asking, setAsking] = useState<"all" | number | null>(null);
+  /** Why the last structure read did not land, with the retry beside it. */
+  const [structureError, setStructureError] = useState<string | null>(null);
+  /** Once per visit: the automatic read never fires twice from one screen. */
+  const autoAsked = useRef(false);
+  const [specsBusy, setSpecsBusy] = useState(false);
 
   // `quiet` skips the loading state. The spec-document view re-reads every
   // three seconds while a document is being read, and blanking the screen out
@@ -327,6 +370,7 @@ export default function ReviewImportPage() {
       message?: EmailMessage | null;
       runs?: ProjectRun[];
       reconciliation?: Record<number, Reconciliation>;
+      billSpecs?: { id: string; status: string } | null;
     }>(`/api/imports/${id}`);
     if (!quiet) setLoading(false);
     if (!res.ok) { setError(res.error); return; }
@@ -337,6 +381,7 @@ export default function ReviewImportPage() {
       message: res.data.message ?? null,
       runs: res.data.runs ?? [],
       reconciliation: res.data.reconciliation ?? {},
+      billSpecs: res.data.billSpecs ?? null,
     });
   }, [id]);
 
@@ -532,6 +577,128 @@ export default function ReviewImportPage() {
     });
   }
 
+  /**
+   * ASK THE MODEL TO READ THE COLUMNS — one small read, charged. `sheetIndex`
+   * absent is the automatic read of every live sheet nobody could map. A
+   * request id per press, so a retried request is answered from the record
+   * rather than read (and charged) again. Reload first, then report.
+   */
+  const askModel = useCallback(
+    async (sheetIndex?: number) => {
+      if (!data) return;
+      setAsking(sheetIndex ?? "all");
+      setStructureError(null);
+      setNotice(null);
+      try {
+        const requestId =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `00000000-0000-4000-8000-${String(Date.now()).padStart(12, "0").slice(-12)}`;
+        const res = await apiFetch<{ nothing?: boolean; charged?: number }>(`/api/imports/${id}/suggest-columns`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            version: data.import.version,
+            requestId,
+            ...(sheetIndex === undefined ? {} : { sheetIndex }),
+          }),
+        });
+        await load(true);
+        if (!res.ok) {
+          const code = (res.data as { code?: string } | null)?.code;
+          // Another tab's read is not a failure: this screen waits for it.
+          if (code === "structure_read_running") setNotice(res.error);
+          else setStructureError(res.error);
+          return;
+        }
+        if (res.data?.nothing) return;
+        setNotice(
+          "Columns and row kinds read by the model — check them on the panel, then press “The columns are right”. " +
+            "Every cell was read by code from the stored spreadsheet.",
+        );
+      } finally {
+        setAsking(null);
+      }
+    },
+    [data, id, load],
+  );
+
+  /**
+   * THE AUTOMATIC READ: once, the first time this screen opens a bill with a
+   * live sheet nobody could map and no structure read on record. Never on a
+   * bill whose original was not kept (there is nothing to re-read with the
+   * answer), never while another tab's read is in flight, and never twice
+   * from one visit.
+   */
+  useEffect(() => {
+    if (!data || autoAsked.current) return;
+    const bill = data.import;
+    if (bill.source_kind !== "boq_xlsx" || bill.status !== "parsed" || bill.has_source === false) return;
+    if (bill.parsed?.sourcePreserved === false) return;
+    const state = bill.model_metadata?.structureRead;
+    if (structurePending(state)) return;
+    const wanted = (bill.parsed?.sheets ?? []).some(
+      (sheet) => sheet.needsColumns && !sheet.ignored && !state?.sheets?.[sheet.sheetName],
+    );
+    if (!wanted) return;
+    autoAsked.current = true;
+    void askModel();
+  }, [data, askModel]);
+
+  /** Another tab is reading: look again quietly until its claim clears. */
+  const otherTabReading = asking === null && structurePending(data?.import.model_metadata?.structureRead);
+  useEffect(() => {
+    if (!otherTabReading) return;
+    const timer = setInterval(() => void load(true), 4000);
+    return () => clearInterval(timer);
+  }, [otherTabReading, load]);
+
+  /** A line's kind, set by a person. The route checks the item against the live sheet. */
+  async function setLineKind(sheetIndex: number, index: number, rowKind: BoqRowKind, finishForRow: number | null) {
+    setError(null);
+    setNotice(null);
+    const res = await apiFetch(`/api/imports/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sheetIndex, index, rowKind, ...(finishForRow === null ? {} : { finishForRow }) }),
+    });
+    await load();
+    if (!res.ok) setError(res.error);
+  }
+
+  /**
+   * READ THE SPECIFICATIONS IN THIS BILL — one read, charged, on the button.
+   * Registers this bill's own stored file as a specification document; a
+   * second press returns the read the first one started.
+   */
+  async function readSpecifications() {
+    setSpecsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch<{ importId: string; reused?: boolean; autoRead?: { dispatched: boolean; error?: string } }>(
+        `/api/imports/${id}/read-specifications`,
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+      );
+      await load(true);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      if (res.data.autoRead && !res.data.autoRead.dispatched && res.data.autoRead.error) {
+        setError(`Registered, but its read did not start: ${res.data.autoRead.error} Retry it from the Documents tab.`);
+        return;
+      }
+      setNotice(
+        res.data.reused
+          ? "The specifications in this bill are already being read — nothing more was charged."
+          : "Reading the specifications in this bill. They arrive as a document to review, like any other.",
+      );
+    } finally {
+      setSpecsBusy(false);
+    }
+  }
+
   async function confirm() {
     if (!data) return;
     setBusy(true);
@@ -584,6 +751,14 @@ export default function ReviewImportPage() {
    * neither.
    */
   const revising = Object.keys(data.reconciliation ?? {}).length > 0;
+  /** Live sheets whose columns a model read and nobody has agreed to — the confirm waits. */
+  const unchecked = sheetsAwaitingColumnCheck({ sheets });
+  /** Fabric lines that cannot be written, from the function the confirm runs. */
+  const kindProblems = activeSheets.flatMap((sheet) => rowKindProblems(sheet.lines));
+  const counts = boqConfirmCounts(sheets);
+  const structureState = run.model_metadata?.structureRead;
+  const reading = asking !== null || structurePending(structureState);
+  const canAsk = run.status === "parsed" && run.has_source !== false && run.parsed?.sourcePreserved !== false;
   const ignoredSheets = sheets.filter((sheet) => sheet.ignored);
   /** The revision and date the FIRST live tab printed, as text. Both stay text. */
   const revisionLabel = (() => {
@@ -685,14 +860,26 @@ export default function ReviewImportPage() {
           <Button
             variant="primary"
             onClick={confirm}
-            disabled={busy || run.status !== "parsed" || activeLines.length === 0 || unmapped.length > 0}
-            title={unmapped.length > 0 ? "Set the columns of every live sheet, or drop it, first." : undefined}
+            disabled={
+              busy ||
+              reading ||
+              run.status !== "parsed" ||
+              activeLines.length === 0 ||
+              unmapped.length > 0 ||
+              unchecked.length > 0 ||
+              kindProblems.length > 0
+            }
+            title={
+              unmapped.length > 0
+                ? "Set the columns of every live sheet, or drop it, first."
+                : unchecked.length > 0
+                  ? "Check the columns the model read, and press “The columns are right”, first."
+                  : kindProblems.length > 0
+                    ? "Say which item each fabric line belongs to first."
+                    : undefined
+            }
           >
-            {busy
-              ? "Importing…"
-              : revising
-                ? `Confirm · updates this phase from ${activeLines.length} line${activeLines.length === 1 ? "" : "s"}`
-                : `Confirm · creates ${activeLines.length} record${activeLines.length === 1 ? "" : "s"} on ${activeSheets.length} phase${activeSheets.length === 1 ? "" : "s"}`}
+            {boqConfirmLabel({ counts, revising, unmapped: unmapped.length, busy })}
           </Button>
           )
         }
@@ -768,6 +955,55 @@ export default function ReviewImportPage() {
           </Note>
         )}
 
+        {/* THE MODEL IS READING THE COLUMNS — said before it answers, with the
+            charge, because the screen is otherwise a panel nobody should start
+            filling in while the reading is about to replace it. */}
+        {reading && (
+          <Note tone="info" title="Reading the columns…">
+            One small read, charged. The model reads the layout — the header, what each column is and which rows
+            are fabric lines, sections or subtotals — and code then reads every cell from the stored spreadsheet.
+            {asking === null && " It was started from another tab or a moment ago; this screen shows the result when it lands."}
+          </Note>
+        )}
+        {structureError && !reading && (
+          <Note
+            tone="warn"
+            title="The model did not read the columns."
+            actions={
+              canAsk ? (
+                <Button size="sm" onClick={() => void askModel()}>
+                  Ask again
+                </Button>
+              ) : undefined
+            }
+          >
+            {structureError} The Columns panel still works by hand, and that is free.
+          </Note>
+        )}
+        {/* A MODEL'S COLUMNS, NOT YET AGREED TO. Yellow, because it is a guess
+            until a person has looked; the confirm refuses until they say so. */}
+        {run.status === "parsed" && unchecked.length > 0 && (
+          <Note tone="guess" title="Columns and row kinds read by the model — check them.">
+            {unchecked.length === 1 ? (
+              <>
+                On <span className="font-mono">{unchecked[0]?.sheetName}</span>, check each column on the panel and
+                the Kind of each line, then press <b>The columns are right</b>.
+              </>
+            ) : (
+              <>
+                On {unchecked.map((sheet) => sheet.sheetName).join(", ")}, check each column and the Kind of each line,
+                then press <b>The columns are right</b> on each.
+              </>
+            )}{" "}
+            The model never typed a value: every code, description and quantity below was read by code.
+          </Note>
+        )}
+        {run.status === "parsed" && kindProblems.length > 0 && (
+          <Note tone="warn" title="A fabric line has no item to be written onto.">
+            {kindProblems.map((problem) => problem.problem).join(" ")}
+          </Note>
+        )}
+
         {/* WHICH SHEETS STILL NEED SOMEBODY, named, above everything else: the
             confirm is disabled until each is mapped or dropped, and a disabled
             button that does not say why is a screen nobody can finish. */}
@@ -808,7 +1044,7 @@ export default function ReviewImportPage() {
                 </span>
               ))}{" "}
               already {ignoredSheets.length === 1 ? "is" : "are"}
-              {ignoredSheets[0]?.ignoredReason ? `, ${ignoredSheets[0].ignoredReason}` : ""}.
+              {ignoredSheets[0]?.ignoredReason ? ` — ${asClause(ignoredSheets[0].ignoredReason)}` : ""}.
             </>
           ) : (
             "."
@@ -826,6 +1062,31 @@ export default function ReviewImportPage() {
         {run.status === "confirmed" && (
           <Note tone="good" actions={<NextStepAction step={step} size="sm" />}>
             This import has already been confirmed.
+          </Note>
+        )}
+        {/* THE SPECIFICATIONS IN THE BILL'S OWN WORDS. A description cell packs
+            sizes, models and finishes; the confirm made records and never read
+            what the words say. One press registers this file as a specification
+            document and reads it — charged, and said so on the button. */}
+        {run.status === "confirmed" && run.has_source !== false && (
+          <Note
+            tone="info"
+            title="The descriptions in this bill carry specifications."
+            actions={
+              data.billSpecs ? (
+                <a href={`/dashboard/imports/${data.billSpecs.id}`} className={buttonClass("secondary", "sm", "no-underline")}>
+                  Open the specifications read
+                </a>
+              ) : (
+                <Button size="sm" disabled={specsBusy} onClick={() => void readSpecifications()}>
+                  {specsBusy ? "Registering…" : "Read the specifications in this bill — one read, charged"}
+                </Button>
+              )
+            }
+          >
+            {data.billSpecs
+              ? "They are being read, or have been, as a document of their own: sizes by slot, finishes by code, each for you to confirm."
+              : "Reading them turns each line's sizes, models and finishes into proposals on its record, for you to confirm like any document's."}
           </Note>
         )}
 
@@ -864,15 +1125,19 @@ export default function ReviewImportPage() {
           const suggested = live.filter(
             (line) => line.level && line.levelStatus !== "chosen" && !notFurnitureIds.has(line.index),
           );
-          const duplicates = duplicateGroups(sheet);
-          const columns = reconciliation ? 9 : 8;
+          // A fabric line is not a record, so the code it carries is not a client
+          // ref two records share: `GR-FAB-13` under six items is one fabric.
+          const duplicates = duplicateGroups({ ...sheet, lines: sheet.lines.filter((line) => line.rowKind !== "finish_for") });
+          const problemByRow = new Map(rowKindProblems(sheet.lines).map((problem) => [problem.lineNo, problem.problem]));
+          const columns = reconciliation ? 10 : 9;
           /**
            * THE COLUMNS PANEL IS OPEN when nobody has mapped this sheet yet
            * (unless it is dropped, when it waits to be asked for), when a
            * SAVED LAYOUT read it and nobody has looked — a remembered layout
            * must never apply unseen — or when somebody pressed Change columns.
            */
-          const layoutUnchecked = sheet.mappingSource === "layout" && !sheet.columnsChecked;
+          const layoutUnchecked =
+            (sheet.mappingSource === "layout" || sheet.mappingSource === "model") && !sheet.columnsChecked;
           const panelOpen =
             openPanels.has(sheetIndex) || (sheet.needsColumns === true && !sheet.ignored) || layoutUnchecked;
           const setPanel = (open: boolean) =>
@@ -1013,6 +1278,8 @@ export default function ReviewImportPage() {
                     setPanel(false);
                     void setSheet(sheetIndex, { ignored: true });
                   }}
+                  onAsk={canAsk ? () => void askModel(sheetIndex) : undefined}
+                  asking={reading}
                 />
               )}
               {panelOpen && (sheet.preview?.length ?? 0) === 0 && run.status === "parsed" && run.has_source && (
@@ -1128,6 +1395,13 @@ export default function ReviewImportPage() {
                     <thead>
                       <tr>
                         <Th>Row</Th>
+                        <Th className="w-[170px]">
+                          Kind
+                          <Tip>
+                            A fabric line is not a record: it is written as the next free COM spec on its item. A section,
+                            subtotal or blank row is left out, and its Include box brings it back.
+                          </Tip>
+                        </Th>
                         <Th>Client ref</Th>
                         <Th>Item</Th>
                         <Th>Area</Th>
@@ -1147,7 +1421,8 @@ export default function ReviewImportPage() {
                     </thead>
                     <tbody>
                       {sheet.lines.map((line) => {
-                        const duplicated = isDuplicated(sheet, line);
+                        const fabric = line.rowKind === "finish_for";
+                        const duplicated = !fabric && isDuplicated(sheet, line);
                         return (
                           <Tr
                             key={line.index}
@@ -1162,6 +1437,16 @@ export default function ReviewImportPage() {
                               {line.sourceLine && (
                                 <span className="block text-[10.5px] text-neutral-400">line {line.sourceLine}</span>
                               )}
+                            </Td>
+                            <Td>
+                              <BoqRowKindCell
+                                line={line}
+                                lines={sheet.lines}
+                                editable={run.status === "parsed"}
+                                busy={busy}
+                                problem={problemByRow.get(line.lineNo) ?? null}
+                                onSet={(kind, finishForRow) => void setLineKind(sheetIndex, line.index, kind, finishForRow)}
+                              />
                             </Td>
                             <Td mono>{line.code ?? "—"}</Td>
                             <Td>
@@ -1268,6 +1553,13 @@ export default function ReviewImportPage() {
                                 })()}
                               </Td>
                             )}
+                            {fabric ? (
+                              <Td colSpan={2} className="text-xs text-neutral-600">
+                                Not a record — its description is written as a fabric spec on row{" "}
+                                {line.finishFor?.row ?? "—"}
+                                {line.finishFor?.code ? ` (${line.finishFor.code})` : ""}.
+                              </Td>
+                            ) : (
                             <Td>
                               <select
                                 value={line.categoryId ?? ""}
@@ -1291,6 +1583,7 @@ export default function ReviewImportPage() {
                               )}
                               <CarriedFrom tab={line.categoryCarriedFrom} />
                             </Td>
+                            )}
                             {/* THE LEVEL, GUESSED AND ONE CLICK FROM A DECISION.
                                 A record with no level cannot be tiered at all,
                                 so a 59-line bill used to arrive as 59 records
@@ -1300,6 +1593,7 @@ export default function ReviewImportPage() {
                                 guess: a select reading "Hero" fires no change
                                 event when somebody chooses Hero, so the one act
                                 recording their agreement would do nothing. */}
+                            {!fabric && (
                             <Td>
                               <LevelCell
                                 line={line}
@@ -1308,6 +1602,7 @@ export default function ReviewImportPage() {
                                 onSet={(level) => void setLine(sheetIndex, line.index, { level })}
                               />
                             </Td>
+                            )}
                             {/* INCLUDE, AND THE ONE QUESTION THAT ASKS TO CHANGE
                                 IT. The suggestion sits in this cell rather than
                                 beside the description, because what it acts on
@@ -1324,8 +1619,13 @@ export default function ReviewImportPage() {
                                 aria-label={`Include row ${line.lineNo}`}
                                 onChange={() => setLine(sheetIndex, line.index, { ignored: !line.ignored })}
                               />
+                              {line.ignored && line.ignoredBecause && (
+                                <span className="mt-1 block text-[10.5px] text-neutral-500">
+                                  left out: {line.ignoredBecause}
+                                </span>
+                              )}
                               {(() => {
-                                const guess = nonFurnitureOf(line);
+                                const guess = fabric ? null : nonFurnitureOf(line);
                                 if (!guess || line.ignored || run.status !== "parsed") return null;
                                 return (
                                   <SuggestButton

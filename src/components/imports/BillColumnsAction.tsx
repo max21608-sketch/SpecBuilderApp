@@ -28,6 +28,8 @@ export type StuckBill = {
   needsColumns?: boolean | null;
   /** False where the original was not kept. Absent is not false. */
   sourcePreserved?: boolean | null;
+  /** A model has already read this bill's columns. Absent: not known, say nothing. */
+  structureRead?: boolean | null;
 };
 
 /** True for a bill row that wants a person rather than a retry. */
@@ -44,9 +46,21 @@ export default function BillColumnsAction({ run }: { run: StuckBill }) {
       </span>
     );
   }
+  // SAID BEFOREHAND: a bill whose columns nobody could map is read by the
+  // model when its review first opens (plan any-bill Step 2.2). One small read,
+  // and the row says so before the press that leads to it, not after.
+  const willRead =
+    run.status === "parsed" && run.needsColumns === true && run.sourcePreserved !== false && run.structureRead === false;
   return (
-    <Link href={`/dashboard/imports/${run.id}`} className={buttonClass("secondary", "xs", "no-underline")}>
-      Set the columns
-    </Link>
+    <span className="flex flex-col items-end gap-0.5">
+      <Link href={`/dashboard/imports/${run.id}`} className={buttonClass("secondary", "xs", "no-underline")}>
+        Set the columns
+      </Link>
+      {willRead && (
+        <span className="text-right text-[11px] text-neutral-500">
+          opening it reads the columns: one small read, charged
+        </span>
+      )}
+    </span>
   );
 }

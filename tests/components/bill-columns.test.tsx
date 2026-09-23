@@ -276,7 +276,9 @@ describe("the bill review", () => {
     mountReview({}, unreadSheets());
     expect(await screen.findByRole("region", { name: "Columns of CASEGOODS+SEATING+TABLES" })).toBeInTheDocument();
     expect(screen.getByText("Say which column is which before confirming.")).toBeInTheDocument();
-    const confirm = screen.getByRole("button", { name: /^Confirm/ });
+    // The header says the one thing to do first (plan any-bill Step 2.8),
+    // never "creates 0 records on 2 phases".
+    const confirm = screen.getByRole("button", { name: "Set the columns first" });
     expect(confirm).toBeDisabled();
   });
 

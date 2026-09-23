@@ -49,6 +49,8 @@ type Run = {
   needsColumns?: boolean | null;
   /** False where the original was not kept. */
   sourcePreserved?: boolean | null;
+  /** A model has already read this bill's columns (any-bill Step 2). */
+  structureRead?: boolean | null;
 };
 
 type Batch = { id: string; label: string | null; created_at: string; created_by: string | null; runs: Run[] };
