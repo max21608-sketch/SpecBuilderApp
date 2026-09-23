@@ -48,6 +48,14 @@ describe("the environment chip", () => {
     }
   });
 
+  it("carries the version on PILOT only", async () => {
+    const pilot = await renderChip("pilot");
+    expect(screen.getByText("v1.2")).toBeInTheDocument();
+    pilot.unmount();
+    await renderChip("staging");
+    expect(screen.queryByText(/^v\d/)).toBeNull();
+  });
+
   it("renders nothing at all in production", async () => {
     const view = await renderChip("production");
     expect(view.container).toBeEmptyDOMElement();
