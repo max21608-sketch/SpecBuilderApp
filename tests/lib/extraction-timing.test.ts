@@ -17,6 +17,8 @@ import {
   RUN_ABORT_MS,
   VISIBILITY_TIMEOUT_SECONDS,
 } from "@/lib/extraction-claim";
+import { MAX_WINDOWS, MEASURED_READ, ROWS_PER_WINDOW, WINDOWS_IN_FLIGHT } from "@/lib/spreadsheet-windows";
+import { MAX_TOKENS } from "@/lib/anthropic";
 
 describe("extraction timing contract", () => {
   it("gives the model less time than the run, and the run less than the platform", () => {
@@ -62,6 +64,22 @@ describe("extraction timing contract", () => {
     expect(waves(11) * MAX_DURATION_SECONDS).toBeLessThanOrEqual(60 * 60);
     expect(waves(30) * MAX_DURATION_SECONDS).toBeLessThanOrEqual(3 * 60 * 60);
     expect(30 * MAX_DURATION_SECONDS).toBeGreaterThan(3 * 60 * 60);
+  });
+
+  it("fits a spreadsheet's row windows inside one invocation, by the measured rate", () => {
+    // One attempt holds all of a document's windows, and one attempt is one
+    // invocation. Measured 2026-09-23: 101 rows, 65,057 output tokens, 498s.
+    // So a window must stay well under the output ceiling, and the waves of
+    // windows must fit the model deadline — with room for a denser bill.
+    const msPerRow = MEASURED_READ.elapsedMs / MEASURED_READ.rows;
+    const tokensPerRow = MEASURED_READ.outputTokens / MEASURED_READ.rows;
+    expect(ROWS_PER_WINDOW * tokensPerRow).toBeLessThan(MAX_TOKENS / 2);
+    const waves = Math.ceil(MAX_WINDOWS / WINDOWS_IN_FLIGHT);
+    expect(waves * ROWS_PER_WINDOW * msPerRow).toBeLessThan(MODEL_DEADLINE_MS * 0.9);
+    // And the limit is what the plan needs: a 300-line bill in one read.
+    expect(MAX_WINDOWS * ROWS_PER_WINDOW).toBeGreaterThanOrEqual(300);
+    // Sequential windows would not have fitted, which is why they run in waves.
+    expect(MAX_WINDOWS * ROWS_PER_WINDOW * msPerRow).toBeGreaterThan(RUN_ABORT_MS);
   });
 
   it("bounds what one press of Extract can cost", () => {

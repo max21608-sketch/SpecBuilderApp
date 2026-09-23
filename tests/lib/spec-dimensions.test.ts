@@ -3,7 +3,7 @@
 // Every case here is taken from the real Panther email of 16 Sept 2026, or is
 // a rule CLAUDE.md names as a trap.
 import { describe, expect, it } from "vitest";
-import { readDimension } from "@/lib/spec-dimensions";
+import { readDimension, sizeLineRefusal } from "@/lib/spec-dimensions";
 
 describe("readDimension", () => {
   it("reads a labelled slot, its unit and the wording that qualifies it", () => {
@@ -133,5 +133,88 @@ describe("readDimension and imperial", () => {
     // Every part fails `parseDimensionFigure`, so no slot is placed and the
     // wording stays on the ordinary path for a person to re-state.
     expect(readDimension("Overall", "5'6\" x 2'4\" x 3'")).toBeNull();
+  });
+});
+
+// ============================================================================
+// A BILL'S SIZE LINE (plan any-bill, Step 8). The shapes are a pricing
+// document's — "Sizes (mm):", "Spec size:", "Sizes(ft-in):" — and every value
+// here is invented.
+// ============================================================================
+describe("readDimension — a bill's size line", () => {
+  it("reads a size label with its unit in brackets, and prefixed parts in any order", () => {
+    const reading = readDimension("Spec size", "D 410 X H 395 mm");
+    expect(reading?.parts).toEqual([
+      { slot: "D", figure: "410", slotSuggested: false },
+      { slot: "H", figure: "395", slotSuggested: false },
+    ]);
+    expect(reading?.unit).toBe("mm");
+    expect(readDimension("Sizes (mm)", "D310 x W870 x H790")?.parts.map((part) => part.slot)).toEqual(["D", "W", "H"]);
+    expect(readDimension("Sizes(mm)", "W 610 x D 640 x H 720")?.unit).toBe("mm");
+    expect(readDimension("Sizes (cm) - Overall", "Dia 118 x H 71")?.unit).toBe("cm");
+  });
+
+  it("reads SH 440/H 690 as two statements, a seat height and a height", () => {
+    const reading = readDimension("Sizes (mm)", "W 612 x D 655 x SH 440/H 690");
+    expect(reading?.parts.map((part) => [part.slot, part.figure])).toEqual([
+      ["W", "612"],
+      ["D", "655"],
+      ["SH", "440"],
+      ["H", "690"],
+    ]);
+    expect(readDimension("Sizes (mm)", "W 700 x D 690 x SH 430/ H 720")?.parts).toHaveLength(4);
+  });
+
+  it("keeps a prefix the five slots do not have as a note, never mapping it", () => {
+    // L is not W. The W beside it is placed; the L is kept, verbatim.
+    const reading = readDimension("Sizes(mm)", "L 520 x W 330 x H440");
+    expect(reading?.parts.map((part) => part.slot)).toEqual(["W", "H"]);
+    expect(reading?.qualifier).toBe("L 520");
+    const oah = readDimension("Sizes(mm)", "W 1600 x D 470 x OAH 400 x SH 350");
+    expect(oah?.parts.map((part) => part.slot)).toEqual(["W", "D", "SH"]);
+    expect(oah?.qualifier).toBe("OAH 400");
+  });
+
+  it("stops at a component named partway along the line", () => {
+    // The base's own W and D are not the table's: a D beside a Dia would be a conflict nobody meant.
+    const reading = readDimension("Sizes (cm) - Overall", "Dia 118 x H 71 x Base: W 60 x D 60");
+    expect(reading?.parts.map((part) => part.slot)).toEqual(["DIA", "H"]);
+    expect(reading?.qualifier).toBe("Base: W 60 x D 60");
+  });
+
+  it("refuses a feet-and-inches line whole, and says why", () => {
+    expect(readDimension("Sizes (ft-in)", 'W 3\'5" X D 1\'-9 1/2" X H 2\'-4"')).toBeNull();
+    expect(readDimension("Sizes(ft-in)", "W 5'-6'' X D TBC X H 2'-4''")).toBeNull();
+    expect(sizeLineRefusal("Sizes (ft-in)", 'W 3\'5" X D 1\'-9 1/2" X H 2\'-4"')).toMatch(/Feet and inches are not converted/);
+    // Not a size line, or one that read: nothing to say.
+    expect(sizeLineRefusal("Arm height", "1'6\"")).toBeNull();
+    expect(sizeLineRefusal("Sizes (mm)", "W 600 x D 600 x H 700")).toBeNull();
+  });
+
+  it("converts plain inches, however the model escaped the inch mark", () => {
+    for (const value of ['W 20" x D 23" x SH 17"', 'W 20"" x D 23"" x SH 17""']) {
+      const reading = readDimension("Sizes (ft-in)", value);
+      expect(reading?.parts.map((part) => [part.slot, part.figure])).toEqual([
+        ["W", "20"],
+        ["D", "23"],
+        ["SH", "17"],
+      ]);
+      expect(reading?.unit).toBe("in");
+      expect(reading?.imperial).toBe(true);
+    }
+    expect(readDimension("Sizes (mm)", "W 600 x D 600 x H 700")?.imperial).toBe(false);
+  });
+
+  it("refuses a line that states two units", () => {
+    expect(readDimension("Sizes (mm)", 'W 20" x D 23"')).toBeNull();
+  });
+
+  it("does not read a size measured in another position as the item's size", () => {
+    expect(readDimension("Sizes (cm) - Fully reclined", "W 190cm x D 70cm x H 25cm")).toBeNull();
+  });
+
+  it("never reads a proportion as a length", () => {
+    // A fabric's "Width" row carrying its composition.
+    expect(readDimension("Width", "24% PC, 20% WV, 56% CO")).toBeNull();
   });
 });

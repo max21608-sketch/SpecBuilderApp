@@ -23,8 +23,19 @@ import type { AnswerEntry, AttributeEntry, RecordEntry, Registers, RequirementEn
 // The same label the chase emails use. Two spellings of one record number would
 // make a proposal and a chase about the same item look like different items.
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
+import { billRunIdOf, buildBillRowIndex, type BillRowIndex, type BillRowLine } from "@/lib/bill-rows";
 
-export async function loadExtractionRegisters(projectId: string): Promise<Registers> {
+/**
+ * `intakeRunId`, where given, is the specification document being resolved.
+ * When it is a bill's OWN specification read (`boq-specs:<billRunId>`), the
+ * bill's row → record map is loaded too, and every proposal carrying a sheet
+ * and a row resolves by it exactly — see `bill-rows.ts`. Every other document
+ * resolves by ref, as it always has.
+ */
+export async function loadExtractionRegisters(
+  projectId: string,
+  options: { intakeRunId?: string | null } = {},
+): Promise<Registers> {
   // Active records only. A retired record is not a thing a new observation
   // should land on, and a draft one has not been confirmed into existence.
   const recordRows = await sql`
@@ -143,7 +154,7 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
   const attributeRows = records.length
     ? await sql`
         select a.id, a.record_id, a.attr_group, a.dimension_slot, a.spec_field_id,
-               a.label, a.value, a.unit, a.state, a.version
+               a.label, a.value, a.unit, a.state, a.version, a.material_code
         from record_attributes a
         join spec_records r on r.id = a.record_id
         where r.project_id = ${projectId} and a.status = 'active'
@@ -161,6 +172,7 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
       unit: normaliseUnit(row.unit),
       state: String(row.state) as AttributeState,
       version: Number(row.version),
+      materialCode: row.material_code ? String(row.material_code) : null,
   }));
 
   // The BWS register, for placing a finish in the first free slot of its kind.
@@ -171,5 +183,81 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
     name: String(row.name),
   }));
 
-  return { records, requirements, answers, attributes, specFields };
+  const billRows = options.intakeRunId ? await loadBillRowIndex(options.intakeRunId, projectId) : null;
+
+  return { records, requirements, answers, attributes, specFields, billRows };
+}
+
+/**
+ * The row → record map of the bill a specification read was registered FROM,
+ * or null where it was not registered from a bill.
+ *
+ * The bill run's staged sheets say which rows are items and which are fabric
+ * lines under an item; the records its confirm made say which record each row
+ * became (`source_import_id` = the bill, `source_line_no` = the row), on the
+ * phase that sheet became. A REVISION keeps the phase it revises
+ * (`replacesRunId`), and its carried records are re-pointed at the revising
+ * bill — so a read of the OLD bill no longer maps those rows, and they fall
+ * back to the ref matcher, which is right: the rows it read are not the rows
+ * the records now stand on.
+ */
+export async function loadBillRowIndex(intakeRunId: string, projectId: string): Promise<BillRowIndex | null> {
+  const runRows = await sql`select registration_request_id from intake_runs where id = ${intakeRunId}`;
+  const billRunId = billRunIdOf(runRows[0]?.registration_request_id ? String(runRows[0].registration_request_id) : null);
+  if (!billRunId) return null;
+
+  const billRows = await sql`
+    select parsed from intake_runs
+    where id = ${billRunId} and project_id = ${projectId} and source_kind = 'boq_xlsx' and status = 'confirmed'
+  `;
+  const parsed = billRows[0]?.parsed as { sheets?: unknown } | null | undefined;
+  if (!parsed || !Array.isArray(parsed.sheets)) return null;
+  const sheets = (
+    parsed.sheets as { sheetName?: unknown; lines?: unknown; replacesRunId?: unknown; headerRow?: unknown; headerRows?: unknown }[]
+  )
+    .filter((sheet) => typeof sheet.sheetName === "string" && Array.isArray(sheet.lines))
+    .map((sheet) => ({
+      sheetName: String(sheet.sheetName),
+      replacesRunId: typeof sheet.replacesRunId === "string" ? sheet.replacesRunId : null,
+      headerRow: Number.isInteger(sheet.headerRow) ? Number(sheet.headerRow) : null,
+      headerRows: Number.isInteger(sheet.headerRows) ? Number(sheet.headerRows) : null,
+      lines: (sheet.lines as Record<string, unknown>[])
+        .filter((line) => Number.isInteger(line.lineNo))
+        .map(
+          (line): BillRowLine => ({
+            lineNo: Number(line.lineNo),
+            code: typeof line.code === "string" ? line.code : null,
+            ignored: line.ignored === true,
+            rowKind: typeof line.rowKind === "string" ? line.rowKind : null,
+            finishFor:
+              line.finishFor && typeof line.finishFor === "object" && Number.isInteger((line.finishFor as { row?: unknown }).row)
+                ? { row: Number((line.finishFor as { row: number }).row) }
+                : null,
+          }),
+        ),
+    }));
+
+  const phaseRows = await sql`
+    select id, source_sheet from spec_runs where source_import_id = ${billRunId} and project_id = ${projectId}
+  `;
+  const recordRows = await sql`
+    select id, run_id, source_line_no from spec_records
+    where source_import_id = ${billRunId} and project_id = ${projectId} and status = 'active'
+      and source_line_no is not null
+  `;
+  const phaseForSheet = (sheet: { sheetName: string; replacesRunId: string | null }): string | null => {
+    if (sheet.replacesRunId) return sheet.replacesRunId;
+    const matches = phaseRows.filter((row) => String(row.source_sheet ?? "") === sheet.sheetName);
+    return matches.length === 1 ? String(matches[0]!.id) : null;
+  };
+  const phases = new Map(sheets.map((sheet) => [sheet.sheetName, phaseForSheet(sheet)]));
+
+  return buildBillRowIndex(billRunId, sheets, (sheetName, lineNo) => {
+    const phase = phases.get(sheetName);
+    if (!phase) return null;
+    const found = recordRows.filter((row) => String(row.run_id) === phase && Number(row.source_line_no) === lineNo);
+    // Two records on one row is not an exact address. Leave it to the ref
+    // matcher, which offers both and picks neither.
+    return found.length === 1 ? String(found[0]!.id) : null;
+  });
 }

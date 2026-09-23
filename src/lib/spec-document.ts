@@ -49,8 +49,9 @@ import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-r
 export { findRecordsByRef, normaliseRef };
 export { deferredToSomebody };
 export type { RecordEntry };
-import { readDimension, type DimensionReading } from "@/lib/spec-dimensions";
-import { readFinish, type FinishReading } from "@/lib/spec-finishes";
+import { readDimension, sizeLineRefusal, type DimensionReading } from "@/lib/spec-dimensions";
+import { kindCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
+import { billRowTarget, type BillRowIndex } from "@/lib/bill-rows";
 import { suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
 
 export const PROPOSAL_SCHEMA_VERSION = 1;
@@ -98,6 +99,12 @@ export type AttributeEntry = {
   unit: AttributeUnit | null;
   state: AttributeState;
   version: number;
+  /**
+   * The client's own code the row carries, verbatim. Optional: only the finish
+   * path reads it, to aim a second statement of a code the item ALREADY holds
+   * at the field it is in rather than the next free one.
+   */
+  materialCode?: string | null;
 };
 
 export type Registers = {
@@ -108,6 +115,12 @@ export type Registers = {
   attributes?: AttributeEntry[];
   /** The 56 BWS spec fields, for placing a finish. Optional for the same reason. */
   specFields?: SpecFieldEntry[];
+  /**
+   * The bill this document was registered FROM, row → record — present only
+   * on a bill's own specification read (`bill-rows.ts`). A proposal carrying a
+   * sheet and a row it names resolves by it, exactly, ahead of the ref matcher.
+   */
+  billRows?: BillRowIndex | null;
 };
 
 // ---- the staged shape ------------------------------------------------------
@@ -205,7 +218,25 @@ export type Proposal = {
     value: string | null;
     tbc: boolean;
     reason: string | null;
+    /**
+     * Why this finish fills NO field even where one is free — a stone code,
+     * "Fabric: COM". Kept against the item as written. Optional: staged JSON
+     * written before it existed has none.
+     */
+    noField?: string | null;
   } | null;
+  /**
+   * The bill row this proposal was placed by, on a bill's own specification
+   * read. `itemRow` is set when the row is a FABRIC LINE and the record is the
+   * item it sits under. Null or absent where the ref matcher placed it.
+   */
+  rowMatch?: { sheet: string; row: number; itemRow: number | null } | null;
+  /**
+   * What the app made of this observation that the reviewer would otherwise
+   * have to work out — a size kept rather than placed, a row whose printed ref
+   * names a different item. Said on the row. Optional for the same reason.
+   */
+  readingNote?: string | null;
   /**
    * The ACTIVE attribute a dimension or finish would replace, as it was when
    * resolved.
@@ -458,14 +489,120 @@ export function seedTakenFields(registers: Registers): Map<string, Set<string>> 
   return taken;
 }
 
+// ---- which record an observation is about ---------------------------------
+
+/**
+ * Where an observation lands, before anything about WHAT it says is read.
+ *
+ * `row` — a bill's own specification read, and the observation's sheet and row
+ * are a row the bill's confirm made a record of. Exact, and it takes
+ * precedence over the ref: the document row IS the record.
+ *
+ * `row_conflict` — the same, except the ref printed beside it names a
+ * DIFFERENT item this project holds. The model has miscounted a row or the bill
+ * has, and the app cannot tell which; both are offered and neither is chosen.
+ *
+ * `ref` — everything else, resolved by the client's code as it always has been.
+ */
+type Resolution =
+  | { by: "row"; sheet: string; row: number; itemRow: number | null; record: RecordEntry }
+  | { by: "row_conflict"; sheet: string; row: number; itemRow: number | null; record: RecordEntry; named: RecordEntry[] }
+  | { by: "ref"; matched: RecordEntry[] };
+
+/** Refs that name nothing: a bill writes these in its code column for a line with no code of its own. */
+const NON_REFS = new Set(["NA", "TBC", "TBA", "NONE", ""]);
+
+function refPieces(codeRaw: string | null): Set<string> {
+  const pieces = new Set<string>();
+  const whole = normaliseRef(codeRaw ?? "");
+  if (whole) pieces.add(whole);
+  for (const piece of (codeRaw ?? "").split(/[()[\]\s,;]+/)) {
+    const folded = normaliseRef(piece);
+    if (folded) pieces.add(folded);
+  }
+  return pieces;
+}
+
+function resolveRecords(observation: RawProposal, registers: Registers): Resolution {
+  const hit = billRowTarget(registers.billRows, observation.sourceSheet, observation.sourceRow);
+  const record = hit ? (registers.records.find((entry) => entry.id === hit.target.recordId) ?? null) : null;
+  if (!hit || !record) return { by: "ref", matched: findRecordsByRef(observation.refRaw, registers.records) };
+
+  const placed = { sheet: hit.sheet, row: hit.row, itemRow: hit.target.itemRow, record };
+  // THE REF STILL HAS TO AGREE WHERE IT CAN BE READ. A ref that is blank,
+  // `N/A`, the row's own printed code (a fabric line's `GR-FAB-13 (GR-FUR-10)`
+  // or either half of it), or one naming nothing this project holds, cannot
+  // contradict the row. One naming a DIFFERENT record can, and does.
+  const folded = normaliseRef(observation.refRaw ?? "");
+  if (NON_REFS.has(folded) || refPieces(hit.target.codeRaw).has(folded)) return { by: "row", ...placed };
+  const named = findRecordsByRef(observation.refRaw, registers.records);
+  if (named.length === 0 || named.some((entry) => entry.id === record.id)) return { by: "row", ...placed };
+  return { by: "row_conflict", ...placed, named };
+}
+
+/** The records an observation would be written to, one per run, for the document-wide pre-pass. */
+function landingRecords(observation: RawProposal, registers: Registers): { record: RecordEntry; fabricLine: boolean }[] {
+  const resolution = resolveRecords(observation, registers);
+  if (resolution.by === "row") return [{ record: resolution.record, fabricLine: resolution.itemRow !== null }];
+  if (resolution.by === "row_conflict") return [];
+  return groupRecordsByRun(resolution.matched)
+    .filter((run) => run.records.length === 1)
+    .map((run) => ({ record: run.records[0]!, fabricLine: false }));
+}
+
+/**
+ * What one observation needs to know about the REST of its document.
+ *
+ * `metricSize`: the records a METRIC size line places slots on, with that
+ * line's label. A bill writes "Sizes (mm)" and "Sizes (ft-in)" for one item —
+ * one size stated twice — and placing both would put every slot on the item
+ * twice. The metric line is the one placed and the imperial line says so.
+ * Computed over the WHOLE document, which is why `rematchProposals`, which
+ * re-resolves one observation at a time, builds it once from every
+ * observation and passes it in.
+ */
+export type DocumentContext = { metricSize: Map<string, string> };
+
+export function documentContext(raw: RawProposal[], registers: Registers): DocumentContext {
+  const metricSize = new Map<string, string>();
+  for (const observation of raw) {
+    const reading = readDimension(observation.attributeRaw, observation.valueRaw);
+    if (!reading || reading.imperial || !reading.unit || reading.unit === "in" || reading.parts.length === 0) continue;
+    for (const { record, fabricLine } of landingRecords(observation, registers)) {
+      if (fabricLine || metricSize.has(record.id)) continue;
+      metricSize.set(record.id, (observation.attributeRaw ?? "the metric size").trim());
+    }
+  }
+  return { metricSize };
+}
+
 export function resolveProposals(
   raw: RawProposal[],
   registers: Registers,
   newId: () => string,
   taken: Map<string, Set<string>> = seedTakenFields(registers),
+  context: DocumentContext = documentContext(raw, registers),
 ): Proposal[] {
   return raw.flatMap((observation, index) => {
-    const matchedRecords = findRecordsByRef(observation.refRaw, registers.records);
+    const resolution = resolveRecords(observation, registers);
+
+    if (resolution.by === "row_conflict") {
+      // Offered, never chosen: the row's record FIRST, because the row is the
+      // stronger address, and the records the ref names after it.
+      const offered = [resolution.record, ...resolution.named.filter((entry) => entry.id !== resolution.record.id)];
+      const candidates: Candidate[] = offered.map((record) => ({
+        id: record.id,
+        label: `${record.label} · ${record.refs.join(", ")} · ${record.itemDescription}`,
+      }));
+      const proposal = buildProposal(observation, index, null, candidates, registers, newId, null);
+      return [
+        {
+          ...proposal,
+          rowMatch: { sheet: resolution.sheet, row: resolution.row, itemRow: resolution.itemRow },
+          readingNote: `Row ${resolution.row} of “${resolution.sheet}” is ${resolution.record.label} on the bill, but this names ${observation.refRaw ?? "another code"}, which is ${resolution.named.map((entry) => entry.label).join(" or ")}. Choose which item it belongs to.`,
+        },
+      ];
+    }
 
     // ------------------------------------------------------------------
     // THE FAN-OUT. `S-201` is on the mock-up run, the main run and the VE
@@ -483,11 +620,20 @@ export function resolveProposals(
     //
     // This is `resolveDrawingTargets`' rule, which has been right since 0007.
     // The two pipelines matching a code differently was the defect.
+    //
+    // A ROW-PLACED observation is one record on one run, by construction: a
+    // bill's row is one line of one tab, and it never fans out.
     // ------------------------------------------------------------------
-    const runs = groupRecordsByRun(matchedRecords);
+    const runs =
+      resolution.by === "row"
+        ? [{ runId: resolution.record.runId, runName: resolution.record.runName, records: [resolution.record] }]
+        : groupRecordsByRun(resolution.matched);
     if (runs.length === 0) {
       return [buildProposal(observation, index, null, [], registers, newId, null)];
     }
+    const rowMatch =
+      resolution.by === "row" ? { sheet: resolution.sheet, row: resolution.row, itemRow: resolution.itemRow } : null;
+    const fabricLine = resolution.by === "row" && resolution.itemRow !== null;
 
     return runs.flatMap((run) => {
       const candidates: Candidate[] = run.records.map((record) => ({
@@ -499,24 +645,60 @@ export function resolveProposals(
       // attribute against, so picking it would only produce a second
       // unanswerable question.
       const record = run.records.length === 1 ? run.records[0] ?? null : null;
+      const placedBy = (proposal: Proposal, readingNote: string | null = null): Proposal => ({
+        ...proposal,
+        ...(rowMatch ? { rowMatch } : {}),
+        ...(readingNote ? { readingNote } : {}),
+      });
 
       // A DIMENSION does not go through requirement matching at all. It
       // carries a slot, and one observation can state three of them.
       const reading = readDimension(observation.attributeRaw, observation.valueRaw);
+      let note: string | null = record ? sizeLineRefusal(observation.attributeRaw, observation.valueRaw) : null;
       if (reading && record) {
-        return reading.parts.map((part) =>
-          buildDimensionProposal(observation, index, record, candidates, newId, run, reading, part, registers),
-        );
+        const metric = context.metricSize.get(record.id);
+        if (fabricLine) {
+          // A FABRIC LINE'S SIZE IS THE FABRIC'S. Its "Width" is a roll width;
+          // written to the item it sits under, it would be the chair's W.
+          note = `This is the fabric line under row ${rowMatch?.itemRow ?? "?"}: its sizes are the fabric's, not the item's, so they fill no slot.`;
+        } else if (reading.imperial && metric) {
+          note = `Not placed: this item's “${metric}” line is the one placed. The two state one size twice, and inches are the copy.`;
+        } else {
+          return reading.parts.map((part, partIndex) =>
+            placedBy(buildDimensionProposal(observation, index, record, candidates, newId, run, reading, part, registers, partIndex)),
+          );
+        }
+      } else if (note && record && context.metricSize.has(record.id)) {
+        note = `Not placed: feet and inches are not converted, and this item's “${context.metricSize.get(record.id)}” line is the one placed.`;
       }
 
       // A FINISH does not either. It carries a BWS field, and which slot it
-      // takes depends on what the record already holds.
-      const finish = record ? readFinish(observation.attributeRaw, observation.valueRaw) : null;
-      if (finish && record) {
-        return [buildFinishProposal(observation, index, record, candidates, newId, run, finish, registers, taken)];
+      // takes depends on what the record already holds. One value can name
+      // several — "STN-02, MTL-01, TIM-03" is three statements, one each.
+      const finishes = record ? readFinishes(observation.attributeRaw, observation.valueRaw) : [];
+      if (finishes.length > 0 && record) {
+        return finishes.map((finish) =>
+          placedBy(buildFinishProposal(observation, index, record, candidates, newId, run, finish, registers, taken)),
+        );
       }
 
-      return [buildProposal(observation, index, record, candidates, registers, newId, run)];
+      // A ROW-PLACED record with no category is still THE record — the bill
+      // row says so — and it is kept, with the next step said: it has no
+      // checklist until it has a category, and re-matching after one is set is
+      // free. Offered-and-unchosen would read "Item not found" about an item
+      // the row names exactly.
+      if (rowMatch && record && !record.categoryId) {
+        const proposal = buildProposal(observation, index, record, candidates, registers, newId, run);
+        return [
+          placedBy(
+            { ...proposal, recordId: record.id, recordLabel: record.label },
+            note ??
+              `${record.label} has no category yet, so it has no checklist question for this. Set its category, then re-match (free).`,
+          ),
+        ];
+      }
+
+      return [placedBy(buildProposal(observation, index, record, candidates, registers, newId, run), note)];
     });
   });
 }
@@ -538,6 +720,7 @@ function buildDimensionProposal(
   reading: DimensionReading,
   part: DimensionReading["parts"][number],
   registers: Registers,
+  partIndex = 0,
 ): Proposal {
   const occupied =
     (registers.attributes ?? []).find(
@@ -556,7 +739,10 @@ function buildDimensionProposal(
       unit: reading.unit,
       unitSource: reading.unitSource,
       slotSuggested: part.slotSuggested,
-      qualifier: reading.qualifier,
+      // ON THE FIRST PART ONLY. The confirm keeps a qualifier as a note row
+      // carrying the whole line, and a line of three slots is one line — three
+      // copies of "L 540 x W 345 x H450" would be the document saying it thrice.
+      qualifier: partIndex === 0 ? reading.qualifier : null,
       tbc: reading.tbc,
     },
     attributeTarget: occupied
@@ -610,19 +796,53 @@ function buildFinishProposal(
   taken: Map<string, Set<string>>,
 ): Proposal {
   const claimed = taken.get(record.id) ?? new Set<string>();
-  const specFieldId = suggestSpecField(
-    {
-      attrGroup: finish.group,
-      labelRaw: observation.attributeRaw,
-      valueRaw: observation.valueRaw,
-      materialCodeRaw: finish.codeRaw,
-    },
-    registers.specFields ?? [],
-    claimed,
-  );
-  if (specFieldId) {
-    claimed.add(specFieldId);
-    taken.set(record.id, claimed);
+  // THE SAME CODE THE ITEM ALREADY HOLDS is the same finish said again — a
+  // bill's item line naming the fabric its own fabric line was confirmed as.
+  // Aimed at the field it is in, never at the next free one, or the item would
+  // ship a second fabric nobody specified.
+  //
+  // The bill's own ZONE in front of a code (`GR-FAB-11` on the item line,
+  // `FAB-11` on its fabric line) is matched too, and said, because it is the
+  // one reading here the bill does not state outright: aimed at the field the
+  // item already holds, it asks the reviewer to confirm a replacement; taken
+  // as a new fabric, it would sit in COM 2 and nobody would be asked.
+  const folded = finish.codeRaw ? normaliseRef(finish.codeRaw) : "";
+  const unzoned = finish.codeRaw ? normaliseRef(kindCode(finish.codeRaw)) : "";
+  const sameCode = (attribute: AttributeEntry, fold: (code: string) => string, wanted: string) =>
+    attribute.recordId === record.id &&
+    Boolean(attribute.specFieldId) &&
+    Boolean(attribute.materialCode) &&
+    fold(String(attribute.materialCode)) === wanted;
+  const exactHolding = folded
+    ? ((registers.attributes ?? []).find((attribute) => sameCode(attribute, normaliseRef, folded)) ?? null)
+    : null;
+  const zoneHolding =
+    !exactHolding && unzoned
+      ? ((registers.attributes ?? []).find((attribute) =>
+          sameCode(attribute, (code) => normaliseRef(kindCode(code)), unzoned),
+        ) ?? null)
+      : null;
+  const holding = exactHolding ?? zoneHolding;
+  let specFieldId: string | null = null;
+  if (finish.noField) {
+    specFieldId = null;
+  } else if (holding?.specFieldId) {
+    specFieldId = holding.specFieldId;
+  } else {
+    specFieldId = suggestSpecField(
+      {
+        attrGroup: finish.group,
+        labelRaw: observation.attributeRaw,
+        valueRaw: finish.value ?? observation.valueRaw,
+        materialCodeRaw: finish.kindCodeRaw ?? finish.codeRaw,
+      },
+      registers.specFields ?? [],
+      claimed,
+    );
+    if (specFieldId) {
+      claimed.add(specFieldId);
+      taken.set(record.id, claimed);
+    }
   }
 
   const occupied =
@@ -645,10 +865,17 @@ function buildFinishProposal(
       specFieldId,
       specFieldName,
       codeRaw: finish.codeRaw,
-      value: observation.valueRaw,
+      // The STATEMENT, which is the whole value unless it named several codes.
+      value: finish.value ?? observation.valueRaw,
       tbc: finish.tbc,
       reason: finish.reason,
+      noField: finish.noField,
     },
+    readingNote: exactHolding
+      ? `This item already holds ${finish.codeRaw} in ${specFieldName ?? "a field"}; this says it again, so it is aimed there rather than at the next free slot. Ignore it unless these words should replace what ${specFieldName ?? "it"} holds.`
+      : zoneHolding
+        ? `This item already holds ${zoneHolding.materialCode} in ${specFieldName ?? "a field"}, and ${finish.codeRaw} reads as the same code under the bill's own zone, so it is aimed there rather than at the next free slot. Check they are one finish; ignore it unless these words should replace what ${specFieldName ?? "it"} holds.`
+        : null,
     attributeTarget: occupied
       ? {
           attributeId: occupied.id,
@@ -666,7 +893,7 @@ function buildFinishProposal(
     recordId: record.id,
     requirementId: null,
     target: null,
-    proposedValue: observation.valueRaw,
+    proposedValue: finish.value ?? observation.valueRaw,
     proposedState: finish.tbc ? "tbc" : "confirmed",
     stateReason: null,
     overwriteAcknowledged: false,
@@ -807,6 +1034,15 @@ export function rematchProposals(
     taken.set(line.recordId, set);
   }
 
+  // What each observation needs to know about the rest of the document — an
+  // item's metric size line beside its imperial one — read over EVERY
+  // observation, frozen ones included, because re-resolving one at a time
+  // cannot see the others.
+  const context = documentContext(
+    order.map((ordinal) => groups.get(ordinal)?.[0]?.raw).filter((raw): raw is RawProposal => Boolean(raw)),
+    registers,
+  );
+
   let rematched = 0;
   let added = 0;
   const lines: Proposal[] = [];
@@ -825,7 +1061,7 @@ export function rematchProposals(
       continue;
     }
 
-    const resolved = resolveProposals([first.raw], registers, newId, taken).map((next) => ({
+    const resolved = resolveProposals([first.raw], registers, newId, taken, context).map((next) => ({
       ...next,
       sourceOrdinal: ordinal,
     }));
@@ -841,13 +1077,16 @@ export function rematchProposals(
     added += resolved.length - group.length;
     // Keep an id wherever the same target survives, so a row the reviewer is
     // looking at stays the row they were looking at.
+    // An id is handed out ONCE: two new proposals that share a target (one
+    // value naming two codes no field holds) must not both inherit one id.
     const byTarget = new Map(group.map((line) => [targetKey(line), line.id]));
-    lines.push(
-      ...resolved.map((next, index) => ({
-        ...next,
-        id: byTarget.get(targetKey(next)) ?? (index === 0 && group.length === 1 ? first.id : next.id),
-      })),
-    );
+    const kept = new Set<string>();
+    for (const [index, next] of resolved.entries()) {
+      const reuse = byTarget.get(targetKey(next)) ?? (index === 0 && group.length === 1 ? first.id : null);
+      const id = reuse && !kept.has(reuse) ? reuse : next.id;
+      kept.add(id);
+      lines.push({ ...next, id });
+    }
   }
 
   return { lines, rematched, added };
@@ -867,7 +1106,9 @@ function targetKey(proposal: Proposal): string {
     proposal.recordId ?? "-",
     proposal.requirementId ?? "-",
     proposal.dimension?.slot ?? "-",
-    proposal.finish ? (proposal.finish.specFieldId ?? "field?") : "-",
+    // A finish with no field is told apart by its code: "STN-02, SPF-05" is
+    // two statements, and one key for both would read as nothing having moved.
+    proposal.finish ? (proposal.finish.specFieldId ?? `field?${proposal.finish.codeRaw ?? ""}`) : "-",
   ].join("|");
 }
 

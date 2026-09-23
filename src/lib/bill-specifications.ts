@@ -25,11 +25,10 @@
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { insertSpecDocumentRun, type SpecRunRegistration } from "@/lib/spec-registration";
-
-/** The registration request id a bill's specification read always carries. */
-export function billSpecsRequestId(billRunId: string): string {
-  return `boq-specs:${billRunId}`;
-}
+import { billSpecsRequestId } from "@/lib/bill-rows";
+// The id lives in the leaf `bill-rows.ts`, so the registers loader can read one
+// without importing the registration protocol. Re-exported for every caller.
+export { billSpecsRequestId };
 
 export async function registerBillSpecifications(
   txn: TxnSql,

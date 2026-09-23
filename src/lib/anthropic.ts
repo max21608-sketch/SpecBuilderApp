@@ -44,7 +44,7 @@ import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
 // Opus reads slower. Effort stays "high" (Max, same day).
 export const EXTRACTION_MODEL = "claude-opus-5";
 
-const MAX_TOKENS = 128_000;
+export const MAX_TOKENS = 128_000;
 
 // Anthropic's total request ceiling. Checked against the ACTUAL serialized
 // length, because a base64 PDF is about a third larger than the file and a
@@ -363,7 +363,15 @@ export type ExtractionResult = ExtractionSuccess | ExtractionFailure;
 export async function extractSpecDocument(
   source: DocumentSource,
   documentKind: DocumentKind,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    signal?: AbortSignal;
+    /**
+     * The app's own words about HOW this source is given — a spreadsheet's
+     * numbered rows, one part of several. Sent after the kind's prompt, never
+     * inside the document's text.
+     */
+    instruction?: string;
+  } = {},
 ): Promise<ExtractionResult> {
   const startedAt = Date.now();
   const elapsed = () => Date.now() - startedAt;
@@ -387,6 +395,7 @@ export async function extractSpecDocument(
       : [
           { type: "text" as const, text: source.text },
           { type: "text" as const, text: PROMPTS[documentKind] },
+          ...(options.instruction ? [{ type: "text" as const, text: options.instruction }] : []),
         ];
 
   // Measured on what will actually be sent, not estimated from the file size.

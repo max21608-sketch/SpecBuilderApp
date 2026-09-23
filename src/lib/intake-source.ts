@@ -6,7 +6,10 @@ import { MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
 
 export type DocumentSource =
   | { type: "pdf"; base64: string }
-  | { type: "spreadsheet"; text: string }
+  // `sheets` is the same workbook as rows, so a long one can be read in row
+  // windows (`spreadsheet-windows.ts`). Optional: a caller that only ever sends
+  // `text` is untouched.
+  | { type: "spreadsheet"; text: string; sheets?: { sheet: string; data: SheetData }[] }
   // An email reaches the model as text: headers, then the body, with any quoted
   // history marked. Attachments are NOT inlined — a file's kind is declared by
   // a person, never inferred, so registering one is its own deliberate act.
@@ -270,7 +273,8 @@ export async function prepareDocumentSource(bytes: Buffer, filename: string, con
     return { type: "email", text: buildEmailModelText(await parseEnvelope(bytes)).text };
   }
   if (kind === "xlsx" || kind === "csv" || kind === "tsv") {
-    return { type: "spreadsheet", text: spreadsheetSheetsToText(await readSpreadsheetSheets(bytes, filename, contentType)) };
+    const sheets = await readSpreadsheetSheets(bytes, filename, contentType);
+    return { type: "spreadsheet", text: spreadsheetSheetsToText(sheets), sheets };
   }
   throw new Error("Unsupported intake file. Upload a PDF, .xlsx, .csv, .tsv or .eml file.");
 }
