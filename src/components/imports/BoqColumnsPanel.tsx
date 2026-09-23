@@ -98,6 +98,7 @@ export default function BoqColumnsPanel({
   sheet,
   version,
   editable,
+  sourceKept = true,
   onRead,
   onClose,
   onIgnoreSheet,
@@ -109,6 +110,12 @@ export default function BoqColumnsPanel({
   version: number;
   /** False once the bill is confirmed, or while the page is busy. */
   editable: boolean;
+  /**
+   * False where the bill was posted without its original being kept: there is
+   * nothing to read again, so the panel says so rather than offering a read
+   * the route will refuse.
+   */
+  sourceKept?: boolean;
   /**
    * After a successful write: the page reloads, THEN reports. A screen that
    * clears its banner on a successful load would otherwise swallow the message.
@@ -400,7 +407,11 @@ export default function BoqColumnsPanel({
       </p>
 
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <Button variant="primary" disabled={!editable || busy || problem !== null} onClick={() => void read()}>
+        <Button
+          variant="primary"
+          disabled={!editable || busy || problem !== null || !sourceKept}
+          onClick={() => void read()}
+        >
           {busy ? "Reading…" : "Read the bill with these columns"}
         </Button>
         <Button disabled={!editable || busy} onClick={onIgnoreSheet}>
@@ -409,7 +420,13 @@ export default function BoqColumnsPanel({
         <span className="text-xs text-neutral-500">Free — the stored spreadsheet is read by code. Nothing is confirmed.</span>
       </div>
 
-      {problem && editable && (
+      {!sourceKept && (
+        <p className="px-4 pb-3 text-[12.5px] text-amber-800">
+          The original of this bill was not kept when it was uploaded, so it cannot be read with new columns. Upload
+          the file again.
+        </p>
+      )}
+      {problem && editable && sourceKept && (
         <p className="px-4 pb-3 text-[12.5px] text-amber-800" role="status">
           {problem}
         </p>

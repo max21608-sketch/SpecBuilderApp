@@ -176,6 +176,12 @@ describe("the Columns panel", () => {
     expect(onRead).not.toHaveBeenCalled();
   });
 
+  it("says so, and offers no read, where the bill's original was not kept", () => {
+    panel(unreadSheets()[0]!, { sourceKept: false });
+    expect(screen.getByText(/cannot be read with new columns\. Upload the file again/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Read the bill with these columns" })).toBeDisabled();
+  });
+
   it("offers 'Not a bill — ignore this sheet'", async () => {
     const user = userEvent.setup();
     const { onIgnoreSheet } = panel(unreadSheets()[1]!);

@@ -1006,6 +1006,7 @@ export default function ReviewImportPage() {
                   sheet={sheet}
                   version={run.version}
                   editable={run.status === "parsed"}
+                  sourceKept={run.parsed?.sourcePreserved !== false && run.has_source !== false}
                   onRead={(message) => afterColumns(sheetIndex, message)}
                   onClose={sheet.needsColumns ? undefined : () => setPanel(false)}
                   onIgnoreSheet={() => {
