@@ -51,7 +51,7 @@ function renderConfigurations(
   // does has to supply it, exactly as the review screens do.
   doc?: Parameters<typeof configurationCards>[2],
 ) {
-  const spies = callbacks();
+  const spies = { ...callbacks(), onSaveItem: vi.fn(async (..._args: unknown[]) => undefined) };
   const byItem =
     resolutions ??
     new Map(
@@ -85,6 +85,7 @@ function renderConfigurations(
         onImage={spies.onImage}
         onSwatch={spies.onSwatch}
       onSetLevel={spies.onSetLevel}
+        onSaveItem={spies.onSaveItem}
       />
     );
   }
@@ -105,7 +106,7 @@ describe("the configuration card", () => {
     expect(screen.getByText(/One bill line, drawn as 2 configurations/)).toBeInTheDocument();
   });
 
-  it("says whether each configuration's record exists or will be created", () => {
+  it("says whether each configuration's record exists or will be created", async () => {
     resetIds();
     const pages = [page("a", 5, "Woven raffia", "S-201"), page("b", 6, "Pale linen", "S-201")];
     renderConfigurations(
@@ -115,7 +116,11 @@ describe("the configuration card", () => {
         ["b", resolution({ id: "b", variantLabel: "B", writesTo: {} })],
       ]),
     );
+    // One configuration at a time: A's tab is open and says its record exists;
+    // B's says its record will be created once it is opened.
     expect(screen.getByText(/record exists/)).toBeInTheDocument();
+    expect(screen.queryByText(/record will be created/)).toBeNull();
+    await userEvent.click(screen.getByRole("tab", { name: /S-201 B/ }));
     expect(screen.getByText(/record will be created/)).toBeInTheDocument();
   });
 
@@ -143,13 +148,25 @@ describe("the configuration card", () => {
     expect(new Set(edits.map((edit) => edit.observation.id)).size).toBe(2);
   });
 
-  it("gives each configuration its own section, with its own fabric", () => {
+  it("shows ONE configuration at a time, as a tab, with its own fabric", async () => {
+    // Max, 2026-09-23: "you just see configuration one ... and then you go to
+    // configuration two ... it's the same every time." Never listed one after
+    // another down the page.
     renderConfigurations(twoPages());
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      expect.stringContaining("S-201 A"),
+      expect.stringContaining("S-201 B"),
+    ]);
     expect(screen.getByDisplayValue("Woven raffia")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Pale linen")).toBeInTheDocument();
-    // And a colour band per configuration, so the chip above maps to it.
+    expect(screen.queryByDisplayValue("Pale linen")).toBeNull();
     expect(document.querySelectorAll(".border-l-sky-400").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("tab", { name: /S-201 B/ }));
+    expect(screen.getByDisplayValue("Pale linen")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Woven raffia")).toBeNull();
+    // Its own colour, the band matching the tab: B is emerald, as it always was.
     expect(document.querySelectorAll(".border-l-emerald-400").length).toBeGreaterThan(0);
+    // The same layout on every tab: the shared geometry is still there, once.
+    expect(screen.getAllByDisplayValue("640")).toHaveLength(1);
   });
 
   it("folds the non-key measurements once, not once per page", () => {
@@ -189,7 +206,7 @@ describe("the configuration card", () => {
     expect(screen.getByText(/S-201 B cannot be confirmed yet: Choose millimetres or centimetres\./)).toBeInTheDocument();
   });
 
-  it("collapses a configuration that has already been applied", () => {
+  it("collapses a configuration that has already been applied", async () => {
     resetIds();
     const applied = page("a", 5, "Woven raffia", "S-201");
     applied.observations = applied.observations.map((o) => ({
@@ -198,6 +215,9 @@ describe("the configuration card", () => {
       reviewedAt: "2026-09-16T10:00:00Z",
     }));
     renderConfigurations([applied, page("b", 6, "Pale linen", "S-201")]);
+    // The strip opens on the configuration still to review, and says the other is done.
+    expect(screen.getByRole("tab", { name: /S-201 A/ }).textContent).toContain("applied");
+    await userEvent.click(screen.getByRole("tab", { name: /S-201 A/ }));
     expect(screen.getByText(/applied on 16\/09\/2026/)).toBeInTheDocument();
     // Its fabric row is history, so it carries no controls.
     expect(screen.queryByDisplayValue("Woven raffia")).toBeNull();
@@ -226,9 +246,10 @@ describe("when the pages do not agree on the size", () => {
     expect(screen.getByRole("button", { name: /Confirm S-201 \(2 configurations\)/ })).toBeEnabled();
   });
 
-  it("shows each configuration's own figures instead of a shared table", () => {
+  it("shows each configuration's own figures instead of a shared table", async () => {
     renderConfigurations(disagreeing());
     expect(screen.getByDisplayValue("680")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: /S-201 B/ }));
     expect(screen.getByDisplayValue("720")).toBeInTheDocument();
   });
 });
@@ -324,9 +345,9 @@ describe("a wide observation table has somewhere to scroll", () => {
   it("gives every observation table an overflow-x-auto ancestor", () => {
     renderConfigurations(twoPages());
     const tables = Array.from(document.querySelectorAll("table"));
-    // The shared geometry plus one per configuration; each configuration's
-    // fabric differs, so each has rows of its own.
-    expect(tables.length).toBeGreaterThanOrEqual(3);
+    // The shared geometry plus the OPEN configuration's own rows: one tab is
+    // mounted at a time.
+    expect(tables.length).toBeGreaterThanOrEqual(2);
     for (const table of tables) {
       expect(table.closest(".overflow-x-auto")).not.toBeNull();
     }
@@ -354,5 +375,68 @@ describe("a wide observation table has somewhere to scroll", () => {
       const box = table.closest<HTMLElement>(".overflow-x-auto")!;
       expect(box.className).not.toContain("overflow-hidden");
     }
+  });
+});
+
+// ============================================================================
+// THE MANUAL codeGroups.relationship (brief C1): a reviewer splits pages the
+// model called one item, joins pages it split, or names the configurations.
+// Each writes to EVERY page of the code, beside the model's reading.
+// ============================================================================
+describe("a reviewer saying what these pages are", () => {
+  const oneItemPages = () => {
+    resetIds();
+    return [page("a", 1, "Tibor Blob Amber Fern", "S-200"), page("b", 2, "Tibor Blob Amber Fern", "S-200")];
+  };
+  const oneItem = {
+    schemaVersion: 2 as const,
+    codeGroups: [{ itemCodes: ["S-200"], pages: [1, 2], relationship: "one_item" as const, evidence: "one chair" }],
+  };
+  const notSplit = (staged: DrawingItem[]) =>
+    new Map(staged.map((entry) => [entry.id, resolution({ id: entry.id, variantLabel: null })]));
+
+  it("splits pages the model called one item, on every page", async () => {
+    const pages = oneItemPages();
+    const spies = renderConfigurations(pages, notSplit(pages), oneItem);
+    await userEvent.click(screen.getByRole("button", { name: "separate configurations" }));
+    expect(spies.onSaveItem.mock.calls.map((call) => [(call[0] as DrawingItem).id, call[1]])).toEqual([
+      ["a", { relationshipByReviewer: "configurations" }],
+      ["b", { relationshipByReviewer: "configurations" }],
+    ]);
+  });
+
+  it("says what was read and what the reviewer set, and can put the reading back", async () => {
+    const pages = oneItemPages().map((entry) => ({ ...entry, relationshipByReviewer: "configurations" as const }));
+    const spies = renderConfigurations(pages, undefined, oneItem);
+    expect(screen.getByText(/read as one item; you set configurations/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Put the reading back" }));
+    expect(spies.onSaveItem.mock.calls.map((call) => call[1])).toEqual([
+      { relationshipByReviewer: null },
+      { relationshipByReviewer: null },
+    ]);
+  });
+
+  it("joins pages the model split", async () => {
+    const spies = renderConfigurations(twoPages());
+    await userEvent.click(screen.getByRole("button", { name: "one item" }));
+    expect(spies.onSaveItem.mock.calls.map((call) => call[1])).toEqual([
+      { relationshipByReviewer: "one_item" },
+      { relationshipByReviewer: "one_item" },
+    ]);
+  });
+
+  it("names the configurations instead, which makes it a card of named ones", async () => {
+    const pages = oneItemPages();
+    const spies = renderConfigurations(pages, notSplit(pages), oneItem);
+    await userEvent.click(screen.getByRole("button", { name: "Name its configurations…" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Configuration name" }), "Type 1, type 2");
+    await userEvent.click(screen.getByRole("button", { name: /^Add/ }));
+    expect(spies.onSaveItem.mock.calls[0]![1]).toEqual({
+      configurationsByReviewer: [
+        { label: "TYPE 1", readAs: null },
+        { label: "TYPE 2", readAs: null },
+      ],
+    });
+    expect(spies.onSaveItem).toHaveBeenCalledTimes(2);
   });
 });

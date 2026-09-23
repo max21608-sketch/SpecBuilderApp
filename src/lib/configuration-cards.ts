@@ -42,6 +42,13 @@ import {
   measuredRows,
   codeGroupFor,
   variantLettersByItem,
+  namedConfigurationPlans,
+  codeConfigurations,
+  configurationEditSummary,
+  FABRIC_SLOTS,
+  METAL_SLOTS,
+  TIMBER_SLOTS,
+  type NamedConfiguration,
   type StagedDrawings,
   type DrawingItem,
   type DrawingObservation,
@@ -134,7 +141,55 @@ export type ReviewCard<R> =
       pages: number[];
       members: ConfigurationMember<R>[];
       geometry: GeometryComparison;
+      /**
+       * A code whose pages NAME its configurations (schemaVersion 3): one tab
+       * per configuration, named as the document names it. Null for a lettered
+       * or one-item card, which keeps `members` and `geometry` as before.
+       */
+      named: NamedCardView | null;
+      /** What the model said about these PAGES, or null on a version 1 run. */
+      relationshipRead: "one_item" | "configurations" | "unclear" | null;
+      /** The reviewer's own answer (brief C1), or null. */
+      relationshipByReviewer: "one_item" | "configurations" | null;
     };
+
+/** One row on a named configuration's tab — the SAME observation on every tab it lands on. */
+export type NamedTabRow = {
+  item: DrawingItem;
+  observation: DrawingObservation;
+  /** Every configuration this row lands on, in the code's order. */
+  lands: string[];
+};
+
+export type NamedTab = {
+  /** Folded, as stored: `TYPE 2`. */
+  label: string;
+  /** Its place in the code's list — what colours it. */
+  index: number;
+  /** Every wording the pages used for it. */
+  namesRaw: string[];
+  /** The rows that land on it, pending ones only, dimensions first. */
+  rows: NamedTabRow[];
+  /** Pending rows landing on it. */
+  pending: number;
+  /** Applied once every row that lands on it has been written or ignored. */
+  state: MemberState;
+};
+
+export type NamedCardView = {
+  configurations: NamedConfiguration[];
+  tabs: NamedTab[];
+  /**
+   * Pending rows that land on NO configuration — theirs were removed by a
+   * reviewer. On no tab, so the card lists them apart, above the tabs, where
+   * they cannot be missed; each is a blocker until somebody places it.
+   */
+  undecided: NamedTabRow[];
+  /** "Read as 4, you set 5 — …", or null when nobody has edited the list. */
+  editSummary: string | null;
+  /** The configurations as the model read them (empty on a v1/v2 run). */
+  read: NamedConfiguration[];
+};
 
 /**
  * Every page of one item, in order.
@@ -274,7 +329,119 @@ export function compareGeometry(members: readonly { item: DrawingItem; letter: s
  * a page with no code — it is its own item, it can never commit, and it opens
  * collapsed.
  */
-export function configurationCards<R extends { variantLabel?: string | null }>(
+/**
+ * The tabs of a named card: one per configuration of the code, each carrying
+ * every pending row that lands on it.
+ *
+ * A ROW IS LISTED ON EVERY TAB IT LANDS ON AND IS ONE OBSERVATION. The shared
+ * geometry is on all five tabs; editing it on TYPE 2 edits it for all of them,
+ * because it is one row and the confirm writes it to each. Only one tab is on
+ * screen at a time, so there is still one input per observation.
+ *
+ * `rowsOf` is the SERVER'S landing when the resolution has arrived and the
+ * local plan until then — both `namedConfigurationPlans` over the same items.
+ */
+export function namedTabs(
+  pages: readonly DrawingItem[],
+  configurations: readonly NamedConfiguration[],
+  rowsOf: (item: DrawingItem) => Record<string, string[]> | undefined,
+): NamedTab[] {
+  const all = configurations.map((entry) => entry.label);
+  return configurations.map((configuration, index) => {
+    const rows: NamedTabRow[] = [];
+    let applied = 0;
+    for (const item of pages) {
+      const landing = rowsOf(item) ?? {};
+      for (const observation of item.observations) {
+        // `?? all` only for a row the plan never saw; `[]` lands nowhere.
+        const lands = landing[observation.id] ?? all;
+        if (!lands.includes(configuration.label)) continue;
+        if (observation.reviewStatus === "applied") applied += 1;
+        if (observation.reviewStatus !== "pending") continue;
+        rows.push({ item, observation, lands });
+      }
+    }
+    const state: MemberState = rows.length > 0 ? "pending" : applied > 0 ? "applied" : "ignored";
+    return {
+      label: configuration.label,
+      index,
+      namesRaw: configuration.namesRaw,
+      rows,
+      pending: rows.length,
+      state,
+    };
+  });
+}
+
+/** Pending rows of a named code that land on no configuration at all. */
+export function undecidedRows(
+  pages: readonly DrawingItem[],
+  rowsOf: (item: DrawingItem) => Record<string, string[]> | undefined,
+): NamedTabRow[] {
+  const out: NamedTabRow[] = [];
+  for (const item of pages) {
+    const landing = rowsOf(item) ?? {};
+    for (const observation of item.observations) {
+      if (observation.reviewStatus !== "pending") continue;
+      if (landing[observation.id]?.length === 0) out.push({ item, observation, lands: [] });
+    }
+  }
+  return out;
+}
+
+/**
+ * A BWS FIELD SKIPPED ON A CONFIGURATION — a warning, never a blocker.
+ *
+ * Staging claims COM 1, COM 2, COM 3 in order per configuration. A REVIEWER
+ * who moves rows between configurations (brief C1), or who names the
+ * configurations of a v2 card whose fabrics were claimed page-wide, can leave
+ * `TYPE 2`'s only fabric in COM 2 with COM 1 empty — which exports as a fabric
+ * in the second slot of a chair that has one. The card says so beside the row;
+ * the reviewer moves it with the field control, which is theirs to decide.
+ */
+export function fieldSlotGaps(
+  tabs: readonly NamedTab[],
+  fields: readonly { id: string; json_id: number; name: string }[],
+): Map<string, string> {
+  const families = [FABRIC_SLOTS, TIMBER_SLOTS, METAL_SLOTS].map((slots) =>
+    slots.map((jsonId) => fields.find((field) => field.json_id === jsonId)).filter(
+      (field): field is { id: string; json_id: number; name: string } => Boolean(field),
+    ),
+  );
+  const out = new Map<string, string>();
+  for (const tab of tabs) {
+    for (const family of families) {
+      const used = new Set<number>();
+      const placed: { id: string; index: number }[] = [];
+      for (const row of tab.rows) {
+        const index = family.findIndex((field) => field.id === row.observation.specFieldId);
+        if (index === -1) continue;
+        used.add(index);
+        placed.push({ id: row.observation.id, index });
+      }
+      for (const entry of placed) {
+        const free = family.findIndex((_, index) => index < entry.index && !used.has(index));
+        if (free === -1 || out.has(entry.id)) continue;
+        out.set(
+          entry.id,
+          `On ${tab.label} this is in ${family[entry.index]!.name}, but ${family[free]!.name} is free there.`,
+        );
+      }
+    }
+  }
+  return out;
+}
+
+/** How a row says where else it lands: "shared by all 5", "shared with TYPE 1 · TYPE 5", or nothing. */
+export function sharedWithSentence(lands: readonly string[], here: string, total: number): string | null {
+  if (lands.length <= 1) return null;
+  if (lands.length === total) return `shared by all ${total}`;
+  return `shared with ${lands.filter((label) => label !== here).join(" · ")}`;
+}
+
+export function configurationCards<
+  R extends { variantLabel?: string | null; named?: { rows: Record<string, string[]> } | null },
+>(
   items: readonly DrawingItem[],
   resolved: ReadonlyMap<string, R | undefined>,
   // The DOCUMENT, not only its items, because whether a repeated code is one
@@ -285,11 +452,16 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
 ): ReviewCard<R>[] {
   const letters = variantLettersByItem(items, doc);
   const groups = groupItemsByCode(items, doc);
+  // Pages whose code NAMES its configurations. Such a code is a card of its own
+  // even when it is drawn on ONE page: S-301's sheet alone is five chairs.
+  const plans = namedConfigurationPlans(items, doc);
+  const byCode = plans.size > 0 ? codeConfigurations(items, doc) : new Map<string, never>();
   const cards: ReviewCard<R>[] = [];
   const grouped = new Set<string>();
 
   for (const [code, group] of groups) {
-    if (group.length < 2) continue;
+    const plan = group.map((item) => plans.get(item.id)).find(Boolean) ?? null;
+    if (group.length < 2 && !plan) continue;
     for (const item of group) grouped.add(item.id);
     // TWO DIFFERENT LETTERS, AND KEEPING THEM APART IS THE POINT.
     //
@@ -305,7 +477,7 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
     // The SERVER'S answer first, exactly as `letter` below resolves it: the
     // resolution is what the confirm will act on, and a card whose sentence
     // disagreed with what the confirm does would be the worse of the two lies.
-    const split = group.some((item) => resolved.get(item.id)?.variantLabel ?? letters.get(item.id));
+    const split = Boolean(plan) || group.some((item) => resolved.get(item.id)?.variantLabel ?? letters.get(item.id));
     const members: ConfigurationMember<R>[] = group.map((item, index) => ({
       item,
       // `resolution.variantLabel` is the server's answer and the one the
@@ -325,6 +497,12 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
       id: `code:${code}`,
       split,
       groupedBecause: codeGroupFor(doc ?? { schemaVersion: 1 }, group[0]!.itemCodeRaw)?.evidence ?? null,
+      relationshipRead: codeGroupFor(doc ?? { schemaVersion: 1 }, group[0]!.itemCodeRaw)?.relationship ?? null,
+      relationshipByReviewer:
+        group
+          .map((item) => item.relationshipByReviewer)
+          .find((answer): answer is "one_item" | "configurations" => answer === "one_item" || answer === "configurations") ??
+        null,
       code,
       codeRaw: group[0]!.itemCodeRaw ?? code,
       name: group.find((item) => item.itemNameRaw)?.itemNameRaw ?? null,
@@ -332,6 +510,19 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
       pages: pagesOfCard(group, doc),
       members,
       geometry: compareGeometry(members.filter((member) => member.state === "pending")),
+      named: plan
+        ? (() => {
+            const rowsOf = (item: DrawingItem) => resolved.get(item.id)?.named?.rows ?? plans.get(item.id)?.rows;
+            const entry = byCode.get(code);
+            return {
+              configurations: plan.configurations,
+              tabs: namedTabs(group, plan.configurations, rowsOf),
+              undecided: undecidedRows(group, rowsOf),
+              editSummary: configurationEditSummary(entry),
+              read: entry?.read ?? [],
+            };
+          })()
+        : null,
     });
   }
 

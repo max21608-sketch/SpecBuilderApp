@@ -370,13 +370,18 @@ export default function PackDrawingsReview({
   }
 
   async function saveTargets(item: DrawingItem, ticked: string[], unticked: string[]) {
+    await saveItem(item, { ticked, unticked });
+  }
+
+  /** Any change to a staged ITEM (its phases, a configuration acknowledgement). */
+  async function saveItem(item: DrawingItem, changes: Record<string, unknown>) {
     const run = runOf(item.id);
     if (!run) return;
     await queueSave(async () => {
       const res = await apiFetch(`/api/imports/${run.importId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ itemId: item.id, expectedVersion: item.version, changes: { ticked, unticked } }),
+        body: JSON.stringify({ itemId: item.id, expectedVersion: item.version, changes }),
       });
       await reloadThen(res.ok ? null : res.error);
     });
@@ -840,6 +845,7 @@ export default function PackDrawingsReview({
               busy={busy === card.item.id}
               onSaveObservation={saveObservation}
               onSaveTargets={saveTargets}
+                onSaveItem={saveItem}
               onSetBulkUnit={setBulkUnit}
               onImage={rememberImage}
               onSwatch={rememberSwatch}
@@ -858,6 +864,7 @@ export default function PackDrawingsReview({
               onSaveObservation={saveObservation}
               onSaveObservations={saveObservations}
               onSaveTargets={saveTargets}
+                onSaveItem={saveItem}
               onSetBulkUnit={setBulkUnit}
               onReview={review}
               onReviewMany={reviewMany}

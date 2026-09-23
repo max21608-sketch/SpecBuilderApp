@@ -41,7 +41,11 @@ import {
   targetRecordIds,
   canonicalCode,
   variantLettersByItem,
+  namedConfigurationPlans,
+  parentVariantsOf,
+  rowWriteRecords,
   stateToWrite,
+  type NamedTargets,
   type DrawingItem,
   type DrawingObservation,
   type OccupiedSlots,
@@ -356,7 +360,15 @@ export async function confirmDrawingItem(
   //   `writeIds` where the specs actually land.
   // A code drawn ONCE has the two identical, which is most of any pack.
   // ==========================================================================
-  const variantLabel = variantLettersByItem(run.staged.items, run.staged).get(item.id) ?? null;
+  //
+  // A CODE WHOSE PAGES NAME ITS CONFIGURATIONS (schemaVersion 3) is the third
+  // case, and it writes to SEVERAL variants per bill line: S-301's sheet is
+  // TYPE 1 … TYPE 5 on every phase that quotes it, and each ROW lands only on
+  // the configurations it belongs to. The plan comes from the same pure
+  // function the card reads. `ordered` is unchanged — still the bill's own.
+  // ==========================================================================
+  const plan = namedConfigurationPlans(run.staged.items, run.staged).get(item.id) ?? null;
+  const variantLabel = plan ? null : (variantLettersByItem(run.staged.items, run.staged).get(item.id) ?? null);
   const ordered = [...targets].sort();
   const variantOf = new Map<string, string>();
   if (variantLabel) {
@@ -365,7 +377,14 @@ export async function confirmDrawingItem(
       variantOf.set(parentId, variant.recordId);
     }
   }
-  const writeIds = ordered.map((parentId) => variantOf.get(parentId) ?? parentId);
+  // The live variants BEFORE this confirm creates any: the blocker that asks
+  // before a new configuration is created beside existing ones has to see the
+  // bill line as it was, or every creation would read as an exact match.
+  const named: NamedTargets | null = plan ? { plan, variants: parentVariantsOf(records) } : null;
+  const existingNamedIds = named
+    ? [...new Set(taken.flatMap((observation) => rowWriteRecords(observation.id, ordered, named)))]
+    : [];
+  const writeIds = named ? existingNamedIds : ordered.map((parentId) => variantOf.get(parentId) ?? parentId);
 
   // Blockers are recomputed here, never trusted from the screen. `occupied` is
   // read live so a slot filled by another card a second ago is caught.
@@ -405,20 +424,52 @@ export async function confirmDrawingItem(
     }
   }
   // Keyed back onto what the reviewer ticked, so the blockers and the replace
-  // acknowledgements both speak about the records named on the card.
-  const occupied = occupancyThrough(byWriteTarget, variantOf);
-  const blockers = drawingItemBlockers(item, resolution, occupied);
+  // acknowledgements both speak about the records named on the card. A NAMED
+  // page is keyed by the real variants instead: one bill line has five of
+  // them, and a re-key onto the parent could only hold one.
+  const occupied = named ? byWriteTarget : occupancyThrough(byWriteTarget, variantOf);
+  const blockers = drawingItemBlockers(item, resolution, occupied, named);
   if (blockers.length > 0) {
     throw new DomainConflictError("blocked", blockers[0]?.message ?? "This item cannot be confirmed yet.", {
       diff: blockers,
     });
   }
 
+  // ---- where each row lands ------------------------------------------------
+  //
+  // One entry per record written. `ackKey` is what the reviewer's replace
+  // acknowledgements are keyed on: the ticked bill record for a plain or
+  // lettered card (the `occupancyThrough` contract), the variant itself for a
+  // named one (whose occupants the card named by variant).
+  type Write = { tickedId: string; recordId: string; ackKey: string; observations: DrawingObservation[] };
+  const writes: Write[] = [];
+  if (named) {
+    for (const parentId of ordered) {
+      for (const label of named.plan.labels) {
+        const variant = await ensureVariant(txn, { parentId, variantLabel: label, actor });
+        writes.push({
+          tickedId: parentId,
+          recordId: variant.recordId,
+          ackKey: variant.recordId,
+          observations: taken.filter((observation) =>
+            (named.plan.rows[observation.id] ?? named.plan.labels).includes(label),
+          ),
+        });
+      }
+    }
+  } else {
+    for (const [index, recordId] of ordered.map((parentId) => variantOf.get(parentId) ?? parentId).entries()) {
+      const tickedId = ordered[index]!;
+      writes.push({ tickedId, recordId, ackKey: tickedId, observations: taken });
+    }
+  }
+  const writtenIds = writes.map((write) => write.recordId);
+
   // Locked in a deterministic order. Two item cards fanning out to overlapping
   // records would otherwise be able to deadlock against each other. The records
   // LOCKED are the ones being written, which for a configuration is the variant
   // rather than the bill line.
-  const lockOrder = [...writeIds].sort();
+  const lockOrder = [...new Set(writtenIds)].sort();
   const locked = await txn`
     select id, project_id, status from spec_records
     where id = any(${lockOrder}::uuid[])
@@ -638,11 +689,11 @@ export async function confirmDrawingItem(
   const now = new Date().toISOString();
   let answersFilled = 0;
 
-  // BOTH IDS PER ITERATION. `recordId` is where the spec lands; `tickedId` is
-  // the record the reviewer saw named on the card, which is what their replace
-  // acknowledgements are keyed on. For a code drawn once the two are the same.
-  for (const [index, recordId] of writeIds.entries()) {
-    const tickedId = ordered[index]!;
+  // BOTH IDS PER ITERATION. `recordId` is where the spec lands; `ackKey` is
+  // what the reviewer's replace acknowledgements are keyed on — the record the
+  // card named. For a code drawn once the two are the same.
+  let inserts = 0;
+  for (const { recordId, ackKey, observations: landing } of writes) {
     // One image row per target record, the same fan-out the attributes get, and
     // correct for the same reason: it is ONE drawing of one item, and the runs
     // quoting it are quoting that item.
@@ -673,8 +724,9 @@ export async function confirmDrawingItem(
     `;
     let sortOrder = Number(sortRows[0]?.max_sort ?? 0);
 
-    for (const observation of taken) {
+    for (const observation of landing) {
       sortOrder += 1;
+      inserts += 1;
 
       // ---- a revised drawing replaces what is in the slot ------------------
       // Retired BEFORE the insert, and that order is decided by the database
@@ -683,7 +735,7 @@ export async function confirmDrawingItem(
       // insert-then-retire cannot. Re-checked against the version the reviewer
       // saw — an occupant that changed since is refused rather than replaced,
       // because the value they agreed to drop is not the value that is there.
-      const replacement = acknowledgedReplacements(observation).get(tickedId);
+      const replacement = acknowledgedReplacements(observation).get(ackKey);
       if (replacement) {
         const supersededRows = await txn`
           update record_attributes
@@ -823,7 +875,7 @@ export async function confirmDrawingItem(
   // would be a version of a state the record was never in.
   // The records that CHANGED, which for a configuration is the variant. A
   // version of the bill line would describe a heading nothing was written to.
-  await snapshotRecords(txn, writeIds, changeSetId);
+  await snapshotRecords(txn, writtenIds, changeSetId);
 
   const items = run.staged.items.map((row) =>
     row.id !== itemId
@@ -852,14 +904,14 @@ export async function confirmDrawingItem(
   await txn`
     insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
     values ('intake_run', ${runId}, 'parsed', ${status}, ${actor},
-            ${`${taken.length} spec${taken.length === 1 ? "" : "s"} applied to ${ordered.length} record${ordered.length === 1 ? "" : "s"}`})
+            ${`${taken.length} spec${taken.length === 1 ? "" : "s"} applied to ${writes.length} record${writes.length === 1 ? "" : "s"}`})
   `;
 
   return {
-    applied: taken.length * ordered.length,
+    applied: inserts,
     ignored: 0,
     restored: 0,
-    records: ordered.length,
+    records: writes.length,
     replaced: superseded.length,
     answersFilled,
     remainingPending: countPending(items),

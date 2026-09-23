@@ -58,13 +58,14 @@ import {
   type SpecField,
 } from "@/components/imports/ObservationRows";
 import type { CroppedImage } from "@/lib/pdf-crop";
+import { AddConfiguration } from "@/components/imports/ConfigurationControls";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Tip from "@/components/ui/Tip";
 
 // Re-exported from where they now live, so the screens keep one import.
 export type { Occupant, RecordChoice, RunResolution, SpecField } from "@/components/imports/ObservationRows";
-import type { FinishFilingView } from "@/lib/drawing-resolution";
+import type { FinishFilingView, NamedResolution } from "@/lib/drawing-resolution";
 
 export type ItemResolution = {
   id: string;
@@ -95,6 +96,12 @@ export type ItemResolution = {
   // NOT blockers. These never disable Confirm and the confirm route never sees
   // them -- see drawingItemWarnings() for why they are a separate type.
   warnings?: RowWarning[];
+  /**
+   * A page of a code that NAMES its configurations (schemaVersion 3): where
+   * each row lands and what the confirm will create. Rendered by
+   * `NamedConfigurationCard`, never by this card.
+   */
+  named?: NamedResolution | null;
 };
 
 /**
@@ -144,6 +151,7 @@ export default function ItemCard({
   onImage,
   onSwatch,
   onSetLevel,
+  onSaveItem,
 }: {
   item: DrawingItem;
   /**
@@ -180,6 +188,12 @@ export default function ItemCard({
    * so the two writes cannot be confused.
    */
   onSetLevel: (recordIds: string[], level: ItemLevel) => Promise<void>;
+  /**
+   * Any other change to this staged ITEM — here, a reviewer naming the
+   * configurations of a page the read called one item (brief C1). Optional: a
+   * screen without it shows no such control.
+   */
+  onSaveItem?: (item: DrawingItem, changes: Record<string, unknown>) => Promise<void>;
 }) {
   const pending = item.observations.filter((o) => o.reviewStatus === "pending");
 
@@ -316,6 +330,27 @@ export default function ItemCard({
         <Chip tone="warn">page unknown</Chip>
       )}
       {item.confidence === "low" && <Chip tone="warn">code was hard to read</Chip>}
+      {/* ONE PAGE, SEVERAL CHAIRS — a reviewer who knows the page names its
+          configurations the read missed. Naming them turns this into a card of
+          named configurations; the model's reading stays beside it. */}
+      {open && onSaveItem && item.itemCodeRaw && (
+        <>
+          <AddConfiguration
+            existing={[]}
+            disabled={busy}
+            label="Name its configurations…"
+            hint="TYPE 1, TYPE 2 — with commas"
+            onAdd={(labels) =>
+              void onSaveItem(item, { configurationsByReviewer: labels.map((label) => ({ label, readAs: null })) })
+            }
+          />
+          {Array.isArray(item.configurationsByReviewer) && (
+            <Button size="xs" variant="quiet" disabled={busy} onClick={() => void onSaveItem(item, { configurationsByReviewer: null })}>
+              Put the configurations the document named back
+            </Button>
+          )}
+        </>
+      )}
       <span className="flex-1" />
       {/* Offered whenever the card holds a MEASUREMENT, not only once one has
           been promoted to a dimension. A page whose units could not be inferred

@@ -49,6 +49,7 @@ import {
 } from "@/lib/drawing-document";
 import { assertStagedPreamble, preambleNoteBlockers, type StagedPreamble } from "@/lib/preamble-document";
 import { loadPalettes, withPalettes } from "@/lib/palette-load";
+import { normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
 
 export const dynamic = "force-dynamic";
 
@@ -162,6 +163,29 @@ const DrawingPatch = z
       .object({
         ticked: z.array(z.string().uuid()).max(200).optional(),
         unticked: z.array(z.string().uuid()).max(200).optional(),
+        // THE ITEM'S: the reviewer's tick that confirming may CREATE a named
+        // configuration beside a bill line's existing ones, per (bill record,
+        // folded name). The blocker it answers is computed; this is only the
+        // decision. The whole list is sent, like `replaces`.
+        configurationAcks: z
+          .array(z.object({ recordId: z.string().uuid(), label: z.string().min(1).max(64) }).strict())
+          .max(200)
+          .optional(),
+        // THE ITEM'S, brief C1: the reviewer's own list of the code's
+        // configurations (null puts the model's reading back), and their
+        // answer to whether the pages are one item or several. Written to
+        // every page of the code by the card; the model's reading is never
+        // touched.
+        configurationsByReviewer: z
+          .array(z.object({ label: z.string().min(1).max(64), readAs: z.string().max(64).nullable() }).strict())
+          .max(30)
+          .nullable()
+          .optional(),
+        relationshipByReviewer: z.enum(["one_item", "configurations"]).nullable().optional(),
+        // THE OBSERVATION'S: which of the code's configurations this row
+        // applies to, by label. `[]` is every one; null puts the model's
+        // reading back.
+        configurations: z.array(z.string().min(1).max(64)).max(30).nullable().optional(),
         value: z.string().max(4000).nullable().optional(),
         unit: z.enum(ATTRIBUTE_UNITS).nullable().optional(),
         attrGroup: z.enum(ATTRIBUTE_GROUPS).optional(),
@@ -239,10 +263,58 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
         }
         const ticked = changes.ticked ?? item.targets?.ticked ?? [];
         const unticked = changes.unticked ?? item.targets?.unticked ?? [];
-        // Both lists are the reviewer's DECISION, which is what lets a target
-        // that appears later be told apart from one they deliberately unticked.
+        // Only when the request is ABOUT the targets. An item that has never
+        // been touched has `targets: null`, meaning "whatever resolves" — and
+        // writing `{ ticked: [], unticked: [] }` over that because somebody
+        // ticked a configuration acknowledgement would untick every phase.
+        const aboutTargets = changes.ticked !== undefined || changes.unticked !== undefined;
+        // A NAME IS REFUSED IN WORDS HERE, when it is typed — the database
+        // would refuse it at confirm, and a card that let it through would be
+        // a 500 waiting. Folded the way the column stores it, and one name once.
+        let configurationsByReviewer: { label: string; readAs: string | null }[] | null | undefined;
+        if (changes.configurationsByReviewer !== undefined) {
+          if (changes.configurationsByReviewer === null) {
+            configurationsByReviewer = null;
+          } else {
+            const seen = new Set<string>();
+            configurationsByReviewer = [];
+            for (const entry of changes.configurationsByReviewer) {
+              const label = normaliseVariantLabel(entry.label);
+              const problem = variantLabelProblem(label);
+              if (problem) throw new DomainConflictError("configuration_name", problem, { status: 400 });
+              if (seen.has(label)) {
+                throw new DomainConflictError("configuration_duplicate", `${label} is already a configuration of this item.`, {
+                  status: 400,
+                });
+              }
+              seen.add(label);
+              configurationsByReviewer.push({ label, readAs: entry.readAs ? normaliseVariantLabel(entry.readAs) : null });
+            }
+          }
+        }
         items = staged.items.map((row) =>
-          row.id === itemId ? { ...row, version: row.version + 1, targets: { ticked, unticked } } : row,
+          row.id === itemId
+            ? {
+                ...row,
+                version: row.version + 1,
+                // Both lists are the reviewer's DECISION, which is what lets a
+                // target that appears later be told apart from one they
+                // deliberately unticked.
+                ...(aboutTargets ? { targets: { ticked, unticked } } : {}),
+                ...(changes.configurationAcks !== undefined
+                  ? {
+                      configurationAcks: changes.configurationAcks.map((ack) => ({
+                        recordId: ack.recordId,
+                        label: normaliseVariantLabel(ack.label),
+                      })),
+                    }
+                  : {}),
+                ...(configurationsByReviewer !== undefined ? { configurationsByReviewer } : {}),
+                ...(changes.relationshipByReviewer !== undefined
+                  ? { relationshipByReviewer: changes.relationshipByReviewer }
+                  : {}),
+              }
+            : row,
         );
       } else {
         const observation = item.observations.find((row) => row.id === observationId);
@@ -338,6 +410,15 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
               }
             : {}),
           ...(changes.replaces !== undefined ? { replaces: changes.replaces } : {}),
+          // Beside the model's `configurations`, never over it.
+          ...(changes.configurations !== undefined
+            ? {
+                configurationsByReviewer:
+                  changes.configurations === null
+                    ? null
+                    : [...new Set(changes.configurations.map((label) => normaliseVariantLabel(label)))],
+              }
+            : {}),
         };
         // Refused by the database; caught here so the reviewer gets a
         // sentence instead of a 500. A NOTE may carry a unit — 0011 widened

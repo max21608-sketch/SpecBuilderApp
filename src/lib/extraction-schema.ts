@@ -403,19 +403,54 @@ export const MAX_PER_ITEM = 120;
 // a couple of details. Twelve is generous; a page reporting more than that is
 // reporting furniture in swatches, not views of one item.
 export const MAX_VIEW_REGIONS = 12;
+// A page naming its own configurations names a handful: S-301's sheet names
+// five room types. Thirty is generous and still bounded.
+export const MAX_CONFIGURATIONS = 30;
 
 const drawingObservationProperties = {
   labelRaw: {
     type: ["string", "null"],
     maxLength: MAX_SHORT,
     description:
-      "The drawing's own label for this, exactly as written ('SOFA FEET', 'FABRIC', 'Width', 'PIPING'). Null if the drawing gives none.",
+      "The drawing's own label for this, exactly as written ('SOFA FEET', 'FABRIC', 'Width', 'PIPING'). Null if the drawing gives none. " +
+      "Never add a configuration to the label: 'FABRIC REFERENCE', not 'FABRIC REFERENCE - Type 2'.",
   },
   valueRaw: {
     type: ["string", "null"],
     maxLength: MAX_VALUE,
     description:
       "The value exactly as written, including 'TBC' where the drawing says so. For a dimension, the figure alone ('190'). Never add a unit the drawing does not print.",
+  },
+};
+
+// ============================================================================
+// WHICH CONFIGURATIONS A ROW BELONGS TO — READ OFF THE PAGE (schemaVersion 3).
+//
+// Panther's S-301 sheet prints ONE fabric line per room type under one heading
+// ("FABRIC REFERENCE  As per room type: Type 1 & 5 - …, Type 2 - …") beside ONE
+// set of overall dimensions. The model read it correctly and the tool had
+// nowhere to put it, so it welded the type into each row's LABEL and the app
+// then handed the four lines COM 1, COM 2 and COM 3 of ONE record — one chair
+// with three fabrics, where the sheet describes five chairs with one each.
+//
+// Which configuration a line is about is a thing a person answers by looking
+// at the page, so under house convention 6 it is the model's to read and
+// report. What this app CALLS a configuration — the folded name it stores in
+// `spec_records.variant_label` — is resolved afterwards, in code.
+//
+// EMPTY IS THE COMMON ANSWER: a row shared by every configuration the page
+// shows (the geometry, a shared frame finish) carries none.
+// ============================================================================
+const observationConfigurationsProperty = {
+  configurations: {
+    type: "array",
+    maxItems: MAX_CONFIGURATIONS,
+    items: { type: "string", maxLength: MAX_SHORT },
+    description:
+      "The configurations this row applies to, by the `name` you gave them in the item's `configurations`. " +
+      "Empty when the row is shared by every configuration the page shows — the overall dimensions, a frame finish " +
+      "common to all of them — and when the page names no configurations at all, which is the usual case. " +
+      "A line reading 'Type 1 & 5 - <fabric>' is ONE row with ['Type 1', 'Type 5'].",
   },
 };
 
@@ -529,8 +564,13 @@ export const DRAWINGS_TOOL = {
               items: {
                 type: "object",
                 additionalProperties: false,
-                properties: { ...drawingObservationProperties, ...dimensionUnitProperty, ...dimensionSlotProperties },
-                required: ["labelRaw", "valueRaw", "unitRaw", "slot", "slotEvidence", "isOverall"],
+                properties: {
+                  ...drawingObservationProperties,
+                  ...dimensionUnitProperty,
+                  ...dimensionSlotProperties,
+                  ...observationConfigurationsProperty,
+                },
+                required: ["labelRaw", "valueRaw", "unitRaw", "slot", "slotEvidence", "isOverall", "configurations"],
               },
             },
             materials: {
@@ -549,8 +589,9 @@ export const DRAWINGS_TOOL = {
                     description:
                       "The client's own finish code shown against this callout, if any ('CH-01.1', 'WD-01', 'MT-01', 'UPH-07'). Null otherwise.",
                   },
+                  ...observationConfigurationsProperty,
                 },
-                required: ["labelRaw", "valueRaw", "materialCodeRaw"],
+                required: ["labelRaw", "valueRaw", "materialCodeRaw", "configurations"],
               },
             },
             dimensionsCombinedRaw: {
@@ -574,6 +615,51 @@ export const DRAWINGS_TOOL = {
             confidence: {
               anyOf: [{ type: "string", enum: ["high", "medium", "low"] }, { type: "null" }],
               description: "How clearly the page identifies this item. 'low' if the code was hard to read.",
+            },
+            configurations: {
+              type: "array",
+              maxItems: MAX_CONFIGURATIONS,
+              description:
+                "The configurations of this item that THIS PAGE NAMES — room types, options, versions the document itself " +
+                "lists ('As per room type: Type 1 & 5 - …, Type 2 - …', 'OPTION A / OPTION B', a title block 'MUR 1 & TYPO 5'). " +
+                "ONE entry per configuration: a line naming two ('Type 1 & 5') gives two entries, 'Type 1' and 'Type 5'. " +
+                "Empty when the page names none, which is the usual case.",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  name: {
+                    type: "string",
+                    maxLength: MAX_SHORT,
+                    description:
+                      "ONE configuration, in plain form ('Type 1', 'Type 5', 'Option B'). Where pages of the same item name one " +
+                      "configuration differently ('TYPO 5' on the shop drawing, 'Type 5' on the specification sheet), use the " +
+                      "SAME name on both, the one the specification uses.",
+                  },
+                  nameRaw: {
+                    type: ["string", "null"],
+                    maxLength: MAX_SHORT,
+                    description: "The page's own words for it, exactly as printed ('Type 1 & 5', 'TYPO 5', 'OPTION B').",
+                  },
+                  evidence: {
+                    type: ["string", "null"],
+                    maxLength: MAX_NOTE,
+                    description:
+                      "Where on the page it is named, quoting it — \"FABRIC REFERENCE: As per room type: Type 1 & 5 - …\", " +
+                      "\"title block reads MUR 1 & TYPO 5 DESK CHAIR\".",
+                  },
+                },
+                required: ["name", "nameRaw", "evidence"],
+              },
+            },
+            depictsConfigurations: {
+              type: "array",
+              maxItems: MAX_CONFIGURATIONS,
+              items: { type: "string", maxLength: MAX_SHORT },
+              description:
+                "Which of this item's configurations THIS PAGE SHOWS, by `name`, when the page itself says so — a shop " +
+                "drawing titled 'MUR 1 & TYPO 5 DESK CHAIR' shows Type 1 and Type 5 only. Empty when the page does not " +
+                "restrict itself to some of them.",
             },
             // WHERE the pictures of this item are, so one can be shown against
             // the record. The model reports every view it can see and which
@@ -613,7 +699,18 @@ export const DRAWINGS_TOOL = {
               },
             },
           },
-          required: ["itemCodeRaw", "itemNameRaw", "page", "dimensions", "dimensionsCombinedRaw", "materials", "notesRaw", "confidence"],
+          required: [
+            "itemCodeRaw",
+            "itemNameRaw",
+            "page",
+            "dimensions",
+            "dimensionsCombinedRaw",
+            "materials",
+            "notesRaw",
+            "confidence",
+            "configurations",
+            "depictsConfigurations",
+          ],
         },
       },
       // ====================================================================
@@ -669,7 +766,9 @@ export const DRAWINGS_TOOL = {
               enum: ["one_item", "configurations", "unclear"],
               description:
                 "'one_item' when the pages describe the SAME piece of furniture in different ways — a specification sheet and " +
-                "its shop drawing, an elevation and a section, a general view and a detail. This is the common case. " +
+                "its shop drawing, an elevation and a section, a general view and a detail. This is the common case, and it " +
+                "stays the answer when the item comes in several configurations that a page itself lists ('as per room type: " +
+                "Type 1 … Type 5'): those go in the items' `configurations`, and this field describes only the PAGES. " +
                 "'configurations' ONLY when the pages are genuinely different things to manufacture: the same shape offered in " +
                 "different fabrics or finishes, usually lettered or numbered by the document itself. " +
                 "'unclear' when you cannot tell — a person will decide, and that is far better than a wrong guess, because " +
@@ -690,7 +789,10 @@ export const DRAWINGS_TOOL = {
                 "OPTION B with different fabrics\".",
             },
           },
-          required: ["itemCodeRaw", "pages", "relationship", "evidence"],
+          // `itemCodes`, the property this object actually declares. The list
+          // named `itemCodeRaw` from before the field became plural — a
+          // required key the object forbids — until 2026-09-23.
+          required: ["itemCodes", "pages", "relationship", "evidence"],
         },
       },
       documentNotes: {
@@ -706,6 +808,12 @@ export const DRAWINGS_TOOL = {
 export const RawDrawingObservation = z.object({
   labelRaw: nullableText(MAX_SHORT),
   valueRaw: nullableText(MAX_VALUE),
+  // schemaVersion 3. OPTIONAL in the inferred type, like `unitRaw`: almost no
+  // row names a configuration, and every fixture and every staged run before
+  // 2026-09-23 describes a row that names none. `.catch([])` because a
+  // malformed hint must never fail a read that has already been paid for —
+  // the row is kept and reads as shared, which the card shows.
+  configurations: looseTextList(MAX_SHORT, MAX_CONFIGURATIONS).catch([]).optional(),
 });
 
 // `.optional().catch(null)` on unitRaw, unlike the arrays above: a model that
@@ -825,7 +933,49 @@ export const RawViewRegion = z.object({
   bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable().catch(null).default(null),
 });
 
-export const RawDrawingItem = z.object({
+/**
+ * One configuration a page names, as the model read it.
+ *
+ * A BARE STRING IS A CONFIGURATION WITH ONLY A NAME — the element can hold it
+ * without inventing anything, which is `bareValuesAsList`'s rule. An entry with
+ * no usable name is dropped by `.catch` on the list's entry, never by failing
+ * the read.
+ */
+export const RawConfiguration = z.object({
+  name: z.string().trim().min(1).max(MAX_SHORT),
+  nameRaw: nullableText(MAX_SHORT),
+  evidence: nullableText(MAX_NOTE),
+});
+
+export type RawConfiguration = z.infer<typeof RawConfiguration>;
+
+/** A configuration list that survives a bare string, a null entry and a nameless entry. */
+const configurationList = z
+  .preprocess(
+    (value) => {
+      const listed = bareValuesAsList((scalar) => ({ name: scalar, nameRaw: scalar, evidence: null }))(value);
+      if (!Array.isArray(listed)) return listed;
+      // An entry that is not a configuration is DROPPED and its siblings kept —
+      // `objectEntriesAsList`'s rule, for the same reason: one bad entry must
+      // not throw away four good ones beside it.
+      return listed.filter((entry) => RawConfiguration.safeParse(entry).success);
+    },
+    z.array(RawConfiguration).max(MAX_CONFIGURATIONS),
+  )
+  .catch([])
+  .optional();
+
+/**
+ * How a configuration name is compared: case and whitespace, and nothing else.
+ *
+ * The same fold `normaliseVariantLabel` (record-variants.ts) stores, repeated
+ * here rather than imported so this schema module stays a leaf. Anything
+ * cleverer — reading `TYPO 5` as `Type 5` — is the model's job on the page, not
+ * a string rule afterwards.
+ */
+const foldConfigurationName = (name: string) => name.trim().replace(/\s+/g, " ").toUpperCase();
+
+const RawDrawingItemShape = z.object({
   itemCodeRaw: nullableText(MAX_SHORT),
   itemNameRaw: nullableText(MAX_SHORT),
   page: z.number().int().min(1).max(100_000).nullable().catch(null).default(null),
@@ -870,6 +1020,57 @@ export const RawDrawingItem = z.object({
     .preprocess(objectEntriesAsList, z.array(RawViewRegion).max(MAX_VIEW_REGIONS))
     .catch([])
     .optional(),
+  // schemaVersion 3: the configurations the page NAMES, and which of them it
+  // SHOWS. Optional in the inferred type for the reason `viewRegions` is.
+  configurations: configurationList,
+  depictsConfigurations: looseTextList(MAX_SHORT, MAX_CONFIGURATIONS).catch([]).optional(),
+});
+
+/**
+ * A NAME THE PAGE DID NOT GIVE IS DROPPED FROM A ROW, AND THE ROW IS KEPT.
+ *
+ * A row names configurations by the `name` the page gave them — in its
+ * `configurations`, or in `depictsConfigurations`, which is the page naming the
+ * ones it shows (a title block `MUR 1 & TYPO 5`). One that matches neither is
+ * a reading this app cannot place — so the NAME goes and the row stays,
+ * reading as shared, which is what the card then shows a reviewer. Failing the
+ * read would lose every other row on the page over one word; keeping the name
+ * would invent a configuration nothing on the page lists.
+ *
+ * `depictsConfigurations` itself is kept as read: it IS the page naming them.
+ * Duplicates (the same folded name twice) collapse to the first.
+ */
+export const RawDrawingItem = RawDrawingItemShape.transform((item) => {
+  const configurations: RawConfiguration[] = [];
+  const known = new Set<string>();
+  for (const entry of item.configurations ?? []) {
+    const folded = foldConfigurationName(entry.name);
+    if (known.has(folded)) continue;
+    known.add(folded);
+    configurations.push(entry);
+  }
+  const distinct = (names: readonly string[] | undefined, allowed: ReadonlySet<string> | null) => {
+    const kept: string[] = [];
+    for (const name of names ?? []) {
+      const folded = foldConfigurationName(name);
+      if (folded === "" || (allowed && !allowed.has(folded))) continue;
+      if (kept.some((entry) => foldConfigurationName(entry) === folded)) continue;
+      kept.push(name);
+    }
+    return kept;
+  };
+  const depicts = distinct(item.depictsConfigurations, null);
+  for (const name of depicts) known.add(foldConfigurationName(name));
+  const keepKnown = (names: readonly string[] | undefined) => distinct(names, known);
+  const withRowNames = <T extends { configurations?: string[] }>(row: T): T =>
+    row.configurations === undefined ? row : { ...row, configurations: keepKnown(row.configurations) };
+  return {
+    ...item,
+    dimensions: item.dimensions.map(withRowNames),
+    materials: item.materials.map(withRowNames),
+    ...(item.configurations === undefined ? {} : { configurations }),
+    ...(item.depictsConfigurations === undefined ? {} : { depictsConfigurations: depicts }),
+  };
 });
 
 export type RawDrawingItem = z.infer<typeof RawDrawingItem>;

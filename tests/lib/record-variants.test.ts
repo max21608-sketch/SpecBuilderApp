@@ -3,8 +3,8 @@ import {
   nextVariantLabel,
   parentIsSupersededBy,
   unallocatedQty,
-  variantName,
-} from "@/lib/record-variants";
+  variantName, isVariantLetter } from "@/lib/record-variants";
+import { letterColour } from "@/components/records/letter-colours";
 
 describe("nextVariantLabel", () => {
   it("names the first two variants A and B", () => {
@@ -72,5 +72,31 @@ describe("unallocatedQty", () => {
 
   it("says nothing when the bill line said nothing", () => {
     expect(unallocatedQty(null, [30])).toBeNull();
+  });
+});
+
+// ============================================================================
+// A CONFIGURATION NAMED BY THE DOCUMENT (schemaVersion 3, 2026-09-23).
+//
+// `S-301 TYPE 2`, never `S-301 B`. Every screen that assumed a one-letter label
+// has to read a name correctly.
+// ============================================================================
+describe("a configuration the document names", () => {
+  it("is called by its ref and its name", () => {
+    expect(variantName("S-301", "TYPE 2", "P1-001")).toBe("S-301 TYPE 2");
+  });
+
+  it("is never coloured by its first letter, which every room type shares", () => {
+    expect(letterColour("TYPE 1")).toBe("text-neutral-700");
+    expect(letterColour("TYPE 5")).toBe("text-neutral-700");
+    // A page LETTER keeps its colour: A is sky on every screen.
+    expect(letterColour("A")).toBe("text-sky-700");
+    expect(letterColour("B")).toBe("text-emerald-700");
+  });
+
+  it("is told apart from a letter", () => {
+    expect(isVariantLetter("A")).toBe(true);
+    expect(isVariantLetter("TYPE 2")).toBe(false);
+    expect(isVariantLetter(null)).toBe(false);
   });
 });

@@ -104,7 +104,15 @@ export type SpecField = {
 /** The project's records, for the card that matched none of them. */
 export type RecordChoice = { id: string; label: string; itemDescription: string; runName: string };
 
-export type RowBlocker = { code: string; message: string; observationId?: string; runId?: string; recordId?: string };
+export type RowBlocker = {
+  code: string;
+  message: string;
+  observationId?: string;
+  runId?: string;
+  recordId?: string;
+  /** A configuration name, on `configuration_name` and `configuration_new`. */
+  label?: string;
+};
 export type RowWarning = { code: string; message: string; observationId: string };
 
 /** What a control on a row does. The caller decides how far it reaches. */
@@ -966,6 +974,7 @@ export function ReplacePanel({
   busy,
   blocked,
   heading,
+  recordNames,
   onChange,
 }: {
   observation: DrawingObservation;
@@ -974,6 +983,11 @@ export function ReplacePanel({
   busy: boolean;
   blocked: boolean;
   heading?: ReactNode;
+  /**
+   * What to call a record the runs do not name — a configuration's own record,
+   * `MAIN RUN · TYPE 2`. Checked before the runs.
+   */
+  recordNames?: Record<string, string>;
   onChange: (observation: DrawingObservation, changes: Record<string, unknown>) => void;
 }) {
   if (occupants.length === 0) return null;
@@ -993,7 +1007,9 @@ export function ReplacePanel({
               (entry) => entry.recordId === recordId && entry.attributeId === occupant.attributeId,
             );
             const runName =
-              runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ?? "this phase";
+              recordNames?.[recordId] ??
+              runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ??
+              "this phase";
             return (
               <label key={recordId} className="mt-1 flex items-start gap-2 text-amber-900">
                 <input

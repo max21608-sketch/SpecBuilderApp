@@ -52,7 +52,7 @@ import { parseCombinedDimensions, parseDimensionFigure, sharesAScale, SCALE_BOUN
 import type { RawCodeGroup, RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
 import { slotFromModel } from "@/lib/extraction-schema";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
-import { nextVariantLabel } from "@/lib/record-variants";
+import { nextVariantLabel, normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
 
 // ---- the staged shape ------------------------------------------------------
 
@@ -177,8 +177,34 @@ export type DrawingObservation = {
    * this existed keep reading.
    */
   replaces?: { recordId: string; attributeId: string; attributeVersion: number }[];
+  /**
+   * WHICH OF THE ITEM'S NAMED CONFIGURATIONS THIS ROW APPLIES TO, as the model
+   * read it off the page, by the `name` the item's `configurations` gave them.
+   * Empty or absent means shared — every configuration the page depicts.
+   *
+   * `schemaVersion: 3` only, and OPTIONAL for the reason every field above is.
+   * Read it through `namedConfigurationPlan`, never directly: which records a
+   * row lands on is one pure function, called by the card and the confirm.
+   */
+  configurations?: string[];
+  /**
+   * THE REVIEWER'S answer to which configurations this row applies to (brief
+   * C1), by folded label. `[]` means shared by every configuration; absent or
+   * null means the model's reading above stands. Kept BESIDE it, never over
+   * it, so the card can say "read as TYPE 1 · TYPE 5, you set TYPE 1".
+   */
+  configurationsByReviewer?: string[] | null;
   /** One attribute row per target record, once applied. */
   applied: { attributeIds: string[] } | null;
+};
+
+/** One configuration a page NAMES (`schemaVersion: 3`), as the model read it. */
+export type StagedConfiguration = {
+  /** One configuration in plain form, as the model gave it: `Type 1`. */
+  name: string;
+  /** The page's own words: `Type 1 & 5`, `TYPO 5`. */
+  nameRaw: string | null;
+  evidence: string | null;
 };
 
 export type DrawingItem = {
@@ -210,6 +236,42 @@ export type DrawingItem = {
    * anything is saved, and can pick another view or drag their own box.
    */
   imageProposal?: ItemView | null;
+  /**
+   * The configurations of this item the PAGE NAMES — S-301's sheet lists five
+   * room types under one fabric heading. `schemaVersion: 3` only; absent or
+   * empty on every other page, which is most of them.
+   */
+  configurations?: StagedConfiguration[];
+  /**
+   * Which of them this page SHOWS, by name, where the page says so (a title
+   * block `MUR 1 & TYPO 5`). Empty means the page does not restrict itself.
+   */
+  depictsConfigurations?: string[];
+  /**
+   * The reviewer's acknowledgement that confirming this page may CREATE a
+   * named configuration under a bill line that already has others — one entry
+   * per (bill record, folded name). See `newConfigurationBlockers`. Stored
+   * because it is a decision; the blocker it answers is computed.
+   */
+  configurationAcks?: { recordId: string; label: string }[];
+  /**
+   * THE REVIEWER'S list of the CODE's configurations (brief C1), replacing the
+   * model's reading for the whole code: each entry's folded `label`, and the
+   * model label it stands for (`readAs`) — null for one the reviewer added.
+   * A rename keeps `readAs`; a removal drops the entry. An EMPTY list is the
+   * reviewer saying the code has none.
+   *
+   * Written to every page of the code and read from the first page, in page
+   * order, that carries it (`reviewerOverride`). Absent or null: the model's
+   * reading stands, which is every page nobody has touched.
+   */
+  configurationsByReviewer?: { label: string; readAs: string | null }[] | null;
+  /**
+   * The reviewer's answer to `codeGroups.relationship` for the code — the
+   * manual version of it, for when the model said `one_item` and the pages are
+   * two chairs, or the reverse. Same storage rule. Absent: the model's answer.
+   */
+  relationshipByReviewer?: "one_item" | "configurations" | null;
 };
 
 /** One picture of an item, and where it sits on its page. */
@@ -245,18 +307,33 @@ export type StagedDrawings = {
    * 2 — the model reported which figure is which, whether it measures the whole
    *     item, and whether repeated pages are one item. Nothing guesses.
    *
-   * Both are read. A version 1 run is not upgraded into a version 2 one:
+   * 3 — as 2, and the model also reported the configurations a page NAMES
+   *     ("as per room type: Type 1 & 5 - …, Type 2 - …") and which rows belong
+   *     to which. Everything version 2 does, version 3 does identically.
+   *
+   * All three are read. An older run is not upgraded into a newer one:
    * inventing the fields it never carried would be one more inference layer,
-   * which is the thing version 2 removes. It is re-read, or it stays as it is.
+   * which is the thing version 2 removes — and no string rule parses
+   * `- Type 2` out of an old label. It is re-read, or it stays as it is.
    */
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   kind: "shop_drawings";
   filename: string | null;
   documentNotes: string | null;
   items: DrawingItem[];
-  /** Version 2 only. Absent on every version 1 run. */
+  /** Version 2 and later. Absent on every version 1 run. */
   codeGroups?: StagedCodeGroup[];
 };
+
+/**
+ * Was this document read by a model asked which figure is which (version 2 and
+ * later)? One test, because `=== 2` was written in five places and a version 3
+ * run would otherwise have silently fallen back into the frozen guessing
+ * pipeline.
+ */
+export function readByModel(doc: { schemaVersion?: unknown } | null | undefined): boolean {
+  return doc?.schemaVersion === 2 || doc?.schemaVersion === 3;
+}
 
 /**
  * Does this figure measure the whole item?
@@ -982,7 +1059,19 @@ export type DrawingBlocker =
   | { code: "slot_taken"; message: string; observationId: string; recordId?: string }
   | { code: "dimension_slot_missing"; message: string; observationId: string }
   | { code: "dimension_slot_taken"; message: string; observationId: string; recordId?: string }
-  | { code: "dia_conflict"; message: string; observationId: string };
+  | { code: "dia_conflict"; message: string; observationId: string }
+  | { code: "configuration_name"; message: string; label: string; observationId?: undefined }
+  | { code: "configuration_undecided"; message: string; observationId: string }
+  | {
+      code: "configuration_new";
+      message: string;
+      /** The bill line the configuration would be created under. */
+      recordId: string;
+      label: string;
+      /** The live configurations that bill line already has. */
+      existing: string[];
+      observationId?: undefined;
+    };
 
 /**
  * What the target records already carry, read live.
@@ -1091,11 +1180,37 @@ export function drawingItemBlockers(
   item: DrawingItem,
   resolution: DrawingResolution,
   occupied: OccupiedSlots,
+  /**
+   * For a page of a code that NAMES its configurations (schemaVersion 3): the
+   * plan and the bill lines' live variants. Every record-level check then runs
+   * per configuration — a BWS field or a dimension slot collides only with
+   * another row written to the SAME record, and Type 2's COM 1 and Type 3's
+   * COM 1 are on two different chairs. `occupied` is then keyed by the REAL
+   * variant ids (not re-keyed through `occupancyThrough`), and so is every
+   * replace acknowledgement.
+   *
+   * Null or absent: exactly the checks this function has always made.
+   */
+  named: NamedTargets | null = null,
 ): DrawingBlocker[] {
   const blockers: DrawingBlocker[] = [];
   const occupiedFields = occupied.fields;
   const targets = targetRecordIds(item, resolution);
   const pending = item.observations.filter((observation) => observation.reviewStatus === "pending");
+  // The records a row reaches that exist today, and the configuration scopes
+  // it is written in. One unnamed scope, and the ticked records, for a page
+  // that names no configurations.
+  const recordsOf = (observation: DrawingObservation) => rowWriteRecords(observation.id, targets, named);
+  const scopesOf = (observation: DrawingObservation): string[] =>
+    named ? (named.plan.rows[observation.id] ?? named.plan.labels) : [""];
+  const scopes: string[] = named ? named.plan.labels : [""];
+  const recordsInScope = (scope: string): string[] =>
+    named
+      ? targets.flatMap((parentId) => {
+          const variantId = named.variants.get(parentId)?.get(scope);
+          return variantId ? [variantId] : [];
+        })
+      : targets;
 
   if (targets.length === 0) {
     blockers.push({
@@ -1121,6 +1236,8 @@ export function drawingItemBlockers(
       });
     }
   }
+
+  if (named) blockers.push(...namedConfigurationBlockers(item, resolution, targets, named));
 
   for (const observation of pending) {
     // Only a row that REACHES something is asked — see `asksForState`. A
@@ -1169,7 +1286,7 @@ export function drawingItemBlockers(
         const acknowledged = acknowledgedReplacements(observation);
         // A clash the reviewer has TICKED for that record is a replacement,
         // not a blocker. One they have not seen still is.
-        const clash = targets.find((recordId) => {
+        const clash = recordsOf(observation).find((recordId) => {
           const occupant = occupied.dimensions.get(recordId)?.get(slot);
           if (!occupant) return false;
           return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
@@ -1188,7 +1305,7 @@ export function drawingItemBlockers(
       // Pre-checked so an occupied slot is a sentence the reviewer can act on,
       // rather than a unique-violation 500 from the database.
       const acknowledged = acknowledgedReplacements(observation);
-      const clash = targets.find((recordId) => {
+      const clash = recordsOf(observation).find((recordId) => {
         const occupant = occupiedFields.get(recordId)?.get(observation.specFieldId ?? "");
         if (!occupant) return false;
         return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
@@ -1205,63 +1322,134 @@ export function drawingItemBlockers(
   }
 
   // Two observations in ONE card claiming one field would satisfy the check
-  // above (nothing is written yet) and collide at insert.
+  // above (nothing is written yet) and collide at insert — but only where they
+  // land on the SAME record, which for named configurations means sharing one.
   const claimed = new Map<string, string>();
   for (const observation of pending) {
     if (!observation.specFieldId || observation.attrGroup === "dimension") continue;
-    const previous = claimed.get(observation.specFieldId);
-    if (previous) {
+    const keys = scopesOf(observation).map((scope) => `${scope}\u0000${observation.specFieldId}`);
+    if (keys.some((key) => claimed.has(key))) {
       blockers.push({
         code: "slot_taken",
         observationId: observation.id,
-        message: "Two of these specs are assigned to the same BWS field. Move one.",
+        message: named
+          ? "Two of these specs are assigned to the same BWS field on the same configuration. Move one."
+          : "Two of these specs are assigned to the same BWS field. Move one.",
       });
     } else {
-      claimed.set(observation.specFieldId, observation.id);
+      for (const key of keys) claimed.set(key, observation.id);
     }
   }
 
   // The same rule for dimension slots: two widths in one card satisfy the
   // live check above (neither is written yet) and collide at insert.
-  const claimedSlots = new Map<DimensionSlot, string>();
+  const claimedSlots = new Map<string, string>();
   for (const observation of pending) {
     if (observation.attrGroup !== "dimension" || !observation.dimensionSlot) continue;
-    if (claimedSlots.has(observation.dimensionSlot)) {
+    const keys = scopesOf(observation).map((scope) => `${scope}\u0000${observation.dimensionSlot}`);
+    if (keys.some((key) => claimedSlots.has(key))) {
       blockers.push({
         code: "dimension_slot_taken",
         observationId: observation.id,
         message: `Two of these are the ${DIMENSION_SLOT_LABELS[observation.dimensionSlot].toLowerCase()}. Change one, or make it a note.`,
       });
     } else {
-      claimedSlots.set(observation.dimensionSlot, observation.id);
+      for (const key of keys) claimedSlots.set(key, observation.id);
     }
   }
 
   // Dia. REPLACES W x D, so a record carrying both would export a cell that
   // silently drops two real measurements. Cross-row, so no check constraint
   // can hold it — it is caught here, against the card AND what the target
-  // records already carry, and named on the export cell too.
-  const diaHere = pending.find((o) => o.attrGroup === "dimension" && o.dimensionSlot === "DIA");
-  const squareHere = pending.filter((o) => o.attrGroup === "dimension" && (o.dimensionSlot === "W" || o.dimensionSlot === "D"));
-  const squareThere = targets.some(
-    (recordId) => occupied.dimensions.get(recordId)?.has("W") || occupied.dimensions.get(recordId)?.has("D"),
-  );
-  const diaThere = targets.some((recordId) => occupied.dimensions.get(recordId)?.has("DIA"));
-  if (diaHere && (squareHere.length > 0 || squareThere)) {
-    blockers.push({
-      code: "dia_conflict",
-      observationId: diaHere.id,
-      message: "This item has a diameter and a width or depth. A round item is written Dia. instead of W x D — remove one.",
-    });
-  }
-  if (!diaHere && diaThere && squareHere.length > 0) {
-    blockers.push({
-      code: "dia_conflict",
-      observationId: squareHere[0]!.id,
-      message: "One of these records already has a diameter. A round item is written Dia. instead of W x D — make this a note, or retire the diameter.",
-    });
+  // records already carry, and named on the export cell too. Per scope: a
+  // round configuration beside a square one is two different chairs.
+  const reported = new Set<string>();
+  for (const scope of scopes) {
+    const inScope = pending.filter((o) => scopesOf(o).includes(scope));
+    const diaHere = inScope.find((o) => o.attrGroup === "dimension" && o.dimensionSlot === "DIA");
+    const squareHere = inScope.filter((o) => o.attrGroup === "dimension" && (o.dimensionSlot === "W" || o.dimensionSlot === "D"));
+    const records = recordsInScope(scope);
+    const squareThere = records.some(
+      (recordId) => occupied.dimensions.get(recordId)?.has("W") || occupied.dimensions.get(recordId)?.has("D"),
+    );
+    const diaThere = records.some((recordId) => occupied.dimensions.get(recordId)?.has("DIA"));
+    if (diaHere && (squareHere.length > 0 || squareThere) && !reported.has(diaHere.id)) {
+      reported.add(diaHere.id);
+      blockers.push({
+        code: "dia_conflict",
+        observationId: diaHere.id,
+        message: "This item has a diameter and a width or depth. A round item is written Dia. instead of W x D — remove one.",
+      });
+    }
+    if (!diaHere && diaThere && squareHere.length > 0 && !reported.has(squareHere[0]!.id)) {
+      reported.add(squareHere[0]!.id);
+      blockers.push({
+        code: "dia_conflict",
+        observationId: squareHere[0]!.id,
+        message: "One of these records already has a diameter. A round item is written Dia. instead of W x D — make this a note, or retire the diameter.",
+      });
+    }
   }
 
+  return blockers;
+}
+
+/**
+ * The two blockers only a page of NAMED configurations can raise.
+ *
+ *   configuration_name  A name the database will refuse (`VARIANT_LABEL_SHAPE`),
+ *                       said in words on the card rather than as a 500 at
+ *                       confirm.
+ *   configuration_new   Confirming would CREATE a configuration under a bill
+ *                       line that already has OTHER live ones. The safety floor
+ *                       for cross-document naming, which this app does not
+ *                       reconcile: without it the drawing set's `MUR 1`
+ *                       silently becomes a sixth configuration beside the
+ *                       specification sheet's `TYPE 1`. An exact name is the
+ *                       exact step and lands on the existing record with no
+ *                       question; anything else waits for the reviewer's tick,
+ *                       stored per (bill line, name) in `configurationAcks`.
+ *
+ * Computed, never stored, and called by the screen and the confirm alike.
+ */
+export function namedConfigurationBlockers(
+  item: DrawingItem,
+  resolution: DrawingResolution,
+  targets: readonly string[],
+  named: NamedTargets,
+): DrawingBlocker[] {
+  const blockers: DrawingBlocker[] = [];
+  // A row whose only configurations a reviewer removed (brief C1).
+  for (const observationId of named.plan.undecided ?? []) {
+    blockers.push({
+      code: "configuration_undecided",
+      observationId,
+      message:
+        "This row belonged only to a configuration that has been removed. Say which configurations it applies to, or make it shared by all of them.",
+    });
+  }
+  for (const label of named.plan.labels) {
+    const problem = variantLabelProblem(label);
+    if (problem) blockers.push({ code: "configuration_name", label, message: problem });
+  }
+  const acked = new Set((Array.isArray(item.configurationAcks) ? item.configurationAcks : []).map((ack) => `${ack?.recordId}|${ack?.label}`));
+  const runNameOf = new Map<string, string>();
+  for (const run of resolution.runs) if (run.status === "matched") runNameOf.set(run.record.id, run.runName);
+  for (const [parentId, toCreate] of configurationsToCreate(targets, named)) {
+    const existing = [...(named.variants.get(parentId)?.keys() ?? [])];
+    if (existing.length === 0) continue;
+    for (const label of toCreate) {
+      if (acked.has(`${parentId}|${label}`)) continue;
+      const where = runNameOf.get(parentId);
+      blockers.push({
+        code: "configuration_new",
+        recordId: parentId,
+        label,
+        existing,
+        message: `This item${where ? ` on ${where}` : ""} already has configuration${existing.length === 1 ? "" : "s"} ${existing.join(", ")} — create ${label} as a new configuration beside ${existing.length === 1 ? "it" : "them"}? Tick to confirm, or correct the name if it is one of those.`,
+      });
+    }
+  }
   return blockers;
 }
 
@@ -1649,6 +1837,69 @@ export function mergeNoteBlocks(observations: DrawingObservation[]): DrawingObse
   });
 }
 
+/**
+ * The configurations a row CLAIMS BWS FIELDS within, on its own page, as
+ * folded names — or `[""]`, one unnamed scope, on a page naming none.
+ *
+ * The row's own names; else the page's `depictsConfigurations`; else every
+ * configuration the page names. That is the same order `namedConfigurationPlan`
+ * uses for where a row LANDS, narrowed to the page — which is enough, because
+ * a BWS field only collides with another row written to the same record, and
+ * one page's rows all land together.
+ */
+function fieldClaimScopes(
+  item: Pick<DrawingItem, "configurations" | "depictsConfigurations">,
+): (row: { configurations?: string[] }) => string[] {
+  const named = itemConfigurationLabels(item);
+  const depicted = foldedNames(item.depictsConfigurations);
+  const fallback = depicted.length > 0 ? depicted : named.length > 0 ? named : [""];
+  return (row) => {
+    const own = foldedNames(row.configurations);
+    return own.length > 0 ? own : fallback;
+  };
+}
+
+/** Folded, de-duplicated, in order; tolerant of whatever a staged run holds. */
+function foldedNames(names: unknown): string[] {
+  if (!Array.isArray(names)) return [];
+  const out: string[] = [];
+  for (const name of names) {
+    if (typeof name !== "string" || name.trim() === "") continue;
+    const folded = normaliseVariantLabel(name);
+    if (!out.includes(folded)) out.push(folded);
+  }
+  return out;
+}
+
+/** The folded names of the configurations a page names, read defensively. */
+function itemConfigurationLabels(item: Pick<DrawingItem, "configurations">): string[] {
+  return foldedNames(
+    (Array.isArray(item.configurations) ? item.configurations : []).map((entry) =>
+      entry && typeof entry === "object" ? (entry as { name?: unknown }).name : null,
+    ),
+  );
+}
+
+/** BWS fields taken, per configuration scope. */
+class ScopedClaims {
+  private readonly byScope = new Map<string, Set<string>>();
+
+  /** Every field taken in ANY of these scopes: a row landing on all of them may use none of those. */
+  across(scopes: readonly string[]): Set<string> {
+    const union = new Set<string>();
+    for (const scope of scopes) for (const field of this.byScope.get(scope) ?? []) union.add(field);
+    return union;
+  }
+
+  claim(scopes: readonly string[], fieldId: string): void {
+    for (const scope of scopes) {
+      const set = this.byScope.get(scope) ?? new Set<string>();
+      set.add(fieldId);
+      this.byScope.set(scope, set);
+    }
+  }
+}
+
 export function stageDrawings(
   items: RawDrawingItem[],
   fields: SpecFieldEntry[],
@@ -1719,7 +1970,12 @@ export function stageDrawings(
         : [...dimensions.map((dimension) => dimension.valueRaw), ...combined.map((part) => part.valueRaw)],
     );
     const views = usableViews(item.viewRegions, item.page);
-    const taken = new Set<string>();
+    // BWS FIELDS ARE CLAIMED PER CONFIGURATION, NOT PER PAGE (schemaVersion 3).
+    // Type 2's fabric is COM 1 on `S-301 TYPE 2`; claiming across the page
+    // handed the four room-type fabrics COM 1, COM 2, COM 3 and nothing, of one
+    // record. See `fieldClaimScopes`.
+    const scopesOf = fieldClaimScopes(item);
+    const taken = new ScopedClaims();
     const observations: DrawingObservation[] = [];
 
     // A drawing dimensions its views with leader lines and no words: the AP364
@@ -1789,6 +2045,7 @@ export function stageDrawings(
         labelRaw: dimension.labelRaw ?? `Dimension ${dimensionNo}`,
         valueRaw: dimension.valueRaw,
         materialCodeRaw: null,
+        ...(dimension.configurations?.length ? { configurations: [...dimension.configurations] } : {}),
         value: state.value,
         unit: resolved.unit,
         // Kept in step with `unitSource` rather than replaced by it: the
@@ -1874,6 +2131,7 @@ export function stageDrawings(
       });
       const attrGroup = callout.group;
       const state = suggestAttributeState(material.valueRaw);
+      const scopes = scopesOf(material);
       const specFieldId = suggestSpecField(
         {
           attrGroup,
@@ -1883,9 +2141,9 @@ export function stageDrawings(
           itemNameRaw: item.itemNameRaw,
         },
         fields,
-        taken,
+        taken.across(scopes),
       );
-      if (specFieldId) taken.add(specFieldId);
+      if (specFieldId) taken.claim(scopes, specFieldId);
       observations.push({
         id: nextId(),
         version: 1,
@@ -1893,6 +2151,7 @@ export function stageDrawings(
         labelRaw: material.labelRaw ?? `Material ${materialNo}`,
         valueRaw: material.valueRaw,
         materialCodeRaw: material.materialCodeRaw,
+        ...(material.configurations?.length ? { configurations: [...material.configurations] } : {}),
         value: state.value,
         unit: null,
         unitSuggested: false,
@@ -1939,14 +2198,27 @@ export function stageDrawings(
       targets: null,
       observations: mergeNoteBlocks(observations),
       ...(views.length > 0 ? { viewRegions: views, imageProposal: pickItemView(views) } : {}),
+      // Only where the page names any: an item with none must stage exactly as
+      // a version 2 item did, key for key.
+      ...(item.configurations?.length
+        ? {
+            configurations: item.configurations.map((entry) => ({
+              name: entry.name,
+              nameRaw: entry.nameRaw,
+              evidence: entry.evidence,
+            })),
+          }
+        : {}),
+      ...(item.depictsConfigurations?.length ? { depictsConfigurations: [...item.depictsConfigurations] } : {}),
     };
   });
 
   return {
-    // VERSION 2: the model was asked which figure is which, whether each one
-    // measures the whole item, and whether repeated pages are one item. The
-    // read-time guessing pipeline is skipped for these, and only for these.
-    schemaVersion: 2,
+    // VERSION 3: version 2 (the model was asked which figure is which, whether
+    // each one measures the whole item, and whether repeated pages are one
+    // item) plus the configurations a page names and which rows belong to
+    // which. The read-time guessing pipeline is skipped for 2 and 3 alike.
+    schemaVersion: 3,
     kind: "shop_drawings",
     filename,
     documentNotes,
@@ -1988,7 +2260,7 @@ export function assertStagedDrawings(parsed: unknown, fields?: SpecFieldEntry[])
     throw new Error("This document was not staged as shop drawings. Upload the drawings again.");
   }
   const upgraded = upgradeTbcMarkers(upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []));
-  return upgraded.schemaVersion === 2 ? upgraded : applyViewGuesses(upgraded);
+  return readByModel(upgraded) ? upgraded : applyViewGuesses(upgraded);
 }
 
 /**
@@ -2072,10 +2344,13 @@ function upgradeCalloutGuesses(doc: StagedDrawings, fields: SpecFieldEntry[]): S
   let anyTouched = false;
   const items = doc.items.map((item) => {
     // Every field this item's rows already hold, whatever their review state:
-    // a COM 1 taken by an applied row is still taken.
-    const taken = new Set<string>();
+    // a COM 1 taken by an applied row is still taken. PER CONFIGURATION, the
+    // way staging claimed them — on a page naming none that is one scope and
+    // exactly the old behaviour.
+    const scopesOf = fieldClaimScopes(item);
+    const taken = new ScopedClaims();
     for (const observation of item.observations) {
-      if (observation.specFieldId) taken.add(observation.specFieldId);
+      if (observation.specFieldId) taken.claim(scopesOf(observation), observation.specFieldId);
     }
 
     let touched = false;
@@ -2102,9 +2377,9 @@ function upgradeCalloutGuesses(doc: StagedDrawings, fields: SpecFieldEntry[]): S
           itemNameRaw: item.itemNameRaw,
         },
         fields,
-        taken,
+        taken.across(scopesOf(observation)),
       );
-      if (specFieldId) taken.add(specFieldId);
+      if (specFieldId) taken.claim(scopesOf(observation), specFieldId);
 
       const next: DrawingObservation = {
         ...observation,
@@ -2178,7 +2453,7 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
     // block: a pack staged before this existed holds fifteen REMARKS rows, and
     // a reviewer would face them a page at a time. Ids are stable, so the
     // screen and the confirm route agree about what the card holds.
-    const observations = dedupeMeasured(mergeNoteBlocks(slotted), doc.schemaVersion === 2);
+    const observations = dedupeMeasured(mergeNoteBlocks(slotted), readByModel(doc));
     // Identity, not length: a lone `SUPPLIER: TO BID` is rewritten in place to
     // a Supplier row, and a length check would throw that away.
     if (observations.length !== slotted.length || observations.some((row, index) => row !== slotted[index])) {
@@ -2696,7 +2971,7 @@ export function occupancyThrough(occupied: OccupiedSlots, writeTo: ReadonlyMap<s
  * in the function whose whole point is that there are none left.
  */
 function codeGroupsOf(doc: Pick<StagedDrawings, "schemaVersion" | "codeGroups"> | undefined): StagedCodeGroup[] {
-  if (doc?.schemaVersion !== 2) return [];
+  if (!doc || !readByModel(doc)) return [];
   const groups: StagedCodeGroup[] = [];
   for (const group of doc.codeGroups ?? []) {
     const codes = Array.isArray(group?.itemCodes)
@@ -2787,11 +3062,29 @@ export function variantLettersByItem(
   for (const group of codeGroupsOf(doc)) {
     relationship.set(normaliseRef(group.itemCodes[0] ?? ""), group.relationship);
   }
-  const version2 = doc?.schemaVersion === 2;
+  const version2 = readByModel(doc);
+  // A v3 code whose pages NAME configurations is split by those names, not by
+  // page — see `namedConfigurationPlans`. Its pages get no letter here.
+  const named = namedConfigurationsByCode(items, doc);
 
   for (const [code, ordered] of byCode) {
     const group = ordered;
-    const splits = version2 ? relationship.get(code) === "configurations" : group.length >= 2;
+    if (named.has(code)) {
+      for (const item of group) letters.set(item.id, null);
+      continue;
+    }
+    // THE REVIEWER'S answer first, on any version (brief C1): the manual
+    // version of `codeGroups.relationship`, for the pages the model got wrong.
+    const byReviewer = reviewerOverride(group, (item) =>
+      item.relationshipByReviewer === "one_item" || item.relationshipByReviewer === "configurations"
+        ? item.relationshipByReviewer
+        : null,
+    );
+    const splits = byReviewer
+      ? byReviewer === "configurations"
+      : version2
+        ? relationship.get(code) === "configurations"
+        : group.length >= 2;
     if (group.length < 2 || !splits) {
       for (const item of group) letters.set(item.id, null);
       continue;
@@ -2801,6 +3094,360 @@ export function variantLettersByItem(
     });
   }
   return letters;
+}
+
+// ============================================================================
+// CONFIGURATIONS A DOCUMENT NAMES (schemaVersion 3, 2026-09-23).
+//
+// Panther's S-301 sheet prints "FABRIC REFERENCE  As per room type: Type 1 & 5
+// - …, Type 2 - …, Type 3 - … ; Type 4 - …" beside ONE set of overall
+// dimensions. That is five chairs to make — one per room type, Max's decision
+// of 2026-09-23 — sharing a shape and differing in cloth. A page count cannot
+// say so (it is one page), and neither can `codeGroups.relationship`, which
+// describes PAGES: S-301's sheet and its shop drawing are still `one_item`.
+//
+// So a v3 code whose pages NAME configurations is split by those names, and
+// they REPLACE page lettering for that code: the variants are `S-301 TYPE 1`
+// … `S-301 TYPE 5`, never `S-301 A`. Every other code — v1, v2, and a v3 code
+// naming none — keeps `variantLettersByItem` exactly as it was.
+//
+// PURE, NEVER STORED, CALLED BY THE CARD AND THE CONFIRM: which record a row
+// lands on is the most consequential thing on the card, and two readings of it
+// would be a card promising one set of chairs while the confirm makes another.
+//
+// READ THROUGH THE THREE ACCESSORS BELOW, NEVER THE FIELDS. A reviewer's own
+// correction of a configuration (brief C1) is staged beside the model's
+// reading, and these are the one place that decides which of the two counts.
+// ============================================================================
+
+/** The configurations a page names, as they count today. */
+export function pageConfigurations(item: Pick<DrawingItem, "configurations">): StagedConfiguration[] {
+  if (!Array.isArray(item.configurations)) return [];
+  return item.configurations.filter(
+    (entry): entry is StagedConfiguration =>
+      Boolean(entry) && typeof entry === "object" && typeof entry.name === "string" && entry.name.trim() !== "",
+  );
+}
+
+/** Which configurations a page shows, as they count today. */
+export function pageDepicts(item: Pick<DrawingItem, "depictsConfigurations">): string[] {
+  return Array.isArray(item.depictsConfigurations)
+    ? item.depictsConfigurations.filter((name): name is string => typeof name === "string" && name.trim() !== "")
+    : [];
+}
+
+/** Which configurations a row names, as they count today. */
+export function rowConfigurations(observation: Pick<DrawingObservation, "configurations">): string[] {
+  return Array.isArray(observation.configurations)
+    ? observation.configurations.filter((name): name is string => typeof name === "string" && name.trim() !== "")
+    : [];
+}
+
+/** One configuration of a CODE: its stored label, and how the pages named it. */
+export type NamedConfiguration = {
+  /** Folded, as `spec_records.variant_label` stores it: `TYPE 2`. */
+  label: string;
+  /** The model's plain form, from the first page that named it: `Type 2`. */
+  name: string;
+  /** Every wording the pages used for it, in page order: `Type 1 & 5`, `TYPO 5`. */
+  namesRaw: string[];
+  evidence: string | null;
+  /** The pages that name it. */
+  pages: number[];
+  /**
+   * The model's label this stands for — itself, unless a reviewer renamed it —
+   * or null for one a reviewer added. Optional so a hand-built list reads.
+   */
+  readAs?: string | null;
+};
+
+/**
+ * The first page of a code, in page order, that carries a reviewer's value —
+ * the one every page reads, so pages that disagree (a save that reached one
+ * page and not the next) still agree about what the card says.
+ */
+function reviewerOverride<T>(pages: readonly DrawingItem[], read: (item: DrawingItem) => T | null | undefined): T | null {
+  for (const item of pages) {
+    const value = read(item);
+    if (value !== null && value !== undefined) return value;
+  }
+  return null;
+}
+
+/** The reviewer's configuration list, read defensively off staged JSON. */
+function reviewerConfigurationList(item: DrawingItem): { label: string; readAs: string | null }[] | null {
+  const list = item.configurationsByReviewer;
+  if (!Array.isArray(list)) return null;
+  const out: { label: string; readAs: string | null }[] = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object" || typeof entry.label !== "string") continue;
+    const label = normaliseVariantLabel(entry.label);
+    if (!label || out.some((kept) => kept.label === label)) continue;
+    out.push({ label, readAs: typeof entry.readAs === "string" ? normaliseVariantLabel(entry.readAs) : null });
+  }
+  return out;
+}
+
+/** A code's configurations: what the model read, what counts, and how one maps to the other. */
+export type CodeConfigurations = {
+  /** As the MODEL read them (schemaVersion 3), or none. */
+  read: NamedConfiguration[];
+  /** As they count today — the reviewer's list where there is one. */
+  effective: NamedConfiguration[];
+  /** Model label -> the effective label it became. Absent: it was removed. */
+  rename: Map<string, string>;
+  /** Model labels the reviewer removed. */
+  removed: string[];
+  /** Did a reviewer set this list? */
+  edited: boolean;
+};
+
+/**
+ * Per canonical folded code, the configurations as READ and as they COUNT.
+ *
+ * The model's reading exists only on a version 3 run. A REVIEWER'S list counts
+ * on any version (brief C1): a person who knows a v1 or v2 card is five chairs
+ * can say so, and the card and the confirm then read it through the same
+ * functions as a v3 reading. A v1 or v2 code nobody has touched reads exactly
+ * as it always did — nothing here runs for it.
+ */
+export function codeConfigurations(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): Map<string, CodeConfigurations> {
+  const out = new Map<string, CodeConfigurations>();
+  for (const [code, pages] of groupItemsByCode(items, doc)) {
+    const read: NamedConfiguration[] = [];
+    if (doc?.schemaVersion === 3) {
+      const add = (name: string, nameRaw: string | null, evidence: string | null, page: number | null) => {
+        const label = normaliseVariantLabel(name);
+        if (!label) return;
+        let entry = read.find((existing) => existing.label === label);
+        if (!entry) {
+          entry = { label, name: name.trim(), namesRaw: [], evidence, pages: [], readAs: label };
+          read.push(entry);
+        }
+        const raw = (nameRaw ?? "").trim();
+        if (raw && !entry.namesRaw.includes(raw)) entry.namesRaw.push(raw);
+        if (!entry.evidence && evidence) entry.evidence = evidence;
+        if (page !== null && !entry.pages.includes(page)) entry.pages.push(page);
+      };
+      for (const item of pages) {
+        for (const entry of pageConfigurations(item)) add(entry.name, entry.nameRaw, entry.evidence, item.page);
+        // A title block naming the ones it shows is the page naming them too.
+        for (const name of pageDepicts(item)) add(name, null, null, item.page);
+      }
+    }
+    const override = reviewerOverride(pages, reviewerConfigurationList);
+    if (!override) {
+      if (read.length > 0) {
+        out.set(code, {
+          read,
+          effective: read,
+          rename: new Map(read.map((entry) => [entry.label, entry.label])),
+          removed: [],
+          edited: false,
+        });
+      }
+      continue;
+    }
+    const rename = new Map<string, string>();
+    const effective: NamedConfiguration[] = override.map((entry) => {
+      const source = entry.readAs ? read.find((model) => model.label === entry.readAs) : undefined;
+      if (source) rename.set(source.label, entry.label);
+      return {
+        label: entry.label,
+        name: entry.label,
+        namesRaw: source?.namesRaw ?? [],
+        evidence: source?.evidence ?? null,
+        pages: source?.pages ?? [],
+        readAs: source ? source.label : null,
+      };
+    });
+    const removed = read.map((entry) => entry.label).filter((label) => !rename.has(label));
+    out.set(code, { read, effective, rename, removed, edited: true });
+  }
+  return out;
+}
+
+/**
+ * Per canonical folded code, the configurations as they COUNT — the model's
+ * reading on a version 3 run, the reviewer's list wherever one is set, in page
+ * order. A code with none is absent, and that is the test for "letter by page
+ * as before".
+ */
+export function namedConfigurationsByCode(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): Map<string, NamedConfiguration[]> {
+  const out = new Map<string, NamedConfiguration[]>();
+  for (const [code, entry] of codeConfigurations(items, doc)) {
+    if (entry.effective.length > 0) out.set(code, entry.effective);
+  }
+  return out;
+}
+
+/**
+ * "Read as 4, you set 5 — added TYPE 6; renamed TYP.O to TYPO 5; removed
+ * TYPE 9." Null when nobody has edited the list. The model's reading stays in
+ * the staged JSON beside the reviewer's; this is how the card says so.
+ */
+export function configurationEditSummary(entry: CodeConfigurations | undefined): string | null {
+  if (!entry?.edited) return null;
+  const parts: string[] = [];
+  const added = entry.effective.filter((configuration) => configuration.readAs === null).map((c) => c.label);
+  const renamed = [...entry.rename].filter(([from, to]) => from !== to).map(([from, to]) => `${from} to ${to}`);
+  if (added.length) parts.push(`added ${added.join(", ")}`);
+  if (renamed.length) parts.push(`renamed ${renamed.join(", ")}`);
+  if (entry.removed.length) parts.push(`removed ${entry.removed.join(", ")}`);
+  const head =
+    entry.read.length === 0
+      ? `The document names no configurations; you set ${entry.effective.length}`
+      : `Read as ${entry.read.length}, you set ${entry.effective.length}`;
+  return parts.length ? `${head} — ${parts.join("; ")}.` : `${head}.`;
+}
+
+/** Where one page of a named code lands, row by row. */
+export type NamedConfigurationPlan = {
+  /** The folded code. */
+  code: string;
+  /** Every configuration of the CODE, in page order. */
+  configurations: NamedConfiguration[];
+  /**
+   * The folded labels this PAGE writes to: every configuration one of its
+   * pending rows lands on, and every one the page itself names — a
+   * configuration with no row of its own still gets the shared geometry, and
+   * it is still a thing to make. In the code's order.
+   */
+  labels: string[];
+  /**
+   * Per observation on the page: the folded labels it lands on — its own
+   * configurations, else the ones the page depicts, else all of the code's.
+   * That is the fan-out for one row, per phase.
+   */
+  rows: Record<string, string[]>;
+  /**
+   * Pending rows that belonged ONLY to configurations a reviewer removed, and
+   * have not been given new ones. They land nowhere, and each is a blocker
+   * until somebody says where it goes — never silently shared, never dropped.
+   */
+  undecided: string[];
+};
+
+/**
+ * Per item of a v3 run whose code names configurations, the plan. Absent for
+ * every other item — which is how every caller tells "named" from "lettered".
+ */
+export function namedConfigurationPlans(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): Map<string, NamedConfigurationPlan> {
+  const out = new Map<string, NamedConfigurationPlan>();
+  const byCode = codeConfigurations(items, doc);
+  if (byCode.size === 0) return out;
+  for (const [code, pages] of groupItemsByCode(items, doc)) {
+    const entry = byCode.get(code);
+    if (!entry || entry.effective.length === 0) continue;
+    const configurations = entry.effective;
+    const order = configurations.map((configuration) => configuration.label);
+    const known = new Set(order);
+    // In the code's order, whatever order the page listed them in.
+    const ordered = (labels: Iterable<string>) => {
+      const set = new Set(labels);
+      return order.filter((label) => set.has(label));
+    };
+    // A MODEL label, as it counts today: renamed, or gone.
+    const mapped = (labels: readonly string[]) =>
+      labels.map((label) => entry.rename.get(label)).filter((label): label is string => Boolean(label));
+    for (const item of pages) {
+      const depicted = ordered(mapped(foldedNames(pageDepicts(item))));
+      const fallback = depicted.length > 0 ? depicted : order;
+      const rows: Record<string, string[]> = {};
+      const undecided: string[] = [];
+      const written = new Set<string>(ordered(mapped(itemConfigurationLabels(item))));
+      for (const observation of item.observations) {
+        let targets: string[];
+        const byReviewer = observation.configurationsByReviewer;
+        if (Array.isArray(byReviewer)) {
+          // THE REVIEWER SAID. `[]` is "shared by every configuration".
+          const own = ordered(foldedNames(byReviewer).filter((label) => known.has(label)));
+          targets = byReviewer.length === 0 ? order : own;
+        } else {
+          const read = foldedNames(rowConfigurations(observation));
+          const own = ordered(mapped(read).filter((label) => known.has(label)));
+          // A name the code never knew is dropped and the row reads as shared —
+          // the schema's own rule, for staged JSON from the past. A name a
+          // REVIEWER removed is different: the row was about that chair, and
+          // sharing it with the others would put its fabric on them.
+          const allRemoved = read.length > 0 && own.length === 0 && read.some((label) => entry.removed.includes(label));
+          targets = own.length > 0 ? own : allRemoved ? [] : fallback;
+        }
+        if (targets.length === 0 && observation.reviewStatus === "pending") undecided.push(observation.id);
+        rows[observation.id] = targets;
+        if (observation.reviewStatus === "pending") for (const label of targets) written.add(label);
+      }
+      out.set(item.id, { code, configurations, labels: ordered(written), rows, undecided });
+    }
+  }
+  return out;
+}
+
+/**
+ * The live configurations of each bill line: parent id -> folded label ->
+ * variant id. Active variants only — a retired one is not somewhere to write.
+ */
+export type ParentVariants = ReadonlyMap<string, ReadonlyMap<string, string>>;
+
+export function parentVariantsOf(records: readonly Pick<RecordEntry, "id" | "parentId" | "variantLabel">[]): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+  for (const record of records) {
+    if (!record.parentId || !record.variantLabel) continue;
+    const map = out.get(record.parentId) ?? new Map<string, string>();
+    map.set(normaliseVariantLabel(record.variantLabel), record.id);
+    out.set(record.parentId, map);
+  }
+  return out;
+}
+
+/** What the card needs to hand the blockers for a named page. */
+export type NamedTargets = { plan: NamedConfigurationPlan; variants: ParentVariants };
+
+/**
+ * The records ONE ROW writes into that exist today: per ticked bill line, the
+ * live variant of each configuration the row lands on. A configuration not
+ * created yet contributes nothing, which is the truth — there is nothing there
+ * to replace.
+ *
+ * For a page that names no configurations this is simply the ticked records,
+ * which is what every blocker and every occupant lookup used before.
+ */
+export function rowWriteRecords(observationId: string, targets: readonly string[], named: NamedTargets | null): string[] {
+  if (!named) return [...targets];
+  // `?? labels` only for a row the plan never saw. A row with NO targets (its
+  // configurations were removed) lands nowhere, and a blocker says so.
+  const labels = named.plan.rows[observationId] ?? named.plan.labels;
+  const out: string[] = [];
+  for (const parentId of targets) {
+    const variants = named.variants.get(parentId);
+    for (const label of labels) {
+      const variantId = variants?.get(label);
+      if (variantId) out.push(variantId);
+    }
+  }
+  return out;
+}
+
+/** What a page of named configurations will CREATE, per bill line: the labels with no live variant yet. */
+export function configurationsToCreate(targets: readonly string[], named: NamedTargets): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const parentId of targets) {
+    const existing = named.variants.get(parentId);
+    out.set(
+      parentId,
+      named.plan.labels.filter((label) => !existing?.has(label)),
+    );
+  }
+  return out;
 }
 
 /** What the model said about a code's pages, or null on a version 1 run. */

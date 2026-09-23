@@ -7,6 +7,7 @@ import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/spec-vocab";
 import { PROMPTS } from "@/lib/anthropic";
 import {
   TOOLS,
+  DRAWINGS_TOOL,
   ExtractionOutput,
   DrawingsOutput,
   PreambleOutput,
@@ -289,5 +290,152 @@ describe("a malformed optional field never fails a paid run", () => {
     // An over-long array still fails loudly rather than staging a 121-dimension
     // page as a page with none.
     expect(drawings({ dimensions: Array.from({ length: MAX_PER_ITEM + 1 }, () => ({ labelRaw: "W", valueRaw: "1" })) }).success).toBe(false);
+  });
+});
+
+// ============================================================================
+// CONFIGURATIONS A PAGE NAMES — schemaVersion 3 (2026-09-23).
+//
+// The S-301 SHAPE, with invented names: one sheet, one set of overall
+// dimensions, and a fabric heading "As per room type" listing four lines for
+// five room types. The model read it right and the tool had nowhere to put it,
+// so it welded the type into each label and the app made one chair with three
+// fabrics out of five chairs with one each.
+// ============================================================================
+describe("configurations a page names", () => {
+  const sheet = (overrides: Record<string, unknown> = {}) => ({
+    itemCodeRaw: "Q-301",
+    itemNameRaw: "Desk chair",
+    page: 1,
+    dimensions: [
+      { labelRaw: "Width", valueRaw: "550", unitRaw: "mm", slot: "width", slotEvidence: "labelled WIDTH", isOverall: true, configurations: [] },
+    ],
+    materials: [
+      { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker A, Ref. X", materialCodeRaw: null, configurations: ["Type 1", "Type 5"] },
+      { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker B, Ref. Y", materialCodeRaw: null, configurations: ["Type 2"] },
+    ],
+    configurations: [
+      { name: "Type 1", nameRaw: "Type 1 & 5", evidence: "As per room type: Type 1 & 5 - Maker A" },
+      { name: "Type 5", nameRaw: "Type 1 & 5", evidence: "As per room type: Type 1 & 5 - Maker A" },
+      { name: "Type 2", nameRaw: "Type 2", evidence: "Type 2 - Maker B" },
+    ],
+    depictsConfigurations: [],
+    ...overrides,
+  });
+  const parse = (item: Record<string, unknown>) => DrawingsOutput.safeParse({ items: [item], codeGroups: [], documentNotes: null });
+
+  it("parses a page naming its configurations, with each row's own list", () => {
+    const parsed = parse(sheet());
+    expect(parsed.success).toBe(true);
+    const item = parsed.success ? parsed.data.items[0]! : null;
+    expect(item?.configurations?.map((entry) => entry.name)).toEqual(["Type 1", "Type 5", "Type 2"]);
+    expect(item?.configurations?.[0]?.nameRaw).toBe("Type 1 & 5");
+    expect(item?.materials.map((row) => row.configurations)).toEqual([["Type 1", "Type 5"], ["Type 2"]]);
+    // The label stays the FIELD. Nothing welds a type onto it.
+    expect(item?.materials.map((row) => row.labelRaw)).toEqual(["FABRIC REFERENCE", "FABRIC REFERENCE"]);
+    expect(item?.dimensions[0]?.configurations).toEqual([]);
+  });
+
+  it("reads a bare string as a one-entry list, everywhere a list is asked for", () => {
+    const parsed = parse(
+      sheet({
+        configurations: "Type 2",
+        depictsConfigurations: "Type 2",
+        materials: [{ labelRaw: "FABRIC REFERENCE", valueRaw: "Maker B", materialCodeRaw: null, configurations: "Type 2" }],
+      }),
+    );
+    expect(parsed.success).toBe(true);
+    const item = parsed.success ? parsed.data.items[0]! : null;
+    expect(item?.configurations).toEqual([{ name: "Type 2", nameRaw: "Type 2", evidence: null }]);
+    expect(item?.depictsConfigurations).toEqual(["Type 2"]);
+    expect(item?.materials[0]?.configurations).toEqual(["Type 2"]);
+  });
+
+  it("drops a name the page never listed from a row, and KEEPS the row", () => {
+    const parsed = parse(
+      sheet({
+        materials: [
+          { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker C", materialCodeRaw: null, configurations: ["Type 9", "Type 2"] },
+          { labelRaw: "FABRIC", valueRaw: "Maker E", materialCodeRaw: null, configurations: ["Type 7"] },
+        ],
+        depictsConfigurations: ["Type 7"],
+      }),
+    );
+    expect(parsed.success).toBe(true);
+    const item = parsed.success ? parsed.data.items[0]! : null;
+    expect(item?.materials).toHaveLength(2);
+    expect(item?.materials[0]?.valueRaw).toBe("Maker C");
+    expect(item?.materials[0]?.configurations).toEqual(["Type 2"]);
+    // A name the TITLE BLOCK gives is the page naming it, so a row may use it.
+    expect(item?.depictsConfigurations).toEqual(["Type 7"]);
+    expect(item?.materials[1]?.configurations).toEqual(["Type 7"]);
+  });
+
+  it("matches a row's names to the page's by case and whitespace only", () => {
+    const parsed = parse(
+      sheet({
+        materials: [{ labelRaw: "FABRIC", valueRaw: "Maker B", materialCodeRaw: null, configurations: ["TYPE  2", "Typo 2"] }],
+      }),
+    );
+    const item = parsed.success ? parsed.data.items[0]! : null;
+    // `TYPE  2` is Type 2; `Typo 2` is a different word and is not guessed at.
+    expect(item?.materials[0]?.configurations).toEqual(["TYPE  2"]);
+  });
+
+  it("never fails the read over a malformed configuration list or entry", () => {
+    const junk = parse(sheet({ configurations: [{ nameRaw: "no name" }, 7, null, { name: "Type 1" }], depictsConfigurations: {} }));
+    expect(junk.success).toBe(true);
+    const item = junk.success ? junk.data.items[0]! : null;
+    // The nameless object is dropped; the bare number is a name; the good one survives.
+    expect(item?.configurations?.map((entry) => entry.name)).toEqual(["7", "Type 1"]);
+    // `{}` is not a list of names; it reads as none rather than failing the read.
+    expect(item?.depictsConfigurations).toEqual([]);
+    const shapeless = parse(sheet({ configurations: { oops: true } }));
+    expect(shapeless.success).toBe(true);
+  });
+
+  it("collapses a configuration listed twice", () => {
+    const parsed = parse(sheet({ configurations: ["Type 2", "type 2", "Type 3"] }));
+    const item = parsed.success ? parsed.data.items[0]! : null;
+    expect(item?.configurations?.map((entry) => entry.name)).toEqual(["Type 2", "Type 3"]);
+  });
+
+  it("still parses a version 2 response, which carries none of it", () => {
+    const parsed = DrawingsOutput.safeParse({
+      items: [{ itemCodeRaw: "X-1", itemNameRaw: "Sofa", page: 1, dimensions: [{ labelRaw: "W", valueRaw: "1" }], materials: [], notesRaw: [], dimensionsCombinedRaw: [], confidence: null }],
+      codeGroups: [{ itemCodes: ["X-1"], pages: [1, 2], relationship: "one_item", evidence: "same chair" }],
+      documentNotes: null,
+    });
+    expect(parsed.success).toBe(true);
+    const item = parsed.success ? parsed.data.items[0]! : null;
+    expect(item?.configurations).toBeUndefined();
+    expect(item?.depictsConfigurations).toBeUndefined();
+    expect(item?.dimensions[0]?.configurations).toBeUndefined();
+  });
+
+  it("asks for the new fields on the tool, and asks the model never to weld them into a label", () => {
+    const itemSchema = DRAWINGS_TOOL.input_schema.properties.items.items as unknown as {
+      properties: Record<string, { items?: { properties?: Record<string, unknown>; required?: string[] } }>;
+      required: string[];
+    };
+    expect(itemSchema.required).toEqual(expect.arrayContaining(["configurations", "depictsConfigurations"]));
+    expect(itemSchema.properties.dimensions?.items?.required).toContain("configurations");
+    expect(itemSchema.properties.materials?.items?.required).toContain("configurations");
+    expect(PROMPTS.shop_drawings).toMatch(/NEVER put the configuration into the label/);
+    expect(PROMPTS.shop_drawings).toMatch(/still describes the PAGES/);
+  });
+
+  it("requires only properties each object declares", () => {
+    // The code-group object listed `itemCodeRaw` as required while declaring
+    // `itemCodes` and forbidding anything else — a request no answer could meet.
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== "object") return;
+      const record = node as { properties?: Record<string, unknown>; required?: string[] };
+      if (record.properties && Array.isArray(record.required)) {
+        for (const key of record.required) expect(Object.keys(record.properties)).toContain(key);
+      }
+      for (const value of Object.values(node as Record<string, unknown>)) walk(value);
+    };
+    for (const kind of DOCUMENT_KINDS) walk(TOOLS[kind].tool.input_schema);
   });
 });

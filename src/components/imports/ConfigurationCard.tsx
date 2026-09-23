@@ -35,6 +35,21 @@
 // THE LETTER IS NEVER SENT. It is derived from page order by
 // `variantLettersByItem`, on the server and here, so the screen and the confirm
 // reach the same answer without either telling the other.
+//
+// ============================================================================
+// ONE CONFIGURATION AT A TIME (2026-09-23).
+//
+// Max: "you just see configuration one, and it's got the dimensions and the
+// fabric. And then you go to configuration two ... it's the same every time."
+// So a split card is a TAB STRIP — one tab per configuration, carrying its
+// state — and the active tab shows that configuration complete: the shared
+// geometry, then its own finishes and notes. A card whose pages are ONE item
+// described twice has no strip: the same layout, with the pages as its sources
+// in the sidebar. The per-page chips that used to sit in the header are gone;
+// the strip is what they were.
+//
+// A code whose pages NAME their configurations (`TYPE 1` … `TYPE 5`,
+// schemaVersion 3) is `NamedConfigurationCard`, below the same props.
 // ============================================================================
 import { Fragment, useEffect, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
@@ -63,30 +78,13 @@ import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Tip from "@/components/ui/Tip";
 import type { CroppedImage } from "@/lib/pdf-crop";
-
-/**
- * A colour per configuration, fixed by LETTER rather than by position on
- * screen.
- *
- * A reviewer matches the chip at the top of the card to the section below it by
- * colour, so A has to be the same colour on every reload and on every card --
- * if it shifted when a configuration was reviewed, the chip would stop being a
- * way of finding anything. Written out as literal class strings because
- * Tailwind reads the source, not the runtime.
- */
-const CONFIGURATION_COLOURS = [
-  { chip: "bg-sky-100 text-sky-900 border-sky-300", band: "bg-sky-50", border: "border-l-sky-400" },
-  { chip: "bg-emerald-100 text-emerald-900 border-emerald-300", band: "bg-emerald-50", border: "border-l-emerald-400" },
-  { chip: "bg-violet-100 text-violet-900 border-violet-300", band: "bg-violet-50", border: "border-l-violet-400" },
-  { chip: "bg-amber-100 text-amber-900 border-amber-300", band: "bg-amber-50", border: "border-l-amber-400" },
-  { chip: "bg-rose-100 text-rose-900 border-rose-300", band: "bg-rose-50", border: "border-l-rose-400" },
-  { chip: "bg-teal-100 text-teal-900 border-teal-300", band: "bg-teal-50", border: "border-l-teal-400" },
-];
-
-const colourFor = (letter: string) => {
-  const index = letter.charCodeAt(0) - 65;
-  return CONFIGURATION_COLOURS[((index % CONFIGURATION_COLOURS.length) + CONFIGURATION_COLOURS.length) % CONFIGURATION_COLOURS.length]!;
-};
+import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
+import PagePicker from "@/components/imports/PagePicker";
+import NamedConfigurationCard from "@/components/imports/NamedConfigurationCard";
+import { AddConfiguration, PagesAreControl } from "@/components/imports/ConfigurationControls";
+// A colour per configuration, fixed by LETTER, so A is sky on every card and
+// on every screen that names one. See configuration-colours.ts.
+import { colourForLetter as colourFor } from "@/components/imports/configuration-colours";
 
 export type ConfigurationCardProps = {
   card: Extract<ReviewCard<ItemResolution>, { kind: "configurations" }>;
@@ -113,9 +111,23 @@ export type ConfigurationCardProps = {
   onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
   /** One level on the records this card applies to, through the levels route. */
   onSetLevel: (recordIds: string[], level: ItemLevel) => Promise<void>;
+  /**
+   * Any other change to a staged ITEM, through the item PATCH — today the
+   * reviewer's tick that a named configuration may be created beside existing
+   * ones. Optional so a screen that has no such control still renders.
+   */
+  onSaveItem?: (item: DrawingItem, changes: Record<string, unknown>) => Promise<void>;
 };
 
-export default function ConfigurationCard({
+/**
+ * A code drawn more than once, or one whose pages name its configurations.
+ * Two cards behind one set of props, so the screens need not tell them apart.
+ */
+export default function ConfigurationCard(props: ConfigurationCardProps) {
+  return props.card.named ? <NamedConfigurationCard {...props} /> : <PageConfigurationCard {...props} />;
+}
+
+function PageConfigurationCard({
   card,
   importId,
   importIdFor,
@@ -133,13 +145,20 @@ export default function ConfigurationCard({
   onImage,
   onSwatch,
   onSetLevel,
+  onSaveItem,
 }: ConfigurationCardProps) {
   const [open, setOpen] = useState(true);
   const [showOther, setShowOther] = useState(false);
   /** Which of the card's pages the sidebar preview is showing. */
   const [previewPage, setPreviewPage] = useState<number | null>(null);
+  /** Which configuration's tab is open. Local state: nothing links into it. */
+  const [activeTab, setActiveTab] = useState<string | null>(null);
 
   const pendingMembers = card.members.filter((member) => member.state === "pending");
+  // The open tab, falling back to the first with anything left to review when
+  // the one chosen has gone (confirmed on another screen, say).
+  const activeMember =
+    card.members.find((member) => member.item.id === activeTab) ?? pendingMembers[0] ?? card.members[0];
   const busyHere = busy === card.id || pendingMembers.some((member) => busy === member.item.id);
   const pageImportId = (itemId: string) => importIdFor?.(itemId) ?? importId;
 
@@ -149,10 +168,6 @@ export default function ConfigurationCard({
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-[13px] font-semibold text-neutral-900">{card.codeRaw}</span>
         {card.name && <span className="text-neutral-700">{card.name}</span>}
-        <Chip>
-          page{card.members.length === 1 ? "" : "s"}{" "}
-          {card.members.map((member) => member.item.page ?? "?").join(", ")}
-        </Chip>
         {card.split && <Chip tone="info">{card.members.length} configurations</Chip>}
         <span className="flex-1" />
         {open && pendingMembers.length > 0 && (
@@ -167,11 +182,6 @@ export default function ConfigurationCard({
         <Button size="xs" variant="quiet" onClick={() => setOpen((value) => !value)}>
           {open ? "Collapse" : "Expand"}
         </Button>
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-2">
-        {card.members.map((member) => (
-          <ConfigurationChip key={member.item.id} card={card} member={member} importId={pageImportId(member.item.id)} />
-        ))}
       </div>
       {/* WHAT THIS CARD IS ABOUT TO DO, said differently for the two cases it
           covers — because they are different, and the card used to claim the
@@ -203,6 +213,62 @@ export default function ConfigurationCard({
           <span className="font-medium text-neutral-600">Read as {card.split ? "configurations" : "one item"}:</span>{" "}
           {card.groupedBecause}
         </p>
+      )}
+      {/* A REVIEWER'S ANSWER (brief C1): one item or several, by page — the
+          manual codeGroups.relationship — or name the configurations instead,
+          which turns this into a card of named ones. Each writes to every page
+          of the code; the model's reading stays beside it. */}
+      {onSaveItem && open && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <PagesAreControl
+            split={card.split}
+            read={card.relationshipRead}
+            byReviewer={card.relationshipByReviewer}
+            disabled={busyHere}
+            onSet={(answer) => {
+              for (const member of card.members) void onSaveItem(member.item, { relationshipByReviewer: answer });
+            }}
+          />
+          <AddConfiguration
+            existing={[]}
+            disabled={busyHere}
+            label="Name its configurations…"
+            hint="TYPE 1, TYPE 2 — with commas"
+            onAdd={(labels) => {
+              const list = labels.map((label) => ({ label, readAs: null }));
+              for (const member of card.members) void onSaveItem(member.item, { configurationsByReviewer: list });
+            }}
+          />
+          {card.members.some((member) => Array.isArray(member.item.configurationsByReviewer)) && (
+            <Button
+              size="xs"
+              variant="quiet"
+              disabled={busyHere}
+              onClick={() => {
+                for (const member of card.members) void onSaveItem(member.item, { configurationsByReviewer: null });
+              }}
+            >
+              Put the configurations the document named back
+            </Button>
+          )}
+        </div>
+      )}
+      {/* THE STRIP IS WHAT THE PER-PAGE CHIPS WERE, and only a split card has
+          one: a card whose pages are one item has nothing to choose between. */}
+      {open && card.split && activeMember && (
+        <ConfigurationTabs
+          label={`Configurations of ${card.codeRaw}`}
+          active={activeMember.item.id}
+          onSelect={setActiveTab}
+          tabs={card.members.map((member) => ({
+            key: member.item.id,
+            label: memberName(card, member),
+            colour: colourFor(member.letter),
+            pending: member.pending.length,
+            state: member.state,
+            blocked: member.resolution?.blockers[0]?.message ?? null,
+          }))}
+        />
       )}
     </div>
   );
@@ -519,8 +585,10 @@ export default function ConfigurationCard({
             </>
           )}
 
-          {/* Each configuration's own band, in its own colour. */}
-          {card.members.map((member) => (
+          {/* The OPEN configuration's own finishes and notes, in its own
+              colour — one at a time on a split card. A card whose pages are one
+              item shows every page's, because those are sources, not choices. */}
+          {(card.split && activeMember ? [activeMember] : card.members).map((member) => (
             <ConfigurationSection
               key={member.item.id}
               card={card}
@@ -553,20 +621,7 @@ export default function ConfigurationCard({
             page={shownPage}
             className="w-full"
           />
-          {pages.length > 1 && (
-            <div className="flex flex-wrap gap-1.5">
-              {pages.map((page) => (
-                <Button
-                  key={page}
-                  size="xs"
-                  variant={page === shownPage ? "secondary" : "quiet"}
-                  onClick={() => setPreviewPage(page)}
-                >
-                  page {page}
-                </Button>
-              ))}
-            </div>
-          )}
+          <PagePicker pages={pages} current={shownPage} onPick={setPreviewPage} />
 
           <RunTargets
             runs={pendingMembers[0]?.resolution?.resolution.runs ?? card.members[0]?.resolution?.resolution.runs ?? []}
@@ -657,66 +712,6 @@ function memberName(
     : `Page ${member.item.page ?? "?"}`;
 }
 
-function ConfigurationChip({
-  card,
-  member,
-  importId,
-}: {
-  card: Extract<ReviewCard<ItemResolution>, { kind: "configurations" }>;
-  member: ConfigurationMember<ItemResolution>;
-  importId: string;
-}) {
-  const colour = colourFor(member.letter);
-  const exists = Object.keys(member.resolution?.writesTo ?? {}).length > 0;
-  // "RECORD WILL BE CREATED" IS ABOUT A RECORD PER CONFIGURATION, and printing
-  // it on each page of a card that is creating none says the opposite of what
-  // the card is doing — two chips, two promises of a record, for one chair. On
-  // a non-split card the pages write to the SAME record, which the Applies-to
-  // panel below states once; only what has happened to this page belongs here.
-  const state = card.split
-    ? member.state === "applied"
-      ? "applied"
-      : member.state === "ignored"
-        ? "ignored"
-        : exists
-          ? "record exists"
-          : "record will be created"
-    : member.state === "applied"
-      ? "applied"
-      : member.state === "ignored"
-        ? "ignored"
-        : null;
-  return (
-    <span
-      className={`inline-flex items-center gap-2 rounded border px-2 py-0.5 text-xs ${colour.chip} ${
-        member.state === "pending" ? "" : "opacity-60"
-      }`}
-    >
-      {/* "S-200 A" is the NAME OF A RECORD this confirm will create, and it is
-          what somebody will later quote in an email. It must not appear on a
-          card that is not splitting anything — there the pages are sources, and
-          the page number is what identifies one. */}
-      {/* The NAME, then a link to the page it came from. On a non-splitting
-          card the name IS the page, so the link carries the word instead of
-          the chip saying "Page 1 Page 1". */}
-      {card.split && <span className="font-medium">{memberName(card, member)}</span>}
-      {member.item.page ? (
-        <a
-          href={`/api/imports/${importId}/source#page=${member.item.page}`}
-          className={card.split ? "underline" : "font-medium underline"}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Page {member.item.page}
-        </a>
-      ) : (
-        !card.split && <span className="font-medium">{memberName(card, member)}</span>
-      )}
-      {state && <span>· {state}</span>}
-    </span>
-  );
-}
-
 /**
  * One configuration's own specs: its picture, its finishes, its notes.
  *
@@ -790,7 +785,23 @@ function ConfigurationSection({
       <div className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2 ${colour.band}`}>
         <p className="text-sm">
           <span className={`inline-flex rounded border px-1.5 py-0.5 text-xs font-medium ${colour.chip}`}>{name}</span>
-          {member.item.page && <span className="ml-2 text-xs text-neutral-600">Page {member.item.page}</span>}
+          {card.split && member.item.page && (
+            <a
+              href={`/api/imports/${importId}/source#page=${member.item.page}`}
+              className="ml-2 text-xs text-neutral-600 underline"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Page {member.item.page}
+            </a>
+          )}
+          {/* "RECORD WILL BE CREATED" is about a record per configuration, so
+              only a split card says it. */}
+          {card.split && (
+            <span className="ml-2 text-xs text-neutral-600">
+              · {Object.keys(member.resolution?.writesTo ?? {}).length > 0 ? "record exists" : "record will be created"}
+            </span>
+          )}
         </p>
         <Button
           size="xs"
