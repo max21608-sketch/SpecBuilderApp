@@ -153,3 +153,46 @@ describe("the renumbering does not stale a sent draft", () => {
     expect(coverageStaleReasons(coverage(frozen), live)).toContain("contextChanged");
   });
 });
+
+describe("a version taken before 0039", () => {
+  it("keeps the label it was taken with, and reads with no numbering under a line", async () => {
+    const { parseAtoms } = await import("@/lib/snapshot-diff");
+    const { RECORD_ATOMS_SCHEMA_VERSION } = await import("@/lib/record-atoms");
+    const older = {
+      schemaVersion: RECORD_ATOMS_SCHEMA_VERSION - 1,
+      project: { number: "P18181", name: "Miami", client: null },
+      record: {
+        id: "r",
+        recordNo: 37,
+        label: "P18181-037",
+        itemDescription: "Desk chair",
+        qty: null,
+        area: null,
+        runName: "MAIN",
+        boqCodes: ["S-301"],
+        variantLabel: "TYPE 3",
+        dimensionNote: null,
+      },
+      runId: "run",
+      runName: "MAIN",
+      status: "active",
+      categoryId: null,
+      categoryName: null,
+      level: null,
+      productReference: null,
+      designer: null,
+      boqCategory: null,
+      parentId: "line",
+      splitReason: "configuration",
+      refs: [],
+      attributes: [],
+      answers: [],
+      itemImage: null,
+    };
+    const parsed = parseAtoms(older);
+    // History is history: the label is not recomputed as 12.3.
+    expect(parsed.record.label).toBe("P18181-037");
+    expect(parsed.record.parentRecordNo).toBeNull();
+    expect(parsed.record.variantOrdinal).toBeNull();
+  });
+});

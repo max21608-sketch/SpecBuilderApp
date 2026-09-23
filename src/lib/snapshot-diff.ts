@@ -108,6 +108,14 @@ const AtomSchema = z.object({
     // name, a field left out here would be silently dropped from every
     // snapshot this reads back.
     dimensionNote: z.string().nullable().optional().default(null),
+    // Added at schema 6 (0039): the bill line's number and this
+    // configuration's under it, which order a configuration under its line.
+    // Named here for the reason above -- Zod strips what it does not name --
+    // and defaulted null, so a version written before 0039 reads as "not
+    // numbered under a line" rather than failing. The LABEL a version carries
+    // is never recomputed from them: history keeps the label it was taken with.
+    parentRecordNo: z.number().nullable().optional().default(null),
+    variantOrdinal: z.number().nullable().optional().default(null),
   }),
   runId: z.string(),
   runName: z.string(),
