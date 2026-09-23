@@ -12,6 +12,7 @@
 // its own `experimentalTriggers` entry in vercel.json and has no consumer at
 // all until that deploy lands.
 import { send } from "@vercel/queue";
+import { localQueueRequested, runLocally } from "@/lib/local-queue";
 
 export const EXTRACTION_QUEUE_TOPIC = "document-extraction";
 
@@ -68,6 +69,11 @@ export async function enqueueExtractionJob(
   message: ExtractionQueueMessage,
   idempotencyKey: string,
 ): Promise<void> {
+  // The local stack only, and guarded there: see src/lib/local-queue.ts.
+  if (localQueueRequested()) {
+    runLocally(message, idempotencyKey);
+    return;
+  }
   await send(EXTRACTION_QUEUE_TOPIC, message, {
     idempotencyKey,
     retentionSeconds: 7 * 24 * 60 * 60,

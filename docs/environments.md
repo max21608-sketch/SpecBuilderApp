@@ -74,6 +74,76 @@ repointed the sandbox file at an empty project for six minutes while
 declaration cannot catch. Pass `--no-env-pull` every time, and read the host
 each script prints before it acts.
 
+## The local stack
+
+The whole app on one Mac, touching no company system: a local Postgres, a
+folder standing in for the private Vercel Blob store, and document reads run
+in-process instead of on Vercel Queues. It exists because the sandbox database
+and the blob store are READ-ONLY for Claude by organisation policy, and
+"verified in the browser" otherwise meant either writing to them or not
+verifying the drawings card's page preview, crops and uploads at all. It is a
+FOURTH place the app runs, beside staging, pilot and production, and it is
+none of them: its data is whatever somebody loaded that day.
+
+**It holds copies of real client documents, outside the repo.** The Panther
+pack is copied to `~/dev/localstack/panther/` and uploaded through the app's
+own screens; the stored bytes land under `~/dev/localstack/blob/`. Neither
+path is inside the checkout, and neither is ever committed, attached to a
+fixture or quoted in a seed — the rule under *Reference material* in
+`CLAUDE.md`. A model read on the local stack is a real, charged call.
+
+**The guard.** `tools/localstack/guard.mjs` refuses unless `LOCAL_STACK=1`,
+`APP_ENV=development` and `DATABASE_URL`'s host is `localhost` — all three —
+and every piece calls it: the stack server, the preload, and the in-process
+queue (`src/lib/local-queue.ts`, where `LOCAL_QUEUE=inline` anywhere else
+THROWS rather than falling through to the real queue). The preload also REFUSES
+outbound requests to `*.neon.tech`, any other blob store, Vercel, Microsoft
+Graph, Capsule and `whistlercloud.com`; Anthropic is allowed. No local-stack
+command reads `.env.local` — each names `.env.localstack.local` itself, and
+`__NEXT_PROCESSED_ENV=true` stops Next loading a `.env.local` that happens to
+sit in the checkout.
+
+**How it works, with no change to app code except the queue:**
+
+- `src/lib/db.ts` speaks Neon's SQL-over-HTTP protocol, which a local Postgres
+  cannot answer. The driver POSTs to `https://localhost/sql` for a `localhost`
+  host; the preload (`NODE_OPTIONS=--import=tools/localstack/preload.mjs`,
+  set by the launchers) reroutes that one URL to the stack server, which runs
+  the query with `pg` and answers in Neon's shape (`tools/localstack/neon-http.mjs`).
+  `withTransaction` already uses `pg` and needs nothing.
+- `@vercel/blob` reads `VERCEL_BLOB_API_URL` for `put`, `head`, `copy`, `del`
+  and the browser's `upload()`, all answered by `tools/localstack/blob-server.mjs`,
+  which checks a client token's signature, pathname, type and size the way
+  the store does. `get()` ignores that URL and builds
+  `https://<store>.private.blob.vercel-storage.com/<path>` from the token, so
+  the preload reroutes that host too. The browser's copy of the URL must start
+  `http://localhost`: otherwise the SDK streams the upload body, which Chrome
+  refuses over HTTP/1.1 (`net::ERR_ALPN_NEGOTIATION_FAILED`).
+- `@vercel/queue`'s `send()` talks to the real Vercel queue even under
+  `next dev`. With `LOCAL_QUEUE=inline` (set by `dev:local` only),
+  `enqueueExtractionJob` hands the message to `src/lib/local-queue.ts`, which
+  calls `runDocumentExtraction` in-process after the caller's commit. That
+  bypasses the transport, `handleCallback`'s signing, the visibility timeout
+  and the platform's retry schedule. The claim protocol, the attempt fence,
+  the claim cap, the busy outcome and the per-pack slot hand-off all still run,
+  and a throw is redelivered up to `MAX_DELIVERIES` before the terminal failure
+  is recorded, as the consumer route does. Mail ingestion is not run.
+
+**Commands** (from a checkout with `node_modules`, Postgres.app running):
+
+```bash
+node tools/localstack/init-env.mjs --anthropic-from=<path to .env.local>   # once; copies that ONE key
+createdb -h localhost specbuilder_local                                     # once
+npm run db:migrate:local && npm run db:seed:local                           # prints the host: read it
+node --env-file=.env.localstack.local tools/create-user.mjs <email> <name> admin <password>
+npm run dev:local           # stack server on 3101, next dev on 3100; Ctrl-C stops both
+VITEST_MAX_FORKS=4 npm run checks:local   # the four checks, database tier REQUIRED, against local
+```
+
+`checks:local` starts the stack server for the suite and ends with
+`next build`, which overwrites `.next` — stop `dev:local` in that checkout
+first. The committed template is `.env.localstack.example`.
+
 ## Deploying to staging
 
 Commit, push `staging`, then confirm a deployment exists **for that exact
