@@ -354,16 +354,21 @@ describe("configurations a page names", () => {
   it("drops a name the page never listed from a row, and KEEPS the row", () => {
     const parsed = parse(
       sheet({
-        materials: [{ labelRaw: "FABRIC REFERENCE", valueRaw: "Maker C", materialCodeRaw: null, configurations: ["Type 9", "Type 2"] }],
+        materials: [
+          { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker C", materialCodeRaw: null, configurations: ["Type 9", "Type 2"] },
+          { labelRaw: "FABRIC", valueRaw: "Maker E", materialCodeRaw: null, configurations: ["Type 7"] },
+        ],
         depictsConfigurations: ["Type 7"],
       }),
     );
     expect(parsed.success).toBe(true);
     const item = parsed.success ? parsed.data.items[0]! : null;
-    expect(item?.materials).toHaveLength(1);
+    expect(item?.materials).toHaveLength(2);
     expect(item?.materials[0]?.valueRaw).toBe("Maker C");
     expect(item?.materials[0]?.configurations).toEqual(["Type 2"]);
-    expect(item?.depictsConfigurations).toEqual([]);
+    // A name the TITLE BLOCK gives is the page naming it, so a row may use it.
+    expect(item?.depictsConfigurations).toEqual(["Type 7"]);
+    expect(item?.materials[1]?.configurations).toEqual(["Type 7"]);
   });
 
   it("matches a row's names to the page's by case and whitespace only", () => {
@@ -383,6 +388,7 @@ describe("configurations a page names", () => {
     const item = junk.success ? junk.data.items[0]! : null;
     // The nameless object is dropped; the bare number is a name; the good one survives.
     expect(item?.configurations?.map((entry) => entry.name)).toEqual(["7", "Type 1"]);
+    // `{}` is not a list of names; it reads as none rather than failing the read.
     expect(item?.depictsConfigurations).toEqual([]);
     const shapeless = parse(sheet({ configurations: { oops: true } }));
     expect(shapeless.success).toBe(true);

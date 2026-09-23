@@ -1029,14 +1029,16 @@ const RawDrawingItemShape = z.object({
 /**
  * A NAME THE PAGE DID NOT GIVE IS DROPPED FROM A ROW, AND THE ROW IS KEPT.
  *
- * A row or a `depictsConfigurations` entry names configurations by the `name`
- * the item's own `configurations` gave them. One that matches none is a
- * reading this app cannot place — so the NAME goes and the row stays, reading
- * as shared, which is what the card then shows a reviewer. Failing the read
- * would lose every other row on the page over one word; keeping the name would
- * invent a configuration nothing on the page lists.
+ * A row names configurations by the `name` the page gave them — in its
+ * `configurations`, or in `depictsConfigurations`, which is the page naming the
+ * ones it shows (a title block `MUR 1 & TYPO 5`). One that matches neither is
+ * a reading this app cannot place — so the NAME goes and the row stays,
+ * reading as shared, which is what the card then shows a reviewer. Failing the
+ * read would lose every other row on the page over one word; keeping the name
+ * would invent a configuration nothing on the page lists.
  *
- * Duplicate configurations (the same folded name twice) collapse to the first.
+ * `depictsConfigurations` itself is kept as read: it IS the page naming them.
+ * Duplicates (the same folded name twice) collapse to the first.
  */
 export const RawDrawingItem = RawDrawingItemShape.transform((item) => {
   const configurations: RawConfiguration[] = [];
@@ -1047,15 +1049,19 @@ export const RawDrawingItem = RawDrawingItemShape.transform((item) => {
     known.add(folded);
     configurations.push(entry);
   }
-  const keepKnown = (names: readonly string[] | undefined) => {
+  const distinct = (names: readonly string[] | undefined, allowed: ReadonlySet<string> | null) => {
     const kept: string[] = [];
     for (const name of names ?? []) {
       const folded = foldConfigurationName(name);
-      if (!known.has(folded) || kept.some((entry) => foldConfigurationName(entry) === folded)) continue;
+      if (folded === "" || (allowed && !allowed.has(folded))) continue;
+      if (kept.some((entry) => foldConfigurationName(entry) === folded)) continue;
       kept.push(name);
     }
     return kept;
   };
+  const depicts = distinct(item.depictsConfigurations, null);
+  for (const name of depicts) known.add(foldConfigurationName(name));
+  const keepKnown = (names: readonly string[] | undefined) => distinct(names, known);
   const withRowNames = <T extends { configurations?: string[] }>(row: T): T =>
     row.configurations === undefined ? row : { ...row, configurations: keepKnown(row.configurations) };
   return {
@@ -1063,7 +1069,7 @@ export const RawDrawingItem = RawDrawingItemShape.transform((item) => {
     dimensions: item.dimensions.map(withRowNames),
     materials: item.materials.map(withRowNames),
     ...(item.configurations === undefined ? {} : { configurations }),
-    ...(item.depictsConfigurations === undefined ? {} : { depictsConfigurations: keepKnown(item.depictsConfigurations) }),
+    ...(item.depictsConfigurations === undefined ? {} : { depictsConfigurations: depicts }),
   };
 });
 

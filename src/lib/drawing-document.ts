@@ -52,7 +52,7 @@ import { parseCombinedDimensions, parseDimensionFigure, sharesAScale, SCALE_BOUN
 import type { RawCodeGroup, RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
 import { slotFromModel } from "@/lib/extraction-schema";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
-import { nextVariantLabel, normaliseVariantLabel } from "@/lib/record-variants";
+import { nextVariantLabel, normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
 
 // ---- the staged shape ------------------------------------------------------
 
@@ -1034,7 +1034,18 @@ export type DrawingBlocker =
   | { code: "slot_taken"; message: string; observationId: string; recordId?: string }
   | { code: "dimension_slot_missing"; message: string; observationId: string }
   | { code: "dimension_slot_taken"; message: string; observationId: string; recordId?: string }
-  | { code: "dia_conflict"; message: string; observationId: string };
+  | { code: "dia_conflict"; message: string; observationId: string }
+  | { code: "configuration_name"; message: string; label: string; observationId?: undefined }
+  | {
+      code: "configuration_new";
+      message: string;
+      /** The bill line the configuration would be created under. */
+      recordId: string;
+      label: string;
+      /** The live configurations that bill line already has. */
+      existing: string[];
+      observationId?: undefined;
+    };
 
 /**
  * What the target records already carry, read live.
@@ -1143,11 +1154,37 @@ export function drawingItemBlockers(
   item: DrawingItem,
   resolution: DrawingResolution,
   occupied: OccupiedSlots,
+  /**
+   * For a page of a code that NAMES its configurations (schemaVersion 3): the
+   * plan and the bill lines' live variants. Every record-level check then runs
+   * per configuration — a BWS field or a dimension slot collides only with
+   * another row written to the SAME record, and Type 2's COM 1 and Type 3's
+   * COM 1 are on two different chairs. `occupied` is then keyed by the REAL
+   * variant ids (not re-keyed through `occupancyThrough`), and so is every
+   * replace acknowledgement.
+   *
+   * Null or absent: exactly the checks this function has always made.
+   */
+  named: NamedTargets | null = null,
 ): DrawingBlocker[] {
   const blockers: DrawingBlocker[] = [];
   const occupiedFields = occupied.fields;
   const targets = targetRecordIds(item, resolution);
   const pending = item.observations.filter((observation) => observation.reviewStatus === "pending");
+  // The records a row reaches that exist today, and the configuration scopes
+  // it is written in. One unnamed scope, and the ticked records, for a page
+  // that names no configurations.
+  const recordsOf = (observation: DrawingObservation) => rowWriteRecords(observation.id, targets, named);
+  const scopesOf = (observation: DrawingObservation): string[] =>
+    named ? (named.plan.rows[observation.id] ?? named.plan.labels) : [""];
+  const scopes: string[] = named ? named.plan.labels : [""];
+  const recordsInScope = (scope: string): string[] =>
+    named
+      ? targets.flatMap((parentId) => {
+          const variantId = named.variants.get(parentId)?.get(scope);
+          return variantId ? [variantId] : [];
+        })
+      : targets;
 
   if (targets.length === 0) {
     blockers.push({
@@ -1173,6 +1210,8 @@ export function drawingItemBlockers(
       });
     }
   }
+
+  if (named) blockers.push(...namedConfigurationBlockers(item, resolution, targets, named));
 
   for (const observation of pending) {
     // Only a row that REACHES something is asked — see `asksForState`. A
@@ -1221,7 +1260,7 @@ export function drawingItemBlockers(
         const acknowledged = acknowledgedReplacements(observation);
         // A clash the reviewer has TICKED for that record is a replacement,
         // not a blocker. One they have not seen still is.
-        const clash = targets.find((recordId) => {
+        const clash = recordsOf(observation).find((recordId) => {
           const occupant = occupied.dimensions.get(recordId)?.get(slot);
           if (!occupant) return false;
           return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
@@ -1240,7 +1279,7 @@ export function drawingItemBlockers(
       // Pre-checked so an occupied slot is a sentence the reviewer can act on,
       // rather than a unique-violation 500 from the database.
       const acknowledged = acknowledgedReplacements(observation);
-      const clash = targets.find((recordId) => {
+      const clash = recordsOf(observation).find((recordId) => {
         const occupant = occupiedFields.get(recordId)?.get(observation.specFieldId ?? "");
         if (!occupant) return false;
         return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
@@ -1257,63 +1296,125 @@ export function drawingItemBlockers(
   }
 
   // Two observations in ONE card claiming one field would satisfy the check
-  // above (nothing is written yet) and collide at insert.
+  // above (nothing is written yet) and collide at insert — but only where they
+  // land on the SAME record, which for named configurations means sharing one.
   const claimed = new Map<string, string>();
   for (const observation of pending) {
     if (!observation.specFieldId || observation.attrGroup === "dimension") continue;
-    const previous = claimed.get(observation.specFieldId);
-    if (previous) {
+    const keys = scopesOf(observation).map((scope) => `${scope}\u0000${observation.specFieldId}`);
+    if (keys.some((key) => claimed.has(key))) {
       blockers.push({
         code: "slot_taken",
         observationId: observation.id,
-        message: "Two of these specs are assigned to the same BWS field. Move one.",
+        message: named
+          ? "Two of these specs are assigned to the same BWS field on the same configuration. Move one."
+          : "Two of these specs are assigned to the same BWS field. Move one.",
       });
     } else {
-      claimed.set(observation.specFieldId, observation.id);
+      for (const key of keys) claimed.set(key, observation.id);
     }
   }
 
   // The same rule for dimension slots: two widths in one card satisfy the
   // live check above (neither is written yet) and collide at insert.
-  const claimedSlots = new Map<DimensionSlot, string>();
+  const claimedSlots = new Map<string, string>();
   for (const observation of pending) {
     if (observation.attrGroup !== "dimension" || !observation.dimensionSlot) continue;
-    if (claimedSlots.has(observation.dimensionSlot)) {
+    const keys = scopesOf(observation).map((scope) => `${scope}\u0000${observation.dimensionSlot}`);
+    if (keys.some((key) => claimedSlots.has(key))) {
       blockers.push({
         code: "dimension_slot_taken",
         observationId: observation.id,
         message: `Two of these are the ${DIMENSION_SLOT_LABELS[observation.dimensionSlot].toLowerCase()}. Change one, or make it a note.`,
       });
     } else {
-      claimedSlots.set(observation.dimensionSlot, observation.id);
+      for (const key of keys) claimedSlots.set(key, observation.id);
     }
   }
 
   // Dia. REPLACES W x D, so a record carrying both would export a cell that
   // silently drops two real measurements. Cross-row, so no check constraint
   // can hold it — it is caught here, against the card AND what the target
-  // records already carry, and named on the export cell too.
-  const diaHere = pending.find((o) => o.attrGroup === "dimension" && o.dimensionSlot === "DIA");
-  const squareHere = pending.filter((o) => o.attrGroup === "dimension" && (o.dimensionSlot === "W" || o.dimensionSlot === "D"));
-  const squareThere = targets.some(
-    (recordId) => occupied.dimensions.get(recordId)?.has("W") || occupied.dimensions.get(recordId)?.has("D"),
-  );
-  const diaThere = targets.some((recordId) => occupied.dimensions.get(recordId)?.has("DIA"));
-  if (diaHere && (squareHere.length > 0 || squareThere)) {
-    blockers.push({
-      code: "dia_conflict",
-      observationId: diaHere.id,
-      message: "This item has a diameter and a width or depth. A round item is written Dia. instead of W x D — remove one.",
-    });
-  }
-  if (!diaHere && diaThere && squareHere.length > 0) {
-    blockers.push({
-      code: "dia_conflict",
-      observationId: squareHere[0]!.id,
-      message: "One of these records already has a diameter. A round item is written Dia. instead of W x D — make this a note, or retire the diameter.",
-    });
+  // records already carry, and named on the export cell too. Per scope: a
+  // round configuration beside a square one is two different chairs.
+  const reported = new Set<string>();
+  for (const scope of scopes) {
+    const inScope = pending.filter((o) => scopesOf(o).includes(scope));
+    const diaHere = inScope.find((o) => o.attrGroup === "dimension" && o.dimensionSlot === "DIA");
+    const squareHere = inScope.filter((o) => o.attrGroup === "dimension" && (o.dimensionSlot === "W" || o.dimensionSlot === "D"));
+    const records = recordsInScope(scope);
+    const squareThere = records.some(
+      (recordId) => occupied.dimensions.get(recordId)?.has("W") || occupied.dimensions.get(recordId)?.has("D"),
+    );
+    const diaThere = records.some((recordId) => occupied.dimensions.get(recordId)?.has("DIA"));
+    if (diaHere && (squareHere.length > 0 || squareThere) && !reported.has(diaHere.id)) {
+      reported.add(diaHere.id);
+      blockers.push({
+        code: "dia_conflict",
+        observationId: diaHere.id,
+        message: "This item has a diameter and a width or depth. A round item is written Dia. instead of W x D — remove one.",
+      });
+    }
+    if (!diaHere && diaThere && squareHere.length > 0 && !reported.has(squareHere[0]!.id)) {
+      reported.add(squareHere[0]!.id);
+      blockers.push({
+        code: "dia_conflict",
+        observationId: squareHere[0]!.id,
+        message: "One of these records already has a diameter. A round item is written Dia. instead of W x D — make this a note, or retire the diameter.",
+      });
+    }
   }
 
+  return blockers;
+}
+
+/**
+ * The two blockers only a page of NAMED configurations can raise.
+ *
+ *   configuration_name  A name the database will refuse (`VARIANT_LABEL_SHAPE`),
+ *                       said in words on the card rather than as a 500 at
+ *                       confirm.
+ *   configuration_new   Confirming would CREATE a configuration under a bill
+ *                       line that already has OTHER live ones. The safety floor
+ *                       for cross-document naming, which this app does not
+ *                       reconcile: without it the drawing set's `MUR 1`
+ *                       silently becomes a sixth configuration beside the
+ *                       specification sheet's `TYPE 1`. An exact name is the
+ *                       exact step and lands on the existing record with no
+ *                       question; anything else waits for the reviewer's tick,
+ *                       stored per (bill line, name) in `configurationAcks`.
+ *
+ * Computed, never stored, and called by the screen and the confirm alike.
+ */
+export function namedConfigurationBlockers(
+  item: DrawingItem,
+  resolution: DrawingResolution,
+  targets: readonly string[],
+  named: NamedTargets,
+): DrawingBlocker[] {
+  const blockers: DrawingBlocker[] = [];
+  for (const label of named.plan.labels) {
+    const problem = variantLabelProblem(label);
+    if (problem) blockers.push({ code: "configuration_name", label, message: problem });
+  }
+  const acked = new Set((Array.isArray(item.configurationAcks) ? item.configurationAcks : []).map((ack) => `${ack?.recordId}|${ack?.label}`));
+  const runNameOf = new Map<string, string>();
+  for (const run of resolution.runs) if (run.status === "matched") runNameOf.set(run.record.id, run.runName);
+  for (const [parentId, toCreate] of configurationsToCreate(targets, named)) {
+    const existing = [...(named.variants.get(parentId)?.keys() ?? [])];
+    if (existing.length === 0) continue;
+    for (const label of toCreate) {
+      if (acked.has(`${parentId}|${label}`)) continue;
+      const where = runNameOf.get(parentId);
+      blockers.push({
+        code: "configuration_new",
+        recordId: parentId,
+        label,
+        existing,
+        message: `This item${where ? ` on ${where}` : ""} already has configuration${existing.length === 1 ? "" : "s"} ${existing.join(", ")} — create ${label} as a new configuration beside ${existing.length === 1 ? "it" : "them"}? Tick to confirm, or correct the name if it is one of those.`,
+      });
+    }
+  }
   return blockers;
 }
 
@@ -2927,9 +3028,16 @@ export function variantLettersByItem(
     relationship.set(normaliseRef(group.itemCodes[0] ?? ""), group.relationship);
   }
   const version2 = readByModel(doc);
+  // A v3 code whose pages NAME configurations is split by those names, not by
+  // page — see `namedConfigurationPlans`. Its pages get no letter here.
+  const named = namedConfigurationsByCode(items, doc);
 
   for (const [code, ordered] of byCode) {
     const group = ordered;
+    if (named.has(code)) {
+      for (const item of group) letters.set(item.id, null);
+      continue;
+    }
     const splits = version2 ? relationship.get(code) === "configurations" : group.length >= 2;
     if (group.length < 2 || !splits) {
       for (const item of group) letters.set(item.id, null);
@@ -2940,6 +3048,220 @@ export function variantLettersByItem(
     });
   }
   return letters;
+}
+
+// ============================================================================
+// CONFIGURATIONS A DOCUMENT NAMES (schemaVersion 3, 2026-09-23).
+//
+// Panther's S-301 sheet prints "FABRIC REFERENCE  As per room type: Type 1 & 5
+// - …, Type 2 - …, Type 3 - … ; Type 4 - …" beside ONE set of overall
+// dimensions. That is five chairs to make — one per room type, Max's decision
+// of 2026-09-23 — sharing a shape and differing in cloth. A page count cannot
+// say so (it is one page), and neither can `codeGroups.relationship`, which
+// describes PAGES: S-301's sheet and its shop drawing are still `one_item`.
+//
+// So a v3 code whose pages NAME configurations is split by those names, and
+// they REPLACE page lettering for that code: the variants are `S-301 TYPE 1`
+// … `S-301 TYPE 5`, never `S-301 A`. Every other code — v1, v2, and a v3 code
+// naming none — keeps `variantLettersByItem` exactly as it was.
+//
+// PURE, NEVER STORED, CALLED BY THE CARD AND THE CONFIRM: which record a row
+// lands on is the most consequential thing on the card, and two readings of it
+// would be a card promising one set of chairs while the confirm makes another.
+//
+// READ THROUGH THE THREE ACCESSORS BELOW, NEVER THE FIELDS. A reviewer's own
+// correction of a configuration (brief C1) is staged beside the model's
+// reading, and these are the one place that decides which of the two counts.
+// ============================================================================
+
+/** The configurations a page names, as they count today. */
+export function pageConfigurations(item: Pick<DrawingItem, "configurations">): StagedConfiguration[] {
+  if (!Array.isArray(item.configurations)) return [];
+  return item.configurations.filter(
+    (entry): entry is StagedConfiguration =>
+      Boolean(entry) && typeof entry === "object" && typeof entry.name === "string" && entry.name.trim() !== "",
+  );
+}
+
+/** Which configurations a page shows, as they count today. */
+export function pageDepicts(item: Pick<DrawingItem, "depictsConfigurations">): string[] {
+  return Array.isArray(item.depictsConfigurations)
+    ? item.depictsConfigurations.filter((name): name is string => typeof name === "string" && name.trim() !== "")
+    : [];
+}
+
+/** Which configurations a row names, as they count today. */
+export function rowConfigurations(observation: Pick<DrawingObservation, "configurations">): string[] {
+  return Array.isArray(observation.configurations)
+    ? observation.configurations.filter((name): name is string => typeof name === "string" && name.trim() !== "")
+    : [];
+}
+
+/** One configuration of a CODE: its stored label, and how the pages named it. */
+export type NamedConfiguration = {
+  /** Folded, as `spec_records.variant_label` stores it: `TYPE 2`. */
+  label: string;
+  /** The model's plain form, from the first page that named it: `Type 2`. */
+  name: string;
+  /** Every wording the pages used for it, in page order: `Type 1 & 5`, `TYPO 5`. */
+  namesRaw: string[];
+  evidence: string | null;
+  /** The pages that name it. */
+  pages: number[];
+};
+
+/**
+ * Per canonical folded code of a VERSION 3 run, the configurations its pages
+ * name — the union over its pages in page order, the first appearance of each
+ * folded name winning. A code whose pages name none is absent, and that is the
+ * test for "letter by page as before".
+ */
+export function namedConfigurationsByCode(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): Map<string, NamedConfiguration[]> {
+  const out = new Map<string, NamedConfiguration[]>();
+  if (doc?.schemaVersion !== 3) return out;
+  for (const [code, pages] of groupItemsByCode(items, doc)) {
+    const list: NamedConfiguration[] = [];
+    const add = (name: string, nameRaw: string | null, evidence: string | null, page: number | null) => {
+      const label = normaliseVariantLabel(name);
+      if (!label) return;
+      let entry = list.find((existing) => existing.label === label);
+      if (!entry) {
+        entry = { label, name: name.trim(), namesRaw: [], evidence, pages: [] };
+        list.push(entry);
+      }
+      const raw = (nameRaw ?? "").trim();
+      if (raw && !entry.namesRaw.includes(raw)) entry.namesRaw.push(raw);
+      if (!entry.evidence && evidence) entry.evidence = evidence;
+      if (page !== null && !entry.pages.includes(page)) entry.pages.push(page);
+    };
+    for (const item of pages) {
+      for (const entry of pageConfigurations(item)) add(entry.name, entry.nameRaw, entry.evidence, item.page);
+      // A title block naming the ones it shows is the page naming them too.
+      for (const name of pageDepicts(item)) add(name, null, null, item.page);
+    }
+    if (list.length > 0) out.set(code, list);
+  }
+  return out;
+}
+
+/** Where one page of a named code lands, row by row. */
+export type NamedConfigurationPlan = {
+  /** The folded code. */
+  code: string;
+  /** Every configuration of the CODE, in page order. */
+  configurations: NamedConfiguration[];
+  /**
+   * The folded labels this PAGE writes to: every configuration one of its
+   * pending rows lands on, and every one the page itself names — a
+   * configuration with no row of its own still gets the shared geometry, and
+   * it is still a thing to make. In the code's order.
+   */
+  labels: string[];
+  /**
+   * Per observation on the page: the folded labels it lands on — its own
+   * configurations, else the ones the page depicts, else all of the code's.
+   * That is the fan-out for one row, per phase.
+   */
+  rows: Record<string, string[]>;
+};
+
+/**
+ * Per item of a v3 run whose code names configurations, the plan. Absent for
+ * every other item — which is how every caller tells "named" from "lettered".
+ */
+export function namedConfigurationPlans(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): Map<string, NamedConfigurationPlan> {
+  const out = new Map<string, NamedConfigurationPlan>();
+  const byCode = namedConfigurationsByCode(items, doc);
+  if (byCode.size === 0) return out;
+  for (const [code, pages] of groupItemsByCode(items, doc)) {
+    const configurations = byCode.get(code);
+    if (!configurations) continue;
+    const order = configurations.map((entry) => entry.label);
+    const known = new Set(order);
+    // In the code's order, whatever order the page listed them in.
+    const ordered = (labels: Iterable<string>) => {
+      const set = new Set(labels);
+      return order.filter((label) => set.has(label));
+    };
+    for (const item of pages) {
+      const depicted = ordered(foldedNames(pageDepicts(item)).filter((label) => known.has(label)));
+      const fallback = depicted.length > 0 ? depicted : order;
+      const rows: Record<string, string[]> = {};
+      const written = new Set<string>(ordered(itemConfigurationLabels(item)));
+      for (const observation of item.observations) {
+        // A name the code does not know is dropped and the row reads as
+        // shared — the schema's own rule, repeated for staged JSON from the past.
+        const own = ordered(foldedNames(rowConfigurations(observation)).filter((label) => known.has(label)));
+        const targets = own.length > 0 ? own : fallback;
+        rows[observation.id] = targets;
+        if (observation.reviewStatus === "pending") for (const label of targets) written.add(label);
+      }
+      out.set(item.id, { code, configurations, labels: ordered(written), rows });
+    }
+  }
+  return out;
+}
+
+/**
+ * The live configurations of each bill line: parent id -> folded label ->
+ * variant id. Active variants only — a retired one is not somewhere to write.
+ */
+export type ParentVariants = ReadonlyMap<string, ReadonlyMap<string, string>>;
+
+export function parentVariantsOf(records: readonly Pick<RecordEntry, "id" | "parentId" | "variantLabel">[]): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+  for (const record of records) {
+    if (!record.parentId || !record.variantLabel) continue;
+    const map = out.get(record.parentId) ?? new Map<string, string>();
+    map.set(normaliseVariantLabel(record.variantLabel), record.id);
+    out.set(record.parentId, map);
+  }
+  return out;
+}
+
+/** What the card needs to hand the blockers for a named page. */
+export type NamedTargets = { plan: NamedConfigurationPlan; variants: ParentVariants };
+
+/**
+ * The records ONE ROW writes into that exist today: per ticked bill line, the
+ * live variant of each configuration the row lands on. A configuration not
+ * created yet contributes nothing, which is the truth — there is nothing there
+ * to replace.
+ *
+ * For a page that names no configurations this is simply the ticked records,
+ * which is what every blocker and every occupant lookup used before.
+ */
+export function rowWriteRecords(observationId: string, targets: readonly string[], named: NamedTargets | null): string[] {
+  if (!named) return [...targets];
+  const labels = named.plan.rows[observationId] ?? named.plan.labels;
+  const out: string[] = [];
+  for (const parentId of targets) {
+    const variants = named.variants.get(parentId);
+    for (const label of labels) {
+      const variantId = variants?.get(label);
+      if (variantId) out.push(variantId);
+    }
+  }
+  return out;
+}
+
+/** What a page of named configurations will CREATE, per bill line: the labels with no live variant yet. */
+export function configurationsToCreate(targets: readonly string[], named: NamedTargets): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const parentId of targets) {
+    const existing = named.variants.get(parentId);
+    out.set(
+      parentId,
+      named.plan.labels.filter((label) => !existing?.has(label)),
+    );
+  }
+  return out;
 }
 
 /** What the model said about a code's pages, or null on a version 1 run. */
