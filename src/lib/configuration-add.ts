@@ -637,3 +637,111 @@ export async function renameConfiguration(
   await snapshotRecords(txn, [recordId], changeSetId);
   return { recordId, label: checked.label, version: Number(updated[0].version), changed: true };
 }
+
+export type ConfigurationStatusResult = { recordId: string; status: "active" | "retired"; version: number; changeSetId: string };
+
+/**
+ * Retire a configuration, or put one back. The shape `run-retire.ts` uses for
+ * the records of a phase — status, `retired_at`, `retired_by` — on ONE record,
+ * under its optimistic lock, as one change set and one version.
+ *
+ * RETIRE needs a reason (0038's CHECK and `REASON_REQUIRED_KINDS`). Its name
+ * stays taken: `checkConfigurationName` refuses a retired name, and 0024's
+ * unique index is not status-filtered.
+ *
+ * RESTORE is refused where a live configuration of the same bill line now has
+ * the same name, and where the bill line itself is retired. The unique index
+ * makes the first unreachable today; the check is kept so the refusal is a
+ * sentence if that index is ever narrowed.
+ */
+export async function setConfigurationStatus(
+  txn: TxnSql,
+  {
+    recordId,
+    status,
+    reason,
+    expectedVersion,
+    actor,
+  }: { recordId: string; status: "active" | "retired"; reason?: string | null; expectedVersion: number; actor: string },
+): Promise<ConfigurationStatusResult> {
+  const rows = await txn`
+    select r.id, r.project_id, r.parent_id, r.variant_label, r.version, r.status,
+           (select p.status from spec_records p where p.id = r.parent_id) as parent_status,
+           (select string_agg(x.ref_value, ', ' order by x.ref_value)
+              from spec_record_refs x where x.record_id = r.parent_id and x.ref_system = 'boq_code') as client_ref,
+           (select p.record_no from spec_records p where p.id = r.parent_id) as parent_no
+      from spec_records r where r.id = ${recordId} for update
+  `;
+  const record = rows[0];
+  if (!record) throw new DomainConflictError("not_found", "No such record.", { status: 404 });
+  if (!record.parent_id) {
+    throw new DomainConflictError(
+      "not_a_configuration",
+      "Only a configuration can be retired here. A bill line leaves the export with its phase, or with a revised bill.",
+      { status: 400 },
+    );
+  }
+  if (Number(record.version) !== expectedVersion) {
+    throw new DomainConflictError(
+      "record_version_stale",
+      "Someone else changed this configuration while you had it open. Reload before trying again.",
+    );
+  }
+  const name = `${text(record.client_ref) ?? `#${String(record.parent_no)}`} ${String(record.variant_label)}`;
+
+  if (status === "retired") {
+    if (String(record.status) !== "active") {
+      throw new DomainConflictError("already_retired", `${name} is already retired.`, { status: 400 });
+    }
+    if (!reason?.trim()) {
+      throw new DomainConflictError("reason_required", `Say why ${name} is being retired.`, { status: 400 });
+    }
+  } else {
+    if (String(record.status) !== "retired") {
+      throw new DomainConflictError("not_retired", `${name} is not retired.`, { status: 400 });
+    }
+    if (String(record.parent_status) !== "active") {
+      throw new DomainConflictError("parent_not_active", `The bill line ${name} belongs to is retired. Restore it first.`);
+    }
+    const clash = await txn`
+      select id from spec_records
+       where parent_id = ${record.parent_id} and id <> ${recordId} and status = 'active'
+         and variant_label = ${record.variant_label}
+    `;
+    if (clash[0]) {
+      throw new DomainConflictError(
+        "name_taken",
+        `${name} cannot be put back: a live configuration of the same bill line now has that name.`,
+      );
+    }
+  }
+
+  const changeSetId = await openChangeSet(txn, {
+    projectId: String(record.project_id),
+    kind: status === "retired" ? "record_retire" : "record_restore",
+    actor,
+    reason: status === "retired" ? `${name}: ${reason!.trim()}` : reason?.trim() ? `${name}: ${reason.trim()}` : name,
+  });
+  const updated =
+    status === "retired"
+      ? await txn`
+          update spec_records
+             set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+           where id = ${recordId} and version = ${expectedVersion} and status = 'active'
+          returning version
+        `
+      : await txn`
+          update spec_records
+             set status = 'active', retired_at = null, retired_by = null, updated_by = ${actor}
+           where id = ${recordId} and version = ${expectedVersion} and status = 'retired'
+          returning version
+        `;
+  if (!updated[0]) {
+    throw new DomainConflictError(
+      "record_version_stale",
+      "Someone else changed this configuration while you had it open. Reload before trying again.",
+    );
+  }
+  await snapshotRecords(txn, [recordId], changeSetId);
+  return { recordId, status, version: Number(updated[0].version), changeSetId };
+}

@@ -6,6 +6,7 @@ import {
   checkConfigurationName,
   defaultSelection,
   defaultTicked,
+  describeRetireEffect,
   describeExportEffect,
   foldConfigurationName,
   isDifferingField,
@@ -137,5 +138,17 @@ describe("the offer shown against the offer that is there", () => {
     expect(sameOffer([{ ...live[0]!, version: 2 }, live[1]!], live)).toBe(false);
     expect(sameOffer([live[0]!], live)).toBe(false);
     expect(sameOffer([...live, { kind: "attribute", id: "c", version: 1 }], live)).toBe(false);
+  });
+});
+
+describe("retiring a configuration", () => {
+  it("says the bill line becomes an item again when it is the last live one", () => {
+    expect(describeRetireEffect("S-301", "TYPE 2", 0)).toBe(
+      "S-301 TYPE 2 stops being exported. It is the last live configuration, so S-301 becomes an item again and its own specs are exported again.",
+    );
+  });
+  it("says the bill line stays a heading while others are live", () => {
+    expect(describeRetireEffect("S-301", "TYPE 2", 1)).toContain("its other configuration is still exported");
+    expect(describeRetireEffect("S-301", "TYPE 2", 3)).toContain("its other 3 configurations are still exported");
   });
 });

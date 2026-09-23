@@ -184,3 +184,19 @@ export function describeExportEffect(
   const named = stops.map((item) => item.label).join(", ");
   return `${head} ${stops.length} thing${stops.length === 1 ? "" : "s"} you left unticked will stop being exported: ${named}.`;
 }
+
+/**
+ * What retiring a configuration does, in the words the panel shows before
+ * the person confirms it.
+ *
+ * `othersLive` is how many OTHER live configurations the bill line has. At
+ * zero, the bill line is an item again — `parentIsSupersededBy` reads a live
+ * child, never a stored flag — and its own specs reach the export again.
+ */
+export function describeRetireEffect(billLine: string, name: string, othersLive: number): string {
+  const head = `${billLine} ${name} stops being exported.`;
+  if (othersLive === 0) {
+    return `${head} It is the last live configuration, so ${billLine} becomes an item again and its own specs are exported again.`;
+  }
+  return `${head} ${billLine} stays a heading: its other ${othersLive === 1 ? "configuration is" : `${othersLive} configurations are`} still exported.`;
+}

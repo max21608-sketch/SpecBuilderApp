@@ -48,6 +48,7 @@ import { composeDimensionCell } from "@/lib/dimensions";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
+import { describeRetireEffect } from "@/lib/configuration-carry";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
@@ -99,6 +100,8 @@ type SpecRecord = {
   category_name: string | null; category_family: string | null;
   /** A fabric split (0024). Both null on an ordinary record. */
   parent_id: string | null; variant_label: string | null;
+  /** `retired` for a configuration somebody took out of the export (0038). */
+  status: string;
   /** Whether a crop was confirmed off the drawings, so the screen can decide
    *  without asking `/image` and being refused. */
   has_image: boolean;
@@ -278,6 +281,9 @@ function RecordView() {
   const [addingConfiguration, setAddingConfiguration] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
+  /** The reason box for retiring a configuration; null while it is closed. */
+  const [configReason, setConfigReason] = useState<string | null>(null);
+  const [configStatusBusy, setConfigStatusBusy] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
@@ -448,6 +454,28 @@ function RecordView() {
       if (res.ok) setRenaming(null);
     } finally {
       setRenameBusy(false);
+    }
+  }
+
+  /** Retire a configuration (a reason is required) or put it back. */
+  async function setConfigurationStatus(status: "active" | "retired") {
+    if (!data) return;
+    if (status === "retired" && !configReason?.trim()) return;
+    setConfigStatusBusy(true);
+    try {
+      const res = await apiFetch(`/api/records/${data.record.id}/configuration-status`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status,
+          version: data.record.version,
+          reason: status === "retired" ? configReason?.trim() : null,
+        }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+      if (res.ok) setConfigReason(null);
+    } finally {
+      setConfigStatusBusy(false);
     }
   }
 
@@ -1546,10 +1574,68 @@ function RecordView() {
                     , which the bill lists once
                     {billQty !== null && <> at {billQty} off</>}. This configuration is what BWS receives.
                   </p>
-                  {renaming === null ? (
-                    <Button variant="quiet" size="xs" className="mt-2" onClick={() => setRenaming(record.variant_label ?? "")}>
-                      Rename
-                    </Button>
+                  {record.status === "retired" ? (
+                    /* RETIRED, NOT GONE. Its name stays taken, and putting it
+                       back is one click — refused in words if a live sibling
+                       now has the same name. */
+                    <Note
+                      tone="blocked"
+                      title="Retired."
+                      actions={
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          disabled={configStatusBusy}
+                          onClick={() => void setConfigurationStatus("active")}
+                        >
+                          Put it back
+                        </Button>
+                      }
+                    >
+                      This configuration is not exported. Its name is never reused.
+                    </Note>
+                  ) : configReason !== null ? (
+                    <div className="mt-2">
+                      <Note tone="warn">
+                        {describeRetireEffect(
+                          parentRefs || "the bill line",
+                          record.variant_label ?? "",
+                          variants.filter((member) => member.id !== record.id).length,
+                        )}
+                      </Note>
+                      <label className="mt-2 block text-xs text-neutral-600">
+                        Why is it being retired?
+                        <textarea
+                          autoFocus
+                          value={configReason}
+                          onChange={(event) => setConfigReason(event.target.value)}
+                          rows={2}
+                          className="mt-1 block w-full rounded border border-neutral-300 px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <div className="mt-2 flex gap-2">
+                        <Button
+                          variant="danger"
+                          size="xs"
+                          disabled={configStatusBusy || !configReason.trim()}
+                          onClick={() => void setConfigurationStatus("retired")}
+                        >
+                          Retire it
+                        </Button>
+                        <Button variant="quiet" size="xs" onClick={() => setConfigReason(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : renaming === null ? (
+                    <div className="mt-2 flex gap-2">
+                      <Button variant="quiet" size="xs" onClick={() => setRenaming(record.variant_label ?? "")}>
+                        Rename
+                      </Button>
+                      <Button variant="quiet" size="xs" onClick={() => setConfigReason("")}>
+                        Retire
+                      </Button>
+                    </div>
                   ) : (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <input

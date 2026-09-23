@@ -14,13 +14,22 @@
 //  - the export scope then carries the configuration and not the bill line;
 //  - the same bill line on another phase gets the configuration in the SAME
 //    change set, carrying ITS OWN specs, and a phase holding the ref on two
-//    lines is offered nothing.
+//    lines is offered nothing;
+//  - retire needs a reason (0038 must be applied), is one change set and one
+//    version, and the last one retired puts the bill line back in the export;
+//    restore puts it back, and a retired name is never reused.
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { createRecord, createRun } from "@/lib/manual-capture";
-import { addConfiguration, loadCarryOffer, loadOtherPhases, renameConfiguration } from "@/lib/configuration-add";
+import {
+  addConfiguration,
+  loadCarryOffer,
+  loadOtherPhases,
+  renameConfiguration,
+  setConfigurationStatus,
+} from "@/lib/configuration-add";
 import { sql } from "@/lib/db";
 import { defaultSelection, carryKey } from "@/lib/configuration-carry";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
@@ -335,5 +344,60 @@ describeIfDb("adding a configuration by hand", () => {
       [billLineId],
     );
     expect(onMain.rows[0].n).toBe(0);
+  }, SLOW);
+
+  it("retires with a reason, puts the bill line back when it was the last, and restores", async () => {
+    // The VE bill line has TYPE 5 and TYPE 6; retire both.
+    const children = await client.query(
+      `select id, version, variant_label from spec_records where parent_id = $1 and status = 'active' order by variant_label`,
+      [veBillLineId],
+    );
+    expect(children.rows.map((row) => row.variant_label)).toEqual(["TYPE 5", "TYPE 6"]);
+    const [five, six] = children.rows;
+
+    await expect(
+      withTransaction((txn) =>
+        setConfigurationStatus(txn, { recordId: five.id, status: "retired", reason: " ", expectedVersion: five.version, actor: "qa" }),
+      ),
+    ).rejects.toMatchObject({ code: "reason_required" });
+
+    const retired = await withTransaction((txn) =>
+      setConfigurationStatus(txn, { recordId: five.id, status: "retired", reason: "Drawn in error", expectedVersion: five.version, actor: "qa" }),
+    );
+    const change = await client.query(`select kind, reason from change_sets where id = $1`, [retired.changeSetId]);
+    expect(change.rows[0]).toMatchObject({ kind: "record_retire" });
+    expect(change.rows[0].reason).toContain("Drawn in error");
+    const versions = await client.query(`select record_id from record_snapshots where change_set_id = $1`, [retired.changeSetId]);
+    expect(versions.rows).toEqual([{ record_id: five.id }]);
+
+    const scoped = async () => {
+      const scope = await loadExportScope(projectId, veRunId);
+      if (isScopeFailure(scope)) throw new Error(scope.error);
+      return scope.scope.records.map((record) => record.id);
+    };
+    expect(await scoped()).toEqual([six.id]);
+
+    await withTransaction((txn) =>
+      setConfigurationStatus(txn, { recordId: six.id, status: "retired", reason: "Not needed", expectedVersion: six.version, actor: "qa" }),
+    );
+    // The last live one gone: the bill line is an item again.
+    expect(await scoped()).toEqual([veBillLineId]);
+
+    // A retired name is still never reused.
+    const veOffer = await loadCarryOffer(sql, veBillLineId);
+    await expect(
+      withTransaction((txn) =>
+        addConfiguration(txn, { billLineId: veBillLineId, name: "Type 5", shown: refs(veOffer), carry: [], actor: "qa" }),
+      ),
+    ).rejects.toMatchObject({ code: "name_retired" });
+
+    const now = await client.query(`select version from spec_records where id = $1`, [five.id]);
+    const restored = await withTransaction((txn) =>
+      setConfigurationStatus(txn, { recordId: five.id, status: "active", expectedVersion: now.rows[0].version, actor: "qa" }),
+    );
+    expect(restored.status).toBe("active");
+    const restoreChange = await client.query(`select kind from change_sets where id = $1`, [restored.changeSetId]);
+    expect(restoreChange.rows[0].kind).toBe("record_restore");
+    expect(await scoped()).toEqual([five.id]);
   }, SLOW);
 });
