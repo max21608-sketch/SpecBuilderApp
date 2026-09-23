@@ -16,6 +16,9 @@ import type { TxnSql } from "@/lib/db-transaction";
 import { matchName, type MatchCandidate } from "@/lib/matching";
 import { guessLevelFromBill } from "@/lib/level-guess";
 import { guessNonFurniture } from "@/lib/non-furniture-guess";
+import type { SheetData } from "read-excel-file/node";
+import { readSheetWithColumns } from "@/lib/boq-import";
+import { applyStructureToLines, type StructureReading } from "@/lib/boq-structure";
 import type {
   BoqAlias,
   BoqLayout,
@@ -159,4 +162,50 @@ export function stageSheet(
   suggest: (line: SuggestInput, index: number) => StagedBoqLine,
 ): StagedBoqSheet {
   return { ...sheet, lines: sheet.lines.map(suggest) };
+}
+
+/**
+ * A MODEL'S READING OF ONE SHEET, applied to the staged bill exactly as a
+ * person's columns are: the sheet is re-read from the stored source through
+ * `readSheetWithColumns`, its lines re-suggested by the same function, and only
+ * THEN are the model's row kinds laid over lines code has already read. The
+ * model never supplies a cell.
+ *
+ * Three outcomes, each visible on the review:
+ *   * NOT A BILL: the sheet is dropped, with the model's evidence as the reason,
+ *     and "Include this sheet" still gets it back.
+ *   * NO USABLE MAPPING: the sheet stays `needsColumns`, and its note says what
+ *     was wrong with the reading — the panel still works by hand.
+ *   * READ: `mappingSource: "model"`, the evidence per column, and
+ *     `columnsChecked: false`, so the confirm waits for a person.
+ */
+export function stageStructureReading(
+  current: StagedBoqSheet,
+  source: { sheet: string; data: SheetData },
+  reading: StructureReading,
+  suggest: (line: SuggestInput, index: number) => StagedBoqLine,
+): StagedBoqSheet {
+  const structure = { headerRow: reading.mapping?.headerRow ?? 0, rows: reading.rows, notes: reading.notes };
+  if (reading.notABill) {
+    return {
+      ...current,
+      ignored: true,
+      ignoredReason: `Not a bill, as the model read it: ${reading.notABill}`,
+      structure,
+    };
+  }
+  if (!reading.mapping) {
+    const why = `The model's reading of the columns could not be used: ${reading.mappingProblem ?? "it named no columns"} Set them by hand below.`;
+    return { ...current, structure, columnsNote: current.columnsNote ? `${why} ${current.columnsNote}` : why };
+  }
+  const fresh = stageSheet(readSheetWithColumns(source.sheet, source.data, reading.mapping, "model"), suggest);
+  return {
+    ...fresh,
+    lines: applyStructureToLines(fresh.lines, reading.rows),
+    proposedRunName: current.proposedRunName,
+    replacesRunId: current.replacesRunId ?? null,
+    mappingEvidence: reading.evidence,
+    columnsChecked: false,
+    structure,
+  };
 }
