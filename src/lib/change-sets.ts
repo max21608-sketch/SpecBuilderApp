@@ -74,6 +74,12 @@ export const CHANGE_SET_KINDS = [
   // back in the file, so it says why.
   "record_retire",
   "record_restore",
+  // 0041: a BW standard beside what the client specified. Proposed (or said
+  // to be TBC), agreed by the client, and an AGREED one changed or withdrawn
+  // -- the last overrides what the client settled, so it says why.
+  "standard_set",
+  "standard_agreed",
+  "standard_change",
 ] as const;
 export type ChangeSetKind = (typeof CHANGE_SET_KINDS)[number];
 
@@ -93,6 +99,8 @@ export const REASON_REQUIRED_KINDS: readonly ChangeSetKind[] = [
   "attribute_correct",
   // 0038: it changes what the export carries.
   "record_retire",
+  // 0041: it overrides a standard the client agreed to.
+  "standard_change",
 ];
 
 export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
@@ -118,6 +126,9 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   attribute_correct: "Spec corrected",
   record_retire: "Item retired",
   record_restore: "Item restored",
+  standard_set: "BW standard proposed",
+  standard_agreed: "BW standard agreed by the client",
+  standard_change: "Agreed BW standard changed",
 };
 
 export type OpenChangeSet = {

@@ -30,6 +30,7 @@
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { isFinishCodeOrigin, isFinishKind } from "@/lib/finishes";
+import { standardFromRow } from "@/lib/bw-standard";
 import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import {
@@ -53,6 +54,7 @@ export type RetireAttributeResult = {
 export async function loadPromotable(txn: TxnSql, recordId: string): Promise<PromotableAttribute[]> {
   const rows = await txn`
     select a.attr_group, a.dimension_slot, a.spec_field_id, a.value, a.qualifier, a.unit, a.state, a.sort_order, a.source_run_id,
+           a.standard_value, a.standard_option_id, a.standard_state,
            a.finish_id, f.code as finish_code, f.code_norm as finish_code_norm,
            f.code_origin as finish_code_origin, f.kind as finish_kind,
            f.description as finish_description, f.supplier_raw as finish_supplier_raw,
@@ -72,6 +74,8 @@ export async function loadPromotable(txn: TxnSql, recordId: string): Promise<Pro
     state: String(row.state) as PromotableAttribute["state"],
     sortOrder: Number(row.sort_order),
     sourceRunId: row.source_run_id ? String(row.source_run_id) : null,
+    // The BW standard (0041): the answer follows the same choice the cell does.
+    standard: standardFromRow(row),
     finish: row.finish_id
       ? {
           id: String(row.finish_id),

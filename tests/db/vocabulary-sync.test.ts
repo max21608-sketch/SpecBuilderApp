@@ -38,6 +38,7 @@ import {
 import { CHANGE_SET_KINDS, REASON_REQUIRED_KINDS } from "@/lib/change-sets";
 import { FINISH_CODE_ORIGINS, FINISH_KINDS } from "@/lib/finishes";
 import { BOQ_ROLES } from "@/lib/boq-roles";
+import { STANDARD_STATES } from "@/lib/bw-standard";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -80,6 +81,8 @@ const VOCABULARIES: {
   },
   // 0040: what a bill column can be read as.
   { name: "BOQ_ROLES", constraint: "boq_column_aliases_role_check", values: BOQ_ROLES },
+  // 0041: what state a BW standard beside the client's words is in.
+  { name: "STANDARD_STATES", constraint: "record_attributes_standard_state_check", values: STANDARD_STATES },
 ];
 
 /** Every single-quoted literal in a constraint definition. */

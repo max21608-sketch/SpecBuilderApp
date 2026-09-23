@@ -67,7 +67,7 @@ export async function loadPalettes(exec: SqlLike): Promise<PaletteRegister> {
     select p.key, p.name, p.owner, p.allows_free_text, p.source_note, p.synced_at,
            coalesce(
              (select json_agg(json_build_object(
-                       'value', o.value, 'label', o.label,
+                       'id', o.id, 'value', o.value, 'label', o.label,
                        'sortOrder', o.sort_order, 'isDefault', o.is_default,
                        'code', o.code)
                       order by o.sort_order)
@@ -151,4 +151,19 @@ export function withPalettes<T extends Record<string, unknown>>(
   // is coerced here rather than the callers being asked to describe their own
   // select twice.
   return fields.map((field) => ({ ...field, palette: byJsonId.get(Number(field.json_id)) ?? null }));
+}
+
+/**
+ * The BWS field register a DRAWINGS read wants, palettes attached, in one call.
+ *
+ * Every reader of a staged drawings run -- the review GET, its two autosaves,
+ * the pack screen and the confirm -- has to hand `assertStagedDrawings` the
+ * same register, because one read-time upgrade (`upgradeStandards`, 0041)
+ * asks whether a value is a palette option. A confirm that read the register
+ * without its palettes would write the option as the client's words -- the
+ * defect 0041 closed -- while the screen showed them apart.
+ */
+export async function loadFieldsWithPalettes(exec: SqlLike) {
+  const fieldRows = await exec`select id, json_id, name, field_category from spec_fields order by sort_order`;
+  return withPalettes(fieldRows, await loadPalettes(exec));
 }

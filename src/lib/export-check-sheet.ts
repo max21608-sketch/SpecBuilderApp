@@ -32,6 +32,7 @@
 // no importer would accept.
 // ============================================================================
 import { compareRecordOrder } from "@/lib/record-label";
+import { describeStandard } from "@/lib/bw-standard";
 import {
   BWS_EXPORT_COLUMNS,
   composeRowCells,
@@ -70,6 +71,15 @@ export const CHECK_SHEET_HEADER = [
   // document actually said. It is a COPY of what is already inside Exported
   // value, not an extra field to sign off.
   "Qualifier",
+  // THE TWO HALVES OF A SPEC THAT CARRIES A BW STANDARD, SHOWN APART (0041).
+  // The client specifies "30% oak"; BW proposes its own "25% oak"; the file
+  // ships the standard. A reviewer reading Exported value against the page
+  // would otherwise see an option the page never printed and mark it wrong --
+  // or, worse, see the page's words and not know the file carries something
+  // else. Client specified is what the DOCUMENT said, verbatim; BW standard is
+  // the option with its state. Which one the file used is then a glance.
+  "Client specified",
+  "BW standard",
   "Came from",
   "Source document",
   "Page",
@@ -115,6 +125,21 @@ function sourceDocuments(source: CellSource): { documents: string; pages: string
   return { documents: documents.join(", "), pages: pages.sort((a, b) => a - b).join(", ") };
 }
 
+/**
+ * What the page said and what BW proposed, for a cell ONE attribute fills.
+ *
+ * Only there: a composed dimensions cell has five pages' figures and no
+ * standard, and a checklist answer has no page -- Source document and Page
+ * already say what there is to say about those.
+ */
+function clientAndStandard(source: CellSource): [string, string] {
+  if (source.kind !== "attribute") return ["", ""];
+  const attribute = source.attribute;
+  const said = attribute.value?.trim() ?? "";
+  const withUnit = said && attribute.unit ? `${said}${attribute.unit}` : said;
+  return [withUnit, describeStandard(attribute.standard ?? null) ?? ""];
+}
+
 export type CheckSheet = { header: string[]; rows: string[][] };
 
 /**
@@ -147,6 +172,7 @@ export function composeCheckSheet(scope: ExportScope): CheckSheet {
         column.jsonId === null ? "" : String(column.jsonId),
         cell.value,
         cell.qualifier ?? "",
+        ...clientAndStandard(cell.source),
         cameFrom(cell.source),
         documents,
         pages,

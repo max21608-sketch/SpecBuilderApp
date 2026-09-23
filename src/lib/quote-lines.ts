@@ -44,6 +44,7 @@
 import { compareRecordOrder } from "@/lib/record-label";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import { renderAttributeValue, type ExportAttribute, type ExportRecord, type ExportScope } from "@/lib/bws-export";
+import { shippedStandardValue } from "@/lib/bw-standard";
 import type { AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
 
 /** The column order of Matthew's own file, unchanged. */
@@ -133,7 +134,10 @@ const NON_ANSWERS = new Set(["", "tbc", "none", "n/a", "na", "not required", "-"
 export function hasMetalFinish(attributes: ExportAttribute[]): boolean {
   return attributes.some((attribute) => {
     if (attribute.specFieldJsonId !== 5 && attribute.specFieldJsonId !== 35) return false;
-    const value = (attribute.value ?? "").trim().toLowerCase();
+    // A BW standard metal proposed beside a client's "TBC" makes it a
+    // metalwork item (0041): the standard is what ships. Otherwise the page's
+    // own words, exactly as before.
+    const value = (shippedStandardValue(attribute.standard) ?? attribute.value ?? "").trim().toLowerCase();
     return !NON_ANSWERS.has(value);
   });
 }

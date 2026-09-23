@@ -462,9 +462,15 @@ async function writeConfiguration(txn: TxnSql, plan: PlannedAdd, label: string, 
     const copied = await txn`
       insert into record_attributes
         (record_id, attr_group, label, value, qualifier, unit, dimension_slot, material_code, spec_field_id,
-         finish_id, state, source_run_id, source_page, sort_order, status, created_by, updated_by)
+         finish_id, state, source_run_id, source_page, sort_order, status,
+         standard_value, standard_option_id, standard_state, standard_set_by, standard_set_at,
+         standard_agreed_evidence_id, created_by, updated_by)
       select ${recordId}, a.attr_group, a.label, a.value, a.qualifier, a.unit, a.dimension_slot, a.material_code,
              a.spec_field_id, a.finish_id, a.state, a.source_run_id, a.source_page, a.sort_order, 'active',
+             -- 0041: a BW standard proposed or agreed on the bill line is part
+             -- of what is carried, beside the client's words it sits next to.
+             a.standard_value, a.standard_option_id, a.standard_state, a.standard_set_by, a.standard_set_at,
+             a.standard_agreed_evidence_id,
              ${actor}, ${actor}
         from record_attributes a
        where a.id = any(${attributeIds}::uuid[]) and a.record_id = ${billLineId} and a.status = 'active'

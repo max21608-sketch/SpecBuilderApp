@@ -27,6 +27,7 @@
 import { z } from "zod";
 import { composeRowCells, BWS_EXPORT_COLUMNS } from "@/lib/bws-export";
 import { composeFinishCell } from "@/lib/finishes";
+import { describeStandard } from "@/lib/bw-standard";
 import { exportAnswers, scopeForAtoms, RECORD_ATOMS_SCHEMA_VERSION, type RecordAtoms } from "@/lib/record-atoms";
 
 // ---- validating a stored snapshot -----------------------------------------
@@ -61,6 +62,24 @@ const AtomAttribute = z.object({
     })
     .nullish()
     .transform((value) => value ?? null),
+  // Added at schema 7 (0041): the BW standard beside the client's words.
+  // Optional and defaulted null, so a version written before it reads as "no
+  // standard had been proposed" -- and NAMED, because Zod strips what it does
+  // not name, and a version that silently lost its standard would recompose
+  // its cells from the client's words and report a change nobody made.
+  standard: z
+    .object({
+      value: z.string().nullable(),
+      optionId: z.string().nullable(),
+      state: z.enum(["proposed", "agreed", "tbc"]),
+    })
+    .nullish()
+    .transform((value) => value ?? null),
+  // 0029's placement, which this schema never named: every snapshot read back
+  // lost it, so `diffCells` recomposed a COM 1 cell without its "- Main body"
+  // and an old version disagreed with the file it described. Named at schema
+  // 7, defaulted null for the versions that never carried it.
+  qualifier: z.string().nullable().optional().default(null),
   specFieldJsonId: z.number().nullable(),
   state: z.string(),
   sortOrder: z.number(),
@@ -241,6 +260,10 @@ function attributeFields(attribute: RecordAtoms["attributes"][number]): { field:
     // finish would change every linked item's export cell and show as no
     // change at all on any of their versions.
     { field: "finish", label: "Finish", value: attribute.finish ? composeFinishCell(attribute.finish) : null },
+    // 0041. What BW proposed beside the client's words, and whether the client
+    // agreed -- so a proposal and an agreement are each a visible change on the
+    // version that made them, while `value` goes on saying what the page said.
+    { field: "standard", label: "BW standard", value: describeStandard(attribute.standard ?? null) },
     { field: "specFieldJsonId", label: "BWS field", value: attribute.specFieldJsonId },
     { field: "source", label: "Source", value: attribute.sourceFilename },
   ];
