@@ -35,6 +35,34 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-23
 
+### Three found while building 4e, none of them fixed
+
+**Status: open, recorded 2026-09-23**, each seen while building something else
+and each deliberately left alone rather than folded into an item it did not
+belong to.
+
+- **The demo holds two messages the router would place itself.** In
+  `tools/qa-demo-project.ts`, two of the five HELD inbox messages are addressed
+  `To:` the project inbox and their own `expect` notes say they would be
+  assigned automatically — but the script holds them, so a walkthrough of the
+  inbox screen shows **the router never firing**, which is the behaviour 2.11
+  exists to demonstrate. Placing them is the SPEND POINT and changes what the
+  demo is, so it is a decision rather than a fix.
+- **The demo fixture hard-codes `assignment_kind = 'auto'`** where the inbox
+  loop three lines above it asks `autoAssignDecision(...)`. It is correct today
+  and cannot stay correct on its own: if the gate moves, or somebody edits the
+  fixture's recipients, the row drifts from what the app would actually do. A
+  96-line patch that asks at the line rather than asserting was written while
+  building 4e and deliberately NOT taken, because it is adjacent work with no
+  entry behind it — `~/dev/briefs/4e2-optional-ask-dont-assert.patch`, applies
+  on top of 4e.3.
+- **`boq-review-variance › counts the sixty lines…` fails under the heaviest
+  load on a COUNT, not on time**: `expect(GET calls).toHaveLength(1)` got 3.
+  Its `beforeEach` resets `routes.calls` and the page fetches the project's
+  batches alongside the import, so under saturation a mount fetch can be issued
+  after the reset. Not the timeout class 4e.1 fixed, and not reproducible on
+  three targeted runs — so it is written down rather than guessed at.
+
 ### `chase-drafts`'s teardown fails under a full run, and nothing says why
 
 **Status: open. The SYMPTOMS are closed and the cause is not.** Recorded
@@ -1672,7 +1700,33 @@ draft.
 
 ### One component test sits at 3 s against a 5 s default
 
-**Status: open — observation from Stage 2's full runs, 2026-09-20.**
+**Status: FIXED 2026-09-23, `e09b322`** (plan item 4e.1), on staging — and the
+bound was raised only after the failure was REPRODUCED, not assumed.
+
+**Measured on this machine, 8 CPUs.** The five named files alone: worst test
+**643 ms**. With one concurrent suite: worst **2,120 ms**, all passing. With
+**two concurrent suites plus a typecheck**: `failure-surfaces › says why in
+words the server never sent` **timed out at 5,276 ms**, and the worst PASSING
+test reached **7,262 ms** — surviving only because it already carried a 30 s
+bound.
+
+**Splitting would not have helped and the coder said so rather than doing it:**
+the bound that fires is per TEST, and more files under saturation is more
+forks. The failing test renders one page and makes two clicks; there is nothing
+in it to make faster. So `COMPONENT_TIMEOUT_MS = 20_000` via `vi.setConfig` in
+the five files, with the measurements and the argument in one place
+(`tests/components/tier-timeout.ts`) so a sixth file is one import away.
+
+**Not the global default**, which stays at 5 s for the pure, db and route tiers
+where a five-second test IS the finding; and not the bound for the four tests
+that paint at scale, which keep their explicit 30 s. 20 s is the number this
+repo had already settled on twice for this argument.
+
+**After, same shape:** two concurrent full non-db runs (112 files, 1,685 tests
+each) plus `tsc --noEmit` — all three exit 0, **zero timeouts**. The original
+entry follows.
+
+**Status when found: open — observation from Stage 2's full runs, 2026-09-20.**
 `tests/components/spec-table-area.test.tsx › renders every area on a 300-line
 phase` takes about 3.0 s alone and timed out once under a full concurrent
 run; `extraction-queue.test.ts › exactly ONE of two simultaneous deliveries`
@@ -1716,7 +1770,23 @@ built **DEMO-300** (`a88aed3e-ef7f-4290-a732-0ef173ae3474`, 503 records over
 5. **`qa:demo --clear --apply` sweeps every `DEMO%` project**, now DEMO-300 and
    the walkthrough together. Unchanged behaviour, worth knowing an hour before
    a call.
-6. **A second demo project needed its own mailbox**: `email_messages` is unique
+6. **FIXED 2026-09-23, `2dcb69b`** (plan item 4e.3). `inboxFor`/`slugFor` take
+   the project NUMBER, so the mailbox and the ids follow it and cannot be
+   forgotten; `DEMO-300` keeps the address already written into the fixture.
+   **Two things the `--lines` fix had not done, both found here.** The
+   RECIPIENTS did not follow: the review email and the two held messages whose
+   whole point is `recipient_is_inbox` named the walkthrough's inbox under the
+   300-line demo, so the signal the fixture exists to demonstrate pointed at
+   the other project. And **`--clear` could not find them** — its predicate was
+   the old constant `mailbox like 'demo@%'`, and a held message has no
+   `project_id`, so neither half reached one: measured read-only, DEMO-300's
+   five held messages SURVIVED a clear, and the next build would have died on
+   the first `recordMessage`. The dry run now reports both projects and *"would
+   remove 10 held demo messages"*, re-run here after the cherry-pick. The final
+   held-message pass runs AFTER the loop, never inside it, where clearing one
+   demo would delete another's correspondence. No demo was rebuilt — that is
+   ~15 minutes and would sweep both existing ones. The original follows.
+   **A second demo project needed its own mailbox**: `email_messages` is unique
    on `(mailbox, graph_message_id)` with fixed ids, fixed for `--lines`; any
    future second demo hits it.
 
