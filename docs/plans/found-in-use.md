@@ -35,6 +35,70 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-23
 
+### An intake document stays "being read" until the page is reloaded
+
+**Status: open, seen by Max 2026-09-23.** *"Quite often you have to, it seems,
+reload the page to get it to switch from … scanning to ready to open. It would
+be great if it automatically refreshed the page and the user wouldn't have to
+do that."*
+
+What was seen: on intake, a document goes on showing its in-progress state
+after the read has finished, and only a manual reload moves it to *Ready to
+review*. "Quite often", not every time. Which screen it was on (the project
+overview, the pack screen, or a single document's review) was not noted.
+
+**Not yet diagnosed.** What the source shows, checked 2026-09-23 and kept apart
+from the symptom because none of it is confirmed:
+
+- The screens DO poll. `usePoll` (`src/lib/use-poll.ts`) re-runs the page's
+  own GET every 3 s on the pack screen, both drawings reviews, the preamble
+  review and the spec-document review, so this is not "nothing refreshes". It
+  is that something stops refreshing, or never starts.
+- The pack screen polls only while a run is `queued` or `parsing`
+  (`isIntakeRunWorking`, `src/lib/intake-status.ts:61`). A run WAITING FOR A
+  SLOT is not either of those, so a pack whose only unsettled documents are
+  waiting can stop polling, and then misses the hand-off that starts them.
+  Candidate, not proven.
+- `usePoll` skips ticks while the tab is hidden. That is deliberate, and it
+  should resume when the tab is back in front. Worth ruling out, not assuming.
+- The project overview does not poll at all. If the pack's status was being
+  watched there, a reload is the only thing that would ever move it.
+
+The next person should reproduce it with a real pack of more than three
+documents, since the cap is three, and note which screen was open.
+
+### The item picture is still the whole page where the page has a real picture on it
+
+**Status: open. A second sighting of 2026-09-18 item 6**, which is recorded
+below as still open and in `fix-found-in-use-2026-09-23.md` as *deferred with a
+cost*. Seen by Max 2026-09-23: *"It's still not picking up all the time an
+actual crop. Quite often it seems to be just displaying the whole page instead
+of a crop of the furniture item. … Not a massive issue because you can just
+crop in on the image, but ideally we'd have it so that it took a crop of the
+actual furniture item."*
+
+What was on the screen: a drawings card for a chair on the MAIN RUN and
+MAIN RUN - VE phases (`W550 x D565 x H735 x SH430mm`), its PICTURE panel reading
+*"The whole page · page 1 — The drawing reported no separate picture, so the
+page itself is proposed."* The page is a SPECIFICATION SHEET: a small photograph
+of the chair in its top-right corner and a page of text below it. *Drag a box
+instead* works, so the recovery path is fine; the proposal is the defect.
+
+What this sighting adds to the 2026-09-18 one: **the reasoning for proposing the
+whole page does not hold for this template.** `CLAUDE.md` justifies the
+fallback on the grounds that the Panther shop drawings "are almost entirely
+picture". A specification sheet is mostly text with one small photograph, so on
+this layout the whole page is certainly the wrong crop. The fallback is still
+better than *No picture*. It just is not a crop.
+
+**Cause, as recorded and not re-checked:** the model returns no `viewRegions`
+for these pages, and the fix recorded against item 6 is the PROMPT, which means
+re-reading every document already read. It is planned to ride with the
+finishes-schedule re-read. Nothing in this sighting changes that cost. It does
+put a number on how often the fallback fires, and nobody has measured that:
+count the version-2 items with no view regions across the staged runs, by
+template.
+
 ### Three found while building 4e, none of them fixed
 
 **Status: open, recorded 2026-09-23**, each seen while building something else
