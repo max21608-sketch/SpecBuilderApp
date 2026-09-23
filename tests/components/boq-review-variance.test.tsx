@@ -183,7 +183,8 @@ describe("VARIANCE row 2: a bill that gave no quantities", () => {
     // THE TRAP: the per-level figures ARE on the row. None of them may appear
     // in the Qty column, and neither may a 1.
     const sofa = screen.getByText("Sofa").closest("tr")!;
-    const qty = sofa.querySelectorAll("td")[4]!;
+    // Row, Kind (plan any-bill Step 2), Client ref, Item, Area, then Qty.
+    const qty = sofa.querySelectorAll("td")[5]!;
     expect(qty.textContent).toBe("not given");
   });
 
@@ -198,7 +199,7 @@ describe("VARIANCE row 2: a bill that gave no quantities", () => {
     mount({}, [stagedSheet([{ sheet: "Bill", data: blankQtyCells() }])]);
     expect(await screen.findByText("Sofa")).toBeTruthy();
     expect(screen.getAllByText("not given")).toHaveLength(2);
-    expect(screen.getByText("Sofa").closest("tr")!.querySelectorAll("td")[4]!.textContent).toBe("4");
+    expect(screen.getByText("Sofa").closest("tr")!.querySelectorAll("td")[5]!.textContent).toBe("4");
     // One line has a quantity, so the tab-level sentence is not printed.
     expect(screen.queryByText(/No line here carries a quantity/)).toBeNull();
   });

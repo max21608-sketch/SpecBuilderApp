@@ -44,8 +44,7 @@ import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
-import { blobPathname, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
-import { readSpreadsheetSheets } from "@/lib/intake-source";
+import { loadBoqRun, readBoqSource, writeStagedBoq, type BoqRunRow } from "@/lib/boq-run-source";
 import {
   assertBoqDocument,
   parseBoqSheets,
@@ -57,11 +56,9 @@ import {
 } from "@/lib/boq-import";
 import { columnMappingProblem, isBoqReadRole, type BoqReadRole } from "@/lib/boq-roles";
 import { loadBoqReadingRegisters, loadLineSuggester, stageSheet } from "@/lib/boq-stage";
+import { applyStructureToLines } from "@/lib/boq-structure";
 
 export const maxDuration = 60;
-
-/** The registration route's ceiling for a bill, for the same reason. */
-const MAX_BOQ_BYTES = 30 * 1024 * 1024;
 
 const Version = z.number().int().nonnegative();
 
@@ -81,97 +78,6 @@ const Checked = z
   .object({ action: z.literal("checked"), sheetIndex: z.number().int().nonnegative(), version: Version })
   .strict();
 
-type RunRow = {
-  id: string;
-  projectId: string;
-  status: string;
-  version: number;
-  sourceKind: string;
-  parsed: unknown;
-  storagePath: string | null;
-  filename: string | null;
-  contentType: string | null;
-};
-
-async function loadRun(id: string): Promise<RunRow | null> {
-  const rows = await sql`
-    select r.id, r.project_id, r.status, r.version, r.source_kind, r.parsed,
-           a.storage_path, a.filename, a.content_type
-    from intake_runs r
-    left join attachments a on a.id = r.attachment_id
-    where r.id = ${id}
-  `;
-  const row = rows[0];
-  if (!row) return null;
-  return {
-    id: String(row.id),
-    projectId: String(row.project_id),
-    status: String(row.status),
-    version: Number(row.version),
-    sourceKind: String(row.source_kind),
-    parsed: row.parsed ?? null,
-    storagePath: row.storage_path === null || row.storage_path === undefined ? null : String(row.storage_path),
-    filename: row.filename === null || row.filename === undefined ? null : String(row.filename),
-    contentType: row.content_type === null || row.content_type === undefined ? null : String(row.content_type),
-  };
-}
-
-/**
- * The stored spreadsheet, read and split into sheets. A bill posted straight to
- * the registration route kept no original, and the sentence says so and asks
- * for the file — a re-read that cannot happen must not be offered as one.
- */
-async function readSource(run: RunRow) {
-  if (!run.storagePath) {
-    throw new DomainConflictError(
-      "source_not_kept",
-      "The original of this bill was not kept when it was uploaded, so it cannot be read again. Upload the file again.",
-      { status: 409 },
-    );
-  }
-  let blob;
-  try {
-    blob = await readTrustedBlob(blobPathname(run.storagePath), run.projectId, { maxBytes: MAX_BOQ_BYTES });
-  } catch (cause) {
-    if (cause instanceof UntrustedBlobError) {
-      throw new DomainConflictError("source_unreadable", cause.message, { status: 409 });
-    }
-    throw cause;
-  }
-  const filename = run.filename ?? "bill.xlsx";
-  return readSpreadsheetSheets(blob.bytes, filename, blob.contentType || run.contentType || "");
-}
-
-/** Write the new staged bill, predicated on the version the screen was shown. */
-async function writeStaged(
-  txn: Parameters<Parameters<typeof withTransaction>[0]>[0],
-  run: RunRow,
-  expectedVersion: number,
-  doc: BoqDocument,
-  actor: string,
-  options: { fromFailed?: boolean } = {},
-): Promise<number> {
-  const rows = await txn`
-    update intake_runs
-    set parsed = ${JSON.stringify(doc)}::jsonb,
-        status = 'parsed',
-        -- A run read again from FAILED loses the refusal it carried; one that
-        -- was already parsed has no error to keep.
-        error = case when ${Boolean(options.fromFailed)}::boolean then null else error end,
-        updated_by = ${actor}
-    where id = ${run.id} and version = ${expectedVersion}
-      and status = any(${options.fromFailed ? ["failed", "parsed"] : ["parsed"]}::text[])
-    returning version
-  `;
-  if (!rows[0]) {
-    throw new DomainConflictError(
-      "import_version_stale",
-      "Someone else changed this bill while you were looking at it. Reload and check before setting its columns.",
-    );
-  }
-  return Number(rows[0].version);
-}
-
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
@@ -184,7 +90,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return json({ ok: false, error: "invalid JSON" }, 400);
   }
 
-  const run = await loadRun(id);
+  const run = await loadBoqRun(id);
   if (!run) return json({ ok: false, error: "No such import." }, 404);
   if (run.sourceKind !== "boq_xlsx") {
     return json({ ok: false, code: "wrong_kind", error: "Only a bill of quantities has columns to set." }, 400);
@@ -208,7 +114,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 }
 
 // ---- one sheet, with a person's columns ------------------------------------
-async function setColumns(run: RunRow, body: z.infer<typeof SetColumns>, actor: string): Promise<Response> {
+async function setColumns(run: BoqRunRow, body: z.infer<typeof SetColumns>, actor: string): Promise<Response> {
   if (run.status !== "parsed") {
     return json({ ok: false, error: `This bill is ${run.status}; its columns can no longer be changed.` }, 409);
   }
@@ -230,7 +136,7 @@ async function setColumns(run: RunRow, body: z.infer<typeof SetColumns>, actor: 
     columns[role] = index;
   }
 
-  const sources = await readSource(run);
+  const sources = await readBoqSource(run);
   // BY NAME, then by position: the staged sheets are the workbook's sheets in
   // order, but a name is what a person would check, and a CSV's one "sheet"
   // is named after the file.
@@ -262,15 +168,22 @@ async function setColumns(run: RunRow, body: z.infer<typeof SetColumns>, actor: 
     // about its lines cannot, because the lines are new. A sheet somebody set
     // columns on is one they mean to import — unless nothing is under the
     // header, which `readRows` still reports as ignored with its reason.
+    // A MODEL'S ROW KINDS SURVIVE A PERSON'S CHANGE OF ONE COLUMN, where the
+    // header row is the one the model read: they are about ROWS, and the rows
+    // have not moved. A different header row is a different reading of the
+    // sheet, and the kinds go with it.
+    const structure = current.structure ?? null;
+    const keepsStructure = structure !== null && structure.headerRow === body.headerRow;
     const replaced: StagedBoqSheet = {
       ...fresh,
+      ...(keepsStructure ? { lines: applyStructureToLines(fresh.lines, structure.rows), structure } : {}),
       proposedRunName: current.proposedRunName,
       replacesRunId: current.replacesRunId ?? null,
       // A person's columns are seen by definition.
       columnsChecked: true,
     };
     const sheets = staged.sheets.map((sheet, index) => (index === body.sheetIndex ? replaced : sheet));
-    return writeStaged(txn, run, body.version, { ...staged, schemaVersion: BOQ_SCHEMA_VERSION, sheets }, actor);
+    return writeStagedBoq(txn, run, body.version, { ...staged, schemaVersion: BOQ_SCHEMA_VERSION, sheets }, actor);
   });
 
   return json({
@@ -283,7 +196,7 @@ async function setColumns(run: RunRow, body: z.infer<typeof SetColumns>, actor: 
 }
 
 // ---- the whole bill, again --------------------------------------------------
-async function readAgain(run: RunRow, expectedVersion: number, actor: string): Promise<Response> {
+async function readAgain(run: BoqRunRow, expectedVersion: number, actor: string): Promise<Response> {
   if (run.status !== "failed" && run.status !== "parsed") {
     return json({ ok: false, error: `This bill is ${run.status}; it can no longer be read again.` }, 409);
   }
@@ -294,7 +207,7 @@ async function readAgain(run: RunRow, expectedVersion: number, actor: string): P
     );
   }
 
-  const sources = await readSource(run);
+  const sources = await readBoqSource(run);
   const version = await withTransaction(async (txn) => {
     const parsed = parseBoqSheets(sources, await loadBoqReadingRegisters(txn));
     if (!parsed.sheets || parsed.sheets.length === 0) {
@@ -310,13 +223,13 @@ async function readAgain(run: RunRow, expectedVersion: number, actor: string): P
       sourcePreserved: true,
       sheets,
     };
-    return writeStaged(txn, run, expectedVersion, doc, actor, { fromFailed: true });
+    return writeStagedBoq(txn, run, expectedVersion, doc, actor, { fromFailed: true });
   });
   return json({ ok: true, version });
 }
 
 // ---- the panel closed -------------------------------------------------------
-async function markChecked(run: RunRow, body: z.infer<typeof Checked>, actor: string): Promise<Response> {
+async function markChecked(run: BoqRunRow, body: z.infer<typeof Checked>, actor: string): Promise<Response> {
   if (run.status !== "parsed") {
     return json({ ok: false, error: `This bill is ${run.status}; nothing on it can change.` }, 409);
   }

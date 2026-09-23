@@ -94,6 +94,18 @@ dimensions, quantities, areas and notes.
 
 Record one observation per item per attribute.
 
+THE SCHEDULE MAY BE A BILL OF QUANTITIES — a priced list of line items, one per row, with a code, a
+description, a unit and a quantity. Read it the same way, and three things about it matter:
+- The client's code column is the item's reference. Use it exactly as printed, and never a line
+  number, an area or a category code in its place.
+- One description cell often packs several statements over several lines ("Model Ref: …", "Sizes
+  (mm): W 660 x D 700 x SH 450", "Finish: …", "Fabric: …"). Record each as its own observation, with
+  the label the cell gives it.
+- A fabric or finish is often stated on its own line directly under its item, with the item's code in
+  brackets after the fabric's ("FAB-01 (ITEM-01)") or no quantity of its own. Those statements belong
+  to the ITEM: record them against the item's code, with the fabric's code in the note.
+Prices, rates, costs and quantities are not specification observations.
+
 ${SHARED_RULES}`,
 
   spec_bible: `You are reading a specification bible for a furniture manufacturer's specification record.

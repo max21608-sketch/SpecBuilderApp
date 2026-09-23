@@ -259,7 +259,10 @@ describe("read with a person's columns", () => {
     );
     expect(Object.values(sheet.lines[0]!)).not.toContain(350);
     expect(sheet.columns?.code).toEqual({ index: 4, heading: "Spec Code" });
-    expect(sheet.lines.every((line) => line.rowKind === undefined)).toBe(true);
+    // THE BRACKET RULE (Step 2): the fabric row names its item in brackets, so
+    // it is read as that item's fabric line, and nothing else is given a kind.
+    expect(sheet.lines[1]).toMatchObject({ rowKind: "finish_for", rowKindSource: "bill", finishFor: { row: sheet.lines[0]!.lineNo, code: "ZZ-FUR-10" } });
+    expect(sheet.lines.filter((line, index) => index !== 1).every((line) => line.rowKind === undefined)).toBe(true);
   });
 
   it("reads the titled copy from row 8, with its revision and date", () => {

@@ -29,10 +29,28 @@
 // the check and the commit.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { assertBoqDocument, normaliseRef, sheetsNeedingColumns, type StagedBoqSheet } from "@/lib/boq-import";
+import {
+  assertBoqDocument,
+  normaliseRef,
+  sheetsAwaitingColumnCheck,
+  sheetsNeedingColumns,
+  type StagedBoqSheet,
+} from "@/lib/boq-import";
 import { effectiveArea } from "@/lib/boq-reconcile";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { fabricCodeOf, fabricLineState, rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
+import { FABRIC_SLOTS } from "@/lib/drawing-document";
+import {
+  isFinishCodeOrigin,
+  isFinishKind,
+  normaliseFinishCode,
+  readUncodedFinish,
+  resolveFinishCode,
+  type Finish,
+} from "@/lib/finishes";
+import { createFinish } from "@/lib/finish-edit";
+import { recomposeAnswers } from "@/lib/attribute-retire";
 
 type StagedLine = {
   index: number;
@@ -63,7 +81,7 @@ type StagedLine = {
   ignored: boolean;
   /** The record this line continues, at the version the reviewer was shown. */
   replaces?: { recordId: string; recordVersion: number } | null;
-};
+} & RowKindFields;
 
 /**
  * Which column a staged line's level belongs in.
@@ -89,6 +107,8 @@ export type ConfirmBoqResult = {
   projectId: string;
   runIds: string[];
   changeSetId: string;
+  /** Fabric lines written as a COM spec on their item, rather than as records. */
+  fabricSpecs: number;
 };
 
 export async function confirmBoqImport(
@@ -143,7 +163,33 @@ export async function confirmBoqImport(
     );
   }
 
+  // A MODEL'S COLUMNS NOBODY HAS AGREED TO ARE REFUSED, BY NAME. The model
+  // never typed a cell, but which column is the quantity is still its reading
+  // until a person says so — Step 1's "The columns are right", reused.
+  const unchecked = sheetsAwaitingColumnCheck(parsed);
+  if (unchecked.length > 0) {
+    const names = unchecked.map((sheet) => `“${sheet.sheetName}”`).join(", ");
+    throw new DomainConflictError(
+      "columns_unchecked",
+      `The model read the columns of ${names}. Check them on the Columns panel and press “The columns are right” first.`,
+      { status: 400 },
+    );
+  }
+
   const sheets = parsed.sheets.filter((sheet) => !sheet.ignored);
+
+  // A FABRIC LINE THAT CANNOT LAND IS REFUSED, NEVER DROPPED: its item is not
+  // being imported, or is no longer an item. The same sentences the review
+  // prints beside the row (`rowKindProblems`), so the two cannot disagree.
+  const kindProblems = sheets.flatMap((sheet) => rowKindProblems(sheet.lines as StagedLine[]));
+  if (kindProblems.length > 0) {
+    throw new DomainConflictError(
+      "fabric_without_item",
+      kindProblems.map((problem) => problem.problem).join(" "),
+      { status: 400, diff: kindProblems },
+    );
+  }
+
   const lineCount = sheets.reduce(
     (total, sheet) => total + (sheet.lines as StagedLine[]).filter((line) => !line.ignored).length,
     0,
@@ -234,9 +280,28 @@ export async function confirmBoqImport(
   let updated = 0;
   let retired = 0;
 
+  // THE PROJECT'S FINISHES LIBRARY, read once, for the fabric lines' codes —
+  // the same library, the same resolution and the same CONFLICT rule as a
+  // drawing's confirm (src/lib/confirm-drawings.ts).
+  const library = await loadLibrary(txn, projectId);
+  const fabricFields = await txn`
+    select id, json_id from spec_fields where json_id = any(${[...FABRIC_SLOTS]}::int[])
+  `;
+  const fabricFieldIds = [...FABRIC_SLOTS]
+    .map((jsonId) => fabricFields.find((row) => Number(row.json_id) === jsonId)?.id)
+    .filter((fieldId): fieldId is string => typeof fieldId === "string" || typeof fieldId === "number")
+    .map(String);
+  const recomposeIds = new Set<string>();
+  let fabricSpecs = 0;
+
   for (const sheet of sheets as StagedBoqSheet[]) {
-    const lines = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
+    const live = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
+    // A FABRIC LINE IS NOT A RECORD. It is written below, onto its item.
+    const lines = live.filter((line) => line.rowKind !== "finish_for");
+    const fabricLines = live.filter((line) => line.rowKind === "finish_for");
     if (lines.length === 0) continue;
+    /** The record each item line became or continues, by its row on the sheet. */
+    const recordByRow = new Map<number, { recordId: string; carried: boolean }>();
 
     const replacesRunId = sheet.replacesRunId ?? null;
 
@@ -351,6 +416,7 @@ export async function confirmBoqImport(
         }
         carriedForward.add(target.recordId);
         recordIds.push(target.recordId);
+        recordByRow.set(line.lineNo, { recordId: target.recordId, carried: true });
 
         // The client ref can be re-punctuated between revisions. Refs are
         // write-once-and-delete by design (0002), so the old one goes and the
@@ -398,6 +464,7 @@ export async function confirmBoqImport(
       const recordId = String(inserted[0]?.id ?? "");
       if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
       recordIds.push(recordId);
+      recordByRow.set(line.lineNo, { recordId, carried: false });
       // A line new to a REVISION is on the run from this moment, and must not
       // be swept up by the retirement of what the revision no longer lists.
       carriedForward.add(recordId);
@@ -421,6 +488,32 @@ export async function confirmBoqImport(
       `;
 
       imported += 1;
+    }
+
+    // ---- the fabric lines, onto their items -----------------------------
+    for (const [order, line] of fabricLines.entries()) {
+      const parent = line.finishFor ? recordByRow.get(line.finishFor.row) : undefined;
+      if (!parent) {
+        throw new DomainConflictError(
+          "fabric_without_item",
+          `Row ${line.lineNo}'s fabric belongs to a row that is not being imported. Reload the review.`,
+        );
+      }
+      const written = await writeFabricLine(txn, {
+        recordId: parent.recordId,
+        carried: parent.carried,
+        line,
+        runId,
+        projectId,
+        actor,
+        library,
+        fabricFieldIds,
+        sortOrder: order,
+      });
+      if (written) {
+        fabricSpecs += 1;
+        recomposeIds.add(parent.recordId);
+      }
     }
 
     // ---- what the revision no longer lists ------------------------------
@@ -455,9 +548,150 @@ export async function confirmBoqImport(
     throw new DomainConflictError("already_confirmed", "This import was confirmed by someone else a moment ago.");
   }
 
-  // v1 of every record, LAST: the version has to hold the refs and the answer
-  // rows written above it, not the bare row the insert returned.
+  // The checklist follows the fabrics: a record that gained a COM spec
+  // composes it into its COM answer, through the one path every other
+  // attribute write uses — never a direct answer write, which the next
+  // document's confirm would recompose away.
+  for (const recordId of recomposeIds) await recomposeAnswers(txn, recordId, runId, actor);
+
+  // v1 of every record, LAST: the version has to hold the refs, the fabric
+  // specs and the answer rows written above it, not the bare row the insert
+  // returned.
   await snapshotRecords(txn, recordIds, changeSetId);
 
-  return { imported, updated, retired, projectId, runIds, changeSetId };
+  return { imported, updated, retired, projectId, runIds, changeSetId, fabricSpecs };
+}
+
+async function loadLibrary(txn: TxnSql, projectId: string): Promise<Finish[]> {
+  const rows = await txn`
+    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state
+    from project_finishes where project_id = ${projectId} and status = 'active'
+  `;
+  const text = (value: unknown) => (value === null || value === undefined ? null : String(value));
+  return rows.map((row) => ({
+    id: String(row.id),
+    code: String(row.code),
+    codeNorm: String(row.code_norm),
+    codeOrigin: isFinishCodeOrigin(row.code_origin) ? row.code_origin : "client",
+    kind: isFinishKind(row.kind) ? row.kind : null,
+    description: text(row.description),
+    supplierRaw: text(row.supplier_raw),
+    reference: text(row.reference),
+    colour: text(row.colour),
+    state: String(row.state) as Finish["state"],
+  }));
+}
+
+/**
+ * ONE FABRIC LINE, WRITTEN AS A COM SPEC ON ITS ITEM (Max, 2026-09-23).
+ *
+ * `record_attributes` is what a document SAID, and the bill is the document:
+ * the value is the line's description VERBATIM, the source is this bill's
+ * intake run, and there is no page, because a spreadsheet has none. The COM
+ * slot is the next one free on THAT record — COM 1, COM 2, COM 3 — which is
+ * how two fabrics under one item land as COM 1 and COM 2. The fabric's code
+ * (the bracket removed; `N/A` and blank as none) is filed in the project's
+ * finishes library by the drawings path's own resolution, and a code the
+ * library has already described DIFFERENTLY links nothing: the CONFLICT rule.
+ *
+ * A REVISION writes nothing where the record already holds that exact fabric
+ * from a bill, and REFUSES — with a sentence — where the record holds a
+ * different one from a bill: replacing a fabric is a decision the review has
+ * no control for yet, and a revision that quietly kept or quietly replaced
+ * one would be the wrong answer either way. Returns whether a row was written.
+ */
+async function writeFabricLine(
+  txn: TxnSql,
+  input: {
+    recordId: string;
+    carried: boolean;
+    line: StagedLine;
+    runId: string;
+    projectId: string;
+    actor: string;
+    library: Finish[];
+    fabricFieldIds: string[];
+    sortOrder: number;
+  },
+): Promise<boolean> {
+  const { recordId, line, runId, projectId, actor, library } = input;
+  const value = line.itemDescription.trim() || (line.code ?? "").trim();
+  const parentCode = line.finishFor?.code ?? null;
+  const ownCode = fabricCodeOf(line.code);
+  // A fabric line whose own code IS its item's code names no fabric at all.
+  const materialCode =
+    ownCode && parentCode && normaliseRef(ownCode) === normaliseRef(parentCode) ? null : ownCode;
+
+  if (input.carried) {
+    const held = await txn`
+      select a.value, a.material_code
+      from record_attributes a
+      join intake_runs r on r.id = a.source_run_id
+      where a.record_id = ${recordId} and a.status = 'active' and r.source_kind = 'boq_xlsx'
+        and a.attr_group = 'material'
+    `;
+    if (held.some((row) => String(row.value ?? "") === value)) return false;
+    if (held.length > 0) {
+      throw new DomainConflictError(
+        "fabric_changed",
+        `Row ${line.lineNo}'s fabric is not the one this item's record already holds from the bill. A revision that ` +
+          "changes a fabric line is not supported yet — correct the fabric on the record's Specs tab, then confirm " +
+          "the revision with the line as the record now reads.",
+      );
+    }
+  }
+
+  const occupied = await txn`
+    select spec_field_id from record_attributes
+    where record_id = ${recordId} and status = 'active' and spec_field_id = any(${input.fabricFieldIds}::uuid[])
+  `;
+  const taken = new Set(occupied.map((row) => String(row.spec_field_id)));
+  const fieldId = input.fabricFieldIds.find((candidate) => !taken.has(candidate)) ?? null;
+  if (!fieldId) {
+    throw new DomainConflictError(
+      "no_free_com",
+      `Row ${line.lineNo}'s fabric has nowhere to go: its item already holds COM 1, COM 2 and COM 3.`,
+    );
+  }
+
+  let finishId: string | null = null;
+  const resolution = resolveFinishCode(materialCode, value, library);
+  if (resolution.status === "matched") {
+    finishId = resolution.finish.id;
+  } else if (resolution.status === "new") {
+    finishId = await createFinish(txn, {
+      projectId,
+      // What THIS line said, as a starting point, and TBC: a bill naming a
+      // code is not somebody confirming what it is.
+      fields: { code: resolution.code, description: value, state: "tbc" },
+      actor,
+    });
+    library.push({
+      id: finishId,
+      code: resolution.code,
+      codeNorm: normaliseFinishCode(resolution.code),
+      codeOrigin: "client",
+      kind: null,
+      description: value,
+      supplierRaw: null,
+      reference: null,
+      colour: null,
+      state: "tbc",
+    });
+  } else if (resolution.status === "none") {
+    // No code: linked only to an internal finish worded EXACTLY the same, which
+    // is the one filing that needs no person. Nothing is minted here.
+    const reading = readUncodedFinish(value, library, null);
+    finishId = reading.outcome === "link" && reading.finish ? reading.finish.id : null;
+  }
+
+  await txn`
+    insert into record_attributes
+      (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
+       source_run_id, source_page, sort_order, created_by, updated_by)
+    values
+      (${recordId}, 'material', null, 'Fabric', ${value}, null, ${materialCode}, ${finishId}, ${fieldId},
+       ${fabricLineState(value)}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
+  `;
+  return true;
 }

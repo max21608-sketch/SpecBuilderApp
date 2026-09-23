@@ -66,15 +66,17 @@ import {
   type BoqReadRole,
   type BoqRole,
 } from "@/lib/boq-roles";
+import { applyBracketRule, type RowKindFields } from "@/lib/boq-row-kinds";
+import type { StructureRowReading } from "@/lib/boq-structure";
 
 /**
- * What KIND of row a line is, where somebody has said. Left undefined by this
- * reader on every line: telling an item from a section heading, a subtotal or
- * a fabric row that belongs to the item above it is Step 2's (a model reads
- * the structure with its evidence, a person agrees), and a rule invented here
- * for one bill would be the kind of inference that is tuned against one pack.
+ * What KIND of row a line is — an item, a fabric line that belongs to the item
+ * above it, a section heading, a subtotal. See `src/lib/boq-row-kinds.ts`: the
+ * bracket rule is applied by this reader to every sheet whatever read its
+ * columns, because a code naming its item in brackets is the document
+ * speaking; everything else is a model's reading or a person's choice.
  */
-export type BoqRowKind = "item" | "section" | "subtotal" | "finish_for";
+export type { BoqRowKind } from "@/lib/boq-row-kinds";
 
 export type BoqLine = {
   /** 1-based row number in the source sheet, for "go and look at line 34". */
@@ -105,9 +107,7 @@ export type BoqLine = {
   subArea?: string | null;
   sourceLine?: string | null;
   notes?: string | null;
-  /** Undefined from this reader — see `BoqRowKind`. */
-  rowKind?: BoqRowKind;
-};
+} & RowKindFields;
 
 /**
  * A staged line: the parsed row plus everything the reviewer decides about it.
@@ -247,6 +247,14 @@ export type StagedBoqSheet = {
   columnsChecked?: boolean;
   /** The first rows of the sheet as displayed text, so the panel needs no re-read. */
   preview?: string[][];
+  /**
+   * WHAT A MODEL READ OF THIS SHEET'S STRUCTURE, validated (Step 2): the row
+   * kinds and the item each fabric line belongs to, by row number. Kept so a
+   * person who then changes one column keeps the row kinds — a re-read with
+   * the same header row re-applies them — and so the review can show the
+   * evidence. Absent on every sheet no model has read.
+   */
+  structure?: { headerRow: number; rows: StructureRowReading[]; notes: string[] } | null;
 };
 
 /**
@@ -1052,7 +1060,10 @@ function readRows(
     // last would file the upper half of a two-row header — "FF&E", "Item",
     // "Total" — as the phase's notes, where the revision and the COM terms go.
     metadata: readMetadata(data, headerIndex - (headerRows - 1)),
-    lines,
+    // THE BRACKET RULE, on every reading — synonyms, a layout, a person's
+    // columns or a model's. `GR-FAB-13 (GR-FUR-10)` names its item, and that is
+    // the one row kind the document states outright (src/lib/boq-row-kinds.ts).
+    lines: applyBracketRule(lines),
     columns,
     headings,
     mappingSource: options.source,
@@ -1231,4 +1242,19 @@ export function sheetsNeedingColumns<T extends Pick<StagedBoqSheet, "ignored" | 
   sheets: readonly T[];
 }): T[] {
   return doc.sheets.filter((sheet) => !sheet.ignored && sheet.needsColumns === true);
+}
+
+/**
+ * The sheets whose columns a MODEL read and nobody has yet agreed to. The
+ * confirm refuses while any remain, and the review's disabled button and its
+ * yellow banner read this same function — Step 1's `columnsChecked`, reused,
+ * because a mapping nobody has looked at must not create records whatever
+ * produced it.
+ */
+export function sheetsAwaitingColumnCheck<
+  T extends Pick<StagedBoqSheet, "ignored" | "needsColumns" | "mappingSource" | "columnsChecked">,
+>(doc: { sheets: readonly T[] }): T[] {
+  return doc.sheets.filter(
+    (sheet) => !sheet.ignored && sheet.needsColumns !== true && sheet.mappingSource === "model" && sheet.columnsChecked !== true,
+  );
 }

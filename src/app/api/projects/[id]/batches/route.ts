@@ -68,6 +68,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                           where s->>'needsColumns' = 'true' and coalesce(s->>'ignored', 'false') <> 'true'
                        )),
                        'sourcePreserved', (r.attachment_id is not null),
+                       -- Whether a model has read this bill's columns yet
+                       -- (plan any-bill Step 2): a row can then say, before
+                       -- the press, that opening its review reads them.
+                       'structureRead', (r.model_metadata->'structureRead'->'sheets') is not null,
                        'filename', a.filename,
                        'createdAt', r.created_at,
                        'pendingReview', jsonb_array_length(

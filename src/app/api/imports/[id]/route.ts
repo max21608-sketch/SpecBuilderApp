@@ -36,6 +36,8 @@ import {
   isItemLevel,
 } from "@/lib/spec-vocab";
 import { assertBoqDocument } from "@/lib/boq-import";
+import { fabricParentOptions, isBoqRowKind, kindChoicePatch } from "@/lib/boq-row-kinds";
+import { billSpecsRequestId } from "@/lib/bill-specifications";
 // Pure: which rows on the OTHER tabs a decision reaches, and what lands on
 // them. The screen reads the same module for its duplicate panel, so the rows
 // it calls ambiguous and the rows the carry refuses are one set.
@@ -778,7 +780,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         hasImage: Boolean(row.has_image),
         settledAnswers: Number(row.settled_answers),
       }));
-      const lines: RevisedLine[] = sheet.lines.map((line) => ({
+      // A FABRIC LINE IS NOT A RECORD, so it is never paired with one: it is
+      // written onto its item at confirm, and listing it here would offer it a
+      // record to continue and count it as a new line.
+      const lines: RevisedLine[] = sheet.lines.filter((line) => line.rowKind !== "finish_for").map((line) => ({
         index: line.index,
         lineNo: line.lineNo,
         code: line.code,
@@ -796,7 +801,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     }
   }
 
-  return json({ ok: true, import: { ...run, parsed }, categories, runs, reconciliation });
+  // THE SPECIFICATIONS IN THIS BILL, where somebody has asked for them to be
+  // read: the spec-document run registered from this bill's own stored file,
+  // found by the request id its registration always carries.
+  const specsRows = await sql`
+    select id, status from intake_runs where registration_request_id = ${billSpecsRequestId(String(run.id))}
+  `;
+  const billSpecs = specsRows[0] ? { id: String(specsRows[0].id), status: String(specsRows[0].status) } : null;
+
+  return json({ ok: true, import: { ...run, parsed }, categories, runs, reconciliation, billSpecs });
 }
 
 // ---- the BOQ's positional autosave -----------------------------------------
@@ -814,12 +827,23 @@ async function patchBoqLine(
     runName?: unknown;
     replacesRunId?: unknown;
     replaces?: unknown;
+    rowKind?: unknown;
+    finishForRow?: unknown;
   },
   actor: string,
 ): Promise<Response> {
   const sheetIndex = typeof body.sheetIndex === "number" ? body.sheetIndex : null;
   if (sheetIndex === null) return json({ ok: false, error: "sheetIndex is required." }, 400);
   const index = typeof body.index === "number" ? body.index : null;
+
+  // A LINE'S KIND, set by a person: its own shape, because a fabric line's
+  // item is checked against the LIVE sheet, under its lock, before anything is
+  // written — an item offered by a screen that has since gone stale must not
+  // become the one a fabric is written onto.
+  if (body.rowKind !== undefined) {
+    if (index === null) return json({ ok: false, error: "A row kind is set on one line." }, 400);
+    return patchRowKind(id, sheetIndex, index, body.rowKind, body.finishForRow, actor);
+  }
 
   // A SHEET-level change: its run name, or dropping the tab entirely. Addressed
   // the same way and merged into the live row, never written back wholesale.
@@ -1041,6 +1065,67 @@ async function patchBoqLine(
       return { version, carried: targets.length, tabs: listTabs(targets) };
     });
     return json({ ok: true, version: result.version, carried: result.carried, carriedTo: result.tabs });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
+// ---- a bill line's KIND -------------------------------------------------------
+// Item, fabric for an item above it, section, subtotal, blank. A section,
+// subtotal or blank line is ignored by the same write (and one click on its
+// Include box brings it back); an item or a fabric line is included. The fabric
+// line's item must be a live ITEM line ABOVE it on the same sheet — the screen
+// offers exactly those (`fabricParentOptions`), and this refuses anything else.
+async function patchRowKind(
+  id: string,
+  sheetIndex: number,
+  index: number,
+  rowKind: unknown,
+  finishForRow: unknown,
+  actor: string,
+): Promise<Response> {
+  if (!isBoqRowKind(rowKind)) return json({ ok: false, error: "That is not a kind of row." }, 400);
+  if (rowKind === "finish_for" && typeof finishForRow !== "number") {
+    return json({ ok: false, error: "Say which item this fabric belongs to." }, 400);
+  }
+  try {
+    const version = await withTransaction(async (txn) => {
+      const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
+      if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
+      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+      const sheet = assertBoqDocument(rows[0].parsed).sheets[sheetIndex];
+      const line = sheet?.lines[index];
+      if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+
+      let parent: { row: number; code: string | null } | null = null;
+      if (rowKind === "finish_for") {
+        const option = fabricParentOptions(sheet.lines, line).find((candidate) => candidate.lineNo === finishForRow);
+        if (!option) {
+          throw new DomainConflictError(
+            "not_an_item",
+            `Row ${String(finishForRow)} is not an item line above row ${line.lineNo} on this sheet. Reload and choose again.`,
+            { status: 400 },
+          );
+        }
+        parent = { row: option.lineNo, code: option.code };
+      }
+      const patch = kindChoicePatch(rowKind, parent);
+      const written = await txn`
+        update intake_runs
+        set parsed = jsonb_set(
+              parsed,
+              array['sheets', ${String(sheetIndex)}, 'lines', ${String(index)}],
+              coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
+                || ${JSON.stringify(patch)}::jsonb
+            ),
+            updated_by = ${actor}
+        where id = ${id} and status = 'parsed'
+        returning version
+      `;
+      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      return Number(written[0].version);
+    });
+    return json({ ok: true, version });
   } catch (cause) {
     return transactionErrorResponse(cause);
   }

@@ -66,6 +66,8 @@ export type ColumnsPanelSheet = {
   columnsNote?: string | null;
   columnsChecked?: boolean;
   preview?: string[][];
+  /** What a model's reading dropped, in words (Step 2). */
+  structure?: { notes?: string[] } | null;
 };
 
 /**
@@ -103,6 +105,8 @@ export default function BoqColumnsPanel({
   onRead,
   onClose,
   onIgnoreSheet,
+  onAsk,
+  asking = false,
 }: {
   importId: string;
   sheetIndex: number;
@@ -126,6 +130,14 @@ export default function BoqColumnsPanel({
   onClose?: () => void;
   /** "Not a bill — ignore this sheet": the sheet-level drop the page already has. */
   onIgnoreSheet: () => void;
+  /**
+   * "Ask the model to read the columns" — one small, charged read of this
+   * sheet's layout. Absent where nothing can be read (no stored original, or
+   * the bill is confirmed).
+   */
+  onAsk?: () => void;
+  /** The model is reading this bill's columns right now. */
+  asking?: boolean;
 }) {
   const preview = useMemo(() => sheet.preview ?? [], [sheet.preview]);
   const width = preview.reduce((widest, row) => Math.max(widest, row.length), 0);
@@ -146,6 +158,9 @@ export default function BoqColumnsPanel({
     (headerRow === null
       ? "Click the row number the column headings are on."
       : columnMappingProblem({ columns: mapped.columns, headerRow, headerRows, rowCount: preview.length, width }));
+
+  /** A layout's or a model's mapping nobody has agreed to yet. */
+  const needsCheck = (sheet.mappingSource === "layout" || sheet.mappingSource === "model") && !sheet.columnsChecked;
 
   const unchanged =
     !sheet.needsColumns &&
@@ -200,9 +215,10 @@ export default function BoqColumnsPanel({
 
   async function close() {
     if (!onClose) return;
-    // A sheet a saved layout read stays open until somebody has LOOKED, and
-    // closing it is that record. Anything else just closes.
-    if (sheet.mappingSource === "layout" && !sheet.columnsChecked && editable) {
+    // A sheet a saved layout or a MODEL read stays open until somebody has
+    // LOOKED, and closing it is that record — for a model's reading it is also
+    // what the confirm waits for. Anything else just closes.
+    if (needsCheck && editable) {
       setBusy(true);
       setError(null);
       try {
@@ -261,6 +277,16 @@ export default function BoqColumnsPanel({
   }
 
   const sourceLabel = sheet.mappingSource ? BOQ_MAPPING_SOURCE_LABELS[sheet.mappingSource] : null;
+  const readButton = (
+    <Button
+      variant="primary"
+      size="xs"
+      disabled={!editable || busy || asking || problem !== null || !sourceKept}
+      onClick={() => void read()}
+    >
+      {busy ? "Reading…" : "Read the bill with these columns"}
+    </Button>
+  );
 
   return (
     <section
@@ -274,17 +300,41 @@ export default function BoqColumnsPanel({
             Read with the <b>{sheet.layout.name}</b> layout
           </span>
         )}
-        <span className="flex-1" />
-        {onClose && (
-          <Button size="xs" disabled={busy} onClick={() => void close()}>
-            {sheet.mappingSource === "layout" && !sheet.columnsChecked ? "The columns are right — close" : "Close"}
-          </Button>
+        {sheet.mappingSource === "model" && (
+          <span className="font-medium normal-case tracking-normal text-neutral-700">Read by the model</span>
         )}
+        <span className="flex-1" />
+        {/* THE PRIMARY ACTION IS IN THE HEADER ROW, beside the model's, so both
+            are visible without scrolling past a 25-row grid at 1920 × 1080. */}
+        <span className="flex flex-wrap items-center gap-2 normal-case tracking-normal">
+          {onAsk && (
+            <Button
+              size="xs"
+              disabled={!editable || busy || asking || !sourceKept}
+              title="One small read of this sheet's layout, charged. The model never copies a cell."
+              onClick={onAsk}
+            >
+              {asking ? "Reading the columns…" : "Ask the model to read the columns"}
+            </Button>
+          )}
+          {readButton}
+          {onClose && (
+            <Button size="xs" disabled={busy || asking} onClick={() => void close()}>
+              {needsCheck ? "The columns are right — close" : "Close"}
+            </Button>
+          )}
+        </span>
       </h2>
 
       <div className="px-4 pt-3 text-[12.5px] leading-5 text-neutral-700">
         {sheet.needsColumns ? (
           <p>{sheet.columnsNote ?? "Nobody has said which column is which on this sheet yet. Set the columns below."}</p>
+        ) : sheet.mappingSource === "model" ? (
+          <p>
+            The model read this sheet&rsquo;s header, its columns and its row kinds; every cell below was then read
+            by code from the stored spreadsheet. Check each column against the sheet, and the row kinds in the lines
+            table, then press <b>The columns are right</b> — the confirm waits for it.
+          </p>
         ) : sheet.mappingSource === "layout" ? (
           <p>
             A saved layout matched every heading it names on this sheet. Check each column below against the sheet
@@ -300,7 +350,13 @@ export default function BoqColumnsPanel({
         )}
         <p className="mt-1 text-xs text-neutral-500">
           Click a row number to make it the header. Shift-click the row next to it to read two rows as one header.
+          {onAsk && " Asking the model is one small read, charged; setting the columns yourself is free."}
         </p>
+        {(sheet.structure?.notes?.length ?? 0) > 0 && (
+          <ul className="mt-1 list-inside list-disc text-xs text-amber-800">
+            {sheet.structure?.notes?.map((note) => <li key={note}>{note}</li>)}
+          </ul>
+        )}
       </div>
 
       {/* THE GRID. Its own bounded scroll box in both directions, so the
@@ -402,13 +458,6 @@ export default function BoqColumnsPanel({
       </p>
 
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <Button
-          variant="primary"
-          disabled={!editable || busy || problem !== null || !sourceKept}
-          onClick={() => void read()}
-        >
-          {busy ? "Reading…" : "Read the bill with these columns"}
-        </Button>
         <Button disabled={!editable || busy} onClick={onIgnoreSheet}>
           Not a bill — ignore this sheet
         </Button>
