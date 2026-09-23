@@ -41,7 +41,8 @@
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import type { TxnSql } from "@/lib/db-transaction";
 import { isDimensionSlot, type AttributeState, type AttributeUnit, type DimensionSlot } from "@/lib/spec-vocab";
-import { combineFinishState, composeFinishCell, type Finish } from "@/lib/finishes";
+import type { Finish } from "@/lib/finishes";
+import { composeAttributeStatement, type AttributeStandard } from "@/lib/bw-standard";
 
 /** The BWS register key for the dimensions field. Resolved by `json_id`, never
  *  by column letter, which is positional and shifts when BWS inserts one. */
@@ -72,6 +73,13 @@ export type PromotableAttribute = {
    * answer, whatever the attribute said.
    */
   finish?: Finish | null;
+  /**
+   * The BW standard beside the client's words (0041). The answer follows the
+   * SAME choice the BWS cell makes (`composeAttributeStatement`), and a
+   * proposal holds it at TBC until the client agrees -- `stateUnderStandard`,
+   * one rule, awaiting Max.
+   */
+  standard?: Pick<AttributeStandard, "value" | "state"> | null;
 };
 
 export type AnswerFill = {
@@ -185,16 +193,15 @@ export function planAnswerFills(attributes: PromotableAttribute[], dimensionNote
     if (attribute.attrGroup === "dimension") continue;
     if (!attribute.specFieldId || clashed.has(attribute.specFieldId)) continue;
     const raw = (attribute.value ?? "").trim();
-    const finish = attribute.finish ?? null;
-    // A LINKED ATTRIBUTE ANSWERS AS THE LIBRARY SAYS IT IS. The export renders
-    // it that way too, through the same function — the two must not be able to
-    // disagree. `value_raw` keeps what this page said, which is what makes the
-    // answer checkable against its drawing.
-    // An internal finish with its description cleared composes to nothing;
-    // this page's own words stand rather than an empty answer.
-    const value = (finish ? composeFinishCell(finish) : "") || raw;
+    // ONE CHOICE, SHARED WITH THE BWS CELL. A BW standard proposed or agreed
+    // beside the client's words answers the question (0041); otherwise a
+    // LINKED ATTRIBUTE ANSWERS AS THE LIBRARY SAYS IT IS; otherwise the page's
+    // own words. The export renders through the same function, so the two
+    // cannot disagree. `value_raw` keeps what this page said -- the CLIENT'S
+    // words, never the option -- which is what makes the answer checkable
+    // against its drawing.
+    const { value, state } = composeAttributeStatement(attribute);
     if (value === "") continue;
-    const state = combineFinishState(attribute.state, finish);
     fills.push({
       specFieldId: attribute.specFieldId,
       jsonId: null,

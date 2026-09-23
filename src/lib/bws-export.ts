@@ -37,7 +37,8 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
-import { combineFinishState, composeFinishCell, type Finish } from "@/lib/finishes";
+import { type Finish } from "@/lib/finishes";
+import { composeAttributeStatement, type AttributeStandard } from "@/lib/bw-standard";
 
 export type BwsColumn = { name: string; jsonId: number | null };
 
@@ -235,12 +236,22 @@ export type ExportAttribute = {
    *
    * THE LIBRARY IS THE TRUTH AND THE ATTRIBUTE IS THE EVIDENCE: `value` stays
    * exactly what the drawing said about this item, so it can be re-checked
-   * against its page, and the CELL renders the finish's current definition.
+   * against its page, and the CELL renders the finish's current definition --
+   * or the BW standard below, where one is set (0041). A palette pick on the
+   * drawings card used to write the option into `value`, and that is the
+   * defect 0041 closed: `value` is the DOCUMENT'S, always.
    * Correcting CH-01.1 once therefore corrects every item carrying it — which
    * is the only correction mechanism there is, the pilot's finishes schedule
    * being confirmed absent.
    */
   finish: Finish | null;
+  /**
+   * The BW standard proposed beside what the client specified (0041). Shipped
+   * where it is proposed or agreed; `composeAttributeStatement` is the one
+   * choice. Optional for the reason `variantLabel` is -- a fixture composing
+   * a row need not know about it -- and `loadRecordAtoms` always sets it.
+   */
+  standard?: AttributeStandard | null;
   specFieldJsonId: number | null;
   state: AttributeState;
   sortOrder: number;
@@ -356,20 +367,19 @@ export function renderAttributeValue(attribute: {
   unit: AttributeUnit | null;
   state: AttributeState;
   finish?: Finish | null;
+  standard?: Pick<AttributeStandard, "value" | "state"> | null;
   qualifier?: string | null;
 }): string {
-  // A LINKED FINISH RENDERS AS THE LIBRARY SAYS IT IS, not as this page wrote
-  // it. One composer, called here, by the record screen and by
-  // promote-answers — see src/lib/finishes.ts for why all three must agree.
-  const finish = attribute.finish ?? null;
-  // An INTERNAL finish composes to its description alone (it has no code the
-  // file may carry), so where somebody has cleared that description there is
-  // nothing to emit — and this page's own words are what the cell said before
-  // the library could hold this fabric at all. Falls back to them rather than
-  // shipping a blank.
-  const value = (finish ? composeFinishCell(finish) : "") || (attribute.value?.trim() ?? "");
-  const state = finish ? combineFinishState(attribute.state, finish) : attribute.state;
-  const withUnit = value && attribute.unit ? `${value}${attribute.unit}` : value;
+  // WHICH HALF SHIPS is decided in ONE place (src/lib/bw-standard.ts), and the
+  // checklist answer asks the same function: a BW standard proposed or agreed
+  // beside the client's words ships; otherwise a LINKED FINISH renders as the
+  // library says it is; otherwise this page's own words. The state comes back
+  // with it, so a proposal awaiting the client's yes carries the TBC marker in
+  // the file exactly as it holds the answer at TBC.
+  const { value, state, fromStandard } = composeAttributeStatement(attribute);
+  // A BWS option name is not a figure, and the unit column belongs to the
+  // page's statement, not to BW's.
+  const withUnit = value && attribute.unit && !fromStandard ? `${value}${attribute.unit}` : value;
   // THE QUALIFIER GOES ON LAST, AFTER the TBC marker. A placement is not part
   // of the statement MENTIONS_TBC is asking about — "Main body and self pipe"
   // can never carry the client's not-decided marker — so folding it in first

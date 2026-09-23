@@ -125,6 +125,8 @@ export async function correctAttribute(
     select a.id, a.record_id, a.version, a.status, a.label, a.value, a.attr_group,
            a.dimension_slot, a.spec_field_id, a.material_code, a.qualifier,
            a.source_run_id, a.source_page, a.sort_order, a.finish_id, a.superseded_by_id,
+           a.standard_value, a.standard_option_id, a.standard_state, a.standard_set_by, a.standard_set_at,
+           a.standard_agreed_evidence_id,
            r.project_id
     from record_attributes a
     join spec_records r on r.id = a.record_id
@@ -280,17 +282,31 @@ export async function correctAttribute(
   // The change set's kind is what records that a PERSON wrote this value —
   // there is no column on `record_attributes` for it, and 0028 added none.
   // `created_by` carries who, `attribute_correct` carries how.
+  //
+  // THE BW STANDARD IS CARRIED FORWARD, whole (0041). Correcting what the
+  // client's page said -- a misread "30% oak" that was really "35% oak" --
+  // does not undo BW's proposal beside it, nor the client's agreement to it:
+  // both were decisions about the ITEM, taken by people, and a correction is
+  // a statement about the page. Who proposed it and when, and the email that
+  // agreed it, come across as they were. Retiring keeps them on the retired
+  // row too, because that row is history and history keeps what it said.
   const inserted = await txn`
     insert into record_attributes
       (record_id, attr_group, label, value, unit, material_code, qualifier, spec_field_id,
        dimension_slot, state, source_run_id, source_page, sort_order, finish_id,
+       standard_value, standard_option_id, standard_state, standard_set_by, standard_set_at,
+       standard_agreed_evidence_id,
        created_by, updated_by)
     values
       (${recordId}, ${attrGroup}, ${String(attribute.label)}, ${value}, ${unit},
        ${attribute.material_code ?? null}, ${attribute.qualifier ?? null},
        ${attribute.spec_field_id ?? null}, ${nextSlot}, ${state},
        ${attribute.source_run_id ?? null}, ${attribute.source_page ?? null},
-       ${Number(attribute.sort_order ?? 0)}, ${finishId}, ${actor}, ${actor})
+       ${Number(attribute.sort_order ?? 0)}, ${finishId},
+       ${attribute.standard_value ?? null}, ${attribute.standard_option_id ?? null},
+       ${attribute.standard_state ?? null}, ${attribute.standard_set_by ?? null},
+       ${attribute.standard_set_at ?? null}, ${attribute.standard_agreed_evidence_id ?? null},
+       ${actor}, ${actor})
     returning id
   `;
   const newId = String(inserted[0]!.id);

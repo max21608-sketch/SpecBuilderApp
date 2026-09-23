@@ -43,6 +43,9 @@ curl -b sb_session=... "$BASE/api/projects/$PROJECT/export/check-sheet?runId=$RU
 | Column | the export's own column letter, so a finding can be pointed at in the file |
 | BWS field, Field id | the field, by name and by `json_id` — never by letter, which moves |
 | Exported value | exactly what the export cell holds, `TBC` included |
+| Qualifier | the placement half of the cell, apart from the value (0029) |
+| Client specified | what the document said, verbatim, for a cell one spec fills (0041) |
+| BW standard | the BW standard proposed beside it and its state — `proposed`, `agreed by the client`, or `TBC`. Where it is proposed or agreed, **Exported value is the standard, not the client's words**, and that is by design |
 | Came from | `Document`, `Checklist`, `BOQ line`, `Project`, or blank |
 | Source document, Page | where to go and look. A composed dimensions cell names **every** page that contributed |
 | **Pack says** | the reviewer's: what the document actually states |
