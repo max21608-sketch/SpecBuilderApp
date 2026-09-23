@@ -35,10 +35,6 @@ import {
   assertStagedDrawings,
   isMeasuredRow,
   variantLettersByItem,
-  drawingItemBlockers,
-  resolveDrawingTargets,
-  targetRecordIds,
-  occupancyThrough,
   type DrawingItem,
   type DrawingObservation,
   type StagedDrawings,
@@ -46,7 +42,7 @@ import {
 import { composeDimensionCell } from "../src/lib/dimensions";
 import type { DimensionSlot } from "../src/lib/spec-vocab";
 import { unitSourceOf } from "../src/lib/drawing-document";
-import { loadDrawingContext } from "../src/lib/drawing-resolution";
+import { loadDrawingContext, resolveStagedRun } from "../src/lib/drawing-resolution";
 import { sql } from "../src/lib/db";
 
 const DATABASE_ENVIRONMENTS = ["sandbox", "pilot", "production"];
@@ -137,6 +133,9 @@ async function dumpRun(row: Record<string, unknown>) {
 
   const letters = variantLettersByItem(staged.items, staged);
   const context = await loadDrawingContext(String(row.project_id));
+  // The screen's own resolution — named configurations (schemaVersion 3)
+  // included — rather than a copy of it here.
+  const resolvedById = new Map(resolveStagedRun(staged, context).map((entry) => [entry.id, entry]));
 
   console.log("");
   console.log(
@@ -154,17 +153,11 @@ async function dumpRun(row: Record<string, unknown>) {
         `${pad(String(folded.length), 5)}${pad(unitSummary(placed), 22)}${composed(item)}`,
     );
 
-    const resolution = resolveDrawingTargets(item.itemCodeRaw, context.records);
-    const targets = targetRecordIds(item, resolution);
-    const variantLabel = letters.get(item.id) ?? null;
-    const writesTo = new Map<string, string>();
-    if (variantLabel) {
-      for (const parentId of targets) {
-        const variantId = context.variants.get(`${parentId}|${variantLabel}`);
-        if (variantId) writesTo.set(parentId, variantId);
-      }
+    const resolved = resolvedById.get(item.id);
+    if (resolved?.named) {
+      console.log(`         configurations: ${resolved.named.labels.join(", ")}`);
     }
-    const blockers = drawingItemBlockers(item, resolution, occupancyThrough(context.occupied, writesTo));
+    const blockers = resolved?.blockers ?? [];
     for (const blocker of blockers) {
       console.log(`         ! ${blocker.code}: ${blocker.message}`);
     }
@@ -172,10 +165,11 @@ async function dumpRun(row: Record<string, unknown>) {
     if (itemFilter) {
       for (const observation of pending) {
         const slot = observation.dimensionSlot ? `${observation.dimensionSlot}${observation.slotSuggested ? "?" : ""}` : "";
+        const lands = resolved?.named?.rows[observation.id];
         console.log(
           `         ${pad(observation.attrGroup, 10)}${pad(observation.labelRaw ?? "-", 16)}` +
             `${pad((observation.value ?? "").slice(0, 28), 30)}${pad(observation.unit ?? "-", 5)}` +
-            `${pad(unitSourceOf(observation) ?? "-", 16)}${slot}`,
+            `${pad(unitSourceOf(observation) ?? "-", 16)}${slot}${lands ? `  → ${lands.join(" · ")}` : ""}`,
         );
       }
     }

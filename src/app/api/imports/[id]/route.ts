@@ -49,6 +49,7 @@ import {
 } from "@/lib/drawing-document";
 import { assertStagedPreamble, preambleNoteBlockers, type StagedPreamble } from "@/lib/preamble-document";
 import { loadPalettes, withPalettes } from "@/lib/palette-load";
+import { normaliseVariantLabel } from "@/lib/record-variants";
 
 export const dynamic = "force-dynamic";
 
@@ -162,6 +163,14 @@ const DrawingPatch = z
       .object({
         ticked: z.array(z.string().uuid()).max(200).optional(),
         unticked: z.array(z.string().uuid()).max(200).optional(),
+        // THE ITEM'S: the reviewer's tick that confirming may CREATE a named
+        // configuration beside a bill line's existing ones, per (bill record,
+        // folded name). The blocker it answers is computed; this is only the
+        // decision. The whole list is sent, like `replaces`.
+        configurationAcks: z
+          .array(z.object({ recordId: z.string().uuid(), label: z.string().min(1).max(64) }).strict())
+          .max(200)
+          .optional(),
         value: z.string().max(4000).nullable().optional(),
         unit: z.enum(ATTRIBUTE_UNITS).nullable().optional(),
         attrGroup: z.enum(ATTRIBUTE_GROUPS).optional(),
@@ -239,10 +248,30 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
         }
         const ticked = changes.ticked ?? item.targets?.ticked ?? [];
         const unticked = changes.unticked ?? item.targets?.unticked ?? [];
-        // Both lists are the reviewer's DECISION, which is what lets a target
-        // that appears later be told apart from one they deliberately unticked.
+        // Only when the request is ABOUT the targets. An item that has never
+        // been touched has `targets: null`, meaning "whatever resolves" — and
+        // writing `{ ticked: [], unticked: [] }` over that because somebody
+        // ticked a configuration acknowledgement would untick every phase.
+        const aboutTargets = changes.ticked !== undefined || changes.unticked !== undefined;
         items = staged.items.map((row) =>
-          row.id === itemId ? { ...row, version: row.version + 1, targets: { ticked, unticked } } : row,
+          row.id === itemId
+            ? {
+                ...row,
+                version: row.version + 1,
+                // Both lists are the reviewer's DECISION, which is what lets a
+                // target that appears later be told apart from one they
+                // deliberately unticked.
+                ...(aboutTargets ? { targets: { ticked, unticked } } : {}),
+                ...(changes.configurationAcks !== undefined
+                  ? {
+                      configurationAcks: changes.configurationAcks.map((ack) => ({
+                        recordId: ack.recordId,
+                        label: normaliseVariantLabel(ack.label),
+                      })),
+                    }
+                  : {}),
+              }
+            : row,
         );
       } else {
         const observation = item.observations.find((row) => row.id === observationId);

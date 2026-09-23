@@ -27,6 +27,11 @@ import {
   targetRecordIds,
   canonicalCode,
   variantLettersByItem,
+  namedConfigurationPlans,
+  parentVariantsOf,
+  rowWriteRecords,
+  configurationsToCreate,
+  type NamedTargets,
   type DrawingBlocker,
   type DrawingResolution,
   type DrawingWarning,
@@ -73,6 +78,26 @@ export type ResolvedItem = {
    * map entirely: the code is the key there and stays the key.
    */
   finishFilings: Record<string, FinishFilingView>;
+  /**
+   * For a page of a code that NAMES its configurations (schemaVersion 3), where
+   * it lands — the server's answer, computed by the same pure functions the
+   * confirm calls. Null for every other page, which is most of them.
+   */
+  named: NamedResolution | null;
+};
+
+/** What the card is told about a page of named configurations. Compact: it crosses the wire. */
+export type NamedResolution = {
+  /** The folded labels this page writes, in the code's order. */
+  labels: string[];
+  /** Per observation, the folded labels it lands on. */
+  rows: Record<string, string[]>;
+  /** Per ticked bill line, the labels confirming would CREATE. */
+  create: Record<string, string[]>;
+  /** Per ticked bill line, its live configurations (label -> record id). */
+  existing: Record<string, Record<string, string>>;
+  /** Variant id -> what to call it on the card: `MAIN RUN · TYPE 2`. */
+  recordNames: Record<string, string>;
 };
 
 /** What the card shows about one uncoded finish. Compact: it crosses the wire. */
@@ -238,12 +263,15 @@ export function occupantsFor(
   item: StagedDrawings["items"][number],
   targets: string[],
   occupied: Awaited<ReturnType<typeof loadDrawingContext>>["occupied"],
+  // A named page: each row's own configurations' live variants, by the same
+  // function the blockers and the confirm use.
+  named: NamedTargets | null = null,
 ): Record<string, { recordId: string; occupant: OccupiedSlot }[]> {
   const out: Record<string, { recordId: string; occupant: OccupiedSlot }[]> = {};
   for (const observation of item.observations) {
     if (observation.reviewStatus !== "pending") continue;
     const found: { recordId: string; occupant: OccupiedSlot }[] = [];
-    for (const recordId of targets) {
+    for (const recordId of rowWriteRecords(observation.id, targets, named)) {
       const occupant =
         observation.attrGroup === "dimension" && observation.dimensionSlot
           ? occupied.dimensions.get(recordId)?.get(observation.dimensionSlot)
@@ -263,6 +291,8 @@ export function resolveStagedRun(
   context: Awaited<ReturnType<typeof loadDrawingContext>>,
 ): ResolvedItem[] {
   const letters = variantLettersByItem(staged.items, staged);
+  const plans = namedConfigurationPlans(staged.items, staged);
+  const variantsByParent = plans.size > 0 ? parentVariantsOf(context.records) : new Map<string, Map<string, string>>();
   return staged.items.map((item) => {
     // THE CANONICAL CODE, not the page's own heading. A shop drawing titled
     // `MUR.2 ARMCHAIR` is the S-200 the bill lists, and matching on its title
@@ -282,20 +312,46 @@ export function resolveStagedRun(
         if (variantId) writesTo.set(parentId, variantId);
       }
     }
-    const occupied = occupancyThrough(context.occupied, writesTo);
+    const plan = plans.get(item.id) ?? null;
+    const named: NamedTargets | null = plan ? { plan, variants: variantsByParent } : null;
+    // A named page reads occupancy off the REAL variants: one bill line has
+    // several, and a re-key onto the parent could only hold one of them.
+    const occupied = named ? context.occupied : occupancyThrough(context.occupied, writesTo);
 
     return {
       id: item.id,
       resolution,
       targets,
-      blockers: drawingItemBlockers(item, resolution, occupied),
+      blockers: drawingItemBlockers(item, resolution, occupied, named),
       warnings: drawingItemWarnings(item),
-      occupants: occupantsFor(item, targets, occupied),
+      occupants: occupantsFor(item, targets, occupied, named),
       variantLabel,
       writesTo: Object.fromEntries(writesTo),
       finishFilings: finishFilingsFor(item, context.finishes),
+      named: named ? namedResolution(targets, resolution, named) : null,
     };
   });
+}
+
+function namedResolution(targets: string[], resolution: DrawingResolution, named: NamedTargets): NamedResolution {
+  const runNameOf = new Map<string, string>();
+  for (const run of resolution.runs) if (run.status === "matched") runNameOf.set(run.record.id, run.runName);
+  const existing: NamedResolution["existing"] = {};
+  const recordNames: NamedResolution["recordNames"] = {};
+  for (const parentId of targets) {
+    const variants = named.variants.get(parentId);
+    existing[parentId] = Object.fromEntries(variants ?? []);
+    for (const [label, variantId] of variants ?? []) {
+      recordNames[variantId] = `${runNameOf.get(parentId) ?? "this phase"} · ${label}`;
+    }
+  }
+  return {
+    labels: named.plan.labels,
+    rows: named.plan.rows,
+    create: Object.fromEntries(configurationsToCreate(targets, named)),
+    existing,
+    recordNames,
+  };
 }
 
 /**

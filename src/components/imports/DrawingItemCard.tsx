@@ -64,7 +64,7 @@ import Tip from "@/components/ui/Tip";
 
 // Re-exported from where they now live, so the screens keep one import.
 export type { Occupant, RecordChoice, RunResolution, SpecField } from "@/components/imports/ObservationRows";
-import type { FinishFilingView } from "@/lib/drawing-resolution";
+import type { FinishFilingView, NamedResolution } from "@/lib/drawing-resolution";
 
 export type ItemResolution = {
   id: string;
@@ -95,6 +95,12 @@ export type ItemResolution = {
   // NOT blockers. These never disable Confirm and the confirm route never sees
   // them -- see drawingItemWarnings() for why they are a separate type.
   warnings?: RowWarning[];
+  /**
+   * A page of a code that NAMES its configurations (schemaVersion 3): where
+   * each row lands and what the confirm will create. Rendered by
+   * `NamedConfigurationCard`, never by this card.
+   */
+  named?: NamedResolution | null;
 };
 
 /**

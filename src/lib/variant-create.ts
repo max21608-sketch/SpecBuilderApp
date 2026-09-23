@@ -1,7 +1,7 @@
 // Creating the variant a drawing page belongs to.
 //
 // ============================================================================
-// FIND OR CREATE, ONCE PER (PARENT, LETTER).
+// FIND OR CREATE, ONCE PER (PARENT, LETTER OR NAME).
 //
 // Confirming page 6 of S-201 writes its fabric to S-201 B, not to the bill's
 // record. The variant does not exist until that moment, so this is where it is
@@ -10,7 +10,12 @@
 //
 // The letter is NOT a parameter the client chose. It is derived from the staged
 // document by `variantLettersByItem`, server-side, so the review screen and the
-// confirm reach the same answer without either telling the other.
+// confirm reach the same answer without either telling the other. The same
+// goes for a NAME a document gives a configuration (`TYPE 2`, schemaVersion 3):
+// `namedConfigurationPlans` reads it off the staged pages, never the request.
+//
+// "A LETTER IS NEVER REUSED" HOLDS FOR NAMES TOO. A retired `TYPE 2` is not
+// silently brought back by the next page naming it — the refusal below.
 //
 // THREE THINGS IT DELIBERATELY DOES NOT DO.
 //
@@ -30,6 +35,7 @@
 // decision silently. The confirm is refused and names the record to restore.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
+import { normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
 
 export type VariantTarget = {
   /** The bill's own record — the parent. */
@@ -52,8 +58,17 @@ export type VariantTarget = {
  */
 export async function ensureVariant(
   txn: TxnSql,
-  { parentId, variantLabel, actor }: { parentId: string; variantLabel: string; actor: string },
+  { parentId, variantLabel: requested, actor }: { parentId: string; variantLabel: string; actor: string },
 ): Promise<VariantTarget> {
+  // A LETTER (`B`) OR A NAME THE DOCUMENT GAVE (`TYPE 2`), found by its folded
+  // form either way — so `Type 2` on one page and `TYPE  2` on another are one
+  // configuration, and nothing cleverer than case and whitespace is folded.
+  //
+  // Refused in words when the database would refuse it: the card raises the
+  // same sentence as a blocker first, and this is the floor under it.
+  const variantLabel = normaliseVariantLabel(requested);
+  const problem = variantLabelProblem(variantLabel);
+  if (problem) throw new DomainConflictError("variant_label_shape", problem, { status: 400 });
   const parents = await txn`
     select id, project_id, run_id, category_id, item_description, product_reference,
            designer, area, boq_category, qty, status, level, level_suggested, level_suggested_reason
