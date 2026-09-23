@@ -346,7 +346,7 @@ describeIfDb("confirming configurations a document names", () => {
     const refused = await patch({
       itemId: item.id,
       expectedVersion: item.version,
-      changes: { configurationsByReviewer: [{ label: "Type 1 & 5 guest", readAs: null }] },
+      changes: { configurationsByReviewer: [{ label: "Type 1 & 5 guestroom corridor", readAs: null }] },
     });
     expect(refused.status).toBe(400);
     expect(JSON.stringify(await refused.json())).toContain("too long to be a configuration name");

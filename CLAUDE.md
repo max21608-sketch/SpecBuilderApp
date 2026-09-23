@@ -2560,8 +2560,10 @@ fabrics.** Nine things are load-bearing.
 - **A configuration is named, not lettered, when the document names it**
   (`S-301 TYPE 2`). `variant_label` keeps 0024's upper-case CHECK, and
   `VARIANT_LABEL_SHAPE` in record-variants.ts is its ONE copy in code. 0037
-  widens the database to 24 characters with `&`; widen the constant IN THE SAME
-  COMMIT that records 0037 as applied, never before.
+  widened both to 24 characters with `&` — applied to the SANDBOX on
+  2026-09-23, in the same change that widened the constant. **Pilot must get
+  0037 (and 0038) before this code is promoted**, or the card lets through a
+  name its database refuses.
 - **The review card is TABS, one per configuration, in natural order** (Max:
   *"configuration one ... it's got the dimensions and the fabric ... it's the
   same every time"*). A shared row is ONE observation on every tab. One row per

@@ -52,7 +52,7 @@ export const VARIANT_LABEL_PATTERN = VARIANT_LABEL_SHAPE;
 
 /** The same rule in words, for the refusal. Keep it beside the pattern. */
 export const VARIANT_LABEL_RULE =
-  "up to 8 characters, starting with a letter or a number, using only letters, numbers, spaces, full stops, slashes and hyphens";
+  "up to 24 characters, starting with a letter or a number, using only letters, numbers, spaces, full stops, slashes, ampersands and hyphens";
 
 /** Trimmed, inner whitespace collapsed to one space, upper-cased. `type  2` → `TYPE 2`. */
 export const foldConfigurationName = normaliseVariantLabel;

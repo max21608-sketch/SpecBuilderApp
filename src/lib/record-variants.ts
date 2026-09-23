@@ -42,17 +42,17 @@
  * — 0028 silently dropped a value 0021 had added — so the card, `ensureVariant`
  * and the tests all read this one.
  *
- * THIS IS 0024's SHAPE, AND IT MUST STAY 0024's UNTIL 0037 IS APPLIED. 0037
- * (`db/migrations/0037_variant_label_names.sql`) widens the database to 24
- * characters with `&` allowed: `^[A-Z0-9][A-Z0-9 ./&-]{0,23}$`. Widening this
- * constant BEFORE the migration is applied would let the card pass a name the
- * database still refuses. Widen it IN THE SAME COMMIT that records 0037 as
- * applied, to exactly the regex in that file.
+ * 0037's SHAPE (`db/migrations/0037_variant_label_names.sql`): up to 24
+ * characters with `&` allowed, so a document's own name fits (`TYPE 1&5`,
+ * `MUR 1`). Applied to the sandbox on 2026-09-23, in the same change that
+ * widened this constant. A database still at 0024 (pilot, until it is
+ * promoted with its migrations first) refuses what this lets through, and the
+ * CHECK is the floor: widen or narrow this only together with a migration.
  */
-export const VARIANT_LABEL_SHAPE = /^[A-Z0-9][A-Z0-9 ./-]{0,7}$/;
+export const VARIANT_LABEL_SHAPE = /^[A-Z0-9][A-Z0-9 ./&-]{0,23}$/;
 
 /** The longest name `VARIANT_LABEL_SHAPE` admits, for the sentence that refuses one. */
-export const VARIANT_LABEL_MAX = 8;
+export const VARIANT_LABEL_MAX = 24;
 
 /**
  * A configuration's NAME as it is stored: trimmed, whitespace collapsed,
@@ -75,9 +75,9 @@ export function normaliseVariantLabel(name: string): string {
 export function variantLabelProblem(label: string): string | null {
   if (VARIANT_LABEL_SHAPE.test(label)) return null;
   if (label.length > VARIANT_LABEL_MAX) {
-    return `'${label}' is too long to be a configuration name — it can be at most ${VARIANT_LABEL_MAX} characters today. Rename it on the page's reading, or ask for migration 0037 to be applied.`;
+    return `'${label}' is too long to be a configuration name — it can be at most ${VARIANT_LABEL_MAX} characters. Rename it on the page's reading.`;
   }
-  return `'${label}' cannot be a configuration name — it may use only letters, digits, spaces and . / - today, starting with a letter or digit.`;
+  return `'${label}' cannot be a configuration name — it may use only letters, digits, spaces and . / & -, starting with a letter or digit.`;
 }
 
 /**

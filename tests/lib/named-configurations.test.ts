@@ -269,29 +269,27 @@ describe("creating a configuration beside existing ones (plan step 5)", () => {
 
 describe("a configuration name the database would refuse", () => {
   it("is a blocker in words on the card, never a 500 at confirm", () => {
-    const long = { ...SPEC_SHEET, configurations: [{ name: "Type 1 & 5 guest", nameRaw: null, evidence: null }], materials: [], depictsConfigurations: [] };
+    const long = { ...SPEC_SHEET, configurations: [{ name: "Type 1 & 5 guestroom corridor", nameRaw: null, evidence: null }], materials: [], depictsConfigurations: [] };
     const doc = stageDrawings([long], NAMED_FIELDS, null, null);
     const item = doc.items[0]!;
     const plan = namedConfigurationPlans(doc.items, doc).get(item.id)!;
     const blockers = drawingItemBlockers(item, resolveDrawingTargets("Q-301", [record()]), NO_OCCUPANCY, { plan, variants: new Map() });
     expect(blockers.map((b) => b.code)).toEqual(["configuration_name"]);
-    expect(blockers[0]!.message).toMatch(/^'TYPE 1 & 5 GUEST' is too long to be a configuration name/);
+    expect(blockers[0]!.message).toMatch(/^'TYPE 1 & 5 GUESTROOM CORRIDOR' is too long to be a configuration name/);
   });
 
   it("folds a name the way the column stores it", () => {
     expect(normaliseVariantLabel("  type   2 ")).toBe("TYPE 2");
     expect(variantLabelProblem("TYPE 2")).toBeNull();
-    expect(variantLabelProblem("TYPE 1&5")).toMatch(/cannot be a configuration name/);
+    expect(variantLabelProblem("TYPE 1&5")).toBeNull(); // allowed since 0037
+    expect(variantLabelProblem("TYPE #2")).toMatch(/cannot be a configuration name/);
   });
 
-  it("holds the code's shape to 0024's CHECK until 0037 is applied", () => {
-    // The constant must say exactly what the LIVE database says. 0037 widens
-    // the CHECK and is written, not applied: when it is recorded as applied,
-    // widen VARIANT_LABEL_SHAPE to 0037's pattern and flip this test with it.
-    const at0024 = readFileSync("db/migrations/0024_record_variants.sql", "utf8");
+  it("holds the code's shape to 0037's CHECK, the live one since 2026-09-23", () => {
+    // The constant must say exactly what the LIVE database says. 0037 was
+    // applied to the sandbox on 2026-09-23 and the constant widened with it.
     const at0037 = readFileSync("db/migrations/0037_variant_label_names.sql", "utf8");
-    expect(at0024).toContain(`variant_label ~ '${VARIANT_LABEL_SHAPE.source}'`);
-    expect(at0037).toContain("variant_label ~ '^[A-Z0-9][A-Z0-9 ./&-]{0,23}$'");
+    expect(at0037).toContain(`variant_label ~ '${VARIANT_LABEL_SHAPE.source}'`);
   });
 });
 

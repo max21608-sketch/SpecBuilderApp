@@ -39,9 +39,9 @@ describe("the configuration name", () => {
   });
 
   it("is the same pattern the database CHECK holds", () => {
-    // 0024's `spec_records_variant_shape`. If a migration widens it, this test
-    // is where the constant has to move with it.
-    const migration = readFileSync(join(process.cwd(), "db/migrations/0024_record_variants.sql"), "utf8");
+    // `spec_records_variant_shape` as 0037 re-lists it (applied 2026-09-23). If
+    // a migration moves it again, this test is where the constant moves with it.
+    const migration = readFileSync(join(process.cwd(), "db/migrations/0037_variant_label_names.sql"), "utf8");
     expect(migration).toContain(`variant_label ~ '${VARIANT_LABEL_PATTERN.source}'`);
   });
 
@@ -55,13 +55,13 @@ describe("the configuration name", () => {
     expect(empty.ok).toBe(false);
     if (!empty.ok) expect(empty.code).toBe("name_required");
 
-    const long = checkConfigurationName("Configuration two", [], "S-301");
+    const long = checkConfigurationName("Configuration two for the guestrooms", [], "S-301");
     expect(long.ok).toBe(false);
     if (!long.ok) {
       expect(long.code).toBe("name_shape");
-      expect(long.message).toContain("up to 8 characters");
+      expect(long.message).toContain("up to 24 characters");
     }
-    const odd = checkConfigurationName("A&B", [], "S-301");
+    const odd = checkConfigurationName("A#B", [], "S-301");
     expect(odd.ok).toBe(false);
   });
 

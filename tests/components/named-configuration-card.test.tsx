@@ -266,8 +266,8 @@ describe("correcting the configurations on the card", () => {
   it("refuses a name the database would refuse, in words, before anything is sent", async () => {
     const { spies } = renderNamed();
     await userEvent.click(screen.getByRole("button", { name: "+ Add configuration" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Configuration name" }), "Type 1 & 5 guest");
-    expect(screen.getByText(/'TYPE 1 & 5 GUEST' is too long to be a configuration name/)).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("textbox", { name: "Configuration name" }), "Type 1 & 5 guestroom corridor");
+    expect(screen.getByText(/'TYPE 1 & 5 GUESTROOM CORRIDOR' is too long to be a configuration name/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Add/ })).toBeDisabled();
     await userEvent.clear(screen.getByRole("textbox", { name: "Configuration name" }));
     await userEvent.type(screen.getByRole("textbox", { name: "Configuration name" }), "type 2");
