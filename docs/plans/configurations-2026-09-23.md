@@ -1,7 +1,9 @@
 # Configurations, manual control and intake accuracy — plan, 2026-09-23
 
-**Status: GO given 2026-09-23 ("just use the real docs"); step 0 amended to
-run on copies of the real pack.** Two coders were already
+**Status: LANDED on staging 2026-09-23 at `96a9b1a`** (steps 0–7 and 10; step 8,
+Max's acceptance session on staging, and step 9's close-out remain as below). GO
+was given 2026-09-23 ("just use the real docs"); step 0 ran on copies of the real
+pack. Two coders were already
 running when Max asked for this plan (steps 2 and 4). They commit only to
 their own branches, so nothing has reached `staging`; their output lands
 through the review and browser gates below like everything else.

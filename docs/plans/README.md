@@ -21,6 +21,43 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-23 — Configurations, manual control and Opus: landed on staging at `96a9b1a`
+
+The plan is `docs/plans/configurations-2026-09-23.md`; every step traces to one
+of Max's reports that morning. Two batches, each through an integration branch,
+the four checks with the DATABASE TIER REQUIRED against a local database, and a
+browser pass on copies of the real Panther pack before the push:
+
+- **`add2651`** — step 0, the local stack (`npm run dev:local`, `checks:local`),
+  and step 1, extraction on `claude-opus-5` at effort high with the timing
+  inequality raised to 740 / 770 / 800 / 900 / 1200 s. Deployed and serving.
+- **`96a9b1a`** — steps 2–7 and 10: named configurations (staged v3) as tabs;
+  a configuration only where the document tells one apart; the same value on
+  another page is not a replacement; a clash shown before confirm; reviewer
+  controls on the card; add / rename / retire / restore after confirm (0038),
+  on every phase; two documents paired by a question, lettered or named; the
+  intake status polling what is in flight; an oversize document refused before
+  upload, with a provisional 70-page warning; an item list on the drawings
+  review. Deployed and serving.
+
+**Migrations 0037 and 0038 were applied to the SANDBOX by Max** before the
+push, and the name rule in code widened to 0037 in the same change. **Pilot has
+neither**: both must be applied to pilot BEFORE this code is promoted.
+
+**Measured, local stack, real documents, Opus 5:** the S-301 sheet read in
+54 s (v3) and confirmed as five configurations × two phases = ten records, each
+cloth in COM 1 on its own record; the drawing set (11 pages) in 191 s, its
+S-301 pages named MUR 1 + TYPO 5 / MUR 2 / TYPO 3 / TYPO 4 and paired by five
+questions; the whole pack merged to 44 pages in 358 s and 43,095 output tokens,
+so time binds at about 90 pages. The database tier's first run off the sandbox
+found four defects before any reached staging.
+
+**Not accepted by Max on any screen.** The acceptance is a staging session with
+the real pack: upload, Read, confirm S-301 from both documents, answer the
+pairing, and read the export against the pages. Open questions for Max are in
+`found-in-use.md` under 2026-09-23 (MUR 1 = Type 1?, the extended-duration
+beta, the MUR 2 caption).
+
 ## 2026-09-22 — Promoted to pilot: Stage 1 and Stage 2, 153 commits
 
 **At Max's instruction ("merge staging to pilot").** Steps 1–3 of
