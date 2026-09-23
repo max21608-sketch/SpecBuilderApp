@@ -54,6 +54,7 @@ one agent.
 | `npm run qa:fake-inbox` | invented correspondence for the inbox screen, recorded through the app's own `recordMessage` so the routing outcomes are real. Sandbox only, no production flag. Dry run unless `--apply`; `--clear --apply` sweeps it, keeping any message somebody has since assigned |
 | `npm run qa:levels -- --project=<ref>` | makes up a level for every line item and a designer contact behind them, so the chase screen can be walked before anybody has decided either. Levels go through `setRecordLevel`; the designer code is a plain update, because nothing in the app edits what a BOQ said. Same guards, and `--clear --apply` puts it back |
 | `npm run qa:demo` | a WHOLE invented project — bill, drawings, preamble, correspondence, finishes, pictures and a checklist worked up to ~83% — so the app can be walked through in front of somebody. Built through the app's OWN confirms, so what is on screen is what the app does; no model is called and nothing is charged. Sandbox only, no production flag. Dry run unless `--apply`; `--clear --apply` sweeps it (`like 'DEMO%'`). Takes ~15 minutes, nearly all of it the checklist. It also writes ONE document it does NOT load, to `demo-documents/`, so there is something to upload live |
+| `npm run dev:local` · `npm run checks:local` · `npm run db:migrate:local` · `npm run db:seed:local` | THE LOCAL STACK (2026-09-23): the whole app on this Mac against a local Postgres, a local fake Blob server and in-process reads, with `.env.localstack.local` and NEVER `.env.local`. It is where Claude verifies in a browser and runs the database tier, because the sandbox is company data and read-only for Claude by organisation policy. `docs/environments.md`, "The local stack". Every other `db:*`, `qa:*` and `checks` script reads `.env.local`, which is the SANDBOX: run the `:local` ones, in a worktree with no `.env.local` |
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
 | `npm run dump:drawings -- --run=<id>` | read only: what a staged drawing run reduces to through the REAL read-time pipeline — measured rows, placed slots, folded rows, unit provenance, the composed BWS cell. Run it before and after a change to that pipeline; the diff is the change |
 | `npm run vocab:gap` | read only: every label the staged documents carry, which route places it (slot / BWS field / question), what is left, and — the point — what a looser rule would have wrongly written instead. Run it before seeding `requirement_aliases`, and read the NEAR MISSES before adding one |
@@ -1783,6 +1784,24 @@ deadline) marker and a red Retry beside a read already promised is a lie. The
 *Read all* button no longer counts a waiting run — "each is charged" over eight
 promised reads would be a charge nobody pays.
 
+**A status moves on its own, and `isIntakeRunInFlight` is why** (found in use
+2026-09-23: *"you have to reload the page to get it to switch"*). The pack
+screen polled only `queued` and `parsing`, so a pack whose last documents were
+WAITING FOR A SLOT stopped polling and never saw them start; the overview did
+not poll at all. Being read OR waiting for a slot is in flight; a plain
+`pending` run nobody asked to read is not, or polling would never stop. The
+overview refreshes its DOCUMENTS only, never through `load()`, which resets the
+details form. The waiting expression is in three queries and
+`tests/lib/intake-in-flight.test.ts` holds them equal.
+
+**An oversize document is refused before a byte is stored**
+(`src/lib/upload-limits.ts`, a leaf, and `upload-check.ts`): over 20 MB or 600
+counted pages is refused on its upload row in words; over 70 pages is a
+WARNING and proceeds, because the real ceiling is time and output, which a page
+count only approximates, and a refusal set too low is the one error with no
+way round it. The 70 is PROVISIONAL, from one 44-page measurement, until a
+100-page set has been read. An uncertain count proceeds.
+
 ### An extraction attempt is owned by two identifiers
 
 `src/lib/extraction-claim.ts`, `src/lib/extraction-run.ts`,
@@ -2492,16 +2511,127 @@ Five things about it are load-bearing:
   letter A in both and writes to the same variant — the pack's
   `duplicateTargets` banner is what reports that case.
 
-**STILL OUTSTANDING:** a record that already carries confirmed specs cannot be
-split at all (`ensureVariant`'s guard), so the thirteen records in the sandbox
-that hold specs would need those moved onto a configuration first, which is a
-path that does not exist. **CORRECTED 2026-09-21 (variance row d4):** this file
+**CLOSED 2026-09-23:** a record that already carries confirmed specs could not
+be split at all (`ensureVariant`'s guard). The guard stays for intake; the path
+it asked for now exists — *Add a configuration* copies the bill line's specs
+onto the new configuration as ticks and says what stops being exported (see
+"A person can add, rename and retire a configuration"). **CORRECTED 2026-09-21 (variance row d4):** this file
 said for four days that nothing lets a person SET a configuration's quantity.
 That has been false since 0028 — `PATCH /api/records/[id]`'s `details` accepts
 `qty` and the record's details panel renders the field on a configuration too.
 What is true: nothing APPORTIONS it, and the three list screens say *quantity
 not allocated* in the same words while it is null; the infill and chase lines
 say it UNCONDITIONALLY (`FinishOptionGroup` carries no `qty`), which is logged.
+
+### A configuration is what the document TELLS APART, named as the document names it
+
+`src/lib/extraction-schema.ts` (`DRAWINGS_TOOL`, staged `schemaVersion: 3`),
+`src/lib/drawing-document.ts` (`namedConfigurationsByCode`, the per-row
+fan-out, `alreadyRecorded`, the pairing blockers),
+`src/lib/confirm-drawings.ts`, `src/lib/variant-create.ts` (`insertVariant`),
+`src/lib/record-variants.ts` (`VARIANT_LABEL_SHAPE`, `normaliseVariantLabel`),
+`src/components/imports/ConfigurationCard.tsx`, `ConfigurationTabs.tsx`,
+`ReviewItemList.tsx`, `docs/plans/configurations-2026-09-23.md`
+
+Max, 2026-09-23, on the S-301 desk chair: *"fabric reference as per room
+type ... there's type one to five. So five different configurations."* The v2
+read had it right and nowhere to put it: a configuration could only come from
+separate PAGES, so the room type was welded into the row LABEL (`FABRIC
+REFERENCE - Type 2`) and `classifyCallout` handed four room types COM 1, COM 2
+and COM 3 of ONE record. **Confirming that card wrote one chair with three
+fabrics.** Nine things are load-bearing.
+
+- **A page lists the configurations it names; a row says which it applies to**
+  (v3). Empty = shared. `Type 1 & 5` is TWO configurations sharing one row
+  (Max: one per room type). A title block (`MUR 1 & TYPO 5`) is
+  `depictsConfigurations`. The name is the PAGE'S OWN WORDS, folded by case and
+  whitespace only — `MUR 1` is never translated into `Type 1` across
+  documents. v1/v2 runs are frozen; nothing parses an old label.
+- **A configuration exists only where the document gives it something
+  different.** If no row targets a strict subset of a code's named
+  configurations, the names distinguish nothing and the code is ONE item. The
+  merged Panther pack read S-100 SOFA as TYPE 1 / TYPE 5 off its title block
+  alone — two identical BWS jobs for one sofa, the "a page count is not a
+  split" trap in a new form. One function decides it for the grouping, the
+  card, its button and the confirm.
+- **BWS slots are claimed PER WRITTEN RECORD.** Type 2's fabric is COM 1 on
+  `S-301 TYPE 2`. The unit of commit is unchanged — one request, one page — and
+  a page fans out to its configurations × its phases (S-301: 5 × 2 = 10).
+- **A configuration is named, not lettered, when the document names it**
+  (`S-301 TYPE 2`). `variant_label` keeps 0024's upper-case CHECK, and
+  `VARIANT_LABEL_SHAPE` in record-variants.ts is its ONE copy in code. 0037
+  widens the database to 24 characters with `&`; widen the constant IN THE SAME
+  COMMIT that records 0037 as applied, never before.
+- **The review card is TABS, one per configuration, in natural order** (Max:
+  *"configuration one ... it's got the dimensions and the fabric ... it's the
+  same every time"*). A shared row is ONE observation on every tab. One row per
+  measurement: a figure two pages state identically is one row. Notes shared by
+  every configuration fold behind one toggle. A code with no configurations has
+  the same layout and no strip.
+- **The same value on another page is not a replacement** (`alreadyRecorded`):
+  same slot, same figure IN MILLIMETRES through the one parser, same state — or,
+  for a finish, the same non-empty client code. The confirm writes nothing there
+  and says so. Anything else two pages give one configuration in different
+  words is a decision SHOWN BEFORE CONFIRM, and Confirm is disabled until it is
+  taken; a confirm must never half-apply because of something the card could
+  see.
+- **A new configuration beside existing ones is a question, lettered or named.**
+  The drawing set's S-301 pages (A–D, or MUR 1 & TYPO 5 / MUR 2 / TYPO 3 /
+  TYPO 4) against the spec sheet's TYPE 1–5 would otherwise have made nine
+  configurations. Only an exact fold of the page's own words pairs silently;
+  anything else asks, a page may pair with MORE THAN ONE (`MUR 1 & TYPO 5` →
+  TYPE 1 + TYPE 5), and the question is asked once per configuration, not once
+  per phase. A document is never asked about a configuration it created itself.
+  A disagreement between the two documents then surfaces as the ordinary
+  replace acknowledgement — it did, on the real pack: Type 2 is Le Manach on the
+  spec sheet and *Tibor Blob Amber Fern* on the drawing set's `MUR 2`.
+- **A reviewer can fix the reading on the card** — add, rename or remove a
+  configuration, change a row's configurations, split or join — as edits to the
+  staged JSON with the model's reading kept beside them ("read as 4, you set
+  5"). A row whose only configuration was removed is a blocker, never silently
+  shared.
+- **ONE insert and one name rule** for intake and for the hand-added
+  configuration (`insertVariant`, `normaliseVariantLabel`): two copies had
+  already been written by two coders on the same day.
+
+**Measured on the real Panther pack, local stack, Opus 5, 2026-09-23:** S-301
+sheet → five configurations, ten records, each cloth in COM 1 on its own
+record; the card 2,400 px tall against 5,300 before the tabs; the drawing set
+guarded and asking. **STILL OPEN, and Max's:** whether `MUR 1` is Type 1 —
+the model maps the two inside ONE document and shows both names; across
+documents the app asks.
+
+### A person can add, rename and retire a configuration
+
+`src/lib/configuration-add.ts`, `src/lib/configuration-carry.ts`,
+`src/app/api/records/[id]/configurations/route.ts`,
+`src/app/api/records/[id]/configuration-name/route.ts`,
+`src/components/records/AddConfiguration.tsx`, `DifferingFields.tsx`,
+`db/migrations/0038_record_retire.sql`
+
+Max, 2026-09-23: *"if someone sees that something's wrong, they still need to
+work through, even if it means they have to add it manually ... it should come
+equipped with a default set of things to fill in."*
+
+- **The bill line's specs are COPIED, each a tick keeping its source page**;
+  COM 1–3 start blank and sit first on the new record (`DIFFERING_FIELD_JSON_IDS`,
+  this repo's judgement and a question for Matthew). Timber and metal are
+  carried. A copied answer is `manual`; an answer that is a PROJECTION of the
+  bill line's attributes is never offered, so an answer and its attribute are
+  never both copied.
+- **Every other phase carrying the same client ref is offered**, each from its
+  OWN bill line's specs — never phase A's specs onto phase B. A ref on two lines
+  of one phase (`SX11A`) offers nothing for that phase.
+- **What stops being exported is stated before Add** (anything left unticked:
+  the bill line becomes a heading), and the route re-derives the offer under
+  the project lock, then the bill lines in id order, and refuses one that is not
+  what was shown. One change set, one version per new record, the parent
+  untouched. This closes the 2026-09-17 gap: a bill line that already held
+  specs could not be split at all.
+- **A name is never reused**, retired ones included. Retire needs a reason
+  (`record_retire`, 0038 re-lists both CHECKs from the LIVE constraint text);
+  restore does not. Retiring the last live configuration makes the bill line an
+  item again, and the panel says so.
 
 ### A drawing dimensions everything, and four of them matter
 
@@ -3068,6 +3198,13 @@ the others.
 
 **Active integrations:** Anthropic (M2 extraction) — a key is set in Vercel
 staging and verified calls have been billed, including one against an email.
+**Extraction reads with `claude-opus-5` at effort `high` since 2026-09-23**
+(Max: accuracy over API cost and read time; Opus 5 rather than 5.5 because 5.5
+refuses the forced `tool_choice` every extraction uses). The timing inequality
+moved with it: model 740 s < abort 770 s < `maxDuration` 800 s (Pro's GA
+maximum; the project default was raised to match) < claim 900 s < queue
+visibility 1200 s. Measured on the merged 44-page Panther pack: 358 s and 43,095
+output tokens, so TIME binds first, at about 90 pages.
 Capsule CRM (contacts) — read-only, built 2026-09-16, no token set yet. Microsoft Graph read-only mailbox
 ingestion (M5) is planned and disabled. The region pinning is deliberate: this
 app handles NDA-covered client specification material, so keep any new service
@@ -3655,6 +3792,20 @@ re-seed that finally puts the 96 BWS palette options on pilot. Steps 4–8 of
 the PILOT chip, the first-session script — are Max's at the console; the
 pilot URL is recorded nowhere in this repo. Details: `docs/plans/README.md`,
 2026-09-22.
+
+**Built 2026-09-23, configurations, manual control and Opus**
+(`docs/plans/configurations-2026-09-23.md`, ten steps from one morning's
+reports). Extraction reads with Opus 5; a page's named configurations come
+through as tabs and land one cloth per record; a reviewer fixes the reading on
+the card; a person adds, renames and retires a configuration after confirm; two
+documents meet on one set of configurations through a question; the intake
+status moves without a reload; an oversize document is refused before upload.
+**Verified in a browser on a LOCAL stack holding copies of the real Panther
+pack** (the sandbox is company data and read-only for Claude), and the
+database tier ran there for the first time off the sandbox — it found four
+defects on its first run, one of them a SQL comment that would have broken the
+pack screen. **Not accepted by Max**; the staging session with the real pack is
+the acceptance.
 
 **Outstanding — judgement, not code.**
 
