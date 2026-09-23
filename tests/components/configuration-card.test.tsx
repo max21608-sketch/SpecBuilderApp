@@ -51,7 +51,7 @@ function renderConfigurations(
   // does has to supply it, exactly as the review screens do.
   doc?: Parameters<typeof configurationCards>[2],
 ) {
-  const spies = { ...callbacks(), onSaveItem: vi.fn(async () => undefined) };
+  const spies = { ...callbacks(), onSaveItem: vi.fn<(...args: unknown[]) => Promise<undefined>>(async () => undefined) };
   const byItem =
     resolutions ??
     new Map(
