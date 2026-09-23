@@ -124,6 +124,47 @@ export async function ensureVariant(
     }
   }
 
+  const { recordId } = await insertVariant(txn, {
+    parentId,
+    label: variantLabel,
+    splitReason: "fabric",
+    dimensionNote: null,
+    actor,
+  });
+
+  return { parentId, recordId, variantLabel, created: true };
+}
+
+/**
+ * THE ONE INSERT OF A CONFIGURATION ROW, shared by intake (`ensureVariant`,
+ * above) and the hand-added configuration (`configuration-add.ts`). They used
+ * to carry two copies of this statement, kept in step by hand; a column added
+ * to one and not the other is how a configuration made by hand would start
+ * differing from one a drawing made. No find-or-create and no guard here —
+ * each caller has its own, for its own reason.
+ *
+ * Takes the PROJECT row lock before allocating a `record_no` (a caller that
+ * already holds it takes it again at no cost), copies the parent's identity,
+ * level and suggestion, leaves `qty` null, and creates the checklist rows.
+ */
+export async function insertVariant(
+  txn: TxnSql,
+  {
+    parentId,
+    label,
+    splitReason,
+    dimensionNote,
+    actor,
+  }: { parentId: string; label: string; splitReason: "fabric" | "configuration"; dimensionNote: string | null; actor: string },
+): Promise<{ recordId: string; recordNo: number }> {
+  const parents = await txn`
+    select project_id, run_id, category_id, item_description, product_reference, designer, area, boq_category,
+           level, level_suggested, level_suggested_reason
+      from spec_records where id = ${parentId}
+  `;
+  const parent = parents[0];
+  if (!parent) throw new DomainConflictError("not_found", "That record no longer exists.", { status: 404 });
+
   // Serialises record_no allocation across concurrent confirms.
   await txn`select id from projects where id = ${parent.project_id} for update`;
   const maxNo = await txn`
@@ -147,18 +188,18 @@ export async function ensureVariant(
     insert into spec_records
       (project_id, run_id, record_no, status, category_id, item_description, product_reference,
        qty, designer, area, boq_category, level, level_suggested, level_suggested_reason,
-       parent_id, depth, split_reason, variant_label,
+       parent_id, depth, split_reason, variant_label, dimension_note,
        created_by, updated_by)
     values
       (${parent.project_id}, ${parent.run_id}, ${recordNo}, 'active', ${parent.category_id ?? null},
        ${parent.item_description}, ${parent.product_reference ?? null},
        null, ${parent.designer ?? null}, ${parent.area ?? null}, ${parent.boq_category ?? null},
        ${parent.level ?? null}, ${parent.level_suggested ?? null}, ${parent.level_suggested_reason ?? null},
-       ${parentId}, 1, 'fabric', ${variantLabel}, ${actor}, ${actor})
+       ${parentId}, 1, ${splitReason}, ${label}, ${dimensionNote}, ${actor}, ${actor})
     returning id
   `;
   const recordId = String(inserted[0]?.id ?? "");
-  if (!recordId) throw new Error(`variant ${variantLabel} of ${parentId} was not inserted`);
+  if (!recordId) throw new Error(`variant ${label} of ${parentId} was not inserted`);
 
   // The checklist, so the questions exist to be filled. Writes nothing for an
   // uncategorised parent, exactly as the BOQ confirm does — and
@@ -171,5 +212,5 @@ export async function ensureVariant(
     where r.id = ${recordId}
   `;
 
-  return { parentId, recordId, variantLabel, created: true };
+  return { recordId, recordNo };
 }

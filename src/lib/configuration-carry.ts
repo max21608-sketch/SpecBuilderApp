@@ -32,6 +32,8 @@
 // that list from the live rows and refuses if it is not what was shown.
 // ============================================================================
 
+import { VARIANT_LABEL_SHAPE, normaliseVariantLabel } from "@/lib/record-variants";
+
 /**
  * The shape a configuration's name may take.
  *
@@ -42,16 +44,18 @@
  * and the database still refuses whatever this lets through, so a drift fails
  * loudly rather than storing something the CHECK does not allow.
  */
-export const VARIANT_LABEL_PATTERN = /^[A-Z0-9][A-Z0-9 ./-]{0,7}$/;
+// NOT a second copy: the shape and the fold live in record-variants.ts, which
+// the intake confirm (`ensureVariant`) and the review card read too. Two copies
+// of a CHECK drift (0028 dropped a value 0021 had added), and two folds would
+// store `TYPE 2` from intake and `Type 2` by hand as two configurations.
+export const VARIANT_LABEL_PATTERN = VARIANT_LABEL_SHAPE;
 
 /** The same rule in words, for the refusal. Keep it beside the pattern. */
 export const VARIANT_LABEL_RULE =
   "up to 8 characters, starting with a letter or a number, using only letters, numbers, spaces, full stops, slashes and hyphens";
 
 /** Trimmed, inner whitespace collapsed to one space, upper-cased. `type  2` → `TYPE 2`. */
-export function foldConfigurationName(raw: string): string {
-  return raw.trim().replace(/\s+/g, " ").toUpperCase();
-}
+export const foldConfigurationName = normaliseVariantLabel;
 
 export type TakenName = { label: string; status: string };
 

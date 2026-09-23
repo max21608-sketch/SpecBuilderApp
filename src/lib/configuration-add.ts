@@ -14,9 +14,8 @@
 // told in words what the rest means — it stops reaching the export. So the
 // guard is replaced here by a stronger one: the route re-derives the offer from
 // the live rows and refuses if it is not exactly what the screen showed. The
-// insert itself is the SAME statement `ensureVariant` makes (the level comes
-// down, the qty does not, the ref is not copied), kept in step by hand until
-// the two are reconciled — see the note at `insertConfiguration`.
+// insert itself is `insertVariant` (variant-create.ts), the one `ensureVariant`
+// calls: the level comes down, the qty does not, the ref is not copied.
 //
 // ---- ONE ACT ------------------------------------------------------------
 //
@@ -45,6 +44,7 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { insertVariant } from "@/lib/variant-create";
 import { loadPromotable, recomposeAnswers } from "@/lib/attribute-retire";
 import { loadDimensionNote, planAnswerFills } from "@/lib/promote-answers";
 import { normaliseRef } from "@/lib/record-refs";
@@ -449,9 +449,10 @@ async function writeConfiguration(txn: TxnSql, plan: PlannedAdd, label: string, 
   const answerIds = plan.carried.filter((item) => item.kind === "answer").map((item) => item.id);
   const note = plan.carried.find((item) => item.kind === "dimension_note");
 
-  const { recordId, recordNo } = await insertConfiguration(txn, {
-    billLineId,
+  const { recordId, recordNo } = await insertVariant(txn, {
+    parentId: billLineId,
     label,
+    splitReason: "configuration",
     dimensionNote: note?.value ?? null,
     actor,
   });
@@ -504,64 +505,6 @@ async function writeConfiguration(txn: TxnSql, plan: PlannedAdd, label: string, 
     carriedAnswers: answerIds.length,
     stoppedExporting: plan.stops.length,
   };
-}
-
-/**
- * THE SAME INSERT `ensureVariant` MAKES, with two differences: the label is a
- * name a person typed rather than a letter derived from a page, and
- * `split_reason` is `configuration` (0002 allows both; nothing reads it apart
- * from the record atoms). Level and suggestion come down, the qty does not,
- * the client ref is not copied — each for the reason `variant-create.ts`
- * gives. Kept in step with it by hand: when the two are reconciled, this is
- * the body `ensureVariant` should expose as an `insertVariant` without its
- * find-or-create and its guard.
- *
- * The caller has already taken the project row lock.
- */
-async function insertConfiguration(
-  txn: TxnSql,
-  { billLineId, label, dimensionNote, actor }: { billLineId: string; label: string; dimensionNote: string | null; actor: string },
-): Promise<{ recordId: string; recordNo: number }> {
-  const parents = await txn`
-    select project_id, run_id, category_id, item_description, product_reference, designer, area, boq_category,
-           level, level_suggested, level_suggested_reason
-      from spec_records where id = ${billLineId}
-  `;
-  const parent = parents[0];
-  if (!parent) throw new DomainConflictError("not_found", "That record no longer exists.", { status: 404 });
-
-  const maxNo = await txn`
-    select coalesce(max(record_no), 0) as max_no from spec_records where project_id = ${parent.project_id}
-  `;
-  const recordNo = Number(maxNo[0]?.max_no ?? 0) + 1;
-
-  const inserted = await txn`
-    insert into spec_records
-      (project_id, run_id, record_no, status, category_id, item_description, product_reference,
-       qty, designer, area, boq_category, level, level_suggested, level_suggested_reason,
-       parent_id, depth, split_reason, variant_label, dimension_note,
-       created_by, updated_by)
-    values
-      (${parent.project_id}, ${parent.run_id}, ${recordNo}, 'active', ${parent.category_id ?? null},
-       ${parent.item_description}, ${parent.product_reference ?? null},
-       null, ${parent.designer ?? null}, ${parent.area ?? null}, ${parent.boq_category ?? null},
-       ${parent.level ?? null}, ${parent.level_suggested ?? null}, ${parent.level_suggested_reason ?? null},
-       ${billLineId}, 1, 'configuration', ${label}, ${dimensionNote}, ${actor}, ${actor})
-    returning id
-  `;
-  const recordId = String(inserted[0]?.id ?? "");
-  if (!recordId) throw new Error(`configuration ${label} of ${billLineId} was not inserted`);
-
-  // The checklist, every question `missing`, so the differing fields are
-  // there to fill in and carried answers have a row to land on.
-  await txn`
-    insert into spec_answers (record_id, requirement_id, spec_field_id, state, source_kind, created_by, updated_by)
-    select ${recordId}, q.id, q.spec_field_id, 'missing', 'manual', ${actor}, ${actor}
-    from requirements q
-    join spec_records r on r.category_id = q.category_id
-    where r.id = ${recordId}
-  `;
-  return { recordId, recordNo };
 }
 
 export type RenameConfigurationResult = { recordId: string; label: string; version: number; changed: boolean };
