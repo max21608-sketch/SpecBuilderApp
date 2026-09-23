@@ -33,6 +33,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { DocumentSource } from "@/lib/intake-source";
+import { EXTRACTION_MODEL } from "@/lib/anthropic";
+import type { ClassifyFailureCode } from "@/lib/classify-failure";
+import { CLASSIFY_MODEL_MAX_PDF_PAGES } from "@/lib/upload-limits";
 import { DOCUMENT_GENRES, KIND_FROM_GENRE, type DocumentGenre, type KindDecision } from "@/lib/document-kinds";
 
 // THE GENRE VOCABULARY AND ITS MAP LIVE IN A LEAF, and are re-exported here so
@@ -52,7 +55,41 @@ export type { DocumentGenre, KindDecision };
  */
 export const CLASSIFY_MODEL = "claude-haiku-4-5-20251001";
 
+/**
+ * WHICH MODEL LOOKS, by the document's length (plan any-bill, step 0.7).
+ *
+ * The fast model is a 200k-context model and takes at most
+ * `CLASSIFY_MODEL_MAX_PDF_PAGES` pages of a PDF; the upload screen admits up
+ * to 600, because that is what the READ can take. A 300-page drawing set sent
+ * to the fast model is refused with a bare 400 and would be held for a person
+ * with a reason nobody can act on. So a PDF counted over the fast model's
+ * ceiling is identified by the reading model instead, and the row says so.
+ *
+ * NULL PAGES MEANS THE FAST MODEL, the `countPdfPages` rule: a count that
+ * could not be read is not evidence the document is long, and the reading
+ * model costs several times as much per page.
+ */
+export function classifyModelFor(source: DocumentSource["type"], pages: number | null): string {
+  if (source === "pdf" && pages !== null && pages > CLASSIFY_MODEL_MAX_PDF_PAGES) return EXTRACTION_MODEL;
+  return CLASSIFY_MODEL;
+}
+
+/**
+ * How long one look may take before it is stopped and reported as a timeout.
+ *
+ * Both are under the classify route's `maxDuration` (300 s) so the ROUTE
+ * answers, in words, before Vercel does with an HTML page. The fast model on
+ * a cover page answers in seconds; the reading model has to take in up to 600
+ * pages before it can say anything, which is what the longer figure is for.
+ */
+export const CLASSIFY_DEADLINE_MS = 60_000;
+export const LARGE_CLASSIFY_DEADLINE_MS = 270_000;
+
 const MAX_TOKENS = 2_000;
+// The reading model thinks before it answers (adaptive thinking, at low
+// effort), and thinking draws on the same budget: 2,000 would truncate the
+// tool call it was asked for.
+const LARGE_MAX_TOKENS = 8_000;
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_EVIDENCE = 400;
 
@@ -136,7 +173,57 @@ export type ClassifyResult =
       certain: boolean;
       model: string;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      code: ClassifyFailureCode;
+      error: string;
+      /**
+       * Whether the request reached the model. A 429, a 529 and a refused key
+       * are not billed; a timeout MAY have been, so it counts as charged — the
+       * footer's "nothing has been charged" must never be said of a file that
+       * was sent.
+       */
+      charged: boolean;
+      model: string | null;
+    };
+
+/**
+ * What a thrown model call means, in the codes the upload screen names.
+ *
+ * Typed classes first, then the bare status — a stubbed client in a test, or a
+ * future SDK, may throw an object carrying only `.status`. `deadlineFired`
+ * separates this route's own timeout from any other abort.
+ */
+export function classifyFailureOf(
+  cause: unknown,
+  model: string,
+  deadlineFired = false,
+): Extract<ClassifyResult, { ok: false }> {
+  const status = (cause as { status?: unknown } | null)?.status;
+  const fail = (code: ClassifyFailureCode, error: string, charged: boolean) =>
+    ({ ok: false, code, error, charged, model }) as const;
+
+  if (cause instanceof Anthropic.APIConnectionTimeoutError || (cause instanceof Anthropic.APIUserAbortError && deadlineFired)) {
+    return fail("timeout", "Identifying this document took too long and was stopped. The file is stored.", true);
+  }
+  if (cause instanceof Anthropic.AuthenticationError || cause instanceof Anthropic.PermissionDeniedError || status === 401 || status === 403) {
+    return fail("auth", "The model refused this deployment's credentials, so nothing was read. The file is stored.", false);
+  }
+  if (cause instanceof Anthropic.RateLimitError || status === 429) {
+    return fail("rate_limited", "The model is rate limited right now, so this was not identified. The file is stored.", false);
+  }
+  if (status === 529) {
+    return fail("overloaded", "The model is overloaded right now, so this was not identified. The file is stored.", false);
+  }
+  if (typeof status === "number") {
+    // A 400 is the request refused before any reading happened, and a 5xx is
+    // the service failing; neither is billed.
+    return fail("failed", `The model service refused the request (${status}). The file is stored.`, false);
+  }
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  // A socket or DNS failure: the request may or may not have arrived.
+  return fail("failed", `The model could not be reached (${detail}). The file is stored.`, true);
+}
 
 /**
  * A BILL OF QUANTITIES INSIDE A PDF IS REFUSED, NOT READ AS A DRAWING.
@@ -255,8 +342,10 @@ function client(): Anthropic {
  */
 export async function classifyDocument(
   source: DocumentSource,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; pages?: number | null } = {},
 ): Promise<ClassifyResult> {
+  const model = classifyModelFor(source.type, options.pages ?? null);
+  const large = model !== CLASSIFY_MODEL;
   const content =
     source.type === "pdf"
       ? [
@@ -269,40 +358,76 @@ export async function classifyDocument(
       : [{ type: "text" as const, text: source.text }, { type: "text" as const, text: PROMPT }];
 
   if (Buffer.byteLength(JSON.stringify(content), "utf8") > MAX_REQUEST_BYTES) {
-    return { ok: false, error: "That document is too large to read in one request." };
+    return {
+      ok: false,
+      code: "too_large",
+      error: "That document is too large to identify in one request, so nothing was read. The file is stored.",
+      charged: false,
+      model: null,
+    };
   }
 
   let anthropic: Anthropic;
   try {
     anthropic = client();
   } catch {
-    return { ok: false, error: "Document reading is not configured on this deployment (no API key)." };
+    return {
+      ok: false,
+      code: "not_configured",
+      error: "Document reading is not configured on this deployment (no API key), so nothing was read. The file is stored.",
+      charged: false,
+      model: null,
+    };
   }
+
+  const deadline = AbortSignal.timeout(large ? LARGE_CLASSIFY_DEADLINE_MS : CLASSIFY_DEADLINE_MS);
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
 
   let message;
   try {
     message = await anthropic.messages.create(
-      {
-        model: CLASSIFY_MODEL,
-        max_tokens: MAX_TOKENS,
-        tool_choice: { type: "tool", name: CLASSIFY_TOOL_NAME },
-        tools: [CLASSIFY_TOOL],
-        messages: [{ role: "user", content }],
-      },
-      options.signal ? { signal: options.signal } : undefined,
+      large
+        ? {
+            // THE READING MODEL, for a PDF the fast one cannot take. The same
+            // forced tool — Opus 5 accepts a forced `tool_choice`, which is why
+            // it is the extraction model (anthropic.ts) — and the extraction
+            // call's own thinking shape, at LOW effort: this answers one
+            // question off a cover page, and a high-effort look would cost
+            // about as much as the read it only decides the prompt for.
+            model,
+            max_tokens: LARGE_MAX_TOKENS,
+            thinking: { type: "adaptive" },
+            output_config: { effort: "low" },
+            tool_choice: { type: "tool", name: CLASSIFY_TOOL_NAME },
+            tools: [CLASSIFY_TOOL],
+            messages: [{ role: "user", content }],
+          }
+        : {
+            model,
+            max_tokens: MAX_TOKENS,
+            tool_choice: { type: "tool", name: CLASSIFY_TOOL_NAME },
+            tools: [CLASSIFY_TOOL],
+            messages: [{ role: "user", content }],
+          },
+      { signal },
     );
   } catch (cause) {
-    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+    return classifyFailureOf(cause, model, deadline.aborted);
   }
 
+  // The model ANSWERED from here on, so every failure below was charged.
   const toolUse = message.content.find(
     (block): block is Extract<typeof block, { type: "tool_use" }> =>
       block.type === "tool_use" && block.name === CLASSIFY_TOOL_NAME,
   );
-  if (!toolUse) return { ok: false, error: "The model did not say what the document is." };
+  if (!toolUse) {
+    return { ok: false, code: "failed", error: "The model did not say what the document is.", charged: true, model };
+  }
 
   const parsed = ClassifyOutput.safeParse(toolUse.input);
-  if (!parsed.success) return { ok: false, error: "The model's answer did not match the expected shape." };
+  if (!parsed.success) {
+    return { ok: false, code: "failed", error: "The model's answer did not match the expected shape.", charged: true, model };
+  }
 
   const { genre, titleText, evidence, certain } = parsed.data;
   // The exact step, and it is code's: `fileDocument` maps a trade genre onto
@@ -319,6 +444,6 @@ export async function classifyDocument(
     titleText,
     evidence,
     certain,
-    model: CLASSIFY_MODEL,
+    model,
   };
 }
