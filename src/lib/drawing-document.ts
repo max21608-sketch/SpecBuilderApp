@@ -52,7 +52,7 @@ import { parseCombinedDimensions, parseDimensionFigure, sharesAScale, SCALE_BOUN
 import type { RawCodeGroup, RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
 import { slotFromModel } from "@/lib/extraction-schema";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
-import { nextVariantLabel, normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
+import { naturalConfigurationOrder, nextVariantLabel, normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
 
 // ---- the staged shape ------------------------------------------------------
 
@@ -3779,7 +3779,7 @@ export function configurationTarget(parentId: string, label: string, named: Name
   const namesRaw = named.pageNamesRaw?.[label]?.length ? named.pageNamesRaw[label]! : (configuration?.namesRaw ?? []);
   const exact = namesRaw.map((raw) => normaliseVariantLabel(raw)).find((folded) => live.has(folded));
   if (exact) return { kind: "existing", variantIds: [live.get(exact)!], as: [exact], via: "exact" };
-  return { kind: "ask", namesRaw, existing: [...live.keys()], collides };
+  return { kind: "ask", namesRaw, existing: naturalConfigurationOrder([...live.keys()]), collides };
 }
 
 /**

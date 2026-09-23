@@ -82,7 +82,13 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
 import PagePicker from "@/components/imports/PagePicker";
 import NamedConfigurationCard from "@/components/imports/NamedConfigurationCard";
-import { AddConfiguration, PagesAreControl, PairChoice, UnsplitNote } from "@/components/imports/ConfigurationControls";
+import {
+  AddConfiguration,
+  groupPairQuestions,
+  PagesAreControl,
+  PairChoice,
+  UnsplitNote,
+} from "@/components/imports/ConfigurationControls";
 // A colour per configuration, fixed by LETTER, so A is sky on every card and
 // on every screen that names one. See configuration-colours.ts.
 import { colourForLetter as colourFor } from "@/components/imports/configuration-colours";
@@ -284,27 +290,41 @@ function PageConfigurationCard({
             These bill lines already have configurations from another document. Say which each page IS — it can be
             more than one — or make it a new configuration. Nothing is matched for you.
           </p>
-          {pairRows.map((row) => (
-            <PairChoice
-              key={`${row.member.item.id}|${row.recordId}`}
-              label={memberName(card, row.member)}
-              where={`(page ${row.member.item.page ?? "?"}) on ${row.runName}`}
-              namesRaw={[]}
-              existing={row.existing}
-              collides={row.collides}
-              chosen={row.chosen}
-              disabled={busyHere || !onSaveItem}
-              onChange={(pairWith) => {
-                if (!onSaveItem) return;
-                const others = (row.member.item.configurationPairs ?? []).filter(
-                  (pair) => !(pair.recordId === row.recordId && pair.label === row.label),
-                );
-                void onSaveItem(row.member.item, {
-                  configurationPairs: [...others, { recordId: row.recordId, label: row.label, pairWith }],
-                });
-              }}
-            />
-          ))}
+          {/* ONE QUESTION PER PAGE, not per phase: the phases whose bill lines
+              hold the same configurations share it, and the answer is saved
+              for each. A phase holding different ones is asked on its own. */}
+          {pendingMembers.flatMap((member) => {
+            const rows = pairRows
+              .filter((row) => row.member.item.id === member.item.id)
+              .map((row) => ({ ...row, namesRaw: [] as string[] }));
+            return groupPairQuestions(rows, (recordId) => rows.find((row) => row.recordId === recordId)?.runName ?? "this phase").map(
+              (question) => (
+                <PairChoice
+                  key={`${member.item.id}|${question.recordIds.join(",")}`}
+                  label={memberName(card, member)}
+                  where={`(page ${member.item.page ?? "?"}) ${question.where}`}
+                  why={question.why}
+                  namesRaw={[]}
+                  existing={question.existing}
+                  collides={question.collides}
+                  chosen={question.chosen}
+                  disabled={busyHere || !onSaveItem}
+                  onChange={(pairWith) => {
+                    if (!onSaveItem) return;
+                    const others = (member.item.configurationPairs ?? []).filter(
+                      (pair) => !(question.recordIds.includes(pair.recordId) && pair.label === question.label),
+                    );
+                    void onSaveItem(member.item, {
+                      configurationPairs: [
+                        ...others,
+                        ...question.recordIds.map((recordId) => ({ recordId, label: question.label, pairWith })),
+                      ],
+                    });
+                  }}
+                />
+              ),
+            );
+          })}
         </div>
       )}
       {onSaveItem && open && (

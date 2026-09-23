@@ -378,3 +378,65 @@ describe("the notes every configuration shares", () => {
     expect(screen.queryByDisplayValue("Invented hotel")).toBeNull();
   });
 });
+
+describe("the pairing question", () => {
+  const ask = (recordId: string, existing: string[]) =>
+    ({
+      code: "configuration_new",
+      recordId,
+      label: "MUR 2",
+      existing,
+      namesRaw: ["MUR 2"],
+      collides: false,
+      message: "The page names MUR 2, and this item already has other configurations.",
+    }) as never;
+  const setUp = (mainHas: string[], veHas: string[]) => {
+    const doc = namedSheetRun();
+    const resolutions = resolutionsFor(doc, (item) =>
+      item.page === 1 ? { blockers: [ask("rec-main", mainHas), ask("rec-ve", veHas)] } : {},
+    );
+    const sheet = doc.items.find((item) => item.page === 1)!;
+    for (const [id, entry] of resolutions) {
+      // Only the sheet names MUR 2 in this setup.
+      if (id === sheet.id) entry.named!.labels = [...entry.named!.labels, "MUR 2"];
+      entry.named!.existing = {
+        "rec-main": Object.fromEntries(mainHas.map((name) => [name, `m-${name}`])),
+        "rec-ve": Object.fromEntries(veHas.map((name) => [name, `v-${name}`])),
+      };
+    }
+    return renderNamed(doc, resolutions);
+  };
+
+  it("asks ONCE per configuration when the phases hold the same ones, and saves the answer for each", async () => {
+    const { spies, doc } = setUp(["TYPE 5", "TYPE 1", "TYPE 2"], ["TYPE 2", "TYPE 1", "TYPE 5"]);
+    const groups = screen.getAllByRole("group", { name: /MUR 2 .* is:/ });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.textContent).toContain("on MAIN RUN and MAIN RUN - VE");
+    // In the order a person counts.
+    expect(within(groups[0]!).getAllByRole("checkbox").map((box) => box.parentElement?.textContent)).toEqual([
+      "TYPE 1",
+      "TYPE 2",
+      "TYPE 5",
+      "a new configuration",
+    ]);
+    // The bar does not claim "creates 0 records" while the answer is missing.
+    expect(screen.getAllByText(/Answer the pairing question first/).length).toBeGreaterThan(0);
+    await userEvent.click(within(groups[0]!).getByRole("checkbox", { name: "TYPE 2" }));
+    const sheet = doc.items.find((item) => item.page === 1)!;
+    const saves = spies.onSaveItem.mock.calls.map((call) => call as unknown as [DrawingItem, Record<string, unknown>]);
+    expect(saves.map(([item]) => item.id)).toEqual([sheet.id]);
+    expect(saves[0]![1]).toEqual({
+      configurationPairs: [
+        { recordId: "rec-main", label: "MUR 2", pairWith: ["TYPE 2"] },
+        { recordId: "rec-ve", label: "MUR 2", pairWith: ["TYPE 2"] },
+      ],
+    });
+  });
+
+  it("asks a phase on its own where its configurations differ, and says why", () => {
+    setUp(["TYPE 1", "TYPE 2"], ["A", "B"]);
+    const groups = screen.getAllByRole("group", { name: /MUR 2 .* is:/ });
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.textContent).join(" ")).toMatch(/has different configurations/);
+  });
+});
