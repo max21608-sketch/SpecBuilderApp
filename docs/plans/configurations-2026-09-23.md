@@ -283,10 +283,15 @@ real"*):
 - **The known hard stops**, already refused in words: 600 pages, 20 MB at
   registration, 32 MB per request.
 
-So: fetch one real large drawing set from SharePoint, read-only (candidates:
-the Maybourne Paris shop drawings), read it on the local stack, and record the
-pages, time, output tokens and whether it truncated, then render its review
-screen and time it. Fix only what the measurement shows. The one fix already
+**No 100-page set exists yet** (Max, 2026-09-23: "I don't have one yet"). So
+the measurement runs on the largest real document available: the whole Panther
+pack (drawing set, nine specification sheets, preamble) MERGED into one PDF,
+locally, as a copy. That is several dozen pages of different items, the
+realistic "a pack arrives as one PDF" case. Read it on the local stack and
+record pages, time, output tokens and whether it truncated; render its review
+screen and time it. The warning threshold below is derived from output tokens
+per page and is marked PROVISIONAL in the code and in `found-in-use.md`, to be
+re-measured when a 100-page set arrives. Fix only what the measurement shows. The one fix already
 known to be needed is **navigation on the review screen**: an item list at the
 top (code, name, pending count) that jumps to the card, and a *show only
 pending* filter. **Splitting one read into page ranges is currently on
