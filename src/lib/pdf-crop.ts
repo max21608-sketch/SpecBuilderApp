@@ -68,6 +68,31 @@ async function loadPdfjs(): Promise<PdfJs> {
   return pdfjsPromise;
 }
 
+/**
+ * How many pages a PDF the person has CHOSEN has, before a byte of it is
+ * stored — or NULL where pdfjs could not tell.
+ *
+ * The same pdfjs and the same worker as the crops (`loadPdfjs`), never a
+ * second setup. NULL MEANS PROCEED (`pdfUploadVerdict`): a count that failed
+ * is not evidence the document is too large, and refusing on it would leave
+ * somebody with a file they cannot get in. The server still checks at the read.
+ */
+export async function countPdfPagesInBrowser(file: Blob): Promise<number | null> {
+  try {
+    const pdfjs = await loadPdfjs();
+    // A copy of the bytes: pdfjs transfers the buffer it is given to its worker.
+    const data = new Uint8Array(await file.arrayBuffer());
+    const document = await pdfjs.getDocument({ data, isEvalSupported: false, useSystemFonts: false }).promise;
+    try {
+      return document.numPages;
+    } finally {
+      void document.destroy();
+    }
+  } catch {
+    return null;
+  }
+}
+
 type LoadedDocument = Awaited<ReturnType<PdfJs["getDocument"]>["promise"]>;
 
 const documents = new Map<string, Promise<LoadedDocument>>();

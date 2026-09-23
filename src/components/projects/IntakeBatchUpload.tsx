@@ -58,6 +58,8 @@ import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { projectUploadPrefix } from "@/lib/blob-source";
 import { guessKindFromName } from "@/lib/document-name-guess";
 import SuggestButton from "@/components/ui/SuggestButton";
+import { checkUpload } from "@/lib/upload-check";
+import { isPdfUpload, pdfUploadVerdict, type UploadVerdict } from "@/lib/upload-limits";
 
 /** What a person calls the thing, in the order a pack is read. */
 const CHOICES: { value: string; label: string; importType: "boq" | "spec_document"; documentKind: DocumentKind | null }[] = [
@@ -137,6 +139,14 @@ type Queued = {
    * than in the red reserved for a read that did not reach the queue.
    */
   note: string | null;
+  /**
+   * A PDF long enough that one read may not finish (`WARN_PDF_PAGES`). The
+   * upload still proceeds; this is said on the row, in amber, and is not
+   * `note`, which the tally reads as "waiting for a slot".
+   */
+  warning: string | null;
+  /** Refused for its SIZE (bytes or pages), not its format — the label differs. */
+  tooLarge: boolean;
 };
 
 /** What will be used for a file: what somebody chose, else what was read. */
@@ -191,13 +201,20 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
   const [dragging, setDragging] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // ONE CHECK PER FILE, started the moment it is dropped so the row can say
+  // what it found, and awaited again by the press so nothing is uploaded
+  // before it has answered.
+  const checks = useRef(new Map<string, Promise<UploadVerdict>>());
+
+  const applyVerdict = (key: string, verdict: UploadVerdict) => {
+    if (verdict.kind === "refuse") update(key, { status: "refused", error: verdict.message, tooLarge: true });
+    else if (verdict.kind === "warn") update(key, { warning: verdict.message });
+  };
 
   function addFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError(null);
-    setQueue((current) => [
-      ...current,
-      ...Array.from(files).map((file) => {
+    const rows = Array.from(files).map((file): Queued => {
         // READ THE NAME NOW, because it costs nothing. It abstains wherever two
         // kinds are possible — a bare "schedule" could be FF&E, finishes or
         // fabric — and an abstention leaves the row exactly as it has always
@@ -230,9 +247,26 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         progress: 0,
         error: unreadableUploadAdvice(file.name),
         note: null,
+        warning: null,
+        tooLarge: false,
         };
-      }),
-    ]);
+      });
+    // TOO LARGE FOR ONE READ is refused here too, before a byte is stored:
+    // the byte cap at once, the page count as soon as pdfjs has counted.
+    for (const row of rows) {
+      if (row.status === "refused" || !isPdfUpload(row.file.name, row.file.type)) continue;
+      const bySize = pdfUploadVerdict({ bytes: row.file.size, pages: null });
+      if (bySize.kind === "refuse") {
+        row.status = "refused";
+        row.error = bySize.message;
+        row.tooLarge = true;
+        continue;
+      }
+      const check = checkUpload(row.file);
+      checks.current.set(row.key, check);
+      void check.then((verdict) => applyVerdict(row.key, verdict));
+    }
+    setQueue((current) => [...current, ...rows]);
   }
 
   const update = (key: string, patch: Partial<Queued>) =>
@@ -278,6 +312,12 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         if (item.status === "needs-kind" && !item.choice) continue;
 
         let pathname = item.pathname;
+        if (!pathname) {
+          // THE SIZE CHECK HAS TO HAVE ANSWERED before a byte is stored.
+          const verdict = await (checks.current.get(item.key) ?? checkUpload(item.file));
+          applyVerdict(item.key, verdict);
+          if (verdict.kind === "refuse") continue;
+        }
         try {
           if (!pathname) {
             update(item.key, { status: "uploading", progress: 0, error: null });
@@ -576,7 +616,9 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
                   {item.status === "needs-kind" && <span className="text-amber-700">Say which</span>}
                   {item.status === "done" && "Added"}
                   {item.status === "failed" && <span className="text-red-700">Failed</span>}
-                  {item.status === "refused" && <span className="text-red-700">Cannot be read</span>}
+                  {item.status === "refused" && (
+                    <span className="text-red-700">{item.tooLarge ? "Too large" : "Cannot be read"}</span>
+                  )}
                 </span>
 
                 {item.status !== "done" && !busy && (
@@ -612,6 +654,7 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
                   item.evidence && <p className="w-full text-xs text-neutral-500">{item.evidence}</p>
                 )}
                 {item.error && <p className="w-full text-xs text-red-700">{item.error}</p>}
+                {item.warning && <p className="w-full text-xs text-amber-700">{item.warning}</p>}
                 {item.note && <p className="w-full text-xs text-neutral-500">{item.note}</p>}
               </li>
             );

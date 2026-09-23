@@ -25,12 +25,14 @@ import { intakeSourceKind, legacySpreadsheetAdvice } from "@/lib/intake-source-t
 import { readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { prepareDocumentSource, pdfHasTextLayer } from "@/lib/intake-source";
 import { classifyDocument, KIND_FROM_GENRE, scannedPdfRefusal } from "@/lib/document-classify";
+import { MAX_MODEL_PDF_BYTES } from "@/lib/upload-limits";
 
 export const maxDuration = 60;
 
-// Well under the extraction ceiling: this reads a cover page, and a document
-// too large to classify is one somebody can declare in a dropdown.
-const MAX_BYTES = 20 * 1024 * 1024;
+// The extraction ceiling (upload-limits.ts): a document larger than that
+// cannot be read at all, so there is nothing to classify it FOR — and one
+// copy of the number is what keeps this route and the upload screen agreeing.
+const MAX_BYTES = MAX_MODEL_PDF_BYTES;
 
 const Body = z
   .object({

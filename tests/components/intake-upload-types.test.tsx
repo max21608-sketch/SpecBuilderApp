@@ -19,6 +19,9 @@ import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
 import { BOQ_AS_PDF } from "@/lib/document-classify";
 
 const upload = vi.fn();
+// The page count before upload (upload-check.ts) is stubbed: the component
+// tier never loads pdfjs or a real PDF. Unknown means proceed.
+vi.mock("@/lib/pdf-crop", () => ({ countPdfPagesInBrowser: async () => null }));
 vi.mock("@vercel/blob/client", () => ({ upload: (...args: unknown[]) => upload(...args) }));
 
 const apiFetch = vi.fn();
