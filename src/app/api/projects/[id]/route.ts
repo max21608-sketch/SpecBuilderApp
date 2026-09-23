@@ -118,6 +118,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            -- recorded the name it was given; fall back to it.
            coalesce(a.filename, r.parsed->>'filename') as filename,
            (r.attachment_id is not null) as source_preserved,
+           -- A BILL waiting for somebody to say which column is which (v4
+           -- needsColumns on a live sheet). Its row offers "Set the columns",
+           -- never a Try again: a bill is not read by a model. THE SAME
+           -- EXPRESSION as /api/projects/[id]/batches; change both.
+           (r.source_kind = 'boq_xlsx' and r.status = 'parsed' and exists (
+              select 1 from jsonb_array_elements(
+                case when jsonb_typeof(r.parsed->'sheets') = 'array' then r.parsed->'sheets' else '[]'::jsonb end
+              ) as s
+              where s->>'needsColumns' = 'true' and coalesce(s->>'ignored', 'false') <> 'true'
+           )) as needs_columns,
            r.batch_id,
            b.label as batch_label,
            -- Deferred by the pack's in-flight cap, not by a person. THE SAME

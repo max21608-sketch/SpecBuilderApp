@@ -74,6 +74,7 @@ import Tabs from "@/components/ui/Tabs";
 import { Table, Td, Tr } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
 import { formatDay } from "@/lib/format-day";
+import BillColumnsAction, { isStuckBill, type StuckBill } from "@/components/imports/BillColumnsAction";
 
 type Project = {
   id: string;
@@ -101,6 +102,8 @@ type DocumentRun = {
   created_by: string | null;
   filename: string | null;
   source_preserved: boolean;
+  /** A bill waiting for somebody to say which column is which. */
+  needs_columns?: boolean | null;
   // Null on anything uploaded before 0007, which is why the grouping below
   // keeps a home for runs that belong to no pack.
   batch_id: string | null;
@@ -113,6 +116,17 @@ type DocumentRun = {
   runs_created: string | number | null;
   records_created: string | number | null;
 };
+
+/** A document row, as the bill action reads it. */
+function billOf(run: DocumentRun): StuckBill {
+  return {
+    id: run.id,
+    sourceKind: run.source_kind,
+    status: run.status,
+    needsColumns: run.needs_columns,
+    sourcePreserved: run.source_preserved,
+  };
+}
 
 /** One delivery, and the runs that arrived in it. */
 type Pack = {
@@ -1050,7 +1064,11 @@ function ProjectOverview() {
                         </Td>
                         <Td>
                           <div className="flex justify-end">
-                            {run.status === "failed" ? (
+                            {/* A BILL IS NEVER RETRIED THROUGH /extract, which
+                                refuses one: a stuck bill goes to its review. */}
+                            {isStuckBill(billOf(run)) ? (
+                              <BillColumnsAction run={billOf(run)} />
+                            ) : run.status === "failed" ? (
                               <Button
                                 size="xs"
                                 disabled={retryingDocument === run.id}

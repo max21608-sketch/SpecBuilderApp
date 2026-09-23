@@ -58,6 +58,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                        'waitingForSlot', (r.status = 'pending' and r.attempt_id is null
                                           and r.attempt_deadline_at > now()),
                        'error', r.error,
+                       -- A bill waiting for its columns, and whether its
+                       -- original was kept. THE SAME EXPRESSION as
+                       -- /api/projects/[id] for the Documents tab; change both.
+                       'needsColumns', (r.source_kind = 'boq_xlsx' and r.status = 'parsed' and exists (
+                          select 1 from jsonb_array_elements(
+                            case when jsonb_typeof(r.parsed->'sheets') = 'array' then r.parsed->'sheets' else '[]'::jsonb end
+                          ) as s
+                          where s->>'needsColumns' = 'true' and coalesce(s->>'ignored', 'false') <> 'true'
+                       )),
+                       'sourcePreserved', (r.attachment_id is not null),
                        'filename', a.filename,
                        'createdAt', r.created_at,
                        'pendingReview', jsonb_array_length(
