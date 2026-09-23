@@ -5,6 +5,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  codeConfigurations,
+  configurationEditSummary,
   drawingItemBlockers,
   namedConfigurationPlans,
   namedConfigurationsByCode,
@@ -224,5 +226,159 @@ describe("the frozen shop drawing", () => {
     const swatch = drawingOf(doc).observations.find((o) => o.materialCodeRaw === "QQ-01.1")!;
     expect(swatch.specFieldId).toBe("f-com1");
     expect(SHOP_DRAWING.depictsConfigurations).toEqual(["Type 1", "Type 5"]);
+  });
+});
+
+// ============================================================================
+// A REVIEWER'S CORRECTIONS (brief C1). Stored beside the model's reading on the
+// staged JSON; computed into the fan-out by the SAME function the card and the
+// confirm call. Every edit below re-computes where every row lands.
+// ============================================================================
+describe("a reviewer's corrections to the configurations", () => {
+  const MODEL = ["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 3", "TYPE 4"];
+  /** Every page of the code carries the reviewer's list — the card writes it to each. */
+  const withList = (doc: StagedDrawings, list: { label: string; readAs: string | null }[] | null): StagedDrawings => ({
+    ...doc,
+    items: doc.items.map((item) => ({ ...item, configurationsByReviewer: list })),
+  });
+  const modelList = () => MODEL.map((label) => ({ label, readAs: label }));
+  const planOf = (doc: StagedDrawings, page = 1) =>
+    namedConfigurationPlans(doc.items, doc).get(doc.items.find((item) => item.page === page)!.id)!;
+  const rowOf = (doc: StagedDrawings, predicate: (o: StagedDrawings["items"][number]["observations"][number]) => boolean) =>
+    doc.items.find((item) => item.page === 1)!.observations.find(predicate)!;
+
+  it("ADDS a configuration: it gets the shared rows and none of its own", () => {
+    const doc = withList(namedSheetRun(), [...modelList(), { label: "Type 6", readAs: null }]);
+    const plan = planOf(doc);
+    expect(plan.labels).toEqual([...MODEL, "TYPE 6"]);
+    const width = rowOf(doc, (o) => o.labelRaw === "Width");
+    expect(plan.rows[width.id]).toContain("TYPE 6");
+    const fabrics = doc.items[0]!.observations.filter((o) => o.labelRaw === "FABRIC REFERENCE");
+    expect(fabrics.some((o) => plan.rows[o.id]!.includes("TYPE 6"))).toBe(false);
+  });
+
+  it("RENAMES one: every row the model gave it follows the new name", () => {
+    const list = modelList().map((entry) => (entry.label === "TYPE 5" ? { label: "TYPO 5", readAs: "TYPE 5" } : entry));
+    const doc = withList(namedSheetRun(), list);
+    const fabricA = rowOf(doc, (o) => o.configurations?.includes("Type 5") ?? false);
+    expect(planOf(doc).rows[fabricA.id]).toEqual(["TYPE 1", "TYPO 5"]);
+    // The drawing depicts Type 5 by the model's name; it follows too.
+    expect(planOf(doc, 2).labels).toEqual(["TYPE 1", "TYPO 5"]);
+  });
+
+  it("REMOVES one: a row that was only its own needs a decision, and is never silently shared", () => {
+    const doc = withList(namedSheetRun(), modelList().filter((entry) => entry.label !== "TYPE 3"));
+    const plan = planOf(doc);
+    const type3 = rowOf(doc, (o) => o.configurations?.includes("Type 3") ?? false);
+    expect(plan.rows[type3.id]).toEqual([]);
+    expect(plan.undecided).toEqual([type3.id]);
+    const blockers = drawingItemBlockers(doc.items[0]!, resolveDrawingTargets("Q-301", [record()]), NO_OCCUPANCY, { plan, variants: new Map() });
+    expect(blockers.filter((b) => b.code === "configuration_undecided").map((b) => b.observationId)).toEqual([type3.id]);
+    // And the geometry goes to the four that are left.
+    const width = rowOf(doc, (o) => o.labelRaw === "Width");
+    expect(plan.rows[width.id]).toEqual(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 4"]);
+  });
+
+  it("…and REASSIGNING that row in the same act settles it", () => {
+    const removed = withList(namedSheetRun(), modelList().filter((entry) => entry.label !== "TYPE 3"));
+    const type3 = rowOf(removed, (o) => o.configurations?.includes("Type 3") ?? false);
+    const shared: StagedDrawings = {
+      ...removed,
+      items: removed.items.map((item) => ({
+        ...item,
+        observations: item.observations.map((o) => (o.id === type3.id ? { ...o, configurationsByReviewer: [] } : o)),
+      })),
+    };
+    expect(planOf(shared).rows[type3.id]).toEqual(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 4"]);
+    expect(planOf(shared).undecided).toEqual([]);
+  });
+
+  it("CHANGES which configurations a row applies to, the model's reading kept beside it", () => {
+    const doc = namedSheetRun();
+    const type2 = rowOf(doc, (o) => o.configurations?.includes("Type 2") ?? false);
+    const moved: StagedDrawings = {
+      ...doc,
+      items: doc.items.map((item) => ({
+        ...item,
+        observations: item.observations.map((o) => (o.id === type2.id ? { ...o, configurationsByReviewer: ["TYPE 3", "type 4"] } : o)),
+      })),
+    };
+    expect(planOf(moved).rows[type2.id]).toEqual(["TYPE 3", "TYPE 4"]);
+    // The model's reading is untouched.
+    expect(moved.items[0]!.observations.find((o) => o.id === type2.id)!.configurations).toEqual(["Type 2"]);
+    // TYPE 2 now has no fabric of its own, and is still made: the geometry lands on it.
+    expect(planOf(moved).labels).toContain("TYPE 2");
+  });
+
+  it("says what the reviewer changed against what was read", () => {
+    const doc = withList(namedSheetRun(), [
+      ...modelList()
+        .filter((entry) => entry.label !== "TYPE 3")
+        .map((entry) => (entry.label === "TYPE 5" ? { label: "TYPO 5", readAs: "TYPE 5" } : entry)),
+      { label: "TYPE 6", readAs: null },
+    ]);
+    const entry = [...codeConfigurations(doc.items, doc).values()][0];
+    expect(configurationEditSummary(entry)).toBe("Read as 5, you set 5 — added TYPE 6; renamed TYPE 5 to TYPO 5; removed TYPE 3.");
+    expect(configurationEditSummary([...codeConfigurations(namedSheetRun().items, namedSheetRun()).values()][0])).toBeNull();
+  });
+
+  it("JOINS: an empty list says the code has none, and the pages are one item again", () => {
+    const doc = withList(namedSheetRun(), []);
+    expect(namedConfigurationPlans(doc.items, doc).size).toBe(0);
+    expect([...variantLettersByItem(doc.items, doc).values()]).toEqual([null, null]);
+  });
+
+  it("reads the first page's list when pages disagree, so every page agrees", () => {
+    const doc = namedSheetRun();
+    const mixed: StagedDrawings = {
+      ...doc,
+      items: doc.items.map((item) =>
+        item.page === 1 ? { ...item, configurationsByReviewer: [{ label: "TYPE 1", readAs: "TYPE 1" }] } : item,
+      ),
+    };
+    expect(planOf(mixed, 2).configurations.map((c) => c.label)).toEqual(["TYPE 1"]);
+  });
+});
+
+describe("splitting and joining by page, the manual codeGroups.relationship", () => {
+  const twoPages = (relationship: "one_item" | "configurations", schemaVersion: 1 | 2 | 3) => {
+    const page = (n: number) => ({ ...SPEC_SHEET, itemCodeRaw: "Q-200", page: n, configurations: undefined, depictsConfigurations: undefined });
+    const staged = stageDrawings([page(5), page(6)], NAMED_FIELDS, null, null, null, [
+      { itemCodes: ["Q-200"], pages: [5, 6], relationship, evidence: null },
+    ]);
+    return { ...staged, schemaVersion } as StagedDrawings;
+  };
+  const say = (doc: StagedDrawings, answer: "one_item" | "configurations"): StagedDrawings => ({
+    ...doc,
+    items: doc.items.map((item) => ({ ...item, relationshipByReviewer: answer })),
+  });
+
+  it("splits pages the model called one item", () => {
+    const doc = twoPages("one_item", 2);
+    expect([...variantLettersByItem(doc.items, doc).values()]).toEqual([null, null]);
+    const split = say(doc, "configurations");
+    expect([...variantLettersByItem(split.items, split).values()]).toEqual(["A", "B"]);
+  });
+
+  it("joins pages the model split", () => {
+    const doc = say(twoPages("configurations", 3), "one_item");
+    expect([...variantLettersByItem(doc.items, doc).values()]).toEqual([null, null]);
+  });
+
+  it("works on a version 1 run, which never had an answer", () => {
+    const v1 = twoPages("one_item", 1);
+    // Version 1 letters by page count, frozen…
+    expect([...variantLettersByItem(v1.items, v1).values()]).toEqual(["A", "B"]);
+    // …until a person says otherwise.
+    const joined = say(v1, "one_item");
+    expect([...variantLettersByItem(joined.items, joined).values()]).toEqual([null, null]);
+  });
+
+  it("lets a person NAME the configurations of a v1 or v2 card", () => {
+    const v2 = twoPages("one_item", 2);
+    const named = { ...v2, items: v2.items.map((item) => ({ ...item, configurationsByReviewer: [{ label: "TYPE 1", readAs: null }, { label: "TYPE 2", readAs: null }] })) };
+    const plans = namedConfigurationPlans(named.items, named);
+    expect(plans.get(named.items[0]!.id)!.labels).toEqual(["TYPE 1", "TYPE 2"]);
+    expect([...variantLettersByItem(named.items, named).values()]).toEqual([null, null]);
   });
 });

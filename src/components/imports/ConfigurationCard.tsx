@@ -81,6 +81,7 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
 import PagePicker from "@/components/imports/PagePicker";
 import NamedConfigurationCard from "@/components/imports/NamedConfigurationCard";
+import { AddConfiguration, PagesAreControl } from "@/components/imports/ConfigurationControls";
 // A colour per configuration, fixed by LETTER, so A is sky on every card and
 // on every screen that names one. See configuration-colours.ts.
 import { colourForLetter as colourFor } from "@/components/imports/configuration-colours";
@@ -144,6 +145,7 @@ function PageConfigurationCard({
   onImage,
   onSwatch,
   onSetLevel,
+  onSaveItem,
 }: ConfigurationCardProps) {
   const [open, setOpen] = useState(true);
   const [showOther, setShowOther] = useState(false);
@@ -211,6 +213,45 @@ function PageConfigurationCard({
           <span className="font-medium text-neutral-600">Read as {card.split ? "configurations" : "one item"}:</span>{" "}
           {card.groupedBecause}
         </p>
+      )}
+      {/* A REVIEWER'S ANSWER (brief C1): one item or several, by page — the
+          manual codeGroups.relationship — or name the configurations instead,
+          which turns this into a card of named ones. Each writes to every page
+          of the code; the model's reading stays beside it. */}
+      {onSaveItem && open && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <PagesAreControl
+            split={card.split}
+            read={card.relationshipRead}
+            byReviewer={card.relationshipByReviewer}
+            disabled={busyHere}
+            onSet={(answer) => {
+              for (const member of card.members) void onSaveItem(member.item, { relationshipByReviewer: answer });
+            }}
+          />
+          <AddConfiguration
+            existing={[]}
+            disabled={busyHere}
+            label="Name its configurations…"
+            hint="TYPE 1, TYPE 2 — with commas"
+            onAdd={(labels) => {
+              const list = labels.map((label) => ({ label, readAs: null }));
+              for (const member of card.members) void onSaveItem(member.item, { configurationsByReviewer: list });
+            }}
+          />
+          {card.members.some((member) => Array.isArray(member.item.configurationsByReviewer)) && (
+            <Button
+              size="xs"
+              variant="quiet"
+              disabled={busyHere}
+              onClick={() => {
+                for (const member of card.members) void onSaveItem(member.item, { configurationsByReviewer: null });
+              }}
+            >
+              Put the configurations the document named back
+            </Button>
+          )}
+        </div>
       )}
       {/* THE STRIP IS WHAT THE PER-PAGE CHIPS WERE, and only a split card has
           one: a card whose pages are one item has nothing to choose between. */}

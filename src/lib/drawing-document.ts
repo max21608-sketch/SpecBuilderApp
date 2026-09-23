@@ -187,6 +187,13 @@ export type DrawingObservation = {
    * row lands on is one pure function, called by the card and the confirm.
    */
   configurations?: string[];
+  /**
+   * THE REVIEWER'S answer to which configurations this row applies to (brief
+   * C1), by folded label. `[]` means shared by every configuration; absent or
+   * null means the model's reading above stands. Kept BESIDE it, never over
+   * it, so the card can say "read as TYPE 1 · TYPE 5, you set TYPE 1".
+   */
+  configurationsByReviewer?: string[] | null;
   /** One attribute row per target record, once applied. */
   applied: { attributeIds: string[] } | null;
 };
@@ -247,6 +254,24 @@ export type DrawingItem = {
    * because it is a decision; the blocker it answers is computed.
    */
   configurationAcks?: { recordId: string; label: string }[];
+  /**
+   * THE REVIEWER'S list of the CODE's configurations (brief C1), replacing the
+   * model's reading for the whole code: each entry's folded `label`, and the
+   * model label it stands for (`readAs`) — null for one the reviewer added.
+   * A rename keeps `readAs`; a removal drops the entry. An EMPTY list is the
+   * reviewer saying the code has none.
+   *
+   * Written to every page of the code and read from the first page, in page
+   * order, that carries it (`reviewerOverride`). Absent or null: the model's
+   * reading stands, which is every page nobody has touched.
+   */
+  configurationsByReviewer?: { label: string; readAs: string | null }[] | null;
+  /**
+   * The reviewer's answer to `codeGroups.relationship` for the code — the
+   * manual version of it, for when the model said `one_item` and the pages are
+   * two chairs, or the reverse. Same storage rule. Absent: the model's answer.
+   */
+  relationshipByReviewer?: "one_item" | "configurations" | null;
 };
 
 /** One picture of an item, and where it sits on its page. */
@@ -1036,6 +1061,7 @@ export type DrawingBlocker =
   | { code: "dimension_slot_taken"; message: string; observationId: string; recordId?: string }
   | { code: "dia_conflict"; message: string; observationId: string }
   | { code: "configuration_name"; message: string; label: string; observationId?: undefined }
+  | { code: "configuration_undecided"; message: string; observationId: string }
   | {
       code: "configuration_new";
       message: string;
@@ -1393,6 +1419,15 @@ export function namedConfigurationBlockers(
   named: NamedTargets,
 ): DrawingBlocker[] {
   const blockers: DrawingBlocker[] = [];
+  // A row whose only configurations a reviewer removed (brief C1).
+  for (const observationId of named.plan.undecided ?? []) {
+    blockers.push({
+      code: "configuration_undecided",
+      observationId,
+      message:
+        "This row belonged only to a configuration that has been removed. Say which configurations it applies to, or make it shared by all of them.",
+    });
+  }
   for (const label of named.plan.labels) {
     const problem = variantLabelProblem(label);
     if (problem) blockers.push({ code: "configuration_name", label, message: problem });
@@ -3038,7 +3073,18 @@ export function variantLettersByItem(
       for (const item of group) letters.set(item.id, null);
       continue;
     }
-    const splits = version2 ? relationship.get(code) === "configurations" : group.length >= 2;
+    // THE REVIEWER'S answer first, on any version (brief C1): the manual
+    // version of `codeGroups.relationship`, for the pages the model got wrong.
+    const byReviewer = reviewerOverride(group, (item) =>
+      item.relationshipByReviewer === "one_item" || item.relationshipByReviewer === "configurations"
+        ? item.relationshipByReviewer
+        : null,
+    );
+    const splits = byReviewer
+      ? byReviewer === "configurations"
+      : version2
+        ? relationship.get(code) === "configurations"
+        : group.length >= 2;
     if (group.length < 2 || !splits) {
       for (const item of group) letters.set(item.id, null);
       continue;
@@ -3108,43 +3154,157 @@ export type NamedConfiguration = {
   evidence: string | null;
   /** The pages that name it. */
   pages: number[];
+  /**
+   * The model's label this stands for — itself, unless a reviewer renamed it —
+   * or null for one a reviewer added. Optional so a hand-built list reads.
+   */
+  readAs?: string | null;
 };
 
 /**
- * Per canonical folded code of a VERSION 3 run, the configurations its pages
- * name — the union over its pages in page order, the first appearance of each
- * folded name winning. A code whose pages name none is absent, and that is the
- * test for "letter by page as before".
+ * The first page of a code, in page order, that carries a reviewer's value —
+ * the one every page reads, so pages that disagree (a save that reached one
+ * page and not the next) still agree about what the card says.
+ */
+function reviewerOverride<T>(pages: readonly DrawingItem[], read: (item: DrawingItem) => T | null | undefined): T | null {
+  for (const item of pages) {
+    const value = read(item);
+    if (value !== null && value !== undefined) return value;
+  }
+  return null;
+}
+
+/** The reviewer's configuration list, read defensively off staged JSON. */
+function reviewerConfigurationList(item: DrawingItem): { label: string; readAs: string | null }[] | null {
+  const list = item.configurationsByReviewer;
+  if (!Array.isArray(list)) return null;
+  const out: { label: string; readAs: string | null }[] = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object" || typeof entry.label !== "string") continue;
+    const label = normaliseVariantLabel(entry.label);
+    if (!label || out.some((kept) => kept.label === label)) continue;
+    out.push({ label, readAs: typeof entry.readAs === "string" ? normaliseVariantLabel(entry.readAs) : null });
+  }
+  return out;
+}
+
+/** A code's configurations: what the model read, what counts, and how one maps to the other. */
+export type CodeConfigurations = {
+  /** As the MODEL read them (schemaVersion 3), or none. */
+  read: NamedConfiguration[];
+  /** As they count today — the reviewer's list where there is one. */
+  effective: NamedConfiguration[];
+  /** Model label -> the effective label it became. Absent: it was removed. */
+  rename: Map<string, string>;
+  /** Model labels the reviewer removed. */
+  removed: string[];
+  /** Did a reviewer set this list? */
+  edited: boolean;
+};
+
+/**
+ * Per canonical folded code, the configurations as READ and as they COUNT.
+ *
+ * The model's reading exists only on a version 3 run. A REVIEWER'S list counts
+ * on any version (brief C1): a person who knows a v1 or v2 card is five chairs
+ * can say so, and the card and the confirm then read it through the same
+ * functions as a v3 reading. A v1 or v2 code nobody has touched reads exactly
+ * as it always did — nothing here runs for it.
+ */
+export function codeConfigurations(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+): Map<string, CodeConfigurations> {
+  const out = new Map<string, CodeConfigurations>();
+  for (const [code, pages] of groupItemsByCode(items, doc)) {
+    const read: NamedConfiguration[] = [];
+    if (doc?.schemaVersion === 3) {
+      const add = (name: string, nameRaw: string | null, evidence: string | null, page: number | null) => {
+        const label = normaliseVariantLabel(name);
+        if (!label) return;
+        let entry = read.find((existing) => existing.label === label);
+        if (!entry) {
+          entry = { label, name: name.trim(), namesRaw: [], evidence, pages: [], readAs: label };
+          read.push(entry);
+        }
+        const raw = (nameRaw ?? "").trim();
+        if (raw && !entry.namesRaw.includes(raw)) entry.namesRaw.push(raw);
+        if (!entry.evidence && evidence) entry.evidence = evidence;
+        if (page !== null && !entry.pages.includes(page)) entry.pages.push(page);
+      };
+      for (const item of pages) {
+        for (const entry of pageConfigurations(item)) add(entry.name, entry.nameRaw, entry.evidence, item.page);
+        // A title block naming the ones it shows is the page naming them too.
+        for (const name of pageDepicts(item)) add(name, null, null, item.page);
+      }
+    }
+    const override = reviewerOverride(pages, reviewerConfigurationList);
+    if (!override) {
+      if (read.length > 0) {
+        out.set(code, {
+          read,
+          effective: read,
+          rename: new Map(read.map((entry) => [entry.label, entry.label])),
+          removed: [],
+          edited: false,
+        });
+      }
+      continue;
+    }
+    const rename = new Map<string, string>();
+    const effective: NamedConfiguration[] = override.map((entry) => {
+      const source = entry.readAs ? read.find((model) => model.label === entry.readAs) : undefined;
+      if (source) rename.set(source.label, entry.label);
+      return {
+        label: entry.label,
+        name: entry.label,
+        namesRaw: source?.namesRaw ?? [],
+        evidence: source?.evidence ?? null,
+        pages: source?.pages ?? [],
+        readAs: source ? source.label : null,
+      };
+    });
+    const removed = read.map((entry) => entry.label).filter((label) => !rename.has(label));
+    out.set(code, { read, effective, rename, removed, edited: true });
+  }
+  return out;
+}
+
+/**
+ * Per canonical folded code, the configurations as they COUNT — the model's
+ * reading on a version 3 run, the reviewer's list wherever one is set, in page
+ * order. A code with none is absent, and that is the test for "letter by page
+ * as before".
  */
 export function namedConfigurationsByCode(
   items: readonly DrawingItem[],
   doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
 ): Map<string, NamedConfiguration[]> {
   const out = new Map<string, NamedConfiguration[]>();
-  if (doc?.schemaVersion !== 3) return out;
-  for (const [code, pages] of groupItemsByCode(items, doc)) {
-    const list: NamedConfiguration[] = [];
-    const add = (name: string, nameRaw: string | null, evidence: string | null, page: number | null) => {
-      const label = normaliseVariantLabel(name);
-      if (!label) return;
-      let entry = list.find((existing) => existing.label === label);
-      if (!entry) {
-        entry = { label, name: name.trim(), namesRaw: [], evidence, pages: [] };
-        list.push(entry);
-      }
-      const raw = (nameRaw ?? "").trim();
-      if (raw && !entry.namesRaw.includes(raw)) entry.namesRaw.push(raw);
-      if (!entry.evidence && evidence) entry.evidence = evidence;
-      if (page !== null && !entry.pages.includes(page)) entry.pages.push(page);
-    };
-    for (const item of pages) {
-      for (const entry of pageConfigurations(item)) add(entry.name, entry.nameRaw, entry.evidence, item.page);
-      // A title block naming the ones it shows is the page naming them too.
-      for (const name of pageDepicts(item)) add(name, null, null, item.page);
-    }
-    if (list.length > 0) out.set(code, list);
+  for (const [code, entry] of codeConfigurations(items, doc)) {
+    if (entry.effective.length > 0) out.set(code, entry.effective);
   }
   return out;
+}
+
+/**
+ * "Read as 4, you set 5 — added TYPE 6; renamed TYP.O to TYPO 5; removed
+ * TYPE 9." Null when nobody has edited the list. The model's reading stays in
+ * the staged JSON beside the reviewer's; this is how the card says so.
+ */
+export function configurationEditSummary(entry: CodeConfigurations | undefined): string | null {
+  if (!entry?.edited) return null;
+  const parts: string[] = [];
+  const added = entry.effective.filter((configuration) => configuration.readAs === null).map((c) => c.label);
+  const renamed = [...entry.rename].filter(([from, to]) => from !== to).map(([from, to]) => `${from} to ${to}`);
+  if (added.length) parts.push(`added ${added.join(", ")}`);
+  if (renamed.length) parts.push(`renamed ${renamed.join(", ")}`);
+  if (entry.removed.length) parts.push(`removed ${entry.removed.join(", ")}`);
+  const head =
+    entry.read.length === 0
+      ? `The document names no configurations; you set ${entry.effective.length}`
+      : `Read as ${entry.read.length}, you set ${entry.effective.length}`;
+  return parts.length ? `${head} — ${parts.join("; ")}.` : `${head}.`;
 }
 
 /** Where one page of a named code lands, row by row. */
@@ -3166,6 +3326,12 @@ export type NamedConfigurationPlan = {
    * That is the fan-out for one row, per phase.
    */
   rows: Record<string, string[]>;
+  /**
+   * Pending rows that belonged ONLY to configurations a reviewer removed, and
+   * have not been given new ones. They land nowhere, and each is a blocker
+   * until somebody says where it goes — never silently shared, never dropped.
+   */
+  undecided: string[];
 };
 
 /**
@@ -3177,32 +3343,50 @@ export function namedConfigurationPlans(
   doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
 ): Map<string, NamedConfigurationPlan> {
   const out = new Map<string, NamedConfigurationPlan>();
-  const byCode = namedConfigurationsByCode(items, doc);
+  const byCode = codeConfigurations(items, doc);
   if (byCode.size === 0) return out;
   for (const [code, pages] of groupItemsByCode(items, doc)) {
-    const configurations = byCode.get(code);
-    if (!configurations) continue;
-    const order = configurations.map((entry) => entry.label);
+    const entry = byCode.get(code);
+    if (!entry || entry.effective.length === 0) continue;
+    const configurations = entry.effective;
+    const order = configurations.map((configuration) => configuration.label);
     const known = new Set(order);
     // In the code's order, whatever order the page listed them in.
     const ordered = (labels: Iterable<string>) => {
       const set = new Set(labels);
       return order.filter((label) => set.has(label));
     };
+    // A MODEL label, as it counts today: renamed, or gone.
+    const mapped = (labels: readonly string[]) =>
+      labels.map((label) => entry.rename.get(label)).filter((label): label is string => Boolean(label));
     for (const item of pages) {
-      const depicted = ordered(foldedNames(pageDepicts(item)).filter((label) => known.has(label)));
+      const depicted = ordered(mapped(foldedNames(pageDepicts(item))));
       const fallback = depicted.length > 0 ? depicted : order;
       const rows: Record<string, string[]> = {};
-      const written = new Set<string>(ordered(itemConfigurationLabels(item)));
+      const undecided: string[] = [];
+      const written = new Set<string>(ordered(mapped(itemConfigurationLabels(item))));
       for (const observation of item.observations) {
-        // A name the code does not know is dropped and the row reads as
-        // shared — the schema's own rule, repeated for staged JSON from the past.
-        const own = ordered(foldedNames(rowConfigurations(observation)).filter((label) => known.has(label)));
-        const targets = own.length > 0 ? own : fallback;
+        let targets: string[];
+        const byReviewer = observation.configurationsByReviewer;
+        if (Array.isArray(byReviewer)) {
+          // THE REVIEWER SAID. `[]` is "shared by every configuration".
+          const own = ordered(foldedNames(byReviewer).filter((label) => known.has(label)));
+          targets = byReviewer.length === 0 ? order : own;
+        } else {
+          const read = foldedNames(rowConfigurations(observation));
+          const own = ordered(mapped(read).filter((label) => known.has(label)));
+          // A name the code never knew is dropped and the row reads as shared —
+          // the schema's own rule, for staged JSON from the past. A name a
+          // REVIEWER removed is different: the row was about that chair, and
+          // sharing it with the others would put its fabric on them.
+          const allRemoved = read.length > 0 && own.length === 0 && read.some((label) => entry.removed.includes(label));
+          targets = own.length > 0 ? own : allRemoved ? [] : fallback;
+        }
+        if (targets.length === 0 && observation.reviewStatus === "pending") undecided.push(observation.id);
         rows[observation.id] = targets;
         if (observation.reviewStatus === "pending") for (const label of targets) written.add(label);
       }
-      out.set(item.id, { code, configurations, labels: ordered(written), rows });
+      out.set(item.id, { code, configurations, labels: ordered(written), rows, undecided });
     }
   }
   return out;
@@ -3239,6 +3423,8 @@ export type NamedTargets = { plan: NamedConfigurationPlan; variants: ParentVaria
  */
 export function rowWriteRecords(observationId: string, targets: readonly string[], named: NamedTargets | null): string[] {
   if (!named) return [...targets];
+  // `?? labels` only for a row the plan never saw. A row with NO targets (its
+  // configurations were removed) lands nowhere, and a blocker says so.
   const labels = named.plan.rows[observationId] ?? named.plan.labels;
   const out: string[] = [];
   for (const parentId of targets) {

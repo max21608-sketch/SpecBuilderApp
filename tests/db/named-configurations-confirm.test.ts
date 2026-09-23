@@ -252,4 +252,67 @@ describeIfDb("confirming configurations a document names", () => {
     expect(accepted.response.ok, JSON.stringify(accepted.body)).toBe(true);
     expect((await variantsOf(bill)).map((row) => row.variant_label)).toEqual(["A", "TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5"]);
   });
+
+  // Brief C1: a reviewer's corrections, through the real PATCH, reach the
+  // confirm through the same plan the card reads.
+  it("writes what the reviewer set: an added configuration, a moved row, a refused name", async () => {
+    const code = `__QA Q-303-${Date.now()}`;
+    const bill = await phase("__QA C1 RUN", code);
+    const runId = await stage(stageDrawings([{ ...SPEC_SHEET, itemCodeRaw: code }], fields, "__QA q-303.pdf", null));
+    const patch = async (body: Record<string, unknown>) =>
+      importPatchRoute(
+        new Request("http://localhost/test", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        { params: Promise.resolve({ id: runId }) },
+      );
+
+    let item = (await liveDoc(runId)).items[0]!;
+    // A name the CHECK would refuse is refused in words, and nothing is written.
+    const refused = await patch({
+      itemId: item.id,
+      expectedVersion: item.version,
+      changes: { configurationsByReviewer: [{ label: "Type 1 & 5 guest", readAs: null }] },
+    });
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(await refused.json())).toContain("too long to be a configuration name");
+
+    const list = ["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 3", "TYPE 4"].map((label) => ({ label, readAs: label }));
+    const added = await patch({
+      itemId: item.id,
+      expectedVersion: item.version,
+      changes: { configurationsByReviewer: [...list, { label: "Type 6", readAs: null }] },
+    });
+    expect(added.ok).toBe(true);
+    item = (await liveDoc(runId)).items[0]!;
+    const type2 = item.observations.find((o) => o.configurations?.includes("Type 2"))!;
+    const moved = await patch({
+      itemId: item.id,
+      observationId: type2.id,
+      expectedVersion: type2.version,
+      changes: { configurations: ["type 6"] },
+    });
+    expect(moved.ok).toBe(true);
+    // The model's reading is still on the row, beside the reviewer's.
+    const after = (await liveDoc(runId)).items[0]!.observations.find((o) => o.id === type2.id)!;
+    expect(after.configurations).toEqual(["Type 2"]);
+    expect(after.configurationsByReviewer).toEqual(["TYPE 6"]);
+
+    const confirmed = await confirm(runId, 1);
+    expect(confirmed.response.ok, JSON.stringify(confirmed.body)).toBe(true);
+    const variants = await variantsOf(bill);
+    expect(variants.map((row) => row.variant_label)).toEqual(["TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5", "TYPE 6"]);
+    const fabricOn = async (label: string) =>
+      (
+        await client.query(
+          `select a.value from record_attributes a join spec_records r on r.id = a.record_id
+            where r.parent_id = $1 and r.variant_label = $2 and a.spec_field_id is not null`,
+          [bill, label],
+        )
+      ).rows.map((row) => row.value);
+    expect(await fabricOn("TYPE 6")).toEqual(["Maker B, Ref. Y"]);
+    expect(await fabricOn("TYPE 2")).toEqual([]);
+  });
 });

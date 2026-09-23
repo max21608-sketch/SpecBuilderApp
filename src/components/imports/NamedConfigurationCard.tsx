@@ -33,7 +33,7 @@
 import { Fragment, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
-import { sharedTargets, sharedWithSentence, type NamedTab } from "@/lib/configuration-cards";
+import { fieldSlotGaps, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import type { DimensionSlot } from "@/lib/spec-vocab";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
@@ -53,6 +53,12 @@ import {
 import { BulkUnit } from "@/components/imports/DrawingItemCard";
 import type { ConfigurationCardProps } from "@/components/imports/ConfigurationCard";
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
+import {
+  AddConfiguration,
+  RemoveConfiguration,
+  RenameConfiguration,
+  RowConfigurationPicker,
+} from "@/components/imports/ConfigurationControls";
 import PagePicker from "@/components/imports/PagePicker";
 import { colourAt } from "@/components/imports/configuration-colours";
 import Button from "@/components/ui/Button";
@@ -92,6 +98,7 @@ export default function NamedConfigurationCard({
   const [previewPage, setPreviewPage] = useState<number | null>(null);
   /** Which configuration's tab is open. Local state: nothing links into it. */
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
+  const [joinArmed, setJoinArmed] = useState(false);
 
   const pendingMembers = card.members.filter((member) => member.state === "pending");
   const busyHere = busy === card.id || pendingMembers.some((member) => busy === member.item.id);
@@ -117,8 +124,30 @@ export default function NamedConfigurationCard({
   }
   const rowBlockers = (row: { item: DrawingItem; observation: DrawingObservation }) =>
     memberOf(row.item.id)?.resolution?.blockers.filter((blocker) => blocker.observationId === row.observation.id) ?? [];
-  const rowWarnings = (row: { item: DrawingItem; observation: DrawingObservation }) =>
-    memberOf(row.item.id)?.resolution?.warnings?.filter((warning) => warning.observationId === row.observation.id) ?? [];
+  // A BWS field skipped on a configuration — COM 2 with COM 1 free — is a
+  // warning beside the row, never a blocker: moving it is the reviewer's call.
+  const gaps = fieldSlotGaps(named.tabs, specFields);
+  const rowWarnings = (row: { item: DrawingItem; observation: DrawingObservation }) => [
+    ...(memberOf(row.item.id)?.resolution?.warnings?.filter((warning) => warning.observationId === row.observation.id) ?? []),
+    ...(gaps.has(row.observation.id)
+      ? [{ code: "field_gap", observationId: row.observation.id, message: gaps.get(row.observation.id)! }]
+      : []),
+  ];
+
+  // ------------------------------------------------ a reviewer's corrections
+  //
+  // Brief C1. The list is written to EVERY page of the code, each with its own
+  // item version, and read from the first — see `configurationsByReviewer`. A
+  // row's own answer goes on the observation, beside the model's reading.
+  const currentList = named.configurations.map((entry) => ({ label: entry.label, readAs: entry.readAs ?? null }));
+  const labels = currentList.map((entry) => entry.label);
+  const canEdit = Boolean(onSaveItem);
+  const saveList = (list: { label: string; readAs: string | null }[] | null) => {
+    if (!onSaveItem) return;
+    for (const member of card.members) void onSaveItem(member.item, { configurationsByReviewer: list });
+  };
+  const saveRow = (row: NamedTabRow, configurations: string[] | null) =>
+    void onSaveObservation(row.item, row.observation, { configurations });
 
   const tabBlocked = (tab: NamedTab): string | null => {
     const own = cardBlockers.find(
@@ -263,6 +292,37 @@ export default function NamedConfigurationCard({
           <span className="font-medium text-neutral-600">The pages, read as one item:</span> {card.groupedBecause}
         </p>
       )}
+      {/* WHAT THE REVIEWER CHANGED, against what was read — the model's
+          reading is still in the staged JSON, and this is where it shows. */}
+      {(named.editSummary || canEdit) && (
+        <p className="mt-1 flex max-w-3xl flex-wrap items-center gap-2 text-xs text-neutral-600">
+          {named.editSummary && <span className="font-medium text-violet-800">{named.editSummary}</span>}
+          {named.editSummary && canEdit && (
+            <Button size="xs" variant="quiet" disabled={busyHere} onClick={() => saveList(null)}>
+              {named.read.length > 0 ? "Put the reading back" : "Undo — no configurations, as read"}
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              size="xs"
+              variant="quiet"
+              disabled={busyHere}
+              className={joinArmed ? "border-amber-400 bg-amber-50 text-amber-900" : undefined}
+              onClick={() => {
+                // Two presses: it takes every configuration off the card at once.
+                if (!joinArmed) {
+                  setJoinArmed(true);
+                  return;
+                }
+                setJoinArmed(false);
+                saveList([]);
+              }}
+            >
+              {joinArmed ? `Make ${card.codeRaw} one item, with no configurations?` : "Not configurations — this is one item"}
+            </Button>
+          )}
+        </p>
+      )}
       {open && activeTab && (
         <div className="mt-2">
           <ConfigurationTabs
@@ -277,6 +337,15 @@ export default function NamedConfigurationCard({
               state: tab.state,
               blocked: tabBlocked(tab),
             }))}
+            trailing={
+              canEdit ? (
+                <AddConfiguration
+                  existing={labels}
+                  disabled={busyHere}
+                  onAdd={(added) => saveList([...currentList, ...added.map((label) => ({ label, readAs: null }))])}
+                />
+              ) : undefined
+            }
           />
         </div>
       )}
@@ -364,15 +433,113 @@ export default function NamedConfigurationCard({
             </div>
           )}
 
+          {/* ROWS THAT LAND NOWHERE: theirs were removed. On no tab, so they
+              are listed here, above the tabs, until somebody places them. */}
+          {named.undecided.length > 0 && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50">
+              <p className="px-3 pt-2 text-xs font-medium text-amber-900">
+                {named.undecided.length} row{named.undecided.length === 1 ? "" : "s"} belonged only to a configuration
+                that has been removed. Say which configurations {named.undecided.length === 1 ? "it applies" : "they apply"}{" "}
+                to — nothing is shared or dropped until you do.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-cell">
+                  <ObservationTableHead />
+                  <tbody>
+                    {named.undecided.map((row) => (
+                      <Fragment key={row.observation.id}>
+                        <ObservationRow
+                          observation={row.observation}
+                          page={row.item.page}
+                          itemPages={card.pages}
+                          importId={pageImportId(row.item.id)}
+                          specFields={specFields}
+                          drafts={drafts}
+                          setDrafts={setDrafts}
+                          busy={busyHere}
+                          blocked
+                          guessWhy={undefined}
+                          callbacks={{
+                            onChange: (target, changes) => void onSaveObservation(row.item, target, changes),
+                            onIgnore: (target) => void onReview(row.item, [target], "ignore"),
+                            onSwatch,
+                          }}
+                        />
+                        <tr>
+                          <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2 text-[11px] text-amber-900">
+                            Page {row.item.page ?? "?"} · read as{" "}
+                            {row.observation.configurations?.length ? row.observation.configurations.join(" · ") : "shared"}{" "}
+                            {canEdit && (
+                              <RowConfigurationPicker
+                                labels={labels}
+                                lands={[]}
+                                readAs={row.observation.configurations ?? []}
+                                byReviewer={row.observation.configurationsByReviewer}
+                                disabled={busyHere}
+                                startOpen
+                                onSave={(configurations) => saveRow(row, configurations)}
+                              />
+                            )}
+                          </td>
+                        </tr>
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className={`rounded-lg border border-neutral-200 border-l-4 ${colour.border}`}>
             <div className={`flex flex-wrap items-center gap-2 px-3 py-2 ${colour.band}`}>
               <span className={`inline-flex rounded border px-1.5 py-0.5 text-xs font-medium ${colour.chip}`}>
                 {variantName(card.codeRaw, tab.label, card.codeRaw)}
               </span>
-              {tab.namesRaw.length > 0 && (
+              {tab.namesRaw.length > 0 ? (
                 <span className="text-xs text-neutral-600">
                   named on the page{tab.namesRaw.length === 1 ? "" : "s"} as{" "}
                   {tab.namesRaw.map((raw) => `“${raw}”`).join(", ")}
+                </span>
+              ) : (
+                named.configurations[tab.index]?.readAs === null && (
+                  <span className="text-xs text-violet-800">added by a reviewer — no page names it</span>
+                )
+              )}
+              {canEdit && (
+                <span className="ml-auto inline-flex flex-wrap items-center gap-1.5">
+                  <RenameConfiguration
+                    key={`rename-${tab.label}`}
+                    label={tab.label}
+                    existing={labels}
+                    disabled={busyHere}
+                    onRename={(to) => {
+                      saveList(currentList.map((entry) => (entry.label === tab.label ? { ...entry, label: to } : entry)));
+                      // A row a reviewer had already placed on the old name
+                      // follows it, or it would land nowhere.
+                      for (const row of named.tabs.flatMap((entry) => entry.rows)) {
+                        const own = row.observation.configurationsByReviewer;
+                        if (Array.isArray(own) && own.includes(tab.label)) {
+                          saveRow(row, own.map((label) => (label === tab.label ? to : label)));
+                        }
+                      }
+                    }}
+                  />
+                  <RemoveConfiguration
+                    key={`remove-${tab.label}`}
+                    label={tab.label}
+                    others={labels.filter((label) => label !== tab.label)}
+                    ownRows={tab.rows.filter((row) => row.lands.length === 1).length}
+                    disabled={busyHere}
+                    onRemove={(rowsTo) => {
+                      saveList(currentList.filter((entry) => entry.label !== tab.label));
+                      if (rowsTo.mode === "none") return;
+                      // IN THE SAME ACT: every row that was only this
+                      // configuration's goes where the reviewer said.
+                      for (const row of tab.rows.filter((entry) => entry.lands.length === 1)) {
+                        saveRow(row, rowsTo.mode === "shared" ? [] : [rowsTo.to]);
+                      }
+                    }}
+                  />
                 </span>
               )}
             </div>
@@ -432,6 +599,26 @@ export default function NamedConfigurationCard({
                                 <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-1 text-[11px] text-neutral-500">
                                   Page {row.item.page ?? "?"}
                                   {shared ? ` · ${shared} — one row, written to each` : ` · ${tab.label} only`}
+                                  {Array.isArray(row.observation.configurationsByReviewer) && (
+                                    <span className="text-violet-800">
+                                      {" "}
+                                      · you set this; read as{" "}
+                                      {row.observation.configurations?.length
+                                        ? row.observation.configurations.join(" · ")
+                                        : "shared"}
+                                    </span>
+                                  )}{" "}
+                                  {canEdit && (
+                                    <RowConfigurationPicker
+                                      key={`${observation.id}-${row.lands.join("|")}`}
+                                      labels={labels}
+                                      lands={row.lands}
+                                      readAs={row.observation.configurations ?? []}
+                                      byReviewer={row.observation.configurationsByReviewer}
+                                      disabled={busyHere}
+                                      onSave={(configurations) => saveRow(row, configurations)}
+                                    />
+                                  )}
                                 </td>
                               </tr>
                               <ReplacePanel

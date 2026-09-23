@@ -189,3 +189,112 @@ describe("a card whose document names its configurations", () => {
     expect(entries.map((entry) => entry.label)).toEqual(["Page 1", "Page 2"]);
   });
 });
+
+// ============================================================================
+// A REVIEWER'S CORRECTIONS ON THE CARD (brief C1). Each fires the existing
+// autosave with the right payload; where the rows then land is the pure
+// function's job and is pinned in tests/lib/named-configurations.test.ts.
+// ============================================================================
+describe("correcting the configurations on the card", () => {
+  const MODEL = ["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 3", "TYPE 4"];
+  const itemSaves = (spies: ReturnType<typeof renderNamed>["spies"]) =>
+    spies.onSaveItem.mock.calls.map((call) => call as unknown as [DrawingItem, Record<string, unknown>]);
+
+  it("ADDS one at the end of the strip, writing the whole list to every page", async () => {
+    const { spies, doc } = renderNamed();
+    await userEvent.click(screen.getByRole("button", { name: "+ Add configuration" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Configuration name" }), "type 6");
+    await userEvent.click(screen.getByRole("button", { name: /^Add/ }));
+    const saves = itemSaves(spies);
+    expect(saves.map(([item]) => item.id).sort()).toEqual(doc.items.map((item) => item.id).sort());
+    expect(saves[0]![1]).toEqual({
+      configurationsByReviewer: [...MODEL.map((label) => ({ label, readAs: label })), { label: "TYPE 6", readAs: null }],
+    });
+  });
+
+  it("refuses a name the database would refuse, in words, before anything is sent", async () => {
+    const { spies } = renderNamed();
+    await userEvent.click(screen.getByRole("button", { name: "+ Add configuration" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Configuration name" }), "Type 1 & 5 guest");
+    expect(screen.getByText(/'TYPE 1 & 5 GUEST' is too long to be a configuration name/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Add/ })).toBeDisabled();
+    await userEvent.clear(screen.getByRole("textbox", { name: "Configuration name" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Configuration name" }), "type 2");
+    expect(screen.getByText(/TYPE 2 is already a configuration of this item/)).toBeInTheDocument();
+    expect(spies.onSaveItem).not.toHaveBeenCalled();
+  });
+
+  it("RENAMES the open tab's configuration, keeping which reading it stands for", async () => {
+    const { spies } = renderNamed();
+    await userEvent.click(screen.getByRole("tab", { name: /TYPE 5/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+    const box = screen.getByRole("textbox", { name: "New name for TYPE 5" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "typo 5");
+    await userEvent.click(screen.getByRole("button", { name: "Save name" }));
+    const list = itemSaves(spies)[0]![1].configurationsByReviewer as { label: string; readAs: string | null }[];
+    expect(list[1]).toEqual({ label: "TYPO 5", readAs: "TYPE 5" });
+    expect(list.map((entry) => entry.label)).toEqual(["TYPE 1", "TYPO 5", "TYPE 2", "TYPE 3", "TYPE 4"]);
+  });
+
+  it("REMOVES one and, in the same act, says where its own rows go", async () => {
+    const { spies } = renderNamed();
+    await userEvent.click(screen.getByRole("tab", { name: /TYPE 3/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(screen.getByText(/TYPE 3 has 1 row of its own/)).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Move TYPE 3's rows to" }), "TYPE 4");
+    await userEvent.click(screen.getByRole("button", { name: /Remove, and move it there/ }));
+    const list = itemSaves(spies)[0]![1].configurationsByReviewer as { label: string }[];
+    expect(list.map((entry) => entry.label)).toEqual(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 4"]);
+    // The Type 3 fabric is moved to TYPE 4 on its own observation.
+    const rowSaves = spies.of("onSaveObservation");
+    expect(rowSaves).toHaveLength(1);
+    const [, observation, changes] = rowSaves[0]!.args as [DrawingItem, DrawingObservation, Record<string, unknown>];
+    expect(observation.valueRaw).toBe("Maker C, Ref. Z");
+    expect(changes).toEqual({ configurations: ["TYPE 4"] });
+  });
+
+  it("CHANGES which configurations a row applies to, on the row, including all", async () => {
+    const { spies } = renderNamed();
+    await userEvent.click(screen.getByRole("tab", { name: /TYPE 2/ }));
+    const pickers = screen.getAllByRole("button", { name: "Applies to…" });
+    // The fabric row is the last on the tab: dimensions first.
+    await userEvent.click(pickers[pickers.length - 1]!);
+    await userEvent.click(screen.getByRole("checkbox", { name: "TYPE 3" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    const [, observation, changes] = spies.of("onSaveObservation")[0]!.args as [DrawingItem, DrawingObservation, Record<string, unknown>];
+    expect(observation.valueRaw).toBe("Maker B, Ref. Y");
+    expect(changes).toEqual({ configurations: ["TYPE 2", "TYPE 3"] });
+  });
+
+  it("stores ALL as shared by every configuration", async () => {
+    const { spies } = renderNamed();
+    await userEvent.click(screen.getByRole("tab", { name: /TYPE 2/ }));
+    const pickers = screen.getAllByRole("button", { name: "Applies to…" });
+    await userEvent.click(pickers[pickers.length - 1]!);
+    await userEvent.click(screen.getByRole("checkbox", { name: "All" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect((spies.of("onSaveObservation")[0]!.args as unknown[])[2]).toEqual({ configurations: [] });
+  });
+
+  it("says what was read against what the reviewer set, and a removed-only row needs a decision", () => {
+    const doc = namedSheetRun();
+    const edited: StagedDrawings = {
+      ...doc,
+      items: doc.items.map((item) => ({
+        ...item,
+        configurationsByReviewer: [
+          { label: "TYPE 1", readAs: "TYPE 1" },
+          { label: "TYPE 5", readAs: "TYPE 5" },
+          { label: "TYPE 2", readAs: "TYPE 2" },
+          { label: "TYPE 4", readAs: "TYPE 4" },
+        ],
+      })),
+    };
+    renderNamed(edited, resolutionsFor(edited));
+    expect(screen.getByText("Read as 5, you set 4 — removed TYPE 3.")).toBeInTheDocument();
+    expect(screen.getByText(/1 row belonged only to a configuration that has been removed/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Maker C, Ref. Z")).toBeInTheDocument();
+    expect(tabNames()).toEqual(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 4"]);
+  });
+});

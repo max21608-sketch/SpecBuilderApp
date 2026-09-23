@@ -829,6 +829,7 @@ export default function DrawingsReview({
                 busy={busy === card.item.id}
                 onSaveObservation={saveObservation}
                 onSaveTargets={saveTargets}
+                onSaveItem={saveItem}
                 onSetBulkUnit={setBulkUnit}
                 onImage={rememberImage}
                 onSwatch={rememberSwatch}

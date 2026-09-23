@@ -51,7 +51,7 @@ function renderConfigurations(
   // does has to supply it, exactly as the review screens do.
   doc?: Parameters<typeof configurationCards>[2],
 ) {
-  const spies = callbacks();
+  const spies = { ...callbacks(), onSaveItem: vi.fn(async (..._args: unknown[]) => undefined) };
   const byItem =
     resolutions ??
     new Map(
@@ -85,6 +85,7 @@ function renderConfigurations(
         onImage={spies.onImage}
         onSwatch={spies.onSwatch}
       onSetLevel={spies.onSetLevel}
+        onSaveItem={spies.onSaveItem}
       />
     );
   }
@@ -374,5 +375,68 @@ describe("a wide observation table has somewhere to scroll", () => {
       const box = table.closest<HTMLElement>(".overflow-x-auto")!;
       expect(box.className).not.toContain("overflow-hidden");
     }
+  });
+});
+
+// ============================================================================
+// THE MANUAL codeGroups.relationship (brief C1): a reviewer splits pages the
+// model called one item, joins pages it split, or names the configurations.
+// Each writes to EVERY page of the code, beside the model's reading.
+// ============================================================================
+describe("a reviewer saying what these pages are", () => {
+  const oneItemPages = () => {
+    resetIds();
+    return [page("a", 1, "Tibor Blob Amber Fern", "S-200"), page("b", 2, "Tibor Blob Amber Fern", "S-200")];
+  };
+  const oneItem = {
+    schemaVersion: 2 as const,
+    codeGroups: [{ itemCodes: ["S-200"], pages: [1, 2], relationship: "one_item" as const, evidence: "one chair" }],
+  };
+  const notSplit = (staged: DrawingItem[]) =>
+    new Map(staged.map((entry) => [entry.id, resolution({ id: entry.id, variantLabel: null })]));
+
+  it("splits pages the model called one item, on every page", async () => {
+    const pages = oneItemPages();
+    const spies = renderConfigurations(pages, notSplit(pages), oneItem);
+    await userEvent.click(screen.getByRole("button", { name: "separate configurations" }));
+    expect(spies.onSaveItem.mock.calls.map((call) => [(call[0] as DrawingItem).id, call[1]])).toEqual([
+      ["a", { relationshipByReviewer: "configurations" }],
+      ["b", { relationshipByReviewer: "configurations" }],
+    ]);
+  });
+
+  it("says what was read and what the reviewer set, and can put the reading back", async () => {
+    const pages = oneItemPages().map((entry) => ({ ...entry, relationshipByReviewer: "configurations" as const }));
+    const spies = renderConfigurations(pages, undefined, oneItem);
+    expect(screen.getByText(/read as one item; you set configurations/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Put the reading back" }));
+    expect(spies.onSaveItem.mock.calls.map((call) => call[1])).toEqual([
+      { relationshipByReviewer: null },
+      { relationshipByReviewer: null },
+    ]);
+  });
+
+  it("joins pages the model split", async () => {
+    const spies = renderConfigurations(twoPages());
+    await userEvent.click(screen.getByRole("button", { name: "one item" }));
+    expect(spies.onSaveItem.mock.calls.map((call) => call[1])).toEqual([
+      { relationshipByReviewer: "one_item" },
+      { relationshipByReviewer: "one_item" },
+    ]);
+  });
+
+  it("names the configurations instead, which makes it a card of named ones", async () => {
+    const pages = oneItemPages();
+    const spies = renderConfigurations(pages, notSplit(pages), oneItem);
+    await userEvent.click(screen.getByRole("button", { name: "Name its configurations…" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Configuration name" }), "Type 1, type 2");
+    await userEvent.click(screen.getByRole("button", { name: /^Add/ }));
+    expect(spies.onSaveItem.mock.calls[0]![1]).toEqual({
+      configurationsByReviewer: [
+        { label: "TYPE 1", readAs: null },
+        { label: "TYPE 2", readAs: null },
+      ],
+    });
+    expect(spies.onSaveItem).toHaveBeenCalledTimes(2);
   });
 });
