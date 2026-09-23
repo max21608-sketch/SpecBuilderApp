@@ -22,7 +22,7 @@
 // `variantLabelProblem` the route and the database-facing code use.
 // ============================================================================
 import { useState } from "react";
-import { normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
+import { naturalConfigurationOrder, normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
 import Button from "@/components/ui/Button";
 
 /** Names a reviewer typed, one per comma, folded the way the column stores them. */
@@ -456,6 +456,7 @@ export function PairChoice({
   chosen,
   disabled,
   onChange,
+  why,
 }: {
   label: string;
   /** "on MAIN RUN", "(page 8) on MAIN RUN". */
@@ -467,14 +468,19 @@ export function PairChoice({
   chosen: readonly string[] | null | undefined;
   disabled: boolean;
   onChange: (pairWith: string[] | null) => void;
+  /** Why this question is asked on its own — "MAIN RUN - VE has different configurations". */
+  why?: string | null;
 }) {
   const words = namesRaw.filter((raw) => normaliseVariantLabel(raw) !== label);
   const picked = new Set(chosen ?? []);
+  // The order a person counts in: TYPE 1, TYPE 2 … not first mention.
+  existing = naturalConfigurationOrder(existing);
   return (
     <fieldset className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
       <legend className="mb-0.5 basis-full">
         <span className="font-mono font-medium">{label}</span>
         {words.length > 0 && <> — the page says {words.join(" / ")} (read as {label})</>} {where} is:
+        {why && <span className="ml-1 font-normal text-amber-800">({why})</span>}
       </legend>
       {existing.map((name) => (
         <label key={name} className="inline-flex items-center gap-1 font-mono">
@@ -506,4 +512,65 @@ export function PairChoice({
       </label>
     </fieldset>
   );
+}
+
+/** One pairing question, covering every phase whose bill line holds the same configurations. */
+export type PairQuestion = {
+  label: string;
+  recordIds: string[];
+  where: string;
+  why: string | null;
+  namesRaw: string[];
+  existing: string[];
+  collides: boolean;
+  chosen: string[] | null | undefined;
+};
+
+/**
+ * Per-phase pairing rows, folded into ONE question per configuration where the
+ * phases agree about which configurations their bill lines hold. A phase that
+ * holds DIFFERENT ones gets its own question and says so — answering one for
+ * it would be answering a different question.
+ */
+export function groupPairQuestions(
+  rows: readonly {
+    recordId: string;
+    label: string;
+    existing: string[];
+    namesRaw: string[];
+    collides: boolean;
+    chosen: string[] | null | undefined;
+  }[],
+  runNameOf: (recordId: string) => string,
+): PairQuestion[] {
+  const byLabel = new Map<string, (typeof rows)[number][]>();
+  for (const row of rows) byLabel.set(row.label, [...(byLabel.get(row.label) ?? []), row]);
+  const out: PairQuestion[] = [];
+  for (const [label, entries] of byLabel) {
+    const bySet = new Map<string, (typeof rows)[number][]>();
+    for (const entry of entries) {
+      const key = [...entry.existing].sort().join("\u0000");
+      bySet.set(key, [...(bySet.get(key) ?? []), entry]);
+    }
+    const groups = [...bySet.values()].sort((a, b) => b.length - a.length);
+    groups.forEach((group, index) => {
+      const phases = group.map((entry) => runNameOf(entry.recordId));
+      const same = (a: string[] | null | undefined, b: string[] | null | undefined) => JSON.stringify(a) === JSON.stringify(b);
+      const chosen = group.every((entry) => same(entry.chosen, group[0]!.chosen)) ? group[0]!.chosen : undefined;
+      out.push({
+        label,
+        recordIds: group.map((entry) => entry.recordId),
+        where: `on ${phases.join(" and ")}`,
+        why:
+          groups.length > 1 && index > 0
+            ? `${phases.join(" and ")} ${phases.length === 1 ? "has" : "have"} different configurations`
+            : null,
+        namesRaw: group[0]!.namesRaw,
+        existing: group[0]!.existing,
+        collides: group.some((entry) => entry.collides),
+        chosen,
+      });
+    });
+  }
+  return out;
 }

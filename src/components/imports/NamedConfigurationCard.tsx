@@ -55,6 +55,7 @@ import type { ConfigurationCardProps } from "@/components/imports/ConfigurationC
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
 import {
   AddConfiguration,
+  groupPairQuestions,
   PairChoice,
   RemoveConfiguration,
   RenameConfiguration,
@@ -212,12 +213,20 @@ export default function NamedConfigurationCard({
     }
   }
   const phases = ticked.size;
+  // Until every pairing question is answered the card does not KNOW which
+  // records it writes, and "creates 0 records" would be a false statement.
+  const unpaired = pendingMembers.some((member) =>
+    (member.resolution?.blockers ?? []).some((blocker) => blocker.code === "configuration_new"),
+  );
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const recordsSentence =
     phases === 0
       ? "Tick a phase to say where these configurations are made."
-      : `${total} configuration${total === 1 ? "" : "s"} × ${phases} phase${phases === 1 ? "" : "s"} — confirming creates ${toCreate.size} record${
-          toCreate.size === 1 ? "" : "s"
-        } under ${card.codeRaw}` + (existing.size > 0 ? ` and writes to ${existing.size} that already exist.` : ".");
+      : unpaired
+        ? "Answer the pairing question first — it decides which records this writes to."
+        : existing.size === 0
+          ? `${plural(total, "configuration")} × ${plural(phases, "phase")} — confirming creates ${plural(toCreate.size, "record")} under ${card.codeRaw}.`
+          : `Writes to ${plural(total, "configuration")} on ${plural(phases, "phase")} under ${card.codeRaw}; creates ${toCreate.size} new.`;
 
   // ------------------------------------------------------------- pairing
   //
@@ -271,15 +280,23 @@ export default function NamedConfigurationCard({
       }
     }
   }
-  const setPair = (recordId: string, label: string, pairWith: string[] | null) => {
+  // ONE QUESTION PER CONFIGURATION, NOT PER PHASE. Pairing MUR 2 with TYPE 2
+  // is one decision about the item; S-301 on MAIN RUN and on the VE run asked
+  // it twice. Phases whose bill lines hold the SAME configurations share one
+  // question and the answer is saved for each; a phase whose configurations
+  // DIFFER gets its own, and says why. Stored per phase, as the confirm reads it.
+  const pairQuestions = groupPairQuestions([...pairRows.values()], runNameOf);
+  const setPair = (recordIds: readonly string[], label: string, pairWith: string[] | null) => {
     if (!onSaveItem) return;
     for (const member of card.members) {
       if (member.state !== "pending") continue;
       if (!(member.resolution?.named?.labels ?? []).includes(label)) continue;
       const others = (member.item.configurationPairs ?? []).filter(
-        (pair) => !(pair.recordId === recordId && pair.label === label),
+        (pair) => !(recordIds.includes(pair.recordId) && pair.label === label),
       );
-      void onSaveItem(member.item, { configurationPairs: [...others, { recordId, label, pairWith }] });
+      void onSaveItem(member.item, {
+        configurationPairs: [...others, ...recordIds.map((recordId) => ({ recordId, label, pairWith }))],
+      });
     }
   };
 
@@ -479,17 +496,18 @@ export default function NamedConfigurationCard({
                 These bill lines already have configurations, and this document names them differently. Pair each with
                 the one it is, or create it as a new configuration. Nothing is matched for you.
               </p>
-              {[...pairRows.values()].map((row) => (
+              {pairQuestions.map((question) => (
                 <PairChoice
-                  key={`${row.recordId}|${row.label}`}
-                  label={row.label}
-                  where={`on ${runNameOf(row.recordId)}`}
-                  namesRaw={row.namesRaw}
-                  existing={row.existing}
-                  collides={row.collides}
-                  chosen={row.chosen}
+                  key={`${question.recordIds.join(",")}|${question.label}`}
+                  label={question.label}
+                  where={question.where}
+                  why={question.why}
+                  namesRaw={question.namesRaw}
+                  existing={question.existing}
+                  collides={question.collides}
+                  chosen={question.chosen}
                   disabled={busyHere || !onSaveItem}
-                  onChange={(pairWith) => setPair(row.recordId, row.label, pairWith)}
+                  onChange={(pairWith) => setPair(question.recordIds, question.label, pairWith)}
                 />
               ))}
             </div>

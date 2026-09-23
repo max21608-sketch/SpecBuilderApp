@@ -59,6 +59,7 @@ import {
 } from "@/lib/drawing-document";
 import { parseDimensionFigure } from "@/lib/dimensions";
 import { normaliseRef } from "@/lib/record-refs";
+import { naturalConfigurationOrder } from "@/lib/record-variants";
 import { DIMENSION_SLOT_LABELS, type DimensionSlot } from "@/lib/spec-vocab";
 
 /** Where a configuration's page has got to. Letters ignore this entirely. */
@@ -403,30 +404,9 @@ export function namedTabs(
   return order.map((label) => tabs.find((tab) => tab.label === label)!);
 }
 
-/**
- * THE ORDER A PERSON COUNTS IN, for display: "configuration one, configuration
- * two, configuration three" — not the order the page happened to mention them
- * (S-301's sheet lists "Type 1 & 5" first, so first mention read TYPE 1, TYPE 5,
- * TYPE 2 …).
- *
- * Numbered names first, numeric-aware (`TYPE 2` before `TYPE 10`), then single
- * letters A–Z, then anything else in the order the document gave it. DISPLAY
- * ONLY: the stored order, the confirm's order and the letters are unchanged.
- */
-export function naturalConfigurationOrder(labels: readonly string[]): string[] {
-  const numbered: { label: string; head: string; n: number; tail: string }[] = [];
-  const letters: string[] = [];
-  const rest: string[] = [];
-  for (const label of labels) {
-    const match = /^(.*?)(\d+)(.*)$/.exec(label);
-    if (match) numbered.push({ label, head: match[1]!, n: Number(match[2]), tail: match[3]! });
-    else if (/^[A-Z]$/.test(label)) letters.push(label);
-    else rest.push(label);
-  }
-  numbered.sort((a, b) => a.head.localeCompare(b.head) || a.n - b.n || a.tail.localeCompare(b.tail));
-  letters.sort();
-  return [...numbered.map((entry) => entry.label), ...letters, ...rest];
-}
+// The order a person counts in lives in record-variants.ts, a leaf, so the
+// blocker sentences in drawing-document.ts can use it too.
+export { naturalConfigurationOrder } from "@/lib/record-variants";
 
 /** What one tab shows of its measurements, when two pages state them. */
 export type TabMeasurements = {
