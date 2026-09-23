@@ -1752,7 +1752,11 @@ does not have) — and `npm run qa:demo -- --lines=300 --no-checklist --apply`
 built **DEMO-300** (`a88aed3e-ef7f-4290-a732-0ef173ae3474`, 503 records over
 3 phases, 416 seconds), beside DEMO-TEST-01 rather than instead of it.
 
-1. **The 300-line project overview takes 10.4 seconds to render.** Measured
+1. **FIXED 2026-09-23, `a3b2f03`** — 10.4 s at the time of this entry, 2,384 ms
+   after the 2026-09-22 pass, **386 ms** now, so §7.4a's two seconds is met.
+   Same query and same cause as the projects-list entry above, which carries
+   the measurements. The original follows.
+   **The 300-line project overview takes 10.4 seconds to render.** Measured
    on DEMO-300. §7.4a asks for under two. The same shape as the two-second
    projects list already recorded; `loadOutstanding` over 503 records is the
    likely weight and the overview's tiles all read it.
@@ -2026,8 +2030,63 @@ the sandbox are a product of the same week.
 
 ### The projects list takes about two seconds to answer
 
-**Status: open. A performance finding, measured, not a fault in what it
-shows.** Found while fixing the red db-tier tests (plan Stage 0.3): the test
+**Status: FIXED 2026-09-23, `a3b2f03`** (plan stage 4d), on staging, on a quiet
+machine with every other coder stood down — which is why the numbers mean
+something.
+
+**The time was not where either entry said, and finding that out is the item.**
+`explain (analyze, buffers)` on the summary query over DEMO-300: the row source
+for the whole thing is **19,722 rows in 29 ms**, and the `GroupAggregate` over
+it took **2,272 ms** touching **2,058,964 shared buffers**. One expression
+accounted for all of it, compounded twice — `tgq_map` is referenced once, so
+Postgres INLINED it and rebuilt the whole
+`spec_matrix_category_map × spec_field_gates × spec_fields` join per
+evaluation (191,307 index searches into `spec_fields` for one copy), and there
+were TEN copies, because `to_quote` is read by every aggregate `FILTER` and the
+planner evaluates it once per filter per row.
+
+**That is also why the 2026-09-22 attempt measured as noise** (1584 ms against
+1652 ms, reverted): precomputing per question only pays if the result is
+JOINED, not looked up by another correlated subquery. That reading was not
+wrong, it was incomplete — and reverting rather than shipping it unproven was
+still the right call.
+
+The fix is the observation that **whether a question is on Matthew's TGQ set is
+a property of the QUESTION, not of the record** — a requirement belongs to
+exactly one category. Decided once in a CTE and joined. The rule moved UP the
+query rather than being copied, so this file's single SQL re-expression of
+`questionTier` is still the whole budget; there is no second count in SQL.
+
+| | before | after | runs |
+|---|---|---|---|
+| `GET /api/projects/[id]` DEMO-300, 503 records | **2,384 ms** | **386 ms** | 7 |
+| `GET /api/projects`, 8 active | **3,719 ms** | **464 ms** | 7 |
+| summary query, DEMO-300 | 1,862 ms | 73 ms | 7 |
+| `loadProjectSummaries` via `measure:screens` | 1,887 ms | 78 ms | 5 |
+| shared buffer hits | 2,058,964 | 2,674 | — |
+
+**§7.4a's two seconds is met.** Re-measured independently after the
+cherry-pick: `loadProjectSummaries` 94 ms on the projects list and 78 ms on
+DEMO-300, with `project-summary`, `projects-list-waiting` and
+`project-completion` all green — the three tests that hold the summary against
+`loadExportScope` and the chase screen.
+
+**Equivalence was asserted, not assumed:** old and new queries were run against
+all eleven sandbox projects, batched and one at a time, compared column by
+column BEFORE the change went in.
+
+**One honest negative, kept as a negative:** `materialized` on the new CTEs
+measured 77 ms against 80 ms over five runs each — noise. It stays as a fence,
+because the defect WAS the planner inlining a once-referenced CTE, and the
+comment says that rather than claiming a saving it does not have.
+
+**Now the slowest thing on the overview, and deliberately left:**
+`contacts-outstanding` at 816 ms, off the critical path by design. Counting it
+in SQL would put `designerKey`'s folding and the split-line predicate in two
+places. The original entry follows.
+
+**Status when found: open. A performance finding, measured, not a fault in what
+it shows.** Found while fixing the red db-tier tests (plan Stage 0.3): the test
 *hides an archived project from the list unless it is asked for* timed out at
 the 5s default, and the timeout was corrupting the test after it.
 
