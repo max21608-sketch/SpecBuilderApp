@@ -95,7 +95,8 @@ describe("a card whose document names its configurations", () => {
     // TYPE 1: the sheet's geometry AND the drawing's (two pages, two rows), and
     // fabric A from each. Nothing of Type 2's.
     expect(screen.getAllByDisplayValue("550")).toHaveLength(2);
-    expect(screen.getAllByDisplayValue("Maker A, Ref. X")).toHaveLength(2);
+    expect(screen.getAllByDisplayValue("Maker A, Ref. X")).toHaveLength(1);
+    expect(screen.getAllByDisplayValue("Maker A, Ref. X, woven")).toHaveLength(1);
     expect(screen.queryByDisplayValue("Maker B, Ref. Y")).toBeNull();
 
     await userEvent.click(screen.getByRole("tab", { name: /TYPE 2/ }));

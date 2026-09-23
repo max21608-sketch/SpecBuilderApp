@@ -764,7 +764,11 @@ function ConfigurationSection({
         {member.state === "applied"
           ? `— applied${reviewed ? ` on ${new Date(reviewed).toLocaleDateString("en-GB")}` : ""}, ${applied.length} spec${
               applied.length === 1 ? "" : "s"
-            } written.`
+            } written${
+              applied.some((o) => o.applied?.alreadyRecorded?.length)
+                ? `, ${applied.filter((o) => o.applied?.alreadyRecorded?.length).length} of them already recorded from another page`
+                : ""
+            }.`
           : "— ignored. The rows are restorable under Ignored below."}
       </div>
     );

@@ -195,7 +195,16 @@ export type DrawingObservation = {
    */
   configurationsByReviewer?: string[] | null;
   /** One attribute row per target record, once applied. */
-  applied: { attributeIds: string[] } | null;
+  applied: {
+    attributeIds: string[];
+    /**
+     * The records where this row wrote NOTHING because the record already held
+     * the same dimension — same slot, same figure in millimetres, same state —
+     * from another page (`alreadyRecorded`). Its attribute id is in
+     * `attributeIds` too. Absent on every row applied before 2026-09-23.
+     */
+    alreadyRecorded?: { recordId: string; attributeId: string; sourcePage: number | null }[];
+  } | null;
 };
 
 /** One configuration a page NAMES (`schemaVersion: 3`), as the model read it. */
@@ -1088,6 +1097,8 @@ export type OccupiedSlot = {
   label: string;
   value: string | null;
   unit: string | null;
+  /** The occupant's state, for `alreadyRecorded`. Optional: absent means unknown, which is never "the same". */
+  state?: string | null;
   sourceFilename: string | null;
   sourcePage: number | null;
 };
@@ -1096,6 +1107,49 @@ export type OccupiedSlots = {
   fields: Map<string, Map<string, OccupiedSlot>>;
   dimensions: Map<string, Map<DimensionSlot, OccupiedSlot>>;
 };
+
+/**
+ * IS THIS DIMENSION ALREADY ON THE RECORD — the same slot, the same figure, the
+ * same state? Then it is not a replacement, and there is nothing to write.
+ *
+ * S-301's specification sheet and its shop drawing both state the chair's W, D
+ * and H. Confirming the sheet writes them to TYPE 1; confirming the drawing
+ * then found an occupant in each slot and asked the reviewer to tick "replace"
+ * three times, to replace 550mm with 550mm — a question with no decision in it,
+ * which teaches people to tick without reading.
+ *
+ * COMPARED AS MILLIMETRES, THROUGH THE ONE PARSER, NEVER AS STRINGS: 55 cm and
+ * 550 mm are the same width, and `550` against `550.0` is not a disagreement.
+ * A figure with no unit on either side is never the same — the unit is what
+ * makes it a measurement. The STATE must match too: a confirmed 550 over a TBC
+ * 550 is a decision being taken, and the reviewer is asked.
+ *
+ * DIMENSIONS ONLY. A fabric described two ways (a finish, a COM line) is the
+ * reviewer's decision about which wording to keep, and stays a blocker.
+ *
+ * ONE FUNCTION, TWO CALLERS: `drawingItemBlockers` (no blocker) and the confirm
+ * (write nothing, mark the row applied naming the existing attribute), so the
+ * screen and the confirm cannot disagree — the `proposalBlockers` rule.
+ */
+export function alreadyRecorded(
+  observation: Pick<DrawingObservation, "attrGroup" | "dimensionSlot" | "value" | "valueRaw" | "unit" | "state">,
+  occupant: Pick<OccupiedSlot, "value" | "unit" | "state"> | undefined,
+): boolean {
+  if (!occupant) return false;
+  if (observation.attrGroup !== "dimension" || !observation.dimensionSlot) return false;
+  const mine = inMillimetres(observation.value ?? observation.valueRaw, observation.unit);
+  const theirs = inMillimetres(occupant.value, occupant.unit);
+  if (mine === null || theirs === null) return false;
+  if (Math.abs(mine - theirs) > 1e-6) return false;
+  return (occupant.state ?? null) !== null && occupant.state === stateToWrite(observation as DrawingObservation);
+}
+
+function inMillimetres(value: string | null, unit: string | null): number | null {
+  const normalised = normaliseUnit(unit);
+  if (!normalised) return null;
+  const figure = parseDimensionFigure(value).figure;
+  return figure === null ? null : figure * TO_MM[normalised];
+}
 
 /**
  * Which occupants an observation is acknowledged to replace, as a lookup.
@@ -1289,6 +1343,10 @@ export function drawingItemBlockers(
         const clash = recordsOf(observation).find((recordId) => {
           const occupant = occupied.dimensions.get(recordId)?.get(slot);
           if (!occupant) return false;
+          // The same measurement already recorded is not a replacement —
+          // decided PER RECORD, since one fan-out can be a no-op on one record
+          // and a real write on another.
+          if (alreadyRecorded(observation, occupant)) return false;
           return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
         });
         if (clash) {
@@ -1455,7 +1513,7 @@ export function namedConfigurationBlockers(
 
 // ---- warnings --------------------------------------------------------------
 
-export type DrawingWarning = { code: "unit_implausible"; message: string; observationId: string };
+export type DrawingWarning = { code: "unit_implausible" | "already_recorded"; message: string; observationId: string };
 
 /**
  * Things worth a second look that must NOT stop a commit.

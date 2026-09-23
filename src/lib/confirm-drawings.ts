@@ -32,6 +32,7 @@ import { applyAnswerFills, applyAnswerRetractions, loadDimensionNote, planAnswer
 import { loadPromotable } from "@/lib/attribute-retire";
 import {
   acknowledgedReplacements,
+  alreadyRecorded,
   assertStagedDrawings,
   specFieldEntries,
   drawingItemBlockers,
@@ -394,7 +395,7 @@ export async function confirmDrawingItem(
   const byWriteTarget: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
   if (writeIds.length > 0) {
     const occupiedRows = await txn`
-      select id, record_id, spec_field_id, dimension_slot, version, label, value, unit, source_page
+      select id, record_id, spec_field_id, dimension_slot, version, label, value, unit, state, source_page
       from record_attributes
       where record_id = any(${writeIds}::uuid[])
         and status = 'active'
@@ -408,6 +409,7 @@ export async function confirmDrawingItem(
         label: String(row.label),
         value: row.value === null || row.value === undefined ? null : String(row.value),
         unit: row.unit === null || row.unit === undefined ? null : String(row.unit),
+        state: row.state === null || row.state === undefined ? null : String(row.state),
         sourceFilename: null,
         sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
       };
@@ -630,6 +632,7 @@ export async function confirmDrawingItem(
   }
 
   const attributeIdsByObservation = new Map<string, string[]>();
+  const alreadyByObservation = new Map<string, { recordId: string; attributeId: string; sourcePage: number | null }[]>();
     // ---- the swatch chips, onto the finishes they belong to -----------------
   //
   // A SWATCH BELONGS TO THE CODE, NOT TO THE ITEM. `project_finishes` is
@@ -736,6 +739,28 @@ export async function confirmDrawingItem(
       // saw — an occupant that changed since is refused rather than replaced,
       // because the value they agreed to drop is not the value that is there.
       const replacement = acknowledgedReplacements(observation).get(ackKey);
+      // ---- the same measurement, already on this record ------------------
+      // Same slot, same figure in millimetres, same state, from another page:
+      // not a replacement, and nothing to write — the unique index would
+      // refuse a second active row, and the fact is already recorded. The row
+      // is marked applied naming the EXISTING attribute, so the card and the
+      // history say where it is. Decided per record, by the same
+      // `alreadyRecorded` the blockers used.
+      const existingDimension =
+        !replacement && observation.attrGroup === "dimension" && observation.dimensionSlot
+          ? byWriteTarget.dimensions.get(recordId)?.get(observation.dimensionSlot)
+          : undefined;
+      if (existingDimension && alreadyRecorded(observation, existingDimension)) {
+        sortOrder -= 1;
+        inserts -= 1;
+        const list = attributeIdsByObservation.get(observation.id) ?? [];
+        list.push(existingDimension.attributeId);
+        attributeIdsByObservation.set(observation.id, list);
+        const recorded = alreadyByObservation.get(observation.id) ?? [];
+        recorded.push({ recordId, attributeId: existingDimension.attributeId, sourcePage: existingDimension.sourcePage });
+        alreadyByObservation.set(observation.id, recorded);
+        continue;
+      }
       if (replacement) {
         const supersededRows = await txn`
           update record_attributes
@@ -892,7 +917,12 @@ export async function confirmDrawingItem(
                   reviewStatus: "applied" as const,
                   reviewedAt: now,
                   reviewedBy: actor,
-                  applied: { attributeIds: attributeIdsByObservation.get(observation.id) ?? [] },
+                  applied: {
+                    attributeIds: attributeIdsByObservation.get(observation.id) ?? [],
+                    ...(alreadyByObservation.has(observation.id)
+                      ? { alreadyRecorded: alreadyByObservation.get(observation.id) }
+                      : {}),
+                  },
                 }
               : observation,
           ),
@@ -904,7 +934,11 @@ export async function confirmDrawingItem(
   await txn`
     insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
     values ('intake_run', ${runId}, 'parsed', ${status}, ${actor},
-            ${`${taken.length} spec${taken.length === 1 ? "" : "s"} applied to ${writes.length} record${writes.length === 1 ? "" : "s"}`})
+            ${`${taken.length} spec${taken.length === 1 ? "" : "s"} applied to ${writes.length} record${writes.length === 1 ? "" : "s"}${
+              alreadyByObservation.size > 0
+                ? `; ${[...alreadyByObservation.values()].reduce((n, list) => n + list.length, 0)} already recorded from another page`
+                : ""
+            }`})
   `;
 
   return {

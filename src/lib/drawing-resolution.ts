@@ -27,6 +27,7 @@ import {
   targetRecordIds,
   canonicalCode,
   variantLettersByItem,
+  alreadyRecorded,
   namedConfigurationPlans,
   parentVariantsOf,
   rowWriteRecords,
@@ -183,7 +184,7 @@ export function finishFilingsFor(
 export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlots> {
   const rows = await sql`
     select a.id, a.record_id, a.spec_field_id, a.dimension_slot, a.version, a.label, a.value, a.unit,
-           a.source_page, at.filename as source_filename
+           a.state, a.source_page, at.filename as source_filename
     from record_attributes a
     join spec_records r on r.id = a.record_id
     left join intake_runs ir on ir.id = a.source_run_id
@@ -205,6 +206,7 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
       label: String(row.label),
       value: row.value === null || row.value === undefined ? null : String(row.value),
       unit: row.unit === null || row.unit === undefined ? null : String(row.unit),
+      state: row.state === null || row.state === undefined ? null : String(row.state),
       sourceFilename: row.source_filename === null || row.source_filename === undefined ? null : String(row.source_filename),
       sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
     };
@@ -278,7 +280,9 @@ export function occupantsFor(
           : observation.specFieldId
             ? occupied.fields.get(recordId)?.get(observation.specFieldId)
             : undefined;
-      if (occupant) found.push({ recordId, occupant });
+      // The same measurement already recorded is not something to replace, and
+      // offering a tick for it is a question with no decision in it.
+      if (occupant && !alreadyRecorded(observation, occupant)) found.push({ recordId, occupant });
     }
     if (found.length > 0) out[observation.id] = found;
   }
@@ -323,7 +327,7 @@ export function resolveStagedRun(
       resolution,
       targets,
       blockers: drawingItemBlockers(item, resolution, occupied, named),
-      warnings: drawingItemWarnings(item),
+      warnings: [...drawingItemWarnings(item), ...alreadyRecordedWarnings(item, targets, occupied, named)],
       occupants: occupantsFor(item, targets, occupied, named),
       variantLabel,
       writesTo: Object.fromEntries(writesTo),
@@ -331,6 +335,38 @@ export function resolveStagedRun(
       named: named ? namedResolution(targets, resolution, named) : null,
     };
   });
+}
+
+/**
+ * "Already recorded from page 1" beside a dimension the confirm will write
+ * NOTHING for, because the record holds the same one. A warning, not a
+ * blocker: it never stops the card, and the confirm cannot even name it.
+ */
+function alreadyRecordedWarnings(
+  item: StagedDrawings["items"][number],
+  targets: string[],
+  occupied: OccupiedSlots,
+  named: NamedTargets | null,
+): DrawingWarning[] {
+  const out: DrawingWarning[] = [];
+  for (const observation of item.observations) {
+    if (observation.reviewStatus !== "pending" || observation.attrGroup !== "dimension" || !observation.dimensionSlot) continue;
+    const pages = new Set<string>();
+    let count = 0;
+    for (const recordId of rowWriteRecords(observation.id, targets, named)) {
+      const occupant = occupied.dimensions.get(recordId)?.get(observation.dimensionSlot);
+      if (!alreadyRecorded(observation, occupant)) continue;
+      count += 1;
+      pages.add(occupant?.sourcePage ? `page ${occupant.sourcePage}` : "another page");
+    }
+    if (count === 0) continue;
+    out.push({
+      code: "already_recorded",
+      observationId: observation.id,
+      message: `Already recorded from ${[...pages].join(" and ")}${count > 1 ? ` on ${count} records` : ""} — the same figure, so nothing new is written there.`,
+    });
+  }
+  return out;
 }
 
 function namedResolution(targets: string[], resolution: DrawingResolution, named: NamedTargets): NamedResolution {
