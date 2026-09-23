@@ -11,13 +11,16 @@
 //    own version does not move;
 //  - a stale offer is refused and writes nothing;
 //  - a retired name is never reused;
-//  - the export scope then carries the configuration and not the bill line.
+//  - the export scope then carries the configuration and not the bill line;
+//  - the same bill line on another phase gets the configuration in the SAME
+//    change set, carrying ITS OWN specs, and a phase holding the ref on two
+//    lines is offered nothing.
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { withTransaction } from "@/lib/db-transaction";
 import { createRecord, createRun } from "@/lib/manual-capture";
-import { addConfiguration, loadCarryOffer, renameConfiguration } from "@/lib/configuration-add";
+import { addConfiguration, loadCarryOffer, loadOtherPhases, renameConfiguration } from "@/lib/configuration-add";
 import { sql } from "@/lib/db";
 import { defaultSelection, carryKey } from "@/lib/configuration-carry";
 import { loadExportScope, isScopeFailure } from "@/lib/export-scope";
@@ -34,6 +37,10 @@ describeIfDb("adding a configuration by hand", () => {
   let widthId = "";
   let comId = "";
   let stitchAnswerId = "";
+  let veRunId = "";
+  let veBillLineId = "";
+  let veWidthId = "";
+  let murRunId = "";
 
   beforeAll(async () => {
     await client.connect();
@@ -87,6 +94,31 @@ describeIfDb("adding a configuration by hand", () => {
       [billLineId],
     );
     stitchAnswerId = answer.rows[0].id;
+
+    // THE SAME BILL LINE ON A SECOND PHASE, with its own width — the VE phase
+    // quotes a narrower chair. And a third phase carrying the ref on TWO lines,
+    // the SX11A case, which must be offered nothing.
+    const ve = await withTransaction((txn) => createRun(txn, { projectId, name: "__QA VE", actor: "qa" }));
+    veRunId = ve.runId;
+    veBillLineId = (
+      await withTransaction((txn) =>
+        createRecord(txn, { projectId, runId: veRunId, itemDescription: "Desk chair", clientRef: "s 301", qty: 20, categoryId, actor: "qa" }),
+      )
+    ).recordId;
+    veWidthId = (
+      await client.query(
+        `insert into record_attributes (record_id, attr_group, label, value, unit, dimension_slot, state, source_run_id, source_page, created_by, updated_by)
+         values ($1, 'dimension', 'Width', '800', 'mm', 'W', 'confirmed', $2, 7, 'qa', 'qa') returning id`,
+        [veBillLineId, intakeRunId],
+      )
+    ).rows[0].id;
+    const mur = await withTransaction((txn) => createRun(txn, { projectId, name: "__QA MUR", actor: "qa" }));
+    murRunId = mur.runId;
+    for (const qty of [2, 3]) {
+      await withTransaction((txn) =>
+        createRecord(txn, { projectId, runId: murRunId, itemDescription: "Desk chair", clientRef: "S-301", qty, categoryId, actor: "qa" }),
+      );
+    }
     await client.query(
       `update spec_answers set state = 'confirmed', value = 'Plain stitch', confirmed_by = 'qa', confirmed_at = now(), updated_by = 'qa'
         where id = $1`,
@@ -234,5 +266,74 @@ describeIfDb("adding a configuration by hand", () => {
       renameConfiguration(txn, { recordId: id, name: "Type 2b", expectedVersion: version, actor: "qa" }),
     );
     expect(renamed).toMatchObject({ label: "TYPE 2B", changed: true });
+  }, SLOW);
+
+  it("adds the same configuration on another phase in one change, each from its own bill line", async () => {
+    const phases = await loadOtherPhases(sql, billLineId);
+    const veId = phases.find((phase) => phase.runId === veRunId);
+    const murId = phases.find((phase) => phase.runId === murRunId);
+    // `s 301` and `S-301` are one ref under normaliseRef.
+    expect(veId).toMatchObject({ billLineId: veBillLineId, lineCount: 1 });
+    expect(murId).toMatchObject({ billLineId: null, lineCount: 2 });
+
+    const main = await loadCarryOffer(sql, billLineId);
+    const veOffer = await loadCarryOffer(sql, veBillLineId);
+    const all = (offer: typeof main) => refs(offer);
+    const result = await withTransaction((txn) =>
+      addConfiguration(txn, {
+        billLineId,
+        name: "Type 5",
+        shown: all(main),
+        carry: [],
+        phases: [{ billLineId: veBillLineId, shown: all(veOffer), carry: all(veOffer) }],
+        actor: "qa",
+      }),
+    );
+    expect(result.alsoAdded).toHaveLength(1);
+    const veChild = result.alsoAdded[0]!.recordId;
+
+    // The VE configuration carries the VE bill line's 800, never MAIN's 840.
+    const attrs = await client.query(
+      `select value, source_page from record_attributes where record_id = $1 and status = 'active'`,
+      [veChild],
+    );
+    expect(attrs.rows).toEqual([{ value: "800", source_page: 7 }]);
+    const parent = await client.query(`select parent_id, run_id from spec_records where id = $1`, [veChild]);
+    expect(parent.rows[0]).toMatchObject({ parent_id: veBillLineId, run_id: veRunId });
+    expect(veWidthId).toBeTruthy();
+
+    // ONE change set, one version per new record.
+    const versions = await client.query(
+      `select record_id from record_snapshots where change_set_id = $1 order by record_id`,
+      [result.changeSetId],
+    );
+    expect(versions.rows.map((row) => row.record_id).sort()).toEqual([result.recordId, veChild].sort());
+  }, SLOW);
+
+  it("refuses the whole act, naming the phase, when the name is used on another phase", async () => {
+    const main = await loadCarryOffer(sql, billLineId);
+    const veOffer = await loadCarryOffer(sql, veBillLineId);
+    // TYPE 5 is on both now; TYPE 6 is on neither — put a TYPE 6 on VE only.
+    await withTransaction((txn) =>
+      addConfiguration(txn, { billLineId: veBillLineId, name: "Type 6", shown: refs(veOffer), carry: [], actor: "qa" }),
+    );
+    const veAgain = await loadCarryOffer(sql, veBillLineId);
+    await expect(
+      withTransaction((txn) =>
+        addConfiguration(txn, {
+          billLineId,
+          name: "Type 6",
+          shown: refs(main),
+          carry: [],
+          phases: [{ billLineId: veBillLineId, shown: refs(veAgain), carry: [] }],
+          actor: "qa",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "name_taken", message: expect.stringContaining("On __QA VE:") });
+    const onMain = await client.query(
+      `select count(*)::int as n from spec_records where parent_id = $1 and variant_label = 'TYPE 6'`,
+      [billLineId],
+    );
+    expect(onMain.rows[0].n).toBe(0);
   }, SLOW);
 });

@@ -47,6 +47,7 @@ import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { loadPromotable, recomposeAnswers } from "@/lib/attribute-retire";
 import { loadDimensionNote, planAnswerFills } from "@/lib/promote-answers";
+import { normaliseRef } from "@/lib/record-refs";
 import {
   carryKey,
   checkConfigurationName,
@@ -63,6 +64,8 @@ export type CarryOffer = {
     id: string;
     projectId: string;
     runId: string;
+    /** The phase's name, as the phase tabs print it. */
+    runName: string;
     version: number;
     /** What a person calls it: the client ref, or `#<record_no>`. */
     name: string;
@@ -88,9 +91,11 @@ const text = (value: unknown): string | null =>
 export async function loadCarryOffer(q: TxnSql, billLineId: string): Promise<CarryOffer> {
   const rows = await q`
     select r.id, r.project_id, r.run_id, r.version, r.status, r.parent_id, r.record_no, r.qty, r.dimension_note,
+           run.name as run_name,
            (select string_agg(x.ref_value, ', ' order by x.ref_value)
               from spec_record_refs x where x.record_id = r.id and x.ref_system = 'boq_code') as client_ref
-      from spec_records r where r.id = ${billLineId}
+      from spec_records r join spec_runs run on run.id = r.run_id
+     where r.id = ${billLineId}
   `;
   const record = rows[0];
   if (!record) throw new DomainConflictError("not_found", "That record no longer exists.", { status: 404 });
@@ -196,6 +201,7 @@ export async function loadCarryOffer(q: TxnSql, billLineId: string): Promise<Car
       id: String(record.id),
       projectId: String(record.project_id),
       runId: String(record.run_id),
+      runName: String(record.run_name),
       version: Number(record.version),
       name,
       qty: record.qty === null || record.qty === undefined ? null : Number(record.qty),
@@ -206,24 +212,109 @@ export async function loadCarryOffer(q: TxnSql, billLineId: string): Promise<Car
   };
 }
 
-export type AddConfigurationInput = {
+// ============================================================================
+// THE SAME BILL LINE ON THE OTHER PHASES.
+//
+// A bill line exists once PER PHASE: `S-301` on MAIN RUN and `S-301` on the VE
+// phase are two records with the same client ref, because each phase quotes it
+// at its own quantity. A configuration added on one is nearly always true of
+// the other, and five types would otherwise be ten adds.
+//
+// So the panel offers every OTHER live phase whose live bill line carries the
+// same `boq_code` ref under `normaliseRef` — the exact fold every matcher here
+// uses, never a looser one. Two lines carrying the ref in ONE phase is the
+// `SX11A` case: nothing is offered there, and the panel says why, because
+// picking one of the two is exactly the guess `findRecordsByRef` refuses.
+//
+// EACH PHASE CARRIES ITS OWN BILL LINE'S SPECS. Never phase A's onto phase B:
+// the phases can differ, and that is why they exist.
+// ============================================================================
+
+export type OtherPhase = {
+  runId: string;
+  runName: string;
+  /** Null when the ref is on more than one line of that phase. */
+  billLineId: string | null;
+  /** How many live bill lines of that phase carry the ref. */
+  lineCount: number;
+};
+
+/**
+ * The other live phases this bill line's client ref is on. Ordered as the
+ * phase tabs are. A bill line with no `boq_code` ref is on no other phase.
+ */
+export async function loadOtherPhases(q: TxnSql, billLineId: string): Promise<OtherPhase[]> {
+  const heads = await q`
+    select r.project_id, r.run_id,
+           coalesce((select array_agg(x.ref_value) from spec_record_refs x
+                      where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as refs
+      from spec_records r where r.id = ${billLineId}
+  `;
+  const head = heads[0];
+  if (!head) return [];
+  const wanted = new Set(((head.refs as string[] | null) ?? []).map(normaliseRef).filter(Boolean));
+  if (wanted.size === 0) return [];
+
+  const rows = await q`
+    select r.id, r.run_id, run.name as run_name, run.sort_order, x.ref_value
+      from spec_records r
+      join spec_runs run on run.id = r.run_id
+      join spec_record_refs x on x.record_id = r.id and x.ref_system = 'boq_code'
+     where r.project_id = ${head.project_id} and r.run_id <> ${head.run_id}
+       and r.parent_id is null and r.status = 'active' and run.status = 'active'
+     order by run.sort_order, run.name, r.id
+  `;
+  const byRun = new Map<string, { runName: string; lines: Set<string> }>();
+  for (const row of rows) {
+    if (!wanted.has(normaliseRef(String(row.ref_value)))) continue;
+    const runId = String(row.run_id);
+    const entry = byRun.get(runId) ?? { runName: String(row.run_name), lines: new Set<string>() };
+    entry.lines.add(String(row.id));
+    byRun.set(runId, entry);
+  }
+  return [...byRun.entries()].map(([runId, entry]) => ({
+    runId,
+    runName: entry.runName,
+    billLineId: entry.lines.size === 1 ? [...entry.lines][0]! : null,
+    lineCount: entry.lines.size,
+  }));
+}
+
+export type PhaseRequest = {
   billLineId: string;
-  name: string;
-  /** Every row the panel showed, by id and version. */
+  /** Every row the panel showed for this bill line, by id and version. */
   shown: CarryRef[];
   /** The rows the person left ticked. A subset of `shown`. */
   carry: CarryRef[];
+};
+
+export type AddConfigurationInput = PhaseRequest & {
+  name: string;
+  /** The same configuration on other phases' bill lines, each with its own carry list. */
+  phases?: PhaseRequest[];
   actor: string;
 };
 
-export type AddConfigurationResult = {
+export type AddedOnPhase = {
   recordId: string;
   recordNo: number;
-  label: string;
+  runName: string;
   carriedSpecs: number;
   carriedAnswers: number;
   stoppedExporting: number;
+};
+
+export type AddConfigurationResult = AddedOnPhase & {
+  label: string;
+  /** The same configuration added on other phases in the same act. */
+  alsoAdded: AddedOnPhase[];
   changeSetId: string;
+};
+
+type PlannedAdd = {
+  offer: CarryOffer;
+  carried: CarryItem[];
+  stops: CarryItem[];
 };
 
 export async function addConfiguration(txn: TxnSql, input: AddConfigurationInput): Promise<AddConfigurationResult> {
@@ -231,78 +322,138 @@ export async function addConfiguration(txn: TxnSql, input: AddConfigurationInput
   const head = heads[0];
   if (!head) throw new DomainConflictError("not_found", "That record no longer exists.", { status: 404 });
 
-  // THE LOCKS, project first, then the bill line. The project row serialises
-  // record_no allocation (the `boq-concurrency` defect); the bill line's row
-  // holds off a spec being added to it between the offer being re-derived and
-  // the copy being made. Project-then-record matches `confirm-boq`, and
-  // `createAttribute` takes only the record, so no cycle is possible.
+  // THE LOCKS: the project first, then every bill line in id order. The
+  // project row serialises record_no allocation (the `boq-concurrency`
+  // defect); the bill lines' rows hold off a spec being added to any of them
+  // between its offer being re-derived and the copy being made. Project, then
+  // records in id order, matches `confirm-boq` and `snapshotRecords`, and
+  // `createAttribute` takes only a record, so no cycle is possible.
   await txn`select id from projects where id = ${head.project_id} for update`;
-  await txn`select id from spec_records where id = ${input.billLineId} for update`;
 
-  const offer = await loadCarryOffer(txn, input.billLineId);
-  const billLine = offer.billLine;
-  const status = await txn`select status from spec_records where id = ${input.billLineId}`;
-  if (String(status[0]?.status) !== "active") {
-    throw new DomainConflictError(
-      "parent_not_active",
-      "That bill line is retired, so nothing can be added under it. Restore it first.",
-    );
+  const requests = [
+    { billLineId: input.billLineId, shown: input.shown, carry: input.carry },
+    ...(input.phases ?? []),
+  ];
+  const ids = requests.map((request) => request.billLineId);
+  if (new Set(ids).size !== ids.length) {
+    throw new DomainConflictError("duplicate_phase", "The same bill line was named twice.", { status: 400 });
   }
+  // Every other phase asked for has to be one this bill line's ref is on,
+  // unambiguously, NOW — the request names bill lines, and the client does
+  // not get to say which records are the same item.
+  if (requests.length > 1) {
+    const others = new Map((await loadOtherPhases(txn, input.billLineId)).map((phase) => [phase.billLineId, phase]));
+    for (const request of requests.slice(1)) {
+      if (!others.has(request.billLineId)) {
+        throw new DomainConflictError(
+          "targets_changed",
+          "One of the other phases no longer carries this item on exactly one line. Reload and check the phases again.",
+        );
+      }
+    }
+  }
+  await txn`select id from spec_records where id = any(${[...ids].sort()}::uuid[]) order by id for update`;
 
-  const name = checkConfigurationName(input.name, offer.taken, billLine.name);
-  if (!name.ok) {
-    throw new DomainConflictError(name.code, name.message, {
-      status: name.code === "name_taken" || name.code === "name_retired" ? 409 : 400,
-    });
-  }
-
-  // THE OFFER HAS TO BE THE ONE THAT WAS SHOWN. A spec added to the bill line,
-  // retired or corrected since the panel opened changes what stops reaching
-  // the export, and the person agreed to a sentence about a different set.
-  if (!sameOffer(input.shown, offer.offered)) {
-    throw new DomainConflictError(
-      "targets_changed",
-      `${billLine.name} has changed since this panel was opened, so what would stop being exported is not what you were shown. Reload and check the list again.`,
-    );
-  }
-  const live = new Map(offer.offered.map((item) => [carryKey(item), item]));
-  const carried: CarryItem[] = [];
-  for (const ref of input.carry) {
-    const item = live.get(carryKey(ref));
-    if (!item || item.version !== ref.version) {
-      throw new DomainConflictError("carry_not_offered", "Something ticked to carry is not on the bill line any more. Reload.", {
-        status: 400,
+  let label = "";
+  const plans: PlannedAdd[] = [];
+  for (const [index, request] of requests.entries()) {
+    const offer = await loadCarryOffer(txn, request.billLineId);
+    const where = index === 0 ? "" : `On ${offer.billLine.runName}: `;
+    const status = await txn`select status from spec_records where id = ${request.billLineId}`;
+    if (String(status[0]?.status) !== "active") {
+      throw new DomainConflictError(
+        "parent_not_active",
+        `${where}that bill line is retired, so nothing can be added under it. Restore it first.`,
+      );
+    }
+    // ONE NAME FOR THE WHOLE ACT, checked against each bill line's own
+    // configurations. A clash on any phase refuses all of them, naming the
+    // phase: a half-applied add across phases is the half-applied card again.
+    const name = checkConfigurationName(input.name, offer.taken, offer.billLine.name);
+    if (!name.ok) {
+      throw new DomainConflictError(name.code, `${where}${name.message}`, {
+        status: name.code === "name_taken" || name.code === "name_retired" ? 409 : 400,
       });
     }
-    if (!carried.includes(item)) carried.push(item);
-  }
-  const ticked = new Set(carried.map(carryKey));
-  const stops = stopsBeingExported(offer.offered, ticked, offer.alreadySplit);
-  const attributeIds = carried.filter((item) => item.kind === "attribute").map((item) => item.id);
-  const answerIds = carried.filter((item) => item.kind === "answer").map((item) => item.id);
-  const carryNote = carried.some((item) => item.kind === "dimension_note");
+    label = name.label;
 
+    // THE OFFER HAS TO BE THE ONE THAT WAS SHOWN. A spec added to the bill
+    // line, retired or corrected since the panel opened changes what stops
+    // reaching the export, and the person agreed to a sentence about a
+    // different set.
+    if (!sameOffer(request.shown, offer.offered)) {
+      throw new DomainConflictError(
+        "targets_changed",
+        `${where}${offer.billLine.name} has changed since this panel was opened, so what would stop being exported is not what you were shown. Reload and check the list again.`,
+      );
+    }
+    const live = new Map(offer.offered.map((item) => [carryKey(item), item]));
+    const carried: CarryItem[] = [];
+    for (const ref of request.carry) {
+      const item = live.get(carryKey(ref));
+      if (!item || item.version !== ref.version) {
+        throw new DomainConflictError(
+          "carry_not_offered",
+          `${where}something ticked to carry is not on the bill line any more. Reload.`,
+          { status: 400 },
+        );
+      }
+      if (!carried.includes(item)) carried.push(item);
+    }
+    const stops = stopsBeingExported(offer.offered, new Set(carried.map(carryKey)), offer.alreadySplit);
+    plans.push({ offer, carried, stops });
+  }
+
+  const primary = plans[0]!.offer.billLine;
+  const count = (items: CarryItem[], kind: CarryItem["kind"]) => items.filter((item) => item.kind === kind).length;
   const changeSetId = await openChangeSet(txn, {
-    projectId: billLine.projectId,
+    projectId: primary.projectId,
     kind: "record_create",
     actor: input.actor,
     reason: [
-      `Configuration ${name.label} of ${billLine.name} added by hand.`,
-      carried.length > 0
-        ? `Carried from the bill line: ${attributeIds.length} spec${attributeIds.length === 1 ? "" : "s"}, ${answerIds.length} answer${answerIds.length === 1 ? "" : "s"}${carryNote ? ", the dimension note" : ""}, each keeping its source.`
-        : "Nothing carried from the bill line.",
-      stops.length > 0 ? `${stops.length} left on the bill line stop being exported.` : "",
+      `Configuration ${label} of ${primary.name} added by hand on ${plans.map((plan) => plan.offer.billLine.runName).join(", ")}.`,
+      ...plans.map((plan) => {
+        const specs = count(plan.carried, "attribute");
+        const answers = count(plan.carried, "answer");
+        const note = count(plan.carried, "dimension_note") > 0 ? ", the dimension note" : "";
+        const carriedText =
+          plan.carried.length > 0
+            ? `carried from its own bill line: ${specs} spec${specs === 1 ? "" : "s"}, ${answers} answer${answers === 1 ? "" : "s"}${note}, each keeping its source`
+            : "nothing carried";
+        const stopText = plan.stops.length > 0 ? `; ${plan.stops.length} left on the bill line stop being exported` : "";
+        return `${plan.offer.billLine.runName}: ${carriedText}${stopText}.`;
+      }),
     ]
-      .filter(Boolean)
       .join(" ")
-      .slice(0, 1000),
+      .slice(0, 2000),
   });
 
+  const added: AddedOnPhase[] = [];
+  for (const plan of plans) {
+    added.push(await writeConfiguration(txn, plan, label, input.actor));
+  }
+  await snapshotRecords(
+    txn,
+    added.map((row) => row.recordId),
+    changeSetId,
+  );
+
+  const [first, ...rest] = added;
+  return { ...first!, label, alsoAdded: rest, changeSetId };
+}
+
+/** One bill line's new configuration: the record, then its own carried rows. */
+async function writeConfiguration(txn: TxnSql, plan: PlannedAdd, label: string, actor: string): Promise<AddedOnPhase> {
+  const billLineId = plan.offer.billLine.id;
+  const attributeIds = plan.carried.filter((item) => item.kind === "attribute").map((item) => item.id);
+  const answerIds = plan.carried.filter((item) => item.kind === "answer").map((item) => item.id);
+  const note = plan.carried.find((item) => item.kind === "dimension_note");
+
   const { recordId, recordNo } = await insertConfiguration(txn, {
-    billLineId: input.billLineId,
-    label: name.label,
-    dimensionNote: carryNote ? (offer.offered.find((item) => item.kind === "dimension_note")?.value ?? null) : null,
-    actor: input.actor,
+    billLineId,
+    label,
+    dimensionNote: note?.value ?? null,
+    actor,
   });
 
   if (attributeIds.length > 0) {
@@ -312,9 +463,9 @@ export async function addConfiguration(txn: TxnSql, input: AddConfigurationInput
          finish_id, state, source_run_id, source_page, sort_order, status, created_by, updated_by)
       select ${recordId}, a.attr_group, a.label, a.value, a.qualifier, a.unit, a.dimension_slot, a.material_code,
              a.spec_field_id, a.finish_id, a.state, a.source_run_id, a.source_page, a.sort_order, 'active',
-             ${input.actor}, ${input.actor}
+             ${actor}, ${actor}
         from record_attributes a
-       where a.id = any(${attributeIds}::uuid[]) and a.record_id = ${input.billLineId} and a.status = 'active'
+       where a.id = any(${attributeIds}::uuid[]) and a.record_id = ${billLineId} and a.status = 'active'
       returning id
     `;
     if (copied.length !== attributeIds.length) {
@@ -327,11 +478,11 @@ export async function addConfiguration(txn: TxnSql, input: AddConfigurationInput
       update spec_answers c
          set value = p.value, value_raw = p.value_raw, qualifier = p.qualifier, state = p.state,
              source_kind = 'manual', source_id = null,
-             confirmed_by = case when p.state = 'confirmed' then ${input.actor} else null end,
+             confirmed_by = case when p.state = 'confirmed' then ${actor} else null end,
              confirmed_at = case when p.state = 'confirmed' then now() else null end,
-             updated_by = ${input.actor}
+             updated_by = ${actor}
         from spec_answers p
-       where p.id = any(${answerIds}::uuid[]) and p.record_id = ${input.billLineId}
+       where p.id = any(${answerIds}::uuid[]) and p.record_id = ${billLineId}
          and c.record_id = ${recordId} and c.requirement_id = p.requirement_id and c.revision_no = 0
       returning c.id
     `;
@@ -344,17 +495,14 @@ export async function addConfiguration(txn: TxnSql, input: AddConfigurationInput
   }
 
   // The composed cells follow the carried attributes, by the one composer.
-  await recomposeAnswers(txn, recordId, null, input.actor);
-  await snapshotRecords(txn, [recordId], changeSetId);
-
+  await recomposeAnswers(txn, recordId, null, actor);
   return {
     recordId,
     recordNo,
-    label: name.label,
+    runName: plan.offer.billLine.runName,
     carriedSpecs: attributeIds.length,
     carriedAnswers: answerIds.length,
-    stoppedExporting: stops.length,
-    changeSetId,
+    stoppedExporting: plan.stops.length,
   };
 }
 

@@ -17,6 +17,11 @@
 // it is not what this panel showed, so the sentence cannot be about a
 // different set from the one that is committed.
 //
+// THE SAME BILL LINE ON THE OTHER PHASES is offered too, ticked, each with
+// its OWN carry list read from its own bill line — never this phase's specs
+// copied across, because phases can differ. A ref on two lines of one phase
+// (the SX11A case) offers nothing there, and says why.
+//
 // The rules are `src/lib/configuration-carry.ts`, shared with the route.
 // ============================================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -36,13 +41,29 @@ import {
 } from "@/lib/configuration-carry";
 
 export type CarryOfferPayload = {
-  billLine: { id: string; name: string; qty: number | null; version: number };
+  billLine: { id: string; name: string; runName: string; qty: number | null; version: number };
   offered: CarryItem[];
   taken: TakenName[];
   alreadySplit: boolean;
 };
 
-export type AddedConfiguration = { recordId: string; label: string; carriedSpecs: number; carriedAnswers: number };
+export type OtherPhasePayload = {
+  runId: string;
+  runName: string;
+  billLineId: string | null;
+  lineCount: number;
+  offer: CarryOfferPayload | null;
+};
+
+type Payload = CarryOfferPayload & { otherPhases?: OtherPhasePayload[] };
+
+export type AddedConfiguration = {
+  recordId: string;
+  label: string;
+  carriedSpecs: number;
+  carriedAnswers: number;
+  alsoAdded?: { recordId: string; runName: string }[];
+};
 
 function sourceOf(item: CarryItem): string {
   if (item.kind === "answer") return "checklist answer";
@@ -58,93 +79,32 @@ function stateLabel(item: CarryItem): string | null {
   return null;
 }
 
-export default function AddConfiguration({
-  billLineId,
-  onAdded,
-  onCancel,
+const refs = (items: CarryItem[]) => items.map((item) => ({ kind: item.kind, id: item.id, version: item.version }));
+
+/** One bill line's carry list: its own ticks, its own "stops being exported". */
+function CarryList({
+  offer,
+  ticked,
+  name,
+  onToggle,
 }: {
-  /** The bill line — the parent. From a configuration's screen, its parent. */
-  billLineId: string;
-  onAdded: (added: AddedConfiguration) => void | Promise<void>;
-  onCancel: () => void;
+  offer: CarryOfferPayload;
+  ticked: ReadonlySet<string>;
+  name: string;
+  onToggle: (item: CarryItem) => void;
 }) {
-  const [offer, setOffer] = useState<CarryOfferPayload | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [ticked, setTicked] = useState<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async (): Promise<boolean> => {
-    const result = await apiFetch<CarryOfferPayload>(`/api/records/${billLineId}/configurations`);
-    if (!result.ok) {
-      setLoadError(result.error);
-      return false;
-    }
-    setLoadError(null);
-    setOffer(result.data);
-    setTicked(defaultSelection(result.data.offered ?? []));
-    return true;
-  }, [billLineId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const offered = useMemo(() => offer?.offered ?? [], [offer]);
-  const differing = offered.filter((item) => item.differing);
-  const shared = offered.filter((item) => !item.differing);
-  const billLine = offer?.billLine.name ?? "the bill line";
-  const nameCheck = name.trim() ? checkConfigurationName(name, offer?.taken ?? [], billLine) : null;
-  const stops = stopsBeingExported(offered, ticked, offer?.alreadySplit ?? false);
-  const effect = describeExportEffect(stops, offer?.alreadySplit ?? false, billLine, foldConfigurationName(name));
-
-  function toggle(item: CarryItem) {
-    setTicked((current) => {
-      const next = new Set(current);
-      const key = carryKey(item);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
-  async function submit() {
-    if (!offer || !nameCheck?.ok) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const refs = (items: CarryItem[]) => items.map((item) => ({ kind: item.kind, id: item.id, version: item.version }));
-      const result = await apiFetch<AddedConfiguration>(`/api/records/${billLineId}/configurations`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name,
-          shown: refs(offered),
-          carry: refs(offered.filter((item) => ticked.has(carryKey(item)))),
-        }),
-      });
-      if (!result.ok) {
-        // A changed bill line means this panel is out of date: reload FIRST,
-        // then say why, or the reload would clear the message it caused.
-        if (result.data?.code === "targets_changed") await load();
-        setError(result.error);
-        return;
-      }
-      await onAdded(result.data);
-    } finally {
-      setSaving(false);
-    }
-  }
-
+  const billLine = offer.billLine.name;
+  const differing = offer.offered.filter((item) => item.differing);
+  const shared = offer.offered.filter((item) => !item.differing);
+  const stops = stopsBeingExported(offer.offered, ticked, offer.alreadySplit);
   const row = (item: CarryItem) => (
     <li key={carryKey(item)} className="flex items-start gap-2 py-1.5 text-[12.5px]">
       <input
         type="checkbox"
         className="mt-0.5"
         checked={ticked.has(carryKey(item))}
-        onChange={() => toggle(item)}
-        aria-label={`Carry ${item.label}`}
+        onChange={() => onToggle(item)}
+        aria-label={`Carry ${item.label} on ${offer.billLine.runName}`}
       />
       <span className="min-w-0 flex-1">
         <span className="font-medium text-neutral-900">{item.label}</span>
@@ -159,6 +119,151 @@ export default function AddConfiguration({
       </span>
     </li>
   );
+  return (
+    <>
+      {differing.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-medium text-neutral-700">
+            Usually different between configurations — left blank unless you tick them
+          </p>
+          <ul className="divide-y divide-neutral-100">{differing.map(row)}</ul>
+        </div>
+      )}
+      <div className="mt-2">
+        <p className="text-xs font-medium text-neutral-700">Carry from {billLine}</p>
+        {shared.length === 0 ? (
+          <p className="py-1.5 text-[12.5px] text-neutral-500">{billLine} holds nothing else to carry.</p>
+        ) : (
+          <ul className="divide-y divide-neutral-100">{shared.map(row)}</ul>
+        )}
+      </div>
+      <Note tone={stops.length > 0 ? "warn" : "info"}>
+        {describeExportEffect(stops, offer.alreadySplit, billLine, name)}
+      </Note>
+    </>
+  );
+}
+
+export default function AddConfiguration({
+  billLineId,
+  onAdded,
+  onCancel,
+}: {
+  /** The bill line — the parent. From a configuration's screen, its parent. */
+  billLineId: string;
+  onAdded: (added: AddedConfiguration) => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const [offer, setOffer] = useState<Payload | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  /** Ticks per bill line: this one and each other phase's. */
+  const [ticked, setTicked] = useState<Map<string, Set<string>>>(new Map());
+  /** The other phases' bill lines the configuration will also be added to. */
+  const [phasesOn, setPhasesOn] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (): Promise<boolean> => {
+    const result = await apiFetch<Payload>(`/api/records/${billLineId}/configurations`);
+    if (!result.ok) {
+      setLoadError(result.error);
+      return false;
+    }
+    setLoadError(null);
+    setOffer(result.data);
+    const next = new Map<string, Set<string>>([[billLineId, defaultSelection(result.data.offered ?? [])]]);
+    const on = new Set<string>();
+    for (const phase of result.data.otherPhases ?? []) {
+      if (!phase.billLineId || !phase.offer) continue;
+      next.set(phase.billLineId, defaultSelection(phase.offer.offered));
+      on.add(phase.billLineId);
+    }
+    setTicked(next);
+    setPhasesOn(on);
+    return true;
+  }, [billLineId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const others = useMemo(() => offer?.otherPhases ?? [], [offer]);
+  const billLine = offer?.billLine.name ?? "the bill line";
+  const folded = foldConfigurationName(name);
+  const chosen = others.filter(
+    (phase): phase is OtherPhasePayload & { billLineId: string; offer: CarryOfferPayload } =>
+      Boolean(phase.billLineId && phase.offer && phasesOn.has(phase.billLineId)),
+  );
+  // ONE NAME, checked against every bill line it will be added under. Any
+  // clash refuses the whole act, naming the phase.
+  const checks = name.trim()
+    ? [
+        { where: "", check: checkConfigurationName(name, offer?.taken ?? [], billLine) },
+        ...chosen.map((phase) => ({
+          where: `On ${phase.runName}: `,
+          check: checkConfigurationName(name, phase.offer.taken, phase.offer.billLine.name),
+        })),
+      ]
+    : [];
+  const refusals = checks.filter((entry) => !entry.check.ok);
+  const nameOk = checks.length > 0 && refusals.length === 0;
+
+  function toggle(lineId: string, item: CarryItem) {
+    setTicked((current) => {
+      const next = new Map(current);
+      const set = new Set(next.get(lineId) ?? []);
+      const key = carryKey(item);
+      if (set.has(key)) set.delete(key);
+      else set.add(key);
+      next.set(lineId, set);
+      return next;
+    });
+  }
+
+  function togglePhase(lineId: string) {
+    setPhasesOn((current) => {
+      const next = new Set(current);
+      if (next.has(lineId)) next.delete(lineId);
+      else next.add(lineId);
+      return next;
+    });
+  }
+
+  const request = (lineId: string, items: CarryItem[]) => {
+    const set = ticked.get(lineId) ?? new Set<string>();
+    return { shown: refs(items), carry: refs(items.filter((item) => set.has(carryKey(item)))) };
+  };
+
+  async function submit() {
+    if (!offer || !nameOk) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await apiFetch<AddedConfiguration>(`/api/records/${billLineId}/configurations`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          ...request(billLineId, offer.offered),
+          phases: chosen.map((phase) => ({
+            billLineId: phase.billLineId,
+            ...request(phase.billLineId, phase.offer.offered),
+          })),
+        }),
+      });
+      if (!result.ok) {
+        // A changed bill line means this panel is out of date: reload FIRST,
+        // then say why, or the reload would clear the message it caused.
+        if (result.data?.code === "targets_changed") await load();
+        setError(result.error);
+        return;
+      }
+      await onAdded(result.data);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="rounded-lg border border-neutral-300 bg-white p-3" aria-label="Add a configuration">
@@ -183,41 +288,63 @@ export default function AddConfiguration({
               className="mt-1 block w-48 rounded border border-neutral-300 px-2 py-1 text-sm"
             />
           </label>
-          {nameCheck && !nameCheck.ok && (
-            <p role="alert" className="mt-1 text-xs text-red-700">
-              {nameCheck.message}
-            </p>
-          )}
-          {nameCheck?.ok && (
-            <p className="mt-1 text-xs text-neutral-500">
-              It will be called {billLine} {nameCheck.label}.
-            </p>
-          )}
-
-          {differing.length > 0 && (
-            <div className="mt-3">
-              <p className="text-xs font-medium text-neutral-700">
-                Usually different between configurations — left blank unless you tick them
+          {refusals.map((entry) =>
+            entry.check.ok ? null : (
+              <p key={entry.where || "here"} role="alert" className="mt-1 text-xs text-red-700">
+                {entry.where}
+                {entry.check.message}
               </p>
-              <ul className="divide-y divide-neutral-100">{differing.map(row)}</ul>
-            </div>
+            ),
           )}
-          <div className="mt-3">
-            <p className="text-xs font-medium text-neutral-700">Carry from {billLine}</p>
-            {shared.length === 0 ? (
-              <p className="py-1.5 text-[12.5px] text-neutral-500">{billLine} holds nothing else to carry.</p>
-            ) : (
-              <ul className="divide-y divide-neutral-100">{shared.map(row)}</ul>
-            )}
-          </div>
+          {nameOk && (
+            <p className="mt-1 text-xs text-neutral-500">
+              It will be called {billLine} {folded}.
+            </p>
+          )}
 
-          <p className="mt-2 text-xs text-neutral-500">
+          <section className="mt-3">
+            <p className="text-xs font-semibold text-neutral-800">On {offer.billLine.runName}</p>
+            <CarryList
+              offer={offer}
+              ticked={ticked.get(billLineId) ?? new Set()}
+              name={folded}
+              onToggle={(item) => toggle(billLineId, item)}
+            />
+          </section>
+
+          {others.map((phase) =>
+            phase.billLineId && phase.offer ? (
+              <section key={phase.runId} className="mt-3 border-t border-neutral-100 pt-2">
+                <label className="flex items-center gap-2 text-xs font-semibold text-neutral-800">
+                  <input
+                    type="checkbox"
+                    checked={phasesOn.has(phase.billLineId)}
+                    onChange={() => togglePhase(phase.billLineId!)}
+                  />
+                  Also add {folded || "it"} to {phase.runName}
+                </label>
+                {phasesOn.has(phase.billLineId) && (
+                  <CarryList
+                    offer={phase.offer}
+                    ticked={ticked.get(phase.billLineId) ?? new Set()}
+                    name={folded}
+                    onToggle={(item) => toggle(phase.billLineId!, item)}
+                  />
+                )}
+              </section>
+            ) : (
+              <p key={phase.runId} className="mt-3 border-t border-neutral-100 pt-2 text-[12.5px] text-neutral-600">
+                {billLine} is on {phase.lineCount} lines of {phase.runName}, so nothing is added there — which of
+                them is this item is a person&rsquo;s call. Add it from the line you mean.
+              </p>
+            ),
+          )}
+
+          <p className="mt-3 text-xs text-neutral-500">
             The new configuration starts with no quantity
             {offer.billLine.qty !== null && <>: the bill&rsquo;s {offer.billLine.qty} is not divided between configurations</>}
             . It says <em>quantity not allocated</em> until somebody sets one.
           </p>
-
-          <Note tone={stops.length > 0 ? "warn" : "info"}>{effect}</Note>
 
           {error && (
             <p role="alert" className="mt-2 text-xs text-red-700">
@@ -225,8 +352,8 @@ export default function AddConfiguration({
             </p>
           )}
           <div className="mt-3 flex gap-2">
-            <Button variant="primary" size="sm" disabled={saving || !nameCheck?.ok} onClick={() => void submit()}>
-              {saving ? "Adding…" : "Add the configuration"}
+            <Button variant="primary" size="sm" disabled={saving || !nameOk} onClick={() => void submit()}>
+              {saving ? "Adding…" : chosen.length > 0 ? `Add on ${chosen.length + 1} phases` : "Add the configuration"}
             </Button>
             <Button variant="quiet" size="sm" onClick={onCancel}>
               Cancel

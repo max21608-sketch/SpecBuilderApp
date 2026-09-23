@@ -11,7 +11,7 @@ import { z } from "zod";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
-import { addConfiguration, loadCarryOffer } from "@/lib/configuration-add";
+import { addConfiguration, loadCarryOffer, loadOtherPhases } from "@/lib/configuration-add";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   try {
     const offer = await loadCarryOffer(sql, id);
-    return json({ ok: true, ...offer });
+    // The same bill line on the other live phases, each with ITS OWN offer —
+    // never this one's, because the phases can differ.
+    const phases = await loadOtherPhases(sql, id);
+    const otherPhases = [];
+    for (const phase of phases) {
+      otherPhases.push({ ...phase, offer: phase.billLineId ? await loadCarryOffer(sql, phase.billLineId) : null });
+    }
+    return json({ ok: true, ...offer, otherPhases });
   } catch (cause) {
     return transactionErrorResponse(cause);
   }
@@ -35,11 +42,20 @@ const Ref = z
   })
   .strict();
 
+const Phase = z
+  .object({
+    billLineId: z.string().uuid(),
+    shown: z.array(Ref).max(2000),
+    carry: z.array(Ref).max(2000),
+  })
+  .strict();
+
 const Body = z
   .object({
     name: z.string().max(200),
     shown: z.array(Ref).max(2000),
     carry: z.array(Ref).max(2000),
+    phases: z.array(Phase).max(50).optional(),
   })
   .strict();
 
@@ -67,6 +83,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         name: parsed.data.name,
         shown: parsed.data.shown,
         carry: parsed.data.carry,
+        phases: parsed.data.phases ?? [],
         actor: user.email,
       }),
     );
