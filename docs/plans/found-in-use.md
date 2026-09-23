@@ -35,9 +35,41 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-23
 
+### Seen while building the configurations work, none of them fixed
+
+**Status: open, recorded 2026-09-23** from the browser walks on the local stack, real Panther
+documents, Opus 5.
+
+- **The drawing set's MUR 2 fabric raises no clash.** Page 9 captions its swatch `ARMCHAIR` on a
+  DESK CHAIR page, `CH-` is deliberately unmapped, so `Tibor Blob Amber Fern` stages as *Other*,
+  no BWS field. Paired onto TYPE 2 it would sit beside COM 1 = Le Manach as a separate row rather
+  than as the replace question the two documents' disagreement deserves. Visible on the tab;
+  setting its field to COM 1 raises the question. Whether a caption naming a DIFFERENT piece
+  should still suggest the upholstery is a `classifyCallout` question.
+- **Two reads of one sheet grouped differently.** The S-301 sheet read at 10:0x linked page 2
+  to S-301; a read an hour later left page 2 codeless ("No item code on this page"). Same file,
+  same model. The codeless card offers "say which record it is". Model variance, not a rule.
+- **The model maps `MUR 1` to `Type 1` inside one document** (and names both on the card). Across
+  documents the app asks. Whether MUR 1 IS Type 1 is Max's question.
+- **S-200 and S-201 were read as one item on the merged pack** although their pages give
+  different fabrics per room; the up-front clash on COM 1 is the net, and a reviewer can split
+  by hand. Not observed on the drawing set read alone, which named them.
+- **A TBC seat height still gets a unit guess** ("mm guessed from the figures") where there is no
+  figure to guess from.
+- **The pairing question lists nothing about quantity**; per-configuration quantities are still
+  "not allocated", by design, and out of scope.
+- **The 70-page upload warning is PROVISIONAL**, from one 44-page measurement (358 s, 43,095
+  output tokens on Opus 5). Re-measure with a real 100-page set. Vercel Pro's extended-duration
+  beta (up to 1800 s per function) would move the time bound from ~90 pages to the output bound
+  at ~130: Max's decision, not taken.
+
 ### A page that lists five configurations stages as one chair with three fabrics
 
-**Status: open, being fixed (brief A, 2026-09-23).** Seen by Max on the S-301
+**Status: FIXED 2026-09-23 on the integration branch** (`docs/plans/configurations-2026-09-23.md`
+steps 2, 3, 5; landing commit recorded in `docs/plans/README.md`). Verified in a browser on the
+local stack against copies of the real S-301 sheet and drawing set: five configurations, ten
+records, each cloth in COM 1 on its own record; the drawing set's pages paired by a question.
+Not accepted by Max. Originally: **open, being fixed (brief A, 2026-09-23).** Seen by Max on the S-301
 desk chair specification sheet: *"we still are not getting the different specs
 per line item right … fabric reference as per room type … there's type one to
 five. So five different configurations."* Max said he had seen it before and
@@ -86,7 +118,10 @@ Seen alongside it and NOT part of the fix:
 
 ### An intake document stays "being read" until the page is reloaded
 
-**Status: open, seen by Max 2026-09-23.** *"Quite often you have to, it seems,
+**Status: FIXED 2026-09-23 on the integration branch** (plan step 6, `isIntakeRunInFlight`).
+Both candidates below were real. Verified on the local stack, no reload: the overview moved
+"Reading" → "Ready to review" in 30 s; the pack screen went "3 still being read · 2 waiting
+for a slot" → "5 waiting for you" in 95 s. Originally: **open, seen by Max 2026-09-23.** *"Quite often you have to, it seems,
 reload the page to get it to switch from … scanning to ready to open. It would
 be great if it automatically refreshed the page and the user wouldn't have to
 do that."*
@@ -118,7 +153,11 @@ documents, since the cap is three, and note which screen was open.
 
 ### The item picture is still the whole page where the page has a real picture on it
 
-**Status: open. A second sighting of 2026-09-18 item 6**, which is recorded
+**Status: FIXED IN PRACTICE by the move to Opus 5, 2026-09-23 (plan steps 1 and 7).** On the
+local stack every Opus read reported view regions: the real S-301 and S-201 sheets proposed the
+chair photograph, not the page, and the merged 44-page pack gave all 25 items a region (the
+Sonnet reads of the same sheets gave none). The whole-page fallback stays as the recovery path.
+Originally: **open. A second sighting of 2026-09-18 item 6**, which is recorded
 below as still open and in `fix-found-in-use-2026-09-23.md` as *deferred with a
 cost*. Seen by Max 2026-09-23: *"It's still not picking up all the time an
 actual crop. Quite often it seems to be just displaying the whole page instead
