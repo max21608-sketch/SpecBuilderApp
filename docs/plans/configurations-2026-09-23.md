@@ -24,6 +24,8 @@ entries of that date carry the evidence):
 | S5 | "the option to add a configuration manually, and it should come equipped with a default set of things to fill in" | 3, 4 |
 | S6 | "not too bothered about how long … or how much it costs … the key is really just the accuracy" · "vercel is on pro" · "I think high is enough" | 1 |
 | S7 | "verify in browser and make sure that things actually work and look okay visually before coming back to me" | 0, every gate |
+| S8 | "if those were the configurations … act as kind of tabs … you just see configuration one, and it's got the dimensions and the fabric … it's the same every time" | 2, 3 |
+| S9 | "what's going to happen if it's like a 100-page document? … What's going to happen with this system for large documents?" | 2 (page picker), 10 |
 
 Decided with Max the same day and not re-opened here: five configurations for
 S-301 (Types 1 and 5 are two, sharing their rows); a configuration is named as
@@ -112,13 +114,22 @@ The defect: the model read S-301's five room types correctly and the schema had
 nowhere to put them, so they were welded into row labels and handed COM 1–3 of
 ONE record. **Confirming that card writes one chair with three fabrics.**
 
+**The card is TABS, one per configuration (S8, 2026-09-23).** Each tab shows
+that configuration complete and in the same layout every time: dimensions,
+then fabrics and finishes, then notes. A shared row appears in every tab as the
+same observation, and says so in words ("shared by all 5"), so editing it once
+edits it everywhere. Only one tab is on screen at a time, which also keeps one
+input per observation. A code with no configurations has the same layout with
+no strip. The "Page 1 / Page 2" chips at the top go; pages are sources and live
+in the sidebar picker. The picker holds at most ~8 buttons and then becomes
+prev/next with "page n of N" (S9), and the swatch's "Crop from" does the same.
+
 Staged `schemaVersion: 3`: a page lists the configurations it names; a row says
 which configurations it applies to (empty = shared); a page can say which
 configurations it depicts (`MUR 1 & TYPO 5`). The confirm stays one request per
 page and fans each row out to its configurations' records (five × two phases =
 ten records), claiming COM slots PER RECORD. The card shows one chip per
-configuration, the geometry once, and one band per fabric group, and says how
-many records confirming creates. A confirm that would create a configuration
+configuration's tab, and says how many records confirming creates. A confirm that would create a configuration
 beside differently-named existing ones is blocked until acknowledged (the floor
 under step 5). v1 and v2 reads stay frozen; nothing parses old labels.
 
@@ -126,7 +137,8 @@ Simplest version: configurations are variants, which already exist (0024); no
 new table. Trap avoided: a string rule reading `- Type 2` out of labels, which
 is the inference the 2026-09-18 overhaul removed.
 **Browser DoD (local):** read the real S-301 sheet (local copy); the card shows five
-chips `TYPE 1`–`TYPE 5`, four bands, each input once, "creates 10 records";
+tabs `TYPE 1`–`TYPE 5`, each with the shared dimensions and its own cloth, a
+shared edit showing on every tab, "creates 10 records";
 confirm; the phase table shows ten configurations under S-301; each record's
 Specs tab shows its own cloth in COM 1 and the shared `W550 x D565 x H735 x
 SH430mm`; the BWS export carries ten rows and no S-301 parent row.
@@ -251,6 +263,36 @@ COM 1 and the shared geometry; the Type 2 disagreement shown and decided by
 Max, not by the app; a crop of the chair on the spec sheet's card; no reload
 needed at any point; and the export read line by line against the pages.
 
+## Step 10 — large documents (S9): measure, then fix what breaks
+
+The page buttons were never the problem: they list the ITEM's pages, not the
+document's, so a 100-page set still shows each card its own two or three. The
+limits that a large document hits are elsewhere, and none has been measured
+(`found-in-use.md` 2026-09-20: *"A 120-page drawing set has never been read for
+real"*):
+
+- **The read's output ceiling.** One read can write 128K tokens, thinking
+  included. Past that the run fails as `truncated` ("split it into smaller
+  documents"). On Sonnet an 11-page set wrote about 5K; nobody knows what
+  Opus writes for 100 pages.
+- **The time budget.** 800 s from step 1.
+- **The review screen.** One card per code: a 100-page set is perhaps 40–60
+  cards in one long scroll, with no way to jump to an item or see what is left.
+- **The known hard stops**, already refused in words: 600 pages, 20 MB at
+  registration, 32 MB per request.
+
+So: fetch one real large drawing set from SharePoint, read-only (candidates:
+the Maybourne Paris shop drawings), read it on the local stack, and record the
+pages, time, output tokens and whether it truncated, then render its review
+screen and time it. Fix only what the measurement shows. The one fix already
+known to be needed is **navigation on the review screen**: an item list at the
+top (code, name, pending count) that jumps to the card, and a *show only
+pending* filter. **Splitting one read into page ranges is currently on
+CLAUDE.md's excluded list** ("splitting an oversize drawing set"). If the
+measurement shows truncation at a size Panther-like packs reach, it comes back
+to Max as a decision with the numbers, and it is not built on spec.
+~1 h measuring, ~2–3 h coder for the navigation, ~1 h verification.
+
 ## Step 9 — close out
 
 CLAUDE.md and AGENTS.md (the new load-bearing sections: named configurations,
@@ -277,15 +319,16 @@ is briefed as soon as step 2 lands. Step 6 is independent and fills a gap.
 | 1 Opus | done | 30 min | with step 0 |
 | 2 named configurations | 4–5 h (running) | 1.5 h | today |
 | 3 card controls | 2–3 h | 1 h | tomorrow morning |
-| 4 add after confirm | 3–4 h (running) | 2 h | today / tomorrow morning |
+| 4 add after confirm | built (`6b75690`), timber/metal default to fix | 2 h | today / tomorrow morning |
 | 5 two documents | 3 h | 1 h | tomorrow |
 | 6 status refresh | 1 h | 30 min | tomorrow |
 | 7 crop prompt | in step 2 | measured in §8 | — |
 | 8 staging acceptance with Max | — | 30 min with Max | end of tomorrow or the day after |
+| 10 large documents | 2–3 h | 2 h incl. measuring | tomorrow, alongside 5 |
 | 9 close out | — | 1 h | last |
 
-**Estimate: about two working days to "ready for the real-pack session"**,
-realistically 1.5–2.5, with the session itself (about 30 minutes of Max's
+**Estimate: about two and a half working days to "ready for the real-pack
+session"**, realistically 2–3 with step 10 and the tabs, with the session itself (about 30 minutes of Max's
 time) at the end. The spread is in steps 2 and 5, which touch the most load-bearing
 code in the app (the confirm fan-out and variant creation), and in whatever the
 local stack turns up the first time the database tier runs off the sandbox.
