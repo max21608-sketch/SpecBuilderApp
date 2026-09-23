@@ -310,6 +310,44 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
   const held = queue.filter((item) => item.status === "needs-kind");
   const heldAndAnswered = held.filter((item) => item.choice);
 
+  // ============================================================================
+  // THIRTY BOXES, SET IN ONE GO (plan any-bill, step 3). Max, on the Miami
+  // Beach pack: assigning thirty dropdowns by hand is a chore, and most of a
+  // pack is drawings.
+  //
+  // A BULK CHOICE IS A PERSON'S CHOICE, exactly as picking the select is: it
+  // writes `choice`, which the press never second-guesses and never pays to
+  // look at. It writes it DIRECTLY, never by driving the select — a select
+  // already showing "Shop drawings" fires no change event when Shop drawings
+  // is chosen, which is the level-picker trap, and the point here is that
+  // agreeing with thirty suggestions takes one press.
+  // ============================================================================
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set());
+  const [bulkKind, setBulkKind] = useState("");
+  /** A row whose kind can still be set: not registered, not refused. */
+  const settable = pending;
+  const tickedRows = settable.filter((item) => ticked.has(item.key));
+  const allTicked = settable.length > 0 && tickedRows.length === settable.length;
+  /**
+   * WHAT "ALL UNSET" TOUCHES: a PDF whose box is empty — no person's choice,
+   * and nothing read off its name or its pages. A box already showing a
+   * suggestion is not unset, and overwriting a name that says "BOQ" with Shop
+   * drawings would be the bulk control guessing louder than the guess. A
+   * spreadsheet is left alone because a drawing set is never one: an unset
+   * .xlsx is a bill or a schedule far more often, and reading it under the
+   * drawings prompt spends a charged read on the wrong question.
+   */
+  const unsetDrawings = settable.filter((item) => !kindOf(item) && isPdfUpload(item.file.name, item.file.type));
+
+  const setChoice = (keys: Set<string>, value: string) =>
+    setQueue((current) => current.map((item) => (keys.has(item.key) ? { ...item, choice: value } : item)));
+
+  function applyBulk() {
+    if (!bulkKind || tickedRows.length === 0) return;
+    setChoice(new Set(tickedRows.map((item) => item.key)), bulkKind);
+    setTicked(new Set());
+  }
+
   /**
    * THE PACK, created the first time a file is about to be REGISTERED into it.
    *
@@ -682,6 +720,54 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         </p>
       ))}
 
+      {/* Two or more: a bulk control over one file is the row's own select. */}
+      {settable.length > 1 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <label className="inline-flex items-center gap-2 text-neutral-700">
+            <input
+              type="checkbox"
+              aria-label="Tick every file"
+              checked={allTicked}
+              ref={(box) => {
+                if (box) box.indeterminate = tickedRows.length > 0 && !allTicked;
+              }}
+              onChange={() => setTicked(allTicked ? new Set() : new Set(settable.map((item) => item.key)))}
+              disabled={busy}
+            />
+            {tickedRows.length > 0 ? `${tickedRows.length} ticked` : "Tick all"}
+          </label>
+          <span className="text-neutral-500">Set the ticked ones to</span>
+          <select
+            aria-label="Kind for the ticked files"
+            value={bulkKind}
+            onChange={(event) => setBulkKind(event.target.value)}
+            disabled={busy}
+            className="border border-neutral-300 rounded px-2 py-1 text-sm text-neutral-900"
+          >
+            <option value="">Choose a kind…</option>
+            {CHOICES.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+          <Button size="xs" onClick={applyBulk} disabled={busy || !bulkKind || tickedRows.length === 0}>
+            Apply
+          </Button>
+          {unsetDrawings.length > 0 && (
+            <Button
+              size="xs"
+              className="ml-auto"
+              title="Every PDF whose kind is still unset. A suggested kind is left as it is."
+              onClick={() => setChoice(new Set(unsetDrawings.map((item) => item.key)), "shop_drawings")}
+              disabled={busy}
+            >
+              All unset → Shop drawings ({unsetDrawings.length})
+            </Button>
+          )}
+        </div>
+      )}
+
       {queue.length > 0 && (
         <ul className="mt-3 divide-y divide-neutral-100 border border-neutral-200 rounded">
           {queue.map((item) => {
@@ -690,11 +776,31 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
             const unchecked = Boolean(item.suggested) && !item.choice;
             return (
               <li key={item.key} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                {item.status !== "done" && item.status !== "refused" ? (
+                  <input
+                    type="checkbox"
+                    aria-label={`Tick ${item.file.name}`}
+                    checked={ticked.has(item.key)}
+                    onChange={() =>
+                      setTicked((current) => {
+                        const next = new Set(current);
+                        if (next.has(item.key)) next.delete(item.key);
+                        else next.add(item.key);
+                        return next;
+                      })
+                    }
+                    disabled={busy}
+                  />
+                ) : (
+                  // Held in place so the names line up.
+                  <span className="inline-block w-[13px]" aria-hidden />
+                )}
                 <span className="text-sm text-neutral-900 flex-1 min-w-[12rem] truncate" title={item.file.name}>
                   {item.file.name}
                 </span>
 
                 <select
+                  aria-label={`Kind of ${item.file.name}`}
                   value={kindOf(item)}
                   onChange={(event) => update(item.key, { choice: event.target.value })}
                   disabled={busy || item.status === "done"}

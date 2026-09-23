@@ -115,3 +115,32 @@ describe("a word that is not a kind names nothing", () => {
     expect(guessKindFromName("AP364 - BOQ - Seating.csv")?.genre).toBe("bill_of_quantities");
   });
 });
+
+describe("a bill named the way a tender names it (plan any-bill, step 3)", () => {
+  it("reads 'bill of quantities' and 'pricing document' on a spreadsheet, as one answer", () => {
+    // The shape of the Aman bill's name, with invented parts.
+    const guess = guessKindFromName("Appendix 2 - XYZ_Bill of Quantities (Pricing Document) - Supplier ABC.xlsx");
+    expect(guess?.genre).toBe("bill_of_quantities");
+    expect(guess?.evidence).toContain("Bill of Quantities");
+    expect(guess?.evidence).toContain("Pricing Document");
+    expect(guessKindFromName("PRICING DOCUMENT - Seating.xlsx")?.genre).toBe("bill_of_quantities");
+    expect(guessKindFromName("Tender pricing documents.csv")?.genre).toBe("bill_of_quantities");
+  });
+
+  it("abstains on anything short of the whole phrase, or not on a spreadsheet", () => {
+    expect(guessKindFromName("Pricing Document.pdf")).toBeNull();
+    expect(guessKindFromName("Supplier pricing.xlsx")).toBeNull();
+    expect(guessKindFromName("Pricing documentation.xlsx")).toBeNull();
+    expect(guessKindFromName("Repricing document.xlsx")).toBeNull();
+    // Two kinds named is still no kind.
+    expect(guessKindFromName("Pricing document and finishes schedule.xlsx")).toBeNull();
+  });
+
+  it("reads nothing into a specifier's drawing numbers", () => {
+    // The Miami Beach drawings are numbered, not named; a numbering scheme is
+    // not evidence of a kind.
+    expect(guessKindFromName("AM-ID-MUR-415.pdf")).toBeNull();
+    expect(guessKindFromName("AM-ID-MUR-FUR-02.pdf")).toBeNull();
+    expect(guessKindFromName("260824 - OMS and FF&E Tracker.pdf")).toBeNull();
+  });
+});
