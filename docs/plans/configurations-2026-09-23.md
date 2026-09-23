@@ -48,9 +48,10 @@ blank and first; extraction moves to Opus at effort `high`.
   for a list screen, a 300-line fixture.
 - **The company-data rule.** The sandbox Neon database, the Vercel Blob store
   and SharePoint hold company data and are read-only for Claude. So Claude
-  verifies on a LOCAL stack with invented data (§0), and the moments that need
-  real Panther documents (pressing Read, pressing Confirm) are Max's clicks in
-  a short session at the end (§8), with Claude reading the screens beside him.
+  verifies on a LOCAL stack holding copies of the real Panther pack (§0), and
+  the only presses on staging itself (Read, Confirm) are Max's, in a short
+  acceptance session at the end (§8), with Claude reading the screens beside
+  him.
 
 ## Step 0 — a local stack Claude can verify on (new, necessary)
 
@@ -64,12 +65,12 @@ unrun.
   `DATABASE_ENVIRONMENT=sandbox` in a separate env file that points at
   `localhost`, never `.env.local`. Migrations and seeds are applied through the
   app's own `db:migrate` / `db:seed`, which print the host.
-- **A local blob stand-in**, development only: `blob-source.ts`, the upload
-  token route and the few `put`/`copy` callers go through one small adapter
-  that, when `BLOB_BACKEND=local`, reads and writes a folder under the
-  scratchpad. It refuses to load unless `APP_ENV=development` **and** the
-  database host is `localhost`, so it cannot be switched on in a deployment by
-  mistake. The pathname scope checks (`projects/<id>/`) stay exactly as they
+- **A local fake Blob server**, development only: `@vercel/blob` reads
+  `VERCEL_BLOB_API_URL` / `NEXT_PUBLIC_VERCEL_BLOB_API_URL`, so a small local
+  server answering the SDK's own calls needs little or no app code. Files live
+  under `~/dev/localstack/blob/`. Any app code it does need refuses unless
+  `APP_ENV=development` **and** the database host is `localhost`, so it cannot
+  be switched on in a deployment by mistake. The pathname scope checks (`projects/<id>/`) stay exactly as they
   are.
 - **The real Panther pack, COPIED** (Max, 2026-09-23: *"just use the real
   docs"*): the seating BOQ, the nine `SPEC-346` sheets and the preamble, copied
@@ -101,7 +102,7 @@ of one. Four checks green on the branch (1689 passed, db tier skipped).
 
 **Not done:** no read has run on Opus. **DoD:** land, confirm the staging
 deployment reaches Ready at that SHA (an 800 s `maxDuration` above the plan's
-limit fails the deploy loudly, not silently), and one invented document read
+limit fails the deploy loudly, not silently), and one real document read
 on the local stack records `model = claude-opus-5` with its elapsed time.
 ~30 min.
 
