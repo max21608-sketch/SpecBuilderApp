@@ -34,7 +34,15 @@ import { TOOLS, type ExtractionPayload } from "@/lib/extraction-schema";
 // independent knobs -- see the header of extraction-claim.ts.
 import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
 
-export const EXTRACTION_MODEL = "claude-sonnet-5";
+// Opus, not Sonnet, from 2026-09-23. Max: "I'm not too bothered about how long
+// this extraction process takes, or how much it costs in API cost … the key
+// is really just the accuracy of the data." Opus 5 and not Opus 5.5: 5.5
+// refuses a forced `tool_choice` with a 400, and every extraction below
+// forces its tool; Opus 5 accepts it, like Sonnet 5 did. Same 1M context and
+// 600-page PDF ceiling as Sonnet 5, so MAX_MODEL_PDF_PAGES does not move. The
+// timings in extraction-claim.ts were raised in the same change, because
+// Opus reads slower. Effort stays "high" (Max, same day).
+export const EXTRACTION_MODEL = "claude-opus-5";
 
 const MAX_TOKENS = 128_000;
 

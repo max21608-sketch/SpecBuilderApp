@@ -32,7 +32,7 @@ export const runtime = "nodejs";
 // compile step reports success. Keep it equal to MAX_DURATION_SECONDS and to
 // vercel.json; tests/lib/extraction-timing.test.ts asserts all three agree,
 // because the number cannot be shared by import.
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 // The trigger schema is picky and rejecting it fails the whole deployment
 // before any app code runs: `type` must be exactly `queue/v1beta` (the variant

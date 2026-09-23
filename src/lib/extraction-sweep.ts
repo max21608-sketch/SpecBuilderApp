@@ -32,8 +32,8 @@
 //
 // THE 24-HOUR DEADLINE IS THE SAFETY MARGIN, and it is worth naming because it
 // is the only thing making "nobody is still working on this" safe to assume. A
-// worker invocation is bounded by MAX_DURATION_SECONDS (300) and a claim
-// expires after CLAIM_EXPIRY_SECONDS (360); the deadline is 24 hours, which is
+// worker invocation is bounded by MAX_DURATION_SECONDS (800) and a claim
+// expires after CLAIM_EXPIRY_SECONDS (900); the deadline is 24 hours, which is
 // 240 times the longest either can legitimately last. The fence below still
 // re-checks for a live claim, because a free check is cheaper than reasoning
 // about clock skew.
