@@ -440,6 +440,13 @@ function RecordView() {
     setPendingReason(null);
   }
 
+  /** Opens the Add panel at the top of the Specs tab and brings it into view. */
+  function openAddConfiguration() {
+    setAddingConfiguration(true);
+    setTab("specs");
+    requestAnimationFrame(() => document.getElementById("add-configuration")?.scrollIntoView({ block: "start" }));
+  }
+
   /** A configuration's name, corrected. Refused in words for one already used. */
   async function rename() {
     if (!data || renaming === null) return;
@@ -941,6 +948,22 @@ function RecordView() {
 
         {tab === "specs" && (
           <div className="grid items-start gap-4 min-[820px]:grid-cols-[minmax(0,1fr)_260px]">
+            {/* ADD, BY HAND (2026-09-23), SPANNING BOTH COLUMNS: its own block,
+                never squeezed into the sidebar. A sibling from a
+                configuration's screen goes under the SAME bill line, so the
+                panel is always given the parent. */}
+            {addingConfiguration && (
+              <div id="add-configuration" className="min-w-0 min-[820px]:col-span-2">
+                <AddConfiguration
+                  billLineId={record.parent_id ?? record.id}
+                  onCancel={() => setAddingConfiguration(false)}
+                  onAdded={(added) => {
+                    setAddingConfiguration(false);
+                    router.push(`/dashboard/records/${added.recordId}`);
+                  }}
+                />
+              </div>
+            )}
             <div className="min-w-0">
               {/* A CONFIGURATION'S OWN FIELDS COME FIRST, blank until somebody
                   fills them: the fabrics (COM 1 to COM 3) are what make it a
@@ -1539,31 +1562,7 @@ function RecordView() {
                   configuration has to name the bill line it came from, because
                   its record number does not.
                   ========================================================== */}
-              <Card
-                title="Configurations"
-                actions={
-                  !addingConfiguration && (
-                    <Button variant="secondary" size="xs" onClick={() => setAddingConfiguration(true)}>
-                      Add a configuration
-                    </Button>
-                  )
-                }
-              >
-                {/* ADD, BY HAND (2026-09-23). A sibling from a configuration's
-                    screen goes under the SAME bill line, so the panel is always
-                    given the parent. */}
-                {addingConfiguration && (
-                  <div className="mb-3">
-                    <AddConfiguration
-                      billLineId={record.parent_id ?? record.id}
-                      onCancel={() => setAddingConfiguration(false)}
-                      onAdded={(added) => {
-                        setAddingConfiguration(false);
-                        router.push(`/dashboard/records/${added.recordId}`);
-                      }}
-                    />
-                  </div>
-                )}
+              <Card title="Configurations">
                 {record.parent_id ? (
                   <>
                   <p className="text-[12.5px] text-neutral-700">
@@ -1705,6 +1704,14 @@ function RecordView() {
                     This bill line is not split.
                     {record.qty !== null && <> Its {record.qty} are one item.</>}
                   </p>
+                )}
+                {/* UNDER THE TEXT, not in the heading: this column is 260px and
+                    a heading action ran past the card's edge. The panel it
+                    opens is WIDE, at the top of this tab. */}
+                {!addingConfiguration && (
+                  <Button variant="secondary" size="xs" className="mt-3" onClick={openAddConfiguration}>
+                    Add a configuration
+                  </Button>
                 )}
               </Card>
             </div>

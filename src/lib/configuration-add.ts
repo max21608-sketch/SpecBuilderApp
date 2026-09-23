@@ -149,6 +149,7 @@ export async function loadCarryOffer(q: TxnSql, billLineId: string): Promise<Car
       qualifier: text(row.qualifier),
       state: String(row.state),
       jsonId,
+      group: String(row.attr_group),
       source: row.source_run_id
         ? { filename: text(row.source_filename), page: row.source_page === null ? null : Number(row.source_page) }
         : null,

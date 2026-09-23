@@ -5,7 +5,7 @@
 // words for a name already used, and the sentence saying what stops being
 // exported. And what it must SEND: ids and versions only, never values.
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AddConfiguration from "@/components/records/AddConfiguration";
 import type { CarryItem } from "@/lib/configuration-carry";
@@ -28,7 +28,8 @@ const item = (overrides: Partial<CarryItem> & Pick<CarryItem, "id" | "label">): 
 const offer = {
   billLine: { id: "bill", name: "S-301", runName: "MAIN", qty: 45, version: 4 },
   offered: [
-    item({ id: "w", label: "W · Width", value: "840 mm", source: { filename: "S-301.pdf", page: 3 } }),
+    item({ id: "w", label: "W · Width", value: "840 mm", group: "dimension", source: { filename: "S-301.pdf", page: 3 } }),
+    item({ id: "d", label: "D · Depth", value: "790 mm", group: "dimension", source: { filename: "S-301.pdf", page: 3 } }),
     item({ id: "com1", label: "SEAT", value: "Tibor Blob Amber Fern", jsonId: 1, differing: true, source: { filename: "S-301.pdf", page: 3 } }),
     item({ id: "stitch", kind: "answer", label: "Stitching spec", value: "Plain stitch", version: 2 }),
   ],
@@ -49,15 +50,35 @@ beforeEach(() => {
 });
 
 describe("adding a configuration", () => {
-  it("lists what the bill line holds, the differing field unticked, with where each came from", async () => {
+  it("keeps the differing field open and unticked, and folds the rest into counted groups", async () => {
     render(<AddConfiguration billLineId="bill" onAdded={() => {}} onCancel={() => {}} />);
-    const width = await screen.findByRole("checkbox", { name: "Carry W · Width on MAIN" });
-    expect(width).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Carry Stitching spec on MAIN" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Carry SEAT on MAIN" })).not.toBeChecked();
-    expect(screen.getAllByText("S-301.pdf, page 3")).toHaveLength(2);
+    expect(await screen.findByRole("checkbox", { name: "Carry SEAT on MAIN" })).not.toBeChecked();
     expect(screen.getByText(/Usually different between configurations/)).toBeInTheDocument();
+    // Folded: a count per group, and no tick visible until show.
+    expect(screen.getByText("Dimensions — 2 carried")).toBeInTheDocument();
+    expect(screen.getByText("Checklist answers — 1 carried")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Carry W · Width on MAIN" })).toBeNull();
     expect(screen.getByText(/quantity not allocated/)).toBeInTheDocument();
+  });
+
+  it("reveals a group's ticks on show, still ticked, with where each came from", async () => {
+    render(<AddConfiguration billLineId="bill" onAdded={() => {}} onCancel={() => {}} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Show Dimensions on MAIN" }));
+    const width = screen.getByRole("checkbox", { name: "Carry W · Width on MAIN" });
+    expect(width).toBeChecked();
+    expect(screen.getAllByText("S-301.pdf, page 3").length).toBeGreaterThanOrEqual(2);
+    await userEvent.click(width);
+    expect(screen.getByText("Dimensions — 1 of 2 carried")).toBeInTheDocument();
+    expect(screen.getByText(/S-301 becomes a heading/)).toHaveTextContent("W · Width");
+  });
+
+  it("puts Add in the footer, beside what stops being exported", async () => {
+    render(<AddConfiguration billLineId="bill" onAdded={() => {}} onCancel={() => {}} />);
+    const effect = await screen.findByTestId("export-effect");
+    expect(effect).toHaveTextContent("S-301 becomes a heading");
+    const footer = effect.parentElement!;
+    expect(within(footer).getByRole("button", { name: "Add the configuration" })).toBeInTheDocument();
+    expect(footer.className).toContain("sticky");
   });
 
   it("says what stops being exported, and follows the ticks", async () => {
@@ -90,9 +111,11 @@ describe("adding a configuration", () => {
     const post = apiFetch.mock.calls.find(([, init]) => init?.method === "POST");
     const body = JSON.parse(String(post?.[1]?.body));
     expect(body.name).toBe("Type 2");
-    expect(body.shown).toHaveLength(3);
+    expect(body.shown).toHaveLength(4);
+    // Folded rows are still ticked, and still sent.
     expect(body.carry).toEqual([
       { kind: "attribute", id: "w", version: 1 },
+      { kind: "attribute", id: "d", version: 1 },
       { kind: "answer", id: "stitch", version: 2 },
     ]);
     expect(body.phases).toEqual([]);
@@ -105,7 +128,8 @@ describe("the same bill line on the other phases", () => {
     billLine: { id: "bill-ve", name: "S-301", runName: "MAIN - VE", qty: 20, version: 1 },
     offered: [
       // The VE phase's OWN width, not MAIN's: phases can differ.
-      item({ id: "w-ve", label: "W · Width", value: "800 mm", source: { filename: "S-301 VE.pdf", page: 1 } }),
+      item({ id: "w-ve", label: "W · Width", value: "800 mm", group: "dimension", source: { filename: "S-301 VE.pdf", page: 1 } }),
+      item({ id: "com1-ve", label: "SEAT", value: "Kolda", jsonId: 1, differing: true }),
     ],
     taken: [{ label: "TYPE 2", status: "retired" }],
     alreadySplit: false,
@@ -126,10 +150,14 @@ describe("the same bill line on the other phases", () => {
     );
   });
 
-  it("offers each other phase ticked, with ITS OWN specs, and says why an ambiguous one is offered nothing", async () => {
+  it("offers each other phase as one ticked line, its OWN specs behind show, and says why an ambiguous one is offered nothing", async () => {
     render(<AddConfiguration billLineId="bill" onAdded={() => {}} onCancel={() => {}} />);
     await userEvent.type(await screen.findByPlaceholderText("Type 2"), "Type 3");
     expect(screen.getByRole("checkbox", { name: "Also add TYPE 3 to MAIN - VE" })).toBeChecked();
+    expect(screen.getByText(/1 spec carried, 1 left on the bill line/)).toBeInTheDocument();
+    expect(screen.queryByText(/800 mm/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show what is carried on MAIN - VE" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show Dimensions on MAIN - VE" }));
     expect(screen.getByRole("checkbox", { name: "Carry W · Width on MAIN - VE" })).toBeChecked();
     expect(screen.getByText(/800 mm/)).toBeInTheDocument();
     expect(screen.getByText(/S-301 is on 2 lines of MUR, so nothing is added there/)).toBeInTheDocument();
@@ -151,7 +179,14 @@ describe("the same bill line on the other phases", () => {
     const post = apiFetch.mock.calls.find(([, init]) => init?.method === "POST");
     const body = JSON.parse(String(post?.[1]?.body));
     expect(body.phases).toEqual([
-      { billLineId: "bill-ve", shown: [{ kind: "attribute", id: "w-ve", version: 1 }], carry: [{ kind: "attribute", id: "w-ve", version: 1 }] },
+      {
+        billLineId: "bill-ve",
+        shown: [
+          { kind: "attribute", id: "w-ve", version: 1 },
+          { kind: "attribute", id: "com1-ve", version: 1 },
+        ],
+        carry: [{ kind: "attribute", id: "w-ve", version: 1 }],
+      },
     ]);
   });
 
