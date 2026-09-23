@@ -228,10 +228,14 @@ describeIfDb("a bill is mapped, not refused", () => {
     const staged = await run(unreadId);
     const done = await confirm(unreadId, staged.version);
     expect(done.status).toBe(200);
-    expect(done.body.imported).toBe(8);
+    // Seven records, not eight: the fabric row reads "ZZ-FAB-13 (ZZ-FUR-10)",
+    // and the bracket names its item, so Step 2's rule makes it a fabric spec
+    // ON that item rather than a record of its own.
+    expect(done.body.imported).toBe(7);
+    expect(done.body.fabricSpecs).toBe(1);
 
     const rows = await client.query(
-      `select r.area, r.qty, r.qty_unit, r.internal_notes, r.boq_category, r.source_line_no,
+      `select r.id, r.area, r.qty, r.qty_unit, r.internal_notes, r.boq_category, r.source_line_no,
               (select ref_value from spec_record_refs x where x.record_id = r.id and x.ref_system = 'boq_code') as code
          from spec_records r
         where r.source_import_id = $1
@@ -247,8 +251,16 @@ describeIfDb("a bill is mapped, not refused", () => {
       source_line_no: 2,
       code: "ZZ-FUR-10",
     });
-    // A fabric row: no quantity, never a 1, and its unit.
-    expect(rows.rows[1]).toMatchObject({ qty: null, qty_unit: "m", code: "ZZ-FAB-13 (ZZ-FUR-10)" });
+    // The fabric row is on its item, the code without the bracket.
+    expect(rows.rows.some((row) => row.code === "ZZ-FAB-13 (ZZ-FUR-10)")).toBe(false);
+    const fabric = await client.query(
+      `select value, material_code from record_attributes where record_id = $1 and status = 'active' and label = 'Fabric'`,
+      [rows.rows[0].id],
+    );
+    expect(fabric.rows).toHaveLength(1);
+    expect(fabric.rows[0].material_code).toBe("ZZ-FAB-13");
+    // A fabric row no bracket places stays a line: no quantity, never a 1, and its unit.
+    expect(rows.rows.find((row) => row.code === "N/A")).toMatchObject({ qty: null, qty_unit: "m" });
     // The same code twice, told apart by the notes that became internal notes.
     expect(rows.rows.filter((row) => row.code === "ZZ-FUR-03").map((row) => [row.qty, row.internal_notes])).toEqual([
       [9, "OPTION 1"],
