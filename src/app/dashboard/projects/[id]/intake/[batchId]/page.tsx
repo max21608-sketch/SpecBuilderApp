@@ -27,6 +27,7 @@ import PackSummary from "@/components/imports/PackSummary";
 import DocumentState from "@/components/imports/DocumentState";
 import { formatDay } from "@/lib/format-day";
 import PageBody from "@/components/ui/PageBody";
+import BillColumnsAction, { isStuckBill } from "@/components/imports/BillColumnsAction";
 
 type Run = {
   id: string;
@@ -44,6 +45,10 @@ type Run = {
   pendingReview?: number | null;
   /** `pending` because the pack is at its in-flight cap, not because nobody asked. */
   waitingForSlot?: boolean | null;
+  /** A bill waiting for somebody to say which column is which. */
+  needsColumns?: boolean | null;
+  /** False where the original was not kept. */
+  sourcePreserved?: boolean | null;
 };
 
 type Batch = { id: string; label: string | null; created_at: string; created_by: string | null; runs: Run[] };
@@ -130,6 +135,8 @@ function kindLabel(run: Run): string {
  */
 function produced(run: Run): string {
   if (isIntakeRunWorking(run.status)) return "nothing to do";
+  // A BILL is never retried through the model: it goes to its own review.
+  if (isStuckBill(run)) return run.status === "failed" ? "set its columns" : "waiting for its columns";
   if (run.status === "failed") return "a retry charges again";
   if (hasPendingReview(run)) return "waiting for you";
   if (run.status === "confirmed") return "review complete";
@@ -244,7 +251,10 @@ export default function IntakeBatchPage({
    * applies to one of them usually applies to all, and each attempt costs.
    */
   async function retryAllFailed() {
-    for (const run of (batch?.runs ?? []).filter((row) => row.status === "failed")) {
+    // BILLS ARE SKIPPED. /extract refuses one (`wrong_kind`) — a bill is parsed
+    // by code — and this loop stops at the first refusal, so one failed bill
+    // used to stop every document after it from being retried at all.
+    for (const run of (batch?.runs ?? []).filter((row) => row.status === "failed" && row.sourceKind !== "boq_xlsx")) {
       if (!(await extract(run))) break;
     }
   }
@@ -559,6 +569,7 @@ export default function IntakeBatchPage({
                             {busy === run.id ? "Retrying…" : "Retry dispatch"}
                           </Button>
                         )}
+                        <BillColumnsAction run={run} />
                         {needsExtract && (
                           <span className="text-right">
                             <Button
@@ -575,7 +586,7 @@ export default function IntakeBatchPage({
                         )}
                         {working ? (
                           <span className="text-[11.5px] text-neutral-500">nothing to do</span>
-                        ) : (
+                        ) : isStuckBill(run) ? null : (
                           <Link
                             href={`/dashboard/imports/${run.id}`}
                             className={buttonClass(

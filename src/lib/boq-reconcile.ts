@@ -29,7 +29,9 @@
 //
 // ---- AREA HAS TO BE DERIVED THE WAY THE CONFIRM WRITES IT ---------------
 //
-// confirm-boq.ts writes `line.area ?? line.boqCategory` into spec_records.area.
+// confirm-boq.ts writes `effectiveArea(line)` into spec_records.area — the
+// area, with a Sub-Area composed in where the bill has one, else the bill's
+// category.
 // Comparing the staged line's `area` against the stored one without that
 // fallback reports a phantom change on every line whose bill left Area blank —
 // which on the pilot is most of them.
@@ -51,6 +53,7 @@
 // the fold's own argument: a collision it creates produces AMBIGUITY — both
 // sides offered as candidates, nothing chosen — never a wrong pick.
 import { normaliseRef } from "@/lib/record-refs";
+import { composeBoqArea } from "@/lib/boq-roles";
 
 export type ExistingRecord = {
   id: string;
@@ -79,6 +82,8 @@ export type RevisedLine = {
   qty: number | null;
   designer: string | null;
   area: string | null;
+  /** Present where the bill has a Sub-Area column; composed into the area. */
+  subArea?: string | null;
   boqCategory: string | null;
   ignored: boolean;
   replaces: { recordId: string; recordVersion: number } | null;
@@ -125,9 +130,22 @@ function show(value: unknown): string | null {
   return text === "" ? null : text;
 }
 
-/** The value confirm-boq writes into spec_records.area. */
-export function effectiveArea(line: { area: string | null; boqCategory: string | null }): string | null {
-  return line.area ?? line.boqCategory ?? null;
+/**
+ * The value confirm-boq writes into spec_records.area — and the confirm now
+ * CALLS this, rather than repeating it, so a revision can never compare against
+ * a value the confirm did not write.
+ *
+ * A Sub-Area composes in (`composeBoqArea`, `Guest Suites / Corridor`): a
+ * revision of the same bill composes the same string and reads as unchanged.
+ * A line from a bill with no Sub-Area column carries none, and reads exactly
+ * as it always did.
+ */
+export function effectiveArea(line: {
+  area: string | null;
+  boqCategory: string | null;
+  subArea?: string | null;
+}): string | null {
+  return composeBoqArea(line.area, line.subArea) ?? line.boqCategory ?? null;
 }
 
 export function lineDeltas(line: RevisedLine, record: ExistingRecord): FieldDelta[] {

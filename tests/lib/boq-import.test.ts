@@ -138,8 +138,20 @@ describe("parseBoqSheets", () => {
         { sheet: "VE", data: TYPICAL },
       ]),
     );
-    expect(staged.map((s) => s.sheetName)).toEqual(["MUR", "MAIN RUN", "VE"]);
-    expect(staged.every((s) => s.lines.length === 5)).toBe(true);
+    // CHANGED 2026-09-23 (v4): a sheet with no header is no longer DROPPED. It
+    // is staged, ignored with a reason and still openable, because a sheet the
+    // reader could not map is one a person may need to map — the Aman bill's
+    // real item sheet was exactly that. The three real tabs are unchanged.
+    const live = staged.filter((s) => !s.ignored);
+    expect(live.map((s) => s.sheetName)).toEqual(["MUR", "MAIN RUN", "VE"]);
+    expect(live.every((s) => s.lines.length === 5)).toBe(true);
+    expect(staged[0]).toMatchObject({
+      sheetName: "Notes",
+      ignored: true,
+      ignoredReason: "No bill columns found on this sheet.",
+      needsColumns: true,
+      lines: [],
+    });
   });
 
   it("reads the AP364-shaped header: FF&E code, Area, unit and TOTAL Q-ty", () => {
@@ -336,7 +348,10 @@ describe("a bill whose headings this reader does not know", () => {
     expect(result.error).toContain("“Item No.”");
     expect(result.error).toContain("“Product”");
     expect(result.error).toContain("“Rate”");
-    expect(result.error).toMatch(/have the bill's own wording added to the reader's list/);
+    // REWRITTEN 2026-09-23 (v4): the sentence is now the Columns panel's
+    // explanation, so it points at the controls under it rather than at a
+    // commit to the synonym list nobody reading it could make.
+    expect(result.error).toMatch(/Set the columns below: click the row the headings are on/);
   });
 
   it("still lists the words it accepts, so renaming is possible without asking", () => {

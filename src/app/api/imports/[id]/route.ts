@@ -566,6 +566,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     select r.id, r.project_id, r.status, r.parsed, r.error, r.version, r.confirmed_at,
            r.source_kind, r.document_kind, r.model, r.model_metadata,
            r.attempt_id, r.claim_count, r.queued_at,
+           -- Whether the original is stored, so a bill that failed or needs
+           -- its columns can offer a free re-read from it rather than a
+           -- request for the file again.
+           (r.attachment_id is not null) as has_source,
            (r.attempt_deadline_at > now()) as within_deadline,
            (r.status = 'parsing' and r.processing_started_at > now() - interval '360 seconds') as claim_live,
            p.bws_project_number, p.name as project_name,
@@ -756,6 +760,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         qty: line.qty,
         designer: line.designer,
         area: line.area,
+        subArea: line.subArea,
         boqCategory: line.boqCategory,
         ignored: line.ignored,
         replaces: line.replaces ?? null,

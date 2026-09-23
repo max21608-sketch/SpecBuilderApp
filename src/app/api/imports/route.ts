@@ -61,7 +61,10 @@
 //   "Read all" is what clears those.
 //
 // The BOQ path is unaffected: a bill is parsed synchronously, by code, and no
-// model has ever been involved in it.
+// model has ever been involved in it. Since 0040 a bill is also never REFUSED
+// for its headings: one whose columns nobody recognised stages as needing a
+// person to map them (src/lib/boq-import.ts), and only a file with no sheets,
+// or one that is not a spreadsheet, fails.
 // ============================================================================
 //
 // Why not @vercel/blob's onUploadCompleted callback: it is an inbound webhook
@@ -76,9 +79,7 @@ import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind, outlookMsgAdvice, spreadsheetRefusal } from "@/lib/intake-source-types";
 import { scannedPdfRefusal } from "@/lib/document-classify";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
-import { matchName, type MatchCandidate } from "@/lib/matching";
-import { guessLevelFromBill } from "@/lib/level-guess";
-import { guessNonFurniture } from "@/lib/non-furniture-guess";
+import { loadBoqReadingRegisters, loadLineSuggester, stageSheet } from "@/lib/boq-stage";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
@@ -545,93 +546,31 @@ async function parseBoqInto(
   const runId = String(run[0]?.id);
 
   // Terminal vs retryable is decided per step, not by one outer try/catch. A
-  // spreadsheet that will not parse never becomes parseable, so it is terminal
-  // and says why.
+  // file that is not a spreadsheet never becomes one, so it is terminal and
+  // says why. A spreadsheet whose COLUMNS nobody recognised is not: since 0040
+  // it stages `needsColumns` and the review asks a person to map it.
   try {
     const sheets = await readSpreadsheetSheets(bytes, filename, options.contentType ?? "");
-    const parsed = parseBoqSheets(sheets);
-    if (!parsed.ok) {
-      await fail(runId, actor, parsed.error);
-      return json({ ok: false, error: parsed.error, importId: runId }, 422);
+    const parsed = parseBoqSheets(sheets, await loadBoqReadingRegisters(sql));
+    // ONLY AN EMPTY WORKBOOK IS REFUSED NOW. A workbook no heading could be
+    // read on comes back `ok: false` with every sheet staged as needing its
+    // columns, and is PARSED, not failed: the refusal was a dead end — the
+    // Documents tab's Try again posted to /extract, which refuses a bill — and
+    // the sentence it carried is now the Columns panel's explanation.
+    if (!parsed.sheets || parsed.sheets.length === 0) {
+      const error = parsed.ok ? "The file has no sheets." : parsed.error;
+      await fail(runId, actor, error);
+      return json({ ok: false, error, importId: runId }, 422);
     }
 
-    // Suggest a category now, at parse time, and STORE the suggestion. It has
-    // to be stored rather than recomputed on each read, because confirm writes
-    // what is stored — and the rule is that what gets written is what the
-    // reviewer approved, not what a fresh match would produce later.
-    //
-    // Candidates are the category names plus the BOQ vocabulary in
-    // item_category_aliases: a BOQ says "Sofa" and the sheet is called
-    // "Armchairs, Benches, Stools, Sofas", which share no word.
-    const categories = await sql`select id, name from item_categories`;
-    const aliases = await sql`select category_id, term from item_category_aliases`;
-    const candidates: MatchCandidate[] = [
-      ...categories.map((c) => ({ id: String(c.id), name: String(c.name) })),
-      ...aliases.map((a) => ({ id: String(a.category_id), name: String(a.term) })),
-    ];
-
-    // The LEVEL, guessed the same way and for the same reason: stored at parse
-    // time so the confirm writes what the reviewer saw. Unlike the category it
-    // is never written straight into the column the gate reads — a guessed
-    // level lands in `level_suggested` unless the reviewer picks one. See
-    // src/lib/level-guess.ts for what it reads, and what it refuses to.
-    type SuggestInput = { itemDescription: string; productReference?: string | null; code?: string | null };
-
-    const levelOf = (line: SuggestInput, categoryStatus: string) => {
-      const guess = guessLevelFromBill({ ...line, categoryStatus });
-      return guess
-        ? { level: guess.level, levelStatus: "suggested" as const, levelReason: guess.reason }
-        : { level: null, levelStatus: "suggested" as const, levelReason: null };
-    };
-
-    // IS THIS A PIECE OF FURNITURE AT ALL? Asked at staging and STORED, like
-    // the category and the level, so the reviewer reads one answer rather than
-    // one per render. It is a question and nothing else: only the reviewer's
-    // click writes `ignored`, which is the only field the confirm reads.
-    //
-    // The CATEGORY is worked out first, because "nothing matched a category
-    // either" is supporting evidence the suggester is allowed to append — and
-    // never to fire on. And the level is worked out LAST, because a line this
-    // suggests is not furniture gets no level at all.
-    const suggest = (line: SuggestInput, index: number) => {
-      const match = matchName(line.itemDescription, candidates);
-      const decided = (
-        categoryId: string | null,
-        categoryStatus: string,
-        extra: Record<string, unknown> = {},
-      ) => ({
-        index,
-        ...line,
-        ...levelOf(line, categoryStatus),
-        nonFurnitureSuggested: guessNonFurniture({ ...line, categoryStatus }),
-        categoryId,
-        categoryStatus,
-        ignored: false,
-        ...extra,
-      });
-
-      if (match.status === "confident") return decided(match.id, "suggested");
-      if (match.status === "ambiguous") {
-        // Several terms pointing at ONE category is agreement, not ambiguity.
-        const ids = [...new Set(match.candidates.map((candidate) => candidate.id))];
-        if (ids.length === 1) return decided(ids[0] ?? null, "suggested");
-        return decided(null, "ambiguous", {
-          categoryCandidates: ids.map((id) => ({
-            id, name: String(categories.find((c) => String(c.id) === id)?.name ?? id),
-          })),
-        });
-      }
-      return decided(null, "none");
-    };
-
-    // v2: every sheet with a header, each becoming a run at confirm. The line
-    // index is per sheet, so a PATCH addresses ['sheets', s, 'lines', i].
-    const stagedSheets = parsed.sheets.map((sheet) => ({
-      ...sheet,
-      lines: sheet.lines.map(suggest),
-    }));
+    // Suggest a category, a level and the not-furniture question now, at parse
+    // time, and STORE them — see src/lib/boq-stage.ts for why, and for why the
+    // re-read from the stored source runs the same function.
+    const suggest = await loadLineSuggester(sql);
+    const stagedSheets = parsed.sheets.map((sheet) => stageSheet(sheet, suggest));
     const lineCount = stagedSheets.reduce((total, sheet) => total + (sheet.ignored ? 0 : sheet.lines.length), 0);
     const skippedRows = parsed.sheets.reduce((total, sheet) => total + sheet.skippedRows, 0);
+    const needsColumns = stagedSheets.filter((sheet) => sheet.needsColumns && !sheet.ignored).length;
 
     await sql`
       update intake_runs
@@ -646,7 +585,17 @@ async function parseBoqInto(
       where id = ${runId}
     `;
     return json(
-      { ok: true, importId: runId, lines: lineCount, sheets: stagedSheets.length, skippedRows, sourcePreserved },
+      {
+        ok: true,
+        importId: runId,
+        lines: lineCount,
+        sheets: stagedSheets.length,
+        skippedRows,
+        sourcePreserved,
+        // How many live sheets are waiting for a person to say which column is
+        // which. Not an error: the upload screen links to the review either way.
+        needsColumns,
+      },
       201,
     );
   } catch (cause) {

@@ -28,7 +28,12 @@ import Tip from "@/components/ui/Tip";
 import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
-import { describeHeader } from "@/lib/boq-import";
+import { describeHeader, sheetsNeedingColumns } from "@/lib/boq-import";
+// Pure: the area a record will carry (a Sub-Area composed in), the same
+// function the confirm writes it with, so the table shows what will be written.
+import { effectiveArea } from "@/lib/boq-reconcile";
+import { BOQ_ROLE_LABELS, BOQ_MAPPING_SOURCE_LABELS, columnLetter, type BoqReadRole } from "@/lib/boq-roles";
+import BoqColumnsPanel, { type ColumnsPanelSheet } from "@/components/imports/BoqColumnsPanel";
 // Pure: the "this may not be furniture" question, and the set the batch action
 // acts on. The page NEVER decides either for itself — one function behind the
 // count on the button and the loop behind it.
@@ -48,6 +53,8 @@ type Line = {
   index: number; lineNo: number; designer: string | null; boqCategory: string | null;
   area: string | null; code: string | null; itemDescription: string; productReference: string | null;
   qty: number | null; qtyUnit: string | null;
+  // Present only where the bill has the column (v4) — see `BoqLine`.
+  subArea?: string | null; sourceLine?: string | null; notes?: string | null;
   categoryId: string | null; categoryStatus: string;
   categoryCandidates?: { id: string; name: string }[]; ignored: boolean;
   // Guessed at parse time, corrected here. `chosen` is what makes it a
@@ -206,7 +213,7 @@ function LevelCell({
 }
 
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
-type Sheet = {
+type Sheet = Omit<ColumnsPanelSheet, "lines"> & {
   sheetName: string; proposedRunName: string; headerRow: number; skippedRows: number;
   ignored: boolean; ignoredReason: string | null;
   replacesRunId?: string | null;
@@ -236,7 +243,9 @@ type Import = {
   id: string; status: string; version: number; error: string | null; source_kind: string;
   document_kind: string | null; project_id: string;
   bws_project_number: string; project_name: string; filename: string | null;
-  parsed: { schemaVersion: 3; filename: string | null; sourcePreserved?: boolean; sheets: Sheet[] } | null;
+  /** Whether the original is stored, so a failed bill can be read again from it. */
+  has_source?: boolean;
+  parsed: { schemaVersion: 3 | 4; filename: string | null; sourcePreserved?: boolean; sheets: Sheet[] } | null;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -288,6 +297,12 @@ export default function ReviewImportPage() {
   const [busy, setBusy] = useState(false);
   /** Which sheet is shown. A BOQ tab is a sub-quote, so a tab each. */
   const [sheetTab, setSheetTab] = useState(0);
+  /**
+   * Sheets whose Columns panel somebody opened with "Change columns". A sheet
+   * nobody has mapped, and one a saved layout read that nobody has checked,
+   * show theirs regardless — see `panelOpen` below.
+   */
+  const [openPanels, setOpenPanels] = useState<Set<number>>(() => new Set());
   const [blocked, setBlocked] = useState<{ lineNo: number; code: string | null }[]>([]);
   /**
    * The pack this document arrived in, for the crumb.
@@ -478,6 +493,45 @@ export default function ReviewImportPage() {
     }
   }
 
+  /**
+   * READ THE WHOLE BILL AGAIN from its stored source — free, by code. For a
+   * bill that failed (every one refused before 0040 included) and for one
+   * staged before its columns were recorded. Reload first, then report.
+   */
+  async function readAgain() {
+    if (!data) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch(`/api/imports/${id}/columns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "reread", version: data.import.version }),
+      });
+      await load();
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setNotice("Read again from the stored spreadsheet. Nothing was charged and nothing is confirmed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** After the Columns panel wrote: reload, THEN say what happened. */
+  async function afterColumns(sheetIndex: number, message: string | null) {
+    await load();
+    setError(null);
+    if (message) setNotice(message);
+    setOpenPanels((current) => {
+      const next = new Set(current);
+      next.delete(sheetIndex);
+      return next;
+    });
+  }
+
   async function confirm() {
     if (!data) return;
     setBusy(true);
@@ -513,6 +567,12 @@ export default function ReviewImportPage() {
   // the page loaded has to show as it is now.
   const runs = data.runs.filter((projectRun) => projectRun.status === "active");
   const activeSheets = sheets.filter((sheet) => !sheet.ignored);
+  /**
+   * Live sheets nobody has said the columns of. The confirm refuses while any
+   * remain (`sheetsNeedingColumns`, the same function it calls), so the button
+   * is disabled and the screen says which, rather than letting a press fail.
+   */
+  const unmapped = sheetsNeedingColumns({ sheets });
   const activeLines = activeSheets.flatMap((sheet) => sheet.lines.filter((line) => !line.ignored));
   /**
    * Is this bill REVISING a run, or creating one?
@@ -625,7 +685,8 @@ export default function ReviewImportPage() {
           <Button
             variant="primary"
             onClick={confirm}
-            disabled={busy || run.status !== "parsed" || activeLines.length === 0}
+            disabled={busy || run.status !== "parsed" || activeLines.length === 0 || unmapped.length > 0}
+            title={unmapped.length > 0 ? "Set the columns of every live sheet, or drop it, first." : undefined}
           >
             {busy
               ? "Importing…"
@@ -678,8 +739,52 @@ export default function ReviewImportPage() {
             own headings, so the sentence below is the one thing a person needs
             in order to act. */}
         {run.status === "failed" && (
-          <Note tone="danger" title="This bill could not be read, and nothing was staged from it.">
+          <Note
+            tone="danger"
+            title="This bill could not be read, and nothing was staged from it."
+            actions={
+              // A BILL IS NEVER READ BY A MODEL, so "Try again" here is free:
+              // the stored spreadsheet is read again by code, with the columns
+              // a person can now set. The bills refused before 0040 recover
+              // this way, without a new upload.
+              run.has_source ? (
+                <Button size="sm" disabled={busy} onClick={() => void readAgain()}>
+                  {busy ? "Reading…" : "Read it again"}
+                </Button>
+              ) : undefined
+            }
+          >
             {run.error ?? "The reader gave no reason, which is itself worth reporting."}
+            {run.has_source ? (
+              <span className="mt-1 block">
+                Reading it again is free — the stored spreadsheet is read by code — and a bill whose columns the
+                reader does not know now opens on a Columns panel instead of stopping here.
+              </span>
+            ) : run.has_source === false ? (
+              <span className="mt-1 block">
+                The original was not kept when it was uploaded, so it cannot be read again. Upload the file again.
+              </span>
+            ) : null}
+          </Note>
+        )}
+
+        {/* WHICH SHEETS STILL NEED SOMEBODY, named, above everything else: the
+            confirm is disabled until each is mapped or dropped, and a disabled
+            button that does not say why is a screen nobody can finish. */}
+        {run.status === "parsed" && unmapped.length > 0 && (
+          <Note tone="warn" title="Say which column is which before confirming.">
+            {unmapped.length === 1 ? (
+              <>
+                Nothing has been read from <span className="font-mono">{unmapped[0]?.sheetName}</span> yet: set its
+                columns below, or drop the sheet if it is not a bill.
+              </>
+            ) : (
+              <>
+                Nothing has been read from {unmapped.length} sheets yet (
+                {unmapped.map((sheet) => sheet.sheetName).join(", ")}): set each one&rsquo;s columns, or drop the ones
+                that are not a bill.
+              </>
+            )}
           </Note>
         )}
 
@@ -761,18 +866,44 @@ export default function ReviewImportPage() {
           );
           const duplicates = duplicateGroups(sheet);
           const columns = reconciliation ? 9 : 8;
+          /**
+           * THE COLUMNS PANEL IS OPEN when nobody has mapped this sheet yet
+           * (unless it is dropped, when it waits to be asked for), when a
+           * SAVED LAYOUT read it and nobody has looked — a remembered layout
+           * must never apply unseen — or when somebody pressed Change columns.
+           */
+          const layoutUnchecked = sheet.mappingSource === "layout" && !sheet.columnsChecked;
+          const panelOpen =
+            openPanels.has(sheetIndex) || (sheet.needsColumns === true && !sheet.ignored) || layoutUnchecked;
+          const setPanel = (open: boolean) =>
+            setOpenPanels((current) => {
+              const next = new Set(current);
+              if (open) next.add(sheetIndex);
+              else next.delete(sheetIndex);
+              return next;
+            });
           return (
             <div key={sheet.sheetName + String(sheetIndex)} className={sheet.ignored ? "opacity-60" : undefined}>
               <Card
                 title="This tab becomes a phase"
                 actions={
-                  <Button
-                    size="xs"
-                    disabled={run.status !== "parsed"}
-                    onClick={() => void setSheet(sheetIndex, { ignored: !sheet.ignored })}
-                  >
-                    {sheet.ignored ? "Include this sheet" : "Drop this sheet"}
-                  </Button>
+                  <>
+                    {/* OFFERED ON EVERY BILL SHEET, including one the synonyms
+                        read: a wrong match is correctable only if it is
+                        visible, and the panel is where it is visible. */}
+                    {!panelOpen && run.status === "parsed" && (
+                      <Button size="xs" onClick={() => setPanel(true)}>
+                        {sheet.needsColumns ? "Set the columns" : "Change columns"}
+                      </Button>
+                    )}
+                    <Button
+                      size="xs"
+                      disabled={run.status !== "parsed"}
+                      onClick={() => void setSheet(sheetIndex, { ignored: !sheet.ignored })}
+                    >
+                      {sheet.ignored ? "Include this sheet" : "Drop this sheet"}
+                    </Button>
+                  </>
                 }
               >
                 <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -807,7 +938,35 @@ export default function ReviewImportPage() {
                     differently from the parser. Printed, not a Tip: a reviewer
                     who never hovers must not be left believing five rows were
                     thrown away. */}
-                <p className="mt-3 text-xs text-neutral-500">{describeHeader(sheet)}</p>
+                <p className="mt-3 text-xs text-neutral-500">
+                  {/* A sheet nobody has mapped has a CANDIDATE header row — the
+                      closest the synonyms came — and describing it as "the
+                      header" would say the sheet was read when it was not. */}
+                  {sheet.needsColumns
+                    ? "Nothing has been read from this sheet yet — nobody has said which column is which."
+                    : describeHeader(sheet)}
+                </p>
+
+                {/* WHICH COLUMN EACH ROLE CAME FROM, printed with the panel
+                    closed too: "Spec Code is the code" is a statement a
+                    reviewer can check in a glance, where a column of codes
+                    alone does not say which column they came from. Absent on
+                    a v3 sheet, which never recorded it. */}
+                {!sheet.needsColumns && sheet.columns && Object.keys(sheet.columns).length > 0 && (
+                  <p className="mt-1 text-xs text-neutral-500">
+                    {sheet.mappingSource === "layout" && sheet.layout ? (
+                      <>
+                        Read with the <b className="text-neutral-700">{sheet.layout.name}</b> layout:{" "}
+                      </>
+                    ) : sheet.mappingSource ? (
+                      <>Columns ({BOQ_MAPPING_SOURCE_LABELS[sheet.mappingSource]}): </>
+                    ) : null}
+                    {(Object.entries(sheet.columns) as [BoqReadRole, { index: number; heading: string }][])
+                      .sort((a, b) => a[1].index - b[1].index)
+                      .map(([role, ref]) => `${BOQ_ROLE_LABELS[role]} ← “${ref.heading || "no heading"}” (${columnLetter(ref.index)})`)
+                      .join(" · ")}
+                  </p>
+                )}
 
                 {/* IS THIS A NEW RUN, OR A REVISION OF ONE?
                     Never chosen automatically. A revised bill that silently
@@ -835,6 +994,34 @@ export default function ReviewImportPage() {
                   </label>
                 )}
               </Card>
+
+              {panelOpen && (
+                <BoqColumnsPanel
+                  // Re-mounted when what was READ changes, so a successful read
+                  // shows the new mapping — and NOT on every autosave, which
+                  // bumps the version and would throw away half-set selects.
+                  key={`${sheetIndex}:${sheet.headerRow}:${sheet.headerRows ?? 1}:${JSON.stringify(sheet.columns ?? {})}`}
+                  importId={run.id}
+                  sheetIndex={sheetIndex}
+                  sheet={sheet}
+                  version={run.version}
+                  editable={run.status === "parsed"}
+                  sourceKept={run.parsed?.sourcePreserved !== false && run.has_source !== false}
+                  onRead={(message) => afterColumns(sheetIndex, message)}
+                  onClose={sheet.needsColumns ? undefined : () => setPanel(false)}
+                  onIgnoreSheet={() => {
+                    setPanel(false);
+                    void setSheet(sheetIndex, { ignored: true });
+                  }}
+                />
+              )}
+              {panelOpen && (sheet.preview?.length ?? 0) === 0 && run.status === "parsed" && run.has_source && (
+                <div className="mt-2">
+                  <Button size="sm" disabled={busy} onClick={() => void readAgain()}>
+                    {busy ? "Reading…" : "Read the whole bill again"}
+                  </Button>
+                </div>
+              )}
 
               {reconciliation && (
                 <Note
@@ -887,7 +1074,7 @@ export default function ReviewImportPage() {
                 </Note>
               )}
 
-              {!sheet.ignored && (
+              {!sheet.ignored && !sheet.needsColumns && (
                 <Card
                   flush
                   title={
@@ -967,15 +1154,29 @@ export default function ReviewImportPage() {
                             tone={duplicated ? "warn" : "plain"}
                             className={line.ignored ? "opacity-40" : undefined}
                           >
-                            <Td muted>{line.lineNo}</Td>
+                            <Td muted>
+                              {line.lineNo}
+                              {/* The bill's OWN line number, where it has a
+                                  column for one. Shown, never written: the row
+                                  is what "go and look" needs. */}
+                              {line.sourceLine && (
+                                <span className="block text-[10.5px] text-neutral-400">line {line.sourceLine}</span>
+                              )}
+                            </Td>
                             <Td mono>{line.code ?? "—"}</Td>
                             <Td>
                               {line.itemDescription}
                               {line.productReference && (
                                 <span className="text-neutral-500"> · {line.productReference}</span>
                               )}
+                              {line.notes && (
+                                <span className="mt-0.5 block text-xs text-neutral-500">Notes: {line.notes}</span>
+                              )}
                             </Td>
-                            <Td>{line.area ?? line.boqCategory ?? "—"}</Td>
+                            {/* What the record will carry: `effectiveArea` is
+                                the function the confirm writes it with, so a
+                                Sub-Area shows here composed exactly as stored. */}
+                            <Td>{effectiveArea(line) ?? "—"}</Td>
                             {/* NO QUANTITY IS NOT A DASH AND IT IS NEVER A 1.
                                 A bill with no `TOTAL Q-ty` column gives every
                                 line a null quantity (variance matrix row 2),
