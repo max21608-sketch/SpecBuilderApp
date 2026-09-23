@@ -21,6 +21,14 @@ import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import ReviewImportPage from "@/app/dashboard/imports/[id]/page";
 // Synthetic, from the committed builder. Invented codes, invented rooms.
 import { bill300, blankQtyCells, noQtyColumn } from "../fixtures/boq-shapes";
+import { COMPONENT_TIMEOUT_MS } from "./tier-timeout";
+
+// This tier's 5s default is a bound about the MACHINE, and this file has gone
+// red under a second concurrent suite while passing alone. See
+// `tests/components/tier-timeout.ts` for the measurements and for why this is
+// not the global default.
+vi.setConfig({ testTimeout: COMPONENT_TIMEOUT_MS });
+
 
 const PROJECT = "project-variance";
 const IMPORT = "import-variance";

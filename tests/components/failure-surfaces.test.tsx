@@ -21,6 +21,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { COMPONENT_TIMEOUT_MS } from "./tier-timeout";
+
+// This tier's 5s default is a bound about the MACHINE, and this file has gone
+// red under a second concurrent suite while passing alone. See
+// `tests/components/tier-timeout.ts` for the measurements and for why this is
+// not the global default.
+vi.setConfig({ testTimeout: COMPONENT_TIMEOUT_MS });
+
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("projectId=p1"),

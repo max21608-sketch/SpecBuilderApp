@@ -18,6 +18,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SpecTable, { type RunTally, type SpecRecord } from "@/components/records/SpecTable";
+import { COMPONENT_TIMEOUT_MS } from "./tier-timeout";
+
+// This tier's 5s default is a bound about the MACHINE, and this file has gone
+// red under a second concurrent suite while passing alone. See
+// `tests/components/tier-timeout.ts` for the measurements and for why this is
+// not the global default.
+vi.setConfig({ testTimeout: COMPONENT_TIMEOUT_MS });
+
 
 // The router, reactive, for the same reason the chase table's test carries
 // one: the chosen area lives in the URL, and a mock that recorded the call
@@ -210,9 +218,16 @@ describe("the area select", () => {
   // 30s, deliberately, and the same number and the same reasoning as
   // `boq-review-variance.test.tsx` and `tests/db/db-tier.ts`: a bound here
   // exists to catch a hang or an accidental O(n squared) blow-up, not to police
-  // a machine that is busy. It is ON THIS TEST and not on the tier, because
-  // every other test in this file paints a handful of rows and should still say
-  // so in five seconds.
+  // a machine that is busy.
+  //
+  // It stays ON THIS TEST although the file now carries `COMPONENT_TIMEOUT_MS`
+  // as well: 20s is what the rest of this file gets for being run on a busy
+  // laptop, and this one is the only test here that genuinely paints 300 rows.
+  // Keeping the two numbers apart is what stops the tier-wide bound quietly
+  // becoming the number a test at scale is judged by. The earlier version of
+  // this comment said the bound was on this test "and not on the tier"; that
+  // was true until 2026-09-23, when four more files in this tier went red for
+  // the same reason and the argument turned out to be about all of them.
   // ===========================================================================
   it("renders every area on a 300-line phase", { timeout: 30_000 }, async () => {
     const many = Array.from({ length: 300 }, (_, index) =>

@@ -5,7 +5,7 @@
 // better than four — the geometry appears once, each configuration's own
 // finishes are visibly its own, and one Confirm rules on the item.
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ConfigurationCard from "@/components/imports/ConfigurationCard";
@@ -13,6 +13,14 @@ import { configurationCards } from "@/lib/configuration-cards";
 import type { ItemResolution } from "@/components/imports/DrawingItemCard";
 import { callbacks, callout, figure, item, records, resetIds, resolution, specFields } from "./fixtures";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
+import { COMPONENT_TIMEOUT_MS } from "./tier-timeout";
+
+// This tier's 5s default is a bound about the MACHINE, and this file has gone
+// red under a second concurrent suite while passing alone. See
+// `tests/components/tier-timeout.ts` for the measurements and for why this is
+// not the global default.
+vi.setConfig({ testTimeout: COMPONENT_TIMEOUT_MS });
+
 
 const slot = (label: string, value: string, dimensionSlot: DrawingObservation["dimensionSlot"]) =>
   figure(label, value, { attrGroup: "dimension", dimensionSlot, slotSuggested: true, unit: "mm", unitSuggested: true, unitSource: "figures" });
