@@ -47,6 +47,7 @@ import { unallocatedQty } from "@/lib/record-variants";
 import { GATE_SHORT_LABELS, NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
 import type { GateSummaryEntry } from "@/lib/gate-load";
 import AddItem from "@/components/records/AddItem";
+import AddConfiguration from "@/components/records/AddConfiguration";
 import AreaSelect from "@/components/ui/AreaSelect";
 import { areaOptions, matchesArea } from "@/lib/area-filter";
 import { useUrlTab } from "@/lib/use-url-tab";
@@ -320,6 +321,8 @@ export default function SpecTable({
    * every row has them from then on.
    */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** The bill line an "Add a configuration" panel is open under, if any. */
+  const [addingTo, setAddingTo] = useState<string | null>(null);
   /** Rows whose fold has been opened past the first six. */
   const [expandedAll, setExpandedAll] = useState<Set<string>>(new Set());
   const [namedQuestions, setNamedQuestions] = useState(false);
@@ -1120,7 +1123,19 @@ export default function SpecTable({
                         );
                       })}
                       <Td>
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-1">
+                          {/* ADD A CONFIGURATION, on a live bill line (2026-09-23).
+                              It opens a panel under the row, and nothing is
+                              written until Add inside it. */}
+                          {!isConfiguration && !retired && (
+                            <Button
+                              variant="quiet"
+                              size="xs"
+                              onClick={() => setAddingTo((current) => (current === record.id ? null : record.id))}
+                            >
+                              Add configuration
+                            </Button>
+                          )}
                           {record.category_name ? (
                             <Link
                               href={`/dashboard/records/${record.id}`}
@@ -1143,10 +1158,34 @@ export default function SpecTable({
                       </Td>
                     </Tr>
                   );
-                  if (!open) return <Fragment key={record.id}>{body}</Fragment>;
+                  // ITS OWN `tr`, like the panel below: never a td beside the
+                  // data cells.
+                  const adding =
+                    addingTo === record.id ? (
+                      <tr className="bg-[#fbfbfb]">
+                        <td colSpan={COLUMNS} className="border-b border-neutral-200 px-4 py-3 align-top">
+                          <AddConfiguration
+                            billLineId={record.id}
+                            onCancel={() => setAddingTo(null)}
+                            onAdded={async () => {
+                              setAddingTo(null);
+                              await load();
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ) : null;
+                  if (!open)
+                    return (
+                      <Fragment key={record.id}>
+                        {body}
+                        {adding}
+                      </Fragment>
+                    );
                   return (
                     <Fragment key={record.id}>
                       {body}
+                      {adding}
                       {/* A SPANNING PANEL IS ITS OWN `tr`, never an extra
                           `td colSpan` beside the data cells: that makes the row
                           21 column slots wide and the browser finds room for

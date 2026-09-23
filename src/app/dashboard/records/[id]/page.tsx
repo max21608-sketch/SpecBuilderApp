@@ -25,7 +25,7 @@
 // Now both columns begin with a box at the same top edge.
 // ============================================================================
 import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -55,6 +55,8 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
+import AddConfiguration from "@/components/records/AddConfiguration";
+import DifferingFields from "@/components/records/DifferingFields";
 import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
 import type { Palette } from "@/lib/palettes";
@@ -270,6 +272,12 @@ function RecordView() {
   // The header's "Add a spec by hand" opens the form beside the specs it adds
   // to. One action, one button: the page-level action lives in the band.
   const [addingSpec, setAddingSpec] = useState(false);
+  // "Add a configuration" (2026-09-23) and a configuration's rename. The panel
+  // lives in the Configurations card, beside the family it adds to.
+  const router = useRouter();
+  const [addingConfiguration, setAddingConfiguration] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
@@ -304,6 +312,8 @@ function RecordView() {
     state: AnswerState,
     reason?: string,
     evidence?: UploadedEvidence | null,
+    /** Absent keeps the qualifier the answer holds; the route reads it that way. */
+    qualifier?: string | null,
   ) {
     // Reachable only if a requirement was added to the category after this
     // record was given one. Choosing the category again creates the missing
@@ -318,7 +328,7 @@ function RecordView() {
       const res = await apiFetch(`/api/answers/${answer.answer_id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value, state, version: answer.version, reason, evidence }),
+        body: JSON.stringify({ value, state, version: answer.version, reason, evidence, qualifier }),
       });
       if (!res.ok) {
         // The server asks for a reason only when the edit OVERRIDES a settled
@@ -422,6 +432,23 @@ function RecordView() {
     }
     await save(answer, pendingReason.value, pendingReason.state, reason, evidence);
     setPendingReason(null);
+  }
+
+  /** A configuration's name, corrected. Refused in words for one already used. */
+  async function rename() {
+    if (!data || renaming === null) return;
+    setRenameBusy(true);
+    try {
+      const res = await apiFetch(`/api/records/${data.record.id}/configuration-name`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: renaming, version: data.record.version }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+      if (res.ok) setRenaming(null);
+    } finally {
+      setRenameBusy(false);
+    }
   }
 
   async function retire() {
@@ -887,6 +914,24 @@ function RecordView() {
         {tab === "specs" && (
           <div className="grid items-start gap-4 min-[820px]:grid-cols-[minmax(0,1fr)_260px]">
             <div className="min-w-0">
+              {/* A CONFIGURATION'S OWN FIELDS COME FIRST, blank until somebody
+                  fills them: the fabrics and main finishes are what make it a
+                  different chair from its siblings, and a configuration added
+                  by hand starts with every one of them `missing`. */}
+              {record.parent_id && (
+                <Card title={`What makes ${variantName(parentRefs, record.variant_label, "this configuration")} different`} className="mb-4">
+                  <DifferingFields
+                    answers={answers}
+                    palettes={data.palettes ?? []}
+                    paletteByQuestion={data.paletteByQuestion ?? []}
+                    savingId={savingId}
+                    reloadKey={historyKey}
+                    onSave={(answer, value, state, qualifier) =>
+                      void save(answer, value, state, undefined, undefined, qualifier)
+                    }
+                  />
+                </Card>
+              )}
               {addingSpec && (
                 <div className="mb-4">
                   <AddSpec
@@ -1466,8 +1511,33 @@ function RecordView() {
                   configuration has to name the bill line it came from, because
                   its record number does not.
                   ========================================================== */}
-              <Card title="Configurations">
+              <Card
+                title="Configurations"
+                actions={
+                  !addingConfiguration && (
+                    <Button variant="secondary" size="xs" onClick={() => setAddingConfiguration(true)}>
+                      Add a configuration
+                    </Button>
+                  )
+                }
+              >
+                {/* ADD, BY HAND (2026-09-23). A sibling from a configuration's
+                    screen goes under the SAME bill line, so the panel is always
+                    given the parent. */}
+                {addingConfiguration && (
+                  <div className="mb-3">
+                    <AddConfiguration
+                      billLineId={record.parent_id ?? record.id}
+                      onCancel={() => setAddingConfiguration(false)}
+                      onAdded={(added) => {
+                        setAddingConfiguration(false);
+                        router.push(`/dashboard/records/${added.recordId}`);
+                      }}
+                    />
+                  </div>
+                )}
                 {record.parent_id ? (
+                  <>
                   <p className="text-[12.5px] text-neutral-700">
                     Configuration {record.variant_label} of{" "}
                     <Link href={`/dashboard/records/${record.parent_id}`} className="underline hover:text-neutral-900">
@@ -1476,6 +1546,28 @@ function RecordView() {
                     , which the bill lists once
                     {billQty !== null && <> at {billQty} off</>}. This configuration is what BWS receives.
                   </p>
+                  {renaming === null ? (
+                    <Button variant="quiet" size="xs" className="mt-2" onClick={() => setRenaming(record.variant_label ?? "")}>
+                      Rename
+                    </Button>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <input
+                        autoFocus
+                        value={renaming}
+                        onChange={(event) => setRenaming(event.target.value)}
+                        aria-label="New name for this configuration"
+                        className="w-28 rounded border border-neutral-300 px-2 py-1 text-sm"
+                      />
+                      <Button variant="primary" size="xs" disabled={renameBusy || !renaming.trim()} onClick={() => void rename()}>
+                        Save
+                      </Button>
+                      <Button variant="quiet" size="xs" onClick={() => setRenaming(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                  </>
                 ) : variants.length > 0 ? (
                   <>
                     <p className="text-[12.5px] text-neutral-700">
