@@ -61,12 +61,12 @@ describe("which half ships — composeAttributeStatement and the BWS cell", () =
     expect(cell(PROPOSED, { qualifier: "Legs" })).toBe("BW Oak Grey - Open grain 10% TBC - Legs");
   });
 
-  it("agreed: the standard ships at the attribute's own state", () => {
+  it("agreed: the standard ships settled", () => {
     expect(cell(AGREED)).toBe("BW Oak Grey - Open grain 10%");
     expect(cell(AGREED, { qualifier: "Legs" })).toBe("BW Oak Grey - Open grain 10% - Legs");
-    // An agreed standard over words the client left TBC keeps the TBC: the
-    // rule is "settles at the attribute's own state", and that state is TBC.
-    expect(cell(AGREED, { state: "tbc" })).toBe("BW Oak Grey - Open grain 10% TBC");
+    // The client's agreement is the decision: words the client left TBC do not
+    // hold an agreed standard at TBC.
+    expect(cell(AGREED, { state: "tbc" })).toBe("BW Oak Grey - Open grain 10%");
   });
 
   it("a TBC standard ships the client's words, held at TBC", () => {
@@ -111,7 +111,7 @@ describe("which half ships — composeAttributeStatement and the BWS cell", () =
 });
 
 describe("the one rule — stateUnderStandard", () => {
-  it("holds a proposal and a TBC standard at TBC, and settles an agreed one at the row's own state", () => {
+  it("holds a proposal and a TBC standard at TBC, and an agreed one settles whatever the client first wrote", () => {
     const table = STANDARD_STATES.map((state) => [
       state,
       stateUnderStandard("confirmed", { state }),
@@ -119,7 +119,7 @@ describe("the one rule — stateUnderStandard", () => {
     ]);
     expect(table).toEqual([
       ["proposed", "tbc", "tbc"],
-      ["agreed", "confirmed", "tbc"],
+      ["agreed", "confirmed", "confirmed"],
       ["tbc", "tbc", "tbc"],
     ]);
     expect(stateUnderStandard("confirmed", null)).toBe("confirmed");

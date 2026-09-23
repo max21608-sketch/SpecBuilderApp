@@ -99,7 +99,12 @@ export function stateUnderStandard(
     case "proposed":
       return "tbc";
     case "agreed":
-      return ownState;
+      // THE CLIENT'S AGREEMENT IS THE DECISION (Max, 2026-09-23: the client
+      // asks for 30% oak, BW offers its 25% standard, the client says "yes,
+      // that's fine"). What the client first wrote may well have been TBC —
+      // that is why a standard was offered — and holding the answer at TBC
+      // after they agreed would put a settled finish back on somebody's desk.
+      return "confirmed";
     case "tbc":
       return "tbc";
   }
