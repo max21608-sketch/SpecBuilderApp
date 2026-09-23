@@ -212,6 +212,20 @@ export type CreateAttributeInput = {
   materialCode?: string | null;
   state: AttributeState;
   actor: string;
+  /**
+   * An ALREADY OPEN change to attach this write to, instead of opening one —
+   * `editAnswer`'s parameter, for the same caller shape: one act that writes
+   * several records (a common spec edited on a bill line, fanned out to every
+   * configuration, `POST /api/records/[id]/common`). The caller owns the
+   * change and the reason on it, and publishes it to the transaction.
+   */
+  changeSetId?: string;
+  /**
+   * FALSE where the caller versions the records itself, ONCE, after the whole
+   * fan-out — `editAnswer`'s rule. A caller that passes false and forgets is
+   * caught by `tests/db/change-history.test.ts`.
+   */
+  snapshot?: boolean;
 };
 
 export type CreateAttributeResult = {
@@ -329,8 +343,10 @@ export async function createAttribute(txn: TxnSql, input: CreateAttributeInput):
   // ("Width: 840"), which is worth keeping on a standalone capture and is not
   // a person's statement about why. So the open change wins where there is
   // one, and the description stands where there is not.
-  const openChange = await findOpenChangeSet(txn, String(record.project_id), input.actor);
-  if (openChange) await publishChangeSet(txn, openChange);
+  // A caller writing several records as ONE act hands its change in, and it
+  // wins over everything: it is already published to this transaction.
+  const openChange = input.changeSetId ?? (await findOpenChangeSet(txn, String(record.project_id), input.actor));
+  if (openChange && !input.changeSetId) await publishChangeSet(txn, openChange);
   const changeSetId =
     openChange ??
     (await openChangeSet(txn, {
@@ -362,7 +378,7 @@ export async function createAttribute(txn: TxnSql, input: CreateAttributeInput):
   // or the answer says H720mm while the record says W1900 x D790 x H720mm.
   const { filled, retracted } = await recomposeAnswers(txn, input.recordId, null, input.actor);
 
-  await snapshotRecords(txn, [input.recordId], changeSetId);
+  if (input.snapshot !== false) await snapshotRecords(txn, [input.recordId], changeSetId);
   return { attributeId, recordId: input.recordId, filled, retracted, changeSetId };
 }
 
