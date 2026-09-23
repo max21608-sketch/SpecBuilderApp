@@ -217,7 +217,7 @@ describeIfDb("adding a configuration by hand", () => {
 
     const change = await client.query(`select kind, reason from change_sets where id = $1`, [result.changeSetId]);
     expect(change.rows[0].kind).toBe("record_create");
-    expect(change.rows[0].reason).toContain("Carried from the bill line");
+    expect(change.rows[0].reason).toContain("carried from its own bill line: 1 spec, 1 answer, each keeping its source");
     const versions = await client.query(`select change_set_id from record_snapshots where record_id = $1`, [result.recordId]);
     expect(versions.rows).toEqual([{ change_set_id: result.changeSetId }]);
 
