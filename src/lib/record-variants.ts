@@ -33,6 +33,62 @@
 // a filtered export, on the most dangerous file in the product.
 // ============================================================================
 
+/**
+ * THE SHAPE `spec_records_variant_shape` ENFORCES, AS ONE CONSTANT IN CODE.
+ *
+ * The drawings card refuses a configuration name that fails it IN WORDS, before
+ * the confirm, because the alternative is a check-constraint violation reaching
+ * the reviewer as a 500 with "Nothing was written". Two copies of a CHECK drift
+ * — 0028 silently dropped a value 0021 had added — so the card, `ensureVariant`
+ * and the tests all read this one.
+ *
+ * THIS IS 0024's SHAPE, AND IT MUST STAY 0024's UNTIL 0037 IS APPLIED. 0037
+ * (`db/migrations/0037_variant_label_names.sql`) widens the database to 24
+ * characters with `&` allowed: `^[A-Z0-9][A-Z0-9 ./&-]{0,23}$`. Widening this
+ * constant BEFORE the migration is applied would let the card pass a name the
+ * database still refuses. Widen it IN THE SAME COMMIT that records 0037 as
+ * applied, to exactly the regex in that file.
+ */
+export const VARIANT_LABEL_SHAPE = /^[A-Z0-9][A-Z0-9 ./-]{0,7}$/;
+
+/** The longest name `VARIANT_LABEL_SHAPE` admits, for the sentence that refuses one. */
+export const VARIANT_LABEL_MAX = 8;
+
+/**
+ * A configuration's NAME as it is stored: trimmed, whitespace collapsed,
+ * upper-cased. `Type 2` and `TYPE  2` are one configuration.
+ *
+ * Case and whitespace ONLY — the `normaliseFinishCode` rule. A fold clever
+ * enough to read `TYPO 5` as `TYPE 5` is clever enough to merge two things a
+ * document kept apart, and there is no way back from that. Upper case because
+ * 0024's CHECK forbids lower case: a label is read aloud and typed into emails.
+ */
+export function normaliseVariantLabel(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/**
+ * Why a configuration name cannot be stored, in words, or null when it can.
+ * Called by the card's blocker AND by `ensureVariant`, so the two cannot
+ * disagree about what the database will accept.
+ */
+export function variantLabelProblem(label: string): string | null {
+  if (VARIANT_LABEL_SHAPE.test(label)) return null;
+  if (label.length > VARIANT_LABEL_MAX) {
+    return `'${label}' is too long to be a configuration name — it can be at most ${VARIANT_LABEL_MAX} characters today. Rename it on the page's reading, or ask for migration 0037 to be applied.`;
+  }
+  return `'${label}' cannot be a configuration name — it may use only letters, digits, spaces and . / - today, starting with a letter or digit.`;
+}
+
+/**
+ * Is this label one of our page LETTERS (A–Z), rather than a name a document
+ * gave? A letter colours by its position in the alphabet; a name has no
+ * position of its own and is coloured by its place in the list it is shown in.
+ */
+export function isVariantLetter(label: string | null | undefined): boolean {
+  return typeof label === "string" && /^[A-Z]$/.test(label.trim().toUpperCase());
+}
+
 /** A–Z, in order. Read aloud and typed into emails, so nothing cleverer. */
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 

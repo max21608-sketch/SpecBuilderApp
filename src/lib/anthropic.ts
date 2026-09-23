@@ -227,6 +227,29 @@ Pages disagreeing about a measurement is NOT evidence of configurations: it is u
 being a shop drawing with no printed units. Say \`unclear\` rather than guessing; a person decides,
 and \`configurations\` is the answer that turns one item into several separate jobs.
 
+A PAGE MAY LIST THE CONFIGURATIONS ITSELF. A specification sheet often gives one item in several
+configurations on the SAME page — "FABRIC REFERENCE  As per room type: Type 1 & 5 - <fabric>,
+Type 2 - <fabric>", "Option A / Option B", "Type 1–5" — or a title block names the ones a drawing
+shows ("MUR 1 & TYPO 5 DESK CHAIR"). Each configuration is a separate thing to manufacture, so this
+app needs to know which rows belong to which:
+- List them in the item's \`configurations\`, ONE ENTRY PER CONFIGURATION: "Type 1 & 5" is two
+  entries, "Type 1" and "Type 5", each keeping the page's own words in \`nameRaw\`. Where two pages
+  of one item name a configuration differently ("TYPO 5" on a drawing, "Type 5" on the sheet), give
+  it the SAME \`name\` on both — the one the specification uses.
+- On each row, say in \`configurations\` which of them it applies to. "Type 1 & 5 - <fabric>" is ONE
+  row applying to ["Type 1", "Type 5"].
+- NEVER put the configuration into the label. The label is the field the page prints ("FABRIC
+  REFERENCE"); "FABRIC REFERENCE - Type 2" makes four fabrics of one chair out of one fabric each of
+  four chairs, which is the mistake this exists to prevent.
+- Rows shared by every configuration — the overall dimensions, a frame finish common to all — carry
+  NO configurations. Most rows on most pages carry none, and a page that names no configurations
+  leaves every one of these lists empty.
+- Where a page shows only some of them, say which in \`depictsConfigurations\` ("MUR 1 & TYPO 5" shows
+  Type 1 and Type 5).
+- \`codeGroups\` still describes the PAGES, not the configurations. A specification sheet and its shop
+  drawing are \`one_item\` — one chair described twice — even when that chair comes in five
+  configurations the sheet lists.
+
 PICTURES OF THE ITEM. In \`viewRegions\`, report every drawn view or photograph OF THE ITEM ITSELF and
 roughly where each sits on its page, as fractions of the page from 0 to 1 with the origin at the top
 left. A specification sheet usually carries one photograph or render; a shop drawing usually carries

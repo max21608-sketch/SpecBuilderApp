@@ -1806,7 +1806,9 @@ describe("the model's own reading of a page", () => {
       ["Depth", "70", "D"],
       ["Height", "90", "H"],
     ]);
-    expect(doc.schemaVersion).toBe(2);
+    // Version 3 since 2026-09-23 (named configurations). Everything version 2
+    // reads, version 3 reads identically — which is what this test holds.
+    expect(doc.schemaVersion).toBe(3);
   });
 
   it("does not flag a slot the page's own label confirms", () => {
@@ -2221,5 +2223,79 @@ describe("stageDrawings and imperial figures", () => {
     ).items[0]!;
     expect(item.observations.filter((observation) => observation.attrGroup === "dimension")).toEqual([]);
     expect(item.observations.some((observation) => (observation.value ?? "").includes("3'"))).toBe(true);
+  });
+});
+
+// ============================================================================
+// CONFIGURATIONS A PAGE NAMES, STAGED — schemaVersion 3 (2026-09-23).
+//
+// Synthetic, in the SHAPE of Panther's S-301 sheet: one set of overall
+// dimensions and a fabric heading "As per room type" whose four lines cover
+// five room types. The names are invented.
+// ============================================================================
+describe("staging the configurations a page names", () => {
+  const sheet = (): RawDrawingItem => ({
+    ...rawItem({ itemCodeRaw: "Q-301", itemNameRaw: "Desk chair" }),
+    dimensions: [
+      { labelRaw: "Width", valueRaw: "550", unitRaw: "mm", slot: "width", slotEvidence: "labelled WIDTH", isOverall: true, configurations: [] },
+    ],
+    materials: [
+      { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker A, Ref. X", materialCodeRaw: null, configurations: ["Type 1", "Type 5"] },
+      { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker B, Ref. Y", materialCodeRaw: null, configurations: ["Type 2"] },
+      { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker C, Ref. Z", materialCodeRaw: null, configurations: ["Type 3"] },
+      { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker D, Ref. W", materialCodeRaw: null, configurations: ["Type 4"] },
+    ],
+    configurations: ["Type 1", "Type 5", "Type 2", "Type 3", "Type 4"].map((name) => ({ name, nameRaw: name, evidence: null })),
+  });
+
+  it("gives every room type's fabric COM 1 — on its own configuration, not COM 2 on the chair", () => {
+    const staged = stageDrawings([sheet()], FIELDS, null, null);
+    expect(staged.schemaVersion).toBe(3);
+    const fabrics = staged.items[0]!.observations.filter((o) => o.labelRaw === "FABRIC REFERENCE");
+    expect(fabrics.map((o) => o.specFieldId)).toEqual(["f-com1", "f-com1", "f-com1", "f-com1"]);
+    expect(fabrics.map((o) => o.configurations)).toEqual([["Type 1", "Type 5"], ["Type 2"], ["Type 3"], ["Type 4"]]);
+    expect(staged.items[0]!.configurations?.map((entry) => entry.name)).toEqual(["Type 1", "Type 5", "Type 2", "Type 3", "Type 4"]);
+  });
+
+  it("puts a shared fabric in COM 1 everywhere, and a configuration's own fabric after it", () => {
+    const item = sheet();
+    item.materials = [
+      { labelRaw: "FABRIC", valueRaw: "Shared cloth", materialCodeRaw: null, configurations: [] },
+      { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker B, Ref. Y", materialCodeRaw: null, configurations: ["Type 2"] },
+    ];
+    const fabrics = stageDrawings([item], FIELDS, null, null).items[0]!.observations.filter((o) => o.attrGroup === "material");
+    expect(fabrics.map((o) => o.specFieldId)).toEqual(["f-com1", "f-com2"]);
+  });
+
+  it("stages an item that names no configurations exactly as version 2 did", () => {
+    const plain = rawItem({ materials: [{ labelRaw: "FABRIC", valueRaw: "Linen", materialCodeRaw: null }, { labelRaw: "FABRIC", valueRaw: "Wool", materialCodeRaw: null }] });
+    const item = stageDrawings([plain], FIELDS, null, null).items[0]!;
+    expect("configurations" in item).toBe(false);
+    expect("depictsConfigurations" in item).toBe(false);
+    expect(item.observations.some((o) => "configurations" in o)).toBe(false);
+    // Page-wide claiming, unchanged: two fabrics on one page are COM 1 and COM 2.
+    expect(item.observations.map((o) => o.specFieldId)).toEqual(["f-com1", "f-com2"]);
+  });
+
+  it("re-reads a callout at read time within the row's own configuration", () => {
+    // A row staged with no field (an older word list gave up on it) is filled
+    // at READ time by `upgradeCalloutGuesses`, which must seed what is taken
+    // per configuration too, or Type 3's fabric reads as COM 2.
+    const staged = stageDrawings([sheet()], FIELDS, null, null);
+    const item = staged.items[0]!;
+    const withoutField = {
+      ...staged,
+      items: [
+        {
+          ...item,
+          observations: item.observations.map((o) =>
+            o.configurations?.[0] === "Type 3" ? { ...o, specFieldId: null, attrGroup: "other" as const } : o,
+          ),
+        },
+      ],
+    };
+    const read = assertStagedDrawings(withoutField, FIELDS);
+    const type3 = read.items[0]!.observations.find((o) => o.configurations?.[0] === "Type 3");
+    expect(type3?.specFieldId).toBe("f-com1");
   });
 });

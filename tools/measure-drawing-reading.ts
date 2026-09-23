@@ -45,6 +45,7 @@
 // ============================================================================
 import {
   assertStagedDrawings,
+  readByModel,
   groupItemsByCode,
   variantLettersByItem,
   foldableRow,
@@ -200,7 +201,7 @@ function measure(staged: StagedDrawings, counts: Counts, label: string, notes: s
   // Version 2 was read by a model that said which figure is which. The guessing
   // pipeline does not run on it, so re-asking `guessSlotsFromViews` below would
   // count a guess the app never made and never showed anybody.
-  const guesses = staged.schemaVersion !== 2;
+  const guesses = !readByModel(staged);
   if (!guesses) counts.runsV2 += 1;
   const letters = variantLettersByItem(staged.items, staged);
   const groups = groupItemsByCode(staged.items, staged);

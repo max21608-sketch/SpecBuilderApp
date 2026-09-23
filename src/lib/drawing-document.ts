@@ -52,7 +52,7 @@ import { parseCombinedDimensions, parseDimensionFigure, sharesAScale, SCALE_BOUN
 import type { RawCodeGroup, RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
 import { slotFromModel } from "@/lib/extraction-schema";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
-import { nextVariantLabel } from "@/lib/record-variants";
+import { nextVariantLabel, normaliseVariantLabel } from "@/lib/record-variants";
 
 // ---- the staged shape ------------------------------------------------------
 
@@ -177,8 +177,27 @@ export type DrawingObservation = {
    * this existed keep reading.
    */
   replaces?: { recordId: string; attributeId: string; attributeVersion: number }[];
+  /**
+   * WHICH OF THE ITEM'S NAMED CONFIGURATIONS THIS ROW APPLIES TO, as the model
+   * read it off the page, by the `name` the item's `configurations` gave them.
+   * Empty or absent means shared — every configuration the page depicts.
+   *
+   * `schemaVersion: 3` only, and OPTIONAL for the reason every field above is.
+   * Read it through `namedConfigurationPlan`, never directly: which records a
+   * row lands on is one pure function, called by the card and the confirm.
+   */
+  configurations?: string[];
   /** One attribute row per target record, once applied. */
   applied: { attributeIds: string[] } | null;
+};
+
+/** One configuration a page NAMES (`schemaVersion: 3`), as the model read it. */
+export type StagedConfiguration = {
+  /** One configuration in plain form, as the model gave it: `Type 1`. */
+  name: string;
+  /** The page's own words: `Type 1 & 5`, `TYPO 5`. */
+  nameRaw: string | null;
+  evidence: string | null;
 };
 
 export type DrawingItem = {
@@ -210,6 +229,24 @@ export type DrawingItem = {
    * anything is saved, and can pick another view or drag their own box.
    */
   imageProposal?: ItemView | null;
+  /**
+   * The configurations of this item the PAGE NAMES — S-301's sheet lists five
+   * room types under one fabric heading. `schemaVersion: 3` only; absent or
+   * empty on every other page, which is most of them.
+   */
+  configurations?: StagedConfiguration[];
+  /**
+   * Which of them this page SHOWS, by name, where the page says so (a title
+   * block `MUR 1 & TYPO 5`). Empty means the page does not restrict itself.
+   */
+  depictsConfigurations?: string[];
+  /**
+   * The reviewer's acknowledgement that confirming this page may CREATE a
+   * named configuration under a bill line that already has others — one entry
+   * per (bill record, folded name). See `newConfigurationBlockers`. Stored
+   * because it is a decision; the blocker it answers is computed.
+   */
+  configurationAcks?: { recordId: string; label: string }[];
 };
 
 /** One picture of an item, and where it sits on its page. */
@@ -245,18 +282,33 @@ export type StagedDrawings = {
    * 2 — the model reported which figure is which, whether it measures the whole
    *     item, and whether repeated pages are one item. Nothing guesses.
    *
-   * Both are read. A version 1 run is not upgraded into a version 2 one:
+   * 3 — as 2, and the model also reported the configurations a page NAMES
+   *     ("as per room type: Type 1 & 5 - …, Type 2 - …") and which rows belong
+   *     to which. Everything version 2 does, version 3 does identically.
+   *
+   * All three are read. An older run is not upgraded into a newer one:
    * inventing the fields it never carried would be one more inference layer,
-   * which is the thing version 2 removes. It is re-read, or it stays as it is.
+   * which is the thing version 2 removes — and no string rule parses
+   * `- Type 2` out of an old label. It is re-read, or it stays as it is.
    */
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   kind: "shop_drawings";
   filename: string | null;
   documentNotes: string | null;
   items: DrawingItem[];
-  /** Version 2 only. Absent on every version 1 run. */
+  /** Version 2 and later. Absent on every version 1 run. */
   codeGroups?: StagedCodeGroup[];
 };
+
+/**
+ * Was this document read by a model asked which figure is which (version 2 and
+ * later)? One test, because `=== 2` was written in five places and a version 3
+ * run would otherwise have silently fallen back into the frozen guessing
+ * pipeline.
+ */
+export function readByModel(doc: { schemaVersion?: unknown } | null | undefined): boolean {
+  return doc?.schemaVersion === 2 || doc?.schemaVersion === 3;
+}
 
 /**
  * Does this figure measure the whole item?
@@ -1649,6 +1701,69 @@ export function mergeNoteBlocks(observations: DrawingObservation[]): DrawingObse
   });
 }
 
+/**
+ * The configurations a row CLAIMS BWS FIELDS within, on its own page, as
+ * folded names — or `[""]`, one unnamed scope, on a page naming none.
+ *
+ * The row's own names; else the page's `depictsConfigurations`; else every
+ * configuration the page names. That is the same order `namedConfigurationPlan`
+ * uses for where a row LANDS, narrowed to the page — which is enough, because
+ * a BWS field only collides with another row written to the same record, and
+ * one page's rows all land together.
+ */
+function fieldClaimScopes(
+  item: Pick<DrawingItem, "configurations" | "depictsConfigurations">,
+): (row: { configurations?: string[] }) => string[] {
+  const named = itemConfigurationLabels(item);
+  const depicted = foldedNames(item.depictsConfigurations);
+  const fallback = depicted.length > 0 ? depicted : named.length > 0 ? named : [""];
+  return (row) => {
+    const own = foldedNames(row.configurations);
+    return own.length > 0 ? own : fallback;
+  };
+}
+
+/** Folded, de-duplicated, in order; tolerant of whatever a staged run holds. */
+function foldedNames(names: unknown): string[] {
+  if (!Array.isArray(names)) return [];
+  const out: string[] = [];
+  for (const name of names) {
+    if (typeof name !== "string" || name.trim() === "") continue;
+    const folded = normaliseVariantLabel(name);
+    if (!out.includes(folded)) out.push(folded);
+  }
+  return out;
+}
+
+/** The folded names of the configurations a page names, read defensively. */
+function itemConfigurationLabels(item: Pick<DrawingItem, "configurations">): string[] {
+  return foldedNames(
+    (Array.isArray(item.configurations) ? item.configurations : []).map((entry) =>
+      entry && typeof entry === "object" ? (entry as { name?: unknown }).name : null,
+    ),
+  );
+}
+
+/** BWS fields taken, per configuration scope. */
+class ScopedClaims {
+  private readonly byScope = new Map<string, Set<string>>();
+
+  /** Every field taken in ANY of these scopes: a row landing on all of them may use none of those. */
+  across(scopes: readonly string[]): Set<string> {
+    const union = new Set<string>();
+    for (const scope of scopes) for (const field of this.byScope.get(scope) ?? []) union.add(field);
+    return union;
+  }
+
+  claim(scopes: readonly string[], fieldId: string): void {
+    for (const scope of scopes) {
+      const set = this.byScope.get(scope) ?? new Set<string>();
+      set.add(fieldId);
+      this.byScope.set(scope, set);
+    }
+  }
+}
+
 export function stageDrawings(
   items: RawDrawingItem[],
   fields: SpecFieldEntry[],
@@ -1719,7 +1834,12 @@ export function stageDrawings(
         : [...dimensions.map((dimension) => dimension.valueRaw), ...combined.map((part) => part.valueRaw)],
     );
     const views = usableViews(item.viewRegions, item.page);
-    const taken = new Set<string>();
+    // BWS FIELDS ARE CLAIMED PER CONFIGURATION, NOT PER PAGE (schemaVersion 3).
+    // Type 2's fabric is COM 1 on `S-301 TYPE 2`; claiming across the page
+    // handed the four room-type fabrics COM 1, COM 2, COM 3 and nothing, of one
+    // record. See `fieldClaimScopes`.
+    const scopesOf = fieldClaimScopes(item);
+    const taken = new ScopedClaims();
     const observations: DrawingObservation[] = [];
 
     // A drawing dimensions its views with leader lines and no words: the AP364
@@ -1789,6 +1909,7 @@ export function stageDrawings(
         labelRaw: dimension.labelRaw ?? `Dimension ${dimensionNo}`,
         valueRaw: dimension.valueRaw,
         materialCodeRaw: null,
+        ...(dimension.configurations?.length ? { configurations: [...dimension.configurations] } : {}),
         value: state.value,
         unit: resolved.unit,
         // Kept in step with `unitSource` rather than replaced by it: the
@@ -1874,6 +1995,7 @@ export function stageDrawings(
       });
       const attrGroup = callout.group;
       const state = suggestAttributeState(material.valueRaw);
+      const scopes = scopesOf(material);
       const specFieldId = suggestSpecField(
         {
           attrGroup,
@@ -1883,9 +2005,9 @@ export function stageDrawings(
           itemNameRaw: item.itemNameRaw,
         },
         fields,
-        taken,
+        taken.across(scopes),
       );
-      if (specFieldId) taken.add(specFieldId);
+      if (specFieldId) taken.claim(scopes, specFieldId);
       observations.push({
         id: nextId(),
         version: 1,
@@ -1893,6 +2015,7 @@ export function stageDrawings(
         labelRaw: material.labelRaw ?? `Material ${materialNo}`,
         valueRaw: material.valueRaw,
         materialCodeRaw: material.materialCodeRaw,
+        ...(material.configurations?.length ? { configurations: [...material.configurations] } : {}),
         value: state.value,
         unit: null,
         unitSuggested: false,
@@ -1939,14 +2062,27 @@ export function stageDrawings(
       targets: null,
       observations: mergeNoteBlocks(observations),
       ...(views.length > 0 ? { viewRegions: views, imageProposal: pickItemView(views) } : {}),
+      // Only where the page names any: an item with none must stage exactly as
+      // a version 2 item did, key for key.
+      ...(item.configurations?.length
+        ? {
+            configurations: item.configurations.map((entry) => ({
+              name: entry.name,
+              nameRaw: entry.nameRaw,
+              evidence: entry.evidence,
+            })),
+          }
+        : {}),
+      ...(item.depictsConfigurations?.length ? { depictsConfigurations: [...item.depictsConfigurations] } : {}),
     };
   });
 
   return {
-    // VERSION 2: the model was asked which figure is which, whether each one
-    // measures the whole item, and whether repeated pages are one item. The
-    // read-time guessing pipeline is skipped for these, and only for these.
-    schemaVersion: 2,
+    // VERSION 3: version 2 (the model was asked which figure is which, whether
+    // each one measures the whole item, and whether repeated pages are one
+    // item) plus the configurations a page names and which rows belong to
+    // which. The read-time guessing pipeline is skipped for 2 and 3 alike.
+    schemaVersion: 3,
     kind: "shop_drawings",
     filename,
     documentNotes,
@@ -1988,7 +2124,7 @@ export function assertStagedDrawings(parsed: unknown, fields?: SpecFieldEntry[])
     throw new Error("This document was not staged as shop drawings. Upload the drawings again.");
   }
   const upgraded = upgradeTbcMarkers(upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []));
-  return upgraded.schemaVersion === 2 ? upgraded : applyViewGuesses(upgraded);
+  return readByModel(upgraded) ? upgraded : applyViewGuesses(upgraded);
 }
 
 /**
@@ -2072,10 +2208,13 @@ function upgradeCalloutGuesses(doc: StagedDrawings, fields: SpecFieldEntry[]): S
   let anyTouched = false;
   const items = doc.items.map((item) => {
     // Every field this item's rows already hold, whatever their review state:
-    // a COM 1 taken by an applied row is still taken.
-    const taken = new Set<string>();
+    // a COM 1 taken by an applied row is still taken. PER CONFIGURATION, the
+    // way staging claimed them — on a page naming none that is one scope and
+    // exactly the old behaviour.
+    const scopesOf = fieldClaimScopes(item);
+    const taken = new ScopedClaims();
     for (const observation of item.observations) {
-      if (observation.specFieldId) taken.add(observation.specFieldId);
+      if (observation.specFieldId) taken.claim(scopesOf(observation), observation.specFieldId);
     }
 
     let touched = false;
@@ -2102,9 +2241,9 @@ function upgradeCalloutGuesses(doc: StagedDrawings, fields: SpecFieldEntry[]): S
           itemNameRaw: item.itemNameRaw,
         },
         fields,
-        taken,
+        taken.across(scopesOf(observation)),
       );
-      if (specFieldId) taken.add(specFieldId);
+      if (specFieldId) taken.claim(scopesOf(observation), specFieldId);
 
       const next: DrawingObservation = {
         ...observation,
@@ -2178,7 +2317,7 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
     // block: a pack staged before this existed holds fifteen REMARKS rows, and
     // a reviewer would face them a page at a time. Ids are stable, so the
     // screen and the confirm route agree about what the card holds.
-    const observations = dedupeMeasured(mergeNoteBlocks(slotted), doc.schemaVersion === 2);
+    const observations = dedupeMeasured(mergeNoteBlocks(slotted), readByModel(doc));
     // Identity, not length: a lone `SUPPLIER: TO BID` is rewritten in place to
     // a Supplier row, and a length check would throw that away.
     if (observations.length !== slotted.length || observations.some((row, index) => row !== slotted[index])) {
@@ -2696,7 +2835,7 @@ export function occupancyThrough(occupied: OccupiedSlots, writeTo: ReadonlyMap<s
  * in the function whose whole point is that there are none left.
  */
 function codeGroupsOf(doc: Pick<StagedDrawings, "schemaVersion" | "codeGroups"> | undefined): StagedCodeGroup[] {
-  if (doc?.schemaVersion !== 2) return [];
+  if (!doc || !readByModel(doc)) return [];
   const groups: StagedCodeGroup[] = [];
   for (const group of doc.codeGroups ?? []) {
     const codes = Array.isArray(group?.itemCodes)
@@ -2787,7 +2926,7 @@ export function variantLettersByItem(
   for (const group of codeGroupsOf(doc)) {
     relationship.set(normaliseRef(group.itemCodes[0] ?? ""), group.relationship);
   }
-  const version2 = doc?.schemaVersion === 2;
+  const version2 = readByModel(doc);
 
   for (const [code, ordered] of byCode) {
     const group = ordered;
