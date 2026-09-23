@@ -52,11 +52,17 @@ describeIfDb("an email's dimensions", () => {
 
     // A category that actually asks BWS field 3, which is where all five slots
     // compose. CLAUDE.md says all 17 do; this asserts it rather than assuming.
+    // It must ALSO ask COM 1 (json_id 1), because the finish test below fills
+    // that answer. Picking by uuid order alone passed on the sandbox and failed
+    // on a fresh database, where the first uuid was a sheet with no COM 1
+    // (found by the local stack, 2026-09-23).
     const category = await client.query(
       `select q.id as requirement_id, q.category_id
          from requirements q
          join spec_fields f on f.id = q.spec_field_id
         where f.json_id = 3
+          and exists (select 1 from requirements c join spec_fields cf on cf.id = c.spec_field_id
+                       where c.category_id = q.category_id and cf.json_id = 1)
         order by q.category_id limit 1`,
     );
     if (!category.rows[0]) throw new Error("no requirement maps to BWS field 3");
