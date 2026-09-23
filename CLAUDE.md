@@ -109,6 +109,21 @@ A human confirms each of these, and nothing else may write it:
   person; an ambiguous outcome is always held; nothing is ever auto-assigned
   from one. Every automatic read counts against the per-project cap.
   (Amended by Max, 2026-09-21 — "yes, amend" — Stage 2 item 2.11.)
+  **An automatic assignment opens NO `change_sets` row, and that is decided,
+  not overlooked** (3c.4, 2026-09-22; the reasoning in full at the head of
+  `src/lib/email-registration.ts`). A change set is a change to specification
+  CONTENT and `record_snapshots` is its output — assignment writes neither, and
+  the whole-database coverage assertion rests on a change and a version being
+  the same fact. The email's EFFECT already opens one (`email_confirm`, with
+  the `.eml` as evidence), most assigned mail records nothing at all, and what
+  the gate asks — that a charged read be ACCOUNTED FOR — is answered more fully
+  on the screen for mail: the row says "assigned automatically" with the signal
+  that decided it and Unassign beside it, `audit_log` carries every write under
+  `system:router`, and the inbox counts the reads that FAILED, which is the
+  half nobody could see. If it is ever overruled, that file states the exact
+  shape and its cost: a migration re-listing the whole CHECK from the LIVE
+  constraint, and a re-reading of the coverage test, because such a change set
+  would carry no version by design.
 - Marking a gate (TG0/TG1/TG2) satisfied for a record.
 - Accepting a VE alternative, which changes which version is live.
 - Retiring a spec, a record or a run, and editing a confirmed finish. Each

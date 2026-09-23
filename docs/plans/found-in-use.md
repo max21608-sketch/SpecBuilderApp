@@ -1492,7 +1492,43 @@ be listed as an item to categorise when it is a heading.
 
 ### After 2.11: what an automatic assignment does not yet do
 
-**Status: open — observations from Coder E, 2026-09-21.** An auto-assigned read
+**Status: CLOSED. All three were answered on 2026-09-22 by `19ac9ad` (item
+3c.4) and THIS ENTRY WAS NEVER MARKED — which is how the work came round
+again.** Planning the 2026-09-23 stages read this entry as open and regenerated
+two items from it (4c.2 and half of 4e.2). The rule in every plan's §7 —
+*every item's FIU entry is marked FIXED with its date and commit when it
+lands* — exists for the "fixed on paper" failure; this is the same rule failing
+in the other direction, and it costs a coder's whole run. **Mark the entry when
+the work lands, not when the stage list is written.**
+
+What each observation got:
+
+- **The failed-read queue** — a tile of its own, slate at zero, a red-bordered
+  table under every tab, out of "to review". Built in `19ac9ad`.
+- **No change set on an automatic assignment** — DELIBERATELY REFUSED, with
+  four reasons written at the head of `src/lib/email-registration.ts`. 3c.4
+  asked that if it stayed out the reason be said in `CLAUDE.md` beside the
+  gate; it went into the library instead. **That paragraph is now in both
+  instruction files** (2026-09-23), which closes the last part of 3c.4.
+- **The demo tool's stale line and `assignment_kind`** — also `19ac9ad`.
+
+**AND THE COUNT WAS WRONG AT SCALE — found 2026-09-23, fixed in `75a6f81`.**
+The tile counted `buckets.failed` CLIENT-SIDE over the 200 rows the route
+returns. Held mail survives that cap only because it sorts first; a failed read
+is `assigned`, so it sorts into the second group by `received_at desc`. **Past
+200 open messages an older failed read falls off the page and the tile reads
+low — silently, on the one count whose whole purpose is that nobody is watching
+that queue.** It now comes from a `filter` clause on the `counts` query that
+already computes "arrived today" and "ruled on this week" — no extra round
+trip, project-scoped like its neighbours — and the section heads on the
+server's count, or the tile would be a number with nothing under it to act on.
+The screen says *showing n of m* and invents no remedy, because it has neither
+a project filter nor paging to offer.
+
+**Nobody has seen the corrected tile against real data**, and producing the
+truncated case needs 200+ fixture messages. The original entry follows.
+
+**Status when found: open — observations from Coder E, 2026-09-21.** An auto-assigned read
 that fails still needs a person to press Retry and nothing but the inbox row
 says it happened — with Graph on, that is a queue somebody must watch; a count
 on the inbox tiles is the cheap fix. `assignMessage` opens no change set, so an
