@@ -53,6 +53,7 @@ import { describeRetireEffect } from "@/lib/configuration-carry";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
+import { BwStandardPanel, BwStandardSummary, paletteForJsonId } from "@/components/records/BwStandardControl";
 import Button, { buttonClass } from "@/components/ui/Button";
 import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
@@ -135,6 +136,13 @@ type Attribute = {
   source_page: number | null; source_run_id: string | null; created_by: string | null;
   field_name: string | null; json_id: number | null; field_category: string | null;
   source_filename: string | null; source_document_kind: string | null;
+  /**
+   * 0041: the BW standard beside the client's words, its state, and the email
+   * that agreed it. Optional so an older payload still renders.
+   */
+  standard_value?: string | null; standard_state?: string | null;
+  standard_set_by?: string | null; standard_set_at?: string | null;
+  standard_evidence_filename?: string | null; standard_evidence_change_set_id?: string | null;
 };
 
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
@@ -283,6 +291,8 @@ function RecordView() {
   const [correctReason, setCorrectReason] = useState("");
   const [correctBusy, setCorrectBusy] = useState(false);
   /** The spec whose finishes-library link is being changed, and what to. */
+  /** Which spec's BW standard is being set or agreed, and which of the two (0041). */
+  const [standardEditing, setStandardEditing] = useState<{ id: string; mode: "set" | "agree" } | null>(null);
   const [attaching, setAttaching] = useState<Attribute | null>(null);
   const [attachTo, setAttachTo] = useState("");
   const [attachReason, setAttachReason] = useState("");
@@ -1129,6 +1139,16 @@ function RecordView() {
                                 {attribute.qualifier && (
                                   <span className="mt-0.5 block text-xs text-neutral-500">{attribute.qualifier}</span>
                                 )}
+                                {/* THE BW STANDARD, BESIDE THE CLIENT'S WORDS
+                                    (0041). The value above is what the page
+                                    said and stays so; this is what BW will
+                                    make, and what the BWS file ships. */}
+                                <BwStandardSummary
+                                  attribute={attribute}
+                                  palette={paletteForJsonId(data.palettes ?? [], data.paletteByQuestion ?? [], attribute.json_id)}
+                                  onSet={() => setStandardEditing({ id: attribute.id, mode: "set" })}
+                                  onAgree={() => setStandardEditing({ id: attribute.id, mode: "agree" })}
+                                />
                                 {/* A LINKED finish is a link to the library,
                                     because the library is what the export
                                     renders and what a correction has to be made
@@ -1331,6 +1351,20 @@ function RecordView() {
                                   </div>
                                 </td>
                               </tr>
+                            )}
+                            {standardEditing?.id === attribute.id && (
+                              <BwStandardPanel
+                                attribute={attribute}
+                                palette={paletteForJsonId(data.palettes ?? [], data.paletteByQuestion ?? [], attribute.json_id)}
+                                projectId={record.project_id}
+                                mode={standardEditing.mode}
+                                span={5}
+                                onClose={() => setStandardEditing(null)}
+                                onSaved={async (message, ok) => {
+                                  await reloadThen(message);
+                                  if (ok) setStandardEditing(null);
+                                }}
+                              />
                             )}
                             {correcting?.id === attribute.id && (
                               <tr className="bg-amber-50/60">

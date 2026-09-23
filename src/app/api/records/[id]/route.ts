@@ -76,6 +76,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const attributes = await sql`
     select a.id, a.attr_group, a.label, a.value, a.qualifier, a.unit, a.dimension_slot, a.material_code, a.state, a.status,
            a.sort_order, a.version, a.source_page, a.source_run_id, a.created_at, a.created_by,
+           -- 0041: the BW standard beside the client's words, and the email
+           -- that agreed it where one was attached.
+           a.standard_value, a.standard_state, a.standard_set_by, a.standard_set_at,
+           a.standard_agreed_evidence_id, ev.filename as standard_evidence_filename,
+           -- The change that carries it, because the evidence download is
+           -- addressed by change set (/api/change-sets/[id]/evidence).
+           (select cs.id from change_sets cs where cs.evidence_attachment_id = a.standard_agreed_evidence_id
+             order by cs.created_at limit 1) as standard_evidence_change_set_id,
            f.name as field_name, f.json_id, f.field_category,
            a.finish_id, fin.code as finish_code, fin.description as finish_description, fin.state as finish_state,
            fin.code_origin as finish_code_origin,
@@ -83,6 +91,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     from record_attributes a
     left join spec_fields f on f.id = a.spec_field_id
     left join project_finishes fin on fin.id = a.finish_id
+    left join attachments ev on ev.id = a.standard_agreed_evidence_id
     left join (
       select r.id, r.document_kind, at.filename
       from intake_runs r left join attachments at on at.id = r.attachment_id
@@ -97,7 +106,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const retired = await sql`
     select a.id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code, a.state,
            a.sort_order, a.version, a.source_page, a.source_run_id, a.retired_at, a.retired_by,
-           a.superseded_by_id,
+           a.superseded_by_id, a.standard_value, a.standard_state,
            f.name as field_name, f.json_id,
            src.filename as source_filename
     from record_attributes a
