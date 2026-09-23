@@ -41,7 +41,7 @@ import Note from "@/components/ui/Note";
 import Tabs from "@/components/ui/Tabs";
 import { Table, Th, Td, Tr, GroupRow } from "@/components/ui/Table";
 import SpecValue from "@/components/records/SpecValue";
-import { composeDimensionCell } from "@/lib/dimensions";
+import { composeDimensionCell, parseDimensionFigure } from "@/lib/dimensions";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
@@ -94,7 +94,10 @@ function ValueCell({ value, unit, state, qualifier }: { value: string | null; un
       ) : (
         <span className="text-neutral-900">
           {value && <SpecValue text={value} />}
-          {unit && <span className="text-neutral-500">{unit}</span>}
+          {/* The unit belongs to a FIGURE. "TBC", "N/A" or "REFER TO … DRAWINGS"
+              carry the row's unit too, and printing it welded on ("TBCmm")
+              reads as a measurement nobody took. */}
+          {unit && parseDimensionFigure(value).figure !== null && <span className="text-neutral-500">{unit}</span>}
           {state === "tbc" && (
             <span className="ml-1.5 align-middle">
               <Chip tone="warn">TBC</Chip>
@@ -142,6 +145,11 @@ export default function BillLineConfigurations({
   const [editing, setEditing] = useState<Editing | null>(null);
   const [adding, setAdding] = useState<Adding | null>(null);
   const [busy, setBusy] = useState(false);
+  // The notes a sheet prints (its general conditions, a title block) are common
+  // to every configuration and can run to fifteen rows; open, they push the
+  // rows that DIFFER and the per-configuration tabs a screen down. Folded, with
+  // the count on the toggle — never dropped.
+  const [showNotes, setShowNotes] = useState(false);
 
   const configurationIds = configurations.map((configuration) => configuration.recordId);
   const n = configurations.length;
@@ -288,8 +296,23 @@ export default function BillLineConfigurations({
             <tbody>
               {sections(common).map(({ section, groups }) => (
                 <Fragment key={section}>
-                  <GroupRow span={4}>{SECTION_LABELS[section]}</GroupRow>
-                  {groups.map((group) => {
+                  <GroupRow
+                    span={4}
+                    aside={
+                      section === "notes" ? (
+                        <button
+                          type="button"
+                          className="text-sky-700 underline-offset-2 hover:underline"
+                          onClick={() => setShowNotes((open) => !open)}
+                        >
+                          {showNotes ? "Hide" : `Show ${groups.length}`}
+                        </button>
+                      ) : undefined
+                    }
+                  >
+                    {SECTION_LABELS[section]}
+                  </GroupRow>
+                  {(section === "notes" && !showNotes ? [] : groups).map((group) => {
                     const shared = group.shared!;
                     const first = group.members[0]!.rows[0]!;
                     const open = editing?.key === group.key ? editing : null;
