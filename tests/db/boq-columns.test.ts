@@ -80,6 +80,9 @@ describeIfDb("a bill is mapped, not refused", () => {
   const client = new pg.Client({ connectionString: databaseUrl });
   let projectId = "";
   const layoutName = qaNumber("pricing document layout");
+  // Per run, so no layout already in the database (saved from the real bill,
+  // whose headings the fixture copies) can read this fixture.
+  const codeHeading = qaNumber("Spec Code");
 
   beforeAll(async () => {
     await client.connect();
@@ -161,7 +164,7 @@ describeIfDb("a bill is mapped, not refused", () => {
 
   it("stages a bill nobody could read as PARSED, every sheet needing its columns", async () => {
     const { status, importId, body } = await register(
-      await pricingDocWorkbook({ titled: false, sharedFormulaGap: true }),
+      await pricingDocWorkbook({ titled: false, sharedFormulaGap: true, codeHeading }),
       "__QA pricing VML.xlsx",
     );
     expect(status).toBe(201);
@@ -209,7 +212,7 @@ describeIfDb("a bill is mapped, not refused", () => {
     expect(after.version).toBeGreaterThan(before.version);
     const sheet = assertBoqDocument(after.parsed).sheets[0]!;
     expect(sheet).toMatchObject({ needsColumns: false, mappingSource: "person", columnsChecked: true, ignored: false });
-    expect(sheet.columns?.code).toEqual({ index: 4, heading: "Spec Code" });
+    expect(sheet.columns?.code).toEqual({ index: 4, heading: codeHeading });
     // Re-suggested by the same function registration uses.
     expect(sheet.lines[0]).toMatchObject({ index: 0, code: "ZZ-FUR-10", ignored: false, levelStatus: "suggested" });
     expect(sheet.lines.map((line) => line.sourceLine)).toContain(null); // the formula with no cached value
@@ -265,12 +268,12 @@ describeIfDb("a bill is mapped, not refused", () => {
     const listed = (await (await listLayouts()).json()) as { layouts: { name: string; mapping: Record<string, string>; headerRows: number }[] };
     const layout = listed.layouts.find((row) => row.name === layoutName)!;
     expect(layout.headerRows).toBe(1);
-    expect(layout.mapping).toMatchObject({ code: "spec code", subArea: "sub-area", sourceLine: "line", notes: "notes" });
+    expect(layout.mapping).toMatchObject({ code: foldHeading(codeHeading), subArea: "sub-area", sourceLine: "line", notes: "notes" });
     // No price, cost or picture column is in a layout.
     expect(Object.values(layout.mapping)).not.toContain("unit price usd $");
 
     // The ORIGINAL copy: its header is seven rows further down.
-    const { status, importId } = await register(await pricingDocWorkbook({ titled: true }), "__QA pricing.xlsx");
+    const { status, importId } = await register(await pricingDocWorkbook({ titled: true, codeHeading }), "__QA pricing.xlsx");
     expect(status).toBe(201);
     const doc = assertBoqDocument((await run(importId)).parsed);
     const sheet = doc.sheets[0]!;
@@ -292,7 +295,7 @@ describeIfDb("a bill is mapped, not refused", () => {
   it("reads a FAILED bill again from its stored source, with no new upload", async () => {
     // The shape every bill refused before 0040 is in: failed, no staged JSON,
     // an attachment holding the original.
-    stored.bytes = await pricingDocWorkbook({ titled: true });
+    stored.bytes = await pricingDocWorkbook({ titled: true, codeHeading });
     const attachment = await client.query(
       `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
        values ('project', $1, 'boq', $2, '__QA refused.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 1, 'qa')

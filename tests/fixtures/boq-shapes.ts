@@ -330,7 +330,7 @@ export function pricingDocRows(firstLine: number): SheetData {
  * rows deleted, header on row 1, and the line formula still counting from row
  * 8 — so the first line number is -6.
  */
-export function pricingDoc({ titled }: { titled: boolean }): SheetData {
+export function pricingDoc({ titled, codeHeading = "Spec Code" }: { titled: boolean; codeHeading?: string }): SheetData {
   const blank = () => Array.from({ length: PRICING_DOC_HEADINGS.length }, () => null) as (string | null)[];
   const put = (row: (string | null)[], index: number, value: string) => {
     row[index] = value;
@@ -347,7 +347,8 @@ export function pricingDoc({ titled }: { titled: boolean }): SheetData {
         put(blank(), 0, "Tendering Company Name:"),
       ]
     : [];
-  return [...title, [...PRICING_DOC_HEADINGS], ...pricingDocRows(titled ? 1 : -6)];
+  const header = PRICING_DOC_HEADINGS.map((heading) => (heading === "Spec Code" ? codeHeading : heading));
+  return [...title, header, ...pricingDocRows(titled ? 1 : -6)];
 }
 
 /**

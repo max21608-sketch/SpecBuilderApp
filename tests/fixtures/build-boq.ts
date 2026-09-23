@@ -98,12 +98,21 @@ export async function bill300Workbook(): Promise<Buffer> {
 export async function pricingDocWorkbook({
   titled,
   sharedFormulaGap = false,
+  codeHeading,
 }: {
   titled: boolean;
   sharedFormulaGap?: boolean;
+  /**
+   * The code column's heading. A database-tier test passes a per-run heading:
+   * layouts are GLOBAL, so a layout somebody saved from the real bill (whose
+   * headings this fixture copies) would otherwise read the fixture, and a
+   * test asserting "nobody could read this" would fail for a reason that has
+   * nothing to do with the code under test.
+   */
+  codeHeading?: string;
 }): Promise<Buffer> {
   const book = new ExcelJS.Workbook();
-  const rows = pricingDoc({ titled });
+  const rows = pricingDoc({ titled, codeHeading });
   const sheet = addSheet(book, "CASEGOODS+SEATING+TABLES", rows);
   const headerRow = titled ? 8 : 1;
   for (const [from, to] of [["E", "F"], ["H", "I"], ["J", "K"]] as const) {
