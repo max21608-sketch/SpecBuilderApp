@@ -69,6 +69,11 @@ export const CHANGE_SET_KINDS = [
   // `record_attributes` is what a DOCUMENT said, and a row saying something
   // its page does not while still citing that page is a false provenance.
   "attribute_correct",
+  // 0038: one record out of the export, and back in. A configuration added by
+  // hand has to be able to go again, and retiring it can put its bill line
+  // back in the file, so it says why.
+  "record_retire",
+  "record_restore",
 ] as const;
 export type ChangeSetKind = (typeof CHANGE_SET_KINDS)[number];
 
@@ -86,6 +91,8 @@ export const REASON_REQUIRED_KINDS: readonly ChangeSetKind[] = [
   // A correction overrides something a document said — the same test retiring
   // one applies, and it asserts a replacement on top.
   "attribute_correct",
+  // 0038: it changes what the export carries.
+  "record_retire",
 ];
 
 export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
@@ -109,6 +116,8 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   record_create: "Item added by hand",
   attribute_create: "Spec added by hand",
   attribute_correct: "Spec corrected",
+  record_retire: "Item retired",
+  record_restore: "Item restored",
 };
 
 export type OpenChangeSet = {

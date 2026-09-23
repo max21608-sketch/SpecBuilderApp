@@ -25,7 +25,7 @@
 // Now both columns begin with a box at the same top edge.
 // ============================================================================
 import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -48,6 +48,7 @@ import { composeDimensionCell } from "@/lib/dimensions";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
+import { describeRetireEffect } from "@/lib/configuration-carry";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
@@ -55,6 +56,8 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
+import AddConfiguration from "@/components/records/AddConfiguration";
+import DifferingFields from "@/components/records/DifferingFields";
 import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
 import type { Palette } from "@/lib/palettes";
@@ -97,6 +100,8 @@ type SpecRecord = {
   category_name: string | null; category_family: string | null;
   /** A fabric split (0024). Both null on an ordinary record. */
   parent_id: string | null; variant_label: string | null;
+  /** `retired` for a configuration somebody took out of the export (0038). */
+  status: string;
   /** Whether a crop was confirmed off the drawings, so the screen can decide
    *  without asking `/image` and being refused. */
   has_image: boolean;
@@ -270,6 +275,15 @@ function RecordView() {
   // The header's "Add a spec by hand" opens the form beside the specs it adds
   // to. One action, one button: the page-level action lives in the band.
   const [addingSpec, setAddingSpec] = useState(false);
+  // "Add a configuration" (2026-09-23) and a configuration's rename. The panel
+  // lives in the Configurations card, beside the family it adds to.
+  const router = useRouter();
+  const [addingConfiguration, setAddingConfiguration] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  /** The reason box for retiring a configuration; null while it is closed. */
+  const [configReason, setConfigReason] = useState<string | null>(null);
+  const [configStatusBusy, setConfigStatusBusy] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiFetch<Payload>(`/api/records/${id}`);
@@ -304,6 +318,8 @@ function RecordView() {
     state: AnswerState,
     reason?: string,
     evidence?: UploadedEvidence | null,
+    /** Absent keeps the qualifier the answer holds; the route reads it that way. */
+    qualifier?: string | null,
   ) {
     // Reachable only if a requirement was added to the category after this
     // record was given one. Choosing the category again creates the missing
@@ -318,7 +334,7 @@ function RecordView() {
       const res = await apiFetch(`/api/answers/${answer.answer_id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value, state, version: answer.version, reason, evidence }),
+        body: JSON.stringify({ value, state, version: answer.version, reason, evidence, qualifier }),
       });
       if (!res.ok) {
         // The server asks for a reason only when the edit OVERRIDES a settled
@@ -422,6 +438,45 @@ function RecordView() {
     }
     await save(answer, pendingReason.value, pendingReason.state, reason, evidence);
     setPendingReason(null);
+  }
+
+  /** A configuration's name, corrected. Refused in words for one already used. */
+  async function rename() {
+    if (!data || renaming === null) return;
+    setRenameBusy(true);
+    try {
+      const res = await apiFetch(`/api/records/${data.record.id}/configuration-name`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: renaming, version: data.record.version }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+      if (res.ok) setRenaming(null);
+    } finally {
+      setRenameBusy(false);
+    }
+  }
+
+  /** Retire a configuration (a reason is required) or put it back. */
+  async function setConfigurationStatus(status: "active" | "retired") {
+    if (!data) return;
+    if (status === "retired" && !configReason?.trim()) return;
+    setConfigStatusBusy(true);
+    try {
+      const res = await apiFetch(`/api/records/${data.record.id}/configuration-status`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status,
+          version: data.record.version,
+          reason: status === "retired" ? configReason?.trim() : null,
+        }),
+      });
+      await reloadThen(res.ok ? null : res.error);
+      if (res.ok) setConfigReason(null);
+    } finally {
+      setConfigStatusBusy(false);
+    }
   }
 
   async function retire() {
@@ -887,6 +942,24 @@ function RecordView() {
         {tab === "specs" && (
           <div className="grid items-start gap-4 min-[820px]:grid-cols-[minmax(0,1fr)_260px]">
             <div className="min-w-0">
+              {/* A CONFIGURATION'S OWN FIELDS COME FIRST, blank until somebody
+                  fills them: the fabrics (COM 1 to COM 3) are what make it a
+                  different chair from its siblings, and a configuration added
+                  by hand starts with every one of them `missing`. */}
+              {record.parent_id && (
+                <Card title={`What makes ${variantName(parentRefs, record.variant_label, "this configuration")} different`} className="mb-4">
+                  <DifferingFields
+                    answers={answers}
+                    palettes={data.palettes ?? []}
+                    paletteByQuestion={data.paletteByQuestion ?? []}
+                    savingId={savingId}
+                    reloadKey={historyKey}
+                    onSave={(answer, value, state, qualifier) =>
+                      void save(answer, value, state, undefined, undefined, qualifier)
+                    }
+                  />
+                </Card>
+              )}
               {addingSpec && (
                 <div className="mb-4">
                   <AddSpec
@@ -1466,8 +1539,33 @@ function RecordView() {
                   configuration has to name the bill line it came from, because
                   its record number does not.
                   ========================================================== */}
-              <Card title="Configurations">
+              <Card
+                title="Configurations"
+                actions={
+                  !addingConfiguration && (
+                    <Button variant="secondary" size="xs" onClick={() => setAddingConfiguration(true)}>
+                      Add a configuration
+                    </Button>
+                  )
+                }
+              >
+                {/* ADD, BY HAND (2026-09-23). A sibling from a configuration's
+                    screen goes under the SAME bill line, so the panel is always
+                    given the parent. */}
+                {addingConfiguration && (
+                  <div className="mb-3">
+                    <AddConfiguration
+                      billLineId={record.parent_id ?? record.id}
+                      onCancel={() => setAddingConfiguration(false)}
+                      onAdded={(added) => {
+                        setAddingConfiguration(false);
+                        router.push(`/dashboard/records/${added.recordId}`);
+                      }}
+                    />
+                  </div>
+                )}
                 {record.parent_id ? (
+                  <>
                   <p className="text-[12.5px] text-neutral-700">
                     Configuration {record.variant_label} of{" "}
                     <Link href={`/dashboard/records/${record.parent_id}`} className="underline hover:text-neutral-900">
@@ -1476,6 +1574,86 @@ function RecordView() {
                     , which the bill lists once
                     {billQty !== null && <> at {billQty} off</>}. This configuration is what BWS receives.
                   </p>
+                  {record.status === "retired" ? (
+                    /* RETIRED, NOT GONE. Its name stays taken, and putting it
+                       back is one click — refused in words if a live sibling
+                       now has the same name. */
+                    <Note
+                      tone="blocked"
+                      title="Retired."
+                      actions={
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          disabled={configStatusBusy}
+                          onClick={() => void setConfigurationStatus("active")}
+                        >
+                          Put it back
+                        </Button>
+                      }
+                    >
+                      This configuration is not exported. Its name is never reused.
+                    </Note>
+                  ) : configReason !== null ? (
+                    <div className="mt-2">
+                      <Note tone="warn">
+                        {describeRetireEffect(
+                          parentRefs || "the bill line",
+                          record.variant_label ?? "",
+                          variants.filter((member) => member.id !== record.id).length,
+                        )}
+                      </Note>
+                      <label className="mt-2 block text-xs text-neutral-600">
+                        Why is it being retired?
+                        <textarea
+                          autoFocus
+                          value={configReason}
+                          onChange={(event) => setConfigReason(event.target.value)}
+                          rows={2}
+                          className="mt-1 block w-full rounded border border-neutral-300 px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <div className="mt-2 flex gap-2">
+                        <Button
+                          variant="danger"
+                          size="xs"
+                          disabled={configStatusBusy || !configReason.trim()}
+                          onClick={() => void setConfigurationStatus("retired")}
+                        >
+                          Retire it
+                        </Button>
+                        <Button variant="quiet" size="xs" onClick={() => setConfigReason(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : renaming === null ? (
+                    <div className="mt-2 flex gap-2">
+                      <Button variant="quiet" size="xs" onClick={() => setRenaming(record.variant_label ?? "")}>
+                        Rename
+                      </Button>
+                      <Button variant="quiet" size="xs" onClick={() => setConfigReason("")}>
+                        Retire
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <input
+                        autoFocus
+                        value={renaming}
+                        onChange={(event) => setRenaming(event.target.value)}
+                        aria-label="New name for this configuration"
+                        className="w-28 rounded border border-neutral-300 px-2 py-1 text-sm"
+                      />
+                      <Button variant="primary" size="xs" disabled={renameBusy || !renaming.trim()} onClick={() => void rename()}>
+                        Save
+                      </Button>
+                      <Button variant="quiet" size="xs" onClick={() => setRenaming(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                  </>
                 ) : variants.length > 0 ? (
                   <>
                     <p className="text-[12.5px] text-neutral-700">
