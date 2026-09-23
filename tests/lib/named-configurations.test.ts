@@ -7,6 +7,8 @@ import { PROMPTS } from "@/lib/anthropic";
 import { describe, expect, it } from "vitest";
 import {
   alreadyRecorded,
+  configurationTarget,
+  namedTargetsFor,
   configurationsDistinguishSomething,
   crossPageClaims,
   codeConfigurations,
@@ -161,34 +163,101 @@ describe("where a page of named configurations writes", () => {
   });
 });
 
-describe("creating a configuration beside existing ones", () => {
+describe("creating a configuration beside existing ones (plan step 5)", () => {
   const doc = namedSheetRun();
   const drawing = drawingOf(doc);
   const plan = namedConfigurationPlans(doc.items, doc).get(drawing.id)!;
   const resolution = resolveDrawingTargets("Q-301", [record()]);
-
-  it("lands on an existing configuration of the exact name with no question", () => {
-    const variants = parentVariantsOf([
+  const typesExist = () =>
+    parentVariantsOf([
       record({ id: "v1", parentId: "bill-main", variantLabel: "TYPE 1", boqCodes: [], refs: [] }),
       record({ id: "v5", parentId: "bill-main", variantLabel: "TYPE 5", boqCodes: [], refs: [] }),
     ]);
-    expect(drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, { plan, variants })).toEqual([]);
+
+  it("pairs silently only on the PAGE'S OWN WORDS — never on the model's translation", () => {
+    // The drawing's title block says MUR 1 & TYPO 5; the model read them as
+    // Type 1 and Type 5. That is a translation nobody has confirmed: ask.
+    const asked = drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, namedTargetsFor(drawing, plan, typesExist(), doc)).filter(
+      (b) => b.code === "configuration_new",
+    );
+    expect(asked.map((b) => b.code === "configuration_new" && b.label)).toEqual(["TYPE 1", "TYPE 5"]);
+    expect(asked[0]!.message).toMatch(/^The page says MUR 1 \(read as TYPE 1\), and this item on MAIN RUN already has TYPE 1, TYPE 5\./);
+
+    // A page whose own words ARE the name lands with no question: case and
+    // whitespace folded, nothing more.
+    const own = stageDrawings(
+      [
+        {
+          ...SHOP_DRAWING,
+          itemCodeRaw: "Q-301",
+          configurations: [{ name: "Type 1", nameRaw: "type  1", evidence: null }, { name: "Type 5", nameRaw: "Type 5", evidence: null }],
+          depictsConfigurations: [],
+          // Something that differs, or the two names would distinguish nothing.
+          materials: [{ labelRaw: "PIPING", valueRaw: "Contrast piping", materialCodeRaw: null, configurations: ["Type 5"] }],
+        },
+      ],
+      NAMED_FIELDS,
+      null,
+      null,
+    );
+    const ownPlan = namedConfigurationPlans(own.items, own).get(own.items[0]!.id)!;
+    const named = namedTargetsFor(own.items[0]!, ownPlan, typesExist(), own);
+    expect(drawingItemBlockers(own.items[0]!, resolution, NO_OCCUPANCY, named)).toEqual([]);
+    expect(configurationTarget("bill-main", "TYPE 1", named)).toMatchObject({ kind: "existing", variantId: "v1", via: "exact" });
   });
 
-  it("asks before adding a name beside OTHER configurations, naming them", () => {
+  it("writes to the configuration the reviewer paired it with", () => {
+    const named = {
+      plan,
+      variants: typesExist(),
+      pairs: [
+        { recordId: "bill-main", label: "TYPE 1", pairWith: "TYPE 1" },
+        { recordId: "bill-main", label: "TYPE 5", pairWith: "TYPE 5" },
+      ],
+    };
+    expect(drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, named)).toEqual([]);
+    const width = drawing.observations.find((o) => o.dimensionSlot === "W")!;
+    expect(rowWriteRecords(width.id, ["bill-main"], named)).toEqual(["v1", "v5"]);
+  });
+
+  it("refuses two configurations paired onto one record", () => {
+    const named = {
+      plan,
+      variants: typesExist(),
+      pairs: [
+        { recordId: "bill-main", label: "TYPE 1", pairWith: "TYPE 1" },
+        { recordId: "bill-main", label: "TYPE 5", pairWith: "TYPE 1" },
+      ],
+    };
+    expect(drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, named).map((b) => b.code)).toEqual(["configuration_pair_twice"]);
+  });
+
+  it("creates a new one on the reviewer's word, and reads a pre-step-5 tick as the same", () => {
     const variants = parentVariantsOf(
       ["A", "B", "C", "D"].map((letter) => record({ id: `v-${letter}`, parentId: "bill-main", variantLabel: letter, boqCodes: [], refs: [] })),
     );
-    const blockers = drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, { plan, variants }).filter((b) => b.code === "configuration_new");
-    expect(blockers.map((b) => b.code === "configuration_new" && b.label)).toEqual(["TYPE 1", "TYPE 5"]);
-    expect(blockers[0]!.message).toContain("A, B, C, D");
-    expect(blockers[0]!.message).toContain("MAIN RUN");
-    expect(blockers[0]!.message).toContain("TYPE 1");
-
-    // Ticked for one bill line and one name: that one goes, the other stays.
+    const asked = drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, { plan, variants }).filter((b) => b.code === "configuration_new");
+    expect(asked.map((b) => b.code === "configuration_new" && b.label)).toEqual(["TYPE 1", "TYPE 5"]);
+    expect(asked[0]!.message).toContain("A, B, C, D");
+    expect(asked[0]!.message).toContain("or create it as a new configuration");
     const acked = { ...drawing, configurationAcks: [{ recordId: "bill-main", label: "TYPE 1" }] };
-    const after = drawingItemBlockers(acked, resolution, NO_OCCUPANCY, { plan, variants }).filter((b) => b.code === "configuration_new");
+    const after = drawingItemBlockers(acked, resolution, NO_OCCUPANCY, namedTargetsFor(acked, plan, variants, doc)).filter(
+      (b) => b.code === "configuration_new",
+    );
     expect(after.map((b) => b.code === "configuration_new" && b.label)).toEqual(["TYPE 5"]);
+  });
+
+  it("cannot create a new one under a name that already exists", () => {
+    const named = { plan, variants: typesExist(), pairs: [{ recordId: "bill-main", label: "TYPE 1", pairWith: null }] };
+    expect(configurationTarget("bill-main", "TYPE 1", named)).toMatchObject({ kind: "ask", collides: true });
+  });
+
+  it("lands this document's own later page where its earlier page landed, with no question", () => {
+    const named = { plan, variants: typesExist(), links: [
+      { recordId: "bill-main", label: "TYPE 1", variantId: "v1" },
+      { recordId: "bill-main", label: "TYPE 5", variantId: "v5" },
+    ] };
+    expect(drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, named)).toEqual([]);
   });
 
   it("asks nothing when the bill line has no configurations yet", () => {
@@ -453,7 +522,11 @@ describe("a dimension already recorded", () => {
         ["v5", new Map([["W", slot("600", "a5")]])],
       ]),
     };
-    const blockers = drawingItemBlockers(drawing, resolveDrawingTargets("Q-301", [record()]), occupied, { plan, variants });
+    const pairs = [
+      { recordId: "bill-main", label: "TYPE 1", pairWith: "TYPE 1" },
+      { recordId: "bill-main", label: "TYPE 5", pairWith: "TYPE 5" },
+    ];
+    const blockers = drawingItemBlockers(drawing, resolveDrawingTargets("Q-301", [record()]), occupied, { plan, variants, pairs });
     const widths = blockers.filter((b) => b.code === "dimension_slot_taken");
     expect(widths).toHaveLength(1);
     expect(widths[0]).toMatchObject({ recordId: "v5" });

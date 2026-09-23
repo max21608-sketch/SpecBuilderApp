@@ -191,7 +191,7 @@ describe("a card whose document names its configurations", () => {
     expect(screen.getAllByText(/shared with TYPE 5 — one row, written to each/).length).toBeGreaterThan(0);
   });
 
-  it("asks before creating a configuration beside existing ones, and saves the tick on each page", async () => {
+  it("asks which configuration a new name is, and saves the choice on each page that names it", async () => {
     const doc = namedSheetRun();
     const blocked = resolutionsFor(doc, (item) =>
       item.page === 1
@@ -201,8 +201,11 @@ describe("a card whose document names its configurations", () => {
                 code: "configuration_new",
                 recordId: "rec-main",
                 label: "TYPE 2",
-                message: "This item on MAIN RUN already has configuration A — create TYPE 2 as a new configuration beside it?",
-              },
+                existing: ["A"],
+                namesRaw: ["MUR 2"],
+                collides: false,
+                message: "The page says MUR 2 (read as TYPE 2), and this item on MAIN RUN already has A. Pair it with one of them, or create it as a new configuration.",
+              } as never,
             ],
           }
         : {},
@@ -211,19 +214,22 @@ describe("a card whose document names its configurations", () => {
       entry.named!.existing = { "rec-main": { A: "variant-a" }, "rec-ve": {} };
     }
     const { spies } = renderNamed(doc, blocked);
-    // The tab says it is blocked, and the confirm waits.
     expect(screen.getByRole("tab", { name: /TYPE 2/ }).textContent).toContain("blocked");
     expect(screen.getByRole("button", { name: /Confirm Q-301/ })).toBeDisabled();
-
-    await userEvent.click(screen.getByRole("checkbox", { name: /Create TYPE 2 on MAIN RUN, beside A/ }));
+    // Both names shown: the page's own words, and what they were read as.
+    expect(screen.getByText(/the page says MUR 2 \(read as TYPE 2\)/)).toBeInTheDocument();
+    const select = screen.getByRole("combobox", { name: /Which configuration is TYPE 2 on MAIN RUN/ });
+    expect(Array.from((select as HTMLSelectElement).options).map((o) => o.textContent)).toEqual([
+      "— choose —",
+      "Pair with A",
+      "Create as a new configuration",
+    ]);
+    await userEvent.selectOptions(select, "Pair with A");
     const sheet = doc.items.find((item) => item.page === 1)!;
-    const pagesSaved = spies.onSaveItem.mock.calls.map((call) => (call as unknown as [DrawingItem, unknown])[0].id);
-    // Saved on every page that would create TYPE 2 — here only the sheet;
-    // the drawing depicts TYPE 1 and TYPE 5.
-    expect(pagesSaved).toEqual([sheet.id]);
-    expect((spies.onSaveItem.mock.calls[0] as unknown as [DrawingItem, Record<string, unknown>])[1]).toEqual({
-      configurationAcks: [{ recordId: "rec-main", label: "TYPE 2" }],
-    });
+    // Saved on every page that names TYPE 2 — here only the sheet.
+    const saved = spies.onSaveItem.mock.calls.map((call) => call as unknown as [DrawingItem, Record<string, unknown>]);
+    expect(saved.map(([item]) => item.id)).toEqual([sheet.id]);
+    expect(saved[0]![1]).toEqual({ configurationPairs: [{ recordId: "rec-main", label: "TYPE 2", pairWith: "A" }] });
   });
 
   it("confirms page by page under one button", async () => {

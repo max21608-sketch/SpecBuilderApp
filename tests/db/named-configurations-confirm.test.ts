@@ -298,7 +298,7 @@ describeIfDb("confirming configurations a document names", () => {
 
     const refused = await confirm(runId, 1);
     expect(refused.response.status).toBe(409);
-    expect(JSON.stringify(refused.body)).toContain("already has configuration A");
+    expect(JSON.stringify(refused.body)).toContain("already has A. Pair it with one of them, or create it as a new configuration");
     expect((await variantsOf(bill)).map((row) => row.variant_label)).toEqual(["A"]);
 
     // The reviewer ticks all five, through the real PATCH.
@@ -386,5 +386,128 @@ describeIfDb("confirming configurations a document names", () => {
       ).rows.map((row) => row.value);
     expect(await fabricOn("TYPE 6")).toEqual(["Maker B, Ref. Y"]);
     expect(await fabricOn("TYPE 2")).toEqual([]);
+  });
+
+  // PLAN STEP 5: two documents, one set of configurations. The spec sheet
+  // makes TYPE 1-5; a drawing set then draws the same chair per room, titled
+  // in its own words. Only the page's OWN WORDS pair silently.
+  it("pairs a second document's configurations only on the page's own words, and asks for the rest", async () => {
+    const code = `__QA Q-305-${Date.now()}`;
+    const bill = await phase("__QA PAIRING RUN", code);
+    const sheetRun = await stage(stageDrawings([{ ...SPEC_SHEET, itemCodeRaw: code }], fields, "__QA sheet.pdf", null));
+    const sheet = await confirm(sheetRun, 1);
+    expect(sheet.response.ok, JSON.stringify(sheet.body)).toBe(true);
+    expect((await variantsOf(bill)).map((row) => row.variant_label)).toEqual(["TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5"]);
+
+    const geometry = SPEC_SHEET.dimensions;
+    const room = (page: number, names: { name: string; nameRaw: string }[], materials: typeof SPEC_SHEET.materials = []) => ({
+      ...SHOP_DRAWING,
+      itemCodeRaw: code,
+      page,
+      dimensions: geometry,
+      materials,
+      configurations: names.map((entry) => ({ ...entry, evidence: `title block reads ${entry.nameRaw}` })),
+      depictsConfigurations: names.map((entry) => entry.name),
+    });
+    const setRun = await stage(
+      stageDrawings(
+        [
+          room(1, [
+            { name: "MUR 1", nameRaw: "MUR 1" },
+            { name: "TYPO 5", nameRaw: "TYPO 5" },
+          ]),
+          room(2, [{ name: "MUR 2", nameRaw: "MUR 2" }], [
+            { labelRaw: "FABRIC", valueRaw: "Maker Q, another cloth", materialCodeRaw: null, configurations: [] },
+          ]),
+          // The page's own words ARE the name: pairs with no question.
+          room(3, [{ name: "Type 3", nameRaw: "Type 3" }]),
+          // Read as "Type 4", but the page says TYPO 4: a translation, so asked.
+          room(4, [{ name: "Type 4", nameRaw: "TYPO 4" }]),
+        ],
+        fields,
+        "__QA drawing set.pdf",
+        null,
+        null,
+        [{ itemCodes: [code], pages: [1, 2, 3, 4], relationship: "one_item", evidence: "one chair per room" }],
+      ),
+    );
+
+    // Type 3: silent, onto TYPE 3, and its geometry is already recorded there.
+    const typeThree = await confirm(setRun, 3);
+    expect(typeThree.response.ok, JSON.stringify(typeThree.body)).toBe(true);
+    expect((await variantsOf(bill)).length).toBe(5);
+
+    // MUR 1, TYPO 5, MUR 2 and TYPO 4 ask — the app never decides MUR 2 is TYPE 2.
+    for (const page of [1, 2, 4]) {
+      const asked = await confirm(setRun, page);
+      expect(asked.response.status).toBe(409);
+      expect(((asked.body as { diff?: { code: string }[] }).diff ?? []).map((b) => b.code)).toContain("configuration_new");
+    }
+    const refusedFour = await confirm(setRun, 4);
+    expect(JSON.stringify(refusedFour.body)).toContain("The page says TYPO 4 (read as TYPE 4)");
+    expect((await variantsOf(bill)).length).toBe(5);
+
+    // The reviewer pairs MUR 2 with TYPE 2, through the real PATCH.
+    let two = (await liveDoc(setRun)).items.find((entry) => entry.page === 2)!;
+    const paired = await importPatchRoute(
+      new Request("http://localhost/test", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          itemId: two.id,
+          expectedVersion: two.version,
+          changes: { configurationPairs: [{ recordId: bill, label: "MUR 2", pairWith: "TYPE 2" }] },
+        }),
+      }),
+      { params: Promise.resolve({ id: setRun }) },
+    );
+    expect(paired.ok).toBe(true);
+
+    // TYPE 2 already holds the sheet's cloth, and MUR 2's is different: the
+    // replace acknowledgement, as for any revised drawing.
+    const differs = await confirm(setRun, 2);
+    expect(differs.response.status).toBe(409);
+    expect(new Set(((differs.body as { diff?: { code: string }[] }).diff ?? []).map((b) => b.code))).toEqual(new Set(["slot_taken"]));
+
+    two = (await liveDoc(setRun)).items.find((entry) => entry.page === 2)!;
+    const fabric = two.observations.find((o) => o.valueRaw === "Maker Q, another cloth")!;
+    const occupant = (
+      await client.query(
+        `select a.id, a.record_id, a.version from record_attributes a join spec_records r on r.id = a.record_id
+          where r.parent_id = $1 and r.variant_label = 'TYPE 2' and a.spec_field_id = $2 and a.status = 'active'`,
+        [bill, com(1)],
+      )
+    ).rows[0];
+    const ticked = await importPatchRoute(
+      new Request("http://localhost/test", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          itemId: two.id,
+          observationId: fabric.id,
+          expectedVersion: fabric.version,
+          changes: { replaces: [{ recordId: occupant.record_id, attributeId: occupant.id, attributeVersion: Number(occupant.version) }] },
+        }),
+      }),
+      { params: Promise.resolve({ id: setRun }) },
+    );
+    expect(ticked.ok).toBe(true);
+    const replaced = await confirm(setRun, 2);
+    expect(replaced.response.ok, JSON.stringify(replaced.body)).toBe(true);
+
+    // Still five records: MUR 2 IS TYPE 2, and TYPE 2 now carries its cloth,
+    // with the sheet's kept under show retired.
+    expect((await variantsOf(bill)).map((row) => row.variant_label)).toEqual(["TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5"]);
+    const typeTwoFabric = (
+      await client.query(
+        `select a.value, a.status from record_attributes a join spec_records r on r.id = a.record_id
+          where r.parent_id = $1 and r.variant_label = 'TYPE 2' and a.spec_field_id = $2 order by a.status`,
+        [bill, com(1)],
+      )
+    ).rows;
+    expect(typeTwoFabric).toEqual([
+      { value: "Maker Q, another cloth", status: "active" },
+      { value: "Maker B, Ref. Y", status: "retired" },
+    ]);
   });
 });

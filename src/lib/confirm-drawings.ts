@@ -46,6 +46,8 @@ import {
   namedConfigurationPlans,
   parentVariantsOf,
   rowWriteRecords,
+  configurationTarget,
+  namedTargetsFor,
   stateToWrite,
   type NamedTargets,
   type SpecFieldEntry,
@@ -230,8 +232,26 @@ function findItem(staged: StagedDrawings, itemId: string): DrawingItem {
   return item;
 }
 
-async function writeStaged(txn: TxnSql, run: LoadedRun, actor: string, items: DrawingItem[]): Promise<string> {
-  const staged: StagedDrawings = { ...run.staged, items };
+async function writeStaged(
+  txn: TxnSql,
+  run: LoadedRun,
+  actor: string,
+  items: DrawingItem[],
+  links: readonly { recordId: string; label: string; variantId: string }[] = [],
+): Promise<string> {
+  // Where this document's configurations landed, so its next page lands on
+  // the same records with no question (`configurationTarget`, LINKED).
+  const configurationLinks = [...(run.staged.configurationLinks ?? [])];
+  for (const link of links) {
+    const at = configurationLinks.findIndex((entry) => entry.recordId === link.recordId && entry.label === link.label);
+    if (at === -1) configurationLinks.push(link);
+    else configurationLinks[at] = link;
+  }
+  const staged: StagedDrawings = {
+    ...run.staged,
+    items,
+    ...(configurationLinks.length > 0 ? { configurationLinks } : {}),
+  };
   // `confirmed` means NO PENDING OBSERVATIONS REMAIN — applied or explicitly
   // ignored. It does not mean every spec of every item is settled, which is why
   // the screen labels it "Review complete".
@@ -385,7 +405,7 @@ export async function confirmDrawingItem(
   // The live variants BEFORE this confirm creates any: the blocker that asks
   // before a new configuration is created beside existing ones has to see the
   // bill line as it was, or every creation would read as an exact match.
-  const named: NamedTargets | null = plan ? { plan, variants: parentVariantsOf(records) } : null;
+  const named: NamedTargets | null = plan ? namedTargetsFor(item, plan, parentVariantsOf(records), run.staged) : null;
   const existingNamedIds = named
     ? [...new Set(taken.flatMap((observation) => rowWriteRecords(observation.id, ordered, named)))]
     : [];
@@ -459,10 +479,21 @@ export async function confirmDrawingItem(
   // named one (whose occupants the card named by variant).
   type Write = { tickedId: string; recordId: string; ackKey: string; observations: DrawingObservation[] };
   const writes: Write[] = [];
+  const links: { recordId: string; label: string; variantId: string }[] = [];
   if (named) {
     for (const parentId of ordered) {
       for (const label of named.plan.labels) {
-        const variant = await ensureVariant(txn, { parentId, variantLabel: label, actor });
+        // WHERE IT LANDS is `configurationTarget`, the function the blockers
+        // read: an existing configuration (this document's own, an exact name,
+        // or the reviewer's pairing) is written to as it is; only a "create"
+        // makes a record, under this configuration's own name. An "ask" never
+        // reaches here — it is a blocker above.
+        const target = configurationTarget(parentId, label, named);
+        const variant =
+          target.kind === "existing"
+            ? { recordId: target.variantId }
+            : await ensureVariant(txn, { parentId, variantLabel: label, actor });
+        links.push({ recordId: parentId, label, variantId: variant.recordId });
         writes.push({
           tickedId: parentId,
           recordId: variant.recordId,
@@ -948,7 +979,7 @@ export async function confirmDrawingItem(
         },
   );
 
-  const status = await writeStaged(txn, run, actor, items);
+  const status = await writeStaged(txn, run, actor, items, links);
 
   await txn`
     insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
