@@ -31,8 +31,8 @@ Decided with Max the same day and not re-opened here: five configurations for
 S-301 (Types 1 and 5 are two, sharing their rows); a configuration is named as
 the document names it (`S-301 TYPE 2`); manual control exists on the review
 card and on the item after confirm; a manually added configuration starts with
-the bill line's shared specs copied (each a tick) and the differing fields
-blank and first; extraction moves to Opus at effort `high`.
+the bill line's shared specs copied (each a tick; dimensions, timber and metal
+ticked) and only COM 1–3 blank and first; extraction moves to Opus at effort `high`.
 
 ## How the work runs
 
@@ -164,8 +164,10 @@ see its rows asked about, then confirm: the records match what the card showed.
 
 **Add a configuration** on the bill line's record screen and its phase-table
 row. The panel asks for the name, then lists the bill line's specs and settled
-answers as ticks: ticked by default except the differing fields (COM 1–3,
-timber and metal finish), which start blank and sit first on the new record.
+answers as ticks: ticked by default except the differing fields (COM 1–3),
+which start blank and sit first on the new record. Timber and metal are
+carried (Max did not object, 2026-09-23; S-301's `WD-01` is the same on all
+five types).
 Copied rows keep their source page. It states in words what stops being
 exported (anything left unticked, since the bill line becomes a heading).
 One change set, one version, and the server re-checks the list the person saw.
@@ -291,7 +293,21 @@ pending* filter. **Splitting one read into page ranges is currently on
 CLAUDE.md's excluded list** ("splitting an oversize drawing set"). If the
 measurement shows truncation at a size Panther-like packs reach, it comes back
 to Max as a decision with the numbers, and it is not built on spec.
-~1 h measuring, ~2–3 h coder for the navigation, ~1 h verification.
+
+**Refused before upload, not after (Max, 2026-09-23: "is it worth having a
+this document is too large to upload?").** Today 20 MB is refused at
+registration, after the upload, and 600 pages only when the read starts,
+because counting pages needs the bytes and registration deliberately reads
+metadata only. The upload screen already loads pdf.js for the previews, so the
+browser counts pages before a byte is stored and refuses over 20 MB or 600
+pages on the upload row, in words and with the number. The OUTPUT ceiling is not
+a page count, because it depends on how dense the drawings are, so it becomes a
+WARNING at the page count the measurement shows ("over N pages, this may be too
+large to read in one go; consider splitting it") and never a refusal. A refusal
+set too low is the one error with no way round it. The server-side checks stay
+as the backstop.
+~1 h measuring, ~3–4 h coder for the navigation and the upload check, ~1 h
+verification.
 
 ## Step 9 — close out
 
@@ -324,7 +340,7 @@ is briefed as soon as step 2 lands. Step 6 is independent and fills a gap.
 | 6 status refresh | 1 h | 30 min | tomorrow |
 | 7 crop prompt | in step 2 | measured in §8 | — |
 | 8 staging acceptance with Max | — | 30 min with Max | end of tomorrow or the day after |
-| 10 large documents | 2–3 h | 2 h incl. measuring | tomorrow, alongside 5 |
+| 10 large documents + upload check | 3–4 h | 2 h incl. measuring | tomorrow, alongside 5 |
 | 9 close out | — | 1 h | last |
 
 **Estimate: about two and a half working days to "ready for the real-pack
