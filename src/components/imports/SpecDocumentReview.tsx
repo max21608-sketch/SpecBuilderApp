@@ -675,6 +675,7 @@ export default function SpecDocumentReview({
       {tab === "pending" && (
         <Card flush>
           <SpecReviewTable
+            sourceHeading={isEmail ? "What the email says" : "What the document says"}
             rows={rows}
             all={proposals}
             registers={data.registers}
@@ -1007,6 +1008,7 @@ const CHANGE_TONE: Record<ChangeDescription["kind"], Tone> = {
 const ROW_GRID = "grid grid-cols-[minmax(0,1fr)_200px_150px_140px_100px] gap-2.5 px-4";
 
 function SpecReviewTable({
+  sourceHeading,
   rows,
   all,
   registers,
@@ -1019,6 +1021,8 @@ function SpecReviewTable({
   onChange,
   onIgnoreRow,
 }: {
+  /** "What the email says" only on an email: a bill or a schedule is not one. */
+  sourceHeading: string;
   rows: SpecRow[];
   all: Proposal[];
   registers: Registers;
@@ -1047,7 +1051,7 @@ function SpecReviewTable({
       <div
         className={`${ROW_GRID} border-b border-neutral-200 bg-[#fcfcfc] py-2 text-th font-semibold uppercase tracking-wider text-neutral-500`}
       >
-        <span>What the email says</span>
+        <span>{sourceHeading}</span>
         <span>Lands on</span>
         <span>Value</span>
         <span>Does what</span>
