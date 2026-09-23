@@ -175,6 +175,44 @@ export async function loadProjectSummary(projectId: string): Promise<ProjectSumm
 
 type SummaryRow = Record<string, unknown>;
 
+/**
+ * ONE QUESTION IS ON HIS TGQ SET OR IT IS NOT, AND THAT IS NOT A PROPERTY OF
+ * THE RECORD. Read this before touching the `to_quote` expression.
+ *
+ * This query took **1,862 ms for the 300-line project alone** and 3,139 ms for
+ * the eight-project list (medians of seven, 2026-09-23, plan item 4d). The
+ * whole of it was one expression. `to_quote` was a correlated `exists` over the
+ * `tgq_map` CTE, and two things compounded:
+ *
+ *   Postgres INLINED `tgq_map`, because it is referenced once. So every
+ *   evaluation rebuilt the whole `spec_matrix_category_map` x `spec_field_gates`
+ *   x `spec_fields` join from scratch, with a sequential scan of the gates
+ *   inside it.
+ *
+ *   And the expression is read by EVERY aggregate FILTER in `ans`, so it was
+ *   re-evaluated once per filter per row. `explain (analyze, buffers)` showed
+ *   **ten SubPlans** inside that GroupAggregate and **2,058,964 shared buffer
+ *   hits** — for a row source that takes 29 ms to produce and 19,722 rows.
+ *
+ * The fix decides it ONCE PER QUESTION (`tgq_questions`) and joins. Same rule,
+ * same order, same fallback, same numbers: asserted IDENTICAL against the old
+ * query over all eleven projects in the sandbox, batched and one at a time,
+ * before the change went in. Measured after: **73 ms** and **91 ms**, against a
+ * 37 ms round-trip floor.
+ *
+ * WHAT IS EASY TO UNDO BY ACCIDENT is the SHAPE, not the `materialized`
+ * keywords: putting the rule back in the select list as anything correlated
+ * with the record restores the defect under a query that still reads as the
+ * fixed one. `tests/db/project-summary.test.ts` holds the NUMBERS and would
+ * stay green through it; nothing but a re-measurement holds the speed. Run
+ * `npm run measure:screens` before and after, as this change did.
+ *
+ * WHAT WAS NOT DONE, and why. `loadOutstanding` computes the same tier in
+ * TypeScript through `questionTier`, and this file re-expresses it in SQL
+ * because the driver cannot share a fragment. That duplication is the budget —
+ * once — and this change does not spend any more of it: the rule still appears
+ * exactly once here, moved up the query rather than copied.
+ */
 async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
   return await sql`
     with scoped as (
@@ -206,7 +244,31 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
     -- nothing happens to be at TGQ is a real answer, and a different one from a
     -- category he has never written.
     mapped_cats as (select distinct item_category_id from spec_matrix_category_map),
-    answers as (
+    -- WHICH QUESTIONS HIS MATRIX PUTS AT TGQ, DECIDED ONCE PER QUESTION.
+    --
+    -- This is the same rule that used to sit inline as a correlated exists in
+    -- the select list below, and moving it here is a PERFORMANCE fix with a
+    -- measured cause, not a rewrite of the rule -- see the note above summaryRows.
+    -- A requirement belongs to exactly one category, so a question is on his
+    -- TGQ set or it is not, and the answer does not depend on the record: it
+    -- is a property of the question, and computing it per ANSWER computed it
+    -- 19,722 times on a 300-line project and then again for every aggregate
+    -- filter that read it.
+    --
+    -- MATERIALIZED is a fence, and it is NOT what made this fast. Measured on
+    -- 2026-09-23: with it 77 ms, without it 80 ms over five runs each, which is
+    -- noise -- the speed comes from the SHAPE below, not from the keyword. It
+    -- is kept because the defect being fixed WAS the planner inlining a
+    -- once-referenced CTE, and pinning the shape costs nothing measurable while
+    -- removing the one degree of freedom that produced it.
+    tgq_questions as materialized (
+      select distinct q.id as requirement_id
+        from requirements q
+        left join spec_fields f on f.id = q.spec_field_id
+        join tgq_map t on t.item_category_id = q.category_id
+                      and (t.json_id = f.json_id or t.local_key = q.local_key)
+    ),
+    answers as materialized (
       select s.project_id,
              -- The RECORD this answer belongs to. Carried so the same pass can
              -- count both units: a question count partitions, an item count
@@ -220,19 +282,20 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
              -- one for the category, the 0019 placeholder where he did not --
              -- never "nothing blocks a quote", which is what an unmapped
              -- category would compute as if this defaulted to false.
+             --
+             -- The two halves are the two joins above it: mapped_cats decides
+             -- WHICH model answers, tgq_questions carries his answer. A left
+             -- join rather than an exists, so both are looked up once per row
+             -- instead of re-derived for each aggregate that reads them.
              case
-               when s.category_id in (select item_category_id from mapped_cats) then
-                 exists (
-                   select 1 from tgq_map t
-                    where t.item_category_id = s.category_id
-                      and (t.json_id = f.json_id or t.local_key = q.local_key)
-                 )
+               when mc.item_category_id is not null then tq.requirement_id is not null
                else
                  s.level is not null and q.tgq_levels @> array[s.level]::text[]
              end as to_quote
       from scoped s
       join requirements q on q.category_id = s.category_id
-      left join spec_fields f on f.id = q.spec_field_id
+      left join mapped_cats mc on mc.item_category_id = s.category_id
+      left join tgq_questions tq on tq.requirement_id = q.id
       left join spec_answers a
         on a.record_id = s.id and a.requirement_id = q.id and a.revision_no = 0
     ),
