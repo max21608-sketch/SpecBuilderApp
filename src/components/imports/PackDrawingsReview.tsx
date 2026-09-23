@@ -36,6 +36,8 @@ import Tip from "@/components/ui/Tip";
 import Note from "@/components/ui/Note";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
+import { ReviewRowActionsContext, type ReviewRowActions } from "@/components/imports/review-row-actions";
+import { planClashResolution, type ClashChoice } from "@/lib/clash-resolution";
 import ItemCard, {
   BulkUnit,
   type ItemResolution,
@@ -369,6 +371,41 @@ export default function PackDrawingsReview({
     });
   }
 
+
+  // ---- a cross-page clash, answered on the row (plan any-bill, step 4) ------
+  //
+  // The row offers the three answers; what they WRITE is `planClashResolution`
+  // (pure), sent as ordinary autosaves under each row's own version. A crop
+  // the screen holds for the row being ignored is RE-KEYED onto the kept row,
+  // because an ignored row's crop is never uploaded.
+  const [swatchEpoch, setSwatchEpoch] = useState(0);
+  const resolveClash = useCallback(
+    (choice: ClashChoice) => {
+      const items = runs.flatMap((entry) => entry.staged?.items ?? []);
+      const plan = planClashResolution(choice, items, (id) => Boolean(swatches.current.get(id)));
+      if (!plan.ok) {
+        setError(plan.error);
+        return;
+      }
+      if (plan.swatch) {
+        swatches.current.set(plan.swatch.to, swatches.current.get(plan.swatch.from) ?? null);
+        swatches.current.delete(plan.swatch.from);
+        setSwatchEpoch((epoch) => epoch + 1);
+      }
+      void saveObservations(plan.edits);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runs],
+  );
+  const rowActions = useMemo<ReviewRowActions>(
+    () => ({
+      resolveClash,
+      busy: busy !== null,
+      heldSwatch: (id) => swatches.current.get(id)?.image ?? null,
+      swatchEpoch,
+    }),
+    [resolveClash, busy, swatchEpoch],
+  );
   async function saveTargets(item: DrawingItem, ticked: string[], unticked: string[]) {
     await saveItem(item, { ticked, unticked });
   }
@@ -827,6 +864,7 @@ export default function PackDrawingsReview({
       )}
 
       {/* ---- the cards, one per code, whichever file it came from ---- */}
+      <ReviewRowActionsContext.Provider value={rowActions}>
       {cards.map(({ run, card }) => (
         <div key={`${run.importId}:${card.id}`}>
           {/* Above the card, because the grouping is about the ITEM and the file
@@ -876,6 +914,7 @@ export default function PackDrawingsReview({
           )}
         </div>
       ))}
+      </ReviewRowActionsContext.Provider>
 
       {/* THE END OF THE PACK, SAID OUT LOUD — the same box the single-document
           screen shows, because it does not matter which of the two a reviewer

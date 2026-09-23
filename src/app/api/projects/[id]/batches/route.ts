@@ -96,6 +96,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            ) as runs
     from intake_batches b
     where b.project_id = ${id}
+      -- A PACK WITH NOTHING IN IT IS NOT A DELIVERY. On pilot (2026-09-23) a
+      -- thirty-file upload whose every look failed left two batches holding no
+      -- document at all; listed, they read as two packs somebody delivered.
+      -- The upload now creates a batch only when a file is registered into it,
+      -- and this hides the ones made before that. The Documents tab builds its
+      -- packs from runs, so it never showed them.
+      and exists (select 1 from intake_runs r where r.batch_id = b.id)
     order by b.created_at desc
     limit 50
   `;

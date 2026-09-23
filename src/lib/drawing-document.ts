@@ -194,6 +194,12 @@ export type DrawingObservation = {
    * it, so the card can say "read as TYPE 1 · TYPE 5, you set TYPE 1".
    */
   configurationsByReviewer?: string[] | null;
+  /**
+   * Why a person ignored this row, where the screen asked (plan any-bill,
+   * step 4: "same as page 1", when two pages stated one fabric). Cleared on
+   * restore. Absent on every row ignored without one.
+   */
+  ignoredReason?: string | null;
   /** One attribute row per target record, once applied. */
   applied: {
     attributeIds: string[];
@@ -1091,7 +1097,7 @@ export type DrawingBlocker =
   | { code: "configuration_name"; message: string; label: string; observationId?: undefined }
   | { code: "configuration_undecided"; message: string; observationId: string }
   | { code: "configuration_pair_twice"; message: string; recordId: string; label: string; observationId?: undefined }
-  | { code: "field_conflict"; message: string; observationId: string; pairKey: string }
+  | { code: "field_conflict"; message: string; observationId: string; pairKey: string; clash: FieldClash }
   | {
       code: "configuration_new";
       message: string;
@@ -1151,8 +1157,9 @@ export type OccupiedSlots = {
  * makes it a measurement. The STATE must match too: a confirmed 550 over a TBC
  * 550 is a decision being taken, and the reviewer is asked.
  *
- * DIMENSIONS ONLY. A fabric described two ways (a finish, a COM line) is the
- * reviewer's decision about which wording to keep, and stays a blocker.
+ * A FINISH is the same finish by its code, or by the same words in any order
+ * (`sameFinish`). A fabric described in DIFFERENT words is the reviewer's
+ * decision about which wording to keep, and stays a blocker.
  *
  * ONE FUNCTION, TWO CALLERS: `drawingItemBlockers` (no blocker) and the confirm
  * (write nothing, mark the row applied naming the existing attribute), so the
@@ -1164,14 +1171,17 @@ export function alreadyRecorded(
   occupant: (Pick<OccupiedSlot, "value" | "unit" | "state"> & Partial<Pick<OccupiedSlot, "materialCode">>) | undefined,
 ): boolean {
   if (!occupant) return false;
-  // A FINISH is the same finish only by the client's own CODE — WD-01 and
-  // WD-01 — never by its wording: "Dark tinted wood" and "feet dark tinted wood
-  // as per approved sample" may well be one timber, and deciding that is the
-  // reviewer's. Same code, same BWS field: already recorded.
+  // A FINISH is the same finish by the client's own CODE — WD-01 and WD-01 —
+  // or by the SAME WORDS in any order (`sameFinishWords`), and never by words
+  // that merely overlap: "Dark tinted wood" and "feet dark tinted wood as per
+  // approved sample" may well be one timber, and deciding that is the
+  // reviewer's. Same field and same finish: already recorded.
   if (observation.attrGroup !== "dimension") {
-    const mine = normaliseFinishCode(observation.materialCodeRaw ?? "");
-    const theirs = normaliseFinishCode(occupant.materialCode ?? "");
-    return Boolean(observation.specFieldId) && mine !== "" && mine === theirs;
+    if (!observation.specFieldId) return false;
+    return sameFinish(
+      { code: observation.materialCodeRaw, words: observation.value ?? observation.valueRaw },
+      { code: occupant.materialCode, words: occupant.value },
+    );
   }
   if (!observation.dimensionSlot) return false;
   const mine = inMillimetres(observation.value ?? observation.valueRaw, observation.unit);
@@ -1298,10 +1308,32 @@ export function drawingItemBlockers(
     if (observation.reviewStatus !== "pending") continue;
     const claim = crossPage?.get(observation.id);
     if (claim?.kind === "conflict") {
-      blockers.push({ code: "field_conflict", observationId: observation.id, pairKey: claim.pairKey, message: claim.message });
+      blockers.push({
+        code: "field_conflict",
+        observationId: observation.id,
+        pairKey: claim.pairKey,
+        message: claim.message,
+        clash: claim.clash,
+      });
     }
   }
   const targets = targetRecordIds(item, resolution);
+  // THE MOVE LANDS ON A SLOT FREE ON THE RECORD, not only on the page. The
+  // staged claims were counted by `crossPageClaims`; what an earlier document
+  // already wrote to the records this row reaches is only known here.
+  for (const blocker of blockers) {
+    if (blocker.code !== "field_conflict") continue;
+    const moving = blocker.clash.move;
+    const held = new Set<string>();
+    for (const recordId of rowWriteRecords(moving.observationId, targets, named)) {
+      for (const fieldId of occupied.fields.get(recordId)?.keys() ?? []) held.add(fieldId);
+    }
+    const free = moving.candidates.find((candidate) => !held.has(candidate.fieldId)) ?? null;
+    blocker.clash = {
+      ...blocker.clash,
+      move: { ...moving, fieldId: free?.fieldId ?? null, fieldName: free?.fieldName ?? null },
+    };
+  }
   const pending = item.observations.filter((observation) => observation.reviewStatus === "pending");
   // The records a row reaches that exist today, and the configuration scopes
   // it is written in. One unnamed scope, and the ticked records, for a page
@@ -3819,6 +3851,77 @@ export function configurationsToCreate(targets: readonly string[], named: NamedT
   return out;
 }
 
+/**
+ * A finish's words, folded so that only WHICH words it uses remains: case and
+ * punctuation gone, and the words SORTED, as a multiset (a word said twice
+ * counts twice). Empty where there are no words.
+ *
+ * Plan any-bill, step 4. S-301's specification sheet and its shop drawing name
+ * one cloth in two orders — "maker, pattern - raffia, col. colour" and "maker
+ * colour, raffia, pattern" — and a rule that compared the client's CODE alone
+ * called every such pair a clash. Word order and punctuation are how a caption
+ * is laid out, not what it says. What is NOT folded is anything that changes a
+ * word: one token more, fewer or different is a different statement, and the
+ * reviewer decides it — `Ref.` printed on one page and not the other is
+ * exactly the near miss that must still ask.
+ */
+export function finishWordsKey(text: string | null | undefined): string {
+  return (text ?? "")
+    .toLocaleLowerCase("en-GB")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
+/**
+ * ONE FINISH, stated twice? By the client's code where BOTH carry one (and
+ * two different codes are two finishes, whatever the words), otherwise by the
+ * same words in any order. A code on one side only does not decide it either
+ * way: on the Panther pack `CH-01.1` is a POSITION, shared by four cloths.
+ *
+ * One function, three callers: `crossPageClaims` (the card folds the later
+ * row), `alreadyRecorded` (the confirm writes nothing over the same finish),
+ * and through them the blockers — so the screen and the confirm agree.
+ */
+export function sameFinish(
+  a: { code: string | null | undefined; words: string | null | undefined },
+  b: { code: string | null | undefined; words: string | null | undefined },
+): boolean {
+  const codeA = normaliseFinishCode(a.code ?? "");
+  const codeB = normaliseFinishCode(b.code ?? "");
+  if (codeA !== "" && codeB !== "") return codeA === codeB;
+  const wordsA = finishWordsKey(a.words);
+  return wordsA !== "" && wordsA === finishWordsKey(b.words);
+}
+
+/**
+ * Two pages giving one configuration the same BWS field, in different words,
+ * and what the reviewer can do about it — carried on the blocker so the row
+ * can offer the three answers (plan any-bill, step 4).
+ */
+export type FieldClash = {
+  /** The field both rows name: "COM 1". */
+  fieldName: string;
+  /** A fabric (a COM slot), which is what the buttons call it; otherwise "finish". */
+  fabric: boolean;
+  /** Both rows, the earlier page first. Either can be the one kept. */
+  rows: { observationId: string; itemId: string; page: number | null }[];
+  /**
+   * The LATER page's row, and the next slot of the same kind free for it —
+   * null where every slot is taken, which the button says. `candidates` is
+   * every slot of the kind this code's own rows leave free, in order; the
+   * blockers pick the first one the RECORD also leaves free.
+   */
+  move: {
+    observationId: string;
+    page: number | null;
+    fieldId: string | null;
+    fieldName: string | null;
+    candidates: { fieldId: string; fieldName: string }[];
+  };
+};
+
 /** What another page of the same code says about one row's BWS field. */
 export type CrossPageClaim =
   | {
@@ -3835,6 +3938,7 @@ export type CrossPageClaim =
       /** The same for both rows of the pair, so a card can count decisions. */
       pairKey: string;
       message: string;
+      clash: FieldClash;
     };
 
 /**
@@ -3850,11 +3954,19 @@ export type CrossPageClaim =
  * for a card that writes one; never for page letters, which are separate
  * records by construction), over pending rows only:
  *
- *   the SAME non-empty client code on both   the same finish — the later page's
- *                                            row is already recorded, and says so.
- *   anything else                            a CONFLICT on both rows, naming the
- *                                            other page's words: ignore one, or
- *                                            move one to another field.
+ *   the same finish (`sameFinish`: one      the later page's row is already
+ *   code on both, or the same words in      recorded, and says so.
+ *   any order)
+ *   anything else                            a CONFLICT on both rows, asking the
+ *                                            real question: the same fabric (keep
+ *                                            one page's wording) or two (give the
+ *                                            later page the next free slot).
+ *
+ * THE OLD ADVICE WAS WRONG ON THE CASE THAT PROMPTED IT (plan any-bill, step
+ * 4). "Ignore one, or move one to another field" on S-301 — one cloth, words
+ * reordered, a code on one page only — put a second, non-existent fabric into
+ * COM 2 of the BWS export for anyone who followed it. The clash now carries
+ * the three answers as data (`FieldClash`) so the row can offer them.
  *
  * ONE FUNCTION, called by the card (through `resolveStagedRun`) and the confirm.
  */
@@ -3902,27 +4014,114 @@ export function crossPageClaims(
         }
       }
     }
+    const words = (claim: Claim) => claim.observation.value ?? claim.observation.valueRaw ?? "";
     for (const [pairKey, { first, later, field, scopes }] of pairs) {
-      const a = normaliseFinishCode(first.observation.materialCodeRaw ?? "");
-      const b = normaliseFinishCode(later.observation.materialCodeRaw ?? "");
-      if (a !== "" && a === b) {
+      if (
+        sameFinish(
+          { code: first.observation.materialCodeRaw, words: words(first) },
+          { code: later.observation.materialCodeRaw, words: words(later) },
+        )
+      ) {
         if (out.get(later.observation.id)?.kind !== "conflict") {
+          const code = (later.observation.materialCodeRaw ?? first.observation.materialCodeRaw ?? "").trim();
+          const sameCode =
+            code !== "" &&
+            normaliseFinishCode(later.observation.materialCodeRaw ?? "") ===
+              normaliseFinishCode(first.observation.materialCodeRaw ?? "");
           out.set(later.observation.id, {
             kind: "same_finish",
             keptId: first.observation.id,
-            code: (later.observation.materialCodeRaw ?? "").trim(),
-            message: `Page ${later.item.page ?? "?"} names the same finish, ${(later.observation.materialCodeRaw ?? "").trim()} — already recorded from page ${first.item.page ?? "?"}.`,
+            code,
+            message: sameCode
+              ? `Page ${later.item.page ?? "?"} names the same finish, ${code} — already recorded from page ${first.item.page ?? "?"}.`
+              : `Page ${later.item.page ?? "?"} names the same finish in the same words — already recorded from page ${first.item.page ?? "?"}.`,
           });
         }
         continue;
       }
       const where = scopes.filter(Boolean).length > 0 ? ` for ${scopes.join(" · ")}` : "";
-      const words = (claim: Claim) => claim.observation.value ?? claim.observation.valueRaw ?? "";
-      const sentence = (self: Claim, other: Claim) =>
-        `Page ${first.item.page ?? "?"} and page ${later.item.page ?? "?"} both give ${fieldName(field)}${where}, in different words — page ${other.item.page ?? "?"} says “${words(other)}”. Ignore one, or move one to another field.`;
-      out.set(first.observation.id, { kind: "conflict", pairKey, message: sentence(first, later) });
-      out.set(later.observation.id, { kind: "conflict", pairKey, message: sentence(later, first) });
+      const fabric = isFabricSlot(field, fields);
+      const noun = fabric ? "fabric" : "finish";
+      const message =
+        `Page ${first.item.page ?? "?"} and page ${later.item.page ?? "?"} both give ${fieldName(field)}${where}. ` +
+        `If they are the same ${noun}, keep one wording; if they are two ${noun}${fabric ? "s" : "es"}, give page ${later.item.page ?? "?"} its own field.`;
+      const candidates = freeSlotsOfKind(field, fields, takenFor(pages, later, scopes, plans));
+      const next = candidates[0] ?? null;
+      const clash: FieldClash = {
+        fieldName: fieldName(field),
+        fabric,
+        rows: [first, later].map((claim) => ({
+          observationId: claim.observation.id,
+          itemId: claim.item.id,
+          page: claim.item.page ?? null,
+        })),
+        move: {
+          observationId: later.observation.id,
+          page: later.item.page ?? null,
+          fieldId: next?.id ?? null,
+          fieldName: next?.name ?? null,
+          candidates: candidates.map((entry) => ({ fieldId: entry.id, fieldName: entry.name })),
+        },
+      };
+      out.set(first.observation.id, { kind: "conflict", pairKey, message, clash });
+      out.set(later.observation.id, { kind: "conflict", pairKey, message, clash });
     }
+  }
+  return out;
+}
+
+/** The slot list a field belongs to — COM, timber or metal — or null for any other field. */
+function slotListOf(fieldId: string, fields: readonly SpecFieldEntry[]): readonly number[] | null {
+  const jsonId = fields.find((field) => field.id === fieldId)?.jsonId;
+  if (jsonId === undefined) return null;
+  for (const list of [FABRIC_SLOTS, TIMBER_SLOTS, METAL_SLOTS] as readonly (readonly number[])[]) {
+    if (list.includes(jsonId)) return list;
+  }
+  return null;
+}
+
+function isFabricSlot(fieldId: string, fields: readonly SpecFieldEntry[]): boolean {
+  return slotListOf(fieldId, fields) === FABRIC_SLOTS;
+}
+
+/**
+ * THE `taken` CLAIMS, for the later row of a clash: every BWS field another row
+ * of this code already holds in one of its configurations — pending or applied,
+ * on any page, excluding the row being moved. A slot free here may still be
+ * held on the RECORD by an earlier document; `drawingItemBlockers` narrows it
+ * by the occupants, and a slot taken there is the ordinary slot_taken blocker.
+ */
+function takenFor(
+  pages: readonly DrawingItem[],
+  moving: { observation: DrawingObservation },
+  scopes: readonly string[],
+  plans: ReturnType<typeof namedConfigurationPlans>,
+): Set<string> {
+  const taken = new Set<string>();
+  for (const item of pages) {
+    const plan = plans.get(item.id);
+    for (const observation of item.observations) {
+      if (observation.id === moving.observation.id || observation.reviewStatus === "ignored") continue;
+      if (!observation.specFieldId || observation.attrGroup === "dimension") continue;
+      const rowScopes = plan ? (plan.rows[observation.id] ?? plan.labels) : [""];
+      if (rowScopes.some((scope) => scopes.includes(scope))) taken.add(observation.specFieldId);
+    }
+  }
+  return taken;
+}
+
+/** The slots of the same kind as `fieldId`, in fill order, that are not in `taken` — never `fieldId` itself. */
+export function freeSlotsOfKind(
+  fieldId: string,
+  fields: readonly SpecFieldEntry[],
+  taken: ReadonlySet<string>,
+): SpecFieldEntry[] {
+  const list = slotListOf(fieldId, fields);
+  if (!list) return [];
+  const out: SpecFieldEntry[] = [];
+  for (const jsonId of list) {
+    const field = fields.find((entry) => entry.jsonId === jsonId);
+    if (field && field.id !== fieldId && !taken.has(field.id)) out.push(field);
   }
   return out;
 }

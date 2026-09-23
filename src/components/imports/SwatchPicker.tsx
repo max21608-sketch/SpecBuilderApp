@@ -61,9 +61,11 @@ import { cropPdfRegion, type CroppedImage } from "@/lib/pdf-crop";
 import PageCropper from "@/components/imports/PageCropper";
 import PagePicker from "@/components/imports/PagePicker";
 import Button from "@/components/ui/Button";
+import { useReviewRowActions } from "@/components/imports/review-row-actions";
 
 export default function SwatchPicker({
   importId,
+  observationId,
   page,
   pages = [],
   code,
@@ -71,6 +73,13 @@ export default function SwatchPicker({
   onCropped,
 }: {
   importId: string;
+  /**
+   * The row this picker crops for. With a review screen around it, a crop the
+   * screen holds for this row — carried here from a row ignored as the same
+   * fabric — is SHOWN, rather than the picker reading empty over a crop that
+   * will be uploaded at confirm.
+   */
+  observationId?: string;
   /** The page the finish row itself was read from. The default, and null on a version 1 run. */
   page: number | null;
   /** Every page of the item this row belongs to. One page means no selector. */
@@ -105,6 +114,19 @@ export default function SwatchPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const objectUrls = useRef<string[]>([]);
+
+  // A CROP THE SCREEN HOLDS FOR THIS ROW, shown. Only fills an empty preview:
+  // one this picker made itself is already the screen's, under the same key.
+  const actions = useReviewRowActions();
+  const epoch = actions?.swatchEpoch ?? 0;
+  useEffect(() => {
+    if (!actions || !observationId || preview) return;
+    const held = actions.heldSwatch(observationId);
+    if (held) setPreview(track(held.blob));
+    // `actions` changes identity on every render of the screen; the epoch is
+    // what says a crop moved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [epoch, observationId]);
 
   // Revoked on unmount. Forty cards each holding an un-revoked object URL is
   // forty crops pinned in memory for the life of the page.

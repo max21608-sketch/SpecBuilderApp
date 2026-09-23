@@ -58,8 +58,15 @@ import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { projectUploadPrefix } from "@/lib/blob-source";
 import { guessKindFromName } from "@/lib/document-name-guess";
 import SuggestButton from "@/components/ui/SuggestButton";
-import { checkUpload } from "@/lib/upload-check";
+import Button from "@/components/ui/Button";
+import { checkUploadCounted } from "@/lib/upload-check";
 import { isPdfUpload, pdfUploadVerdict, type UploadVerdict } from "@/lib/upload-limits";
+import {
+  CLASSIFY_FAILURE_BANNER,
+  classifyFailureFromResponse,
+  type ClassifyFailure,
+  type ClassifyFailureCode,
+} from "@/lib/classify-failure";
 
 /** What a person calls the thing, in the order a pack is read. */
 const CHOICES: { value: string; label: string; importType: "boq" | "spec_document"; documentKind: DocumentKind | null }[] = [
@@ -147,6 +154,23 @@ type Queued = {
   warning: string | null;
   /** Refused for its SIZE (bytes or pages), not its format — the label differs. */
   tooLarge: boolean;
+  /**
+   * THE LOOK FAILED, for a reason that is the app's and not the document's —
+   * no API key, a rate limit, a timeout (FIU 2026-09-23, the pilot upload). Red
+   * on the row with "Try identifying again", and NOT the grey evidence line: a
+   * failure printed as evidence reads as "the app looked and could not tell".
+   */
+  failure: ClassifyFailure | null;
+  /**
+   * Whether this file has been SENT to the model to be identified, by any
+   * press. The footer's "nothing has been charged" is only ever said of files
+   * where this is false.
+   */
+  sentToModel: boolean;
+  /** Identified by the reading model because it is too long for the fast one. */
+  largeDocument: boolean;
+  /** The browser's page count, passed to classify as a hint. Null when not counted. */
+  pages: number | null;
 };
 
 /** What will be used for a file: what somebody chose, else what was read. */
@@ -199,16 +223,19 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [batchId, setBatchId] = useState<string | null>(null);
+  // A REF, not state: the batch is created inside the press's loop, and a
+  // second file in the same loop has to see the id the first one made.
+  const batchId = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   // ONE CHECK PER FILE, started the moment it is dropped so the row can say
   // what it found, and awaited again by the press so nothing is uploaded
   // before it has answered.
-  const checks = useRef(new Map<string, Promise<UploadVerdict>>());
+  const checks = useRef(new Map<string, Promise<{ verdict: UploadVerdict; pages: number | null }>>());
 
-  const applyVerdict = (key: string, verdict: UploadVerdict) => {
-    if (verdict.kind === "refuse") update(key, { status: "refused", error: verdict.message, tooLarge: true });
-    else if (verdict.kind === "warn") update(key, { warning: verdict.message });
+  const applyVerdict = (key: string, verdict: UploadVerdict, pages: number | null = null) => {
+    if (verdict.kind === "refuse") update(key, { status: "refused", error: verdict.message, tooLarge: true, pages });
+    else if (verdict.kind === "warn") update(key, { warning: verdict.message, pages });
+    else update(key, { pages });
   };
 
   function addFiles(files: FileList | null) {
@@ -249,6 +276,10 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         note: null,
         warning: null,
         tooLarge: false,
+        failure: null,
+        sentToModel: false,
+        largeDocument: false,
+        pages: null,
         };
       });
     // TOO LARGE FOR ONE READ is refused here too, before a byte is stored:
@@ -262,9 +293,9 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         row.tooLarge = true;
         continue;
       }
-      const check = checkUpload(row.file);
+      const check = checkUploadCounted(row.file);
       checks.current.set(row.key, check);
-      void check.then((verdict) => applyVerdict(row.key, verdict));
+      void check.then(({ verdict, pages }) => applyVerdict(row.key, verdict, pages));
     }
     setQueue((current) => [...current, ...rows]);
   }
@@ -279,44 +310,100 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
   const held = queue.filter((item) => item.status === "needs-kind");
   const heldAndAnswered = held.filter((item) => item.choice);
 
-  async function start() {
+  // ============================================================================
+  // THIRTY BOXES, SET IN ONE GO (plan any-bill, step 3). Max, on the Miami
+  // Beach pack: assigning thirty dropdowns by hand is a chore, and most of a
+  // pack is drawings.
+  //
+  // A BULK CHOICE IS A PERSON'S CHOICE, exactly as picking the select is: it
+  // writes `choice`, which the press never second-guesses and never pays to
+  // look at. It writes it DIRECTLY, never by driving the select — a select
+  // already showing "Shop drawings" fires no change event when Shop drawings
+  // is chosen, which is the level-picker trap, and the point here is that
+  // agreeing with thirty suggestions takes one press.
+  // ============================================================================
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set());
+  const [bulkKind, setBulkKind] = useState("");
+  /** A row whose kind can still be set: not registered, not refused. */
+  const settable = pending;
+  const tickedRows = settable.filter((item) => ticked.has(item.key));
+  const allTicked = settable.length > 0 && tickedRows.length === settable.length;
+  /**
+   * WHAT "ALL UNSET" TOUCHES: a PDF whose box is empty — no person's choice,
+   * and nothing read off its name or its pages. A box already showing a
+   * suggestion is not unset, and overwriting a name that says "BOQ" with Shop
+   * drawings would be the bulk control guessing louder than the guess. A
+   * spreadsheet is left alone because a drawing set is never one: an unset
+   * .xlsx is a bill or a schedule far more often, and reading it under the
+   * drawings prompt spends a charged read on the wrong question.
+   */
+  const unsetDrawings = settable.filter((item) => !kindOf(item) && isPdfUpload(item.file.name, item.file.type));
+
+  const setChoice = (keys: Set<string>, value: string) =>
+    setQueue((current) => current.map((item) => (keys.has(item.key) ? { ...item, choice: value } : item)));
+
+  function applyBulk() {
+    if (!bulkKind || tickedRows.length === 0) return;
+    setChoice(new Set(tickedRows.map((item) => item.key)), bulkKind);
+    setTicked(new Set());
+  }
+
+  /**
+   * THE PACK, created the first time a file is about to be REGISTERED into it.
+   *
+   * It used to be created before the loop, and on pilot (2026-09-23) a
+   * thirty-file upload whose every look failed left two intake batches holding
+   * nothing — a pack nobody delivered, listed as though somebody had. Created
+   * here, a press that registers nothing creates nothing: not an upload that
+   * fails to store, and not a file held for a kind. Returns null, with the
+   * banner set, when the pack itself could not be made.
+   */
+  async function ensureBatch(): Promise<string | null> {
+    if (batchId.current) return batchId.current;
+    const batch = await apiFetch<{ batch: { id: string } }>(`/api/projects/${projectId}/batches`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: `${queue.length} document${queue.length === 1 ? "" : "s"}` }),
+    });
+    if (!batch.ok) {
+      setError(batch.error);
+      return null;
+    }
+    batchId.current = batch.data.batch.id;
+    return batchId.current;
+  }
+
+  /**
+   * The press, over every file — or over ONE, for "Try identifying again". A
+   * retry is the same path with the held-row guard lifted for that file: it is
+   * already stored, so nothing is uploaded twice, and it is looked at again.
+   */
+  async function start(onlyKey: string | null = null) {
     if (pending.length === 0) return;
     setBusy(true);
     setError(null);
 
     try {
-      let id = batchId;
-      if (!id) {
-        const batch = await apiFetch<{ batch: { id: string } }>(`/api/projects/${projectId}/batches`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ label: `${queue.length} document${queue.length === 1 ? "" : "s"}` }),
-        });
-        if (!batch.ok) {
-          setError(batch.error);
-          return;
-        }
-        id = batch.data.batch.id;
-        setBatchId(id);
-      }
-
       // Sequential, so a failure names the file it belongs to and the others
       // still land. A pack whose drawings failed is still a pack with a bill.
       for (const item of queue) {
+        if (onlyKey && item.key !== onlyKey) continue;
         if (item.status === "done") continue;
         // Nothing to retry about a format this app cannot read.
         if (item.status === "refused") continue;
         // HELD FOR A KIND AND STILL UNANSWERED. Skipped rather than guessed at:
         // reading it under the wrong prompt spends a call on output that
-        // answers a different question.
-        if (item.status === "needs-kind" && !item.choice) continue;
+        // answers a different question. A retry of THIS file is the exception.
+        if (item.status === "needs-kind" && !item.choice && item.key !== onlyKey) continue;
 
         let pathname = item.pathname;
+        let pages = item.pages;
         if (!pathname) {
           // THE SIZE CHECK HAS TO HAVE ANSWERED before a byte is stored.
-          const verdict = await (checks.current.get(item.key) ?? checkUpload(item.file));
-          applyVerdict(item.key, verdict);
-          if (verdict.kind === "refuse") continue;
+          const checked = await (checks.current.get(item.key) ?? checkUploadCounted(item.file));
+          applyVerdict(item.key, checked.verdict, checked.pages);
+          pages = checked.pages;
+          if (checked.verdict.kind === "refuse") continue;
         }
         try {
           if (!pathname) {
@@ -345,13 +432,15 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         // filename rule guessed at is still looked at here.
         let choice = settledKind(item);
         if (!choice) {
-          update(item.key, { status: "reading" });
+          update(item.key, { status: "reading", failure: null });
           const asked = await apiFetch<{
             decision: { importType: string; documentKind: string | null } | null;
             /** Known, and not something this app reads — a bill inside a PDF. */
             unsupported?: string | null;
             evidence?: string;
             titleText?: string | null;
+            charged?: boolean;
+            largeDocument?: boolean;
           }>("/api/imports/classify", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -360,10 +449,29 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
               pathname,
               filename: item.file.name,
               contentType: item.file.type,
+              ...(pages ? { pages } : {}),
             }),
           });
-          const read = asked.ok ? choiceFor(asked.data.decision) : "";
-          const evidence = asked.ok ? (asked.data.evidence ?? null) : asked.error;
+
+          // THE LOOK FAILED — no key, a rate limit, a timeout, a 504 page.
+          // Red, on the row, with the reason; held for a person, who can try
+          // again or choose the kind by hand. Never the grey evidence line.
+          if (!asked.ok) {
+            const failure = classifyFailureFromResponse(asked.status, asked.data, asked.error);
+            update(item.key, {
+              status: "needs-kind",
+              failure,
+              sentToModel: item.sentToModel || failure.sent,
+            });
+            continue;
+          }
+
+          const read = choiceFor(asked.data.decision);
+          const evidence = asked.data.evidence ?? null;
+          update(item.key, {
+            sentToModel: item.sentToModel || asked.data.charged !== false,
+            largeDocument: asked.data.largeDocument === true,
+          });
           if (read) {
             // THE DOCUMENT BEATS THE NAME, and the evidence moves with it: a
             // suggestion and the sentence under it are one reading, or the row
@@ -386,7 +494,7 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
           // case the answer was wrong, and the reason is printed as an error
           // rather than as the grey evidence line — because there is an action
           // in it, and it is not on this screen.
-          const unsupported = asked.ok ? (asked.data.unsupported ?? null) : null;
+          const unsupported = asked.data.unsupported ?? null;
           if (unsupported) {
             update(item.key, { status: "needs-kind", error: unsupported });
             continue;
@@ -406,7 +514,10 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
           continue;
         }
 
-        update(item.key, { status: "registering" });
+        const id = await ensureBatch();
+        if (!id) return;
+
+        update(item.key, { status: "registering", failure: null });
         const res = await apiFetch<{
           importId: string;
           autoRead?: { dispatched: boolean; error?: string; waiting?: boolean; note?: string };
@@ -447,7 +558,8 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
       // file the app could not identify would lose it — it is uploaded, it is
       // in no batch row, and this screen is the only place that knows.
       setQueue((current) => {
-        if (!current.some((row) => row.status === "needs-kind" || row.status === "failed")) {
+        const id = batchId.current;
+        if (id && !current.some((row) => row.status === "needs-kind" || row.status === "failed")) {
           window.location.href = `/dashboard/projects/${projectId}/intake/${id}`;
         }
         return current;
@@ -467,6 +579,23 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
   const namedFromFilename = queue.filter((item) => item.suggestedFrom === "name" && !item.choice).length;
   const tally = uploadTally(queue);
   const showTally = busy || queue.some((item) => item.pathname);
+
+  // ONE REASON, SAID ONCE. Two or more files whose look failed for the same
+  // reason get one banner above the rows; each row keeps its own line. Thirty
+  // red rows reading "not configured" are one problem, not thirty.
+  const failureCounts = new Map<ClassifyFailureCode, number>();
+  for (const item of queue) {
+    if (item.failure && item.status === "needs-kind") {
+      failureCounts.set(item.failure.code, (failureCounts.get(item.failure.code) ?? 0) + 1);
+    }
+  }
+  const banners = [...failureCounts.entries()].filter(([, count]) => count >= 2);
+
+  // THE FOOTER COUNTS WHAT WAS NEVER SENT. "Nothing has been charged" was
+  // printed under every held file, including thirty the model had been asked
+  // about and a pack where every call had failed for want of a key — true of
+  // the second only by accident, and false of the first.
+  const heldSent = held.filter((item) => item.sentToModel).length;
 
   const label = busy
     ? "Working…"
@@ -581,6 +710,64 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         </p>
       )}
 
+      {banners.map(([code, count]) => (
+        <p
+          key={code}
+          role="alert"
+          className="mt-3 text-sm text-red-800 bg-red-50 border border-red-200 rounded px-3 py-2"
+        >
+          <span className="font-medium">{count} files were not identified.</span> {CLASSIFY_FAILURE_BANNER[code]}
+        </p>
+      ))}
+
+      {/* Two or more: a bulk control over one file is the row's own select. */}
+      {settable.length > 1 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <label className="inline-flex items-center gap-2 text-neutral-700">
+            <input
+              type="checkbox"
+              aria-label="Tick every file"
+              checked={allTicked}
+              ref={(box) => {
+                if (box) box.indeterminate = tickedRows.length > 0 && !allTicked;
+              }}
+              onChange={() => setTicked(allTicked ? new Set() : new Set(settable.map((item) => item.key)))}
+              disabled={busy}
+            />
+            {tickedRows.length > 0 ? `${tickedRows.length} ticked` : "Tick all"}
+          </label>
+          <span className="text-neutral-500">Set the ticked ones to</span>
+          <select
+            aria-label="Kind for the ticked files"
+            value={bulkKind}
+            onChange={(event) => setBulkKind(event.target.value)}
+            disabled={busy}
+            className="border border-neutral-300 rounded px-2 py-1 text-sm text-neutral-900"
+          >
+            <option value="">Choose a kind…</option>
+            {CHOICES.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+          <Button size="xs" onClick={applyBulk} disabled={busy || !bulkKind || tickedRows.length === 0}>
+            Apply
+          </Button>
+          {unsetDrawings.length > 0 && (
+            <Button
+              size="xs"
+              className="ml-auto"
+              title="Every PDF whose kind is still unset. A suggested kind is left as it is."
+              onClick={() => setChoice(new Set(unsetDrawings.map((item) => item.key)), "shop_drawings")}
+              disabled={busy}
+            >
+              All unset → Shop drawings ({unsetDrawings.length})
+            </Button>
+          )}
+        </div>
+      )}
+
       {queue.length > 0 && (
         <ul className="mt-3 divide-y divide-neutral-100 border border-neutral-200 rounded">
           {queue.map((item) => {
@@ -589,11 +776,31 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
             const unchecked = Boolean(item.suggested) && !item.choice;
             return (
               <li key={item.key} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                {item.status !== "done" && item.status !== "refused" ? (
+                  <input
+                    type="checkbox"
+                    aria-label={`Tick ${item.file.name}`}
+                    checked={ticked.has(item.key)}
+                    onChange={() =>
+                      setTicked((current) => {
+                        const next = new Set(current);
+                        if (next.has(item.key)) next.delete(item.key);
+                        else next.add(item.key);
+                        return next;
+                      })
+                    }
+                    disabled={busy}
+                  />
+                ) : (
+                  // Held in place so the names line up.
+                  <span className="inline-block w-[13px]" aria-hidden />
+                )}
                 <span className="text-sm text-neutral-900 flex-1 min-w-[12rem] truncate" title={item.file.name}>
                   {item.file.name}
                 </span>
 
                 <select
+                  aria-label={`Kind of ${item.file.name}`}
                   value={kindOf(item)}
                   onChange={(event) => update(item.key, { choice: event.target.value })}
                   disabled={busy || item.status === "done"}
@@ -613,7 +820,12 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
                   {item.status === "uploading" && `${item.progress}%`}
                   {item.status === "reading" && "Looking…"}
                   {item.status === "registering" && "Registering…"}
-                  {item.status === "needs-kind" && <span className="text-amber-700">Say which</span>}
+                  {item.status === "needs-kind" &&
+                    (item.failure ? (
+                      <span className="text-red-700">Not identified</span>
+                    ) : (
+                      <span className="text-amber-700">Say which</span>
+                    ))}
                   {item.status === "done" && "Added"}
                   {item.status === "failed" && <span className="text-red-700">Failed</span>}
                   {item.status === "refused" && (
@@ -654,6 +866,24 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
                   item.evidence && <p className="w-full text-xs text-neutral-500">{item.evidence}</p>
                 )}
                 {item.error && <p className="w-full text-xs text-red-700">{item.error}</p>}
+                {item.failure && item.status === "needs-kind" && (
+                  <div className="w-full flex flex-wrap items-center gap-2">
+                    <p className="text-xs text-red-700">{item.failure.message}</p>
+                    {/* THE FILE IS STORED, so this looks at it again and
+                        uploads nothing. Choosing a kind in the box beside it
+                        is the other way on, and needs no look at all. */}
+                    {item.pathname && !item.choice && (
+                      <Button variant="secondary" size="xs" onClick={() => void start(item.key)} disabled={busy}>
+                        Try identifying again
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {item.largeDocument && (
+                  <p className="w-full text-xs text-neutral-500">
+                    Large document — identified with the reading model.
+                  </p>
+                )}
                 {item.warning && <p className="w-full text-xs text-amber-700">{item.warning}</p>}
                 {item.note && <p className="w-full text-xs text-neutral-500">{item.note}</p>}
               </li>
@@ -675,7 +905,21 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
           <p className="text-xs text-amber-700">
             {held.length === 1 ? "One file could not be identified" : `${held.length} files could not be identified`} —
             say what {held.length === 1 ? "it is" : "they are"} and press again. Nothing has been read for{" "}
-            {held.length === 1 ? "it" : "them"}, so nothing has been charged.
+            {held.length === 1 ? "it" : "them"}
+            {heldSent === 0 ? (
+              <>, so nothing has been charged.</>
+            ) : heldSent === held.length ? (
+              <>
+                ; {held.length === 1 ? "it was" : `all ${held.length} were`} sent to the model to be identified, one small
+                call each.
+              </>
+            ) : (
+              <>
+                ; {heldSent} {heldSent === 1 ? "was" : "were"} sent to the model to be identified, one small call each,
+                and the other {held.length - heldSent} {held.length - heldSent === 1 ? "was" : "were"} never sent, so
+                nothing was charged for {held.length - heldSent === 1 ? "it" : "those"}.
+              </>
+            )}
           </p>
         )}
       </div>

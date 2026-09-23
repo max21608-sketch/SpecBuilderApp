@@ -18,6 +18,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { loadDrawingContext, recordChoices, resolveStagedRun } from "@/lib/drawing-resolution";
+import { reviewDrawingObservations } from "@/lib/confirm-drawings";
 import { normaliseFinishCode } from "@/lib/finishes";
 import {
   buildTargetSnapshot,
@@ -226,6 +227,13 @@ const DrawingPatch = z
           ])
           .nullable()
           .optional(),
+        // IGNORE THIS ROW, AND SAY WHY (plan any-bill, step 4). The clash
+        // panel's "Same fabric — keep page 1's wording" ignores the other
+        // page's row "same as page 1" through this autosave, under the row's
+        // own version, rather than through a second route. Sent ALONE: it is
+        // handed to the same `reviewDrawingObservations` the Ignore button
+        // uses, so the run's status is derived exactly as it is there.
+        ignoreBecause: z.string().trim().min(1).max(200).optional(),
         // Which occupied slot, on which record, this observation replaces.
         // Per (observation, RECORD): a card fans out one record per run, and
         // the mock-up run's COM 1 may hold a different old value from the main
@@ -357,6 +365,23 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
         }
         if (observation.version !== expectedVersion) {
           throw new DomainConflictError("observation_version_stale", "That spec was edited in another tab. Reload.");
+        }
+        if (changes.ignoreBecause !== undefined) {
+          if (Object.keys(changes).length !== 1) {
+            throw new DomainConflictError("ignore_alone", "An ignore is sent on its own, not with other changes.", {
+              status: 400,
+            });
+          }
+          const reviewed = await reviewDrawingObservations(txn, {
+            runId: id,
+            expectedVersion: null,
+            itemId,
+            observations: [{ id: observationId, version: expectedVersion }],
+            action: "ignore",
+            actor,
+            reason: changes.ignoreBecause,
+          });
+          return { version: null, ignored: reviewed.ignored };
         }
         if (changes.specFieldId) {
           const field = await txn`select id from spec_fields where id = ${changes.specFieldId}`;

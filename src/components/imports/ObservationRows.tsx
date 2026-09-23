@@ -33,7 +33,16 @@ import {
   type DimensionSlot,
   type ItemLevel,
 } from "@/lib/spec-vocab";
-import { asksForState, foldableRow, isMeasuredRow, unitSourceOf, type DrawingObservation } from "@/lib/drawing-document";
+import {
+  asksForState,
+  foldableRow,
+  isMeasuredRow,
+  unitSourceOf,
+  type DrawingObservation,
+  type FieldClash,
+} from "@/lib/drawing-document";
+import { useReviewRowActions } from "@/components/imports/review-row-actions";
+import type { ClashChoice } from "@/lib/clash-resolution";
 import {
   isOfferable,
   normalisePaletteValue,
@@ -114,6 +123,8 @@ export type RowBlocker = {
   label?: string;
   /** The same for both rows of a cross-page `field_conflict`, so a card counts one decision. */
   pairKey?: string;
+  /** A cross-page `field_conflict`'s three answers, as data (plan any-bill, step 4). */
+  clash?: FieldClash;
 };
 export type RowWarning = { code: string; message: string; observationId: string };
 
@@ -835,6 +846,7 @@ export function ObservationRow({
           return (
             <SwatchPicker
               importId={importId}
+              observationId={observation.id}
               page={page}
               pages={itemPages}
               code={target.code}
@@ -1053,11 +1065,21 @@ export function ReplacePanel({
 
 /** Why a row cannot commit, and what is merely worth knowing. */
 export function RowNotes({ blockers, warnings }: { blockers: RowBlocker[]; warnings: RowWarning[] }) {
+  const actions = useReviewRowActions();
   if (blockers.length === 0 && warnings.length === 0) return null;
+  const clash = blockers.find((blocker) => blocker.clash)?.clash ?? null;
   return (
     <tr className="bg-amber-50/40">
       <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2 text-xs text-amber-900">
         {blockers.map((blocker) => blocker.message).join(" ")}
+        {/* THE THREE ANSWERS, ON THE ROW (plan any-bill, step 4). The old
+            advice — "ignore one, or move one to another field" — put a
+            second, non-existent fabric into COM 2 on the case that prompted
+            it. The same fabric keeps one page's wording and carries the
+            other's code and swatch; two fabrics move the later page to the
+            next slot free on the record. Offered only where a review screen
+            is there to do it. */}
+        {clash && actions && <ClashAnswers clash={clash} busy={actions.busy} onAnswer={actions.resolveClash} />}
         {/* Said out loud, because an amber row that still commits looks like a
             bug otherwise. */}
         {warnings.length > 0 && (
@@ -1067,6 +1089,53 @@ export function RowNotes({ blockers, warnings }: { blockers: RowBlocker[]; warni
         )}
       </td>
     </tr>
+  );
+}
+
+function ClashAnswers({
+  clash,
+  busy,
+  onAnswer,
+}: {
+  clash: FieldClash;
+  busy: boolean;
+  onAnswer: (choice: ClashChoice) => void;
+}) {
+  const noun = clash.fabric ? "fabric" : "finish";
+  const [first, later] = clash.rows;
+  if (!first || !later) return null;
+  const page = (row: { page: number | null }) => row.page ?? "?";
+  const move = clash.move;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      {clash.rows.map((row) => {
+        const other = row === first ? later : first;
+        return (
+          <Button
+            key={row.observationId}
+            size="xs"
+            disabled={busy}
+            onClick={() => onAnswer({ kind: "keep", keepId: row.observationId, dropId: other.observationId })}
+          >
+            Same {noun} — keep page {page(row)}’s wording
+          </Button>
+        );
+      })}
+      {move.fieldId && move.fieldName ? (
+        <Button
+          size="xs"
+          disabled={busy}
+          onClick={() => onAnswer({ kind: "move", observationId: move.observationId, fieldId: move.fieldId! })}
+        >
+          Two {clash.fabric ? "fabrics" : "finishes"} — move page {page(move)} to {move.fieldName}
+        </Button>
+      ) : (
+        <span className="text-neutral-600">
+          Two {clash.fabric ? "fabrics" : "finishes"}: no other {clash.fabric ? "COM" : "finish"} slot is free on this
+          record for page {page(move)} — choose its field in the row above.
+        </span>
+      )}
+    </div>
   );
 }
 

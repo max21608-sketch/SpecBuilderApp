@@ -8,8 +8,19 @@ import { countPdfPagesInBrowser } from "@/lib/pdf-crop";
 import { isPdfUpload, pdfUploadVerdict, type UploadVerdict } from "@/lib/upload-limits";
 
 export async function checkUpload(file: File): Promise<UploadVerdict> {
-  if (!isPdfUpload(file.name, file.type)) return { kind: "proceed" };
+  return (await checkUploadCounted(file)).verdict;
+}
+
+/**
+ * The verdict AND the page count it was reached from. The count travels on to
+ * the classify route as a hint, because the server's own reader cannot see the
+ * page tree of most compressed PDFs and the count decides which model looks at
+ * the document (`classifyModelFor`). Null wherever nothing was counted.
+ */
+export async function checkUploadCounted(file: File): Promise<{ verdict: UploadVerdict; pages: number | null }> {
+  if (!isPdfUpload(file.name, file.type)) return { verdict: { kind: "proceed" }, pages: null };
   const bySize = pdfUploadVerdict({ bytes: file.size, pages: null });
-  if (bySize.kind === "refuse") return bySize;
-  return pdfUploadVerdict({ bytes: file.size, pages: await countPdfPagesInBrowser(file) });
+  if (bySize.kind === "refuse") return { verdict: bySize, pages: null };
+  const pages = await countPdfPagesInBrowser(file);
+  return { verdict: pdfUploadVerdict({ bytes: file.size, pages }), pages };
 }

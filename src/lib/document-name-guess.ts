@@ -60,7 +60,17 @@ export type NameGuess = {
 const SIGNALS: { genre: Exclude<DocumentGenre, "unclear">; pattern: RegExp }[] = [
   // "BOQ" as a word, or the thing spelled out. Never a bare "bill", which is
   // a word an invoice and a supplier quotation both carry.
+  //
+  // AND "PRICING DOCUMENT", as whole words (plan any-bill, step 3). The Aman
+  // bill is "Appendix 2 - AMB_Bill of Quantities (Pricing Document) - Supplier
+  // VML.xlsx": the phrase is what a tender calls the sheet it wants priced,
+  // and like every bill signal it only counts on a spreadsheet (below). A bare
+  // "pricing" is not enough — a supplier's price list is not a bill — and a
+  // specifier's own drawing numbers (`AM-ID-MUR-415.pdf`) are deliberately
+  // NOT read: a numbering scheme is not evidence of a kind.
+  // A signal of its own, so a name carrying both phrases quotes both back.
   { genre: "bill_of_quantities", pattern: /\bboq\b|\bbills? of quantit\w+\b/i },
+  { genre: "bill_of_quantities", pattern: /\bpricing documents?\b/i },
   { genre: "shop_drawings", pattern: /\bshop[ -]?drawings?\b/i },
   // The Panther pack's own convention: SPEC-346 is one sheet per item. A bare
   // "spec" is not enough — it is in "spec bible" and in half the folder names

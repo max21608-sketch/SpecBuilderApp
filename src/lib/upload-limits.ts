@@ -39,6 +39,17 @@ export const MAX_MODEL_PDF_BYTES = 20 * 1024 * 1024;
 export const MAX_MODEL_PDF_PAGES = 600;
 
 /**
+ * The most PDF pages the CLASSIFY model can take: 100, the documented ceiling
+ * for a 200k-context model, which the fast model (`CLASSIFY_MODEL`) is.
+ *
+ * A PDF counted over this is identified by the reading model instead
+ * (`classifyModelFor`), because the upload admits up to `MAX_MODEL_PDF_PAGES`
+ * and a 300-page set sent to the fast model is refused with a bare 400. Tied
+ * to the model for the same reason the figure above is.
+ */
+export const CLASSIFY_MODEL_MAX_PDF_PAGES = 100;
+
+/**
  * Over this many pages, the upload row WARNS and the upload still proceeds.
  *
  * PROVISIONAL until a 100-page set has been read. Measured 2026-09-23 on the
