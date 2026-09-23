@@ -500,7 +500,7 @@ describe("a dimension already recorded", () => {
     expect(alreadyRecorded(width("550", "mm"), undefined)).toBe(false);
   });
 
-  it("is never a finish, whatever its wording", () => {
+  it("is never a finish with no BWS field, whatever its wording", () => {
     const fabric = { attrGroup: "material" as const, dimensionSlot: null, value: "Maker A", valueRaw: "Maker A", unit: null, state: "confirmed" as const };
     expect(alreadyRecorded(fabric, occupant("Maker A", null))).toBe(false);
   });
@@ -557,10 +557,12 @@ describe("two pages giving one configuration the same BWS field", () => {
     expect(a?.kind).toBe("conflict");
     expect(b?.kind).toBe("conflict");
     expect(a?.kind === "conflict" && b?.kind === "conflict" && a.pairKey === b.pairKey).toBe(true);
+    // THE REAL QUESTION (plan any-bill, step 4), not "move one to another
+    // field" — which on S-301 put a second, non-existent fabric into COM 2.
     expect(a?.message).toBe(
-      "Page 1 and page 2 both give COM 1 for TYPE 1 · TYPE 5, in different words — page 2 says “Maker A, Ref. X, woven”. Ignore one, or move one to another field.",
+      "Page 1 and page 2 both give COM 1 for TYPE 1 · TYPE 5. If they are the same fabric, keep one wording; if they are two fabrics, give page 2 its own field.",
     );
-    expect(b?.message).toContain("page 1 says “Maker A, Ref. X”");
+    expect(b?.message).toBe(a?.message);
   });
 
   it("is the same finish where both carry the same client code — the later one already recorded", () => {

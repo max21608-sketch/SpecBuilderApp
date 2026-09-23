@@ -1041,6 +1041,7 @@ export async function reviewDrawingObservations(
     observations: refs,
     action,
     actor,
+    reason = null,
   }: {
     runId: string;
     expectedVersion: number | null;
@@ -1048,6 +1049,12 @@ export async function reviewDrawingObservations(
     observations: ObservationRef[];
     action: "ignore" | "restore";
     actor: string;
+    /**
+     * Why, where the screen asked — "same as page 1", when two pages stated
+     * one fabric (plan any-bill, step 4). Kept on the row so the Ignored list
+     * says it; a restore clears it.
+     */
+    reason?: string | null;
   },
 ): Promise<DrawingsConfirmResult> {
   const run = await loadRun(txn, runId, expectedVersion);
@@ -1069,6 +1076,7 @@ export async function reviewDrawingObservations(
                   reviewStatus: action === "ignore" ? ("ignored" as const) : ("pending" as const),
                   reviewedAt: action === "ignore" ? now : null,
                   reviewedBy: action === "ignore" ? actor : null,
+                  ignoredReason: action === "ignore" ? (reason?.trim() || null) : null,
                 }
               : observation,
           ),

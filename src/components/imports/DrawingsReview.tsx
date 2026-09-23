@@ -44,6 +44,8 @@ import Button from "@/components/ui/Button";
 import Tabs from "@/components/ui/Tabs";
 import { DOCUMENT_KIND_LABELS, type ItemLevel } from "@/lib/spec-vocab";
 import type { DrawingItem, DrawingObservation, StagedDrawings } from "@/lib/drawing-document";
+import { ReviewRowActionsContext, type ReviewRowActions } from "@/components/imports/review-row-actions";
+import { planClashResolution, type ClashChoice } from "@/lib/clash-resolution";
 import ItemCard, {
   BulkUnit,
   type ItemResolution,
@@ -506,6 +508,42 @@ export default function DrawingsReview({
     }
   }
 
+
+  // ---- a cross-page clash, answered on the row (plan any-bill, step 4) ------
+  //
+  // The row offers the three answers; what they WRITE is `planClashResolution`
+  // (pure), sent as ordinary autosaves under each row's own version. A crop
+  // the screen holds for the row being ignored is RE-KEYED onto the kept row,
+  // because an ignored row's crop is never uploaded.
+  const [swatchEpoch, setSwatchEpoch] = useState(0);
+  const resolveClash = useCallback(
+    (choice: ClashChoice) => {
+      const items = run?.parsed?.items ?? [];
+      const plan = planClashResolution(choice, items, (id) => Boolean(swatches.current.get(id)));
+      if (!plan.ok) {
+        setError(plan.error);
+        return;
+      }
+      if (plan.swatch) {
+        swatches.current.set(plan.swatch.to, swatches.current.get(plan.swatch.from) ?? null);
+        swatches.current.delete(plan.swatch.from);
+        setSwatchEpoch((epoch) => epoch + 1);
+      }
+      void saveObservations(plan.edits);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [run],
+  );
+  const rowActions = useMemo<ReviewRowActions>(
+    () => ({
+      resolveClash,
+      busy: busy !== null,
+      heldSwatch: (id) => swatches.current.get(id)?.image ?? null,
+      swatchEpoch,
+    }),
+    [resolveClash, busy, swatchEpoch],
+  );
+
   // ---- the band ------------------------------------------------------------
   //
   // Rendered by this component rather than by the route above it, for the
@@ -849,6 +887,7 @@ export default function DrawingsReview({
           shown as one card with a chip per configuration, the geometry once
           and each configuration's own finishes below. A code drawn once is a
           plain card, unchanged. See src/lib/configuration-cards.ts. */}
+      <ReviewRowActionsContext.Provider value={rowActions}>
       <div className={reviewTab === "pending" ? "" : "hidden"}>
         {cards.map((card, index) => (
           <div key={card.id} id={`drawing-card-${index}`} className="scroll-mt-4">
@@ -897,6 +936,7 @@ export default function DrawingsReview({
           </div>
         ))}
       </div>
+      </ReviewRowActionsContext.Provider>
 
       <CollapsedList
         title="Ignored"
@@ -985,6 +1025,10 @@ function CollapsedList({
             <span className="text-neutral-500 w-24 truncate">{item.itemCodeRaw ?? "—"}</span>
             <span className="flex-1 text-neutral-800">
               {observation.labelRaw}: {observation.value ?? observation.valueRaw ?? "—"}
+              {/* Why, where the screen asked — "same as page 1". */}
+              {status === "ignored" && observation.ignoredReason && (
+                <span className="ml-1 text-xs text-neutral-500">— ignored, {observation.ignoredReason}</span>
+              )}
             </span>
             {status === "applied" ? (
               <span className="text-xs text-neutral-500">
