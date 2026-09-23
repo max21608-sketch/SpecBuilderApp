@@ -33,6 +33,7 @@ import { loadPromotable } from "@/lib/attribute-retire";
 import {
   acknowledgedReplacements,
   alreadyRecorded,
+  crossPageClaims,
   assertStagedDrawings,
   specFieldEntries,
   drawingItemBlockers,
@@ -47,6 +48,7 @@ import {
   rowWriteRecords,
   stateToWrite,
   type NamedTargets,
+  type SpecFieldEntry,
   type DrawingItem,
   type DrawingObservation,
   type OccupiedSlots,
@@ -121,7 +123,7 @@ export type DrawingsConfirmResult = {
   status: string;
 };
 
-type LoadedRun = { runId: string; projectId: string; staged: StagedDrawings };
+type LoadedRun = { runId: string; projectId: string; staged: StagedDrawings; fields: SpecFieldEntry[] };
 
 async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | null): Promise<LoadedRun> {
   const rows = await txn`
@@ -148,10 +150,12 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
   // same field when it is written, or the screen is promising a cell the file
   // does not deliver.
   const fieldRows = await txn`select id, json_id, name from spec_fields order by sort_order`;
+  const fields = specFieldEntries(fieldRows);
   return {
     runId: String(run.id),
     projectId: String(run.project_id),
-    staged: assertStagedDrawings(run.parsed, specFieldEntries(fieldRows)),
+    staged: assertStagedDrawings(run.parsed, fields),
+    fields,
   };
 }
 
@@ -395,7 +399,7 @@ export async function confirmDrawingItem(
   const byWriteTarget: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
   if (writeIds.length > 0) {
     const occupiedRows = await txn`
-      select id, record_id, spec_field_id, dimension_slot, version, label, value, unit, state, source_page
+      select id, record_id, spec_field_id, dimension_slot, version, label, value, unit, state, material_code, source_page
       from record_attributes
       where record_id = any(${writeIds}::uuid[])
         and status = 'active'
@@ -410,6 +414,7 @@ export async function confirmDrawingItem(
         value: row.value === null || row.value === undefined ? null : String(row.value),
         unit: row.unit === null || row.unit === undefined ? null : String(row.unit),
         state: row.state === null || row.state === undefined ? null : String(row.state),
+        materialCode: row.material_code === null || row.material_code === undefined ? null : String(row.material_code),
         sourceFilename: null,
         sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
       };
@@ -430,7 +435,16 @@ export async function confirmDrawingItem(
   // page is keyed by the real variants instead: one bill line has five of
   // them, and a re-key onto the parent could only hold one.
   const occupied = named ? byWriteTarget : occupancyThrough(byWriteTarget, variantOf);
-  const blockers = drawingItemBlockers(item, resolution, occupied, named);
+  // Cross-page claims over the WHOLE staged document, by the function the card
+  // used: a clash the card could see refuses this page too, before any page of
+  // it is applied.
+  const blockers = drawingItemBlockers(
+    item,
+    resolution,
+    occupied,
+    named,
+    crossPageClaims(run.staged.items, run.staged, run.fields),
+  );
   if (blockers.length > 0) {
     throw new DomainConflictError("blocked", blockers[0]?.message ?? "This item cannot be confirmed yet.", {
       diff: blockers,
@@ -746,10 +760,15 @@ export async function confirmDrawingItem(
       // is marked applied naming the EXISTING attribute, so the card and the
       // history say where it is. Decided per record, by the same
       // `alreadyRecorded` the blockers used.
-      const existingDimension =
-        !replacement && observation.attrGroup === "dimension" && observation.dimensionSlot
+      // A FINISH the record already holds under the SAME client code, in the
+      // same field, is the same rule (`alreadyRecorded` reads the code).
+      const existingDimension = replacement
+        ? undefined
+        : observation.attrGroup === "dimension" && observation.dimensionSlot
           ? byWriteTarget.dimensions.get(recordId)?.get(observation.dimensionSlot)
-          : undefined;
+          : observation.specFieldId
+            ? byWriteTarget.fields.get(recordId)?.get(observation.specFieldId)
+            : undefined;
       if (existingDimension && alreadyRecorded(observation, existingDimension)) {
         sortOrder -= 1;
         inserts -= 1;

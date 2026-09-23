@@ -32,8 +32,8 @@
 // ============================================================================
 import { Fragment, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
-import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
-import { fieldSlotGaps, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
+import { isMeasuredRow, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
+import { fieldSlotGaps, naturalConfigurationOrder, tabMeasurements, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import type { DimensionSlot } from "@/lib/spec-vocab";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
@@ -99,6 +99,7 @@ export default function NamedConfigurationCard({
   /** Which configuration's tab is open. Local state: nothing links into it. */
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [joinArmed, setJoinArmed] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
 
   const pendingMembers = card.members.filter((member) => member.state === "pending");
   const busyHere = busy === card.id || pendingMembers.some((member) => busy === member.item.id);
@@ -140,7 +141,8 @@ export default function NamedConfigurationCard({
   // item version, and read from the first — see `configurationsByReviewer`. A
   // row's own answer goes on the observation, beside the model's reading.
   const currentList = named.configurations.map((entry) => ({ label: entry.label, readAs: entry.readAs ?? null }));
-  const labels = currentList.map((entry) => entry.label);
+  // STORED in the code's order (what `saveList` writes); SHOWN in natural order.
+  const labels = naturalConfigurationOrder(currentList.map((entry) => entry.label));
   const canEdit = Boolean(onSaveItem);
   const saveList = (list: { label: string; readAs: string | null }[] | null) => {
     if (!onSaveItem) return;
@@ -245,6 +247,13 @@ export default function NamedConfigurationCard({
 
   // --------------------------------------------------------------- confirm
   const blockedMember = pendingMembers.find((member) => (member.resolution?.blockers.length ?? 0) > 0);
+  // TWO PAGES, ONE FIELD, DIFFERENT WORDS: one decision per pair, however many
+  // pages raised it. Counted so the bar can say how many are left.
+  const decisions = new Set(
+    pendingMembers.flatMap((member) =>
+      (member.resolution?.blockers ?? []).filter((b) => b.code === "field_conflict").map((b) => b.pairKey ?? b.message),
+    ),
+  ).size;
   const confirmable =
     pendingMembers.length > 0 &&
     !blockedMember &&
@@ -366,10 +375,32 @@ export default function NamedConfigurationCard({
   // ------------------------------------------------------------ the open tab
   const tab = activeTab!;
   const colour = colourAt(tab.index);
-  const rowById = new Map(tab.rows.map((row) => [row.observation.id, row]));
-  const order = orderRows(tab.rows.map((row) => row.observation));
+  // ONE ROW PER MEASUREMENT: a later page stating the same figure is folded
+  // into the first page's row, and still confirms as already recorded.
+  const measurements = tabMeasurements(tab);
+  // And a later page naming the SAME finish by the client's code folds into
+  // the earlier page's row the same way, where that row is on this tab.
+  const onTab = new Set(tab.rows.map((row) => row.observation.id));
+  const finishFolded = new Map<string, string[]>();
+  for (const [laterId, same] of Object.entries(named.sameFinish)) {
+    if (!onTab.has(laterId) || !onTab.has(same.keptId)) continue;
+    measurements.hidden.add(laterId);
+    finishFolded.set(same.keptId, [...(finishFolded.get(same.keptId) ?? []), same.message]);
+  }
+  const visibleRows = tab.rows.filter((row) => !measurements.hidden.has(row.observation.id));
+  const rowById = new Map(visibleRows.map((row) => [row.observation.id, row]));
+  // THE NOTES EVERY CONFIGURATION SHARES fold away at the end of the tab.
+  // S-301's tabs were ~5,300px tall, most of it the same twelve notes on all
+  // five — project, title, supplier, remarks, the disclaimer. A note that
+  // belongs to fewer than all of them stays in view: it is about this chair.
+  const sharedNotes = visibleRows.filter(
+    (row) => total > 1 && row.lands.length === total && row.observation.attrGroup === "note" && !isMeasuredRow(row.observation),
+  );
+  const sharedNoteIds = new Set(sharedNotes.map((row) => row.observation.id));
+  const order = orderRows(visibleRows.filter((row) => !sharedNoteIds.has(row.observation.id)).map((row) => row.observation));
+  const sequence = [...order.ordered, ...sharedNotes.map((row) => row.observation)];
   const dimensionCell = composeDimensionCell(
-    tab.rows
+    visibleRows
       .filter((row) => row.observation.attrGroup === "dimension" && row.observation.dimensionSlot)
       .map((row, index) => ({
         slot: row.observation.dimensionSlot as DimensionSlot,
@@ -555,12 +586,19 @@ export default function NamedConfigurationCard({
                 <table className="w-full border-collapse text-cell">
                   <ObservationTableHead />
                   <tbody>
-                    {order.ordered.map((observation) => {
+                    {sequence.map((observation) => {
                       const row = rowById.get(observation.id)!;
                       const member = memberOf(row.item.id);
                       const blockers = rowBlockers(row);
-                      const warnings = rowWarnings(row);
+                      const disagreement = measurements.disagree.get(observation.id);
+                      const warnings = [
+                        ...rowWarnings(row),
+                        ...(disagreement ? [{ code: "pages_disagree", observationId: observation.id, message: disagreement }] : []),
+                      ];
+                      const sameOn = measurements.sameOn.get(observation.id) ?? [];
                       const isOther = order.otherIds.has(observation.id);
+                      const isSharedNote = sharedNoteIds.has(observation.id);
+                      const folded = (isOther && !showOther) || (isSharedNote && !showNotes);
                       const shared = sharedWithSentence(row.lands, tab.label, total);
                       const callbacks = {
                         onChange: (target: DrawingObservation, changes: Record<string, unknown>) =>
@@ -577,7 +615,21 @@ export default function NamedConfigurationCard({
                               onToggle={() => setShowOther((value) => !value)}
                             />
                           )}
-                          {(!isOther || showOther) && (
+                          {observation.id === sharedNotes[0]?.observation.id && (
+                            <tr className="border-t border-neutral-200 bg-neutral-50">
+                              <td colSpan={OBSERVATION_COLUMNS} className="px-4 py-2">
+                                <Button size="xs" variant="quiet" onClick={() => setShowNotes((value) => !value)}>
+                                  {showNotes
+                                    ? `Hide the ${sharedNotes.length} shared note${sharedNotes.length === 1 ? "" : "s"}`
+                                    : `${sharedNotes.length} note${sharedNotes.length === 1 ? "" : "s"} shared by all ${total} — show`}
+                                </Button>
+                                <span className="ml-2 text-xs text-neutral-500">
+                                  The same on every configuration. Kept on each, and still confirmed with the card.
+                                </span>
+                              </td>
+                            </tr>
+                          )}
+                          {!folded && (
                             <>
                               <ObservationRow
                                 observation={observation}
@@ -598,6 +650,19 @@ export default function NamedConfigurationCard({
                               <tr>
                                 <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-1 text-[11px] text-neutral-500">
                                   Page {row.item.page ?? "?"}
+                                  {(finishFolded.get(observation.id) ?? []).map((message) => (
+                                    <span key={message} className="text-neutral-700">
+                                      {" "}
+                                      · {message}
+                                    </span>
+                                  ))}
+                                  {sameOn.length > 0 && (
+                                    <span className="text-neutral-700">
+                                      {" "}
+                                      · {sameOn.map((page) => `page ${page}`).join(" and ")} state
+                                      {sameOn.length === 1 ? "s" : ""} the same
+                                    </span>
+                                  )}
                                   {shared ? ` · ${shared} — one row, written to each` : ` · ${tab.label} only`}
                                   {Array.isArray(row.observation.configurationsByReviewer) && (
                                     <span className="text-violet-800">
@@ -722,9 +787,11 @@ export default function NamedConfigurationCard({
 
       <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
         <p className="text-neutral-600">
-          {blockedMember
-            ? `Page ${blockedMember.item.page ?? "?"} cannot be confirmed yet: ${blockedMember.resolution?.blockers[0]?.message ?? ""}`
-            : recordsSentence}
+          {decisions > 0
+            ? `${decisions} decision${decisions === 1 ? "" : "s"} left before ${card.codeRaw} can be confirmed: two pages give one field in different words. Ignore one, or move one to another field — each is marked on its row.`
+            : blockedMember
+              ? `Page ${blockedMember.item.page ?? "?"} cannot be confirmed yet: ${blockedMember.resolution?.blockers[0]?.message ?? ""}`
+              : recordsSentence}
         </p>
         <span className="flex-1" />
         {/* ONE CONFIRM FOR THE CARD; each PAGE still commits on its own request,

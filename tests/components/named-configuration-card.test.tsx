@@ -14,7 +14,7 @@ import { namedConfigurationPlans, type DrawingItem, type DrawingObservation, typ
 import type { ItemResolution } from "@/components/imports/DrawingItemCard";
 import { callbacks, records, resolution, specFields } from "./fixtures";
 import { COMPONENT_TIMEOUT_MS } from "./tier-timeout";
-import { namedSheetRun } from "../fixtures/named-configurations";
+import { namedSheetRun, SHOP_DRAWING, SPEC_SHEET } from "../fixtures/named-configurations";
 
 vi.setConfig({ testTimeout: COMPONENT_TIMEOUT_MS });
 
@@ -80,7 +80,8 @@ const tabNames = () => screen.getAllByRole("tab").map((tab) => tab.querySelector
 describe("a card whose document names its configurations", () => {
   it("is one card with a tab per configuration, named as the document names them", () => {
     renderNamed();
-    expect(tabNames()).toEqual(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 3", "TYPE 4"]);
+    // In the order a person counts, not the order the page mentioned them.
+    expect(tabNames()).toEqual(["TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5"]);
     // Never listed one after another down the page: one tab panel at a time.
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
   });
@@ -92,9 +93,9 @@ describe("a card whose document names its configurations", () => {
 
   it("shows each configuration complete, and only what lands on it", async () => {
     renderNamed();
-    // TYPE 1: the sheet's geometry AND the drawing's (two pages, two rows), and
-    // fabric A from each. Nothing of Type 2's.
-    expect(screen.getAllByDisplayValue("550")).toHaveLength(2);
+    // TYPE 1: the geometry ONCE — the drawing states the same figures, so its
+    // rows fold into the sheet's — and fabric A from each page. Nothing of Type 2's.
+    expect(screen.getAllByDisplayValue("550")).toHaveLength(1);
     expect(screen.getAllByDisplayValue("Maker A, Ref. X")).toHaveLength(1);
     expect(screen.getAllByDisplayValue("Maker A, Ref. X, woven")).toHaveLength(1);
     expect(screen.queryByDisplayValue("Maker B, Ref. Y")).toBeNull();
@@ -113,17 +114,18 @@ describe("a card whose document names its configurations", () => {
     const { doc } = renderNamed();
     await userEvent.click(screen.getByRole("tab", { name: /TYPE 3/ }));
     const sheet = doc.items.find((item) => item.page === 1)!;
-    // W, D, H and the Type 3 fabric: four rows, four value boxes, each once.
-    for (const value of ["550", "560", "790", "Maker C, Ref. Z"]) {
+    // W, D, H, the Type 3 fabric and the shared timber: five rows, five value boxes, each once.
+    for (const value of ["550", "560", "790", "Maker C, Ref. Z", "feet dark tinted wood as per approved sample"]) {
       expect(screen.getAllByDisplayValue(value)).toHaveLength(1);
     }
-    expect(sheet.observations.filter((o) => o.configurations === undefined || o.configurations.includes("Type 3"))).toHaveLength(4);
+    expect(sheet.observations.filter((o) => o.configurations === undefined || o.configurations.includes("Type 3"))).toHaveLength(5);
   });
 
   it("says where else a row lands, and an edit on one tab is the edit on every tab", async () => {
     const { spies, doc } = renderNamed();
     await userEvent.click(screen.getByRole("tab", { name: /TYPE 2/ }));
-    expect(screen.getAllByText(/shared by all 5 — one row, written to each/).length).toBe(3);
+    // W, D, H and the shared timber.
+    expect(screen.getAllByText(/shared by all 5 — one row, written to each/).length).toBe(4);
     expect(screen.getByText(/TYPE 2 only/)).toBeInTheDocument();
 
     const width = screen.getByDisplayValue("550");
@@ -140,6 +142,48 @@ describe("a card whose document names its configurations", () => {
     // The SAME observation on TYPE 4: it shows the edit.
     await userEvent.click(screen.getByRole("tab", { name: /TYPE 4/ }));
     expect(screen.getByDisplayValue("555")).toBeInTheDocument();
+  });
+
+  it("shows one row per measurement, and says the other page states the same", () => {
+    renderNamed();
+    expect(screen.getAllByDisplayValue("550")).toHaveLength(1);
+    expect(screen.getAllByText(/page 2 states the same/)).toHaveLength(3);
+    expect(screen.getByText("W550 x D560 x H790mm")).toBeInTheDocument();
+    expect(screen.queryByText(/Two width values/i)).toBeNull();
+  });
+
+  it("folds a later page naming the same finish by code, and says so", () => {
+    renderNamed();
+    expect(screen.getAllByDisplayValue("feet dark tinted wood as per approved sample")).toHaveLength(1);
+    expect(screen.queryByDisplayValue("Dark tinted wood")).toBeNull();
+    expect(screen.getByText(/Page 2 names the same finish, QW-01 — already recorded from page 1\./)).toBeInTheDocument();
+  });
+
+  it("shows a clash it can see BEFORE confirm, on both rows, and holds the confirm until it is decided", () => {
+    const doc = namedSheetRun();
+    const sheet = doc.items.find((item) => item.page === 1)!;
+    const drawing = doc.items.find((item) => item.page === 2)!;
+    const fabricA = sheet.observations.find((o) => o.configurations?.includes("Type 1"))!;
+    const fabricB = drawing.observations.find((o) => o.materialCodeRaw === "QQ-01.1")!;
+    const conflict = (observationId: string, other: string) => ({
+      code: "field_conflict",
+      observationId,
+      pairKey: `${fabricA.id}|${fabricB.id}`,
+      message: `Page 1 and page 2 both give COM 1 for TYPE 1 · TYPE 5, in different words — ${other}. Ignore one, or move one to another field.`,
+    });
+    const resolutions = resolutionsFor(doc, (item) => ({
+      blockers:
+        item.id === sheet.id
+          ? [conflict(fabricA.id, "page 2 says “Maker A, Ref. X, woven”")]
+          : [conflict(fabricB.id, "page 1 says “Maker A, Ref. X”")],
+    }));
+    renderNamed(doc, resolutions);
+    expect(screen.getByRole("button", { name: /Confirm Q-301/ })).toBeDisabled();
+    expect(screen.getByText(/1 decision left before Q-301 can be confirmed/)).toBeInTheDocument();
+    // On BOTH rows, each naming the other page's words.
+    expect(screen.getByText(/page 2 says “Maker A, Ref. X, woven”/)).toBeInTheDocument();
+    expect(screen.getByText(/page 1 says “Maker A, Ref. X”/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /TYPE 1/ }).textContent).toContain("blocked");
   });
 
   it("on TYPE 1, names the one configuration a fabric shares", () => {
@@ -259,8 +303,8 @@ describe("correcting the configurations on the card", () => {
     const { spies } = renderNamed();
     await userEvent.click(screen.getByRole("tab", { name: /TYPE 2/ }));
     const pickers = screen.getAllByRole("button", { name: "Applies to…" });
-    // The fabric row is the last on the tab: dimensions first.
-    await userEvent.click(pickers[pickers.length - 1]!);
+    // Dimensions, then the fabric, then the (shared) timber finish.
+    await userEvent.click(pickers[pickers.length - 2]!);
     await userEvent.click(screen.getByRole("checkbox", { name: "TYPE 3" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     const [, observation, changes] = spies.of("onSaveObservation")[0]!.args as [DrawingItem, DrawingObservation, Record<string, unknown>];
@@ -272,7 +316,7 @@ describe("correcting the configurations on the card", () => {
     const { spies } = renderNamed();
     await userEvent.click(screen.getByRole("tab", { name: /TYPE 2/ }));
     const pickers = screen.getAllByRole("button", { name: "Applies to…" });
-    await userEvent.click(pickers[pickers.length - 1]!);
+    await userEvent.click(pickers[pickers.length - 2]!);
     await userEvent.click(screen.getByRole("checkbox", { name: "All" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect((spies.of("onSaveObservation")[0]!.args as unknown[])[2]).toEqual({ configurations: [] });
@@ -296,6 +340,35 @@ describe("correcting the configurations on the card", () => {
     expect(screen.getByText("Read as 5, you set 4 — removed TYPE 3.")).toBeInTheDocument();
     expect(screen.getByText(/1 row belonged only to a configuration that has been removed/)).toBeInTheDocument();
     expect(screen.getByDisplayValue("Maker C, Ref. Z")).toBeInTheDocument();
-    expect(tabNames()).toEqual(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 4"]);
+    expect(tabNames()).toEqual(["TYPE 1", "TYPE 2", "TYPE 4", "TYPE 5"]);
+  });
+});
+
+describe("the notes every configuration shares", () => {
+  const withNotes = () =>
+    namedSheetRun([
+      { ...SPEC_SHEET, notesRaw: ["PROJECT: Invented hotel", "SUPPLIER: TO BID"] },
+      { ...SHOP_DRAWING, notesRaw: ["TITLE: Invented desk chair"] },
+    ]);
+
+  it("fold behind one toggle at the end of the tab, after the dimensions and the finishes", async () => {
+    renderNamed(withNotes());
+    await userEvent.click(screen.getByRole("tab", { name: /TYPE 2/ }));
+    expect(screen.queryByDisplayValue("Invented hotel")).toBeNull();
+    const toggle = screen.getByRole("button", { name: "2 notes shared by all 5 — show" });
+    // After every value box on the tab: dimensions, then fabrics and finishes, then the toggle.
+    const boxes = screen.getAllByRole("textbox");
+    expect(boxes[boxes.length - 1]!.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.click(toggle);
+    expect(screen.getByDisplayValue("Invented hotel")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("TO BID")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide the 2 shared notes" })).toBeInTheDocument();
+  });
+
+  it("leave a note belonging to fewer than all of them in view", () => {
+    renderNamed(withNotes());
+    // TYPE 1 is open: the drawing's title note lands on TYPE 1 and TYPE 5 only.
+    expect(screen.getByDisplayValue("Invented desk chair")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Invented hotel")).toBeNull();
   });
 });

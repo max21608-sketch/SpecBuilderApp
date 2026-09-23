@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   alreadyRecorded,
+  crossPageClaims,
   codeConfigurations,
   configurationEditSummary,
   drawingItemBlockers,
@@ -454,5 +455,79 @@ describe("a dimension already recorded", () => {
     const widths = blockers.filter((b) => b.code === "dimension_slot_taken");
     expect(widths).toHaveLength(1);
     expect(widths[0]).toMatchObject({ recordId: "v5" });
+  });
+});
+
+// ============================================================================
+// A CLASH THE CARD CAN SEE IS SHOWN BEFORE CONFIRM (2026-09-23).
+//
+// Pressing Confirm applied the sheet and then refused the drawing with
+// slot_taken: both gave TYPE 1 / TYPE 5 a COM 1, in different words. Compared
+// across pages, per configuration, by one function the card and the confirm
+// both call.
+// ============================================================================
+describe("two pages giving one configuration the same BWS field", () => {
+  const doc = namedSheetRun();
+  const sheet = sheetOf(doc);
+  const drawing = drawingOf(doc);
+  const claims = crossPageClaims(doc.items, doc, NAMED_FIELDS);
+  const sheetFabricA = sheet.observations.find((o) => o.configurations?.includes("Type 1"))!;
+  const drawingFabric = drawing.observations.find((o) => o.materialCodeRaw === "QQ-01.1")!;
+  const sheetTimber = sheet.observations.find((o) => o.materialCodeRaw === "QW-01")!;
+  const drawingTimber = drawing.observations.find((o) => o.materialCodeRaw === "QW-01")!;
+
+  it("is a decision on BOTH rows where the words differ, naming the other page's", () => {
+    const a = claims.get(sheetFabricA.id);
+    const b = claims.get(drawingFabric.id);
+    expect(a?.kind).toBe("conflict");
+    expect(b?.kind).toBe("conflict");
+    expect(a?.kind === "conflict" && b?.kind === "conflict" && a.pairKey === b.pairKey).toBe(true);
+    expect(a?.message).toBe(
+      "Page 1 and page 2 both give COM 1 for TYPE 1 · TYPE 5, in different words — page 2 says “Maker A, Ref. X, woven”. Ignore one, or move one to another field.",
+    );
+    expect(b?.message).toContain("page 1 says “Maker A, Ref. X”");
+  });
+
+  it("is the same finish where both carry the same client code — the later one already recorded", () => {
+    expect(claims.get(sheetTimber.id)).toBeUndefined();
+    const later = claims.get(drawingTimber.id);
+    expect(later).toMatchObject({ kind: "same_finish", keptId: sheetTimber.id, code: "QW-01" });
+    expect(later?.message).toBe("Page 2 names the same finish, QW-01 — already recorded from page 1.");
+  });
+
+  it("never compares configurations the rows do not share", () => {
+    const type2 = sheet.observations.find((o) => o.configurations?.includes("Type 2"))!;
+    expect(claims.get(type2.id)).toBeUndefined();
+  });
+
+  it("blocks the card on both pages, and goes once a row is ignored", () => {
+    const resolution = resolveDrawingTargets("Q-301", [record()]);
+    const plans = namedConfigurationPlans(doc.items, doc);
+    const blocked = (item: typeof sheet, map = claims) =>
+      drawingItemBlockers(item, resolution, NO_OCCUPANCY, { plan: plans.get(item.id)!, variants: new Map() }, map)
+        .filter((b) => b.code === "field_conflict")
+        .map((b) => b.observationId);
+    expect(blocked(sheet)).toEqual([sheetFabricA.id]);
+    expect(blocked(drawing)).toEqual([drawingFabric.id]);
+    const ignoredDoc = {
+      ...doc,
+      items: doc.items.map((item) => ({
+        ...item,
+        observations: item.observations.map((o) => (o.id === drawingFabric.id ? { ...o, reviewStatus: "ignored" as const } : o)),
+      })),
+    };
+    const after = crossPageClaims(ignoredDoc.items, ignoredDoc, NAMED_FIELDS);
+    expect(blocked(sheet, after)).toEqual([]);
+  });
+
+  it("treats the same client code already on the record as already recorded, at confirm too", () => {
+    expect(
+      alreadyRecorded(
+        { ...drawingTimber },
+        { value: "feet dark tinted wood as per approved sample", unit: null, state: "confirmed", materialCode: "qw-01 " },
+      ),
+    ).toBe(true);
+    expect(alreadyRecorded({ ...drawingTimber }, { value: "Dark tinted wood", unit: null, state: "confirmed", materialCode: "QW-02" })).toBe(false);
+    expect(alreadyRecorded({ ...drawingFabric }, { value: "Maker A", unit: null, state: "confirmed", materialCode: null })).toBe(false);
   });
 });

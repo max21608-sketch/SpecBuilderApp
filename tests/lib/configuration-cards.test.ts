@@ -3,8 +3,17 @@
 // with invented codes and materials. No client document content is in this
 // repo.
 import { describe, expect, it } from "vitest";
-import { cardHasPending, compareGeometry, configurationCards, pagesOfCard, sharedTargets } from "@/lib/configuration-cards";
+import {
+  cardHasPending,
+  compareGeometry,
+  configurationCards,
+  naturalConfigurationOrder,
+  pagesOfCard,
+  tabMeasurements,
+  sharedTargets,
+} from "@/lib/configuration-cards";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
+import { namedSheetRun } from "../fixtures/named-configurations";
 
 let counter = 0;
 const observation = (over: Partial<DrawingObservation> = {}): DrawingObservation => {
@@ -226,5 +235,83 @@ describe("pagesOfCard", () => {
 
   it("is empty for an item whose page is unknown", () => {
     expect(pagesOfCard([item({ id: "z", page: null, itemCodeRaw: "S-999" })])).toEqual([]);
+  });
+});
+
+describe("the order configuration tabs are shown in", () => {
+  it("counts the way a person does, not the way a page first mentioned them", () => {
+    expect(naturalConfigurationOrder(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 3", "TYPE 4"])).toEqual([
+      "TYPE 1",
+      "TYPE 2",
+      "TYPE 3",
+      "TYPE 4",
+      "TYPE 5",
+    ]);
+    expect(naturalConfigurationOrder(["TYPE 10", "TYPE 2"])).toEqual(["TYPE 2", "TYPE 10"]);
+    expect(naturalConfigurationOrder(["C", "A", "B"])).toEqual(["A", "B", "C"]);
+    // Numbered first, then letters, then anything else in document order.
+    expect(naturalConfigurationOrder(["SUITE", "B", "TYPE 2", "LOBBY", "A", "TYPE 1"])).toEqual([
+      "TYPE 1",
+      "TYPE 2",
+      "A",
+      "B",
+      "SUITE",
+      "LOBBY",
+    ]);
+  });
+});
+
+describe("one row per measurement in a tab", () => {
+  const cardOf = (doc: ReturnType<typeof namedSheetRun>) => {
+    const card = configurationCards(doc.items, new Map(), doc)[0]!;
+    if (card.kind !== "configurations" || !card.named) throw new Error("expected a named card");
+    return card.named;
+  };
+  const tabOf = (doc: ReturnType<typeof namedSheetRun>, label: string) => cardOf(doc).tabs.find((tab) => tab.label === label)!;
+
+  it("folds a later page stating the same figure into the first page's row", () => {
+    const doc = namedSheetRun();
+    const tab = tabOf(doc, "TYPE 1");
+    const measured = tabMeasurements(tab);
+    const drawing = doc.items.find((item) => item.page === 2)!;
+    const sheet = doc.items.find((item) => item.page === 1)!;
+    const dims = (item: DrawingItem) => item.observations.filter((o) => o.dimensionSlot).map((o) => o.id);
+    expect([...measured.hidden].sort()).toEqual(dims(drawing).sort());
+    for (const id of dims(sheet)) expect(measured.sameOn.get(id)).toEqual([2]);
+    expect(measured.disagree.size).toBe(0);
+    // A configuration only page 1 reaches has nothing to fold.
+    expect(tabMeasurements(tabOf(doc, "TYPE 2")).hidden.size).toBe(0);
+  });
+
+  it("keeps both rows, each saying so, where the figures differ", () => {
+    const doc = namedSheetRun();
+    const drawing = doc.items.find((item) => item.page === 2)!;
+    const changed = {
+      ...doc,
+      items: doc.items.map((item) =>
+        item.id !== drawing.id
+          ? item
+          : { ...item, observations: item.observations.map((o) => (o.dimensionSlot === "H" ? { ...o, value: "800" } : o)) },
+      ),
+    };
+    const measured = tabMeasurements(tabOf(changed, "TYPE 5"));
+    expect(measured.hidden.size).toBe(2);
+    const messages = [...new Set(measured.disagree.values())];
+    expect(messages).toEqual(["Page 1 and page 2 disagree about the height: page 1 says 790mm, page 2 says 800mm. Correct one, or ignore it."]);
+    expect(measured.disagree.size).toBe(2);
+  });
+
+  it("compares in millimetres, not as text", () => {
+    const doc = namedSheetRun();
+    const drawing = doc.items.find((item) => item.page === 2)!;
+    const inCm = {
+      ...doc,
+      items: doc.items.map((item) =>
+        item.id !== drawing.id
+          ? item
+          : { ...item, observations: item.observations.map((o) => (o.dimensionSlot === "W" ? { ...o, value: "55", unit: "cm" as const } : o)) },
+      ),
+    };
+    expect(tabMeasurements(tabOf(inCm, "TYPE 1")).hidden.size).toBe(3);
   });
 });
