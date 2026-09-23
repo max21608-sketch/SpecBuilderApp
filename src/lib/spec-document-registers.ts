@@ -22,7 +22,7 @@ import type { SpecFieldEntry } from "@/lib/drawing-document";
 import type { AnswerEntry, AttributeEntry, RecordEntry, Registers, RequirementEntry } from "@/lib/spec-document";
 // The same label the chase emails use. Two spellings of one record number would
 // make a proposal and a chase about the same item look like different items.
-import { recordLabel } from "@/lib/chase-drafts";
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 
 export async function loadExtractionRegisters(projectId: string): Promise<Registers> {
   // Active records only. A retired record is not a thing a new observation
@@ -33,7 +33,8 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
            c.name as category_name,
            p.bws_project_number,
            r.run_id, run.name as run_name,
-           r.parent_id, r.variant_label,
+           r.parent_id, r.variant_label, r.variant_ordinal,
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            coalesce(
              (select array_agg(x.ref_value order by x.ref_value)
                 from spec_record_refs x where x.record_id = r.id),
@@ -55,7 +56,7 @@ export async function loadExtractionRegisters(projectId: string): Promise<Regist
   const records: RecordEntry[] = recordRows.map((row) => ({
     id: String(row.id),
     recordNo: Number(row.record_no),
-    label: recordLabel(String(row.bws_project_number), Number(row.record_no)),
+    label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
     itemDescription: String(row.item_description),
     categoryId: row.category_id ? String(row.category_id) : null,
     categoryName: row.category_name ? String(row.category_name) : null,

@@ -31,6 +31,7 @@
 // different columns, and it carries the reviewer's own words in three columns
 // no importer would accept.
 // ============================================================================
+import { compareRecordOrder } from "@/lib/record-label";
 import {
   BWS_EXPORT_COLUMNS,
   composeRowCells,
@@ -126,7 +127,7 @@ export type CheckSheet = { header: string[]; rows: string[][] };
 export function composeCheckSheet(scope: ExportScope): CheckSheet {
   const rows: string[][] = [];
 
-  for (const record of [...scope.records].sort((a, b) => a.recordNo - b.recordNo)) {
+  for (const record of [...scope.records].sort(compareRecordOrder)) {
     const cells = composeRowCells(scope, record, scope.attributes, scope.answers);
     for (const [index, column] of BWS_EXPORT_COLUMNS.entries()) {
       // `composeRowCells` maps over the same list, so the lengths match by

@@ -27,6 +27,7 @@
 // reason that has nothing to do with them — the same trap as a `chased_at`
 // column.
 // ============================================================================
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { applyAnswerFills, applyAnswerRetractions, loadDimensionNote, planAnswerFills } from "@/lib/promote-answers";
 import { loadPromotable } from "@/lib/attribute-retire";
@@ -173,7 +174,8 @@ async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[
   const rows = await txn`
     select r.id, r.record_no, r.item_description, r.category_id, r.version,
            r.run_id, run.name as run_name, p.bws_project_number,
-           r.parent_id, r.variant_label,
+           r.parent_id, r.variant_label, r.variant_ordinal,
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            coalesce((select array_agg(x.ref_value order by x.ref_value)
                        from spec_record_refs x where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as boq_codes
     from spec_records r
@@ -185,7 +187,7 @@ async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[
   return rows.map((row) => ({
     id: String(row.id),
     recordNo: Number(row.record_no),
-    label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+    label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
     itemDescription: String(row.item_description),
     categoryId: row.category_id ? String(row.category_id) : null,
     categoryName: null,

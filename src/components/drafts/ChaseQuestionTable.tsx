@@ -847,6 +847,7 @@ function LineRows({
                       held. Nothing is apportioned either way: the number is
                       read, never divided. */}
                   <span className="text-neutral-500"> · {finishOptionQtyLabel(option.qty)}</span>
+                  {option.number && <span className="font-mono text-neutral-500"> · {option.number}</span>}
                 </Td>
                 <Td num className="text-neutral-400">—</Td>
                 <Td />

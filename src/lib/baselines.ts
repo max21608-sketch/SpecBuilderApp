@@ -25,6 +25,7 @@
 // makes unobservable — but it is why membership is a join rather than an
 // assumption.
 // ============================================================================
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { openChangeSet } from "@/lib/change-sets";
 import { diffSnapshots, parseAtoms, type SnapshotDiff } from "@/lib/snapshot-diff";
@@ -92,7 +93,8 @@ async function membersOf(exec: SqlLike, changeSetId: string): Promise<Side> {
   // taken as the versions IT produced, which is what "compare this change
   // against that one" means on a single change.
   const rows = await exec`
-    select s.record_id, s.snapshot_no, s.atoms, r.record_no, r.item_description, p.bws_project_number
+    select s.record_id, s.snapshot_no, s.atoms, r.record_no, r.item_description, p.bws_project_number,
+           r.variant_ordinal, (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
     from baseline_members m
     join record_snapshots s on s.id = m.snapshot_id
     join spec_records r on r.id = s.record_id
@@ -104,7 +106,7 @@ async function membersOf(exec: SqlLike, changeSetId: string): Promise<Side> {
     out.set(String(row.record_id), {
       snapshotNo: Number(row.snapshot_no),
       atoms: row.atoms,
-      label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+      label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
       itemDescription: String(row.item_description),
     });
   }
@@ -124,7 +126,8 @@ async function stateAt(exec: SqlLike, projectId: string, changeSetId: string): P
   const rows = await exec`
     with mark as (select created_at from change_sets where id = ${changeSetId})
     select distinct on (s.record_id)
-           s.record_id, s.snapshot_no, s.atoms, r.record_no, r.item_description, p.bws_project_number
+           s.record_id, s.snapshot_no, s.atoms, r.record_no, r.item_description, p.bws_project_number,
+           r.variant_ordinal, (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
     from record_snapshots s
     join change_sets cs on cs.id = s.change_set_id
     join spec_records r on r.id = s.record_id
@@ -138,7 +141,7 @@ async function stateAt(exec: SqlLike, projectId: string, changeSetId: string): P
     out.set(String(row.record_id), {
       snapshotNo: Number(row.snapshot_no),
       atoms: row.atoms,
-      label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+      label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
       itemDescription: String(row.item_description),
     });
   }

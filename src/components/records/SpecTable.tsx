@@ -32,6 +32,7 @@
 // and the crop queue already paid for that mistake once (33 rasterisations for
 // 12 panels).
 // ============================================================================
+import { recordShortLabel } from "@/lib/record-label";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
@@ -63,8 +64,23 @@ import {
   type RecordUrgency,
 } from "@/lib/project-programme";
 
+/**
+ * `12`, or `12.3` for a configuration of line 12 (0039) — the number the
+ * search box matches as well as the one the cell prints, so typing "12.3"
+ * finds the row that says it.
+ */
+function numberOf(record: Pick<SpecRecord, "record_no" | "variant_ordinal" | "parent_record_no">): string {
+  return recordShortLabel({
+    recordNo: record.record_no,
+    parentRecordNo: record.parent_record_no ?? null,
+    variantOrdinal: record.variant_ordinal ?? null,
+  });
+}
+
 export type SpecRecord = {
   id: string; record_no: number; item_description: string; product_reference: string | null;
+  /** 0039: a configuration's number under its line, and that line's own. Both null on a bill line. */
+  variant_ordinal?: number | null; parent_record_no?: number | null;
   status: string; retired_at: string | null; retired_by: string | null;
   qty: number | null; designer: string | null; area: string | null; boq_category: string | null;
   /**
@@ -498,7 +514,7 @@ export default function SpecTable({
   const shown = records.filter((record) => {
     if (
       term &&
-      !`${record.record_no} ${record.refs ?? ""} ${record.parent_refs ?? ""} ${record.item_description} ${
+      !`${numberOf(record)} ${record.refs ?? ""} ${record.parent_refs ?? ""} ${record.item_description} ${
         record.area ?? ""
       }`
         .toLowerCase()
@@ -843,7 +859,7 @@ export default function SpecTable({
                           href={`/dashboard/records/${record.id}`}
                           className="font-mono text-neutral-600 no-underline hover:underline"
                         >
-                          {record.record_no}
+                          {numberOf(record)}
                         </Link>
                       </Td>
                       <Td

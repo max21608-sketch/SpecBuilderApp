@@ -25,6 +25,8 @@ function question(overrides: Partial<OutstandingQuestion> = {}): OutstandingQues
     recordId: "rec-1",
     recordNo: 7,
     recordLabel: "P17231-007",
+    recordShortLabel: "7",
+    recordNoLabel: "P17231-007",
     recordStatus: "active",
     recordVersion: 3,
     itemDescription: "Armchair",
@@ -60,6 +62,7 @@ function question(overrides: Partial<OutstandingQuestion> = {}): OutstandingQues
     groupNo: 7,
     groupLabel: "P17231-007",
     variantCount: 0,
+    variantOrdinal: null,
     ...overrides,
   };
 }

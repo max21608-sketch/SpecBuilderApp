@@ -19,6 +19,7 @@ import { ITEM_LEVELS } from "@/lib/spec-vocab";
 import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
 import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
 import { loadPalettes } from "@/lib/palette-load";
+import { loadConfigurationFamily } from "@/lib/configuration-family";
 import {
   designerKey,
   loadOutstanding,
@@ -36,7 +37,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            r.spec_description, r.internal_notes, r.dimension_note,
            r.boq_category, r.status, r.version, r.source_line_no, r.category_id, r.level,
            r.level_suggested, r.level_suggested_reason,
-           r.parent_id, r.variant_label,
+           r.parent_id, r.variant_label, r.variant_ordinal,
+           -- 0039: a configuration is titled by its line's number and its own
+           -- under it, P18181-012.3, so the line's record_no comes with it.
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            p.bws_project_number, p.name as project_name, p.id as project_id,
            run.id as run_id, run.name as run_name,
            c.name as category_name, c.family as category_family, c.requirements_authored,
@@ -218,7 +222,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // with the parent first so a screen can take it off the front.
   const familyId = record.parent_id ? String(record.parent_id) : String(record.id);
   const family = await sql`
-    select r.id, r.record_no, r.variant_label, r.qty, r.status, r.item_description,
+    select r.id, r.record_no, r.variant_label, r.variant_ordinal, r.qty, r.status, r.item_description,
+           r.version, r.parent_id,
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            (select count(*) from record_attributes ra where ra.record_id = r.id and ra.status = 'active')
              as attribute_count,
            (select string_agg(x.ref_value, ', ' order by x.ref_value)
@@ -226,8 +232,26 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       from spec_records r
      where (r.id = ${familyId} or r.parent_id = ${familyId})
        and r.status = 'active'
-     order by r.parent_id nulls first, r.variant_label
+     -- The line first, then its configurations by their number under it
+     -- (0039), which is their natural order: TYPE 1 to TYPE 5, not the order
+     -- the text of their names sorts in.
+     order by r.parent_id nulls first, r.variant_ordinal, r.variant_label
   `;
+
+  // ---- what a SPLIT bill line's configurations have in common --------------
+  //
+  // A bill line with live configurations is a heading, and its own screen used
+  // to show only the specs it held before it was split — which are not
+  // exported. Max, 2026-09-23: it must show what is COMMON to all of them, and
+  // edit it once for all of them. So the configurations' live specs and
+  // answers come in the SAME request, through the loader the edit route
+  // re-reads under its lock (configuration-family.ts), so the screen and the
+  // check cannot disagree about what "the configurations" are. Bounded by what
+  // a line has — S-301 has five — and loaded only for a bill line that has any.
+  const configurationFamily =
+    !record.parent_id && family.some((member) => member.parent_id !== null && member.parent_id !== undefined)
+      ? await loadConfigurationFamily(sql, id)
+      : null;
 
   // ---- what has already been ASKED about this record ----------------------
   //
@@ -364,6 +388,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     palettes,
     paletteByQuestion,
     family,
+    configurationFamily,
     gates,
     tgqMatrix: tgqMatrix
       ? { fields: [...tgqMatrix.fields], localKeys: [...tgqMatrix.localKeys] }

@@ -156,7 +156,7 @@ export async function insertVariant(
     dimensionNote,
     actor,
   }: { parentId: string; label: string; splitReason: "fabric" | "configuration"; dimensionNote: string | null; actor: string },
-): Promise<{ recordId: string; recordNo: number }> {
+): Promise<{ recordId: string; recordNo: number; variantOrdinal: number }> {
   const parents = await txn`
     select project_id, run_id, category_id, item_description, product_reference, designer, area, boq_category,
            level, level_suggested, level_suggested_reason
@@ -196,9 +196,18 @@ export async function insertVariant(
        null, ${parent.designer ?? null}, ${parent.area ?? null}, ${parent.boq_category ?? null},
        ${parent.level ?? null}, ${parent.level_suggested ?? null}, ${parent.level_suggested_reason ?? null},
        ${parentId}, 1, ${splitReason}, ${label}, ${dimensionNote}, ${actor}, ${actor})
-    returning id
+    -- ITS NUMBER UNDER THE LINE, the 3 in 12.3, is NOT written here: 0039's
+    -- insert trigger allocates it, max + 1 over every sibling including the
+    -- retired ones, so a retired 12.2 keeps 2 and the next is 12.6. It runs
+    -- inside this statement, after the project lock above, so two
+    -- configurations added at once cannot both claim the same number. One
+    -- allocator, in the database, because fixtures and maintenance inserts
+    -- make configurations too and a rule only this function kept would be a
+    -- rule they broke. (No backticks in here: one closes the tagged template.)
+    returning id, variant_ordinal
   `;
   const recordId = String(inserted[0]?.id ?? "");
+  const variantOrdinal = Number(inserted[0]?.variant_ordinal ?? 0);
   if (!recordId) throw new Error(`variant ${label} of ${parentId} was not inserted`);
 
   // The checklist, so the questions exist to be filled. Writes nothing for an
@@ -212,5 +221,5 @@ export async function insertVariant(
     where r.id = ${recordId}
   `;
 
-  return { recordId, recordNo };
+  return { recordId, recordNo, variantOrdinal };
 }

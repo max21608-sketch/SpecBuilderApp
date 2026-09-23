@@ -48,6 +48,7 @@ import { composeDimensionCell } from "@/lib/dimensions";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
+import { recordLabel as formatRecordLabel, recordShortLabel } from "@/lib/record-label";
 import { describeRetireEffect } from "@/lib/configuration-carry";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
@@ -57,6 +58,9 @@ import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
 import AddConfiguration from "@/components/records/AddConfiguration";
+import BillLineConfigurations from "@/components/records/BillLineConfigurations";
+import CommonChecklist from "@/components/records/CommonChecklist";
+import type { ConfigurationFamily } from "@/lib/configuration-family";
 import DifferingFields from "@/components/records/DifferingFields";
 import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
@@ -100,6 +104,8 @@ type SpecRecord = {
   category_name: string | null; category_family: string | null;
   /** A fabric split (0024). Both null on an ordinary record. */
   parent_id: string | null; variant_label: string | null;
+  /** 0039: its number under its bill line, and that line's own number. Null on a bill line. */
+  variant_ordinal?: number | null; parent_record_no?: number | null;
   /** `retired` for a configuration somebody took out of the export (0038). */
   status: string;
   /** Whether a crop was confirmed off the drawings, so the screen can decide
@@ -111,6 +117,9 @@ type SpecRecord = {
 type FamilyMember = {
   id: string; record_no: number; variant_label: string | null; qty: number | null;
   item_description: string; attribute_count: string; refs: string | null;
+  /** 0039. Null on the bill line itself. */
+  variant_ordinal?: number | null; parent_record_no?: number | null;
+  version?: number;
 };
 
 type Attribute = {
@@ -161,6 +170,12 @@ export type Payload = {
   /** Which palette a question offers, by BWS field id or by local key. */
   paletteByQuestion: { json_id: number | null; local_key: string | null; palette_key: string }[];
   family: FamilyMember[];
+  /**
+   * A split bill line's configurations with their live specs and answers,
+   * for what they have in common. Null on a configuration and on a line with
+   * none.
+   */
+  configurationFamily?: ConfigurationFamily | null;
   /** Null where this record's category is not on Matthew's matrix. */
   gates: Record<Gate, GateStatus> | null;
   /**
@@ -279,6 +294,9 @@ function RecordView() {
   // lives in the Configurations card, beside the family it adds to.
   const router = useRouter();
   const [addingConfiguration, setAddingConfiguration] = useState(false);
+  // A split bill line's own pre-split specs fold away, CLOSED: they are not
+  // exported, and heading the tab they read as the item.
+  const [lineOwnOpen, setLineOwnOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
   /** The reason box for retiring a configuration; null while it is closed. */
@@ -635,13 +653,23 @@ function RecordView() {
   // from the parent because a configuration deliberately carries none of its
   // own — see `ensureVariant`.
   const family = data.family ?? [];
+  // Older payloads have no `configurationFamily`; a bill line then renders as
+  // it always did.
+  const configurationFamily = data.configurationFamily ?? null;
+  const splitLine = !record.parent_id && Boolean(configurationFamily && configurationFamily.configurations.length > 0);
   const billLine = family.find((member) => member.variant_label === null) ?? null;
   const variants = family.filter((member) => member.variant_label !== null);
   const parentRefs = billLine?.refs ?? refs.map((ref) => ref.ref_value).join(", ");
   const billQty = billLine?.qty ?? null;
   const unallocated = unallocatedQty(billQty, variants.map((member) => member.qty));
 
-  const recordLabel = `${record.bws_project_number}-${String(record.record_no).padStart(3, "0")}`;
+  // THE ONE LABEL HELPER (0039): `P18181-012.3` on a configuration, whose own
+  // record_no is just the next free number in the project.
+  const recordLabel = formatRecordLabel(record.bws_project_number, {
+    recordNo: record.record_no,
+    parentRecordNo: record.parent_record_no ?? null,
+    variantOrdinal: record.variant_ordinal ?? null,
+  });
   const runHref = `/dashboard/projects/${record.project_id}?tab=${record.run_id}`;
   const level = normaliseItemLevel(record.level);
   const readiness = data.quoteReadiness ?? {
@@ -995,6 +1023,29 @@ function RecordView() {
                 </div>
               )}
 
+              {/* A SPLIT BILL LINE SHOWS WHAT ITS CONFIGURATIONS HAVE IN COMMON
+                  (2026-09-23). Its own specs — anything it carried before it
+                  was split — are NOT exported, so they fold into one closed
+                  section below rather than heading the tab as though they
+                  were the item. */}
+              {splitLine && configurationFamily && (
+                <BillLineConfigurations
+                  lineId={record.id}
+                  family={configurationFamily}
+                  specFields={data.specFields ?? []}
+                  onDone={reloadThen}
+                />
+              )}
+              {splitLine && (
+                <div className="mt-4">
+                  <Button variant="quiet" size="xs" onClick={() => setLineOwnOpen((value) => !value)}>
+                    {lineOwnOpen ? "▾" : "▸"} On the bill line itself — not exported
+                    {attributes.length > 0 ? ` (${attributes.length} spec${attributes.length === 1 ? "" : "s"})` : " (none)"}
+                  </Button>
+                </div>
+              )}
+              {(!splitLine || lineOwnOpen) && (
+              <>
               {/* What BWS field 3 will receive, composed by the same function
                   the export calls. The rows below keep each figure's ORIGINAL
                   value and unit, which is what makes a converted W1900
@@ -1468,6 +1519,8 @@ function RecordView() {
                   )}
                 </div>
               )}
+              </>
+              )}
 
               {/* THE BILL'S OWN WORDS, AND THE TWO FREE-TEXT COLUMNS (0028).
                   Last, because the specs are what you came to read and this is
@@ -1666,6 +1719,13 @@ function RecordView() {
                           <span className="font-medium text-neutral-900">
                             {variantName(parentRefs, member.variant_label, `#${member.record_no}`)}
                           </span>
+                          <span className="ml-1.5 font-mono text-neutral-500">
+                            {recordShortLabel({
+                              recordNo: member.record_no,
+                              parentRecordNo: member.parent_record_no ?? null,
+                              variantOrdinal: member.variant_ordinal ?? null,
+                            })}
+                          </span>
                           {member.id === record.id ? (
                             <span className="ml-2 text-neutral-400">you are here</span>
                           ) : (
@@ -1718,6 +1778,20 @@ function RecordView() {
           </div>
         )}
 
+        {tab === "checklist" && splitLine && configurationFamily && (
+          <div className="mb-4">
+            <CommonChecklist
+              lineId={record.id}
+              family={configurationFamily}
+              palettes={data.palettes ?? []}
+              paletteByQuestion={data.paletteByQuestion ?? []}
+              onDone={reloadThen}
+            />
+            <p className="mt-3 text-xs text-neutral-500">
+              Below: the bill line&rsquo;s OWN checklist, which is not exported while it has configurations.
+            </p>
+          </div>
+        )}
         {tab === "checklist" && (
           <RecordChecklist
             recordId={record.id}

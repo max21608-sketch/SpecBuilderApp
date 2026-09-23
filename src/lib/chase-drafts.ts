@@ -22,6 +22,7 @@ import type { Row } from "@/lib/db";
 import { type AnswerState, type ItemLevel, isSettled, normaliseItemLevel } from "@/lib/spec-vocab";
 import { questionTierOrNull, type QuestionTier, type TgqMatrix } from "@/lib/tgq";
 import { loadTgqMatrices } from "@/lib/gate-load";
+import { numberingFromRow, recordLabel, recordNoLabel, recordShortLabel } from "@/lib/record-label";
 import type { ChaseGroup } from "@/lib/chase-template";
 
 /**
@@ -38,7 +39,16 @@ export type OutstandingQuestion = {
   projectId: string;
   recordId: string;
   recordNo: number;
+  /** `P18181-012`, or `P18181-012.3` for a configuration (0039). */
   recordLabel: string;
+  /** `12`, or `12.3` — the same number without the project, for a screen. */
+  recordShortLabel: string;
+  /**
+   * The label as it read before 0039, off `record_no` alone. NOT for display:
+   * `coverageStaleReasons` reads it so that the renumbering, and nothing else,
+   * does not make a sent draft's frozen label read as a change.
+   */
+  recordNoLabel: string;
   recordStatus: string;
   recordVersion: number;
   itemDescription: string;
@@ -116,6 +126,8 @@ export type OutstandingQuestion = {
   groupLabel: string;
   /** Live finish options under this record. One or more makes it a heading. */
   variantCount: number;
+  /** 0039: the 3 in 12.3. Null on a bill line. */
+  variantOrdinal: number | null;
 };
 
 export type ProjectContact = {
@@ -142,9 +154,13 @@ export function designerKey(value: string | null | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-export function recordLabel(projectNumber: string, recordNo: number): string {
-  return `${projectNumber}-${String(recordNo).padStart(3, "0")}`;
-}
+/**
+ * The one label helper moved to the leaf `record-label.ts` (0039), because a
+ * configuration now reads `P18181-012.3` and the template had been written
+ * out in twenty places. Re-exported so nothing that imported it from here
+ * had to change.
+ */
+export { recordLabel } from "@/lib/record-label";
 
 // ---------------------------------------------------------------------------
 // The context an email actually stated about a question.
@@ -245,7 +261,20 @@ export function coverageStaleReasons(
   if (isSettled(live.state)) reasons.push("answerSettled");
 
   const fresh = contextSnapshot(live);
-  if (canonicalJson(fresh) !== canonicalJson(coverage.context)) reasons.push("contextChanged");
+  if (
+    canonicalJson(fresh) !== canonicalJson(coverage.context) &&
+    // THE RENUMBERING IS NOT A CHANGE. 0039 turned a configuration's label
+    // from `P18181-034` into `P18181-012.3`, and a draft written before that
+    // froze the old one. Everything else in the snapshot is still compared
+    // exactly; only a label that equals the record's pre-0039 form is taken
+    // as the same label, because the record it names is the same record
+    // (the coverage row carries its id) and nothing the email asked has
+    // moved. Without this, every unsent draft covering a configuration would
+    // have read as stale the moment 0039 shipped — the chased_at trap.
+    canonicalJson({ ...fresh, recordLabel: live.recordNoLabel }) !== canonicalJson(coverage.context)
+  ) {
+    reasons.push("contextChanged");
+  }
 
   return reasons;
 }
@@ -595,6 +624,9 @@ export async function loadOutstanding(
       r.run_id,
       r.parent_id,
       r.variant_label,
+      -- 0039: what the record is CALLED, 12.3 rather than its own 34.
+      r.variant_ordinal,
+      (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
       run.name as run_name,
       -- A FINISH OPTION SHOWS ITS PARENT'S CLIENT REF and its parent's
       -- quantity: S-201 A carries no ref of its own (copying it would make
@@ -665,7 +697,9 @@ export async function loadOutstanding(
     -- Bill order, with each line's finish options directly under it. Ordering
     -- on the parent ID instead would put the groups in uuid order, which is no
     -- order at all -- the same rule as /api/records.
-    order by group_no, r.parent_id nulls first, r.variant_label, q.sort_order
+    -- Within a line, its configurations by their number under it (0039), not
+    -- by name: TYPE 10 sorts before TYPE 2 as text.
+    order by group_no, r.parent_id nulls first, r.variant_ordinal, q.sort_order
   `;
   // ONE load for the whole project, then one lookup per row. The tier is
   // computed here and nowhere else — the spec table, the chase screen, the
@@ -682,7 +716,9 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): Outs
     projectId: String(row.project_id),
     recordId: String(row.record_id),
     recordNo,
-    recordLabel: recordLabel(String(row.bws_project_number), recordNo),
+    recordLabel: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
+    recordShortLabel: recordShortLabel(numberingFromRow(row)),
+    recordNoLabel: recordNoLabel(String(row.bws_project_number), recordNo),
     recordStatus: String(row.record_status),
     recordVersion: Number(row.record_version),
     itemDescription: String(row.item_description ?? ""),
@@ -727,6 +763,7 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): Outs
     groupNo: Number(row.group_no ?? recordNo),
     groupLabel: recordLabel(String(row.bws_project_number), Number(row.group_no ?? recordNo)),
     variantCount: Number(row.variant_count ?? 0),
+    variantOrdinal: numberingFromRow(row).variantOrdinal ?? null,
   };
 }
 
@@ -767,6 +804,9 @@ export async function loadQuestionsByKey(
       r.run_id,
       r.parent_id,
       r.variant_label,
+      -- 0039: what the record is CALLED, 12.3 rather than its own 34.
+      r.variant_ordinal,
+      (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
       run.name as run_name,
       -- A FINISH OPTION SHOWS ITS PARENT'S CLIENT REF and its parent's
       -- quantity: S-201 A carries no ref of its own (copying it would make
@@ -845,7 +885,9 @@ export async function loadUncategorisedRecords(projectId: string): Promise<
   { recordId: string; recordLabel: string; itemDescription: string; version: number }[]
 > {
   const rows = await sql`
-    select r.id, r.record_no, r.item_description, r.version, p.bws_project_number
+    select r.id, r.record_no, r.item_description, r.version, p.bws_project_number,
+           r.variant_ordinal,
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
     from spec_records r
     join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id
@@ -867,7 +909,7 @@ export async function loadUncategorisedRecords(projectId: string): Promise<
   `;
   return rows.map((row) => ({
     recordId: String(row.id),
-    recordLabel: recordLabel(String(row.bws_project_number), Number(row.record_no)),
+    recordLabel: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
     itemDescription: String(row.item_description ?? ""),
     // The optimistic lock, so a category can be SET from a list rather than
     // only from the record screen. The chase screen ignores it and links out.

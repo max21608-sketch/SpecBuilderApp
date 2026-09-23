@@ -2,6 +2,7 @@
 //
 // Read-only. The diffs are computed here rather than stored; see
 // change-history.ts for why that is not an optimisation waiting to happen.
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { loadRecordHistory, compareRecordVersions } from "@/lib/change-history";
@@ -15,13 +16,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params;
 
   const records = await sql`
-    select r.id, r.record_no, r.item_description, p.bws_project_number
+    select r.id, r.record_no, r.item_description, p.bws_project_number,
+           r.variant_ordinal, (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
     from spec_records r join projects p on p.id = r.project_id
     where r.id = ${id}
   `;
   const record = records[0];
   if (!record) return json({ ok: false, error: "No such record." }, 404);
-  const label = `${String(record.bws_project_number)}-${String(record.record_no).padStart(3, "0")}`;
+  const label = recordLabel(String(record.bws_project_number), numberingFromRow(record));
 
   const url = new URL(request.url);
   const from = url.searchParams.get("from");

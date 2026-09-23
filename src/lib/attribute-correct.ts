@@ -89,6 +89,20 @@ export type CorrectAttributeInput = {
   reason: string;
   evidence?: UploadedEvidence | null;
   actor: string;
+  /**
+   * An ALREADY OPEN change to attach this write to, instead of opening one —
+   * `editAnswer`'s parameter, for the same caller shape: one act that writes
+   * several records (a common spec edited on a bill line, fanned out to every
+   * configuration, `POST /api/records/[id]/common`). The caller owns the
+   * change and the reason on it, and publishes it to the transaction.
+   */
+  changeSetId?: string;
+  /**
+   * FALSE where the caller versions the records itself, ONCE, after the whole
+   * fan-out — `editAnswer`'s rule. A caller that passes false and forgets is
+   * caught by `tests/db/change-history.test.ts`.
+   */
+  snapshot?: boolean;
 };
 
 export async function correctAttribute(
@@ -103,6 +117,8 @@ export async function correctAttribute(
     reason,
     evidence,
     actor,
+    changeSetId: attachTo,
+    snapshot = true,
   }: CorrectAttributeInput,
 ): Promise<CorrectAttributeResult> {
   const rows = await txn`
@@ -232,13 +248,15 @@ export async function correctAttribute(
     }
   }
 
-  const { changeSetId } = await changeSetForEdit(txn, {
-    projectId: String(attribute.project_id),
-    actor,
-    kind: "attribute_correct",
-    reason,
-    evidence,
-  });
+  const { changeSetId } = attachTo
+    ? { changeSetId: attachTo }
+    : await changeSetForEdit(txn, {
+        projectId: String(attribute.project_id),
+        actor,
+        kind: "attribute_correct",
+        reason,
+        evidence,
+      });
 
   // RETIRE FIRST. Both partial unique indexes count active rows only, so the
   // reverse order cannot commit — the database decides this, not the comment.
@@ -288,7 +306,7 @@ export async function correctAttribute(
   // is not a document, and every fill that survives already carries the run
   // that supplied its value.
   const { filled, retracted } = await recomposeAnswers(txn, recordId, null, actor);
-  const snapshots = await snapshotRecords(txn, [recordId], changeSetId);
+  const snapshots = snapshot ? await snapshotRecords(txn, [recordId], changeSetId) : new Map<string, number>();
 
   return {
     attributeId: newId,

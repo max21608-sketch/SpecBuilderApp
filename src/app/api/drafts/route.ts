@@ -33,6 +33,7 @@ import {
   type ProjectContact,
 } from "@/lib/chase-drafts";
 import { isQuestionTier } from "@/lib/tgq";
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { loadProjectSummary } from "@/lib/project-summary";
 
 export const dynamic = "force-dynamic";
@@ -98,7 +99,8 @@ export async function GET(request: Request): Promise<Response> {
   // are all answered, so the level can be set before the next document lands.
   const levelless = await sql`
     select r.id, r.record_no, r.item_description, r.version, r.level_suggested, r.level_suggested_reason,
-           p.bws_project_number
+           p.bws_project_number, r.variant_ordinal,
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
     from spec_records r
     join projects p on p.id = r.project_id
     join spec_runs run on run.id = r.run_id
@@ -110,7 +112,9 @@ export async function GET(request: Request): Promise<Response> {
   // A category nobody has authored requirements for scores 0/0 and renders
   // green. Surface it next to the real blockers.
   const unauthored = await sql`
-    select r.id, r.record_no, r.item_description, c.name as category_name, p.bws_project_number
+    select r.id, r.record_no, r.item_description, c.name as category_name, p.bws_project_number,
+           r.variant_ordinal,
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
     from spec_records r
     join projects p on p.id = r.project_id
     join item_categories c on c.id = r.category_id
@@ -235,10 +239,15 @@ export async function GET(request: Request): Promise<Response> {
       blocked,
       suggestedCodes,
       uncategorised,
-      unauthored,
+      unauthored: unauthored.map((row) => ({
+        ...row,
+        // Named by the one label helper (0039), so the page prints it rather
+        // than composing the number itself.
+        record_label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
+      })),
       levelless: levelless.map((row) => ({
         recordId: String(row.id),
-        recordLabel: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+        recordLabel: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
         itemDescription: String(row.item_description ?? ""),
         version: Number(row.version),
         // What this app would guess, and why. Advisory: the record is still
