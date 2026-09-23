@@ -21,6 +21,42 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-23 (afternoon) — Any bill, never stuck: built on `anybill-int`, not yet on staging
+
+The plan is `docs/plans/any-bill-2026-09-23.md`, from Max and Matthew's
+run-through on the Miami Beach pack (P18181, Aman Interiors). Decided with Max
+the same day: the model reads a bill's STRUCTURE and code reads its cells; a
+fabric line becomes a COM spec on its item; a bill's descriptions get one
+charged read as a specification document; a BW standard sits per item beside
+the client's words; a line's common specs are computed and an edit fans out.
+
+**Pilot, read SELECT-only with Max's permission:** migrations through 0038
+applied; P18181 had two intake batches with zero runs and zero attachments —
+the silent classify failure followed by the self-closing upload panel. The
+suspected trigger, no `ANTHROPIC_API_KEY` on `spec-builder-pilot`, is Max's to
+check at the console.
+
+**Verified on the local stack with copies of the real files** (four checks with
+the database tier green at each landing — 2,571 tests at the last):
+- the AMB bill: Columns panel → 101 lines, qty 1,241; a saved layout reads the
+  other copy on its own; with no layout the model's structure read (25 s)
+  placed 67 items and all 34 fabric lines — 101/101 against the golden —
+  and the confirm wrote 67 records and 34 fabric specs (one item COM 1 + 2);
+- the pilot scenario with no key: 38 rows red with the reason, one banner, no
+  empty pack; bulk assign put 33 drawings in one pack with one press;
+- S-301's COM 1 clash answered "same fabric — keep page 1";
+- S-301 as 14.1–14.5 under line 14, common specs shown, the seat height
+  corrected on all five in one change set;
+- a BW standard proposed at intake and agreed after confirm, the export
+  shipping it and the check sheet showing both halves.
+
+**Charged calls made verifying:** one S-301 drawings read, one bill structure
+read, one bill specification read (559 proposals, 65,057 output tokens, 499 s).
+
+**Before staging:** 0039, 0040 + `db/seed/0012` and 0041 on the sandbox (Max),
+because an empty `boq_column_aliases` fails every bill registration.
+**Not accepted by Max or Matthew on any screen.**
+
 ## 2026-09-23 — Configurations, manual control and Opus: landed on staging at `96a9b1a`
 
 The plan is `docs/plans/configurations-2026-09-23.md`; every step traces to one

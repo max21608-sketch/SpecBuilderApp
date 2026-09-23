@@ -58,6 +58,8 @@ one agent.
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
 | `npm run dump:drawings -- --run=<id>` | read only: what a staged drawing run reduces to through the REAL read-time pipeline — measured rows, placed slots, folded rows, unit provenance, the composed BWS cell. Run it before and after a change to that pipeline; the diff is the change |
 | `npm run vocab:gap` | read only: every label the staged documents carry, which route places it (slot / BWS field / question), what is left, and — the point — what a looser rule would have wrongly written instead. Run it before seeding `requirement_aliases`, and read the NEAR MISSES before adding one |
+| `npm run boq:gap -- <folder> [--golden <dir>]` | read only, no database: what every bill in a folder reduces to through the real reader — how the header was found, the column map, lines, lines with no code or qty, row kinds, qty sum — and, with `--golden`, line/code/quantity/fabric-parent accuracy against hand-checked expectations kept OUTSIDE the repo. It is how "the reader nails this specifier" becomes a number |
+| `npm run db:backfill-standards` | one-off: where a palette pick at intake OVERWROTE the drawing's words (before 0041), puts the words back into `value` and the pick into `standard_*` as `proposed`, read from the staged run. Dry run unless `--apply`; safe to re-run; ambiguous rows are reported, never guessed |
 | `npm run palette:gap` | read only: every callout that lands on a palette-backed BWS field, how many match an option exactly, and — the point — what a SUBSTRING step would have written instead. Run it before widening the match past the exact step. On 2026-09-22 it read 98 callouts over 47 staged runs, **0 matching and 0 near misses**, which is the evidence §6.2 asked for |
 
 Tests run in FOUR tiers — pure / component / db-gated / route. **A db-tier
@@ -228,8 +230,8 @@ reasoning.
 | `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox |
 | `spec_runs` | A PHASE: a sub-quote, normally one BOQ tab. "Phase" is the word on screen (2026-09-19); the table keeps its name. Name (editable), `source_sheet`, `boq_revision`/`boq_date` (**text**), `header_notes`. Retired, never deleted; two phases may share a name |
 | `project_contacts` | Who to ask. `designer_code` joins `spec_records.designer`; `capsule_party_id` is the modelled person (0022), optional and flagged when absent |
-| `spec_records` | One per BOQ line. `level` (`simple`/`complex`/`hero`, nullable, a person's decision beside the category — nothing infers it, and `level_suggested` (0025) is where a guess goes instead, where no gate can read it). `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level |
-| `record_attributes` | What a document SAID about an item: group, label, value, `unit` (dimensions only), the client's own `material_code`, `spec_field_id`, `state` (`confirmed`/`tbc`), source run and page. Multi-valued, requirement-free |
+| `spec_records` | One per BOQ line. `level` (`simple`/`complex`/`hero`, nullable, a person's decision beside the category — nothing infers it, and `level_suggested` (0025) is where a guess goes instead, where no gate can read it). `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level. `variant_ordinal` (0039) is a configuration's number under its line — the 3 in `12.3` — allocated by the `assign_variant_ordinal` insert trigger (max + 1 over every sibling, retired included, never reused); the label is `src/lib/record-label.ts` and nothing else. `qty_unit` (0040) is the bill's own unit, verbatim |
+| `record_attributes` | What a document SAID about an item: group, label, value, `unit` (dimensions only), the client's own `material_code`, `spec_field_id`, `state` (`confirmed`/`tbc`), source run and page. Multi-valued, requirement-free. `standard_*` (0041) is the BW standard BESIDE what the document said — `value` is always the document's words |
 | `project_notes` | The preamble, per requirement. NOT the chassis `notes` table, which is append-only by trigger and would make a mis-extracted note permanent |
 | `intake_batches` | One delivery of documents. **No status column** — a batch's state is derived from its runs |
 | `spec_record_refs` | Every ref an item carries, one row each: `boq_code`, `design_code`, `cos_code`, `compound`, `bws_job`. Unique **per record**, never per project |
@@ -243,6 +245,7 @@ reasoning.
 | `change_sets` | One entry in the trail (0012): who, when, why, the kind, and a link to the document or the uploaded email that caused it. Append-only; `closed_at` is the only column that may be set later |
 | `record_snapshots` | A VERSION of one record (0012): `snapshot_no` per record, the export's own atoms, and the composed cells as they were that day |
 | `baseline_members` | A named point's exact membership (0013). Materialised under the project lock, because transaction start time does not order commits |
+| `boq_column_aliases` / `boq_layouts` | 0040: which bill heading means which column role (whole-heading match, seeded with the reader's original list — an EMPTY table fails every bill registration, so seed wherever 0040 is applied), and a person's saved column mapping for one specifier's layout. Layouts are GLOBAL, which is why db-tier fixtures use a per-run heading |
 | `project_finishes` | The project's finishes library (0018), keyed by the client's own code. Project-scoped: `MOR005` means different things on different projects |
 | `spec_matrix_categories` / `spec_matrix_category_map` | Matthew's nine seating categories (0026) and which of our seventeen cheat sheets each one is. Many-to-many both ways; an unmapped sheet gets no gate view, which is a real answer |
 | `spec_field_gates` | His decision matrix as a seeded overlay (0026): gate, capture, BWS field or `local_key`, `dimension_slot`, `applies_to`, palette, conditional. `matrix_row` is his own `#`, so a re-issued workbook diffs |
@@ -897,8 +900,10 @@ refused at classify time (`fileDocument`, the exact step; a certain answer
 only) so no charged read starts. Two bills in one pack both stage and the
 pack screen says nothing is paired. Recorded and NOT fixed: a subtotal or
 section row that carries a description becomes a spec record with the
-subtotal's figure as its quantity. The header synonym list is still CODE
-(`COLUMNS`), not seed.
+subtotal's figure as its quantity — since 2026-09-23 a `section` or
+`subtotal` row KIND exists and defaults to Ignore, but only the model or a
+person sets one (see *A bill is never refused*). The header synonym list is
+SEED DATA since 2026-09-23 (`boq_column_aliases`, 0040).
 
 Rows above the header carry the revision, the date and the terms the run is
 priced under. A client template writes `Revision:` in one cell and `0` in the
@@ -1724,8 +1729,10 @@ consent.
 So an attempt is opened and published as each specification document registers.
 **The upload screen states the count and the charge before anything uploads, and
 that statement is where the human decision now lives.** A bill of quantities is
-not part of it: a bill is parsed synchronously, by code, and no model has ever
-touched one.
+not part of it: a bill is parsed synchronously, by code. Since 2026-09-23 a
+model MAY read a bill's STRUCTURE — never its cells — when nothing the app
+knows maps its columns, as one small charged read the screen names (see *A
+bill is never refused; it is mapped*).
 
 Three things about it are load-bearing:
 
@@ -2320,6 +2327,150 @@ S-200 one item on two pages, both `W840 x D790 x H720 x SH460mm`; S-100's
 previously CODELESS second page now groups with S-100 through its title block.
 S-201's reason followed the page: *"page 1 explicitly instructs 'ITEM: REFER TO
 JACQUES GRANGE DRAWINGS' … tying the two pages to the same armchair."*
+
+### A bill is never refused; it is mapped
+
+`src/lib/boq-import.ts`, `src/lib/boq-roles.ts`, `src/lib/boq-stage.ts`,
+`src/lib/boq-row-kinds.ts`, `src/lib/boq-structure.ts`, `src/lib/confirm-boq.ts`
+(`writeFabricLine`), `src/app/api/imports/[id]/columns/route.ts`,
+`src/app/api/imports/[id]/suggest-columns/route.ts`, `src/app/api/boq-layouts/route.ts`,
+`src/components/imports/BoqColumnsPanel.tsx`, `tools/boq-gap.ts`,
+`db/migrations/0040_boq_columns_and_layouts.sql`, `docs/plans/any-bill-2026-09-23.md`
+
+Found 2026-09-23 on the Miami Beach pack (Aman Interiors): a real bill headed
+its code column "Spec Code", no row read as a header, the run went `failed`,
+and **Try again** posted to `/extract`, which refuses a bill. A bill whose
+columns are plainly there was a dead end because of the words above them. Max:
+*"we should never get to the stage where it's like, I just can't move on."*
+
+- **The order is layout → synonyms → the model's reading → a person.** A
+  synonym is seed data (`boq_column_aliases`), a WHOLE heading after folding
+  case and whitespace, never a substring — a substring makes "Category Code"
+  the code and "Unit Price" the unit. A layout applies only when EVERY heading
+  it maps is present exactly, and a sheet a layout read keeps its Columns panel
+  open until a person closes it once: a remembered layout never applies unseen.
+- **Nothing is refused.** A sheet nothing could read is staged `needsColumns`
+  with a preview of its rows; the review opens on the Columns panel; the
+  confirm refuses a live one BY NAME. Re-reading with a mapping is free: the
+  stored source is parsed again by code, fenced on the run's version.
+- **The model reads the STRUCTURE and code reads every cell** (Max, 2026-09-23).
+  The structure read (Opus 5, effort medium, one call per sheet up to 1,000
+  rows) proposes the header, a role per column from the CLOSED list with its
+  evidence, which sheets are not bills, and each row's kind. Code validates
+  every part and drops what fails, and the confirm waits for "The columns are
+  right". A model transcribing 300 quantities would be 300 chances to mis-copy
+  one that nothing downstream questions. The replay guard is a version claim
+  taken BEFORE the call.
+- **A fabric line is a spec on its item, never a record** (Max, 2026-09-23).
+  The AMB bill puts each item's fabric on its own line — `GR-FAB-13
+  (GR-FUR-10)`, unit `m`, no quantity. The bracket names the item, so an exact
+  bracket match is applied at parse unflagged; two lines carrying the code →
+  the nearer one ABOVE, flagged; otherwise only the model or a person places
+  it. **The bracket alone placed 5 of 34** on the real bill (brackets such as
+  `GR / MUR-FUR--04` name no item code); the model's reading placed all 34.
+  The confirm writes the description verbatim into the next free COM slot on
+  that record, files the code through `resolveFinishCode` (CONFLICT rule), and
+  refuses a REVISION that changes a fabric line rather than guessing.
+- **Measured on the real bill, local stack:** 101 lines, 67 items, 34 fabric
+  lines, quantity total 1,241 — `boq:gap --golden` 100% on lines, codes,
+  quantities and fabric parents; the structure read took 25 s; a layout saved
+  from one copy read the other copy (header on row 8 instead of row 1) with no
+  human step.
+- **A formula cell with no cached result reads as blank**, never
+  `[object Object]` — one real copy saved its `Line` column that way.
+
+**Read the specifications in this bill** registers the SAME stored file as an
+`ffe_schedule` document (`src/lib/bill-specifications.ts`, idempotent on
+`registration_request_id = 'boq-specs:<runId>'`). Measured on the real bill:
+559 proposals, **65,057 output tokens and 499 s for 101 lines** — half the
+128K ceiling and two thirds of the model deadline — so a longer bill is read
+in ROW WINDOWS, which is not the excluded "splitting an oversize drawing set":
+a spreadsheet has rows, and a row window loses nothing a page split would.
+
+### A failure names its reason on the row, and the panel stays open
+
+`src/lib/classify-failure.ts`, `src/lib/document-classify.ts`,
+`src/app/api/imports/classify/route.ts`, `src/components/projects/IntakeBatchUpload.tsx`
+
+The pilot "mass fail" of 2026-09-23 was two defects in series. The classify
+route answered `200 ok:true` when the model call itself FAILED (no API key on
+the deployment) and the screen read only `evidence`, so thirty rows said "Say
+which" with no reason — and then `onUploaded`, which the project page answers
+by UNMOUNTING the upload panel, fired on every press, so all thirty rows
+vanished together and nothing had registered (two batches, zero runs, zero
+attachments, read off pilot). Now: a failed look is `ok:false` with a stable
+code, the sentence and a truthful `charged`; the row is red with **Try
+identifying again** (the file is stored, nothing uploads twice); two or more
+failures for one reason get one banner; `onUploaded` fires only when nothing
+waits on a person, and `onRegistered` refreshes the page otherwise; a batch is
+created at the first REGISTRATION, and the batches route lists no empty one. A
+PDF over the classify model's 100 pages is identified by `EXTRACTION_MODEL`.
+Bulk assign ("Set the ticked ones to…", "All unset → Shop drawings") is a
+person's choice and skips the model call, exactly as the select does.
+
+### One finish stated on two pages is one finish
+
+`src/lib/drawing-document.ts` (`sameFinish`, `crossPageClaims`),
+`src/lib/clash-resolution.ts`, `src/components/imports/review-row-actions.tsx`
+
+`crossPageClaims` decided "the same finish" by client code alone, so S-301's
+specification text (no code) and its swatch caption (`CH-01.1`) — the SAME
+raffia, words reordered — clashed "in different words", and the card advised
+"move one to another field": following it would have put a second, invented
+fabric into COM 2 of the BWS file. Two rows are the same finish when both carry
+one code, or their words are identical after folding case, punctuation and
+WORD ORDER; a code on only one side decides nothing, because on Panther
+`CH-01.1` is a POSITION code (four cloths share it). Anything else asks the
+real question on the row: *keep page 1's wording* / *keep page 2's* (the kept
+row takes the other's code and swatch; the other is ignored "same as page N"
+through the PATCH's `ignoreBecause`) / *two fabrics — move page N to the next
+free COM*. Never go back to the old advice.
+
+### A line's common specs are a reading, and an edit to one fans out
+
+`src/lib/configuration-common.ts`, `src/lib/configuration-family.ts`,
+`src/app/api/records/[id]/common/route.ts`, `src/components/records/BillLineConfigurations.tsx`,
+`src/lib/record-label.ts`, `db/migrations/0039_variant_ordinal.sql`
+
+Max, 2026-09-23: S-301's five types numbered 34–38 meant nothing (they are now
+**12.1–12.5**, the ordinal under the line), and the bill line's own screen
+showed nothing — it should show the COMMON specs, and changing one there should
+change all five. **No inheritance** (decided that day): each configuration keeps
+its full copy, so the export, gates, TGQ, chase and completion are untouched. A
+row is common when every configuration holds exactly one row with the same
+value, unit, state and qualifier; otherwise it DIFFERS and is edited on the
+configuration's own screen, never as common. The edit re-derives the set under
+lock and refuses WHOLE on a moved version, a changed set or a row no longer
+common; one change set, one version per configuration, `spec_records.version`
+untouched. The 0039 backfill disables `spec_records_bump_version` for one
+statement as owner, because a bump would stale every unsent chase draft; for
+the same reason `coverageStaleReasons` forgives exactly one label change — a
+frozen pre-0039 label — and nothing else. Exports sort a configuration under
+its line; row order never changes what a BWS import replaces.
+
+### A BW standard sits beside the client's words, and one function decides which ships
+
+`db/migrations/0041_bw_standard.sql`, `src/lib/bw-standard.ts`
+(`composeAttributeStatement`, `stateUnderStandard`), `src/lib/attribute-standard.ts`,
+`src/lib/standards-backfill.ts`, `src/components/records/BwStandardControl.tsx`,
+`src/components/imports/ObservationRows.tsx` (`PaletteChoice`)
+
+Picking a BWS palette option on a drawings row OVERWROTE the observation's
+value, and the confirm wrote only the value, so the client's words ("feet dark
+tinted wood as per approved sample") survived nowhere but the staged JSON. Max:
+*"we need to record what the client said and a BW standard finish … the BW
+standard finish shouldn't override what they specified."* `value` is what the
+document said, always; the pick sets `standard_*` (`proposed` | `agreed` |
+`tbc`). `composeAttributeStatement` is the ONLY choice between the standard,
+the finishes library and the page's words — `renderAttributeValue` and
+`planAnswerFills` both call it, so never read `value` directly for a cell or an
+answer. A proposal (or a TBC standard) holds the answer at TBC; the client's
+AGREEMENT settles it whatever the client first wrote, because the agreement is
+the decision. The check sheet carries **Client specified** and **BW standard**
+columns beside the exported cell. Every reader of a staged drawings run loads
+`loadFieldsWithPalettes`, or the confirm writes an option as the client's
+words. Found on the way and fixed: `loadRecordAtoms` never selected
+`qualifier`, so 0029's placement had never reached the BWS file.
 
 ### The upload works out what each file is
 
@@ -3808,6 +3959,25 @@ database tier ran there for the first time off the sandbox — it found four
 defects on its first run, one of them a SQL comment that would have broken the
 pack screen. **Not accepted by Max**; the staging session with the real pack is
 the acceptance.
+
+**Built 2026-09-23 (afternoon), any bill, never stuck** —
+`docs/plans/any-bill-2026-09-23.md`, from Max and Matthew's run-through on the
+Miami Beach pack. Five Opus coders through `anybill-int`, the four
+checks with the database tier on the local stack before each landing, and every
+step walked in a browser on copies of the REAL Miami Beach and Panther files:
+a bill mapped rather than refused (Columns panel, seeded synonyms, saved
+layouts, the model's structure read, fabric lines onto their items — 101/101
+on the real AMB bill); the pilot mass failure explained and fixed (the silent
+classify failure and the self-closing upload panel); bulk assign; the COM 1
+clash answered as "same fabric or two"; configurations numbered 12.1 under
+their line with common specs edited once; the BW standard beside the client's
+words; the inbox per project. Migrations 0039, 0040 (+ seed 0012) and 0041
+must be on a database BEFORE this code: an empty `boq_column_aliases` fails
+every bill. **Not accepted by Max or Matthew on any screen**, and still open:
+per-specifier tuning of the bill's own specification read (Step 8 — 559
+proposals, few placed until the row-resolution work lands), a real 300-line
+bill, and the three defaults awaiting Max (Sub-Area composed into the area, a
+proposed standard holding at TBC, layouts saved per specifier).
 
 **Outstanding — judgement, not code.**
 
