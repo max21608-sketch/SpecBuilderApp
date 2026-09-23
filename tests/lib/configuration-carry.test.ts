@@ -76,16 +76,18 @@ describe("the configuration name", () => {
 });
 
 describe("the differing fields", () => {
-  it("are COM 1, COM 2, COM 3, main timber and main metal, in that order", () => {
-    expect(DIFFERING_FIELD_JSON_IDS).toEqual([1, 2, 14, 4, 5]);
+  it("are COM 1, COM 2 and COM 3, in that order — timber and metal are carried", () => {
+    expect(DIFFERING_FIELD_JSON_IDS).toEqual([1, 2, 14]);
     expect(isDifferingField(1)).toBe(true);
+    expect(isDifferingField(4)).toBe(false);
+    expect(isDifferingField(5)).toBe(false);
     expect(isDifferingField(3)).toBe(false);
     expect(isDifferingField(null)).toBe(false);
   });
 
   it("each names a field the BWS register holds under that name", () => {
     const seed = readFileSync(join(process.cwd(), "db/seed/0001_spec_fields.sql"), "utf8");
-    const named: Record<number, string> = { 1: "COM 1", 2: "COM 2", 14: "COM 3", 4: "Main timber finish", 5: "Main metal finish" };
+    const named: Record<number, string> = { 1: "COM 1", 2: "COM 2", 14: "COM 3" };
     for (const id of DIFFERING_FIELD_JSON_IDS) expect(seed).toMatch(new RegExp(`\\(${id}, '[A-Z]+', '${named[id]}'`));
   });
 });
@@ -96,18 +98,19 @@ describe("the default ticks", () => {
     item({ id: "com1", label: "COM 1", jsonId: 1, differing: true }),
     item({ id: "note", kind: "dimension_note", label: "Dimension note" }),
     item({ id: "ans", kind: "answer", label: "Stitching spec" }),
-    item({ id: "timber", label: "Timber", jsonId: 4, differing: true }),
+    item({ id: "com2", label: "COM 2", jsonId: 2, differing: true }),
+    item({ id: "timber", label: "Timber", jsonId: 4, differing: false }),
   ];
 
   it("ticks everything that is not a differing field", () => {
     expect(defaultTicked(offered[0]!)).toBe(true);
     expect(defaultTicked(offered[1]!)).toBe(false);
-    expect([...defaultSelection(offered)].sort()).toEqual(["answer:ans", "attribute:w", "dimension_note:note"]);
+    expect([...defaultSelection(offered)].sort()).toEqual(["answer:ans", "attribute:timber", "attribute:w", "dimension_note:note"]);
   });
 
   it("says what stops being exported: everything left unticked, on the first split only", () => {
     const ticked = defaultSelection(offered);
-    expect(stopsBeingExported(offered, ticked, false).map((row) => row.id)).toEqual(["com1", "timber"]);
+    expect(stopsBeingExported(offered, ticked, false).map((row) => row.id)).toEqual(["com1", "com2"]);
     expect(stopsBeingExported(offered, ticked, true)).toEqual([]);
     expect(stopsBeingExported(offered, new Set(offered.map(carryKey)), false)).toEqual([]);
   });
@@ -116,7 +119,7 @@ describe("the default ticks", () => {
     const stops = stopsBeingExported(offered, defaultSelection(offered), false);
     const sentence = describeExportEffect(stops, false, "S-301", "TYPE 2");
     expect(sentence).toContain("S-301 becomes a heading");
-    expect(sentence).toContain("2 things you left unticked will stop being exported: COM 1, Timber.");
+    expect(sentence).toContain("2 things you left unticked will stop being exported: COM 1, COM 2.");
     expect(describeExportEffect([], false, "S-301", "TYPE 2")).toContain("nothing stops being exported");
     expect(describeExportEffect([], true, "S-301", "TYPE 2")).toContain("already a heading");
   });

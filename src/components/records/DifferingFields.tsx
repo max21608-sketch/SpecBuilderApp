@@ -2,8 +2,8 @@
 // The fields that make a configuration different, at the top of its screen.
 //
 // A configuration added by hand starts with the bill line's shared specs and
-// the fields that usually DIFFER between configurations — the fabrics and the
-// main finishes, `DIFFERING_FIELD_JSON_IDS` — left `missing`. They are the
+// the fields that usually DIFFER between configurations — the fabrics, COM 1
+// to COM 3, `DIFFERING_FIELD_JSON_IDS` — left `missing`. They are the
 // first thing somebody opening it has to do, so they are the first thing on
 // the Specs tab, blank and ready to fill in, each with the second line of the
 // same field (where on the item it goes, 0029) beside it.
@@ -78,7 +78,7 @@ export default function DifferingFields<A extends DifferingAnswer>({
   if (rows.length === 0) {
     return (
       <p className="text-[12.5px] text-neutral-500">
-        This item has no category yet, so there are no fabric or finish questions to fill in. Set one above.
+        This item has no category yet, so there are no fabric questions to fill in. Set one above.
       </p>
     );
   }

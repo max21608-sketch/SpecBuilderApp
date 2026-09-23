@@ -88,17 +88,17 @@ export function checkConfigurationName(raw: string, taken: readonly TakenName[],
 
 /**
  * The fields that usually DIFFER between configurations of one bill line, by
- * BWS `json_id` (db/seed/0001_spec_fields.sql): COM 1, COM 2, COM 3, Main
- * timber finish, Main metal finish — in that order, which is the order the new
- * configuration's screen shows them in. A qualifier (0029) is the second line
- * of the same field, so it goes with it.
+ * BWS `json_id` (db/seed/0001_spec_fields.sql): COM 1, COM 2, COM 3 — in that
+ * order, which is the order the new configuration's screen shows them in. A
+ * qualifier (0029) is the second line of the same field, so it goes with it.
  *
  * THIS REPO'S JUDGEMENT, and a question for Matthew. The AP364 pages that are
- * configurations of one chair differ in fabric and timber; nothing written
- * down says which fields a configuration may differ in. Timber Finish 2/3 and
- * Metal Finish 2 (31, 143, 35) are deliberately NOT here until he says so.
+ * configurations of one chair differ in fabric; nothing written down says
+ * which fields a configuration may differ in. The main timber and metal
+ * finishes (4, 5) are deliberately NOT here: Max chose, 2026-09-23, to carry
+ * the bill line's shared specs — dimensions, timber, metal — ticked.
  */
-export const DIFFERING_FIELD_JSON_IDS: readonly number[] = [1, 2, 14, 4, 5];
+export const DIFFERING_FIELD_JSON_IDS: readonly number[] = [1, 2, 14];
 
 export function isDifferingField(jsonId: number | null | undefined): boolean {
   return jsonId !== null && jsonId !== undefined && DIFFERING_FIELD_JSON_IDS.includes(jsonId);

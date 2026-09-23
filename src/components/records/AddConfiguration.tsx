@@ -6,8 +6,8 @@
 //
 // Everything the bill line holds is listed with a tick, its value and where it
 // came from, so a person can see what the new configuration starts with. The
-// fields that usually differ between configurations (the fabrics and the main
-// finishes) are listed FIRST and UNTICKED, which is what makes the new one
+// fields that usually differ between configurations (the fabrics, COM 1 to
+// COM 3) are listed FIRST and UNTICKED, which is what makes the new one
 // begin blank exactly where it is different.
 //
 // The sentence above Add is the reason this path is allowed to split a bill

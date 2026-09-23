@@ -915,7 +915,7 @@ function RecordView() {
           <div className="grid items-start gap-4 min-[820px]:grid-cols-[minmax(0,1fr)_260px]">
             <div className="min-w-0">
               {/* A CONFIGURATION'S OWN FIELDS COME FIRST, blank until somebody
-                  fills them: the fabrics and main finishes are what make it a
+                  fills them: the fabrics (COM 1 to COM 3) are what make it a
                   different chair from its siblings, and a configuration added
                   by hand starts with every one of them `missing`. */}
               {record.parent_id && (
