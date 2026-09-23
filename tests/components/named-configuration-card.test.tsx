@@ -14,7 +14,7 @@ import { namedConfigurationPlans, type DrawingItem, type DrawingObservation, typ
 import type { ItemResolution } from "@/components/imports/DrawingItemCard";
 import { callbacks, records, resolution, specFields } from "./fixtures";
 import { COMPONENT_TIMEOUT_MS } from "./tier-timeout";
-import { namedSheetRun } from "../fixtures/named-configurations";
+import { namedSheetRun, SHOP_DRAWING, SPEC_SHEET } from "../fixtures/named-configurations";
 
 vi.setConfig({ testTimeout: COMPONENT_TIMEOUT_MS });
 
@@ -341,5 +341,34 @@ describe("correcting the configurations on the card", () => {
     expect(screen.getByText(/1 row belonged only to a configuration that has been removed/)).toBeInTheDocument();
     expect(screen.getByDisplayValue("Maker C, Ref. Z")).toBeInTheDocument();
     expect(tabNames()).toEqual(["TYPE 1", "TYPE 2", "TYPE 4", "TYPE 5"]);
+  });
+});
+
+describe("the notes every configuration shares", () => {
+  const withNotes = () =>
+    namedSheetRun([
+      { ...SPEC_SHEET, notesRaw: ["PROJECT: Invented hotel", "SUPPLIER: TO BID"] },
+      { ...SHOP_DRAWING, notesRaw: ["TITLE: Invented desk chair"] },
+    ]);
+
+  it("fold behind one toggle at the end of the tab, after the dimensions and the finishes", async () => {
+    renderNamed(withNotes());
+    await userEvent.click(screen.getByRole("tab", { name: /TYPE 2/ }));
+    expect(screen.queryByDisplayValue("Invented hotel")).toBeNull();
+    const toggle = screen.getByRole("button", { name: "2 notes shared by all 5 — show" });
+    // After every value box on the tab: dimensions, then fabrics and finishes, then the toggle.
+    const boxes = screen.getAllByRole("textbox");
+    expect(boxes[boxes.length - 1]!.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.click(toggle);
+    expect(screen.getByDisplayValue("Invented hotel")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("TO BID")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide the 2 shared notes" })).toBeInTheDocument();
+  });
+
+  it("leave a note belonging to fewer than all of them in view", () => {
+    renderNamed(withNotes());
+    // TYPE 1 is open: the drawing's title note lands on TYPE 1 and TYPE 5 only.
+    expect(screen.getByDisplayValue("Invented desk chair")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Invented hotel")).toBeNull();
   });
 });

@@ -32,7 +32,7 @@
 // ============================================================================
 import { Fragment, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
-import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
+import { isMeasuredRow, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
 import { fieldSlotGaps, naturalConfigurationOrder, tabMeasurements, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import type { DimensionSlot } from "@/lib/spec-vocab";
@@ -99,6 +99,7 @@ export default function NamedConfigurationCard({
   /** Which configuration's tab is open. Local state: nothing links into it. */
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [joinArmed, setJoinArmed] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
 
   const pendingMembers = card.members.filter((member) => member.state === "pending");
   const busyHere = busy === card.id || pendingMembers.some((member) => busy === member.item.id);
@@ -388,7 +389,16 @@ export default function NamedConfigurationCard({
   }
   const visibleRows = tab.rows.filter((row) => !measurements.hidden.has(row.observation.id));
   const rowById = new Map(visibleRows.map((row) => [row.observation.id, row]));
-  const order = orderRows(visibleRows.map((row) => row.observation));
+  // THE NOTES EVERY CONFIGURATION SHARES fold away at the end of the tab.
+  // S-301's tabs were ~5,300px tall, most of it the same twelve notes on all
+  // five — project, title, supplier, remarks, the disclaimer. A note that
+  // belongs to fewer than all of them stays in view: it is about this chair.
+  const sharedNotes = visibleRows.filter(
+    (row) => total > 1 && row.lands.length === total && row.observation.attrGroup === "note" && !isMeasuredRow(row.observation),
+  );
+  const sharedNoteIds = new Set(sharedNotes.map((row) => row.observation.id));
+  const order = orderRows(visibleRows.filter((row) => !sharedNoteIds.has(row.observation.id)).map((row) => row.observation));
+  const sequence = [...order.ordered, ...sharedNotes.map((row) => row.observation)];
   const dimensionCell = composeDimensionCell(
     visibleRows
       .filter((row) => row.observation.attrGroup === "dimension" && row.observation.dimensionSlot)
@@ -576,7 +586,7 @@ export default function NamedConfigurationCard({
                 <table className="w-full border-collapse text-cell">
                   <ObservationTableHead />
                   <tbody>
-                    {order.ordered.map((observation) => {
+                    {sequence.map((observation) => {
                       const row = rowById.get(observation.id)!;
                       const member = memberOf(row.item.id);
                       const blockers = rowBlockers(row);
@@ -587,6 +597,8 @@ export default function NamedConfigurationCard({
                       ];
                       const sameOn = measurements.sameOn.get(observation.id) ?? [];
                       const isOther = order.otherIds.has(observation.id);
+                      const isSharedNote = sharedNoteIds.has(observation.id);
+                      const folded = (isOther && !showOther) || (isSharedNote && !showNotes);
                       const shared = sharedWithSentence(row.lands, tab.label, total);
                       const callbacks = {
                         onChange: (target: DrawingObservation, changes: Record<string, unknown>) =>
@@ -603,7 +615,21 @@ export default function NamedConfigurationCard({
                               onToggle={() => setShowOther((value) => !value)}
                             />
                           )}
-                          {(!isOther || showOther) && (
+                          {observation.id === sharedNotes[0]?.observation.id && (
+                            <tr className="border-t border-neutral-200 bg-neutral-50">
+                              <td colSpan={OBSERVATION_COLUMNS} className="px-4 py-2">
+                                <Button size="xs" variant="quiet" onClick={() => setShowNotes((value) => !value)}>
+                                  {showNotes
+                                    ? `Hide the ${sharedNotes.length} shared note${sharedNotes.length === 1 ? "" : "s"}`
+                                    : `${sharedNotes.length} note${sharedNotes.length === 1 ? "" : "s"} shared by all ${total} — show`}
+                                </Button>
+                                <span className="ml-2 text-xs text-neutral-500">
+                                  The same on every configuration. Kept on each, and still confirmed with the card.
+                                </span>
+                              </td>
+                            </tr>
+                          )}
+                          {!folded && (
                             <>
                               <ObservationRow
                                 observation={observation}
