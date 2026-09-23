@@ -45,6 +45,12 @@ export type SpecRow = {
   valueRaw: string | null;
   quotedText: string | null;
   note: string | null;
+  /**
+   * What the APP made of the observation, in words — a size kept rather than
+   * placed, a row whose printed ref names another item. Distinct across the
+   * members, so a fan-out does not print one sentence three times.
+   */
+  readingNotes: string[];
   /** The configuration the wording names, if any. A reading, never a target. */
   configurationLabel: string | null;
   /** One entry per MEMBER — a dimension has one per (run × slot). */
@@ -150,6 +156,7 @@ export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[]): SpecR
       valueRaw: first.raw.valueRaw,
       quotedText: first.raw.quotedText ?? null,
       note: first.raw.note,
+      readingNotes: [...new Set(members.map((member) => member.readingNote ?? null).filter((note): note is string => Boolean(note)))],
       configurationLabel: first.configurationLabel ?? null,
       runs,
       distinctRuns: [...seenRuns.values()],

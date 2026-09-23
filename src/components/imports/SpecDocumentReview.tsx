@@ -1200,6 +1200,14 @@ function SpecRowView({
             </p>
           )}
           {row.note && <p className="mt-1 text-[11px] text-neutral-500">{row.note}</p>}
+          {/* The app's own reading, as distinct from the model's note above:
+              what was kept rather than placed, and why. Plain, not amber — it
+              states what happened; a blocker is what asks. */}
+          {row.readingNotes.map((note) => (
+            <p key={note} className="mt-1 text-xs text-neutral-700">
+              {note}
+            </p>
+          ))}
           {row.varies && (
             // Never averaged. One row genuinely being several decisions is the
             // case most worth saying out loud.
@@ -1468,7 +1476,9 @@ function FinishRow({
         </span>
         {finish.codeRaw && <span className="text-sm font-mono text-neutral-800">{finish.codeRaw}</span>}
         <span className="text-neutral-800">{finish.tbc ? "TBC" : (finish.value ?? "—")}</span>
-        {finish.reason && <span className="text-xs text-neutral-500">{finish.reason}</span>}
+        {finish.reason && finish.reason !== finish.noField && (
+          <span className="text-xs text-neutral-500">{finish.reason}</span>
+        )}
 
         <Button
           variant="quiet"
@@ -1481,15 +1491,21 @@ function FinishRow({
         </Button>
       </div>
 
-      {!finish.specFieldId && (
-        // Kept, not refused: 0007 makes the column nullable precisely so an
-        // observation with no BWS home is still worth recording against the
-        // item. It simply will not reach the export's own cell.
-        <p className="mt-1 text-xs text-amber-800">
-          Every {finish.group === "material" ? "COM" : "finish"} slot on this item is already filled, so this will be
-          recorded against the item but will not reach a BWS column.
-        </p>
-      )}
+      {!finish.specFieldId &&
+        (finish.noField ? (
+          // Not a full item: a statement no field holds — a stone code,
+          // "Fabric: COM". Said as what it is, and not amber, because nothing
+          // here needs a person to do anything but read it.
+          <p className="mt-1 text-xs text-neutral-700">{finish.noField}</p>
+        ) : (
+          // Kept, not refused: 0007 makes the column nullable precisely so an
+          // observation with no BWS home is still worth recording against the
+          // item. It simply will not reach the export's own cell.
+          <p className="mt-1 text-xs text-amber-800">
+            Every {finish.group === "material" ? "COM" : "finish"} slot on this item is already filled, so this will be
+            recorded against the item but will not reach a BWS column.
+          </p>
+        ))}
 
       {replace && (
         <label className="mt-2 flex items-start gap-2 text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1.5">

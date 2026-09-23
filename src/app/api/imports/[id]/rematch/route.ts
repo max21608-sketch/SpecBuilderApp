@@ -88,7 +88,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
       // Read INSIDE the transaction, so the registers the re-match resolves
       // against are the ones true at the moment it is written.
-      const registers = await loadExtractionRegisters(String(run.project_id));
+      // With this run's id: a bill's own specification read re-matches by the
+      // bill's ROWS, which is what makes an already-read bill placeable free.
+      const registers = await loadExtractionRegisters(String(run.project_id), { intakeRunId: id });
       const { lines, rematched, added } = rematchProposals(staged, registers, () => randomUUID());
 
       if (rematched === 0) {
