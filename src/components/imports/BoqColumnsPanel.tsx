@@ -35,6 +35,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import { Table, Td, Th, Tr } from "@/components/ui/Table";
 import {
   BOQ_MAPPING_SOURCE_LABELS,
   BOQ_ROLES,
@@ -307,22 +308,21 @@ export default function BoqColumnsPanel({
           the scroll container, which is the opposite of the chase table's
           trap, where a wrapper became one by accident. */}
       <div className="mx-4 mt-3 max-h-[440px] overflow-auto rounded border border-neutral-200">
-        <table className="border-collapse text-cell">
+        <Table>
           <thead>
             <tr>
-              <th className="sticky left-0 top-0 z-20 border-b border-r border-neutral-200 bg-[#fcfcfc] px-2 py-2 text-left text-th font-semibold uppercase tracking-wider text-neutral-500">
-                Row
-              </th>
+              <Th className="sticky left-0 top-0 z-20 border-r">Row</Th>
               {Array.from({ length: width }, (_, index) => {
                 const role = selections[index] ?? null;
                 const stagedRole = staged[index] ?? null;
                 const badge =
-                  role && role !== "ignore" && role === stagedRole && sourceLabel ? sourceLabel : role !== stagedRole ? "changed here" : null;
+                  role && role !== "ignore" && role === stagedRole && sourceLabel
+                    ? sourceLabel
+                    : role !== stagedRole
+                      ? "changed here"
+                      : null;
                 return (
-                  <th
-                    key={index}
-                    className="sticky top-0 z-10 min-w-[150px] border-b border-neutral-200 bg-[#fcfcfc] px-2 py-2 text-left align-top font-normal"
-                  >
+                  <Th key={index} className="sticky top-0 z-10 min-w-[160px] align-top normal-case tracking-normal">
                     <span className="block font-mono text-[11px] text-neutral-500">{columnLetter(index)}</span>
                     <select
                       aria-label={`Column ${columnLetter(index)} is read as`}
@@ -334,7 +334,7 @@ export default function BoqColumnsPanel({
                         next[index] = isBoqRole(event.target.value) ? event.target.value : null;
                         setSelections(next);
                       }}
-                      className="mt-1 block w-full rounded border border-neutral-300 px-1.5 py-1 text-xs text-neutral-900 disabled:opacity-50"
+                      className="mt-1 block w-full rounded border border-neutral-300 px-1.5 py-1 text-xs font-normal text-neutral-900 disabled:opacity-50"
                     >
                       <option value="">— not read —</option>
                       {BOQ_ROLES.filter((option) => option !== "ignore").map((option) => (
@@ -345,17 +345,15 @@ export default function BoqColumnsPanel({
                     </select>
                     {badge && (
                       <span className="mt-1 block">
-                        <Chip tone={BADGE_TONE[badge] ?? "plain"}>
-                          {badge}
-                        </Chip>
+                        <Chip tone={BADGE_TONE[badge] ?? "plain"}>{badge}</Chip>
                       </span>
                     )}
                     {role && role !== "ignore" && sheet.mappingEvidence?.[role as BoqReadRole] && role === stagedRole && (
-                      <span className="mt-1 block text-[10.5px] text-neutral-500">
+                      <span className="mt-1 block text-[10.5px] font-normal text-neutral-500">
                         {sheet.mappingEvidence[role as BoqReadRole]}
                       </span>
                     )}
-                  </th>
+                  </Th>
                 );
               })}
             </tr>
@@ -363,12 +361,11 @@ export default function BoqColumnsPanel({
           <tbody>
             {preview.map((row, rowIndex) => {
               const rowNo = rowIndex + 1;
-              const isHeader =
-                headerRow !== null && rowNo <= headerRow && rowNo > headerRow - headerRows;
+              const isHeader = headerRow !== null && rowNo <= headerRow && rowNo > headerRow - headerRows;
               const above = headerRow !== null && rowNo <= headerRow - headerRows;
               return (
-                <tr key={rowNo} className={isHeader ? "bg-sky-50" : above ? "text-neutral-400" : undefined}>
-                  <td className="sticky left-0 z-[5] border-b border-r border-neutral-100 bg-white px-1 py-1 align-top">
+                <Tr key={rowNo} tone={isHeader ? "info" : "plain"} className={above ? "text-neutral-400" : undefined}>
+                  <Td className="sticky left-0 z-[5] border-r bg-white !px-1 !py-1">
                     <button
                       type="button"
                       disabled={!editable || busy}
@@ -376,31 +373,29 @@ export default function BoqColumnsPanel({
                       aria-label={`Row ${rowNo} is the header`}
                       onClick={(event) => pickHeader(rowNo, event.shiftKey)}
                       className={`w-full rounded px-1.5 py-0.5 text-right font-mono text-[11px] disabled:cursor-not-allowed ${
-                        isHeader
-                          ? "bg-sky-700 text-white"
-                          : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+                        isHeader ? "bg-neutral-900 text-white" : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
                       }`}
                     >
                       {rowNo}
                     </button>
-                  </td>
+                  </Td>
                   {Array.from({ length: width }, (_, index) => (
-                    <td
+                    <Td
                       key={index}
-                      className={`max-w-[260px] border-b border-neutral-100 px-2 py-1 align-top text-[12px] ${
-                        isHeader ? "font-semibold text-neutral-900" : ""
-                      } ${selections[index] && selections[index] !== "ignore" ? "" : "text-neutral-400"}`}
+                      className={`max-w-[260px] !py-1 text-[12px] ${isHeader ? "font-semibold text-neutral-900" : ""} ${
+                        selections[index] && selections[index] !== "ignore" ? "" : "text-neutral-400"
+                      }`}
                     >
                       <span className="block truncate" title={row[index] ?? ""}>
                         {row[index] ?? ""}
                       </span>
-                    </td>
+                    </Td>
                   ))}
-                </tr>
+                </Tr>
               );
             })}
           </tbody>
-        </table>
+        </Table>
       </div>
       <p className="mx-4 mt-1 text-[11px] text-neutral-500">
         The first {preview.length} rows of the sheet. Every row under the header is read.
