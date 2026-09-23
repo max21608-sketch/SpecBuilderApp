@@ -73,6 +73,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Tabs from "@/components/ui/Tabs";
 import { Table, Td, Tr } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
+import { inboxBuckets, type InboxOutcomeFields } from "@/lib/inbox-outcome";
 import { formatDay } from "@/lib/format-day";
 
 type Project = {
@@ -347,6 +348,8 @@ function ProjectOverview() {
   const [retiringBusy, setRetiringBusy] = useState(false);
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [contactsOutstanding, setContactsOutstanding] = useState<ContactsOutstanding | null>(null);
+  /** This project's mail still to review; null until counted (plan any-bill, step 7). */
+  const [inboxToReview, setInboxToReview] = useState<number | null>(null);
   const [addingContact, setAddingContact] = useState(false);
   const [suggestedCodes, setSuggestedCodes] = useState<string[]>([]);
   const [codeCounts, setCodeCounts] = useState<Record<string, number>>({});
@@ -553,12 +556,26 @@ function ProjectOverview() {
   }, [projectId]);
 
 
+  /**
+   * THE INBOX'S OWN COUNT, over the inbox's own payload. "To review" is
+   * `inboxBuckets` over `/api/email-messages?projectId=` — the function the
+   * inbox's tab calls — rather than a second count in SQL, so the header and
+   * the tab it links to cannot disagree. A failure leaves the link uncounted.
+   */
+  const loadInboxCount = useCallback(async () => {
+    const res = await apiFetch<{ messages: InboxOutcomeFields[] }>(
+      `/api/email-messages?projectId=${encodeURIComponent(projectId)}`,
+    );
+    if (res.ok && Array.isArray(res.data.messages)) setInboxToReview(inboxBuckets(res.data.messages).review.length);
+  }, [projectId]);
+
   useEffect(() => {
     if (!projectId) return;
     void load();
     void loadContacts();
     void loadContactsOutstanding();
-  }, [projectId, load, loadContacts, loadContactsOutstanding]);
+    void loadInboxCount();
+  }, [projectId, load, loadContacts, loadContactsOutstanding, loadInboxCount]);
 
   // THE OVERVIEW POLLS ITS DOCUMENTS while any is being read or waiting for a
   // slot (found-in-use 2026-09-23: "you have to reload the page to get it to
@@ -1145,6 +1162,14 @@ function ProjectOverview() {
         actions={
           <>
             <OpenChangeBar projectId={project.id} onChanged={() => void load()} />
+            {/* THIS PROJECT'S MAIL, counted as the inbox's To review tab counts
+                it. A link: it goes to the inbox, narrowed to this project. */}
+            <Link
+              href={`/dashboard/inbox?project=${encodeURIComponent(project.id)}`}
+              className={buttonClass("secondary", "sm", "no-underline")}
+            >
+              Inbox{inboxToReview !== null && <> {inboxToReview.toLocaleString()}</>}
+            </Link>
             {/* FILL IN WHAT WE KNOW, BESIDE THE CHASE. The two are the same
                 list with different controls on it — one records what somebody
                 in this building already knows, the other asks the client for

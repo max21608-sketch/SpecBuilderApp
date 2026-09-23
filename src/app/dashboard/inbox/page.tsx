@@ -42,6 +42,7 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
 import { WAITING_FOR_SLOT_LABEL } from "@/lib/intake-status";
+import { inboxBuckets, outcome } from "@/lib/inbox-outcome";
 
 /** What a read turned up. Computed in the route by `describeChange`, per 0021. */
 type Found = {
@@ -106,28 +107,12 @@ type Payload = {
 };
 
 const TABS = ["review", "held", "nothing", "everything"] as const;
-type Tab = (typeof TABS)[number];
 
-/**
- * How a message reads on this screen.
- *
- * `reading` and `failed` are deliberately NOT folded into `review`: an email
- * the queue has not got to is not an email waiting for a person, and saying so
- * is the difference between a queue somebody watches and a queue somebody
- * believes is stuck.
- */
-function outcome(message: Message): "held" | "waiting" | "reading" | "failed" | "nothing" | "review" {
-  if (message.routing_status !== "assigned") return "held";
-  if (message.run_status === "failed") return "failed";
-  // WAITING FOR A SLOT IS NOT READING. The cap defers a read rather than
-  // refusing it, so this row needs nobody and will start on its own — and a
-  // message the app auto-assigned on a busy morning is the normal way to reach
-  // this state, which is why it earns a word of its own rather than an error.
-  if (message.run_status === "pending" && message.waiting_for_slot) return "waiting";
-  if (!message.found) return "reading";
-  if (message.found.nothingToRecord) return "nothing";
-  return "review";
-}
+/** The project select's first option, and the URL value that means it. */
+const ALL_PROJECTS = "all";
+/** A project id as the URL carries it. Anything else renders the whole inbox. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type Tab = (typeof TABS)[number];
 
 /** Today where the reader is, which is where this app is pinned. */
 function arrivedToday(message: Message): boolean {
@@ -167,9 +152,29 @@ function InboxView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [assignTo, setAssignTo] = useState<Record<string, string>>({});
+  // ============================================================================
+  // ONE PROJECT'S MAIL (plan any-bill, step 7). `?project=<id>` is URL state
+  // for the reason the tab is: a link from a project's header lands here and
+  // has to survive a reload and a paste into Teams. The route has always
+  // filtered on `projectId`; this page never passed it.
+  //
+  // HELD MAIL CANNOT BELONG TO A PROJECT — it is held because no project was
+  // decided — so a project view does not list it or count it in a tile, and
+  // says in ONE line how much is waiting on no project, with the way to it.
+  // Every tile in a project view counts that project's mail, because a tile
+  // that counts something the table under it does not list is a number
+  // nobody can act on.
+  // ============================================================================
+  const [project, setProject] = useUrlTab<string>({
+    param: "project",
+    fallback: ALL_PROJECTS,
+    resolve: (raw) => (raw && (raw === ALL_PROJECTS || UUID.test(raw)) ? raw : null),
+  });
+  const projectId = project === ALL_PROJECTS ? null : project;
   const [tab, setTab] = useUrlTab<Tab>({
     fallback: "review",
-    resolve: (raw) => (TABS.includes(raw as Tab) ? (raw as Tab) : null),
+    // "Could not be placed" is not a tab a project view has.
+    resolve: (raw) => (TABS.includes(raw as Tab) && !(projectId && raw === "held") ? (raw as Tab) : null),
   });
 
   /**
@@ -180,14 +185,16 @@ function InboxView() {
    * exactly the screen it appears on if the request hid them.
    */
   const load = useCallback(async () => {
-    const res = await apiFetch<Payload>(`/api/email-messages?includeTriaged=1`);
+    const query = new URLSearchParams({ includeTriaged: "1" });
+    if (projectId) query.set("projectId", projectId);
+    const res = await apiFetch<Payload>(`/api/email-messages?${query.toString()}`);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setError(null);
     setData(res.data);
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     void load();
@@ -218,24 +225,9 @@ function InboxView() {
     }
   }
 
-  const buckets = useMemo(() => {
-    const all = data?.messages ?? [];
-    const open = all.filter((message) => message.triage === "open");
-    return {
-      all,
-      held: open.filter((message) => outcome(message) === "held"),
-      nothing: open.filter((message) => outcome(message) === "nothing"),
-      // A FAILED READ IS ITS OWN QUEUE, and it came out of "to review" when
-      // assignment stopped being something a person always did. Since 2.11 the
-      // app places mail on a project by itself and starts the charged read, so
-      // a read that failed is work nobody asked for, that nobody is waiting
-      // on, and that only a person pressing Retry will move. Left inside the
-      // review bucket it was one row among a morning's post, and the only
-      // thing saying it had happened was that row.
-      failed: open.filter((message) => outcome(message) === "failed"),
-      review: open.filter((message) => ["review", "waiting", "reading"].includes(outcome(message))),
-    };
-  }, [data]);
+  // The queues, by `inboxBuckets` — the project header's "Inbox n" is the
+  // same function over the same payload, so the two cannot disagree.
+  const buckets = useMemo(() => inboxBuckets(data?.messages ?? []), [data]);
 
   if (error && !data) {
     return (
@@ -276,24 +268,63 @@ function InboxView() {
           </Link>
         }
         tabs={
-          <Tabs
-            label="Which mail"
-            value={tab}
-            onChange={setTab}
-            items={[
-              { id: "review", label: "To review", count: buckets.review.length, tone: "info" },
-              { id: "held", label: "Could not be placed", count: buckets.held.length, tone: "warn" },
-              { id: "nothing", label: "Nothing to record", count: buckets.nothing.length },
-              { id: "everything", label: "Everything", count: buckets.all.length },
-            ]}
-          />
+          <>
+            <label className="mb-3 flex items-center gap-2 text-sm text-neutral-700">
+              Project
+              <select
+                aria-label="Which project's mail"
+                value={project}
+                onChange={(event) => setProject(event.target.value)}
+                className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+              >
+                <option value={ALL_PROJECTS}>All projects</option>
+                {data.projects.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.bws_project_number} — {option.name}
+                  </option>
+                ))}
+                {/* An archived project is not in the list, and a link to its
+                    mail must still say which project it is showing. */}
+                {projectId && !data.projects.some((option) => option.id === projectId) && (
+                  <option value={projectId}>This project (archived or not found)</option>
+                )}
+              </select>
+            </label>
+            <Tabs
+              label="Which mail"
+              value={tab}
+              onChange={setTab}
+              items={[
+                { id: "review", label: "To review", count: buckets.review.length, tone: "info" },
+                // Held mail is on no project, so a project view has no such tab.
+                ...(projectId
+                  ? []
+                  : [{ id: "held" as const, label: "Could not be placed", count: buckets.held.length, tone: "warn" as const }]),
+                { id: "nothing", label: "Nothing to record", count: buckets.nothing.length },
+                { id: "everything", label: "Everything", count: buckets.all.length },
+              ]}
+            />
+          </>
         }
       />
 
       <PageBody>
         {error && <Note tone="danger">{error}</Note>}
 
-        <div className="mt-4 grid grid-cols-2 gap-2.5 lg:grid-cols-5">
+        {/* ONE LINE, NOT A LIST. Held mail is held because no project was
+            decided, so it cannot be this project's; how much there is, and the
+            way to it, is what a project view owes somebody. */}
+        {projectId && data.heldCount > 0 && (
+          <p className="mt-4 text-sm text-amber-800">
+            {data.heldCount} held message{data.heldCount === 1 ? " is" : "s are"} on no project yet —{" "}
+            <Link href="/dashboard/inbox" className="font-medium text-amber-900 underline">
+              open the full inbox
+            </Link>
+            .
+          </p>
+        )}
+
+        <div className={`mt-4 grid grid-cols-2 gap-2.5 ${projectId ? "lg:grid-cols-4" : "lg:grid-cols-5"}`}>
           <StatTile
             label="Read, waiting for you"
             tone="info"
@@ -302,14 +333,16 @@ function InboxView() {
             onPress={tab === "review" ? undefined : () => setTab("review")}
             active={tab === "review"}
           />
-          <StatTile
-            label="Could not be placed"
-            tone={buckets.held.length > 0 ? "warn" : "plain"}
-            value={buckets.held.length}
-            meaning="needs a person to say which project"
-            onPress={buckets.held.length > 0 && tab !== "held" ? () => setTab("held") : undefined}
-            active={tab === "held"}
-          />
+          {!projectId && (
+            <StatTile
+              label="Could not be placed"
+              tone={buckets.held.length > 0 ? "warn" : "plain"}
+              value={buckets.held.length}
+              meaning="needs a person to say which project"
+              onPress={buckets.held.length > 0 && tab !== "held" ? () => setTab("held") : undefined}
+              active={tab === "held"}
+            />
+          )}
           {/* THE READS NOBODY IS COMING BACK FOR.
               Since 2.11 the app assigns confidently routed mail by itself and
               starts the charged read, so this is the only count on any screen
@@ -417,9 +450,9 @@ function InboxView() {
               <span className="font-medium normal-case tracking-normal text-neutral-500">
                 {" "}· the message is on its project and the read did not finish — open it to retry
                 {/* NAME THE GAP, AND DO NOT INVENT A WAY OUT OF IT. This
-                    screen has no project filter and no paging, so there is
-                    nothing to tell somebody to press: what is owed them is
-                    that the tile and the table do not quietly disagree. */}
+                    screen has no paging, so there is nothing to tell somebody
+                    to press: what is owed them is that the tile and the table
+                    do not quietly disagree. */}
                 {data.failedReads > buckets.failed.length &&
                   ` · showing ${buckets.failed.length} of ${data.failedReads} — the rest are older than the 200 messages this page holds`}
               </span>
