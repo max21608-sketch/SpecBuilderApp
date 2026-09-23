@@ -36,6 +36,13 @@
 export type PaletteOwner = "app" | "bws";
 
 export type PaletteOption = {
+  /**
+   * `spec_palette_options.id`, which a BW standard names (0041). Optional: a
+   * fixture or a screen that only ever shows a list need not carry it, and
+   * the server resolves it from the value whenever it writes one -- a client
+   * never gets to say which option a row points at.
+   */
+  id?: string;
   value: string;
   label: string;
   sortOrder: number;
@@ -203,6 +210,18 @@ export function normalisePaletteValue(palette: Palette, raw: string | null): str
       (option.code !== null && comparisonKey(option.code) === wanted),
   );
   return hit ? hit.value : null;
+}
+
+/**
+ * The option a written value names, whole -- with its id -- or null.
+ *
+ * `normalisePaletteValue`'s exact step and nothing looser; it returns the
+ * option so a writer can record WHICH one, where that function returns only
+ * the value a select sits on.
+ */
+export function paletteOptionFor(palette: Palette, raw: string | null): PaletteOption | null {
+  const value = normalisePaletteValue(palette, raw);
+  return value === null ? null : (palette.options.find((option) => option.value === value) ?? null);
 }
 
 /** The single comparison key. Every call site uses this rather than `===` on a raw string. */

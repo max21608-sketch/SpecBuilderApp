@@ -39,6 +39,9 @@ import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab
 import { normaliseName } from "@/lib/matching";
 // `finishes.ts` is a leaf here and imports nothing from this file.
 import { normaliseFinishCode, type FinishFiling } from "@/lib/finishes";
+// Both leaves: neither imports anything from this file.
+import { paletteOptionFor, type Palette } from "@/lib/palettes";
+import type { StagedStandard } from "@/lib/bw-standard";
 import {
   DIMENSION_SLOT_LABELS,
   normaliseDimensionSlot,
@@ -200,6 +203,21 @@ export type DrawingObservation = {
    * restore. Absent on every row ignored without one.
    */
   ignoredReason?: string | null;
+  /**
+   * THE BW STANDARD a reviewer set beside the page's words (0041): a BWS
+   * palette option BW proposes to make, or `tbc` -- "BW will propose one".
+   *
+   * `value` stays what the reviewer agrees the PAGE said; this is BW's answer
+   * to it, and the confirm writes both, into two sets of columns. The palette
+   * pick used to write the option into `value`, which lost the client's words
+   * at confirm.
+   *
+   * ABSENT means nobody has been asked -- and a row staged before 0041 whose
+   * `value` already holds an option is read that way by `upgradeStandards`.
+   * NULL means a person chose "Other…" and there is no standard. The two are
+   * different on purpose: the read-time upgrade fires on absent only.
+   */
+  standard?: StagedStandard | null;
   /** One attribute row per target record, once applied. */
   applied: {
     attributeIds: string[];
@@ -911,7 +929,18 @@ export { METAL_WORDS };
 const FABRIC_WORDS = FABRIC_CALLOUT_WORDS;
 const TIMBER_WORDS = TIMBER_CALLOUT_WORDS;
 
-export type SpecFieldEntry = { id: string; jsonId: number; name: string };
+export type SpecFieldEntry = {
+  id: string;
+  jsonId: number;
+  name: string;
+  /**
+   * The closed list this field offers, where the register was read with its
+   * palettes (`loadFieldsWithPalettes`). Absent or null reads as "no list",
+   * which is the honest answer for a caller that did not load one -- and
+   * `upgradeStandards` then leaves every row exactly as it is.
+   */
+  palette?: Palette | null;
+};
 
 /**
  * The BWS register as the classifier wants it, from a `spec_fields` query.
@@ -926,6 +955,9 @@ export function specFieldEntries(rows: readonly Record<string, unknown>[]): Spec
     id: String(row.id),
     jsonId: Number(row.json_id),
     name: String(row.name ?? ""),
+    // Carried through where the rows came from `withPalettes`, so the one
+    // mapper serves a register read with its lists and one read without.
+    ...(row.palette ? { palette: row.palette as Palette } : {}),
   }));
 }
 
@@ -2433,8 +2465,91 @@ export function assertStagedDrawings(parsed: unknown, fields?: SpecFieldEntry[])
   if (!doc || typeof doc !== "object" || doc.kind !== "shop_drawings" || !Array.isArray(doc.items)) {
     throw new Error("This document was not staged as shop drawings. Upload the drawings again.");
   }
-  const upgraded = upgradeTbcMarkers(upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? []));
+  const upgraded = upgradeStandards(
+    upgradeTbcMarkers(upgradeCalloutGuesses(upgradeDimensionSlots(doc as StagedDrawings), fields ?? [])),
+    fields ?? [],
+  );
   return readByModel(upgraded) ? upgraded : applyViewGuesses(upgraded);
+}
+
+/**
+ * Read a palette pick made before 0041 as what it was: a BW STANDARD, beside
+ * the page's words rather than over them.
+ *
+ * Until 0041 the drawings card's palette select wrote the chosen BWS option
+ * into `value`, and `valueRaw` kept what the drawing said. So a pending row
+ * whose `value` IS an option of its field's palette, and whose `valueRaw`
+ * says something else, is a row where a person picked BW's option for the
+ * client's words -- and reading it as a client who wrote "BW Oak Grey - Open
+ * grain 10%" would put the option in the client's column at confirm, which is
+ * the defect itself. It reads as: value = the drawing's words, standard = the
+ * option, proposed.
+ *
+ * AT READ TIME, NEVER WRITTEN BACK HERE -- the discipline of every upgrade in
+ * this file. The next autosave persists it, and until then the screen, the
+ * autosave and the confirm compute the same answer from the same JSON.
+ *
+ * Four conditions, and each is a trap on its own:
+ *
+ *   * PENDING ONLY. An applied row is history; the attribute it wrote is
+ *     restored by `npm run db:backfill-standards`, which reads the same JSON.
+ *   * `standard` ABSENT, never null. Null is a person pressing "Other…", and
+ *     second-guessing it would bring back an option they took away.
+ *   * THE VALUE IS AN OPTION BY THE EXACT STEP (`paletteOptionFor`), and the
+ *     drawing's words are NOT that same option. A drawing that quotes BWS's
+ *     own wording has value = option = valueRaw, and there is nothing to
+ *     separate: the client specified the BW standard.
+ *   * A FIELD WITH A PALETTE, from a register read with its palettes. A
+ *     caller that loaded none leaves the row alone, which the confirm cannot
+ *     do -- it always loads them (`loadFieldsWithPalettes`).
+ */
+function upgradeStandards(doc: StagedDrawings, fields: SpecFieldEntry[]): StagedDrawings {
+  const paletteOf = new Map<string, Palette>();
+  for (const field of fields) if (field.palette) paletteOf.set(field.id, field.palette);
+  if (paletteOf.size === 0) return doc;
+
+  let anyTouched = false;
+  const items = doc.items.map((item) => {
+    let touched = false;
+    const observations = item.observations.map((observation) => {
+      const upgraded = legacyPaletteStandard(observation, paletteOf);
+      if (upgraded === observation) return observation;
+      touched = true;
+      return upgraded;
+    });
+    if (!touched) return item;
+    anyTouched = true;
+    return { ...item, observations };
+  });
+  return anyTouched ? { ...doc, items } : doc;
+}
+
+/**
+ * One row of `upgradeStandards`, exported for the backfill -- which asks the
+ * same question of an APPLIED row's JSON and must not ask it differently.
+ * Returns the observation itself when nothing applies.
+ */
+export function legacyPaletteStandard(
+  observation: DrawingObservation,
+  paletteOf: ReadonlyMap<string, Palette>,
+  options: { includeApplied?: boolean } = {},
+): DrawingObservation {
+  if (observation.reviewStatus !== "pending" && !(options.includeApplied && observation.reviewStatus === "applied")) {
+    return observation;
+  }
+  if (observation.standard !== undefined) return observation;
+  if (!observation.specFieldId) return observation;
+  const palette = paletteOf.get(observation.specFieldId);
+  if (!palette) return observation;
+  const option = paletteOptionFor(palette, observation.value);
+  if (!option) return observation;
+  if (observation.valueRaw === null || !observation.valueRaw.trim()) return observation;
+  if (paletteOptionFor(palette, observation.valueRaw)?.value === option.value) return observation;
+  return {
+    ...observation,
+    value: observation.valueRaw,
+    standard: { state: "proposed", value: option.value, optionId: option.id ?? null },
+  };
 }
 
 /**

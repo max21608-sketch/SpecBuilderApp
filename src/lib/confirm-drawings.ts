@@ -96,6 +96,8 @@ export type SwatchCrop = {
 import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
 import { ensureVariant } from "@/lib/variant-create";
 import { snapshotRecords } from "@/lib/record-snapshot";
+import { loadFieldsWithPalettes } from "@/lib/palette-load";
+import { paletteOptionFor } from "@/lib/palettes";
 
 /**
  * What a stored swatch is CALLED, which is the only place its page survives.
@@ -130,6 +132,34 @@ export type DrawingsConfirmResult = {
 
 type LoadedRun = { runId: string; projectId: string; staged: StagedDrawings; fields: SpecFieldEntry[] };
 
+/**
+ * The BW standard a row carries into `record_attributes`, resolved (0041).
+ *
+ * A proposed standard must still be an option of the row's field's palette as
+ * the register holds it NOW -- the field may have been changed on the card,
+ * or the option deactivated by a re-sync, since the pick. Refused in words
+ * rather than written: a standard naming an option BWS no longer offers is a
+ * plausible-looking wrong answer in the one file that overwrites. Exported for
+ * the pure tier.
+ */
+export function standardToWrite(
+  observation: DrawingObservation,
+  fields: readonly SpecFieldEntry[],
+): { value: string | null; optionId: string | null; state: "proposed" | "tbc" } | null {
+  const standard = observation.standard ?? null;
+  if (!standard) return null;
+  if (standard.state === "tbc") return { value: null, optionId: null, state: "tbc" };
+  const palette = fields.find((field) => field.id === observation.specFieldId)?.palette ?? null;
+  const option = palette ? paletteOptionFor(palette, standard.value) : null;
+  if (!option?.id) {
+    throw new DomainConflictError(
+      "standard_not_on_palette",
+      `“${observation.labelRaw ?? "A spec"}” proposes ${standard.value} as the BW standard, and that is not an option of its BWS field's list any more. Choose the standard again, or leave it empty.`,
+    );
+  }
+  return { value: option.value, optionId: option.id, state: "proposed" };
+}
+
 async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | null): Promise<LoadedRun> {
   const rows = await txn`
     select id, project_id, status, parsed, version, source_kind, document_kind
@@ -154,7 +184,11 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
   // group and BWS field were re-read on the way to the card must land on the
   // same field when it is written, or the screen is promising a cell the file
   // does not deliver.
-  const fieldRows = await txn`select id, json_id, name from spec_fields order by sort_order`;
+  //
+  // WITH ITS PALETTES (0041): a staged BW standard is resolved to its option
+  // against the field's own list, and a pick made before 0041 is read as a
+  // standard by the same `upgradeStandards` the screen ran.
+  const fieldRows = await loadFieldsWithPalettes(txn);
   const fields = specFieldEntries(fieldRows);
   return {
     runId: String(run.id),
@@ -854,10 +888,18 @@ export async function confirmDrawingItem(
         superseded.push({ oldId: replacement.attributeId, observationId: observation.id, recordId });
       }
 
+      // THE TWO HALVES, INTO TWO SETS OF COLUMNS (0041). `value` is what the
+      // reviewer agrees the PAGE said; the BW standard beside it is BW's answer
+      // to that. Resolved against the field's own palette here and not trusted
+      // from the staged JSON, because the option list is the register's.
+      const standard = standardToWrite(observation, run.fields);
+
       const inserted = await txn`
         insert into record_attributes
           (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
-           source_run_id, source_page, sort_order, created_by, updated_by)
+           source_run_id, source_page, sort_order,
+           standard_value, standard_option_id, standard_state, standard_set_by, standard_set_at,
+           created_by, updated_by)
         values
           (${recordId}, ${observation.attrGroup},
            -- Only a dimension carries one, and 0011's biconditional makes the
@@ -878,7 +920,10 @@ export async function confirmDrawingItem(
            -- would never fire. stateToWrite is that default, shared with the
            -- empty_value blocker so the two cannot disagree. A row that WAS
            -- asked writes exactly what the reviewer chose.
-           ${stateToWrite(observation)}, ${runId}, ${item.page}, ${sortOrder}, ${actor}, ${actor})
+           ${stateToWrite(observation)}, ${runId}, ${item.page}, ${sortOrder},
+           ${standard?.value ?? null}, ${standard?.optionId ?? null}, ${standard?.state ?? null},
+           ${standard ? actor : null}, ${standard ? new Date().toISOString() : null},
+           ${actor}, ${actor})
         returning id
       `;
       const attributeId = String(inserted[0]?.id ?? "");

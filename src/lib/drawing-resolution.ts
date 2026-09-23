@@ -15,6 +15,7 @@
 // drawing-document.ts sets out: confirming a pack's BOQ after its drawings were
 // extracted is a normal order of work, and a stored target would be stale from
 // that moment on.
+import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { sql } from "@/lib/db";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import {
@@ -541,7 +542,9 @@ export async function loadBatchDrawings(
     // Read once for the pack, for the same reason: `assertStagedDrawings`
     // re-reads a callout the old word lists gave up on, and needs the register
     // to give it a BWS field.
-    sql`select id, json_id, name from spec_fields order by sort_order`,
+    // With its palettes (0041): a pick made before the standard existed is
+    // read as a standard here exactly as the confirm will read it.
+    loadFieldsWithPalettes(sql),
   ]);
   const fields = specFieldEntries(fieldRows);
 

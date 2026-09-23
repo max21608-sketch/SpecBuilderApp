@@ -50,7 +50,9 @@ import {
   type StagedDrawings,
 } from "@/lib/drawing-document";
 import { assertStagedPreamble, preambleNoteBlockers, type StagedPreamble } from "@/lib/preamble-document";
-import { loadPalettes, withPalettes } from "@/lib/palette-load";
+import { loadFieldsWithPalettes } from "@/lib/palette-load";
+import { paletteOptionFor } from "@/lib/palettes";
+import type { StagedStandard } from "@/lib/bw-standard";
 import { normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
 
 export const dynamic = "force-dynamic";
@@ -100,7 +102,11 @@ async function patchBulkUnit(id: string, raw: unknown, actor: string): Promise<R
       if (run.status !== "parsed") {
         throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
       }
-      const fieldRows = await txn`select id, json_id, name from spec_fields order by sort_order`;
+      // WITH ITS PALETTES, as the review GET and the confirm read it: a pick
+      // made before 0041 is read as a BW standard (`upgradeStandards`), and an
+      // autosave that read it otherwise would persist the option as the
+      // client's words.
+      const fieldRows = await loadFieldsWithPalettes(txn);
       const staged: StagedDrawings = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
       if (scope === "item" && !staged.items.some((item) => item.id === itemId)) {
         throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
@@ -235,6 +241,20 @@ const DrawingPatch = z
         // handed to the same `reviewDrawingObservations` the Ignore button
         // uses, so the run's status is derived exactly as it is there.
         ignoreBecause: z.string().trim().min(1).max(200).optional(),
+        // THE BW STANDARD BESIDE THE PAGE'S WORDS (0041). The palette pick no
+        // longer writes `value`: it sets this, and `value` goes on holding
+        // what the reviewer agrees the drawing said. Named by the option's
+        // VALUE; the server resolves which option against the row's own
+        // field, so a client never names an id. `tbc` is "BW will propose
+        // one"; null is "Other…", no standard. Only `proposed` at intake --
+        // an agreement is the client's, recorded after confirm.
+        standard: z
+          .union([
+            z.object({ state: z.literal("proposed"), value: z.string().min(1).max(4000) }).strict(),
+            z.object({ state: z.literal("tbc") }).strict(),
+          ])
+          .nullable()
+          .optional(),
         // Which occupied slot, on which record, this observation replaces.
         // Per (observation, RECORD): a card fans out one record per run, and
         // the mock-up run's COM 1 may hold a different old value from the main
@@ -275,7 +295,11 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
       if (run.status !== "parsed") {
         throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
       }
-      const fieldRows = await txn`select id, json_id, name from spec_fields order by sort_order`;
+      // WITH ITS PALETTES, as the review GET and the confirm read it: a pick
+      // made before 0041 is read as a BW standard (`upgradeStandards`), and an
+      // autosave that read it otherwise would persist the option as the
+      // client's words.
+      const fieldRows = await loadFieldsWithPalettes(txn);
       const staged: StagedDrawings = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
       const item = staged.items.find((row) => row.id === itemId);
       if (!item) throw new DomainConflictError("item_missing", "That item is no longer part of this import. Reload.");
@@ -398,9 +422,43 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
             ? splitFigureAndUnit(changes.value)
             : null;
 
+        // THE STANDARD IS RESOLVED HERE, against the field the row will hold
+        // after this patch, and refused in words when it is not one of that
+        // field's options -- the exact step, never the nearest option.
+        const fieldAfter = changes.specFieldId !== undefined ? changes.specFieldId : observation.specFieldId;
+        let standard: StagedStandard | null | undefined;
+        if (changes.standard === null) {
+          standard = null;
+        } else if (changes.standard?.state === "tbc") {
+          standard = { state: "tbc", value: null, optionId: null };
+        } else if (changes.standard?.state === "proposed") {
+          const palette = fieldRows.find((field) => field.id === fieldAfter)?.palette ?? null;
+          const option = palette ? paletteOptionFor(palette, changes.standard.value) : null;
+          if (!palette || !option) {
+            throw new DomainConflictError(
+              "standard_not_on_palette",
+              palette
+                ? `That is not one of the ${palette.name} options, so it cannot be the BW standard. Keep the drawing's words and leave the standard empty.`
+                : "This spec's BWS field offers no BWS list, so it has no BW standard to choose.",
+              { status: 400 },
+            );
+          }
+          standard = { state: "proposed", value: option.value, optionId: option.id ?? null };
+        } else if (
+          changes.specFieldId !== undefined &&
+          changes.specFieldId !== observation.specFieldId &&
+          observation.standard
+        ) {
+          // A standard is an option of ONE field's list. Moving the row to
+          // another field takes it away rather than leaving a timber option
+          // proposed against a metal finish.
+          standard = null;
+        }
+
         const next = {
           ...observation,
           version: observation.version + 1,
+          ...(standard !== undefined ? { standard } : {}),
           // ====================================================================
           // CORRECTING A GUESSED FIGURE IS A DECISION ABOUT THAT ROW.
           //
@@ -639,7 +697,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // The register FIRST: a callout the old word lists gave up on is re-read on
     // the way past (`upgradeCalloutGuesses`), and it can only claim COM 1 if it
     // is holding the field ids while it does.
-    const fieldRows = await sql`select id, json_id, name, field_category from spec_fields order by sort_order`;
+    // With its palettes, because one read-time upgrade asks whether a value is
+    // a palette option (0041's `upgradeStandards`), and the autosave and the
+    // confirm read it the same way.
+    const fieldRows = await loadFieldsWithPalettes(sql);
     const staged = assertStagedDrawings(run.parsed, specFieldEntries(fieldRows));
     // ======================================================================
     // THE PALETTE IS RESOLVED HERE, NOT WRITTEN INTO `intake_runs.parsed`.
@@ -654,7 +715,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // parallel list is one more thing a caller can forget to pass -- which
     // would be a card offering a list the confirm never saw.
     // ======================================================================
-    const fields = withPalettes(fieldRows, await loadPalettes(sql));
+    const fields = fieldRows;
     // The same pairing the pack-wide screen uses, so the two can never disagree
     // about whether a card can commit. See src/lib/drawing-resolution.ts.
     const context = await loadDrawingContext(String(run.project_id));

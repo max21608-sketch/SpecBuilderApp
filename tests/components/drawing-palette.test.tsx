@@ -129,17 +129,18 @@ function timberCallout(value: string | null): DrawingObservation {
 }
 
 describe("a callout on a palette-backed BWS field", () => {
-  it("names the palette, offers its options, and keeps the drawing's words", () => {
+  it("names the palette as the BW standard, offers its options and TBC, and keeps the drawing's words", () => {
     // The real pack says this forty times over. It is not on BWS's list and
     // never will be: the drawing states the designer's intent and the palette
     // is BW's manufacturing range.
     renderCard([timberCallout("Dark tinted wood")]);
     const row = rowFor("Dark tinted wood");
 
-    expect(within(row).getByText("BWS timber finish palette")).toBeInTheDocument();
+    expect(within(row).getByText(/BW standard — BWS timber finish palette/)).toBeInTheDocument();
     const select = paletteSelect(row);
     expect(within(select).getByText("BW Oak Natural - Open grain 10%")).toBeInTheDocument();
     expect(within(select).getByText("BW Walnut Dark")).toBeInTheDocument();
+    expect(within(select).getByText(/TBC — BW to propose one/)).toBeInTheDocument();
     // FREE TEXT IS THE DEFAULT AND IT IS STILL THERE.
     expect(within(row).getByDisplayValue("Dark tinted wood")).toBeInTheDocument();
   });
@@ -157,26 +158,37 @@ describe("a callout on a palette-backed BWS field", () => {
     expect(screen.getByRole("button", { name: /^Confirm/ })).toBeEnabled();
   });
 
-  it("sits on Other... while the value is the page's own words", () => {
+  it("sits on Other... while no BW standard is set", () => {
     renderCard([timberCallout("Dark tinted wood")]);
     expect(paletteSelect(rowFor("Dark tinted wood")).value).toBe("__other__");
   });
 
-  it("sits on the option where the drawing quotes BWS's own wording", () => {
-    // Expect this never to fire on today's data. It is one call to a function
-    // that already exists, and it is what the whole control is FOR.
-    renderCard([timberCallout("BW WALNUT DARK")]);
-    const select = paletteSelect(rowFor("BW WALNUT DARK"));
-    expect(select.value).toBe("BW Walnut Dark");
-    // On the list, so nothing is said about it.
+  it("OFFERS the option as a suggestion where the drawing quotes BWS's own wording, and writes nothing unseen", async () => {
+    // Expect this almost never to fire on today's data. The exact step is the
+    // whole matcher, and an exact hit is still only an offer (0041).
+    const spies = renderCard([timberCallout("BW WALNUT DARK")]);
+    const row = rowFor("BW WALNUT DARK");
+    expect(paletteSelect(row).value).toBe("__other__");
+    expect(within(row).getByText("the drawing's own words are this BWS option")).toBeInTheDocument();
+    // On the list, so nothing is said about it being off it.
     expect(screen.queryByText(/Not one of the/)).toBeNull();
+    expect(spies.of("onSaveObservation")).toHaveLength(0);
+
+    await userEvent.click(within(row).getByRole("button", { name: /Use BW Walnut Dark as the BW standard/ }));
+    const saved = spies.of("onSaveObservation");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.args[2]).toEqual({ standard: { state: "proposed", value: "BW Walnut Dark" } });
   });
 
-  it("sits on the option where the drawing quotes only BWS's code", () => {
+  it("offers the option where the drawing quotes only BWS's code", () => {
     // The case `spec_palette_options.code` exists for (0035).
     resetIds();
     renderCard([callout("STUDS", "U1660-6031", null, { specFieldId: "field-stud" })]);
-    expect(paletteSelect(rowFor("U1660-6031")).value).toBe("Standard - French Natural | BWE Code: U1660-6031");
+    expect(
+      within(rowFor("U1660-6031")).getByRole("button", {
+        name: /Use Standard - French Natural \| BWE Code: U1660-6031 as the BW standard/,
+      }),
+    ).toBeInTheDocument();
   });
 
   it("says nothing at all about a row that states nothing", () => {
@@ -184,31 +196,57 @@ describe("a callout on a palette-backed BWS field", () => {
     // report — only the list, in case the reviewer knows the answer.
     renderCard([timberCallout(null)]);
     expect(screen.queryByText(/Not one of the/)).toBeNull();
-    expect(screen.getByText("BWS timber finish palette")).toBeInTheDocument();
+    expect(screen.getByText(/BWS timber finish palette/)).toBeInTheDocument();
   });
 });
 
-describe("picking an option", () => {
-  it("writes the option through the autosave that already exists", async () => {
+describe("picking a BW standard (0041)", () => {
+  it("writes the standard through the autosave, and never the value", async () => {
     const spies = renderCard([timberCallout("Dark tinted wood")]);
     await userEvent.selectOptions(paletteSelect(rowFor("Dark tinted wood")), "BW Walnut Dark");
 
     const saved = spies.of("onSaveObservation");
     expect(saved).toHaveLength(1);
-    // `value` and nothing else. `valueRaw` is untouched, which is what keeps
-    // the provenance honest and why this needed no column and no migration.
-    expect(saved[0]?.args[2]).toEqual({ value: "BW Walnut Dark" });
+    // THE STANDARD AND NOTHING ELSE. `value` is the client's words, and the
+    // pick writing over it was the defect 0041 closed.
+    expect(saved[0]?.args[2]).toEqual({ standard: { state: "proposed", value: "BW Walnut Dark" } });
   });
 
-  it("puts the drawing's own words back when Other... is chosen from an option", () => {
-    // Reachable only FROM an option: a select already showing "Other..." fires
-    // no change event, so the control can never destroy typed text.
-    const spies = renderCard([timberCallout("BW WALNUT DARK")]);
-    return userEvent.selectOptions(paletteSelect(rowFor("BW WALNUT DARK")), "__other__").then(() => {
-      const saved = spies.of("onSaveObservation");
-      expect(saved).toHaveLength(1);
-      expect(saved[0]?.args[2]).toEqual({ value: "BW WALNUT DARK" });
-    });
+  it("can say BW will propose one", async () => {
+    const spies = renderCard([timberCallout("Dark tinted wood")]);
+    await userEvent.selectOptions(paletteSelect(rowFor("Dark tinted wood")), "__standard_tbc__");
+    expect(spies.of("onSaveObservation")[0]?.args[2]).toEqual({ standard: { state: "tbc" } });
+  });
+
+  it("shows the client's words and the standard side by side", () => {
+    renderCard([
+      timberCallout("feet dark tinted wood as per approved sample"),
+    ].map((row) => ({ ...row, standard: { state: "proposed" as const, value: "BW Walnut Dark", optionId: "opt-1" } })));
+    const row = rowFor("feet dark tinted wood as per approved sample");
+    expect(paletteSelect(row).value).toBe("BW Walnut Dark");
+    // Both halves, on one line: what the page said, and BW's answer to it.
+    const line = within(row).getByText(/Client:/).closest("p");
+    expect(line).toHaveTextContent(
+      "Client: feet dark tinted wood as per approved sample · BW standard: BW Walnut Dark (proposed)",
+    );
+    // The value box is still the client's words, untouched.
+    expect(within(row).getByDisplayValue("feet dark tinted wood as per approved sample")).toBeInTheDocument();
+    // A row with a standard is not nagged about being off the list.
+    expect(screen.queryByText(/Not one of the/)).toBeNull();
+  });
+
+  it("clears the standard with Other..., and never destroys the client's words", async () => {
+    const spies = renderCard([
+      { ...timberCallout("Dark tinted wood"), standard: { state: "proposed", value: "BW Walnut Dark", optionId: "opt-1" } },
+    ]);
+    const row = rowFor("Dark tinted wood");
+    await userEvent.selectOptions(paletteSelect(row), "__other__");
+    const saved = spies.of("onSaveObservation");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.args[2]).toEqual({ standard: null });
+    // Nothing about the value was sent, and the box still holds it.
+    expect(Object.keys(saved[0]?.args[2] as object)).not.toContain("value");
+    expect(within(row).getByDisplayValue("Dark tinted wood")).toBeInTheDocument();
   });
 });
 

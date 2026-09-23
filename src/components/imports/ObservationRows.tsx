@@ -52,6 +52,7 @@ import {
   type Palette,
 } from "@/lib/palettes";
 import SwatchPicker from "@/components/imports/SwatchPicker";
+import { STANDARD_STATE_LABELS, type StagedStandard } from "@/lib/bw-standard";
 import SuggestButton from "@/components/ui/SuggestButton";
 import Chip from "@/components/ui/Chip";
 import { isFinishGroup } from "@/lib/finishes";
@@ -275,6 +276,8 @@ export function OtherDimensionsToggle({
  * `AnswerValue`'s, so the two controls cannot mean different things by it.
  */
 const FREE_TEXT = "__other__";
+/** "BW will propose one" -- a state, never a value. */
+const STANDARD_TBC = "__standard_tbc__";
 
 /**
  * THE LIST A BWS FIELD OFFERS, BESIDE THE WORDS THE PAGE PRINTED.
@@ -308,19 +311,28 @@ const FREE_TEXT = "__other__";
  * evidence rather than a default. On this corpus it would buy nothing at all:
  * not one unmatched callout is a substring of an option or contains one.
  *
- * ---- FREE TEXT IS THE DEFAULT AND IS ALWAYS REACHABLE ----------------------
+ * ---- THE PICK IS A BW STANDARD, BESIDE THE PAGE'S WORDS, NEVER OVER THEM ------
  *
- * The value box above this is untouched: the page's own words are what the row
- * starts with and what it keeps unless a person changes it. This control only
- * ever writes `value`, through the autosave that already exists -- `valueRaw`
- * still holds what the drawing said and the row already prints it underneath,
- * which is what keeps the provenance honest and why this needs no column and
- * no migration.
+ * 0041, Max 2026-09-23. Until then this control wrote the chosen option into
+ * `value`, and because `record_attributes` has no raw column the confirm
+ * inserted only the option: the client's "feet dark tinted wood as per
+ * approved sample" survived only inside `intake_runs.parsed`. Now the pick is
+ * the observation's `standard` -- what BW proposes to make -- written through
+ * the same autosave, and `value` goes on holding what the reviewer agrees the
+ * PAGE said. The row reads "Client: <words> · BW standard: <option>
+ * (proposed)", and the confirm writes the two into two sets of columns.
  *
- * `Other...` is the state the row is in whenever the value is not an option,
- * so it cannot destroy typed text: a select already showing it fires no change
- * event. Choosing it is only reachable FROM an option, where it means "undo
- * that pick" and puts the drawing's own words back.
+ * `Other…` means "no BW standard". It clears the standard and never touches
+ * the value box, so it cannot destroy the client's words -- and a select
+ * already showing it fires no change event, so it cannot fire by accident.
+ * `TBC` is "BW will propose one". An AGREEMENT is not offered here: that is
+ * the client's, recorded on the record after confirm with the email that says
+ * so.
+ *
+ * THE EXACT MATCH IS A SUGGESTION, NEVER A PICK. Where the drawing's own
+ * words ARE an option -- BWS's wording, or only its code -- a `SuggestButton`
+ * offers that option as the standard with the reason beside it. Nothing is
+ * written until a person presses it.
  *
  * A palette with no options offers no dropdown at all -- `unheldPaletteNote`
  * says so in a sentence, because an empty select reads as broken and a
@@ -332,50 +344,81 @@ const FREE_TEXT = "__other__";
 export function PaletteChoice({
   palette,
   value,
-  valueRaw,
+  standard,
   disabled,
   onPick,
 }: {
   palette: Palette;
-  /** What the row currently holds -- the reviewer's draft where there is one. */
+  /** What the row currently holds -- the reviewer's draft where there is one. The CLIENT'S words. */
   value: string | null;
-  /** What the page printed, restored by "Other...". */
-  valueRaw: string | null;
+  /** The BW standard already set on the row, if any. */
+  standard: StagedStandard | null | undefined;
   disabled: boolean;
-  onPick: (next: string | null) => void;
+  /** A new standard, or null for none. Never a value: the words are not this control's. */
+  onPick: (next: { state: "proposed"; value: string } | { state: "tbc" } | null) => void;
 }) {
   if (!isOfferable(palette)) {
     return <p className="mt-1 text-xs text-slate-500">{unheldPaletteNote(palette)}</p>;
   }
 
-  const onPalette = normalisePaletteValue(palette, value);
+  const selected =
+    standard?.state === "proposed"
+      ? (normalisePaletteValue(palette, standard.value) ?? standard.value)
+      : standard?.state === "tbc"
+        ? STANDARD_TBC
+        : FREE_TEXT;
+  const wordsAreAnOption = normalisePaletteValue(palette, value);
   return (
     <div className="mt-1">
-      <p className="text-[11px] text-neutral-500">{palette.name}</p>
+      <p className="text-[11px] text-neutral-500">BW standard — {palette.name}</p>
       <select
-        value={onPalette ?? FREE_TEXT}
+        value={selected}
         disabled={disabled}
+        aria-label="BW standard"
         onChange={(event) => {
           const chosen = event.target.value;
-          onPick(chosen === FREE_TEXT ? valueRaw : chosen);
+          onPick(
+            chosen === FREE_TEXT ? null : chosen === STANDARD_TBC ? { state: "tbc" } : { state: "proposed", value: chosen },
+          );
         }}
         className="mt-0.5 w-full border border-neutral-300 rounded px-1 py-0.5 text-xs disabled:opacity-50"
       >
-        <option value={FREE_TEXT}>Other&hellip; — keep the drawing&rsquo;s own words</option>
+        <option value={FREE_TEXT}>Other&hellip; — no BW standard, keep the drawing&rsquo;s own words</option>
+        <option value={STANDARD_TBC}>TBC — BW to propose one</option>
         {palette.options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
       </select>
+      {/* BOTH HALVES, SIDE BY SIDE, once there is a standard. The client's
+          words are the value box above; this says them again beside BW's
+          answer so the row reads as the record will. */}
+      {standard && (
+        <p className="mt-0.5 text-xs text-neutral-700">
+          <span className="text-neutral-500">Client:</span> {value?.trim() || "—"}{" "}
+          <span className="text-neutral-400">·</span> <span className="text-neutral-500">BW standard:</span>{" "}
+          {standard.state === "tbc" ? STANDARD_STATE_LABELS.tbc : `${standard.value} (${STANDARD_STATE_LABELS.proposed})`}
+        </p>
+      )}
+      {!standard && wordsAreAnOption && (
+        <div className="mt-1">
+          <SuggestButton
+            value={`Use ${wordsAreAnOption} as the BW standard`}
+            evidence="the drawing's own words are this BWS option"
+            disabled={disabled}
+            onAccept={() => onPick({ state: "proposed", value: wordsAreAnOption })}
+          />
+        </div>
+      )}
       {/* NEUTRAL, NOT AMBER, AND NEVER A BLOCKER. On the record screen the same
           sentence is amber, because a settled answer sitting outside its list
           is a question. At intake it is the normal case -- every real callout
           measured -- and amber on all of them teaches a reviewer to ignore
           amber, which is the argument that keeps `unanswerable` slate.
           Nothing to be off is not a mismatch, so a row with no value says
-          nothing at all. */}
-      {onPalette === null && (value ?? "").trim() !== "" && (
+          nothing at all, and nor does one that already has a standard. */}
+      {!standard && wordsAreAnOption === null && (value ?? "").trim() !== "" && (
         <p className="mt-0.5 text-xs text-neutral-500">{offPaletteNote(palette)}</p>
       )}
     </div>
@@ -767,21 +810,11 @@ export function ObservationRow({
           <PaletteChoice
             palette={palette}
             value={value}
-            valueRaw={observation.valueRaw}
+            standard={observation.standard}
             disabled={busy}
-            onPick={(next) => {
-              // THE DRAFT GOES FIRST. The value box is controlled by
-              // `drafts[id] ?? observation.value`, so a half-typed draft left
-              // behind would go on showing the old text over the value that
-              // was just picked -- the reload would land and the box would
-              // still disagree with it.
-              setDrafts((current) => {
-                const rest = { ...current };
-                delete rest[observation.id];
-                return rest;
-              });
-              callbacks.onChange(observation, { value: next });
-            }}
+            // THE STANDARD, AND NOTHING ELSE (0041). The value box and its
+            // draft are the client's words and this control never writes them.
+            onPick={(next) => callbacks.onChange(observation, { standard: next })}
           />
         )}
         {observation.materialCodeRaw && (
