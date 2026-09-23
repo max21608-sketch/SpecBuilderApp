@@ -379,13 +379,24 @@ describeIfDb("confirming configurations a document names", () => {
     const fabricOn = async (label: string) =>
       (
         await client.query(
+          // COM 1-3 only (json_id 1, 2, 14): the shared timber row reaches every
+          // configuration too, which is asserted separately below.
           `select a.value from record_attributes a join spec_records r on r.id = a.record_id
-            where r.parent_id = $1 and r.variant_label = $2 and a.spec_field_id is not null`,
+             join spec_fields f on f.id = a.spec_field_id
+            where r.parent_id = $1 and r.variant_label = $2 and a.status = 'active' and f.json_id in (1, 2, 14)`,
           [bill, label],
         )
       ).rows.map((row) => row.value);
     expect(await fabricOn("TYPE 6")).toEqual(["Maker B, Ref. Y"]);
     expect(await fabricOn("TYPE 2")).toEqual([]);
+    // A SHARED row reaches every configuration, the one a reviewer added included.
+    const timberOn = await client.query(
+      `select r.variant_label from record_attributes a join spec_records r on r.id = a.record_id
+        where r.parent_id = $1 and a.status = 'active' and a.value = 'feet dark tinted wood as per approved sample'
+        order by r.variant_label`,
+      [bill],
+    );
+    expect(timberOn.rows.map((row) => row.variant_label)).toEqual(["TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5", "TYPE 6"]);
   });
 
   // PLAN STEP 5: two documents, one set of configurations. The spec sheet
