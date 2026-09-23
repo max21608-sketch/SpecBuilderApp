@@ -148,7 +148,10 @@ describe("the automatic structure read", () => {
     expect(body.version).toBe(7);
     expect(body.requestId).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.sheetIndex).toBeUndefined();
-    expect(await screen.findByText(/Columns and row kinds read by the model — check them on the panel/)).toBeInTheDocument();
+    // A successful read reports itself through the reload — the yellow banner
+    // over a model's columns — and not through a second notice; it is not a
+    // failure either.
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Ask again/ })).toBeNull());
     // Reloads do not ask again.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(structureCalls()).toHaveLength(1);

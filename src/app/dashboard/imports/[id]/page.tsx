@@ -611,11 +611,9 @@ export default function ReviewImportPage() {
           else setStructureError(res.error);
           return;
         }
-        if (res.data?.nothing) return;
-        setNotice(
-          "Columns and row kinds read by the model — check them on the panel, then press “The columns are right”. " +
-            "Every cell was read by code from the stored spreadsheet.",
-        );
+        // No notice on success: the yellow banner that the reload brings up
+        // says the same thing, on every sheet the model read, until the
+        // reviewer checks it — two banners for one fact is one to ignore.
       } finally {
         setAsking(null);
       }
@@ -829,7 +827,10 @@ export default function ReviewImportPage() {
                 app was read by a model and charged for it; a bill is parsed by
                 code, and a reviewer who does not know that treats the figures
                 as something to second-guess. */}
-            Parsed by code, not by a model — nothing here was charged. {sheets.length} tab
+            {Object.keys(run.model_metadata?.structureRead?.sheets ?? {}).length > 0
+              ? "Every cell read by code; the model read the columns (one small read, charged)."
+              : "Parsed by code, not by a model — nothing here was charged."}{" "}
+            {sheets.length} tab
             {sheets.length === 1 ? "" : "s"}
             {revisionLabel && <> · {revisionLabel}</>}
             {/* A reload after an action. Inline rather than a spinner over the
