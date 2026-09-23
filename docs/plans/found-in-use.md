@@ -35,6 +35,22 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-23
 
+### A bill's own specification read repeats the bill's columns, ~400 rows to ignore one by one
+
+**Status: open, recorded 2026-09-23** on the local stack, real AMB bill (read
+`0a679852…`, re-matched free). Of 667 proposals, 233 place and **411 are
+"record only"** — nearly all of them the bill's own columns read back as
+specifications (`Item Description` 101, `Model Ref` 57, `DWG REF` 19, `Unit`
+13) or a fabric line's properties (`Certifications`, `Composition`,
+`Durability`, `Pattern Repeat`, `Width`, 16 each). A reviewer has to ignore
+each, and the confirm for that record waits until they do. Two fixes, neither
+built: tell the model not to repeat the bill's own columns (a prompt change,
+which means a charged re-read), or an Ignore the app SUGGESTS for a proposal
+whose label is one of the bill's mapped headings (free, and the reviewer still
+presses it). The 8 still ambiguous are a real conflict in the bill (row 25's
+bracket names `GR-FUR-03` under `PL-FUR-03B`).
+
+
 ### Seen while building the configurations work, none of them fixed
 
 **Status: open, recorded 2026-09-23** from the browser walks on the local stack, real Panther

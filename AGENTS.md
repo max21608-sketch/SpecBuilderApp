@@ -60,6 +60,7 @@ one agent.
 | `npm run vocab:gap` | read only: every label the staged documents carry, which route places it (slot / BWS field / question), what is left, and — the point — what a looser rule would have wrongly written instead. Run it before seeding `requirement_aliases`, and read the NEAR MISSES before adding one |
 | `npm run boq:gap -- <folder> [--golden <dir>]` | read only, no database: what every bill in a folder reduces to through the real reader — how the header was found, the column map, lines, lines with no code or qty, row kinds, qty sum — and, with `--golden`, line/code/quantity/fabric-parent accuracy against hand-checked expectations kept OUTSIDE the repo. It is how "the reader nails this specifier" becomes a number |
 | `npm run db:backfill-standards` | one-off: where a palette pick at intake OVERWROTE the drawing's words (before 0041), puts the words back into `value` and the pick into `standard_*` as `proposed`, read from the staged run. Dry run unless `--apply`; safe to re-run; ambiguous rows are reported, never guessed |
+| `npm run spec:gap -- <runId>` | read only, local stack: a specification-document run's proposals by outcome (placed / record only / ambiguous / nothing) as STAGED and as a free re-match would leave them, and the top unplaced labels. Run it before and after any change to `spec-reading-vocab.ts` |
 | `npm run palette:gap` | read only: every callout that lands on a palette-backed BWS field, how many match an option exactly, and — the point — what a SUBSTRING step would have written instead. Run it before widening the match past the exact step. On 2026-09-22 it read 98 callouts over 47 staged runs, **0 matching and 0 near misses**, which is the evidence §6.2 asked for |
 
 Tests run in FOUR tiers — pure / component / db-gated / route. **A db-tier
@@ -2386,6 +2387,40 @@ columns are plainly there was a dead end because of the words above them. Max:
 128K ceiling and two thirds of the model deadline — so a longer bill is read
 in ROW WINDOWS, which is not the excluded "splitting an oversize drawing set":
 a spreadsheet has rows, and a row window loses nothing a page split would.
+
+### A bill's own specification read resolves by ROW, and a long sheet is read in windows
+
+`src/lib/bill-rows.ts`, `src/lib/spec-document.ts` (`resolveRecords`),
+`src/lib/spec-document-registers.ts` (`loadBillRowIndex`),
+`src/lib/spec-reading-vocab.ts`, `src/lib/spreadsheet-windows.ts`,
+`src/lib/extraction-windows.ts`, `tools/spec-gap.ts`
+
+The first read of a real bill's descriptions (AMB, 101 lines) produced 559
+proposals and placed 18: fabric-line refs such as `GR-FAB-13 (GR-FUR-10)` found
+no record, a code on two lines was ambiguous, and "Spec size: D 460 X H 450 mm"
+reached no slot. **The row is the record**: a read registered from a confirmed
+bill (`boq-specs:<runId>`) maps each proposal's sheet row to the record the
+bill's confirm made of it — a fabric line to its item — and that precedes the
+ref matcher; a readable ref naming a DIFFERENT record is offered with the row's
+record and neither is chosen. A fabric line's sizes never fill the item's slots
+(its Width is a roll width); an item's metric size line is placed over its
+imperial one; "Fabric: COM" and stone codes fill no field; a code the item
+already holds is aimed at its own field, never at the next free COM. Re-matching
+the staged read (free): **233 placed, 0 with nowhere to go** (was 18 and 88).
+Still left for a person: ~400 rows that repeat the bill's own columns (Item
+Description, Model Ref, Unit) — `found-in-use.md`, 2026-09-23.
+
+**The wording rules live ONLY in `spec-reading-vocab.ts`**, each with the bill
+it came from, because they were derived from ONE specifier's bill before
+Matthew's examples arrived: size labels, the zone prefix (`GR-TIM-09` reads as
+`TIM-09`), the words that mean COM. Add to it from verified wording only, and
+run `npm run spec:gap -- <runId>` before and after.
+
+**Windows:** a spreadsheet for an observation kind is sent as numbered rows, in
+windows of 40, three in flight, at most nine, inside ONE attempt, so 360 rows
+fit the unchanged timing inequality; more is refused before any call, in words.
+One retryable failure re-reads every window (the succeeded ones are paid for
+twice) — the fix, not built, is each window as its own queue message.
 
 ### A failure names its reason on the row, and the panel stays open
 
