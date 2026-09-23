@@ -35,6 +35,8 @@ import {
   parentVariantsOf,
   rowWriteRecords,
   configurationsToCreate,
+  configurationTarget,
+  namedTargetsFor,
   type NamedTargets,
   type DrawingBlocker,
   type DrawingResolution,
@@ -102,6 +104,15 @@ export type NamedResolution = {
   existing: Record<string, Record<string, string>>;
   /** Variant id -> what to call it on the card: `MAIN RUN · TYPE 2`. */
   recordNames: Record<string, string>;
+  /**
+   * Per ticked bill line, per label: where it lands — an existing configuration
+   * (and why), a new one, or a question. `configurationTarget`'s answer.
+   * Optional: a payload from before step 5 carries none.
+   */
+  lands?: Record<
+    string,
+    Record<string, { kind: "existing"; as: string; via: "linked" | "exact" | "paired" } | { kind: "create" | "ask" }>
+  >;
 };
 
 /** What the card shows about one uncoded finish. Compact: it crosses the wire. */
@@ -327,7 +338,7 @@ export function resolveStagedRun(
       }
     }
     const plan = plans.get(item.id) ?? null;
-    const named: NamedTargets | null = plan ? { plan, variants: variantsByParent } : null;
+    const named: NamedTargets | null = plan ? namedTargetsFor(item, plan, variantsByParent, staged) : null;
     // A named page reads occupancy off the REAL variants: one bill line has
     // several, and a re-key onto the parent could only hold one of them.
     const occupied = named ? context.occupied : occupancyThrough(context.occupied, writesTo);
@@ -416,12 +427,22 @@ function namedResolution(targets: string[], resolution: DrawingResolution, named
       recordNames[variantId] = `${runNameOf.get(parentId) ?? "this phase"} · ${label}`;
     }
   }
+  const lands: NamedResolution["lands"] = {};
+  for (const parentId of targets) {
+    lands[parentId] = {};
+    for (const label of named.plan.labels) {
+      const target = configurationTarget(parentId, label, named);
+      lands[parentId][label] =
+        target.kind === "existing" ? { kind: "existing", as: target.as, via: target.via } : { kind: target.kind };
+    }
+  }
   return {
     labels: named.plan.labels,
     rows: named.plan.rows,
     create: Object.fromEntries(configurationsToCreate(targets, named)),
     existing,
     recordNames,
+    lands,
   };
 }
 

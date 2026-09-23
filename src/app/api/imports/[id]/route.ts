@@ -176,6 +176,21 @@ const DrawingPatch = z
         // answer to whether the pages are one item or several. Written to
         // every page of the code by the card; the model's reading is never
         // touched.
+        // THE ITEM'S, plan step 5: which existing configuration of a bill
+        // line each of this page's configurations IS, or null for "create a
+        // new one". The whole list is sent, like `configurationAcks`.
+        configurationPairs: z
+          .array(
+            z
+              .object({
+                recordId: z.string().uuid(),
+                label: z.string().min(1).max(64),
+                pairWith: z.string().min(1).max(64).nullable(),
+              })
+              .strict(),
+          )
+          .max(200)
+          .optional(),
         configurationsByReviewer: z
           .array(z.object({ label: z.string().min(1).max(64), readAs: z.string().max(64).nullable() }).strict())
           .max(30)
@@ -310,6 +325,15 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
                     }
                   : {}),
                 ...(configurationsByReviewer !== undefined ? { configurationsByReviewer } : {}),
+                ...(changes.configurationPairs !== undefined
+                  ? {
+                      configurationPairs: changes.configurationPairs.map((pair) => ({
+                        recordId: pair.recordId,
+                        label: normaliseVariantLabel(pair.label),
+                        pairWith: pair.pairWith === null ? null : normaliseVariantLabel(pair.pairWith),
+                      })),
+                    }
+                  : {}),
                 ...(changes.relationshipByReviewer !== undefined
                   ? { relationshipByReviewer: changes.relationshipByReviewer }
                   : {}),

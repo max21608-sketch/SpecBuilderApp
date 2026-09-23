@@ -58,7 +58,7 @@ import {
   type SpecField,
 } from "@/components/imports/ObservationRows";
 import type { CroppedImage } from "@/lib/pdf-crop";
-import { AddConfiguration } from "@/components/imports/ConfigurationControls";
+import { AddConfiguration, UnsplitNote } from "@/components/imports/ConfigurationControls";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Tip from "@/components/ui/Tip";
@@ -152,8 +152,11 @@ export default function ItemCard({
   onSwatch,
   onSetLevel,
   onSaveItem,
+  unsplitNames,
 }: {
   item: DrawingItem;
+  /** Configurations the page names but gives nothing different to — read as one item. */
+  unsplitNames?: string[] | null;
   /**
    * Every page of this item, for the swatch picker. A code drawn once is one
    * page; the model's own code group can still name a second one that staged
@@ -308,7 +311,25 @@ export default function ItemCard({
     </Button>
   );
 
-  const header = (
+  const unsplit =
+    unsplitNames && unsplitNames.length > 0 ? (
+      <div className="border-b border-neutral-200 px-4 pb-2">
+        <UnsplitNote
+          names={unsplitNames}
+          disabled={busy}
+          onSplit={
+            onSaveItem
+              ? () =>
+                  void onSaveItem(item, {
+                    configurationsByReviewer: unsplitNames.map((label) => ({ label, readAs: label })),
+                  })
+              : undefined
+          }
+        />
+      </div>
+    ) : null;
+
+  const headerBar = (
     <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2.5">
       {/* THE CODE IS THE NAME. Mono, normal case, at the size a heading is read
           at — not the card heading's uppercase tracking, which turns `S-201`
@@ -367,6 +388,12 @@ export default function ItemCard({
         {open ? "Collapse" : "Expand"}
       </Button>
     </div>
+  );
+  const header = (
+    <>
+      {headerBar}
+      {unsplit}
+    </>
   );
 
   if (!open) {

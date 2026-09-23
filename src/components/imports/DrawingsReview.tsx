@@ -52,6 +52,7 @@ import ItemCard, {
 } from "@/components/imports/DrawingItemCard";
 import ConfigurationCard from "@/components/imports/ConfigurationCard";
 import { cardHasPending, configurationCards } from "@/lib/configuration-cards";
+import ReviewItemList, { type ReviewItemLine } from "@/components/imports/ReviewItemList";
 import { describePartialConfirm } from "@/lib/confirm-partial";
 
 type Run = {
@@ -214,6 +215,7 @@ export default function DrawingsReview({
    * a reviewer who has to rule on it.
    */
   const [current, setCurrent] = useState(0);
+  const [pendingOnly, setPendingOnly] = useState(true);
 
   // Server-acked state is held separately from what the reviewer is typing, so
   // a reload cannot wipe an unsaved edit and an autosave cannot fight the input.
@@ -548,6 +550,12 @@ export default function DrawingsReview({
     </>
   );
 
+  /** Put the card at this position on screen, from the item list. */
+  function jump(index: number) {
+    setCurrent(index);
+    document.getElementById(`drawing-card-${index}`)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }
+
   /** Move the navigator, and put the card it names on screen. */
   function step(delta: number, count: number) {
     setCurrent((index) => {
@@ -683,7 +691,24 @@ export default function DrawingsReview({
   );
   const reviewComplete = pendingItems.length === 0;
   // Grouped into cards: one per code, one per page for a code drawn once.
-  const cards = configurationCards(staged.items, byItem, staged).filter(cardHasPending);
+  // "Pending only" (the item list) hides settled cards from the screen as well
+  // as the list; it never changes what any card's confirm covers.
+  const allCards = configurationCards(staged.items, byItem, staged);
+  const cards = pendingOnly ? allCards.filter(cardHasPending) : allCards;
+  const itemLines: ReviewItemLine[] = cards.map((card) => {
+    const items = card.kind === "single" ? [card.item] : card.members.map((member) => member.item);
+    const blocker = items
+      .filter((item) => item.observations.some((o) => o.reviewStatus === "pending"))
+      .map((item) => byItem.get(item.id)?.blockers[0]?.message ?? null)
+      .find(Boolean);
+    return {
+      key: card.id,
+      code: card.kind === "single" ? (card.item.itemCodeRaw ?? "no code") : card.codeRaw,
+      name: card.kind === "single" ? card.item.itemNameRaw : card.name,
+      pending: items.reduce((total, item) => total + item.observations.filter((o) => o.reviewStatus === "pending").length, 0),
+      blocked: blocker ?? null,
+    };
+  });
   // Split, because the two have different answers. A page whose CODE matched
   // nothing is waiting for the bill of quantities; a page with no code at all
   // will never match one however many bills are confirmed, so sending its
@@ -804,6 +829,17 @@ export default function DrawingsReview({
                 </>
               ))}
             .
+            <ReviewItemList
+              lines={itemLines}
+              current={Math.min(current, cards.length - 1)}
+              onJump={jump}
+              pendingOnly={pendingOnly}
+              onPendingOnly={(value) => {
+                setPendingOnly(value);
+                setCurrent(0);
+              }}
+              settledHidden={allCards.length - allCards.filter(cardHasPending).length}
+            />
           </Note>
         );
       })()}
@@ -819,6 +855,7 @@ export default function DrawingsReview({
             {card.kind === "single" ? (
               <ItemCard
                 item={card.item}
+                unsplitNames={card.unsplitNames}
                 pages={card.pages}
                 importId={importId}
                 resolution={byItem.get(card.item.id)}

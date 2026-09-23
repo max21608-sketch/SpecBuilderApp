@@ -38,6 +38,7 @@
 // ============================================================================
 import {
   groupItemsByCode,
+  canonicalCode,
   measuredKey,
   measuredRows,
   codeGroupFor,
@@ -57,6 +58,7 @@ import {
   type DrawingObservation,
 } from "@/lib/drawing-document";
 import { parseDimensionFigure } from "@/lib/dimensions";
+import { normaliseRef } from "@/lib/record-refs";
 import { DIMENSION_SLOT_LABELS, type DimensionSlot } from "@/lib/spec-vocab";
 
 /** Where a configuration's page has got to. Letters ignore this entirely. */
@@ -103,7 +105,15 @@ export type GeometryComparison =
   | { status: "disagree"; differences: GeometryDifference[] };
 
 export type ReviewCard<R> =
-  | { kind: "single"; id: string; page: number | null; pages: number[]; item: DrawingItem }
+  | {
+      kind: "single";
+      id: string;
+      page: number | null;
+      pages: number[];
+      item: DrawingItem;
+      /** See the configurations card's `unsplitNames`. */
+      unsplitNames?: string[] | null;
+    }
   | {
       kind: "configurations";
       id: string;
@@ -154,6 +164,13 @@ export type ReviewCard<R> =
       relationshipRead: "one_item" | "configurations" | "unclear" | null;
       /** The reviewer's own answer (brief C1), or null. */
       relationshipByReviewer: "one_item" | "configurations" | null;
+      /**
+       * The configurations the pages NAME but give nothing different to — so
+       * the code is read as one item (`configurationsDistinguishSomething`).
+       * The card says so in words, and offers to split it by hand. Null
+       * wherever that is not the case.
+       */
+      unsplitNames?: string[] | null;
     };
 
 /** One row on a named configuration's tab — the SAME observation on every tab it lands on. */
@@ -557,7 +574,11 @@ export function configurationCards<
   // Pages whose code NAMES its configurations. Such a code is a card of its own
   // even when it is drawn on ONE page: S-301's sheet alone is five chairs.
   const plans = namedConfigurationPlans(items, doc);
-  const byCode = plans.size > 0 ? codeConfigurations(items, doc) : new Map<string, never>();
+  const byCode = codeConfigurations(items, doc);
+  const unsplit = (code: string) => {
+    const entry = byCode.get(code);
+    return entry?.undistinguished ? entry.read.map((configuration) => configuration.label) : null;
+  };
   const crossPage = plans.size > 0 ? crossPageClaims(items, doc) : new Map<string, never>();
   const cards: ReviewCard<R>[] = [];
   const grouped = new Set<string>();
@@ -600,6 +621,7 @@ export function configurationCards<
       id: `code:${code}`,
       split,
       groupedBecause: codeGroupFor(doc ?? { schemaVersion: 1 }, group[0]!.itemCodeRaw)?.evidence ?? null,
+      unsplitNames: unsplit(code),
       relationshipRead: codeGroupFor(doc ?? { schemaVersion: 1 }, group[0]!.itemCodeRaw)?.relationship ?? null,
       relationshipByReviewer:
         group
@@ -638,7 +660,14 @@ export function configurationCards<
 
   for (const item of items) {
     if (grouped.has(item.id)) continue;
-    cards.push({ kind: "single", id: item.id, page: item.page ?? null, pages: pagesOfCard([item], doc), item });
+    cards.push({
+      kind: "single",
+      id: item.id,
+      page: item.page ?? null,
+      pages: pagesOfCard([item], doc),
+      item,
+      unsplitNames: unsplit(normaliseRef(canonicalCode(doc, item.itemCodeRaw) ?? "")),
+    });
   }
 
   return cards.sort(

@@ -81,7 +81,7 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
 import PagePicker from "@/components/imports/PagePicker";
 import NamedConfigurationCard from "@/components/imports/NamedConfigurationCard";
-import { AddConfiguration, PagesAreControl } from "@/components/imports/ConfigurationControls";
+import { AddConfiguration, PagesAreControl, UnsplitNote } from "@/components/imports/ConfigurationControls";
 // A colour per configuration, fixed by LETTER, so A is sky on every card and
 // on every screen that names one. See configuration-colours.ts.
 import { colourForLetter as colourFor } from "@/components/imports/configuration-colours";
@@ -218,6 +218,20 @@ function PageConfigurationCard({
           manual codeGroups.relationship — or name the configurations instead,
           which turns this into a card of named ones. Each writes to every page
           of the code; the model's reading stays beside it. */}
+      {card.unsplitNames && card.unsplitNames.length > 0 && (
+        <UnsplitNote
+          names={card.unsplitNames}
+          disabled={busyHere}
+          onSplit={
+            onSaveItem
+              ? () => {
+                  const list = card.unsplitNames!.map((label) => ({ label, readAs: label }));
+                  for (const member of card.members) void onSaveItem(member.item, { configurationsByReviewer: list });
+                }
+              : undefined
+          }
+        />
+      )}
       {onSaveItem && open && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <PagesAreControl

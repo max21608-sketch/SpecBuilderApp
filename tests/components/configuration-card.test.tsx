@@ -440,3 +440,27 @@ describe("a reviewer saying what these pages are", () => {
     expect(spies.onSaveItem).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("a code whose pages name rooms but give them nothing different", () => {
+  it("says it is read as one item, and offers the split by hand", async () => {
+    resetIds();
+    const pages = [page("a", 1, "Invented cloth", "S-100"), page("b", 2, "Invented cloth", "S-100")];
+    const doc = {
+      schemaVersion: 3 as const,
+      codeGroups: [{ itemCodes: ["S-100"], pages: [1, 2], relationship: "one_item" as const, evidence: "one sofa" }],
+    };
+    pages[1] = { ...pages[1]!, configurations: [{ name: "Type 1", nameRaw: "MUR 1", evidence: null }, { name: "Type 5", nameRaw: "TYPO 5", evidence: null }], depictsConfigurations: ["Type 1", "Type 5"] };
+    const spies = renderConfigurations(
+      pages,
+      new Map(pages.map((entry) => [entry.id, resolution({ id: entry.id, variantLabel: null })])),
+      doc,
+    );
+    expect(screen.getByText(/The pages name TYPE 1 and TYPE 5 but give them nothing different, so this is read as one item/)).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Split into TYPE 1 and TYPE 5" }));
+    expect(spies.onSaveItem.mock.calls.map((call) => call[1])).toEqual([
+      { configurationsByReviewer: [{ label: "TYPE 1", readAs: "TYPE 1" }, { label: "TYPE 5", readAs: "TYPE 5" }] },
+      { configurationsByReviewer: [{ label: "TYPE 1", readAs: "TYPE 1" }, { label: "TYPE 5", readAs: "TYPE 5" }] },
+    ]);
+  });
+});

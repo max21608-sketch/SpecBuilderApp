@@ -202,7 +202,11 @@ export default function NamedConfigurationCard({
   }
   for (const parentId of ticked) {
     for (const tab of named.tabs) {
-      const exists = pendingMembers.some((member) => member.resolution?.named?.existing?.[parentId]?.[tab.label]);
+      const exists = pendingMembers.some(
+        (member) =>
+          member.resolution?.named?.lands?.[parentId]?.[tab.label]?.kind === "existing" ||
+          member.resolution?.named?.existing?.[parentId]?.[tab.label],
+      );
       if (exists) existing.add(`${parentId}|${tab.label}`);
     }
   }
@@ -214,36 +218,69 @@ export default function NamedConfigurationCard({
           toCreate.size === 1 ? "" : "s"
         } under ${card.codeRaw}` + (existing.size > 0 ? ` and writes to ${existing.size} that already exist.` : ".");
 
-  // ----------------------------------------------------- acknowledgements
+  // ------------------------------------------------------------- pairing
   //
-  // Creating a configuration beside a bill line's EXISTING ones waits for a
-  // tick, per bill line and name. Ticked here, stored on each page that would
-  // create it, so every page's confirm sees the same decision.
-  const acksWanted = cardBlockers.filter((blocker) => blocker.code === "configuration_new");
-  const acked = new Map<string, { recordId: string; label: string }>();
-  for (const member of pendingMembers) {
-    for (const ack of member.item.configurationAcks ?? []) {
-      const stillCreates = member.resolution?.named?.create?.[ack.recordId]?.includes(ack.label);
-      if (stillCreates) acked.set(`${ack.recordId}|${ack.label}`, ack);
-    }
-  }
+  // PLAN STEP 5. A configuration the bill line does not already hold under the
+  // page's OWN WORDS is a choice: pair it with one of the bill line's live
+  // configurations, or create it as a new one. Asked, never guessed — "MUR 2"
+  // read as "Type 2" is shown with both names and left to the reviewer. The
+  // choice is stored on every page that names it (`configurationPairs`).
   const runNameOf = (recordId: string) =>
     runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ?? "this phase";
-  const setAck = (recordId: string, label: string, on: boolean) => {
+  type PairRow = { recordId: string; label: string; existing: string[]; namesRaw: string[]; collides: boolean; chosen: string | null | undefined };
+  const pairRows = new Map<string, PairRow>();
+  for (const blocker of cardBlockers) {
+    if (blocker.code !== "configuration_new" || !blocker.recordId || !blocker.label) continue;
+    const extra = blocker as RowBlocker & { existing?: string[]; namesRaw?: string[]; collides?: boolean };
+    pairRows.set(`${blocker.recordId}|${blocker.label}`, {
+      recordId: blocker.recordId,
+      label: blocker.label,
+      existing: extra.existing ?? [],
+      namesRaw: extra.namesRaw ?? [],
+      collides: Boolean(extra.collides),
+      chosen: undefined,
+    });
+  }
+  for (const member of pendingMembers) {
+    const lands = member.resolution?.named?.lands ?? {};
+    const decided = [
+      ...(member.item.configurationPairs ?? []),
+      ...(member.item.configurationAcks ?? []).map((ack) => ({ ...ack, pairWith: null })),
+    ];
+    for (const pair of decided) {
+      const where = lands[pair.recordId]?.[pair.label];
+      if (!where || where.kind === "ask" || (where.kind === "existing" && where.via !== "paired") || (where.kind === "create" && Object.keys(member.resolution?.named?.existing?.[pair.recordId] ?? {}).length === 0)) continue;
+      pairRows.set(`${pair.recordId}|${pair.label}`, {
+        recordId: pair.recordId,
+        label: pair.label,
+        existing: Object.keys(member.resolution?.named?.existing?.[pair.recordId] ?? {}),
+        namesRaw: named.configurations.find((entry) => entry.label === pair.label)?.namesRaw ?? [],
+        collides: false,
+        chosen: pair.pairWith,
+      });
+    }
+  }
+  const silentPairs: string[] = [];
+  for (const member of pendingMembers) {
+    for (const [recordId, byLabel] of Object.entries(member.resolution?.named?.lands ?? {})) {
+      for (const [label, where] of Object.entries(byLabel)) {
+        if (where.kind !== "existing" || where.via !== "exact") continue;
+        const line = `${label} lands on ${where.as} on ${runNameOf(recordId)} — the page's own words`;
+        if (!silentPairs.includes(line)) silentPairs.push(line);
+      }
+    }
+  }
+  const setPair = (recordId: string, label: string, pairWith: string | null) => {
     if (!onSaveItem) return;
-    for (const member of pendingMembers) {
-      const wants = member.resolution?.named?.create?.[recordId]?.includes(label);
-      if (!wants) continue;
-      const others = (member.item.configurationAcks ?? []).filter(
-        (ack) => !(ack.recordId === recordId && ack.label === label),
+    for (const member of card.members) {
+      if (member.state !== "pending") continue;
+      if (!(member.resolution?.named?.labels ?? []).includes(label)) continue;
+      const others = (member.item.configurationPairs ?? []).filter(
+        (pair) => !(pair.recordId === recordId && pair.label === label),
       );
-      void onSaveItem(member.item, { configurationAcks: on ? [...others, { recordId, label }] : others });
+      void onSaveItem(member.item, { configurationPairs: [...others, { recordId, label, pairWith }] });
     }
   };
-  const ackRows = [
-    ...acksWanted.map((blocker) => ({ recordId: blocker.recordId!, label: blocker.label!, on: false })),
-    ...[...acked.values()].map((ack) => ({ ...ack, on: true })),
-  ];
 
   // --------------------------------------------------------------- confirm
   const blockedMember = pendingMembers.find((member) => (member.resolution?.blockers.length ?? 0) > 0);
@@ -432,36 +469,57 @@ export default function NamedConfigurationCard({
               </Note>
             ))}
 
-          {ackRows.length > 0 && (
+          {pairRows.size > 0 && (
             <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
               <p className="text-th font-semibold uppercase tracking-wider text-amber-800">
-                New configurations beside existing ones
+                Which configuration is this?
               </p>
               <p className="mt-0.5">
-                These bill lines already have configurations, and this document names others. If one is the same
-                chair under another name, stop and correct the name instead — ticking creates a new record.
+                These bill lines already have configurations, and this document names them differently. Pair each with
+                the one it is, or create it as a new configuration. Nothing is matched for you.
               </p>
-              {ackRows.map((row) => {
-                const others = Object.keys(
-                  pendingMembers.map((member) => member.resolution?.named?.existing?.[row.recordId]).find(Boolean) ?? {},
-                );
+              {[...pairRows.values()].map((row) => {
+                const words = row.namesRaw.filter((raw) => raw.trim().toUpperCase().replace(/\s+/g, " ") !== row.label);
                 return (
-                  <label key={`${row.recordId}|${row.label}`} className="mt-1 flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      checked={row.on}
-                      disabled={busyHere || !onSaveItem}
-                      onChange={(event) => setAck(row.recordId, row.label, event.target.checked)}
-                      className="mt-0.5"
-                    />
+                  <label key={`${row.recordId}|${row.label}`} className="mt-1.5 flex flex-wrap items-center gap-2">
                     <span>
-                      Create <span className="font-mono font-medium">{row.label}</span> on {runNameOf(row.recordId)}
-                      {others.length > 0 ? `, beside ${others.join(", ")}` : ""}
+                      <span className="font-mono font-medium">{row.label}</span>
+                      {words.length > 0 && (
+                        <>
+                          {" "}
+                          — the page says {words.join(" / ")} (read as {row.label})
+                        </>
+                      )}{" "}
+                      on {runNameOf(row.recordId)}:
                     </span>
+                    <select
+                      aria-label={`Which configuration is ${row.label} on ${runNameOf(row.recordId)}`}
+                      value={row.chosen === undefined ? "" : row.chosen === null ? "__new" : row.chosen}
+                      disabled={busyHere || !onSaveItem}
+                      onChange={(event) =>
+                        setPair(row.recordId, row.label, event.target.value === "__new" ? null : event.target.value)
+                      }
+                      className="rounded border border-amber-300 bg-white px-1 py-0.5"
+                    >
+                      <option value="" disabled>
+                        — choose —
+                      </option>
+                      {row.existing.map((label) => (
+                        <option key={label} value={label}>
+                          Pair with {label}
+                        </option>
+                      ))}
+                      <option value="__new" disabled={row.collides}>
+                        Create as a new configuration
+                      </option>
+                    </select>
                   </label>
                 );
               })}
             </div>
+          )}
+          {silentPairs.length > 0 && (
+            <p className="mb-3 text-xs text-neutral-600">{silentPairs.join(". ")}.</p>
           )}
 
           {/* ROWS THAT LAND NOWHERE: theirs were removed. On no tab, so they
@@ -536,6 +594,20 @@ export default function NamedConfigurationCard({
                   <span className="text-xs text-violet-800">added by a reviewer — no page names it</span>
                 )
               )}
+              {(() => {
+                // WHERE THIS TAB LANDS when it is not a record of its own name —
+                // a pairing, or the page's own words matching an existing one.
+                const onto = new Set<string>();
+                for (const member of pendingMembers) {
+                  for (const byLabel of Object.values(member.resolution?.named?.lands ?? {})) {
+                    const where = byLabel[tab.label];
+                    if (where?.kind === "existing" && where.as !== tab.label) onto.add(where.as);
+                  }
+                }
+                return onto.size > 0 ? (
+                  <span className="text-xs font-medium text-violet-800">lands on {[...onto].join(", ")}</span>
+                ) : null;
+              })()}
               {canEdit && (
                 <span className="ml-auto inline-flex flex-wrap items-center gap-1.5">
                   <RenameConfiguration

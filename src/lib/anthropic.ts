@@ -254,6 +254,12 @@ app needs to know which rows belong to which:
   leaves every one of these lists empty.
 - Where a page shows only some of them, say which in \`depictsConfigurations\` ("MUR 1 & TYPO 5" shows
   Type 1 and Type 5).
+- A TITLE BLOCK OR "WHERE USED" LABEL IS NOT A CONFIGURATION ON ITS OWN. "SOFA MUR 1 & TYPO 5", a room
+  name, a floor: that says which rooms a drawing applies to, not that there are several different
+  things to make. Record it in \`configurations\` and \`depictsConfigurations\` ONLY where the document
+  ALSO gives those configurations different specifications somewhere — a fabric per room type, a
+  finish per option. A sofa drawn once for two rooms, in one fabric, is one sofa: leave both lists
+  empty. Naming configurations that differ in nothing makes one item into several identical jobs.
 - \`codeGroups\` still describes the PAGES, not the configurations. A specification sheet and its shop
   drawing are \`one_item\` — one chair described twice — even when that chair comes in five
   configurations the sheet lists.
