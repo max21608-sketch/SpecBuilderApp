@@ -493,6 +493,24 @@ describeIfDb("the BW standard beside the client's words", () => {
   );
 
   it(
+    "an attribute's placement reaches the file (0029, found while building 0041)",
+    async () => {
+      // `loadRecordAtoms` never SELECTED `qualifier`, so every attribute
+      // reached the export, the check sheet and the quote with a null
+      // placement -- "Yarn Tessarae - Main body and self pipe" shipped as
+      // "Yarn Tessarae" while the Specs tab showed both lines.
+      const recordId = await item("__QA Stool", `__QA Q-${Date.now()}`);
+      const intakeId = await stage(doc("__QA none", timberCallout()));
+      const attributeId = await documentSpec(recordId, intakeId, "__QA oak");
+      await client.query(`update record_attributes set qualifier = '__QA Legs only' where id = $1`, [attributeId]);
+      const out = await exported(recordId);
+      expect(out.cell).toBe("__QA oak - __QA Legs only");
+      expect(out.at("Qualifier")).toBe("__QA Legs only");
+    },
+    SLOW,
+  );
+
+  it(
     "the backfill reports, and does not guess, an attribute it cannot link",
     async () => {
       const code = `__QA C-${Date.now()}`;

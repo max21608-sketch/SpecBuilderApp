@@ -75,6 +75,11 @@ const AtomAttribute = z.object({
     })
     .nullish()
     .transform((value) => value ?? null),
+  // 0029's placement, which this schema never named: every snapshot read back
+  // lost it, so `diffCells` recomposed a COM 1 cell without its "- Main body"
+  // and an old version disagreed with the file it described. Named at schema
+  // 7, defaulted null for the versions that never carried it.
+  qualifier: z.string().nullable().optional().default(null),
   specFieldJsonId: z.number().nullable(),
   state: z.string(),
   sortOrder: z.number(),

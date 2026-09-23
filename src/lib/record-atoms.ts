@@ -95,7 +95,7 @@ export type RecordAtoms = {
  * 6 — the record carries its bill line's number and its own under it (0039),
  *     which is what orders a configuration under its line in every file.
  * 7 — each attribute carries the BW standard proposed beside the client's
- *     words (0041).
+ *     words (0041), and its qualifier (0029) is named on read at last.
  *
  * Bumped whenever a field is added, and every addition since 1 is optional on
  * read, so an older version still parses rather than reading as "everything
@@ -300,7 +300,7 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
   const attributeRows = await exec`
     select a.id, a.record_id, a.attr_group, a.label, a.value, a.unit, a.dimension_slot, a.material_code,
            a.state, a.sort_order, a.source_page, f.json_id, at.filename as source_filename,
-           a.standard_value, a.standard_option_id, a.standard_state,
+           a.qualifier, a.standard_value, a.standard_option_id, a.standard_state,
            a.finish_id, fin.code as finish_code, fin.code_norm as finish_code_norm,
            fin.code_origin as finish_code_origin, fin.kind as finish_kind,
            fin.description as finish_description, fin.supplier_raw as finish_supplier_raw,
