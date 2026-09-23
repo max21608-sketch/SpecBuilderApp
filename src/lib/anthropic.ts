@@ -241,9 +241,13 @@ Type 2 - <fabric>", "Option A / Option B", "Type 1–5" — or a title block nam
 shows ("MUR 1 & TYPO 5 DESK CHAIR"). Each configuration is a separate thing to manufacture, so this
 app needs to know which rows belong to which:
 - List them in the item's \`configurations\`, ONE ENTRY PER CONFIGURATION: "Type 1 & 5" is two
-  entries, "Type 1" and "Type 5", each keeping the page's own words in \`nameRaw\`. Where two pages
-  of one item name a configuration differently ("TYPO 5" on a drawing, "Type 5" on the sheet), give
-  it the SAME \`name\` on both — the one the specification uses.
+  entries, "Type 1" and "Type 5", each keeping the page's own words in \`nameRaw\`.
+- \`name\` IS THE PAGE'S OWN WORDS for that one configuration ("MUR 1", "TYPO 5", "Type 2") — never a
+  translation into another vocabulary. The one exception is inside THIS document: where its own
+  specification sheet and its own shop drawing describe one configuration in different words
+  ("Type 5" on the sheet, "TYPO 5" on the drawing of the same chair), use the sheet's name on both
+  and keep each page's words in \`nameRaw\`. Never take a name from anything outside this document:
+  matching this document's names to another's is a person's decision, made later.
 - On each row, say in \`configurations\` which of them it applies to. "Type 1 & 5 - <fabric>" is ONE
   row applying to ["Type 1", "Type 5"].
 - NEVER put the configuration into the label. The label is the field the page prints ("FABRIC
@@ -254,12 +258,15 @@ app needs to know which rows belong to which:
   leaves every one of these lists empty.
 - Where a page shows only some of them, say which in \`depictsConfigurations\` ("MUR 1 & TYPO 5" shows
   Type 1 and Type 5).
-- A TITLE BLOCK OR "WHERE USED" LABEL IS NOT A CONFIGURATION ON ITS OWN. "SOFA MUR 1 & TYPO 5", a room
-  name, a floor: that says which rooms a drawing applies to, not that there are several different
-  things to make. Record it in \`configurations\` and \`depictsConfigurations\` ONLY where the document
-  ALSO gives those configurations different specifications somewhere — a fabric per room type, a
-  finish per option. A sofa drawn once for two rooms, in one fabric, is one sofa: leave both lists
-  empty. Naming configurations that differ in nothing makes one item into several identical jobs.
+- A TITLE BLOCK OR "WHERE USED" LABEL SAYS WHICH ROOMS A DRAWING IS FOR ("SOFA MUR 1 & TYPO 5", a room
+  name, a floor). Whether that names configurations depends on whether anything DIFFERS:
+  - where the pages of one item DIFFER in specification — a different fabric, finish or size on each
+    — and each page's title block names the room types it is for, those ARE its configurations:
+    report them as that page's \`configurations\` in the page's own words ("MUR 1", "TYPO 5", "MUR 2",
+    "TYPO 3", "TYPO 4"), and the same names in its \`depictsConfigurations\`;
+  - where nothing differs — one sofa drawn for two rooms, in one fabric, one size — name none and
+    leave both lists empty. Naming configurations that differ in nothing makes one item into several
+    identical jobs.
 - \`codeGroups\` still describes the PAGES, not the configurations. A specification sheet and its shop
   drawing are \`one_item\` — one chair described twice — even when that chair comes in five
   configurations the sheet lists.

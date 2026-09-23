@@ -185,7 +185,8 @@ const DrawingPatch = z
               .object({
                 recordId: z.string().uuid(),
                 label: z.string().min(1).max(64),
-                pairWith: z.string().min(1).max(64).nullable(),
+                // One or more existing configurations this IS; null for "new".
+                pairWith: z.union([z.string().min(1).max(64), z.array(z.string().min(1).max(64)).min(1).max(30)]).nullable(),
               })
               .strict(),
           )
@@ -330,7 +331,10 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
                       configurationPairs: changes.configurationPairs.map((pair) => ({
                         recordId: pair.recordId,
                         label: normaliseVariantLabel(pair.label),
-                        pairWith: pair.pairWith === null ? null : normaliseVariantLabel(pair.pairWith),
+                        pairWith:
+                          pair.pairWith === null
+                            ? null
+                            : [...new Set((Array.isArray(pair.pairWith) ? pair.pairWith : [pair.pairWith]).map(normaliseVariantLabel))],
                       })),
                     }
                   : {}),
@@ -624,7 +628,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // The same pairing the pack-wide screen uses, so the two can never disagree
     // about whether a card can commit. See src/lib/drawing-resolution.ts.
     const context = await loadDrawingContext(String(run.project_id));
-    const items = resolveStagedRun(staged, context, specFieldEntries(fieldRows));
+    const items = resolveStagedRun(staged, context, specFieldEntries(fieldRows), String(run.id));
     return json({
       ok: true,
       import: { ...run, parsed: staged },

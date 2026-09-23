@@ -632,9 +632,9 @@ export const DRAWINGS_TOOL = {
                     type: "string",
                     maxLength: MAX_SHORT,
                     description:
-                      "ONE configuration, in plain form ('Type 1', 'Type 5', 'Option B'). Where pages of the same item name one " +
-                      "configuration differently ('TYPO 5' on the shop drawing, 'Type 5' on the specification sheet), use the " +
-                      "SAME name on both, the one the specification uses.",
+                      "ONE configuration, in the PAGE'S OWN WORDS ('MUR 1', 'TYPO 5', 'Type 2', 'Option B') — never translated " +
+                      "into another vocabulary. Only where this same document's specification sheet and shop drawing name one " +
+                      "configuration differently ('Type 5' and 'TYPO 5' for the same chair) use the sheet's name on both.",
                   },
                   nameRaw: {
                     type: ["string", "null"],
@@ -659,8 +659,8 @@ export const DRAWINGS_TOOL = {
               description:
                 "Which of this item's configurations THIS PAGE SHOWS, by `name`, when the page itself says so — a shop " +
                 "drawing titled 'MUR 1 & TYPO 5 DESK CHAIR' shows Type 1 and Type 5 only. Empty when the page does not " +
-                "restrict itself to some of them. A title block or room label on its own is NOT a configuration: use " +
-                "this only where the document also gives those configurations different specifications somewhere.",
+                "restrict itself to some of them. A title block naming rooms counts only where the pages differ in " +
+                "specification; where nothing differs, leave this empty.",
             },
             // WHERE the pictures of this item are, so one can be shown against
             // the record. The model reports every view it can see and which

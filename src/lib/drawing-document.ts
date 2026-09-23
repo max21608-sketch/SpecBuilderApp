@@ -209,7 +209,7 @@ export type DrawingObservation = {
 
 /** One configuration a page NAMES (`schemaVersion: 3`), as the model read it. */
 export type StagedConfiguration = {
-  /** One configuration in plain form, as the model gave it: `Type 1`. */
+  /** One configuration, in the page's own words as the model gave them: `MUR 1`, `Type 1`. */
   name: string;
   /** The page's own words: `Type 1 & 5`, `TYPO 5`. */
   nameRaw: string | null;
@@ -271,7 +271,7 @@ export type DrawingItem = {
    * written to every page of the code that names it; the model's reading stays
    * beside it. `configurationAcks` (before step 5) reads as "create new".
    */
-  configurationPairs?: { recordId: string; label: string; pairWith: string | null }[];
+  configurationPairs?: { recordId: string; label: string; pairWith: string | string[] | null }[];
   /**
    * THE REVIEWER'S list of the CODE's configurations (brief C1), replacing the
    * model's reading for the whole code: each entry's folded `label`, and the
@@ -1314,7 +1314,7 @@ export function drawingItemBlockers(
     named
       ? targets.flatMap((parentId) => {
           const target = configurationTarget(parentId, scope, named);
-          return target.kind === "existing" ? [target.variantId] : [];
+          return target.kind === "existing" ? target.variantIds : [];
         })
       : targets;
 
@@ -1573,17 +1573,19 @@ export function namedConfigurationBlockers(
     for (const label of named.plan.labels) {
       const target = configurationTarget(parentId, label, named);
       if (target.kind !== "existing") continue;
-      const other = seen.get(target.variantId);
-      if (other) {
-        blockers.push({
-          code: "configuration_pair_twice",
-          recordId: parentId,
-          label,
-          message: `${other} and ${label} would both land on ${target.as}. Pair one of them with a different configuration, or create it as a new one.`,
-        });
-      } else {
-        seen.set(target.variantId, label);
-      }
+      target.variantIds.forEach((variantId, index) => {
+        const other = seen.get(variantId);
+        if (other) {
+          blockers.push({
+            code: "configuration_pair_twice",
+            recordId: parentId,
+            label,
+            message: `${other} and ${label} would both land on ${target.as[index]}. Pair one of them with a different configuration, or create it as a new one.`,
+          });
+        } else {
+          seen.set(variantId, label);
+        }
+      });
     }
   }
   for (const label of creating) {
@@ -3287,7 +3289,7 @@ export function rowConfigurations(observation: Pick<DrawingObservation, "configu
 export type NamedConfiguration = {
   /** Folded, as `spec_records.variant_label` stores it: `TYPE 2`. */
   label: string;
-  /** The model's plain form, from the first page that named it: `Type 2`. */
+  /** The model's name for it, from the first page that named it: `Type 2`, `MUR 2`. */
   name: string;
   /** Every wording the pages used for it, in page order: `Type 1 & 5`, `TYPO 5`. */
   namesRaw: string[];
@@ -3597,22 +3599,36 @@ export type NamedTargets = {
   plan: NamedConfigurationPlan;
   variants: ParentVariants;
   /** The page's `configurationPairs` (and legacy acks, as "create new"). */
-  pairs?: readonly { recordId: string; label: string; pairWith: string | null }[];
+  pairs?: readonly ConfigurationPair[];
   /** The document's `configurationLinks`. */
   links?: readonly ConfigurationLink[];
   /** THIS PAGE'S own words for each configuration (folded label -> nameRaw). */
   pageNamesRaw?: Readonly<Record<string, string[]>>;
+  /**
+   * The live variants THIS DOCUMENT already wrote to (its links, and any
+   * variant holding an attribute from this run). Creating beside those asks
+   * nothing: a document is never asked to pair with itself.
+   */
+  own?: ReadonlySet<string>;
 };
 
+/** A reviewer's pairing, read: the existing configurations it IS (one or more), or null for "a new one". */
+export type ConfigurationPair = { recordId: string; label: string; pairWith: string[] | null };
+
 /** A page's pairing decisions, with the pre-step-5 acknowledgements read as "create new". */
-export function pairsOf(item: Pick<DrawingItem, "configurationPairs" | "configurationAcks">): { recordId: string; label: string; pairWith: string | null }[] {
-  const out: { recordId: string; label: string; pairWith: string | null }[] = [];
+export function pairsOf(item: Pick<DrawingItem, "configurationPairs" | "configurationAcks">): ConfigurationPair[] {
+  const out: ConfigurationPair[] = [];
   for (const pair of Array.isArray(item.configurationPairs) ? item.configurationPairs : []) {
     if (!pair || typeof pair.recordId !== "string" || typeof pair.label !== "string") continue;
+    const raw = (pair as { pairWith?: unknown }).pairWith;
+    const list = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : null;
+    const pairWith = list
+      ? [...new Set(list.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "").map(normaliseVariantLabel))]
+      : null;
     out.push({
       recordId: pair.recordId,
       label: normaliseVariantLabel(pair.label),
-      pairWith: typeof pair.pairWith === "string" ? normaliseVariantLabel(pair.pairWith) : null,
+      pairWith: pairWith && pairWith.length > 0 ? pairWith : null,
     });
   }
   for (const ack of Array.isArray(item.configurationAcks) ? item.configurationAcks : []) {
@@ -3625,12 +3641,32 @@ export function pairsOf(item: Pick<DrawingItem, "configurationPairs" | "configur
   return out;
 }
 
+/**
+ * The live variants a document already wrote to: its links, and every variant
+ * holding an attribute from this run (`sourcesByVariant`: variant id -> run ids).
+ */
+export function ownVariantsOf(
+  doc: Pick<StagedDrawings, "configurationLinks"> | undefined,
+  runId: string | null,
+  sourcesByVariant: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+): Set<string> {
+  const own = new Set<string>();
+  for (const link of Array.isArray(doc?.configurationLinks) ? doc!.configurationLinks : []) {
+    if (link && typeof link.variantId === "string") own.add(link.variantId);
+  }
+  if (runId && sourcesByVariant) {
+    for (const [variantId, runs] of sourcesByVariant) if (runs.has(runId)) own.add(variantId);
+  }
+  return own;
+}
+
 /** The NamedTargets for one page: its plan, the live variants, its pairings and its document's links. */
 export function namedTargetsFor(
   item: DrawingItem,
   plan: NamedConfigurationPlan,
   variants: ParentVariants,
   doc: Pick<StagedDrawings, "configurationLinks"> | undefined,
+  own?: ReadonlySet<string>,
 ): NamedTargets {
   const pageNamesRaw: Record<string, string[]> = {};
   for (const entry of pageConfigurations(item)) {
@@ -3645,6 +3681,31 @@ export function namedTargetsFor(
     pairs: pairsOf(item),
     links: Array.isArray(doc?.configurationLinks) ? doc!.configurationLinks : [],
     pageNamesRaw,
+    own: own ?? ownVariantsOf(doc, null, undefined),
+  };
+}
+
+/**
+ * A PAGE LETTER, AS A PLAN OF ONE CONFIGURATION.
+ *
+ * `S-301 A` on the drawing set is a configuration the confirm would CREATE,
+ * exactly as `TYPE 2` is — and the guard against creating one beside a bill
+ * line's existing configurations has to cover it: S-301 already held TYPE 1–5
+ * from the specification sheet, and "Confirm S-301 (4 configurations)" was
+ * enabled with no question, which would have made nine configurations and four
+ * duplicate BWS jobs. So a lettered page reads through the same pair-or-create
+ * path: one label (its letter), every row landing on it.
+ */
+export function letteredPlan(item: DrawingItem, letter: string): NamedConfigurationPlan {
+  const label = normaliseVariantLabel(letter);
+  const rows: Record<string, string[]> = {};
+  for (const observation of item.observations) rows[observation.id] = [label];
+  return {
+    code: normaliseRef(item.itemCodeRaw ?? ""),
+    configurations: [{ label, name: label, namesRaw: [], evidence: null, pages: item.page ? [item.page] : [], readAs: label }],
+    labels: [label],
+    rows,
+    undecided: [],
   };
 }
 
@@ -3652,9 +3713,10 @@ export function namedTargetsFor(
 export type ConfigurationTarget =
   | {
       kind: "existing";
-      variantId: string;
-      /** The existing configuration's label — what the record is called. */
-      as: string;
+      /** One or more: a page the reviewer says IS TYPE 1 and TYPE 5 writes to both. */
+      variantIds: string[];
+      /** The existing configurations' labels — what the records are called. */
+      as: string[];
       via: "linked" | "exact" | "paired";
     }
   | { kind: "create"; via: "first" | "chosen" }
@@ -3671,40 +3733,52 @@ export type ConfigurationTarget =
 /**
  * WHERE A CONFIGURATION LANDS, when the bill line may already have some (plan
  * step 5). One pure function behind the blockers, the occupancy lookups, the
- * card and the confirm, in this order:
+ * card and the confirm — for a NAMED configuration and a page LETTER alike —
+ * in this order:
  *
  *   1. LINKED   this document already created or paired it (page 1 of the same
- *               sheet): the same record, no question.
- *   2. PAIRED   the reviewer chose — an existing configuration, or "new".
- *   3. FIRST    the bill line has no configurations yet: create it.
+ *               sheet, or a variant holding this run's attributes): the same
+ *               record, no question.
+ *   2. PAIRED   the reviewer chose — one or more existing configurations, or
+ *               "new".
+ *   3. FIRST    the bill line has no configurations from ANOTHER source: create.
  *   4. EXACT    the PAGE'S OWN WORDS, folded for case and whitespace only,
  *               are an existing configuration's name: `Type 3` is `TYPE 3`.
  *   5. ASK      anything else. "MUR 1" read as "Type 1" is NOT exact: the model
  *               translated, and nobody yet knows that MUR 1 is Type 1 — the
- *               app must not decide it. `TYPO 3` is not `TYPE 3` either.
+ *               app must not decide it. `TYPO 3` is not `TYPE 3` either, and a
+ *               page letter matches nothing.
  */
 export function configurationTarget(parentId: string, label: string, named: NamedTargets): ConfigurationTarget {
   const live = named.variants.get(parentId) ?? new Map<string, string>();
   const liveIds = new Set(live.values());
-  const link = (named.links ?? []).find((entry) => entry.recordId === parentId && entry.label === label);
-  if (link && liveIds.has(link.variantId)) {
-    const as = [...live].find(([, id]) => id === link.variantId)?.[0] ?? label;
-    return { kind: "existing", variantId: link.variantId, as, via: "linked" };
+  const own = named.own ?? new Set<string>();
+  const nameOf = (variantId: string) => [...live].find(([, id]) => id === variantId)?.[0] ?? label;
+  const linked = (named.links ?? [])
+    .filter((entry) => entry.recordId === parentId && entry.label === label && liveIds.has(entry.variantId))
+    .map((entry) => entry.variantId);
+  if (linked.length === 0 && live.has(label) && own.has(live.get(label)!)) linked.push(live.get(label)!);
+  if (linked.length > 0) {
+    const variantIds = [...new Set(linked)];
+    return { kind: "existing", variantIds, as: variantIds.map(nameOf), via: "linked" };
   }
   const collides = live.has(label);
   const pair = (named.pairs ?? []).find((entry) => entry.recordId === parentId && entry.label === label);
   if (pair) {
-    if (pair.pairWith && live.has(pair.pairWith)) {
-      return { kind: "existing", variantId: live.get(pair.pairWith)!, as: pair.pairWith, via: "paired" };
+    const chosen = (pair.pairWith ?? []).filter((entry) => live.has(entry));
+    if (chosen.length > 0) {
+      return { kind: "existing", variantIds: chosen.map((entry) => live.get(entry)!), as: chosen, via: "paired" };
     }
     if (pair.pairWith === null && !collides) return { kind: "create", via: "chosen" };
   }
-  if (live.size === 0) return { kind: "create", via: "first" };
+  // Configurations from ANOTHER source. This document's own are not a reason to ask.
+  const others = [...live].filter(([, id]) => !own.has(id));
+  if (others.length === 0) return { kind: "create", via: "first" };
   const configuration = named.plan.configurations.find((entry) => entry.label === label);
   // The page's own words where this page gave some; the document's otherwise.
   const namesRaw = named.pageNamesRaw?.[label]?.length ? named.pageNamesRaw[label]! : (configuration?.namesRaw ?? []);
   const exact = namesRaw.map((raw) => normaliseVariantLabel(raw)).find((folded) => live.has(folded));
-  if (exact) return { kind: "existing", variantId: live.get(exact)!, as: exact, via: "exact" };
+  if (exact) return { kind: "existing", variantIds: [live.get(exact)!], as: [exact], via: "exact" };
   return { kind: "ask", namesRaw, existing: [...live.keys()], collides };
 }
 
@@ -3726,7 +3800,8 @@ export function rowWriteRecords(observationId: string, targets: readonly string[
   for (const parentId of targets) {
     for (const label of labels) {
       const target = configurationTarget(parentId, label, named);
-      if (target.kind === "existing" && !out.includes(target.variantId)) out.push(target.variantId);
+      if (target.kind !== "existing") continue;
+      for (const variantId of target.variantIds) if (!out.includes(variantId)) out.push(variantId);
     }
   }
   return out;

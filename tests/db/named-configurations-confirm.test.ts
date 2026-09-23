@@ -521,4 +521,78 @@ describeIfDb("confirming configurations a document names", () => {
       { value: "Maker B, Ref. Y", status: "retired" },
     ]);
   });
+
+  // THE GUARD COVERS PAGE LETTERS: a drawing set whose S-301 pages the model
+  // called "configurations" with no names would have made S-301 A–D beside the
+  // sheet's TYPE 1–5. Every page is asked; a page can be MORE than one.
+  it("asks which configuration each lettered page is, and writes a page paired with two to both", async () => {
+    const code = `__QA Q-306-${Date.now()}`;
+    const bill = await phase("__QA LETTERED PAIRING RUN", code);
+    const sheet = await confirm(await stage(stageDrawings([{ ...SPEC_SHEET, itemCodeRaw: code }], fields, "__QA sheet.pdf", null)), 1);
+    expect(sheet.response.ok, JSON.stringify(sheet.body)).toBe(true);
+
+    const drawingPage = (page: number) => ({
+      ...SHOP_DRAWING,
+      itemCodeRaw: code,
+      page,
+      materials: [],
+      notesRaw: [`REMARKS: __QA remark from page ${page}`],
+      configurations: undefined,
+      depictsConfigurations: undefined,
+    });
+    const setRun = await stage(
+      stageDrawings([8, 9, 10, 11].map(drawingPage), fields, "__QA drawing set.pdf", null, null, [
+        { itemCodes: [code], pages: [8, 9, 10, 11], relationship: "configurations", evidence: "a fabric per room" },
+      ]),
+    );
+
+    // Blocked, every page, until each is paired or made new.
+    for (const page of [8, 9, 10, 11]) {
+      const asked = await confirm(setRun, page);
+      expect(asked.response.status, `page ${page}`).toBe(409);
+      expect(((asked.body as { diff?: { code: string }[] }).diff ?? []).map((b) => b.code)).toContain("configuration_new");
+    }
+    expect((await variantsOf(bill)).length).toBe(5);
+
+    const pair = async (page: number, letter: string, pairWith: string[] | null) => {
+      const item = (await liveDoc(setRun)).items.find((entry) => entry.page === page)!;
+      const response = await importPatchRoute(
+        new Request("http://localhost/test", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            itemId: item.id,
+            expectedVersion: item.version,
+            changes: { configurationPairs: [{ recordId: bill, label: letter, pairWith }] },
+          }),
+        }),
+        { params: Promise.resolve({ id: setRun }) },
+      );
+      expect(response.ok).toBe(true);
+    };
+    await pair(8, "A", ["TYPE 1", "TYPE 5"]);
+    await pair(9, "B", ["TYPE 2"]);
+    await pair(10, "C", ["TYPE 3"]);
+    await pair(11, "D", null);
+
+    for (const page of [8, 9, 10, 11]) {
+      const done = await confirm(setRun, page);
+      expect(done.response.ok, `page ${page}: ${JSON.stringify(done.body)}`).toBe(true);
+    }
+
+    // Page 8 wrote to BOTH TYPE 1 and TYPE 5; "new" made one record, D.
+    expect((await variantsOf(bill)).map((row) => row.variant_label)).toEqual(["D", "TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5"]);
+    const remarkOn = async (label: string) =>
+      (
+        await client.query(
+          `select a.value from record_attributes a join spec_records r on r.id = a.record_id
+            where r.parent_id = $1 and r.variant_label = $2 and a.status = 'active' and a.value like '__QA remark%'`,
+          [bill, label],
+        )
+      ).rows.map((row) => row.value);
+    expect(await remarkOn("TYPE 1")).toEqual(["__QA remark from page 8"]);
+    expect(await remarkOn("TYPE 5")).toEqual(["__QA remark from page 8"]);
+    expect(await remarkOn("TYPE 2")).toEqual(["__QA remark from page 9"]);
+    expect(await remarkOn("D")).toEqual(["__QA remark from page 11"]);
+  });
 });

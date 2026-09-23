@@ -71,6 +71,7 @@ import {
   RunTargets,
   orderRows,
   type RecordChoice,
+  type RowBlocker,
   type SpecField,
 } from "@/components/imports/ObservationRows";
 import { BulkUnit, type ItemResolution } from "@/components/imports/DrawingItemCard";
@@ -81,7 +82,7 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
 import PagePicker from "@/components/imports/PagePicker";
 import NamedConfigurationCard from "@/components/imports/NamedConfigurationCard";
-import { AddConfiguration, PagesAreControl, UnsplitNote } from "@/components/imports/ConfigurationControls";
+import { AddConfiguration, PagesAreControl, PairChoice, UnsplitNote } from "@/components/imports/ConfigurationControls";
 // A colour per configuration, fixed by LETTER, so A is sky on every card and
 // on every screen that names one. See configuration-colours.ts.
 import { colourForLetter as colourFor } from "@/components/imports/configuration-colours";
@@ -159,6 +160,47 @@ function PageConfigurationCard({
   // the one chosen has gone (confirmed on another screen, say).
   const activeMember =
     card.members.find((member) => member.item.id === activeTab) ?? pendingMembers[0] ?? card.members[0];
+
+  // ---- pairing a lettered page (plan step 5) ------------------------------
+  const runNameOf = (member: (typeof card.members)[number], recordId: string) =>
+    member.resolution?.resolution.runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ??
+    "this phase";
+  type PagePair = {
+    member: (typeof card.members)[number];
+    recordId: string;
+    label: string;
+    runName: string;
+    existing: string[];
+    collides: boolean;
+    chosen: string[] | null | undefined;
+  };
+  const pairRows: PagePair[] = [];
+  for (const member of pendingMembers) {
+    const lands = member.resolution?.named?.lands ?? {};
+    const letter = member.resolution?.named?.labels[0];
+    if (!letter) continue;
+    for (const [recordId, byLabel] of Object.entries(lands)) {
+      const where = byLabel[letter];
+      const saved = (member.item.configurationPairs ?? []).find(
+        (pair) => pair.recordId === recordId && pair.label === letter,
+      );
+      const existing = Object.keys(member.resolution?.named?.existing?.[recordId] ?? {});
+      const asked = member.resolution?.blockers.find(
+        (blocker) => blocker.code === "configuration_new" && blocker.recordId === recordId && blocker.label === letter,
+      ) as (RowBlocker & { existing?: string[]; collides?: boolean }) | undefined;
+      if (!asked && !(saved && where && (where.kind !== "existing" || where.via === "paired"))) continue;
+      pairRows.push({
+        member,
+        recordId,
+        label: letter,
+        runName: runNameOf(member, recordId),
+        existing: asked?.existing ?? existing,
+        collides: Boolean(asked?.collides),
+        chosen: saved ? (saved.pairWith === null ? null : Array.isArray(saved.pairWith) ? saved.pairWith : [saved.pairWith]) : undefined,
+      });
+    }
+  }
+
   const busyHere = busy === card.id || pendingMembers.some((member) => busy === member.item.id);
   const pageImportId = (itemId: string) => importIdFor?.(itemId) ?? importId;
 
@@ -231,6 +273,39 @@ function PageConfigurationCard({
               : undefined
           }
         />
+      )}
+      {/* A PAGE LETTER THE BILL LINE DOES NOT HOLD, beside configurations from
+          another document: which is it? One or more of them, or a new one —
+          the guard every created configuration goes through (plan step 5). */}
+      {open && pairRows.length > 0 && (
+        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+          <p className="text-th font-semibold uppercase tracking-wider text-amber-800">Which configuration is each page?</p>
+          <p className="mt-0.5">
+            These bill lines already have configurations from another document. Say which each page IS — it can be
+            more than one — or make it a new configuration. Nothing is matched for you.
+          </p>
+          {pairRows.map((row) => (
+            <PairChoice
+              key={`${row.member.item.id}|${row.recordId}`}
+              label={memberName(card, row.member)}
+              where={`(page ${row.member.item.page ?? "?"}) on ${row.runName}`}
+              namesRaw={[]}
+              existing={row.existing}
+              collides={row.collides}
+              chosen={row.chosen}
+              disabled={busyHere || !onSaveItem}
+              onChange={(pairWith) => {
+                if (!onSaveItem) return;
+                const others = (row.member.item.configurationPairs ?? []).filter(
+                  (pair) => !(pair.recordId === row.recordId && pair.label === row.label),
+                );
+                void onSaveItem(row.member.item, {
+                  configurationPairs: [...others, { recordId: row.recordId, label: row.label, pairWith }],
+                });
+              }}
+            />
+          ))}
+        </div>
       )}
       {onSaveItem && open && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -548,6 +623,7 @@ function PageConfigurationCard({
                                     observation={observation}
                                     occupants={occupants}
                                     runs={member.resolution?.resolution.runs ?? []}
+                                    recordNames={member.resolution?.named?.recordNames}
                                     busy={busyHere}
                                     blocked
                                     heading={memberName(card, member)}
@@ -683,9 +759,13 @@ function PageConfigurationCard({
             ? `${memberName(card, blockedMember)} cannot be confirmed yet: ${
                 blockedMember.resolution?.blockers[0]?.message ?? ""
               }`
-            : `Writes ${totalSpecs} spec${totalSpecs === 1 ? "" : "s"} across ${pendingMembers.length} configuration${
-                pendingMembers.length === 1 ? "" : "s"
-              }.`}
+            : card.split
+              ? `Writes ${totalSpecs} spec${totalSpecs === 1 ? "" : "s"} across ${pendingMembers.length} configuration${
+                  pendingMembers.length === 1 ? "" : "s"
+                }.`
+              : `Writes ${totalSpecs} spec${totalSpecs === 1 ? "" : "s"} from ${pendingMembers.length} page${
+                  pendingMembers.length === 1 ? "" : "s"
+                } onto one item.`}
         </p>
         <span className="flex-1" />
         {/* ONE CONFIRM FOR THE CARD. Each configuration still commits on its own
@@ -695,13 +775,37 @@ function PageConfigurationCard({
             Enabled only when EVERY configuration can commit: one that skipped a
             blocked configuration would read as done. */}
         <Button variant="primary" onClick={confirmAll} disabled={busyHere || !confirmable}>
+          {/* COUNTED ONLY WHERE SOMETHING IS SPLIT, off the same `split` the
+              header and the strip read. A card that says "read as one item"
+              and a button that says "2 configurations" is the card saying two
+              things; S-100 did exactly that. */}
           {busyHere
             ? "Confirming…"
-            : `Confirm ${card.codeRaw} (${pendingMembers.length} configuration${pendingMembers.length === 1 ? "" : "s"})`}
+            : card.split
+              ? `Confirm ${card.codeRaw} (${pendingMembers.length} configuration${pendingMembers.length === 1 ? "" : "s"})`
+              : `Confirm ${card.codeRaw}`}
         </Button>
       </div>
     </div>
   );
+}
+
+/** What the confirm does with a split page: create its record, or write to the ones it was paired with. */
+function sectionLanding(member: ConfigurationMember<ItemResolution>): string {
+  const letter = member.resolution?.named?.labels[0];
+  const onto = new Set<string>();
+  let creates = false;
+  for (const byLabel of Object.values(member.resolution?.named?.lands ?? {})) {
+    const where = letter ? byLabel[letter] : undefined;
+    // Paired or matched onto ANOTHER document's configurations: say which. Its
+    // own record (linked) is simply a record that exists.
+    if (where?.kind === "existing" && where.via !== "linked") for (const as of where.as) onto.add(as);
+    if (where?.kind === "existing" && where.via === "linked") return "record exists";
+    if (where?.kind === "create") creates = true;
+  }
+  if (onto.size > 0 && !creates) return `writes to ${[...onto].join(" and ")}`;
+  if (Object.keys(member.resolution?.writesTo ?? {}).length > 0) return "record exists";
+  return "record will be created";
 }
 
 /**
@@ -817,7 +921,7 @@ function ConfigurationSection({
               only a split card says it. */}
           {card.split && (
             <span className="ml-2 text-xs text-neutral-600">
-              · {Object.keys(member.resolution?.writesTo ?? {}).length > 0 ? "record exists" : "record will be created"}
+              · {sectionLanding(member)}
             </span>
           )}
         </p>
@@ -904,6 +1008,7 @@ function ConfigurationSection({
                       observation={observation}
                       occupants={occupants}
                       runs={member.resolution?.resolution.runs ?? []}
+                      recordNames={member.resolution?.named?.recordNames}
                       busy={busy}
                       blocked={blockers.length > 0 || warnings.length > 0}
                       onChange={(target, changes) => void onSaveObservation(member.item, target, changes)}

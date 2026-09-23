@@ -7,6 +7,8 @@ import { PROMPTS } from "@/lib/anthropic";
 import { describe, expect, it } from "vitest";
 import {
   alreadyRecorded,
+  letteredPlan,
+  ownVariantsOf,
   configurationTarget,
   namedTargetsFor,
   configurationsDistinguishSomething,
@@ -203,7 +205,7 @@ describe("creating a configuration beside existing ones (plan step 5)", () => {
     const ownPlan = namedConfigurationPlans(own.items, own).get(own.items[0]!.id)!;
     const named = namedTargetsFor(own.items[0]!, ownPlan, typesExist(), own);
     expect(drawingItemBlockers(own.items[0]!, resolution, NO_OCCUPANCY, named)).toEqual([]);
-    expect(configurationTarget("bill-main", "TYPE 1", named)).toMatchObject({ kind: "existing", variantId: "v1", via: "exact" });
+    expect(configurationTarget("bill-main", "TYPE 1", named)).toMatchObject({ kind: "existing", variantIds: ["v1"], via: "exact" });
   });
 
   it("writes to the configuration the reviewer paired it with", () => {
@@ -211,8 +213,8 @@ describe("creating a configuration beside existing ones (plan step 5)", () => {
       plan,
       variants: typesExist(),
       pairs: [
-        { recordId: "bill-main", label: "TYPE 1", pairWith: "TYPE 1" },
-        { recordId: "bill-main", label: "TYPE 5", pairWith: "TYPE 5" },
+        { recordId: "bill-main", label: "TYPE 1", pairWith: ["TYPE 1"] },
+        { recordId: "bill-main", label: "TYPE 5", pairWith: ["TYPE 5"] },
       ],
     };
     expect(drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, named)).toEqual([]);
@@ -225,8 +227,8 @@ describe("creating a configuration beside existing ones (plan step 5)", () => {
       plan,
       variants: typesExist(),
       pairs: [
-        { recordId: "bill-main", label: "TYPE 1", pairWith: "TYPE 1" },
-        { recordId: "bill-main", label: "TYPE 5", pairWith: "TYPE 1" },
+        { recordId: "bill-main", label: "TYPE 1", pairWith: ["TYPE 1"] },
+        { recordId: "bill-main", label: "TYPE 5", pairWith: ["TYPE 1"] },
       ],
     };
     expect(drawingItemBlockers(drawing, resolution, NO_OCCUPANCY, named).map((b) => b.code)).toEqual(["configuration_pair_twice"]);
@@ -523,8 +525,8 @@ describe("a dimension already recorded", () => {
       ]),
     };
     const pairs = [
-      { recordId: "bill-main", label: "TYPE 1", pairWith: "TYPE 1" },
-      { recordId: "bill-main", label: "TYPE 5", pairWith: "TYPE 5" },
+      { recordId: "bill-main", label: "TYPE 1", pairWith: ["TYPE 1"] },
+      { recordId: "bill-main", label: "TYPE 5", pairWith: ["TYPE 5"] },
     ];
     const blockers = drawingItemBlockers(drawing, resolveDrawingTargets("Q-301", [record()]), occupied, { plan, variants, pairs });
     const widths = blockers.filter((b) => b.code === "dimension_slot_taken");
@@ -677,7 +679,77 @@ describe("configurations that distinguish nothing", () => {
     expect(namedConfigurationPlans(split.items, split).size).toBe(2);
   });
 
-  it("tells the model a title block names no configuration on its own", () => {
-    expect(PROMPTS.shop_drawings).toMatch(/A TITLE BLOCK OR "WHERE USED" LABEL IS NOT A CONFIGURATION ON ITS OWN/);
+  it("tells the model a title block names configurations only where the pages differ, in their own words", () => {
+    expect(PROMPTS.shop_drawings).toMatch(/A TITLE BLOCK OR "WHERE USED" LABEL SAYS WHICH ROOMS A DRAWING IS FOR/);
+    expect(PROMPTS.shop_drawings).toMatch(/where nothing differs[^]*name none/);
+    // Where the pages DO differ, the title blocks name them, in the page's own words.
+    expect(PROMPTS.shop_drawings).toMatch(/in the page's own words \("MUR 1", "TYPO 5", "MUR 2",/);
+    expect(PROMPTS.shop_drawings).toMatch(/IS THE PAGE'S OWN WORDS[^]*never a\s+translation/);
+  });
+});
+
+// ============================================================================
+// THE GUARD COVERS PAGE LETTERS TOO (2026-09-23).
+//
+// S-301's bill lines held TYPE 1–5 from the specification sheet; the drawing
+// set's S-301 card (four pages, "configurations", no names) offered to create
+// S-301 A–D beside them with no question — nine configurations, four duplicate
+// jobs. Every configuration a confirm would CREATE goes through the same
+// pair-or-create choice.
+// ============================================================================
+describe("a page letter beside another document's configurations", () => {
+  // A drawing-set page: one fabric of its own, no names — the v2-style read.
+  const page = {
+    ...SPEC_SHEET,
+    itemCodeRaw: "Q-301",
+    materials: [{ labelRaw: "FABRIC", valueRaw: "Maker A, Ref. X", materialCodeRaw: null }],
+    configurations: undefined,
+    depictsConfigurations: undefined,
+  };
+  const lettered = stageDrawings([{ ...page, page: 8 }, { ...page, page: 9 }], NAMED_FIELDS, null, null, null, [
+    { itemCodes: ["Q-301"], pages: [8, 9], relationship: "configurations", evidence: "a different fabric per room" },
+  ]);
+  const [eight, nine] = lettered.items;
+  const types = () =>
+    parentVariantsOf(
+      ["TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5"].map((label, index) =>
+        record({ id: `t${index + 1}`, parentId: "bill-main", variantLabel: label, boqCodes: [], refs: [] }),
+      ),
+    );
+  const resolution = resolveDrawingTargets("Q-301", [record()]);
+
+  it("letters the pages as before, and asks before creating S-301 A beside TYPE 1-5", () => {
+    expect([...variantLettersByItem(lettered.items, lettered).values()]).toEqual(["A", "B"]);
+    const named = namedTargetsFor(eight!, letteredPlan(eight!, "A"), types(), lettered);
+    const asked = drawingItemBlockers(eight!, resolution, NO_OCCUPANCY, named).filter((b) => b.code === "configuration_new");
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ label: "A", existing: ["TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5"] });
+  });
+
+  it("writes one page to MORE THAN ONE existing configuration when the reviewer says so", () => {
+    const paired = { ...eight!, configurationPairs: [{ recordId: "bill-main", label: "A", pairWith: ["TYPE 1", "TYPE 5"] }] };
+    const named = namedTargetsFor(paired, letteredPlan(paired, "A"), types(), lettered);
+    expect(drawingItemBlockers(paired, resolution, NO_OCCUPANCY, named)).toEqual([]);
+    expect(configurationTarget("bill-main", "A", named)).toMatchObject({ kind: "existing", variantIds: ["t1", "t5"], as: ["TYPE 1", "TYPE 5"] });
+    const width = paired.observations.find((o) => o.dimensionSlot === "W")!;
+    expect(rowWriteRecords(width.id, ["bill-main"], named)).toEqual(["t1", "t5"]);
+  });
+
+  it("never asks a document about configurations it made itself", () => {
+    // Page 8 was confirmed first and created S-301 A; page 9's B asks nothing.
+    const withA = parentVariantsOf([record({ id: "va", parentId: "bill-main", variantLabel: "A", boqCodes: [], refs: [] })]);
+    const own = ownVariantsOf(lettered, "run-drawings", new Map([["va", new Set(["run-drawings"])]]));
+    const named = namedTargetsFor(nine!, letteredPlan(nine!, "B"), withA, lettered, own);
+    expect(configurationTarget("bill-main", "B", named)).toEqual({ kind: "create", via: "first" });
+    // Another document's A is a different matter.
+    const theirs = namedTargetsFor(nine!, letteredPlan(nine!, "B"), withA, lettered, ownVariantsOf(lettered, "run-drawings", new Map([["va", new Set(["run-sheet"])]])));
+    expect(configurationTarget("bill-main", "B", theirs).kind).toBe("ask");
+  });
+
+  it("reads a pairing saved as one name, from before the multi-select, as a list", () => {
+    const legacy = { ...eight!, configurationPairs: [{ recordId: "bill-main", label: "A", pairWith: "TYPE 3" }] };
+    expect(configurationTarget("bill-main", "A", namedTargetsFor(legacy, letteredPlan(legacy, "A"), types(), lettered))).toMatchObject({
+      variantIds: ["t3"],
+    });
   });
 });

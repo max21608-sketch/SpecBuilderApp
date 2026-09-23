@@ -55,6 +55,7 @@ import type { ConfigurationCardProps } from "@/components/imports/ConfigurationC
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
 import {
   AddConfiguration,
+  PairChoice,
   RemoveConfiguration,
   RenameConfiguration,
   RowConfigurationPicker,
@@ -227,7 +228,7 @@ export default function NamedConfigurationCard({
   // choice is stored on every page that names it (`configurationPairs`).
   const runNameOf = (recordId: string) =>
     runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ?? "this phase";
-  type PairRow = { recordId: string; label: string; existing: string[]; namesRaw: string[]; collides: boolean; chosen: string | null | undefined };
+  type PairRow = { recordId: string; label: string; existing: string[]; namesRaw: string[]; collides: boolean; chosen: string[] | null | undefined };
   const pairRows = new Map<string, PairRow>();
   for (const blocker of cardBlockers) {
     if (blocker.code !== "configuration_new" || !blocker.recordId || !blocker.label) continue;
@@ -256,7 +257,7 @@ export default function NamedConfigurationCard({
         existing: Object.keys(member.resolution?.named?.existing?.[pair.recordId] ?? {}),
         namesRaw: named.configurations.find((entry) => entry.label === pair.label)?.namesRaw ?? [],
         collides: false,
-        chosen: pair.pairWith,
+        chosen: pair.pairWith === null ? null : Array.isArray(pair.pairWith) ? pair.pairWith : [pair.pairWith],
       });
     }
   }
@@ -265,12 +266,12 @@ export default function NamedConfigurationCard({
     for (const [recordId, byLabel] of Object.entries(member.resolution?.named?.lands ?? {})) {
       for (const [label, where] of Object.entries(byLabel)) {
         if (where.kind !== "existing" || where.via !== "exact") continue;
-        const line = `${label} lands on ${where.as} on ${runNameOf(recordId)} — the page's own words`;
+        const line = `${label} lands on ${where.as.join(" and ")} on ${runNameOf(recordId)} — the page's own words`;
         if (!silentPairs.includes(line)) silentPairs.push(line);
       }
     }
   }
-  const setPair = (recordId: string, label: string, pairWith: string | null) => {
+  const setPair = (recordId: string, label: string, pairWith: string[] | null) => {
     if (!onSaveItem) return;
     for (const member of card.members) {
       if (member.state !== "pending") continue;
@@ -478,44 +479,19 @@ export default function NamedConfigurationCard({
                 These bill lines already have configurations, and this document names them differently. Pair each with
                 the one it is, or create it as a new configuration. Nothing is matched for you.
               </p>
-              {[...pairRows.values()].map((row) => {
-                const words = row.namesRaw.filter((raw) => raw.trim().toUpperCase().replace(/\s+/g, " ") !== row.label);
-                return (
-                  <label key={`${row.recordId}|${row.label}`} className="mt-1.5 flex flex-wrap items-center gap-2">
-                    <span>
-                      <span className="font-mono font-medium">{row.label}</span>
-                      {words.length > 0 && (
-                        <>
-                          {" "}
-                          — the page says {words.join(" / ")} (read as {row.label})
-                        </>
-                      )}{" "}
-                      on {runNameOf(row.recordId)}:
-                    </span>
-                    <select
-                      aria-label={`Which configuration is ${row.label} on ${runNameOf(row.recordId)}`}
-                      value={row.chosen === undefined ? "" : row.chosen === null ? "__new" : row.chosen}
-                      disabled={busyHere || !onSaveItem}
-                      onChange={(event) =>
-                        setPair(row.recordId, row.label, event.target.value === "__new" ? null : event.target.value)
-                      }
-                      className="rounded border border-amber-300 bg-white px-1 py-0.5"
-                    >
-                      <option value="" disabled>
-                        — choose —
-                      </option>
-                      {row.existing.map((label) => (
-                        <option key={label} value={label}>
-                          Pair with {label}
-                        </option>
-                      ))}
-                      <option value="__new" disabled={row.collides}>
-                        Create as a new configuration
-                      </option>
-                    </select>
-                  </label>
-                );
-              })}
+              {[...pairRows.values()].map((row) => (
+                <PairChoice
+                  key={`${row.recordId}|${row.label}`}
+                  label={row.label}
+                  where={`on ${runNameOf(row.recordId)}`}
+                  namesRaw={row.namesRaw}
+                  existing={row.existing}
+                  collides={row.collides}
+                  chosen={row.chosen}
+                  disabled={busyHere || !onSaveItem}
+                  onChange={(pairWith) => setPair(row.recordId, row.label, pairWith)}
+                />
+              ))}
             </div>
           )}
           {silentPairs.length > 0 && (
@@ -601,7 +577,7 @@ export default function NamedConfigurationCard({
                 for (const member of pendingMembers) {
                   for (const byLabel of Object.values(member.resolution?.named?.lands ?? {})) {
                     const where = byLabel[tab.label];
-                    if (where?.kind === "existing" && where.as !== tab.label) onto.add(where.as);
+                    if (where?.kind === "existing") for (const as of where.as) if (as !== tab.label) onto.add(as);
                   }
                 }
                 return onto.size > 0 ? (

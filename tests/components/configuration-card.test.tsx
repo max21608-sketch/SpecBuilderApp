@@ -6,7 +6,7 @@
 // finishes are visibly its own, and one Confirm rules on the item.
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ConfigurationCard from "@/components/imports/ConfigurationCard";
 import { configurationCards } from "@/lib/configuration-cards";
@@ -457,10 +457,76 @@ describe("a code whose pages name rooms but give them nothing different", () => 
     );
     expect(screen.getByText(/The pages name TYPE 1 and TYPE 5 but give them nothing different, so this is read as one item/)).toBeInTheDocument();
     expect(screen.queryByRole("tab")).toBeNull();
+    // The button reads the SAME answer as the note: one item, no count.
+    expect(screen.getByRole("button", { name: "Confirm S-100" })).toBeInTheDocument();
+    expect(screen.queryByText(/2 configurations/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Split into TYPE 1 and TYPE 5" }));
     expect(spies.onSaveItem.mock.calls.map((call) => call[1])).toEqual([
       { configurationsByReviewer: [{ label: "TYPE 1", readAs: "TYPE 1" }, { label: "TYPE 5", readAs: "TYPE 5" }] },
       { configurationsByReviewer: [{ label: "TYPE 1", readAs: "TYPE 1" }, { label: "TYPE 5", readAs: "TYPE 5" }] },
     ]);
+  });
+});
+
+describe("a lettered page beside another document's configurations", () => {
+  it("asks which configuration each page IS, a multi-select, and holds the confirm until it is answered", async () => {
+    const pages = twoPages();
+    const ask = (id: string, letter: string) =>
+      resolution({
+        id,
+        variantLabel: letter,
+        blockers: [
+          {
+            code: "configuration_new",
+            recordId: "rec-main",
+            label: letter,
+            message: `The page names ${letter}, and this item on MAIN RUN already has TYPE 1, TYPE 5.`,
+            existing: ["TYPE 1", "TYPE 5"],
+            collides: false,
+          } as never,
+        ],
+        named: {
+          labels: [letter],
+          rows: {},
+          create: { "rec-main": [] },
+          existing: { "rec-main": { "TYPE 1": "t1", "TYPE 5": "t5" } },
+          recordNames: {},
+          lands: { "rec-main": { [letter]: { kind: "ask" } } },
+        },
+      });
+    const spies = renderConfigurations(pages, new Map([["a", ask("a", "A")], ["b", ask("b", "B")]]));
+    expect(screen.getByRole("button", { name: /Confirm S-201 \(2 configurations\)/ })).toBeDisabled();
+    const choice = screen.getByRole("group", { name: /S-201 A \(page 5\) on MAIN RUN is:/ });
+    expect(within(choice).getAllByRole("checkbox").map((box) => box.parentElement?.textContent)).toEqual([
+      "TYPE 1",
+      "TYPE 5",
+      "a new configuration",
+    ]);
+    await userEvent.click(within(choice).getByRole("checkbox", { name: "TYPE 1" }));
+    const [call] = spies.onSaveItem.mock.calls;
+    expect((call![0] as DrawingItem).id).toBe("a");
+    expect(call![1]).toEqual({ configurationPairs: [{ recordId: "rec-main", label: "A", pairWith: ["TYPE 1"] }] });
+  });
+
+  it("offers every page, and says where a paired page writes", () => {
+    const pages = twoPages();
+    pages[0] = { ...pages[0]!, configurationPairs: [{ recordId: "rec-main", label: "A", pairWith: ["TYPE 1", "TYPE 5"] }] };
+    const paired = resolution({
+      id: "a",
+      variantLabel: "A",
+      named: {
+        labels: ["A"],
+        rows: {},
+        create: { "rec-main": [] },
+        existing: { "rec-main": { "TYPE 1": "t1", "TYPE 5": "t5" } },
+        recordNames: {},
+        lands: { "rec-main": { A: { kind: "existing", as: ["TYPE 1", "TYPE 5"], via: "paired" } } },
+      },
+    });
+    renderConfigurations(pages, new Map([["a", paired], ["b", resolution({ id: "b", variantLabel: "B" })]]));
+    expect(screen.getByText(/writes to TYPE 1 and TYPE 5/)).toBeInTheDocument();
+    const choice = screen.getByRole("group", { name: /S-201 A \(page 5\) on MAIN RUN is:/ });
+    expect((within(choice).getByRole("checkbox", { name: "TYPE 1" }) as HTMLInputElement).checked).toBe(true);
+    expect((within(choice).getByRole("checkbox", { name: "TYPE 5" }) as HTMLInputElement).checked).toBe(true);
   });
 });
