@@ -192,3 +192,199 @@ export function bill300(): SheetData {
   }
   return rows;
 }
+
+// ============================================================================
+// THE PRICING-DOCUMENT LAYOUT — the bill that was refused on 2026-09-23.
+//
+// A real specifier's "Bill of Quantities (Pricing Document)" arrived with its
+// code under "Spec Code" and three columns no synonym knew ("Line",
+// "Sub-Area", "Category Code"), so no row on either sheet read as a header and
+// the bill was refused with nowhere to go. These are that layout's HEADINGS,
+// in its order, with its blanks where a heading is merged across two columns —
+// and nothing else of it: every row below is invented (`ZZ-`), the category
+// codes are made up, and the descriptions are generic furniture.
+//
+// What the shape carries, because each is a thing the reader has to survive:
+//
+//   * `Line` is a FORMULA column on the real sheet, so its values run from a
+//     negative number upward, and one copy of the bill saved a shared formula
+//     with no cached result. The workbook builder writes both; as an array the
+//     line numbers are the cached values.
+//   * ITEM ROWS AND FABRIC ROWS INTERLEAVE. An item has a category, a code, a
+//     unit of `ea` and a quantity; the fabric row under it names its own code
+//     with the item's in brackets, a unit of `m` and NO quantity — or `N/A`,
+//     or no code at all. They are all lines to this reader: telling a fabric
+//     row from an item is Step 2's, with evidence.
+//   * THE SAME CODE ON TWO LINES, different sizes, told apart only by the
+//     Notes column (`OPTION 1` / `OPTION 2`).
+//   * Descriptions carrying the spec inline, over several lines of one cell.
+//   * Prices and a picture column, which are never read.
+// ============================================================================
+
+/** The pricing document's header, exactly as its columns are laid out. */
+export const PRICING_DOC_HEADINGS = [
+  "Line",
+  "Area",
+  "Sub-Area",
+  "Category Code",
+  "Spec Code",
+  null, // "Spec Code" is merged over two columns
+  "Image",
+  "Item Description",
+  null, // merged
+  "Target Unit Cost",
+  null, // merged
+  "Unit",
+  "Total QTY",
+  "Unit Price \nUSD $",
+  "Total Price \nUSD $",
+  null,
+  "Notes",
+] as const;
+
+/** One invented line in the pricing-document layout. */
+function pricingRow(line: number, cells: {
+  area: string;
+  subArea: string;
+  category: string;
+  code: string | null;
+  description: string;
+  target?: number | null;
+  unit: string;
+  qty: number | null;
+  notes?: string | null;
+}): SheetData[number] {
+  return [
+    line,
+    cells.area,
+    cells.subArea,
+    cells.category,
+    cells.code,
+    null,
+    null,
+    cells.description,
+    null,
+    cells.target ?? null,
+    null,
+    cells.unit,
+    cells.qty,
+    null,
+    null,
+    null,
+    cells.notes ?? null,
+  ];
+}
+
+/**
+ * The data rows, invented, starting at the formula's first value.
+ *
+ * `firstLine` is what `=ROW()-8` evaluates to on the first data row: 1 with the
+ * title block above the header, -6 once the title rows are deleted and the
+ * formula was not.
+ */
+export function pricingDocRows(firstLine: number): SheetData {
+  const n = (offset: number) => firstLine + offset;
+  return [
+    pricingRow(n(0), {
+      area: "Example Suites", subArea: "Example Corridor", category: "SEAT-X", code: "ZZ-FUR-10",
+      description: "Stool\nModel Ref: Bespoke\nSizes (mm): W 450 x D 450 x SH 460\nFinish: Example oak\nFabric: COM",
+      target: 350, unit: "ea", qty: 54,
+    }),
+    pricingRow(n(1), {
+      area: "Example Suites", subArea: "Example Corridor", category: "FAB-SEAT-X", code: "ZZ-FAB-13\n\n(ZZ-FUR-10)",
+      description: "Fabric @ Stool\nCollection & Pattern: Example weave", unit: "m", qty: null,
+    }),
+    pricingRow(n(2), {
+      area: "Example Suites", subArea: "Example Lounge", category: "CASE-X", code: "ZZ-FUR-26",
+      description: "Drawers\nModel Ref: Bespoke\nSizes (mm): W 900 x D 500 x H 800", target: 2800, unit: "ea", qty: 36,
+    }),
+    pricingRow(n(3), {
+      area: "Example Suites", subArea: "Example Lounge", category: "SEAT-X", code: "ZZ-FUR-03",
+      description: "Sofa\nSizes (mm): W 2000 x D 900 x SH 450/H 780", target: 1350, unit: "ea", qty: 9, notes: "OPTION 1",
+    }),
+    pricingRow(n(4), {
+      area: "Example Suites", subArea: "Example Lounge", category: "SEAT-X", code: "ZZ-FUR-03",
+      description: "Sofa\nSizes (mm): W 2400 x D 900 x SH 450/H 780", target: 1450, unit: "ea", qty: 3, notes: "OPTION 2",
+    }),
+    pricingRow(n(5), {
+      area: "Example Suites", subArea: "Example Lounge", category: "FAB-SEAT-X", code: "N/A",
+      description: "Fabric @ Sofa\nCollection & Pattern: Example plain", unit: "m", qty: null,
+    }),
+    pricingRow(n(6), {
+      area: "Example Suites", subArea: "Example Lounge", category: "FAB-SEAT-X", code: null,
+      description: "Fabric @ Sofa piping", unit: "m", qty: null,
+    }),
+    pricingRow(n(7), {
+      area: "Example Terrace", subArea: "Example Deck", category: "SEAT-OUT", code: "ZZ-FUR-40",
+      description: "Lounger\nSizes (mm): W 700 x D 1900 x H 350", target: 900, unit: "ea", qty: 12,
+    }),
+  ];
+}
+
+/**
+ * The pricing document as its copies arrive.
+ *
+ * `titled`: the original — a title block of seven rows, the date and the
+ * revision INLINE in column M ("Date: XX", "Revision: Rev 0"), a note in
+ * column H, and the header on row 8. Untitled: the same sheet with the title
+ * rows deleted, header on row 1, and the line formula still counting from row
+ * 8 — so the first line number is -6.
+ */
+export function pricingDoc({ titled }: { titled: boolean }): SheetData {
+  const blank = () => Array.from({ length: PRICING_DOC_HEADINGS.length }, () => null) as (string | null)[];
+  const put = (row: (string | null)[], index: number, value: string) => {
+    row[index] = value;
+    return row;
+  };
+  const title: SheetData = titled
+    ? [
+        blank(),
+        put(put(blank(), 7, "Note: Example note about the quoted product."), 12, "Date: XX"),
+        put(blank(), 12, "Revision: Rev 0"),
+        blank(),
+        put(put(blank(), 0, "Bill Of Quantities/Pricing Document"), 12, "Note: Example note about the rates."),
+        put(blank(), 0, "Project: Example Project"),
+        put(blank(), 0, "Tendering Company Name:"),
+      ]
+    : [];
+  return [...title, [...PRICING_DOC_HEADINGS], ...pricingDocRows(titled ? 1 : -6)];
+}
+
+/**
+ * The tender summary beside the bill: NOT a bill, and it must not read as one.
+ * Its own date and revision, a title, a site block and a price table — none of
+ * which names a code and a description on one row.
+ */
+export function tenderSummarySheet(): SheetData {
+  return [
+    [null, null, null, null, "Date:", "XX", null, null],
+    [null, null, null, null, "Revision:", "Rev 0", null, null],
+    [null, null, null, null, null, null, null, null],
+    ["TENDER SUMMARY", null, null, null, null, null, null, null],
+    ["Project: Example Project", null, null, null, "Note: Example note.", null, null, null],
+    ["SITE ADDRESS:", null, null, null, "1 Example Street", null, null, null],
+    [null, null, null, null, "OPTION 1", null, null, "OPTION 2"],
+    ["DELIVERY LOCATION:", null, null, null, "Example warehouse", null, null, "Direct to site"],
+    ["SUBTOTAL (GOODS ONLY)", null, null, null, null, null, null, null],
+    ["LOGISTICS", null, null, null, null, null, null, null],
+    ["Packing Costs", null, null, null, null, null, null, null],
+  ];
+}
+
+/**
+ * A programme-dates sheet: its own `LINE | ACTIVITY | …` header two rows deep,
+ * months across the top, and nobody would declare it a bill. It must not crash
+ * the reader, and it must not read.
+ */
+export function programmeDatesSheet(): SheetData {
+  return [
+    [null, "Appendix 3", null, null, null, null, null, null],
+    [null, "Programme Dates", null, "Version:", "Rev 0", null, null, null],
+    [null, "Project: Example Project", null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null],
+    ["LINE", "ACTIVITY", "ACTIVITY BREAKDOWN", "Start", "Finish", "Duration\n(weeks)", "Month 1", "Notes"],
+    [null, null, null, null, null, null, null, null],
+    [1, null, null, null, null, null, null, null],
+    [2, "DEVELOPMENT", "Mobilisation deposit due", "XX", "XX", null, null, null],
+  ];
+}

@@ -42,7 +42,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import ExcelJS from "exceljs";
 import type { SheetData } from "read-excel-file/node";
-import { bill300, twoRowHeader } from "./boq-shapes";
+import { bill300, pricingDoc, programmeDatesSheet, tenderSummarySheet, twoRowHeader } from "./boq-shapes";
 
 /** One sheet of positional rows, written as itself. */
 function addSheet(book: ExcelJS.Workbook, name: string, rows: SheetData): ExcelJS.Worksheet {
@@ -76,10 +76,73 @@ export async function bill300Workbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/**
+ * THE PRICING-DOCUMENT LAYOUT AS A REAL WORKBOOK — the bill refused on
+ * 2026-09-23, with invented rows (see `pricingDoc` in boq-shapes.ts).
+ *
+ * Three things only a file can carry, each of which the real copies have:
+ *
+ *   * "Spec Code", "Item Description" and "Target Unit Cost" MERGED across two
+ *     columns in the header, which `read-excel-file` reads as the heading in
+ *     the first column and nothing in the second.
+ *   * The `Line` column as FORMULAS (`=ROW()-8`), a shared formula whose
+ *     cells carry their cached results — and, with `sharedFormulaGap`, ONE
+ *     cell with no cached result at all, the way one real copy saved it. That
+ *     cell must read as blank, never as `[object Object]`.
+ *   * A tender-summary sheet beside the bill, which is not a bill.
+ *
+ * `titled` is the original with its title block (header on row 8); untitled
+ * is the copy with the title rows deleted (header on row 1). A layout saved
+ * from one has to read the other.
+ */
+export async function pricingDocWorkbook({
+  titled,
+  sharedFormulaGap = false,
+}: {
+  titled: boolean;
+  sharedFormulaGap?: boolean;
+}): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  const rows = pricingDoc({ titled });
+  const sheet = addSheet(book, "CASEGOODS+SEATING+TABLES", rows);
+  const headerRow = titled ? 8 : 1;
+  for (const [from, to] of [["E", "F"], ["H", "I"], ["J", "K"]] as const) {
+    sheet.mergeCells(`${from}${headerRow}:${to}${headerRow}`);
+  }
+  // The Line column, as the formula the real sheet carries. The master cell
+  // owns the shared formula; every other data cell points at it.
+  const first = headerRow + 1;
+  const last = rows.length;
+  for (let rowNo = first; rowNo <= last; rowNo += 1) {
+    const result = rowNo - 8;
+    const cell = sheet.getCell(`A${rowNo}`);
+    if (rowNo === first) {
+      cell.value = { formula: "ROW()-8", result, shareType: "shared", ref: `A${first}:A${last}` } as ExcelJS.CellValue;
+    } else if (sharedFormulaGap && rowNo === first + 3) {
+      // NO cached result: what a copy saved by some other tool looks like.
+      cell.value = { sharedFormula: `A${first}` } as unknown as ExcelJS.CellValue;
+    } else {
+      cell.value = { sharedFormula: `A${first}`, result } as ExcelJS.CellValue;
+    }
+  }
+  addSheet(book, "LOGISTICS", tenderSummarySheet());
+  return bytes(book);
+}
+
+/** A programme-dates workbook: nobody would declare it a bill, and it must not crash the reader. */
+export async function programmeDatesWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  addSheet(book, "FF&E Critical Path", programmeDatesSheet());
+  return bytes(book);
+}
+
 /** Every workbook this module can build, by the filename the CLI gives it. */
 export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-two-row-header.xlsx": twoRowHeaderWorkbook,
   "bill-300-lines.xlsx": bill300Workbook,
+  "bill-pricing-document.xlsx": () => pricingDocWorkbook({ titled: true }),
+  "bill-pricing-document-untitled.xlsx": () => pricingDocWorkbook({ titled: false, sharedFormulaGap: true }),
+  "programme-dates.xlsx": programmeDatesWorkbook,
 };
 
 async function main(): Promise<void> {
