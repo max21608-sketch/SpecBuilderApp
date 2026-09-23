@@ -35,6 +35,55 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ## 2026-09-23
 
+### A page that lists five configurations stages as one chair with three fabrics
+
+**Status: open, being fixed (brief A, 2026-09-23).** Seen by Max on the S-301
+desk chair specification sheet: *"we still are not getting the different specs
+per line item right … fabric reference as per room type … there's type one to
+five. So five different configurations."* Max said he had seen it before and
+passed over it.
+
+What the page says: one set of overall dimensions, then `FABRIC REFERENCE — As
+per room type:` with `Type 1 & 5`, `Type 2`, `Type 3` and `Type 4`, each with its
+own cloth. Page 2 is the shop drawing, titled `MUR 1 & TYPO 5`, with one swatch
+`CH-01.1`.
+
+**What was staged, read from the sandbox (read-only), and it is NOT a page-count
+split.** Both reads of the sheet (18 and 23 September, Sonnet 5, staged v2) put
+pages 1 and 2 together as ONE item, `one_item`, for the right reason. The model
+read every type and its fabric correctly. It then had nowhere to put them: a
+configuration can only come from separate PAGES
+(`codeGroups.relationship = "configurations"`), so the room type went into
+each row's LABEL (`FABRIC REFERENCE - Type 2`). `classifyCallout` then gave the
+four rows COM 1, COM 2 and COM 3 of one record, and the fourth got nothing.
+**Confirming that card writes one chair with three fabrics.** That is a wrong
+BWS export, not a cosmetic one.
+
+Decided by Max the same day: **five configurations, one per room type** (1 and 5
+share their rows), **named as the document names them** (`S-301 TYPE 2`). The
+model stays as it is for this fix. The move to Opus is a separate change,
+because of the timing limit.
+
+Seen alongside it and NOT part of the fix:
+
+- **The drawing set disagrees with the spec sheet about Type 2.** The pack's
+  drawing set draws S-301 on four pages (`MUR 1 & TYPO 5`, `MUR 2`, `TYPO 3`,
+  `TYPO 4`). Page 9 (`MUR 2`) reads *Tibor Blob Amber Fern*, and the spec
+  sheet's Type 2 reads Le Manach L4093. It could be a misread or a real conflict
+  between two documents, and whether `MUR 2` is Type 2 is itself a question.
+  This is the cross-document case (brief B, not yet written).
+- **`CH-01.1` is a POSITION code on this pack, not a finish.** It is printed on
+  all four drawing-set pages with four different cloths. The finishes library
+  is keyed on the code (`project_finishes`, unique on `(project_id, code_norm)`),
+  so this client's code does not identify one finish. The CONFLICT rule leaves
+  the second to fourth unlinked, which is safe, but the library cannot hold
+  this pack's upholstery as it stands. Related to *Finishes by room*
+  (2026-09-22).
+- The title-block reading wobbles between reads: `MUR.1 & TYP.O DESK CHAIR` on
+  23 September, `MUR.1 & TYPO D DESK CHAIR` on 18 September, where the page
+  says `MUR 1 & TYPO 5`. A misread digit in a configuration's name would make it
+  a different configuration.
+
 ### An intake document stays "being read" until the page is reloaded
 
 **Status: open, seen by Max 2026-09-23.** *"Quite often you have to, it seems,
