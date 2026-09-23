@@ -33,7 +33,7 @@
 import { Fragment, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
-import { fieldSlotGaps, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
+import { fieldSlotGaps, naturalConfigurationOrder, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import type { DimensionSlot } from "@/lib/spec-vocab";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
@@ -140,7 +140,8 @@ export default function NamedConfigurationCard({
   // item version, and read from the first — see `configurationsByReviewer`. A
   // row's own answer goes on the observation, beside the model's reading.
   const currentList = named.configurations.map((entry) => ({ label: entry.label, readAs: entry.readAs ?? null }));
-  const labels = currentList.map((entry) => entry.label);
+  // STORED in the code's order (what `saveList` writes); SHOWN in natural order.
+  const labels = naturalConfigurationOrder(currentList.map((entry) => entry.label));
   const canEdit = Boolean(onSaveItem);
   const saveList = (list: { label: string; readAs: string | null }[] | null) => {
     if (!onSaveItem) return;

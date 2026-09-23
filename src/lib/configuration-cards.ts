@@ -347,7 +347,10 @@ export function namedTabs(
   rowsOf: (item: DrawingItem) => Record<string, string[]> | undefined,
 ): NamedTab[] {
   const all = configurations.map((entry) => entry.label);
-  return configurations.map((configuration, index) => {
+  // Shown in natural order; `index` stays the configuration's place in the
+  // code's own list, which is what its colour and its reading are keyed on.
+  const order = naturalConfigurationOrder(all);
+  const tabs = configurations.map((configuration, index) => {
     const rows: NamedTabRow[] = [];
     let applied = 0;
     for (const item of pages) {
@@ -371,6 +374,32 @@ export function namedTabs(
       state,
     };
   });
+  return order.map((label) => tabs.find((tab) => tab.label === label)!);
+}
+
+/**
+ * THE ORDER A PERSON COUNTS IN, for display: "configuration one, configuration
+ * two, configuration three" — not the order the page happened to mention them
+ * (S-301's sheet lists "Type 1 & 5" first, so first mention read TYPE 1, TYPE 5,
+ * TYPE 2 …).
+ *
+ * Numbered names first, numeric-aware (`TYPE 2` before `TYPE 10`), then single
+ * letters A–Z, then anything else in the order the document gave it. DISPLAY
+ * ONLY: the stored order, the confirm's order and the letters are unchanged.
+ */
+export function naturalConfigurationOrder(labels: readonly string[]): string[] {
+  const numbered: { label: string; head: string; n: number; tail: string }[] = [];
+  const letters: string[] = [];
+  const rest: string[] = [];
+  for (const label of labels) {
+    const match = /^(.*?)(\d+)(.*)$/.exec(label);
+    if (match) numbered.push({ label, head: match[1]!, n: Number(match[2]), tail: match[3]! });
+    else if (/^[A-Z]$/.test(label)) letters.push(label);
+    else rest.push(label);
+  }
+  numbered.sort((a, b) => a.head.localeCompare(b.head) || a.n - b.n || a.tail.localeCompare(b.tail));
+  letters.sort();
+  return [...numbered.map((entry) => entry.label), ...letters, ...rest];
 }
 
 /** Pending rows of a named code that land on no configuration at all. */
@@ -436,7 +465,7 @@ export function fieldSlotGaps(
 export function sharedWithSentence(lands: readonly string[], here: string, total: number): string | null {
   if (lands.length <= 1) return null;
   if (lands.length === total) return `shared by all ${total}`;
-  return `shared with ${lands.filter((label) => label !== here).join(" · ")}`;
+  return `shared with ${naturalConfigurationOrder(lands.filter((label) => label !== here)).join(" · ")}`;
 }
 
 export function configurationCards<

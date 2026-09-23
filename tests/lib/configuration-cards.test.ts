@@ -3,7 +3,14 @@
 // with invented codes and materials. No client document content is in this
 // repo.
 import { describe, expect, it } from "vitest";
-import { cardHasPending, compareGeometry, configurationCards, pagesOfCard, sharedTargets } from "@/lib/configuration-cards";
+import {
+  cardHasPending,
+  compareGeometry,
+  configurationCards,
+  naturalConfigurationOrder,
+  pagesOfCard,
+  sharedTargets,
+} from "@/lib/configuration-cards";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 
 let counter = 0;
@@ -226,5 +233,28 @@ describe("pagesOfCard", () => {
 
   it("is empty for an item whose page is unknown", () => {
     expect(pagesOfCard([item({ id: "z", page: null, itemCodeRaw: "S-999" })])).toEqual([]);
+  });
+});
+
+describe("the order configuration tabs are shown in", () => {
+  it("counts the way a person does, not the way a page first mentioned them", () => {
+    expect(naturalConfigurationOrder(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 3", "TYPE 4"])).toEqual([
+      "TYPE 1",
+      "TYPE 2",
+      "TYPE 3",
+      "TYPE 4",
+      "TYPE 5",
+    ]);
+    expect(naturalConfigurationOrder(["TYPE 10", "TYPE 2"])).toEqual(["TYPE 2", "TYPE 10"]);
+    expect(naturalConfigurationOrder(["C", "A", "B"])).toEqual(["A", "B", "C"]);
+    // Numbered first, then letters, then anything else in document order.
+    expect(naturalConfigurationOrder(["SUITE", "B", "TYPE 2", "LOBBY", "A", "TYPE 1"])).toEqual([
+      "TYPE 1",
+      "TYPE 2",
+      "A",
+      "B",
+      "SUITE",
+      "LOBBY",
+    ]);
   });
 });

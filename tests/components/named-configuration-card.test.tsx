@@ -80,7 +80,8 @@ const tabNames = () => screen.getAllByRole("tab").map((tab) => tab.querySelector
 describe("a card whose document names its configurations", () => {
   it("is one card with a tab per configuration, named as the document names them", () => {
     renderNamed();
-    expect(tabNames()).toEqual(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 3", "TYPE 4"]);
+    // In the order a person counts, not the order the page mentioned them.
+    expect(tabNames()).toEqual(["TYPE 1", "TYPE 2", "TYPE 3", "TYPE 4", "TYPE 5"]);
     // Never listed one after another down the page: one tab panel at a time.
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
   });
@@ -296,6 +297,6 @@ describe("correcting the configurations on the card", () => {
     expect(screen.getByText("Read as 5, you set 4 — removed TYPE 3.")).toBeInTheDocument();
     expect(screen.getByText(/1 row belonged only to a configuration that has been removed/)).toBeInTheDocument();
     expect(screen.getByDisplayValue("Maker C, Ref. Z")).toBeInTheDocument();
-    expect(tabNames()).toEqual(["TYPE 1", "TYPE 5", "TYPE 2", "TYPE 4"]);
+    expect(tabNames()).toEqual(["TYPE 1", "TYPE 2", "TYPE 4", "TYPE 5"]);
   });
 });
