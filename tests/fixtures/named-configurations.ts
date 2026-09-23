@@ -65,7 +65,9 @@ export const SHOP_DRAWING: RawDrawingItem = {
   itemNameRaw: "Desk chair",
   page: 2,
   dimensions: [dim("Width", "550", "width"), dim("Depth", "560", "depth"), dim("Height", "790", "height")],
-  materials: [{ labelRaw: "FABRIC", valueRaw: "Maker A, Ref. X", materialCodeRaw: "QQ-01.1", configurations: [] }],
+  // The SAME cloth as the sheet's Type 1 & 5 line, WORDED DIFFERENTLY — which
+  // is the real pack's shape, and what makes COM 1 a reviewer's decision.
+  materials: [{ labelRaw: "FABRIC", valueRaw: "Maker A, Ref. X, woven", materialCodeRaw: "QQ-01.1", configurations: [] }],
   dimensionsCombinedRaw: [],
   notesRaw: [],
   confidence: "high",

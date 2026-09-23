@@ -197,10 +197,88 @@ describeIfDb("confirming configurations a document names", () => {
     // The bill line itself carries nothing: it is a heading now.
     expect((await client.query(`select count(*)::int as n from record_attributes where record_id = $1`, [main])).rows[0].n).toBe(0);
 
-    // Page 2 depicts TYPE 1 and TYPE 5 and lands on exactly those, creating nothing.
+    // Page 2 depicts TYPE 1 and TYPE 5 and lands on exactly those, creating
+    // nothing. ITS GEOMETRY IS THE SAME FIGURES the sheet already wrote, so it
+    // asks nothing about them. ITS FABRIC IS WORDED DIFFERENTLY, and which
+    // wording to keep is the reviewer's call: that one still needs a tick.
+    const refused = await confirm(runId, 2);
+    expect(refused.response.status).toBe(409);
+    const refusedBlockers = ((refused.body as { diff?: { code: string }[] }).diff ?? []).map((blocker) => blocker.code);
+    expect(refusedBlockers.length).toBeGreaterThan(0);
+    expect(new Set(refusedBlockers)).toEqual(new Set(["slot_taken"]));
+
+    const drawingDoc = await liveDoc(runId);
+    const drawingItem = drawingDoc.items.find((entry) => entry.page === 2)!;
+    const fabric = drawingItem.observations.find((o) => o.materialCodeRaw === "QQ-01.1")!;
+    const occupants = (
+      await client.query(
+        `select a.id, a.record_id, a.version from record_attributes a join spec_records r on r.id = a.record_id
+          where r.parent_id = any($1::uuid[]) and r.variant_label in ('TYPE 1', 'TYPE 5')
+            and a.spec_field_id = $2 and a.status = 'active'`,
+        [[main, ve], com(1)],
+      )
+    ).rows;
+    expect(occupants).toHaveLength(4);
+    const ticked = await importPatchRoute(
+      new Request("http://localhost/test", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          itemId: drawingItem.id,
+          observationId: fabric.id,
+          expectedVersion: fabric.version,
+          changes: {
+            replaces: occupants.map((row) => ({ recordId: row.record_id, attributeId: row.id, attributeVersion: Number(row.version) })),
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: runId }) },
+    );
+    expect(ticked.ok).toBe(true);
+
     const second = await confirm(runId, 2);
     expect(second.response.ok, JSON.stringify(second.body)).toBe(true);
     expect((await variantsOf(main)).length).toBe(5);
+
+    // The geometry was ALREADY RECORDED: one W, D and H per record, still the
+    // sheet's (page 1), and page 2's rows are applied naming those attributes.
+    for (const parentId of [main, ve]) {
+      for (const label of ["TYPE 1", "TYPE 5"]) {
+        const dims = (
+          await client.query(
+            `select a.dimension_slot, a.source_page from record_attributes a join spec_records r on r.id = a.record_id
+              where r.parent_id = $1 and r.variant_label = $2 and a.status = 'active' and a.dimension_slot is not null
+              order by a.dimension_slot`,
+            [parentId, label],
+          )
+        ).rows;
+        expect(dims.map((row) => [row.dimension_slot, row.source_page])).toEqual([
+          ["D", 1],
+          ["H", 1],
+          ["W", 1],
+        ]);
+      }
+    }
+    const appliedDoc = await liveDoc(runId);
+    const appliedDims = appliedDoc.items
+      .find((entry) => entry.page === 2)!
+      .observations.filter((o) => o.attrGroup === "dimension");
+    expect(appliedDims.length).toBe(3);
+    for (const observation of appliedDims) {
+      expect(observation.reviewStatus).toBe("applied");
+      expect(observation.applied?.alreadyRecorded).toHaveLength(4);
+      expect(observation.applied?.alreadyRecorded?.every((entry) => entry.sourcePage === 1)).toBe(true);
+    }
+    // And the fabric was REPLACED, with the tick, on exactly those four.
+    const fabricsNow = (
+      await client.query(
+        `select a.value from record_attributes a join spec_records r on r.id = a.record_id
+          where r.parent_id = any($1::uuid[]) and r.variant_label in ('TYPE 1', 'TYPE 5')
+            and a.spec_field_id = $2 and a.status = 'active'`,
+        [[main, ve], com(1)],
+      )
+    ).rows.map((row) => row.value);
+    expect(fabricsNow).toEqual(Array(4).fill("Maker A, Ref. X, woven"));
     const onType2 = (
       await client.query(
         `select count(*)::int as n from record_attributes a join spec_records r on r.id = a.record_id

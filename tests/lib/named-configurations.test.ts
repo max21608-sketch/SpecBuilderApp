@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  alreadyRecorded,
   codeConfigurations,
   configurationEditSummary,
   drawingItemBlockers,
@@ -380,5 +381,78 @@ describe("splitting and joining by page, the manual codeGroups.relationship", ()
     const plans = namedConfigurationPlans(named.items, named);
     expect(plans.get(named.items[0]!.id)!.labels).toEqual(["TYPE 1", "TYPE 2"]);
     expect([...variantLettersByItem(named.items, named).values()]).toEqual([null, null]);
+  });
+});
+
+// ============================================================================
+// THE SAME MEASUREMENT FROM TWO PAGES IS NOT A REPLACEMENT (2026-09-23).
+//
+// S-301's sheet and its shop drawing both state W, D and H. Confirming the
+// drawing after the sheet used to ask "replace 550mm with 550mm?" three times.
+// Compared as millimetres through the one parser, with the state; dimensions
+// only — a finish described two ways is still the reviewer's decision.
+// ============================================================================
+describe("a dimension already recorded", () => {
+  const width = (value: string, unit: "mm" | "cm" | null, state: "confirmed" | "tbc" | null = "confirmed") => ({
+    attrGroup: "dimension" as const,
+    dimensionSlot: "W" as const,
+    value,
+    valueRaw: value,
+    unit,
+    state,
+  });
+  const occupant = (value: string, unit: string | null, state: string | null = "confirmed") => ({ value, unit, state });
+
+  it("is the same figure in the same unit", () => {
+    expect(alreadyRecorded(width("550", "mm"), occupant("550", "mm"))).toBe(true);
+    expect(alreadyRecorded(width("550.0", "mm"), occupant("550", "mm"))).toBe(true);
+  });
+
+  it("is the same width in centimetres and millimetres — never compared as strings", () => {
+    expect(alreadyRecorded(width("55", "cm"), occupant("550", "mm"))).toBe(true);
+    expect(alreadyRecorded(width("550", "cm"), occupant("550", "mm"))).toBe(false);
+  });
+
+  it("is NOT a different figure", () => {
+    expect(alreadyRecorded(width("555", "mm"), occupant("550", "mm"))).toBe(false);
+  });
+
+  it("is NOT the same figure in a different state", () => {
+    expect(alreadyRecorded(width("550", "mm", "confirmed"), occupant("550", "mm", "tbc"))).toBe(false);
+    expect(alreadyRecorded(width("550", "mm", "tbc"), occupant("550", "mm", "confirmed"))).toBe(false);
+  });
+
+  it("is never a figure with no unit, nor an occupant whose state is unknown", () => {
+    expect(alreadyRecorded(width("550", null), occupant("550", "mm"))).toBe(false);
+    expect(alreadyRecorded(width("550", "mm"), occupant("550", "mm", null))).toBe(false);
+    expect(alreadyRecorded(width("550", "mm"), undefined)).toBe(false);
+  });
+
+  it("is never a finish, whatever its wording", () => {
+    const fabric = { attrGroup: "material" as const, dimensionSlot: null, value: "Maker A", valueRaw: "Maker A", unit: null, state: "confirmed" as const };
+    expect(alreadyRecorded(fabric, occupant("Maker A", null))).toBe(false);
+  });
+
+  it("raises no blocker per record where it is already recorded, and a blocker where it is not", () => {
+    const doc = namedSheetRun();
+    const drawing = drawingOf(doc);
+    const plan = namedConfigurationPlans(doc.items, doc).get(drawing.id)!;
+    const variants = parentVariantsOf([
+      record({ id: "v1", parentId: "bill-main", variantLabel: "TYPE 1", boqCodes: [], refs: [] }),
+      record({ id: "v5", parentId: "bill-main", variantLabel: "TYPE 5", boqCodes: [], refs: [] }),
+    ]);
+    const slot = (value: string, id: string) => ({ attributeId: id, attributeVersion: 1, label: "Width", value, unit: "mm", state: "confirmed", sourceFilename: null, sourcePage: 1 });
+    // TYPE 1 holds the same width; TYPE 5 holds a different one.
+    const occupied: OccupiedSlots = {
+      fields: new Map(),
+      dimensions: new Map([
+        ["v1", new Map([["W", slot("550", "a1")]])],
+        ["v5", new Map([["W", slot("600", "a5")]])],
+      ]),
+    };
+    const blockers = drawingItemBlockers(drawing, resolveDrawingTargets("Q-301", [record()]), occupied, { plan, variants });
+    const widths = blockers.filter((b) => b.code === "dimension_slot_taken");
+    expect(widths).toHaveLength(1);
+    expect(widths[0]).toMatchObject({ recordId: "v5" });
   });
 });
