@@ -33,7 +33,7 @@
 import { Fragment, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
-import { fieldSlotGaps, naturalConfigurationOrder, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
+import { fieldSlotGaps, naturalConfigurationOrder, tabMeasurements, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import type { DimensionSlot } from "@/lib/spec-vocab";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
@@ -367,10 +367,14 @@ export default function NamedConfigurationCard({
   // ------------------------------------------------------------ the open tab
   const tab = activeTab!;
   const colour = colourAt(tab.index);
-  const rowById = new Map(tab.rows.map((row) => [row.observation.id, row]));
-  const order = orderRows(tab.rows.map((row) => row.observation));
+  // ONE ROW PER MEASUREMENT: a later page stating the same figure is folded
+  // into the first page's row, and still confirms as already recorded.
+  const measurements = tabMeasurements(tab);
+  const visibleRows = tab.rows.filter((row) => !measurements.hidden.has(row.observation.id));
+  const rowById = new Map(visibleRows.map((row) => [row.observation.id, row]));
+  const order = orderRows(visibleRows.map((row) => row.observation));
   const dimensionCell = composeDimensionCell(
-    tab.rows
+    visibleRows
       .filter((row) => row.observation.attrGroup === "dimension" && row.observation.dimensionSlot)
       .map((row, index) => ({
         slot: row.observation.dimensionSlot as DimensionSlot,
@@ -560,7 +564,12 @@ export default function NamedConfigurationCard({
                       const row = rowById.get(observation.id)!;
                       const member = memberOf(row.item.id);
                       const blockers = rowBlockers(row);
-                      const warnings = rowWarnings(row);
+                      const disagreement = measurements.disagree.get(observation.id);
+                      const warnings = [
+                        ...rowWarnings(row),
+                        ...(disagreement ? [{ code: "pages_disagree", observationId: observation.id, message: disagreement }] : []),
+                      ];
+                      const sameOn = measurements.sameOn.get(observation.id) ?? [];
                       const isOther = order.otherIds.has(observation.id);
                       const shared = sharedWithSentence(row.lands, tab.label, total);
                       const callbacks = {
@@ -599,6 +608,13 @@ export default function NamedConfigurationCard({
                               <tr>
                                 <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-1 text-[11px] text-neutral-500">
                                   Page {row.item.page ?? "?"}
+                                  {sameOn.length > 0 && (
+                                    <span className="text-neutral-700">
+                                      {" "}
+                                      · {sameOn.map((page) => `page ${page}`).join(" and ")} state
+                                      {sameOn.length === 1 ? "s" : ""} the same
+                                    </span>
+                                  )}
                                   {shared ? ` · ${shared} — one row, written to each` : ` · ${tab.label} only`}
                                   {Array.isArray(row.observation.configurationsByReviewer) && (
                                     <span className="text-violet-800">

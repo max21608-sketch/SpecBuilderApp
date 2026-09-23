@@ -93,9 +93,9 @@ describe("a card whose document names its configurations", () => {
 
   it("shows each configuration complete, and only what lands on it", async () => {
     renderNamed();
-    // TYPE 1: the sheet's geometry AND the drawing's (two pages, two rows), and
-    // fabric A from each. Nothing of Type 2's.
-    expect(screen.getAllByDisplayValue("550")).toHaveLength(2);
+    // TYPE 1: the geometry ONCE — the drawing states the same figures, so its
+    // rows fold into the sheet's — and fabric A from each page. Nothing of Type 2's.
+    expect(screen.getAllByDisplayValue("550")).toHaveLength(1);
     expect(screen.getAllByDisplayValue("Maker A, Ref. X")).toHaveLength(1);
     expect(screen.getAllByDisplayValue("Maker A, Ref. X, woven")).toHaveLength(1);
     expect(screen.queryByDisplayValue("Maker B, Ref. Y")).toBeNull();
@@ -141,6 +141,14 @@ describe("a card whose document names its configurations", () => {
     // The SAME observation on TYPE 4: it shows the edit.
     await userEvent.click(screen.getByRole("tab", { name: /TYPE 4/ }));
     expect(screen.getByDisplayValue("555")).toBeInTheDocument();
+  });
+
+  it("shows one row per measurement, and says the other page states the same", () => {
+    renderNamed();
+    expect(screen.getAllByDisplayValue("550")).toHaveLength(1);
+    expect(screen.getAllByText(/page 2 states the same/)).toHaveLength(3);
+    expect(screen.getByText("W550 x D560 x H790mm")).toBeInTheDocument();
+    expect(screen.queryByText(/Two width values/i)).toBeNull();
   });
 
   it("on TYPE 1, names the one configuration a fabric shares", () => {

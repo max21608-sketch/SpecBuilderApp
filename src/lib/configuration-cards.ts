@@ -43,6 +43,8 @@ import {
   codeGroupFor,
   variantLettersByItem,
   namedConfigurationPlans,
+  alreadyRecorded,
+  stateToWrite,
   codeConfigurations,
   configurationEditSummary,
   FABRIC_SLOTS,
@@ -54,7 +56,7 @@ import {
   type DrawingObservation,
 } from "@/lib/drawing-document";
 import { parseDimensionFigure } from "@/lib/dimensions";
-import type { DimensionSlot } from "@/lib/spec-vocab";
+import { DIMENSION_SLOT_LABELS, type DimensionSlot } from "@/lib/spec-vocab";
 
 /** Where a configuration's page has got to. Letters ignore this entirely. */
 export type MemberState = "pending" | "applied" | "ignored";
@@ -400,6 +402,70 @@ export function naturalConfigurationOrder(labels: readonly string[]): string[] {
   numbered.sort((a, b) => a.head.localeCompare(b.head) || a.n - b.n || a.tail.localeCompare(b.tail));
   letters.sort();
   return [...numbered.map((entry) => entry.label), ...letters, ...rest];
+}
+
+/** What one tab shows of its measurements, when two pages state them. */
+export type TabMeasurements = {
+  /** Rows NOT shown: a later page stating the same measurement a row already on the tab states. */
+  hidden: Set<string>;
+  /** Kept row id -> the later pages that state the same. */
+  sameOn: Map<string, number[]>;
+  /** Row id -> "Page 1 and page 2 disagree about the width: …". */
+  disagree: Map<string, string>;
+};
+
+/**
+ * ONE ROW PER MEASUREMENT IN A TAB.
+ *
+ * S-301's sheet says WIDTH 550 and its shop drawing's front view says 550, and
+ * both land on TYPE 1. Shown twice, the tab read as two widths and the composed
+ * cell warned "two width values are recorded" four times — about one width.
+ *
+ * So where two PAGES give a configuration the same slot with the same figure in
+ * millimetres and the same state — `alreadyRecorded`, the comparison the
+ * confirm uses — the tab shows the first page's row and says the other page
+ * states the same. The later row still confirms, as already recorded. Where
+ * the figures DIFFER, both rows stay, each saying the pages disagree: that is
+ * a real question, and averaging or picking one would answer it for somebody.
+ *
+ * A row nobody has ruled on (no state yet) is never hidden: it still needs
+ * the person, and a hidden row cannot be seen to need anything.
+ */
+export function tabMeasurements(tab: Pick<NamedTab, "rows">): TabMeasurements {
+  const out: TabMeasurements = { hidden: new Set(), sameOn: new Map(), disagree: new Map() };
+  const bySlot = new Map<string, NamedTabRow[]>();
+  for (const row of tab.rows) {
+    const { observation } = row;
+    if (observation.attrGroup !== "dimension" || !observation.dimensionSlot) continue;
+    bySlot.set(observation.dimensionSlot, [...(bySlot.get(observation.dimensionSlot) ?? []), row]);
+  }
+  for (const [slot, rows] of bySlot) {
+    const ordered = [...rows].sort((a, b) => (a.item.page ?? Number.MAX_SAFE_INTEGER) - (b.item.page ?? Number.MAX_SAFE_INTEGER));
+    const kept = ordered[0]!;
+    for (const later of ordered.slice(1)) {
+      if (later.item.id === kept.item.id) continue; // one page twice: the card's own blocker says so
+      const same =
+        kept.observation.state !== null &&
+        later.observation.state !== null &&
+        alreadyRecorded(later.observation, {
+          value: kept.observation.value ?? kept.observation.valueRaw,
+          unit: kept.observation.unit,
+          state: stateToWrite(kept.observation),
+        });
+      if (same) {
+        out.hidden.add(later.observation.id);
+        out.sameOn.set(kept.observation.id, [...(out.sameOn.get(kept.observation.id) ?? []), later.item.page ?? 0]);
+        continue;
+      }
+      const name = (DIMENSION_SLOT_LABELS[slot as DimensionSlot] ?? slot).toLowerCase();
+      const say = (row: NamedTabRow) =>
+        `page ${row.item.page ?? "?"} says ${row.observation.value ?? row.observation.valueRaw ?? "nothing"}${row.observation.unit ?? ""}`;
+      const message = `Page ${kept.item.page ?? "?"} and page ${later.item.page ?? "?"} disagree about the ${name}: ${say(kept)}, ${say(later)}. Correct one, or ignore it.`;
+      out.disagree.set(kept.observation.id, message);
+      out.disagree.set(later.observation.id, message);
+    }
+  }
+  return out;
 }
 
 /** Pending rows of a named code that land on no configuration at all. */
