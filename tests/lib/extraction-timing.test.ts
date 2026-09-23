@@ -52,10 +52,16 @@ describe("extraction timing contract", () => {
     // The cap trades concurrency for a rate somebody can survive, and the
     // trade has a worst case: ceil(N / cap) waves, each bounded by the
     // function's own limit. Stated here so lowering the cap to 1 fails a test
-    // rather than quietly making a pack of thirty two and a half hours.
+    // rather than quietly making a pack of thirty an overnight job.
+    //
+    // Widened 2026-09-23 with the move to Opus and an 800s function: Max said
+    // read time does not matter against accuracy, and a read runs in the
+    // background. The bound still has to be one a cap of 1 FAILS (thirty
+    // documents × 800s is 6h40m), because that is the mistake it exists for.
     const waves = (n: number) => Math.ceil(n / MAX_IN_FLIGHT_READS_PER_PACK);
-    expect(waves(11) * MAX_DURATION_SECONDS).toBeLessThanOrEqual(30 * 60);
-    expect(waves(30) * MAX_DURATION_SECONDS).toBeLessThanOrEqual(60 * 60);
+    expect(waves(11) * MAX_DURATION_SECONDS).toBeLessThanOrEqual(60 * 60);
+    expect(waves(30) * MAX_DURATION_SECONDS).toBeLessThanOrEqual(3 * 60 * 60);
+    expect(30 * MAX_DURATION_SECONDS).toBeGreaterThan(3 * 60 * 60);
   });
 
   it("bounds what one press of Extract can cost", () => {

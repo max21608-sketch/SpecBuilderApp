@@ -22,36 +22,46 @@
 // ============================================================================
 // THE TIMING INEQUALITIES ARE THE CONTRACT, not tuning:
 //
-//   MODEL_DEADLINE (240s)  <  RUN_ABORT (270s)  <  MAX_DURATION (300s)
+//   MODEL_DEADLINE (740s)  <  RUN_ABORT (770s)  <  MAX_DURATION (800s)
 //     the model gives up in time for the run to persist WHY, and the run gives
 //     up in time for the platform not to kill it mid-write.
 //
-//   CLAIM_EXPIRY (360s)  >  MAX_DURATION (300s)
+//   CLAIM_EXPIRY (900s)  >  MAX_DURATION (800s)
 //     a claim cannot expire while its own invocation is legitimately still
 //     running, or two workers race for one attempt and both pay.
 //
-//   VISIBILITY_TIMEOUT (600s)  >  CLAIM_EXPIRY (360s)
+//   VISIBILITY_TIMEOUT (1200s)  >  CLAIM_EXPIRY (900s)
 //     the message does not come back before the claim it left behind can be
 //     taken, or every redelivery is a guaranteed busy no-op.
 //
 // tests/lib/extraction-timing.test.ts asserts each of these. Change one number
 // and that test tells you which of the others it just broke.
+//
+// RAISED 2026-09-23 FROM 240/270/300/360/600, when extraction moved from
+// Sonnet 5 to Opus 5. Max: "I'm not too bothered about how long this
+// extraction process takes, or how much it costs … the key is really just
+// the accuracy." Opus reads slower, and on Sonnet a preamble already took
+// 188-192s of a 240s budget, so the old numbers would have turned the upgrade
+// into timeouts. 800s is the Pro plan's generally available maximum (fluid
+// compute, which is on by default); the queue's visibility timeout may go to
+// 60 minutes. Past 800s is a beta (per-function, up to 1800s) and was not
+// taken.
 // ============================================================================
 
 /** Must equal `maxDuration` on the queue route and in vercel.json. */
-export const MAX_DURATION_SECONDS = 300;
+export const MAX_DURATION_SECONDS = 800;
 
 /** The run's own abort target, leaving room to write the failure down. */
-export const RUN_ABORT_MS = 270_000;
+export const RUN_ABORT_MS = 770_000;
 
 /** Passed to the model call. Preflight is subtracted from it by the caller. */
-export const MODEL_DEADLINE_MS = 240_000;
+export const MODEL_DEADLINE_MS = 740_000;
 
 /** After this, a `parsing` row is presumed abandoned and can be reclaimed. */
-export const CLAIM_EXPIRY_SECONDS = 360;
+export const CLAIM_EXPIRY_SECONDS = 900;
 
 /** Must equal `visibilityTimeoutSeconds` on the consumer. */
-export const VISIBILITY_TIMEOUT_SECONDS = 600;
+export const VISIBILITY_TIMEOUT_SECONDS = 1200;
 
 /**
  * How many times ONE attempt may be claimed. Equal to the delivery cap, because
@@ -78,10 +88,12 @@ export const ATTEMPT_DEADLINE_HOURS = 24;
  *
  * THE ARITHMETIC THIS BUYS, and its cost. A pack of N documents works through
  * in at most ceil(N / 3) waves, each bounded by MAX_DURATION_SECONDS: eleven
- * documents is 4 × 300s = 20 minutes in the worst case where every read uses
- * its whole budget, against 5 minutes unbounded. Real reads finish in well
- * under a minute, so a pack of eleven is a few minutes either way — the bound
- * is on the pathological case, which is the one that costs money.
+ * documents is 4 × 800s ≈ 53 minutes in the worst case where every read uses
+ * its whole budget (it was 4 × 300s = 20 minutes on Sonnet, before
+ * 2026-09-23). Real reads finish far inside the budget — a drawing set took
+ * 28s typically and 97s at most on Sonnet — so a pack of eleven is minutes
+ * either way; the bound is on the pathological case, which is the one that
+ * costs money.
  * `tests/lib/extraction-timing.test.ts` states it, so lowering the cap to 1
  * fails a test rather than quietly making a pack of thirty an afternoon.
  *

@@ -68,7 +68,7 @@ describe("intake spreadsheet sources", () => {
 //
 // MEASURED FIRST, and for 120 pages the answer is PROCEEDS. The cap is the
 // MODEL'S limit, which is 600 for a 1M-context model — `EXTRACTION_MODEL` is
-// `claude-sonnet-5` — and 100 only for a 200k-context one. The first version of
+// `claude-opus-5` — and 100 only for a 200k-context one. The first version of
 // this cap was set at 100 and would have refused a 120-page document the API
 // accepts, which is the worst outcome available here: a document nobody can get
 // into the app, refused by us with a confident sentence. So 120 pages is pinned
@@ -76,7 +76,7 @@ describe("intake spreadsheet sources", () => {
 //
 // A 120-page PDF is registered (the 20MB byte cap does not touch it — a
 // 120-page synthetic is 33KB), base64'd whole and read. It does not hang;
-// `MODEL_DEADLINE_MS` bounds the call at 240s inside a 270s abort. What the cap
+// `MODEL_DEADLINE_MS` bounds the call at 740s inside a 770s abort. What the cap
 // buys is the sentence over the limit, where the API's own answer was a bare
 // "The request was refused (400)." after an attempt had been spent.
 //
