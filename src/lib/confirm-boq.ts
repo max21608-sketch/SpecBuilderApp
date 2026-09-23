@@ -29,7 +29,8 @@
 // the check and the commit.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
-import { assertBoqDocument, normaliseRef, type StagedBoqSheet } from "@/lib/boq-import";
+import { assertBoqDocument, normaliseRef, sheetsNeedingColumns, type StagedBoqSheet } from "@/lib/boq-import";
+import { effectiveArea } from "@/lib/boq-reconcile";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 
@@ -44,6 +45,9 @@ type StagedLine = {
   productReference: string | null;
   qty: number | null;
   qtyUnit: string | null;
+  /** Present only where the bill has the column (v4). See `BoqLine`. */
+  subArea?: string | null;
+  notes?: string | null;
   categoryId: string | null;
   /**
    * The level, and whether a person chose it.
@@ -123,6 +127,22 @@ export async function confirmBoqImport(
   if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
 
   const parsed = assertBoqDocument(run.parsed);
+
+  // A LIVE SHEET NOBODY HAS MAPPED IS REFUSED, BY NAME. It has no lines, so
+  // letting it through would confirm the bill without it — a tab of the bill
+  // silently left out, which is the defect `parseBoqSheets` stopped doing in
+  // 2026-09-14. Setting its columns or dropping it are both one press away.
+  const unmapped = sheetsNeedingColumns(parsed);
+  if (unmapped.length > 0) {
+    const names = unmapped.map((sheet) => `“${sheet.sheetName}”`).join(", ");
+    throw new DomainConflictError(
+      "columns_needed",
+      `Say which column is which on ${names} first, or drop ${unmapped.length === 1 ? "that sheet" : "those sheets"} ` +
+        "— nothing has been read from it yet.",
+      { status: 400 },
+    );
+  }
+
   const sheets = parsed.sheets.filter((sheet) => !sheet.ignored);
   const lineCount = sheets.reduce(
     (total, sheet) => total + (sheet.lines as StagedLine[]).filter((line) => !line.ignored).length,
@@ -287,8 +307,12 @@ export async function confirmBoqImport(
               product_reference = ${line.productReference},
               qty = ${line.qty},
               designer = ${line.designer},
-              area = ${line.area ?? line.boqCategory ?? null},
+              area = ${effectiveArea(line)},
               boq_category = ${line.boqCategory ?? null},
+              -- The bill's own unit, like its quantity: a revision writes it.
+              -- NOT the notes column: internal notes are a person's once the
+              -- record exists, and a revised bill never writes over them.
+              qty_unit = ${line.qtyUnit ?? null},
               source_import_id = ${runId},
               source_line_no = ${line.lineNo},
               run_id = ${specRunId},
@@ -361,14 +385,14 @@ export async function confirmBoqImport(
       const inserted = await txn`
         insert into spec_records
           (project_id, run_id, record_no, status, category_id, item_description, product_reference, qty,
-           designer, area, boq_category, level, level_suggested, level_suggested_reason,
-           source_import_id, source_line_no, created_by, updated_by)
+           qty_unit, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+           internal_notes, source_import_id, source_line_no, created_by, updated_by)
         values
           (${projectId}, ${specRunId}, ${recordNo}, 'active', ${line.categoryId ?? null}, ${line.itemDescription},
-           ${line.productReference}, ${line.qty}, ${line.designer},
-           ${line.area ?? line.boqCategory ?? null}, ${line.boqCategory ?? null},
+           ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${line.designer},
+           ${effectiveArea(line)}, ${line.boqCategory ?? null},
            ${decided.level}, ${decided.suggested}, ${decided.reason},
-           ${runId}, ${line.lineNo}, ${actor}, ${actor})
+           ${line.notes ?? null}, ${runId}, ${line.lineNo}, ${actor}, ${actor})
         returning id
       `;
       const recordId = String(inserted[0]?.id ?? "");
