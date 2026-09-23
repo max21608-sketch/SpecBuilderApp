@@ -44,6 +44,7 @@ import {
   variantLettersByItem,
   namedConfigurationPlans,
   alreadyRecorded,
+  crossPageClaims,
   stateToWrite,
   codeConfigurations,
   configurationEditSummary,
@@ -191,6 +192,12 @@ export type NamedCardView = {
   editSummary: string | null;
   /** The configurations as the model read them (empty on a v1/v2 run). */
   read: NamedConfiguration[];
+  /**
+   * Later-page rows that name the SAME finish, by the client's code, as an
+   * earlier page's row in the same field (`crossPageClaims`): folded into that
+   * row on the tab, and already recorded at confirm.
+   */
+  sameFinish: Record<string, { keptId: string; message: string }>;
 };
 
 /**
@@ -551,6 +558,7 @@ export function configurationCards<
   // even when it is drawn on ONE page: S-301's sheet alone is five chairs.
   const plans = namedConfigurationPlans(items, doc);
   const byCode = plans.size > 0 ? codeConfigurations(items, doc) : new Map<string, never>();
+  const crossPage = plans.size > 0 ? crossPageClaims(items, doc) : new Map<string, never>();
   const cards: ReviewCard<R>[] = [];
   const grouped = new Set<string>();
 
@@ -609,12 +617,19 @@ export function configurationCards<
         ? (() => {
             const rowsOf = (item: DrawingItem) => resolved.get(item.id)?.named?.rows ?? plans.get(item.id)?.rows;
             const entry = byCode.get(code);
+            const sameFinish: Record<string, { keptId: string; message: string }> = {};
+            for (const [id, claim] of crossPage) {
+              if (claim.kind === "same_finish" && group.some((item) => item.observations.some((o) => o.id === id))) {
+                sameFinish[id] = { keptId: claim.keptId, message: claim.message };
+              }
+            }
             return {
               configurations: plan.configurations,
               tabs: namedTabs(group, plan.configurations, rowsOf),
               undecided: undecidedRows(group, rowsOf),
               editSummary: configurationEditSummary(entry),
               read: entry?.read ?? [],
+              sameFinish,
             };
           })()
         : null,

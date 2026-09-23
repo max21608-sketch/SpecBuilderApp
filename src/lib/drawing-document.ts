@@ -37,8 +37,8 @@
 import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
 import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
-// Type only: `finishes.ts` is a leaf here and imports nothing from this file.
-import type { FinishFiling } from "@/lib/finishes";
+// `finishes.ts` is a leaf here and imports nothing from this file.
+import { normaliseFinishCode, type FinishFiling } from "@/lib/finishes";
 import {
   DIMENSION_SLOT_LABELS,
   normaliseDimensionSlot,
@@ -1071,6 +1071,7 @@ export type DrawingBlocker =
   | { code: "dia_conflict"; message: string; observationId: string }
   | { code: "configuration_name"; message: string; label: string; observationId?: undefined }
   | { code: "configuration_undecided"; message: string; observationId: string }
+  | { code: "field_conflict"; message: string; observationId: string; pairKey: string }
   | {
       code: "configuration_new";
       message: string;
@@ -1099,6 +1100,8 @@ export type OccupiedSlot = {
   unit: string | null;
   /** The occupant's state, for `alreadyRecorded`. Optional: absent means unknown, which is never "the same". */
   state?: string | null;
+  /** The client's own material code on the occupant, for `alreadyRecorded`. */
+  materialCode?: string | null;
   sourceFilename: string | null;
   sourcePage: number | null;
 };
@@ -1132,11 +1135,21 @@ export type OccupiedSlots = {
  * screen and the confirm cannot disagree — the `proposalBlockers` rule.
  */
 export function alreadyRecorded(
-  observation: Pick<DrawingObservation, "attrGroup" | "dimensionSlot" | "value" | "valueRaw" | "unit" | "state">,
-  occupant: Pick<OccupiedSlot, "value" | "unit" | "state"> | undefined,
+  observation: Pick<DrawingObservation, "attrGroup" | "dimensionSlot" | "value" | "valueRaw" | "unit" | "state"> &
+    Partial<Pick<DrawingObservation, "specFieldId" | "materialCodeRaw">>,
+  occupant: (Pick<OccupiedSlot, "value" | "unit" | "state"> & Partial<Pick<OccupiedSlot, "materialCode">>) | undefined,
 ): boolean {
   if (!occupant) return false;
-  if (observation.attrGroup !== "dimension" || !observation.dimensionSlot) return false;
+  // A FINISH is the same finish only by the client's own CODE — WD-01 and
+  // WD-01 — never by its wording: "Dark tinted wood" and "feet dark tinted wood
+  // as per approved sample" may well be one timber, and deciding that is the
+  // reviewer's. Same code, same BWS field: already recorded.
+  if (observation.attrGroup !== "dimension") {
+    const mine = normaliseFinishCode(observation.materialCodeRaw ?? "");
+    const theirs = normaliseFinishCode(occupant.materialCode ?? "");
+    return Boolean(observation.specFieldId) && mine !== "" && mine === theirs;
+  }
+  if (!observation.dimensionSlot) return false;
   const mine = inMillimetres(observation.value ?? observation.valueRaw, observation.unit);
   const theirs = inMillimetres(occupant.value, occupant.unit);
   if (mine === null || theirs === null) return false;
@@ -1246,9 +1259,24 @@ export function drawingItemBlockers(
    * Null or absent: exactly the checks this function has always made.
    */
   named: NamedTargets | null = null,
+  /**
+   * What OTHER PAGES of the same code claim — `crossPageClaims`, over the
+   * staged document. A pending row giving the same BWS field to the same
+   * configuration as another page's row, in different words, is a decision the
+   * card can see before anything is written, so it is a blocker on BOTH rows
+   * now rather than a 409 on the second page after the first was applied.
+   */
+  crossPage: ReadonlyMap<string, CrossPageClaim> | null = null,
 ): DrawingBlocker[] {
   const blockers: DrawingBlocker[] = [];
   const occupiedFields = occupied.fields;
+  for (const observation of item.observations) {
+    if (observation.reviewStatus !== "pending") continue;
+    const claim = crossPage?.get(observation.id);
+    if (claim?.kind === "conflict") {
+      blockers.push({ code: "field_conflict", observationId: observation.id, pairKey: claim.pairKey, message: claim.message });
+    }
+  }
   const targets = targetRecordIds(item, resolution);
   const pending = item.observations.filter((observation) => observation.reviewStatus === "pending");
   // The records a row reaches that exist today, and the configuration scopes
@@ -1366,6 +1394,8 @@ export function drawingItemBlockers(
       const clash = recordsOf(observation).find((recordId) => {
         const occupant = occupiedFields.get(recordId)?.get(observation.specFieldId ?? "");
         if (!occupant) return false;
+        // The same finish, by the client's code, is not a replacement.
+        if (alreadyRecorded(observation, occupant)) return false;
         return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
       });
       if (clash) {
@@ -3504,6 +3534,114 @@ export function configurationsToCreate(targets: readonly string[], named: NamedT
       parentId,
       named.plan.labels.filter((label) => !existing?.has(label)),
     );
+  }
+  return out;
+}
+
+/** What another page of the same code says about one row's BWS field. */
+export type CrossPageClaim =
+  | {
+      /** The same finish, by the client's own code: the later page's row is already recorded. */
+      kind: "same_finish";
+      /** The earlier page's row it repeats. */
+      keptId: string;
+      code: string;
+      message: string;
+    }
+  | {
+      /** The same field, the same configuration, different words: a person decides. */
+      kind: "conflict";
+      /** The same for both rows of the pair, so a card can count decisions. */
+      pairKey: string;
+      message: string;
+    };
+
+/**
+ * TWO PAGES OF ONE CODE GIVING ONE CONFIGURATION THE SAME BWS FIELD.
+ *
+ * S-301's sheet gives TYPE 1 and TYPE 5 their COM 1 as "…Gorée - Raffia, col.
+ * black/straw diamonds" with no code, and its shop drawing gives them COM 1 as
+ * "…black/straw diamonds, raffia, Gorée" coded CH-01.1. Pressing Confirm
+ * applied the sheet and then refused the drawing with slot_taken — a card half
+ * applied, over something it could see before anything was written.
+ *
+ * So the claims are compared ACROSS PAGES here, per configuration (per record,
+ * for a card that writes one; never for page letters, which are separate
+ * records by construction), over pending rows only:
+ *
+ *   the SAME non-empty client code on both   the same finish — the later page's
+ *                                            row is already recorded, and says so.
+ *   anything else                            a CONFLICT on both rows, naming the
+ *                                            other page's words: ignore one, or
+ *                                            move one to another field.
+ *
+ * ONE FUNCTION, called by the card (through `resolveStagedRun`) and the confirm.
+ */
+export function crossPageClaims(
+  items: readonly DrawingItem[],
+  doc?: Pick<StagedDrawings, "schemaVersion" | "codeGroups">,
+  fields: readonly SpecFieldEntry[] = [],
+): Map<string, CrossPageClaim> {
+  const out = new Map<string, CrossPageClaim>();
+  const plans = namedConfigurationPlans(items, doc);
+  const letters = variantLettersByItem(items, doc);
+  const fieldName = (id: string) => fields.find((field) => field.id === id)?.name ?? "the same BWS field";
+  type Claim = { item: DrawingItem; observation: DrawingObservation };
+  for (const [, pages] of groupItemsByCode(items, doc)) {
+    if (pages.length < 2) continue;
+    // Page letters are separate records: two pages cannot collide on one.
+    if (pages.some((item) => letters.get(item.id))) continue;
+    const byKey = new Map<string, { field: string; scope: string; claims: Claim[] }>();
+    for (const item of pages) {
+      const plan = plans.get(item.id);
+      for (const observation of item.observations) {
+        if (observation.reviewStatus !== "pending" || !observation.specFieldId || observation.attrGroup === "dimension") continue;
+        const scopes = plan ? (plan.rows[observation.id] ?? plan.labels) : [""];
+        for (const scope of scopes) {
+          const key = `${scope}\u0000${observation.specFieldId}`;
+          const entry = byKey.get(key) ?? { field: observation.specFieldId, scope, claims: [] };
+          entry.claims.push({ item, observation });
+          byKey.set(key, entry);
+        }
+      }
+    }
+    // Per pair of rows, which configurations they collide on.
+    const pairs = new Map<string, { first: Claim; later: Claim; field: string; scopes: string[] }>();
+    for (const { field, scope, claims } of byKey.values()) {
+      const ordered = [...claims].sort((a, b) => (a.item.page ?? Number.MAX_SAFE_INTEGER) - (b.item.page ?? Number.MAX_SAFE_INTEGER));
+      for (let i = 0; i < ordered.length; i += 1) {
+        for (let j = i + 1; j < ordered.length; j += 1) {
+          const first = ordered[i]!;
+          const later = ordered[j]!;
+          if (first.item.id === later.item.id) continue; // one page twice: the card's own blocker
+          const key = `${first.observation.id}|${later.observation.id}`;
+          const pair = pairs.get(key) ?? { first, later, field, scopes: [] };
+          pair.scopes.push(scope);
+          pairs.set(key, pair);
+        }
+      }
+    }
+    for (const [pairKey, { first, later, field, scopes }] of pairs) {
+      const a = normaliseFinishCode(first.observation.materialCodeRaw ?? "");
+      const b = normaliseFinishCode(later.observation.materialCodeRaw ?? "");
+      if (a !== "" && a === b) {
+        if (out.get(later.observation.id)?.kind !== "conflict") {
+          out.set(later.observation.id, {
+            kind: "same_finish",
+            keptId: first.observation.id,
+            code: (later.observation.materialCodeRaw ?? "").trim(),
+            message: `Page ${later.item.page ?? "?"} names the same finish, ${(later.observation.materialCodeRaw ?? "").trim()} — already recorded from page ${first.item.page ?? "?"}.`,
+          });
+        }
+        continue;
+      }
+      const where = scopes.filter(Boolean).length > 0 ? ` for ${scopes.join(" · ")}` : "";
+      const words = (claim: Claim) => claim.observation.value ?? claim.observation.valueRaw ?? "";
+      const sentence = (self: Claim, other: Claim) =>
+        `Page ${first.item.page ?? "?"} and page ${later.item.page ?? "?"} both give ${fieldName(field)}${where}, in different words — page ${other.item.page ?? "?"} says “${words(other)}”. Ignore one, or move one to another field.`;
+      out.set(first.observation.id, { kind: "conflict", pairKey, message: sentence(first, later) });
+      out.set(later.observation.id, { kind: "conflict", pairKey, message: sentence(later, first) });
+    }
   }
   return out;
 }

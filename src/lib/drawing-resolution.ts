@@ -28,6 +28,9 @@ import {
   canonicalCode,
   variantLettersByItem,
   alreadyRecorded,
+  crossPageClaims,
+  type CrossPageClaim,
+  type SpecFieldEntry,
   namedConfigurationPlans,
   parentVariantsOf,
   rowWriteRecords,
@@ -184,7 +187,7 @@ export function finishFilingsFor(
 export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlots> {
   const rows = await sql`
     select a.id, a.record_id, a.spec_field_id, a.dimension_slot, a.version, a.label, a.value, a.unit,
-           a.state, a.source_page, at.filename as source_filename
+           a.state, a.material_code, a.source_page, at.filename as source_filename
     from record_attributes a
     join spec_records r on r.id = a.record_id
     left join intake_runs ir on ir.id = a.source_run_id
@@ -207,6 +210,7 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
       value: row.value === null || row.value === undefined ? null : String(row.value),
       unit: row.unit === null || row.unit === undefined ? null : String(row.unit),
       state: row.state === null || row.state === undefined ? null : String(row.state),
+      materialCode: row.material_code === null || row.material_code === undefined ? null : String(row.material_code),
       sourceFilename: row.source_filename === null || row.source_filename === undefined ? null : String(row.source_filename),
       sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
     };
@@ -293,8 +297,14 @@ export function occupantsFor(
 export function resolveStagedRun(
   staged: StagedDrawings,
   context: Awaited<ReturnType<typeof loadDrawingContext>>,
+  // The field register, for the NAME in a cross-page clash sentence ("both give
+  // COM 1"). Optional: without it the sentence says "the same BWS field".
+  fields: readonly SpecFieldEntry[] = [],
 ): ResolvedItem[] {
   const letters = variantLettersByItem(staged.items, staged);
+  // Two pages of one code giving one configuration one BWS field — computed
+  // over the WHOLE document, by the same function the confirm calls.
+  const crossPage = crossPageClaims(staged.items, staged, fields);
   const plans = namedConfigurationPlans(staged.items, staged);
   const variantsByParent = plans.size > 0 ? parentVariantsOf(context.records) : new Map<string, Map<string, string>>();
   return staged.items.map((item) => {
@@ -326,8 +336,12 @@ export function resolveStagedRun(
       id: item.id,
       resolution,
       targets,
-      blockers: drawingItemBlockers(item, resolution, occupied, named),
-      warnings: [...drawingItemWarnings(item), ...alreadyRecordedWarnings(item, targets, occupied, named)],
+      blockers: drawingItemBlockers(item, resolution, occupied, named, crossPage),
+      warnings: [
+        ...drawingItemWarnings(item),
+        ...alreadyRecordedWarnings(item, targets, occupied, named),
+        ...sameFinishWarnings(item, crossPage),
+      ],
       occupants: occupantsFor(item, targets, occupied, named),
       variantLabel,
       writesTo: Object.fromEntries(writesTo),
@@ -350,11 +364,15 @@ function alreadyRecordedWarnings(
 ): DrawingWarning[] {
   const out: DrawingWarning[] = [];
   for (const observation of item.observations) {
-    if (observation.reviewStatus !== "pending" || observation.attrGroup !== "dimension" || !observation.dimensionSlot) continue;
+    if (observation.reviewStatus !== "pending") continue;
+    const isDimension = observation.attrGroup === "dimension" && Boolean(observation.dimensionSlot);
+    if (!isDimension && !observation.specFieldId) continue;
     const pages = new Set<string>();
     let count = 0;
     for (const recordId of rowWriteRecords(observation.id, targets, named)) {
-      const occupant = occupied.dimensions.get(recordId)?.get(observation.dimensionSlot);
+      const occupant = isDimension
+        ? occupied.dimensions.get(recordId)?.get(observation.dimensionSlot!)
+        : occupied.fields.get(recordId)?.get(observation.specFieldId!);
       if (!alreadyRecorded(observation, occupant)) continue;
       count += 1;
       pages.add(occupant?.sourcePage ? `page ${occupant.sourcePage}` : "another page");
@@ -363,8 +381,25 @@ function alreadyRecordedWarnings(
     out.push({
       code: "already_recorded",
       observationId: observation.id,
-      message: `Already recorded from ${[...pages].join(" and ")}${count > 1 ? ` on ${count} records` : ""} — the same figure, so nothing new is written there.`,
+      message: `Already recorded from ${[...pages].join(" and ")}${count > 1 ? ` on ${count} records` : ""} — ${
+        isDimension ? "the same figure" : `the same finish, ${(observation.materialCodeRaw ?? "").trim()}`
+      }, so nothing new is written there.`,
     });
+  }
+  return out;
+}
+
+/** "Page 2 names the same finish, WD-01" beside a row the card folds. Never a blocker. */
+function sameFinishWarnings(
+  item: StagedDrawings["items"][number],
+  crossPage: ReadonlyMap<string, CrossPageClaim>,
+): DrawingWarning[] {
+  const out: DrawingWarning[] = [];
+  for (const observation of item.observations) {
+    const claim = crossPage.get(observation.id);
+    if (observation.reviewStatus === "pending" && claim?.kind === "same_finish") {
+      out.push({ code: "already_recorded", observationId: observation.id, message: claim.message });
+    }
   }
   return out;
 }
@@ -473,7 +508,7 @@ export async function loadBatchDrawings(
       error: row.error ? String(row.error) : null,
       version: Number(row.version),
       staged,
-      items: staged ? resolveStagedRun(staged, context) : [],
+      items: staged ? resolveStagedRun(staged, context, fields) : [],
     };
   });
 

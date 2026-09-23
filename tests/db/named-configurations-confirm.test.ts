@@ -160,6 +160,33 @@ describeIfDb("confirming configurations a document names", () => {
     );
     const runId = await stage(doc);
 
+    // A CLASH THE CARD CAN SEE IS REFUSED BEFORE ANY PAGE IS APPLIED. Both
+    // pages give TYPE 1 and TYPE 5 their COM 1, in different words (page 2
+    // coded, page 1 not): the sheet itself is refused, nothing is written, and
+    // the reviewer decides — here by ignoring the drawing's fabric row.
+    const upFront = await confirm(runId, 1);
+    expect(upFront.response.status).toBe(409);
+    expect(new Set(((upFront.body as { diff?: { code: string }[] }).diff ?? []).map((b) => b.code))).toEqual(
+      new Set(["field_conflict"]),
+    );
+    expect((await variantsOf(main)).length).toBe(0);
+    const staged2 = (await liveDoc(runId)).items.find((entry) => entry.page === 2)!;
+    const drawingFabric = staged2.observations.find((o) => o.materialCodeRaw === "QQ-01.1")!;
+    const ignored = await confirmRoute(
+      new Request("http://localhost/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "ignore",
+          itemId: staged2.id,
+          itemVersion: staged2.version,
+          observations: [{ id: drawingFabric.id, version: drawingFabric.version }],
+        }),
+      }),
+      { params: Promise.resolve({ id: runId }) },
+    );
+    expect(ignored.ok).toBe(true);
+
     const first = await confirm(runId, 1);
     expect(first.response.ok, JSON.stringify(first.body)).toBe(true);
 
@@ -189,7 +216,7 @@ describeIfDb("confirming configurations a document names", () => {
         // The geometry, shared, on every configuration.
         expect(rows.filter((row) => row.dimension_slot).map((row) => row.dimension_slot).sort()).toEqual(["D", "H", "W"]);
         // ONE fabric, and it is COM 1. Nothing in COM 2 or COM 3.
-        const fabrics = rows.filter((row) => row.spec_field_id);
+        const fabrics = rows.filter((row) => [com(1), com(2), com(14)].includes(row.spec_field_id));
         expect(fabrics).toEqual([expect.objectContaining({ value: cloth, spec_field_id: com(1) })]);
         expect(rows.some((row) => row.spec_field_id === com(2) || row.spec_field_id === com(14))).toBe(false);
       }
@@ -198,78 +225,45 @@ describeIfDb("confirming configurations a document names", () => {
     expect((await client.query(`select count(*)::int as n from record_attributes where record_id = $1`, [main])).rows[0].n).toBe(0);
 
     // Page 2 depicts TYPE 1 and TYPE 5 and lands on exactly those, creating
-    // nothing. ITS GEOMETRY IS THE SAME FIGURES the sheet already wrote, so it
-    // asks nothing about them. ITS FABRIC IS WORDED DIFFERENTLY, and which
-    // wording to keep is the reviewer's call: that one still needs a tick.
-    const refused = await confirm(runId, 2);
-    expect(refused.response.status).toBe(409);
-    const refusedBlockers = ((refused.body as { diff?: { code: string }[] }).diff ?? []).map((blocker) => blocker.code);
-    expect(refusedBlockers.length).toBeGreaterThan(0);
-    expect(new Set(refusedBlockers)).toEqual(new Set(["slot_taken"]));
-
-    const drawingDoc = await liveDoc(runId);
-    const drawingItem = drawingDoc.items.find((entry) => entry.page === 2)!;
-    const fabric = drawingItem.observations.find((o) => o.materialCodeRaw === "QQ-01.1")!;
-    const occupants = (
-      await client.query(
-        `select a.id, a.record_id, a.version from record_attributes a join spec_records r on r.id = a.record_id
-          where r.parent_id = any($1::uuid[]) and r.variant_label in ('TYPE 1', 'TYPE 5')
-            and a.spec_field_id = $2 and a.status = 'active'`,
-        [[main, ve], com(1)],
-      )
-    ).rows;
-    expect(occupants).toHaveLength(4);
-    const ticked = await importPatchRoute(
-      new Request("http://localhost/test", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          itemId: drawingItem.id,
-          observationId: fabric.id,
-          expectedVersion: fabric.version,
-          changes: {
-            replaces: occupants.map((row) => ({ recordId: row.record_id, attributeId: row.id, attributeVersion: Number(row.version) })),
-          },
-        }),
-      }),
-      { params: Promise.resolve({ id: runId }) },
-    );
-    expect(ticked.ok).toBe(true);
-
+    // nothing. Its GEOMETRY is the figures the sheet already wrote, and its
+    // TIMBER names the same finish by the same code (QW-01) in other words:
+    // both are ALREADY RECORDED, with no tick, and nothing is refused.
     const second = await confirm(runId, 2);
     expect(second.response.ok, JSON.stringify(second.body)).toBe(true);
     expect((await variantsOf(main)).length).toBe(5);
 
-    // The geometry was ALREADY RECORDED: one W, D and H per record, still the
-    // sheet's (page 1), and page 2's rows are applied naming those attributes.
     for (const parentId of [main, ve]) {
       for (const label of ["TYPE 1", "TYPE 5"]) {
-        const dims = (
+        const held = (
           await client.query(
-            `select a.dimension_slot, a.source_page from record_attributes a join spec_records r on r.id = a.record_id
-              where r.parent_id = $1 and r.variant_label = $2 and a.status = 'active' and a.dimension_slot is not null
-              order by a.dimension_slot`,
-            [parentId, label],
+            `select a.dimension_slot, a.spec_field_id, a.value, a.source_page from record_attributes a
+               join spec_records r on r.id = a.record_id
+              where r.parent_id = $1 and r.variant_label = $2 and a.status = 'active'
+                and (a.dimension_slot is not null or a.spec_field_id = $3)
+              order by a.dimension_slot nulls last`,
+            [parentId, label, com(4)],
           )
         ).rows;
-        expect(dims.map((row) => [row.dimension_slot, row.source_page])).toEqual([
+        // One W, D, H and one timber per record — the sheet's, page 1.
+        expect(held.map((row) => [row.dimension_slot, row.source_page])).toEqual([
           ["D", 1],
           ["H", 1],
           ["W", 1],
+          [null, 1],
         ]);
+        expect(held[3]!.value).toBe("feet dark tinted wood as per approved sample");
       }
     }
     const appliedDoc = await liveDoc(runId);
-    const appliedDims = appliedDoc.items
-      .find((entry) => entry.page === 2)!
-      .observations.filter((o) => o.attrGroup === "dimension");
-    expect(appliedDims.length).toBe(3);
-    for (const observation of appliedDims) {
+    const drawingRows = appliedDoc.items.find((entry) => entry.page === 2)!.observations;
+    const recorded = drawingRows.filter((o) => o.attrGroup === "dimension" || o.materialCodeRaw === "QW-01");
+    expect(recorded.length).toBe(4);
+    for (const observation of recorded) {
       expect(observation.reviewStatus).toBe("applied");
       expect(observation.applied?.alreadyRecorded).toHaveLength(4);
       expect(observation.applied?.alreadyRecorded?.every((entry) => entry.sourcePage === 1)).toBe(true);
     }
-    // And the fabric was REPLACED, with the tick, on exactly those four.
+    // The ignored fabric wrote nothing: TYPE 1 keeps the sheet's cloth.
     const fabricsNow = (
       await client.query(
         `select a.value from record_attributes a join spec_records r on r.id = a.record_id
@@ -278,7 +272,7 @@ describeIfDb("confirming configurations a document names", () => {
         [[main, ve], com(1)],
       )
     ).rows.map((row) => row.value);
-    expect(fabricsNow).toEqual(Array(4).fill("Maker A, Ref. X, woven"));
+    expect(fabricsNow).toEqual(Array(4).fill("Maker A, Ref. X"));
     const onType2 = (
       await client.query(
         `select count(*)::int as n from record_attributes a join spec_records r on r.id = a.record_id

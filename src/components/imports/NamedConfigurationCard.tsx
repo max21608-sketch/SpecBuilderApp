@@ -246,6 +246,13 @@ export default function NamedConfigurationCard({
 
   // --------------------------------------------------------------- confirm
   const blockedMember = pendingMembers.find((member) => (member.resolution?.blockers.length ?? 0) > 0);
+  // TWO PAGES, ONE FIELD, DIFFERENT WORDS: one decision per pair, however many
+  // pages raised it. Counted so the bar can say how many are left.
+  const decisions = new Set(
+    pendingMembers.flatMap((member) =>
+      (member.resolution?.blockers ?? []).filter((b) => b.code === "field_conflict").map((b) => b.pairKey ?? b.message),
+    ),
+  ).size;
   const confirmable =
     pendingMembers.length > 0 &&
     !blockedMember &&
@@ -370,6 +377,15 @@ export default function NamedConfigurationCard({
   // ONE ROW PER MEASUREMENT: a later page stating the same figure is folded
   // into the first page's row, and still confirms as already recorded.
   const measurements = tabMeasurements(tab);
+  // And a later page naming the SAME finish by the client's code folds into
+  // the earlier page's row the same way, where that row is on this tab.
+  const onTab = new Set(tab.rows.map((row) => row.observation.id));
+  const finishFolded = new Map<string, string[]>();
+  for (const [laterId, same] of Object.entries(named.sameFinish)) {
+    if (!onTab.has(laterId) || !onTab.has(same.keptId)) continue;
+    measurements.hidden.add(laterId);
+    finishFolded.set(same.keptId, [...(finishFolded.get(same.keptId) ?? []), same.message]);
+  }
   const visibleRows = tab.rows.filter((row) => !measurements.hidden.has(row.observation.id));
   const rowById = new Map(visibleRows.map((row) => [row.observation.id, row]));
   const order = orderRows(visibleRows.map((row) => row.observation));
@@ -608,6 +624,12 @@ export default function NamedConfigurationCard({
                               <tr>
                                 <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-1 text-[11px] text-neutral-500">
                                   Page {row.item.page ?? "?"}
+                                  {(finishFolded.get(observation.id) ?? []).map((message) => (
+                                    <span key={message} className="text-neutral-700">
+                                      {" "}
+                                      · {message}
+                                    </span>
+                                  ))}
                                   {sameOn.length > 0 && (
                                     <span className="text-neutral-700">
                                       {" "}
@@ -739,9 +761,11 @@ export default function NamedConfigurationCard({
 
       <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
         <p className="text-neutral-600">
-          {blockedMember
-            ? `Page ${blockedMember.item.page ?? "?"} cannot be confirmed yet: ${blockedMember.resolution?.blockers[0]?.message ?? ""}`
-            : recordsSentence}
+          {decisions > 0
+            ? `${decisions} decision${decisions === 1 ? "" : "s"} left before ${card.codeRaw} can be confirmed: two pages give one field in different words. Ignore one, or move one to another field — each is marked on its row.`
+            : blockedMember
+              ? `Page ${blockedMember.item.page ?? "?"} cannot be confirmed yet: ${blockedMember.resolution?.blockers[0]?.message ?? ""}`
+              : recordsSentence}
         </p>
         <span className="flex-1" />
         {/* ONE CONFIRM FOR THE CARD; each PAGE still commits on its own request,

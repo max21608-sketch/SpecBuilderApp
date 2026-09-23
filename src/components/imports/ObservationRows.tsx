@@ -112,6 +112,8 @@ export type RowBlocker = {
   recordId?: string;
   /** A configuration name, on `configuration_name` and `configuration_new`. */
   label?: string;
+  /** The same for both rows of a cross-page `field_conflict`, so a card counts one decision. */
+  pairKey?: string;
 };
 export type RowWarning = { code: string; message: string; observationId: string };
 

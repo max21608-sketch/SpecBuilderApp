@@ -600,7 +600,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // The same pairing the pack-wide screen uses, so the two can never disagree
     // about whether a card can commit. See src/lib/drawing-resolution.ts.
     const context = await loadDrawingContext(String(run.project_id));
-    const items = resolveStagedRun(staged, context);
+    const items = resolveStagedRun(staged, context, specFieldEntries(fieldRows));
     return json({
       ok: true,
       import: { ...run, parsed: staged },

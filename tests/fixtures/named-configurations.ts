@@ -46,6 +46,8 @@ export const SPEC_SHEET: RawDrawingItem = {
     { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker B, Ref. Y", materialCodeRaw: null, configurations: ["Type 2"] },
     { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker C, Ref. Z", materialCodeRaw: null, configurations: ["Type 3"] },
     { labelRaw: "FABRIC REFERENCE", valueRaw: "Maker D, Ref. W", materialCodeRaw: null, configurations: ["Type 4"] },
+    // Shared by every room type, and CODED — the drawing names the same code.
+    { labelRaw: "FEET", valueRaw: "feet dark tinted wood as per approved sample", materialCodeRaw: "QW-01", configurations: [] },
   ],
   dimensionsCombinedRaw: [],
   notesRaw: [],
@@ -67,7 +69,12 @@ export const SHOP_DRAWING: RawDrawingItem = {
   dimensions: [dim("Width", "550", "width"), dim("Depth", "560", "depth"), dim("Height", "790", "height")],
   // The SAME cloth as the sheet's Type 1 & 5 line, WORDED DIFFERENTLY — which
   // is the real pack's shape, and what makes COM 1 a reviewer's decision.
-  materials: [{ labelRaw: "FABRIC", valueRaw: "Maker A, Ref. X, woven", materialCodeRaw: "QQ-01.1", configurations: [] }],
+  materials: [
+    { labelRaw: "FABRIC", valueRaw: "Maker A, Ref. X, woven", materialCodeRaw: "QQ-01.1", configurations: [] },
+    // The SAME finish as the sheet's feet, by the same client code, worded
+    // differently: already recorded, never a question.
+    { labelRaw: "FEET", valueRaw: "Dark tinted wood", materialCodeRaw: "QW-01", configurations: [] },
+  ],
   dimensionsCombinedRaw: [],
   notesRaw: [],
   confidence: "high",
