@@ -29,6 +29,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import { TONE } from "@/components/ui/tone";
+import { ATTRIBUTE_GROUPS, ATTRIBUTE_GROUP_LABELS, type AttributeGroup } from "@/lib/spec-vocab";
 import {
   carryKey,
   checkConfigurationName,
@@ -81,30 +83,25 @@ function stateLabel(item: CarryItem): string | null {
 
 const refs = (items: CarryItem[]) => items.map((item) => ({ kind: item.kind, id: item.id, version: item.version }));
 
-/** One bill line's carry list: its own ticks, its own "stops being exported". */
-function CarryList({
-  offer,
-  ticked,
-  name,
-  onToggle,
-}: {
-  offer: CarryOfferPayload;
-  ticked: ReadonlySet<string>;
-  name: string;
-  onToggle: (item: CarryItem) => void;
-}) {
-  const billLine = offer.billLine.name;
-  const differing = offer.offered.filter((item) => item.differing);
-  const shared = offer.offered.filter((item) => !item.differing);
-  const stops = stopsBeingExported(offer.offered, ticked, offer.alreadySplit);
-  const row = (item: CarryItem) => (
-    <li key={carryKey(item)} className="flex items-start gap-2 py-1.5 text-[12.5px]">
+/** Which fold a carried row sits in. Answers are their own; the note goes with the dimensions. */
+function groupOf(item: CarryItem): string {
+  if (item.kind === "answer") return "answer";
+  if (item.kind === "dimension_note") return "dimension";
+  return item.group && (ATTRIBUTE_GROUPS as readonly string[]).includes(item.group) ? item.group : "other";
+}
+const GROUP_ORDER = [...ATTRIBUTE_GROUPS, "answer"] as const;
+const groupLabel = (group: string) =>
+  group === "answer" ? "Checklist answers" : (ATTRIBUTE_GROUP_LABELS[group as AttributeGroup] ?? "Other");
+
+function CarryRow({ item, runName, checked, onToggle }: { item: CarryItem; runName: string; checked: boolean; onToggle: () => void }) {
+  return (
+    <li className="flex items-start gap-2 py-1.5 text-[12.5px]">
       <input
         type="checkbox"
         className="mt-0.5"
-        checked={ticked.has(carryKey(item))}
-        onChange={() => onToggle(item)}
-        aria-label={`Carry ${item.label} on ${offer.billLine.runName}`}
+        checked={checked}
+        onChange={onToggle}
+        aria-label={`Carry ${item.label} on ${runName}`}
       />
       <span className="min-w-0 flex-1">
         <span className="font-medium text-neutral-900">{item.label}</span>
@@ -119,6 +116,38 @@ function CarryList({
       </span>
     </li>
   );
+}
+
+/**
+ * One bill line's carry list, FOLDED: the differing fields open, because they
+ * are the decision; everything else one summary line per group with its
+ * count, its ticks inside a show toggle and still ticked by default.
+ */
+function CarryList({
+  offer,
+  ticked,
+  onToggle,
+}: {
+  offer: CarryOfferPayload;
+  ticked: ReadonlySet<string>;
+  onToggle: (item: CarryItem) => void;
+}) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const runName = offer.billLine.runName;
+  const differing = offer.offered.filter((item) => item.differing);
+  const shared = offer.offered.filter((item) => !item.differing);
+  const groups = GROUP_ORDER.map((group) => ({ group, items: shared.filter((item) => groupOf(item) === group) })).filter(
+    (entry) => entry.items.length > 0,
+  );
+  const row = (item: CarryItem) => (
+    <CarryRow
+      key={carryKey(item)}
+      item={item}
+      runName={runName}
+      checked={ticked.has(carryKey(item))}
+      onToggle={() => onToggle(item)}
+    />
+  );
   return (
     <>
       {differing.length > 0 && (
@@ -130,16 +159,42 @@ function CarryList({
         </div>
       )}
       <div className="mt-2">
-        <p className="text-xs font-medium text-neutral-700">Carry from {billLine}</p>
-        {shared.length === 0 ? (
-          <p className="py-1.5 text-[12.5px] text-neutral-500">{billLine} holds nothing else to carry.</p>
+        <p className="text-xs font-medium text-neutral-700">Carry from {offer.billLine.name}</p>
+        {groups.length === 0 ? (
+          <p className="py-1.5 text-[12.5px] text-neutral-500">{offer.billLine.name} holds nothing else to carry.</p>
         ) : (
-          <ul className="divide-y divide-neutral-100">{shared.map(row)}</ul>
+          <ul className="divide-y divide-neutral-100">
+            {groups.map(({ group, items }) => {
+              const carried = items.filter((item) => ticked.has(carryKey(item))).length;
+              const shown = open.has(group);
+              return (
+                <li key={group} className="py-1 text-[12.5px]">
+                  <span className="text-neutral-800">
+                    {groupLabel(group)} — {carried === items.length ? `${carried} carried` : `${carried} of ${items.length} carried`}
+                  </span>{" "}
+                  <Button
+                    variant="quiet"
+                    size="xs"
+                    aria-expanded={shown}
+                    aria-label={`${shown ? "Hide" : "Show"} ${groupLabel(group)} on ${runName}`}
+                    onClick={() =>
+                      setOpen((current) => {
+                        const next = new Set(current);
+                        if (next.has(group)) next.delete(group);
+                        else next.add(group);
+                        return next;
+                      })
+                    }
+                  >
+                    {shown ? "hide" : "show"}
+                  </Button>
+                  {shown && <ul className="ml-4 divide-y divide-neutral-100">{items.map(row)}</ul>}
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
-      <Note tone={stops.length > 0 ? "warn" : "info"}>
-        {describeExportEffect(stops, offer.alreadySplit, billLine, name)}
-      </Note>
     </>
   );
 }
@@ -161,6 +216,8 @@ export default function AddConfiguration({
   const [ticked, setTicked] = useState<Map<string, Set<string>>>(new Map());
   /** The other phases' bill lines the configuration will also be added to. */
   const [phasesOn, setPhasesOn] = useState<Set<string>>(new Set());
+  /** The other phases whose own carry list is open. */
+  const [phasesShown, setPhasesShown] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -229,6 +286,19 @@ export default function AddConfiguration({
       return next;
     });
   }
+
+  function toggleShown(lineId: string) {
+    setPhasesShown((current) => {
+      const next = new Set(current);
+      if (next.has(lineId)) next.delete(lineId);
+      else next.add(lineId);
+      return next;
+    });
+  }
+
+  const stopsFor = (lineId: string, lineOffer: CarryOfferPayload) =>
+    stopsBeingExported(lineOffer.offered, ticked.get(lineId) ?? new Set(), lineOffer.alreadySplit);
+  const primaryStops = offer ? stopsFor(billLineId, offer) : [];
 
   const request = (lineId: string, items: CarryItem[]) => {
     const set = ticked.get(lineId) ?? new Set<string>();
@@ -307,57 +377,99 @@ export default function AddConfiguration({
             <CarryList
               offer={offer}
               ticked={ticked.get(billLineId) ?? new Set()}
-              name={folded}
               onToggle={(item) => toggle(billLineId, item)}
             />
           </section>
 
-          {others.map((phase) =>
-            phase.billLineId && phase.offer ? (
-              <section key={phase.runId} className="mt-3 border-t border-neutral-100 pt-2">
-                <label className="flex items-center gap-2 text-xs font-semibold text-neutral-800">
-                  <input
-                    type="checkbox"
-                    checked={phasesOn.has(phase.billLineId)}
-                    onChange={() => togglePhase(phase.billLineId!)}
-                  />
-                  Also add {folded || "it"} to {phase.runName}
-                </label>
-                {phasesOn.has(phase.billLineId) && (
-                  <CarryList
-                    offer={phase.offer}
-                    ticked={ticked.get(phase.billLineId) ?? new Set()}
-                    name={folded}
-                    onToggle={(item) => toggle(phase.billLineId!, item)}
-                  />
-                )}
-              </section>
-            ) : (
-              <p key={phase.runId} className="mt-3 border-t border-neutral-100 pt-2 text-[12.5px] text-neutral-600">
-                {billLine} is on {phase.lineCount} lines of {phase.runName}, so nothing is added there — which of
-                them is this item is a person&rsquo;s call. Add it from the line you mean.
-              </p>
-            ),
+          {/* EACH OTHER PHASE IS ONE LINE, with its tick; its own list opens
+              only on show. */}
+          {others.length > 0 && (
+            <ul className="mt-3 divide-y divide-neutral-100 border-t border-neutral-100">
+              {others.map((phase) => {
+                if (!phase.billLineId || !phase.offer) {
+                  return (
+                    <li key={phase.runId} className="py-1.5 text-[12.5px] text-neutral-600">
+                      {billLine} is on {phase.lineCount} lines of {phase.runName}, so nothing is added there —
+                      which of them is this item is a person&rsquo;s call. Add it from the line you mean.
+                    </li>
+                  );
+                }
+                const lineId = phase.billLineId;
+                const set = ticked.get(lineId) ?? new Set<string>();
+                const carried = phase.offer.offered.filter((item) => set.has(carryKey(item))).length;
+                const left = phase.offer.offered.length - carried;
+                const on = phasesOn.has(lineId);
+                const shown = phasesShown.has(lineId);
+                return (
+                  <li key={phase.runId} className="py-1.5 text-[12.5px]">
+                    <label className="inline-flex items-center gap-2 font-medium text-neutral-800">
+                      <input type="checkbox" checked={on} onChange={() => togglePhase(lineId)} />
+                      Also add {folded || "it"} to {phase.runName}
+                    </label>
+                    {on && (
+                      <>
+                        <span className="text-neutral-500">
+                          {" "}
+                          — {carried} spec{carried === 1 ? "" : "s"} carried, {left} left on the bill line
+                        </span>{" "}
+                        <Button
+                          variant="quiet"
+                          size="xs"
+                          aria-expanded={shown}
+                          aria-label={`${shown ? "Hide" : "Show"} what is carried on ${phase.runName}`}
+                          onClick={() => toggleShown(lineId)}
+                        >
+                          {shown ? "hide" : "show"}
+                        </Button>
+                      </>
+                    )}
+                    {on && shown && (
+                      <div className="ml-6">
+                        <CarryList offer={phase.offer} ticked={set} onToggle={(item) => toggle(lineId, item)} />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           )}
 
           <p className="mt-3 text-xs text-neutral-500">
-            The new configuration starts with no quantity
-            {offer.billLine.qty !== null && <>: the bill&rsquo;s {offer.billLine.qty} is not divided between configurations</>}
-            . It says <em>quantity not allocated</em> until somebody sets one.
+            Starts with no quantity
+            {offer.billLine.qty !== null && <>: the bill&rsquo;s {offer.billLine.qty} is not divided</>} — it says{" "}
+            <em>quantity not allocated</em> until somebody sets one.
           </p>
 
-          {error && (
-            <p role="alert" className="mt-2 text-xs text-red-700">
-              {error}
-            </p>
-          )}
-          <div className="mt-3 flex gap-2">
-            <Button variant="primary" size="sm" disabled={saving || !nameOk} onClick={() => void submit()}>
-              {saving ? "Adding…" : chosen.length > 0 ? `Add on ${chosen.length + 1} phases` : "Add the configuration"}
-            </Button>
-            <Button variant="quiet" size="sm" onClick={onCancel}>
-              Cancel
-            </Button>
+          {/* THE FOOTER: the consequence beside the act, and sticky, so Add is
+              on screen however much was opened above it. */}
+          <div className="sticky bottom-0 -mx-3 -mb-3 mt-3 flex flex-wrap items-center gap-3 rounded-b-lg border-t border-neutral-200 bg-white px-3 py-2">
+            <div className="min-w-0 flex-1 text-[12.5px] text-neutral-700" data-testid="export-effect">
+              <p className={primaryStops.length > 0 ? TONE.warn.text : undefined}>
+                {describeExportEffect(primaryStops, offer.alreadySplit, billLine, folded)}
+              </p>
+              {chosen.map((phase) => {
+                const stops = stopsFor(phase.billLineId, phase.offer);
+                return stops.length > 0 ? (
+                  <p key={phase.runId} className={TONE.warn.text}>
+                    On {phase.runName}: {stops.length} left unticked stop{stops.length === 1 ? "s" : ""} being exported:{" "}
+                    {stops.map((item) => item.label).join(", ")}.
+                  </p>
+                ) : null;
+              })}
+              {error && (
+                <p role="alert" className="text-red-700">
+                  {error}
+                </p>
+              )}
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button variant="primary" size="sm" disabled={saving || !nameOk} onClick={() => void submit()}>
+                {saving ? "Adding…" : chosen.length > 0 ? `Add on ${chosen.length + 1} phases` : "Add the configuration"}
+              </Button>
+              <Button variant="quiet" size="sm" onClick={onCancel}>
+                Cancel
+              </Button>
+            </div>
           </div>
         </>
       )}

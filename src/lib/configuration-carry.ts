@@ -123,6 +123,9 @@ export type CarryItem = {
   /** `confirmed` / `tbc` for a spec, `confirmed` / `na` for an answer. */
   state: string;
   jsonId: number | null;
+  /** The spec's `attr_group` (dimension, material, finish, note, …), so the
+   *  panel can fold the list by group. Null for an answer and for the note. */
+  group?: string | null;
   /** Where it came from: a document and page, or typed. */
   source: { filename: string | null; page: number | null } | null;
   differing: boolean;
