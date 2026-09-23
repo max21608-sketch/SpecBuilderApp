@@ -435,3 +435,75 @@ export function UnsplitNote({
     </p>
   );
 }
+
+/**
+ * WHICH CONFIGURATION IS THIS? — one or more of the bill line's live ones, or
+ * a new one (plan step 5).
+ *
+ * A MULTI-SELECT, because a page can be more than one: the drawing set's page
+ * titled "MUR 1 & TYPO 5 DESK CHAIR" is TYPE 1 AND TYPE 5, and its rows then
+ * write to both. "A new configuration" stands alone: ticking it clears the
+ * others, and it is unavailable where the name already exists (rename first).
+ * Every change is saved as the reviewer's `configurationPairs`; nothing is
+ * paired for them.
+ */
+export function PairChoice({
+  label,
+  where,
+  namesRaw,
+  existing,
+  collides,
+  chosen,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  /** "on MAIN RUN", "(page 8) on MAIN RUN". */
+  where: string;
+  namesRaw: readonly string[];
+  existing: readonly string[];
+  collides: boolean;
+  /** undefined: not chosen yet; null: a new configuration; else the existing ones. */
+  chosen: readonly string[] | null | undefined;
+  disabled: boolean;
+  onChange: (pairWith: string[] | null) => void;
+}) {
+  const words = namesRaw.filter((raw) => normaliseVariantLabel(raw) !== label);
+  const picked = new Set(chosen ?? []);
+  return (
+    <fieldset className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <legend className="mb-0.5 basis-full">
+        <span className="font-mono font-medium">{label}</span>
+        {words.length > 0 && <> — the page says {words.join(" / ")} (read as {label})</>} {where} is:
+      </legend>
+      {existing.map((name) => (
+        <label key={name} className="inline-flex items-center gap-1 font-mono">
+          <input
+            type="checkbox"
+            checked={picked.has(name)}
+            disabled={disabled}
+            onChange={(event) => {
+              const next = new Set(picked);
+              if (event.target.checked) next.add(name);
+              else next.delete(name);
+              const list = existing.filter((entry) => next.has(entry));
+              if (list.length > 0) onChange(list);
+            }}
+          />
+          {name}
+        </label>
+      ))}
+      <label className="inline-flex items-center gap-1">
+        <input
+          type="checkbox"
+          checked={chosen === null}
+          disabled={disabled || collides}
+          onChange={(event) => {
+            if (event.target.checked) onChange(null);
+          }}
+        />
+        a new configuration{collides ? " (rename it first — that name exists)" : ""}
+      </label>
+    </fieldset>
+  );
+}

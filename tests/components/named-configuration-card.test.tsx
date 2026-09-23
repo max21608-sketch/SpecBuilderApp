@@ -6,7 +6,7 @@
 // complete — and a row shared by several is ONE observation on every tab.
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ConfigurationCard from "@/components/imports/ConfigurationCard";
 import { configurationCards } from "@/lib/configuration-cards";
@@ -218,18 +218,18 @@ describe("a card whose document names its configurations", () => {
     expect(screen.getByRole("button", { name: /Confirm Q-301/ })).toBeDisabled();
     // Both names shown: the page's own words, and what they were read as.
     expect(screen.getByText(/the page says MUR 2 \(read as TYPE 2\)/)).toBeInTheDocument();
-    const select = screen.getByRole("combobox", { name: /Which configuration is TYPE 2 on MAIN RUN/ });
-    expect(Array.from((select as HTMLSelectElement).options).map((o) => o.textContent)).toEqual([
-      "— choose —",
-      "Pair with A",
-      "Create as a new configuration",
+    // A MULTI-SELECT of the bill line's live configurations, plus "a new one".
+    const choice = screen.getByRole("group", { name: /TYPE 2 — the page says MUR 2 \(read as TYPE 2\) on MAIN RUN is:/ });
+    expect(within(choice).getAllByRole("checkbox").map((box) => box.parentElement?.textContent)).toEqual([
+      "A",
+      "a new configuration",
     ]);
-    await userEvent.selectOptions(select, "Pair with A");
+    await userEvent.click(within(choice).getByRole("checkbox", { name: "A" }));
     const sheet = doc.items.find((item) => item.page === 1)!;
     // Saved on every page that names TYPE 2 — here only the sheet.
     const saved = spies.onSaveItem.mock.calls.map((call) => call as unknown as [DrawingItem, Record<string, unknown>]);
     expect(saved.map(([item]) => item.id)).toEqual([sheet.id]);
-    expect(saved[0]![1]).toEqual({ configurationPairs: [{ recordId: "rec-main", label: "TYPE 2", pairWith: "A" }] });
+    expect(saved[0]![1]).toEqual({ configurationPairs: [{ recordId: "rec-main", label: "TYPE 2", pairWith: ["A"] }] });
   });
 
   it("confirms page by page under one button", async () => {

@@ -37,6 +37,8 @@ import {
   configurationsToCreate,
   configurationTarget,
   namedTargetsFor,
+  ownVariantsOf,
+  letteredPlan,
   type NamedTargets,
   type DrawingBlocker,
   type DrawingResolution,
@@ -111,7 +113,7 @@ export type NamedResolution = {
    */
   lands?: Record<
     string,
-    Record<string, { kind: "existing"; as: string; via: "linked" | "exact" | "paired" } | { kind: "create" | "ask" }>
+    Record<string, { kind: "existing"; as: string[]; via: "linked" | "exact" | "paired" } | { kind: "create" | "ask" }>
   >;
 };
 
@@ -241,13 +243,34 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
 
 /** The registers a drawings screen needs, read once for any number of runs. */
 export async function loadDrawingContext(projectId: string) {
-  const [registers, occupied, variants, finishes] = await Promise.all([
+  const [registers, occupied, variants, finishes, variantSources] = await Promise.all([
     loadExtractionRegisters(projectId),
     loadOccupiedSlots(projectId),
     loadVariants(projectId),
     loadFinishLibrary(projectId),
+    loadVariantSources(projectId),
   ]);
-  return { records: registers.records, occupied, variants, finishes };
+  return { records: registers.records, occupied, variants, finishes, variantSources };
+}
+
+/**
+ * Which documents wrote to each configuration: variant id -> intake run ids.
+ * So a document is never asked to pair a configuration with one it made
+ * itself — the S-201 A its own page 5 created is not "another source" to page 6.
+ */
+async function loadVariantSources(projectId: string): Promise<Map<string, Set<string>>> {
+  const rows = await sql`
+    select distinct a.record_id, a.source_run_id
+      from record_attributes a join spec_records r on r.id = a.record_id
+     where r.project_id = ${projectId} and r.parent_id is not null and a.source_run_id is not null
+  `;
+  const out = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const set = out.get(String(row.record_id)) ?? new Set<string>();
+    set.add(String(row.source_run_id));
+    out.set(String(row.record_id), set);
+  }
+  return out;
 }
 
 /**
@@ -311,13 +334,16 @@ export function resolveStagedRun(
   // The field register, for the NAME in a cross-page clash sentence ("both give
   // COM 1"). Optional: without it the sentence says "the same BWS field".
   fields: readonly SpecFieldEntry[] = [],
+  // The intake run this staged document IS, so its own configurations are
+  // never "another source". Optional: without it only its links count.
+  runId: string | null = null,
 ): ResolvedItem[] {
   const letters = variantLettersByItem(staged.items, staged);
   // Two pages of one code giving one configuration one BWS field — computed
   // over the WHOLE document, by the same function the confirm calls.
   const crossPage = crossPageClaims(staged.items, staged, fields);
   const plans = namedConfigurationPlans(staged.items, staged);
-  const variantsByParent = plans.size > 0 ? parentVariantsOf(context.records) : new Map<string, Map<string, string>>();
+  const variantsByParent = parentVariantsOf(context.records);
   return staged.items.map((item) => {
     // THE CANONICAL CODE, not the page's own heading. A shop drawing titled
     // `MUR.2 ARMCHAIR` is the S-200 the bill lists, and matching on its title
@@ -337,8 +363,11 @@ export function resolveStagedRun(
         if (variantId) writesTo.set(parentId, variantId);
       }
     }
-    const plan = plans.get(item.id) ?? null;
-    const named: NamedTargets | null = plan ? namedTargetsFor(item, plan, variantsByParent, staged) : null;
+    // A page LETTER reads through the same pair-or-create path as a name.
+    const plan = plans.get(item.id) ?? (variantLabel ? letteredPlan(item, variantLabel) : null);
+    const named: NamedTargets | null = plan
+      ? namedTargetsFor(item, plan, variantsByParent, staged, ownVariantsOf(staged, runId, context.variantSources))
+      : null;
     // A named page reads occupancy off the REAL variants: one bill line has
     // several, and a re-key onto the parent could only hold one of them.
     const occupied = named ? context.occupied : occupancyThrough(context.occupied, writesTo);
@@ -529,7 +558,7 @@ export async function loadBatchDrawings(
       error: row.error ? String(row.error) : null,
       version: Number(row.version),
       staged,
-      items: staged ? resolveStagedRun(staged, context, fields) : [],
+      items: staged ? resolveStagedRun(staged, context, fields, String(row.id)) : [],
     };
   });
 

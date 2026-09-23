@@ -48,6 +48,8 @@ import {
   rowWriteRecords,
   configurationTarget,
   namedTargetsFor,
+  ownVariantsOf,
+  letteredPlan,
   stateToWrite,
   type NamedTargets,
   type SpecFieldEntry,
@@ -243,9 +245,9 @@ async function writeStaged(
   // the same records with no question (`configurationTarget`, LINKED).
   const configurationLinks = [...(run.staged.configurationLinks ?? [])];
   for (const link of links) {
-    const at = configurationLinks.findIndex((entry) => entry.recordId === link.recordId && entry.label === link.label);
-    if (at === -1) configurationLinks.push(link);
-    else configurationLinks[at] = link;
+    if (!configurationLinks.some((entry) => entry.recordId === link.recordId && entry.label === link.label && entry.variantId === link.variantId)) {
+      configurationLinks.push(link);
+    }
   }
   const staged: StagedDrawings = {
     ...run.staged,
@@ -392,20 +394,36 @@ export async function confirmDrawingItem(
   // the configurations it belongs to. The plan comes from the same pure
   // function the card reads. `ordered` is unchanged — still the bill's own.
   // ==========================================================================
-  const plan = namedConfigurationPlans(run.staged.items, run.staged).get(item.id) ?? null;
-  const variantLabel = plan ? null : (variantLettersByItem(run.staged.items, run.staged).get(item.id) ?? null);
+  //
+  // A PAGE LETTER goes the same way (`letteredPlan`): it is a configuration
+  // the confirm would create, and one created beside a bill line's existing
+  // configurations from another document is a question, not a default.
+  const namedPlan = namedConfigurationPlans(run.staged.items, run.staged).get(item.id) ?? null;
+  const letter = namedPlan ? null : (variantLettersByItem(run.staged.items, run.staged).get(item.id) ?? null);
+  const plan = namedPlan ?? (letter ? letteredPlan(item, letter) : null);
   const ordered = [...targets].sort();
   const variantOf = new Map<string, string>();
-  if (variantLabel) {
-    for (const parentId of ordered) {
-      const variant = await ensureVariant(txn, { parentId, variantLabel, actor });
-      variantOf.set(parentId, variant.recordId);
-    }
-  }
   // The live variants BEFORE this confirm creates any: the blocker that asks
   // before a new configuration is created beside existing ones has to see the
-  // bill line as it was, or every creation would read as an exact match.
-  const named: NamedTargets | null = plan ? namedTargetsFor(item, plan, parentVariantsOf(records), run.staged) : null;
+  // bill line as it was, or every creation would read as an exact match. And
+  // which of them THIS DOCUMENT already wrote to, so it is never asked about
+  // its own.
+  const sourceRows = plan
+    ? await txn`
+        select distinct a.record_id, a.source_run_id
+          from record_attributes a join spec_records r on r.id = a.record_id
+         where r.project_id = ${run.projectId} and r.parent_id is not null and a.source_run_id is not null
+      `
+    : [];
+  const sources = new Map<string, Set<string>>();
+  for (const row of sourceRows) {
+    const set = sources.get(String(row.record_id)) ?? new Set<string>();
+    set.add(String(row.source_run_id));
+    sources.set(String(row.record_id), set);
+  }
+  const named: NamedTargets | null = plan
+    ? namedTargetsFor(item, plan, parentVariantsOf(records), run.staged, ownVariantsOf(run.staged, runId, sources))
+    : null;
   const existingNamedIds = named
     ? [...new Set(taken.flatMap((observation) => rowWriteRecords(observation.id, ordered, named)))]
     : [];
@@ -489,19 +507,23 @@ export async function confirmDrawingItem(
         // makes a record, under this configuration's own name. An "ask" never
         // reaches here — it is a blocker above.
         const target = configurationTarget(parentId, label, named);
-        const variant =
+        // A page the reviewer says IS TYPE 1 and TYPE 5 writes to both.
+        const variantIds =
           target.kind === "existing"
-            ? { recordId: target.variantId }
-            : await ensureVariant(txn, { parentId, variantLabel: label, actor });
-        links.push({ recordId: parentId, label, variantId: variant.recordId });
-        writes.push({
-          tickedId: parentId,
-          recordId: variant.recordId,
-          ackKey: variant.recordId,
-          observations: taken.filter((observation) =>
-            (named.plan.rows[observation.id] ?? named.plan.labels).includes(label),
-          ),
-        });
+            ? target.variantIds
+            : [(await ensureVariant(txn, { parentId, variantLabel: label, actor })).recordId];
+        for (const variantId of variantIds) {
+          links.push({ recordId: parentId, label, variantId });
+          if (writes.some((write) => write.recordId === variantId)) continue;
+          writes.push({
+            tickedId: parentId,
+            recordId: variantId,
+            ackKey: variantId,
+            observations: taken.filter((observation) =>
+              (named.plan.rows[observation.id] ?? named.plan.labels).includes(label),
+            ),
+          });
+        }
       }
     }
   } else {
