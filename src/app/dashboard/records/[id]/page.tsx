@@ -48,6 +48,7 @@ import { composeDimensionCell } from "@/lib/dimensions";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
+import { recordLabel as formatRecordLabel, recordShortLabel } from "@/lib/record-label";
 import { describeRetireEffect } from "@/lib/configuration-carry";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
@@ -100,6 +101,8 @@ type SpecRecord = {
   category_name: string | null; category_family: string | null;
   /** A fabric split (0024). Both null on an ordinary record. */
   parent_id: string | null; variant_label: string | null;
+  /** 0039: its number under its bill line, and that line's own number. Null on a bill line. */
+  variant_ordinal?: number | null; parent_record_no?: number | null;
   /** `retired` for a configuration somebody took out of the export (0038). */
   status: string;
   /** Whether a crop was confirmed off the drawings, so the screen can decide
@@ -111,6 +114,9 @@ type SpecRecord = {
 type FamilyMember = {
   id: string; record_no: number; variant_label: string | null; qty: number | null;
   item_description: string; attribute_count: string; refs: string | null;
+  /** 0039. Null on the bill line itself. */
+  variant_ordinal?: number | null; parent_record_no?: number | null;
+  version?: number;
 };
 
 type Attribute = {
@@ -641,7 +647,13 @@ function RecordView() {
   const billQty = billLine?.qty ?? null;
   const unallocated = unallocatedQty(billQty, variants.map((member) => member.qty));
 
-  const recordLabel = `${record.bws_project_number}-${String(record.record_no).padStart(3, "0")}`;
+  // THE ONE LABEL HELPER (0039): `P18181-012.3` on a configuration, whose own
+  // record_no is just the next free number in the project.
+  const recordLabel = formatRecordLabel(record.bws_project_number, {
+    recordNo: record.record_no,
+    parentRecordNo: record.parent_record_no ?? null,
+    variantOrdinal: record.variant_ordinal ?? null,
+  });
   const runHref = `/dashboard/projects/${record.project_id}?tab=${record.run_id}`;
   const level = normaliseItemLevel(record.level);
   const readiness = data.quoteReadiness ?? {
@@ -1665,6 +1677,13 @@ function RecordView() {
                         <li key={member.id} className="py-1.5 text-[12.5px]">
                           <span className="font-medium text-neutral-900">
                             {variantName(parentRefs, member.variant_label, `#${member.record_no}`)}
+                          </span>
+                          <span className="ml-1.5 font-mono text-neutral-500">
+                            {recordShortLabel({
+                              recordNo: member.record_no,
+                              parentRecordNo: member.parent_record_no ?? null,
+                              variantOrdinal: member.variant_ordinal ?? null,
+                            })}
                           </span>
                           {member.id === record.id ? (
                             <span className="ml-2 text-neutral-400">you are here</span>

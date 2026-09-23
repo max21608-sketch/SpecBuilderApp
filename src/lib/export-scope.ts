@@ -115,7 +115,13 @@ export async function loadExportScope(projectId: string, runId: string | null): 
         select 1 from spec_records v
         where v.parent_id = r.id and v.status = 'active'
       )
-    order by r.record_no
+    -- BILL ORDER, each configuration under its line (0039), so every file that
+    -- reads this scope lists 12.1 to 12.5 after line 12 rather than at the
+    -- end. Order changes nothing about what a BWS import replaces: every
+    -- record is still in scope, and BWS keys a row by its job.
+    order by coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no),
+             r.variant_ordinal nulls first,
+             r.record_no
   `;
   const recordIds = idRows.map((row) => String(row.id));
   const atoms = await loadRecordAtoms(sql, recordIds);

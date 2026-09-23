@@ -62,6 +62,7 @@
 // renders the original verbatim in a bracket saying why, which is the honest
 // cell and exactly what a pasted string could never be.
 // ============================================================================
+import { compareRecordOrder } from "@/lib/record-label";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import type { ExportAttribute, ExportRecord, ExportScope } from "@/lib/bws-export";
 import type { AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
@@ -209,7 +210,7 @@ export function composeCostingSheet(
 ): CostingSheet {
   const rows: CostingRow[] = [];
 
-  for (const record of [...scope.records].sort((a, b) => a.recordNo - b.recordNo)) {
+  for (const record of [...scope.records].sort(compareRecordOrder)) {
     const mine = scope.attributes.filter((attribute) => attribute.recordId === record.id);
     const [first, second] = pickSources(options.sourcesByRecord.get(record.id) ?? []);
 

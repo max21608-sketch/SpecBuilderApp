@@ -12,6 +12,7 @@
 //   the set the screen is filtering, so "the proposal at index 4" means a
 //   different row before and after an Ignore. Every operation here locates by
 //   `elem.id` in the live, locked JSON.
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { z } from "zod";
 import { sql, json, type Row } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
@@ -717,7 +718,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       if (!replacesRunId) continue;
       const recordRows = await sql`
         select r.id, r.version, r.record_no, r.item_description, r.product_reference, r.qty,
-               r.designer, r.area, r.boq_category, p.bws_project_number,
+               r.designer, r.area, r.boq_category, p.bws_project_number, r.variant_ordinal,
+               (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
                coalesce((select array_agg(x.ref_value order by x.ref_value)
                            from spec_record_refs x
                           where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as codes,
@@ -735,7 +737,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         id: String(row.id),
         version: Number(row.version),
         recordNo: Number(row.record_no),
-        label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+        label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
         itemDescription: String(row.item_description),
         productReference: row.product_reference === null || row.product_reference === undefined ? null : String(row.product_reference),
         qty: row.qty === null || row.qty === undefined ? null : Number(row.qty),

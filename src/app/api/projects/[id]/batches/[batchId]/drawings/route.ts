@@ -22,6 +22,7 @@
 //
 //   REPEATED OBSERVATIONS. Ten sheets carrying one fourteen-bullet REMARKS
 //   block is ~140 identical notes to review individually.
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { loadBatchDrawings } from "@/lib/drawing-resolution";
@@ -68,16 +69,17 @@ export async function GET(
   const labels = new Map<string, string>();
   if (duplicates.length > 0) {
     const rows = await sql`
-      select id, record_no, item_description
-      from spec_records
-      where id = any(${duplicates.map((entry) => entry.recordId)}::uuid[])
+      select r.id, r.record_no, r.item_description, r.variant_ordinal,
+             (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
+      from spec_records r
+      where r.id = any(${duplicates.map((entry) => entry.recordId)}::uuid[])
     `;
     const project = await sql`select bws_project_number from projects where id = ${id}`;
     const prefix = String(project[0]?.bws_project_number ?? "");
     for (const row of rows) {
       labels.set(
         String(row.id),
-        `${prefix}-${String(row.record_no).padStart(3, "0")} · ${String(row.item_description)}`,
+        `${recordLabel(prefix, numberingFromRow(row))} · ${String(row.item_description)}`,
       );
     }
   }

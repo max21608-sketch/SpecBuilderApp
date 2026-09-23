@@ -26,6 +26,7 @@
 // change to the record's own row, and bumping it would invalidate every
 // extraction snapshot and chase coverage row taken against it.
 // ============================================================================
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { changeSetForEdit, openChangeSet, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
@@ -220,7 +221,8 @@ export async function editFinish(
 
   // ---- carry it to every item -------------------------------------------
   const linked = await txn`
-    select distinct r.id, r.record_no, p.bws_project_number
+    select distinct r.id, r.record_no, p.bws_project_number, r.variant_ordinal,
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
     from record_attributes a
     join spec_records r on r.id = a.record_id
     join projects p on p.id = r.project_id
@@ -252,7 +254,7 @@ export async function editFinish(
     if (owned[0]) {
       manual.push({
         recordId,
-        label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+        label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
       });
     }
   }

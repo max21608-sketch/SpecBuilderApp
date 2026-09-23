@@ -58,7 +58,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { changeSetForEdit, findOpenChangeSet } from "@/lib/change-sets";
 import { editAnswer } from "@/lib/answer-edit";
-import { recordLabel } from "@/lib/chase-drafts";
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 import { isAnswerState, type AnswerState } from "@/lib/spec-vocab";
@@ -150,6 +150,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
                r.status as record_status,
                r.record_no,
                r.variant_label,
+               r.variant_ordinal,
+               (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
                pr.bws_project_number,
                q.prompt,
                f.json_id
@@ -309,5 +311,5 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
  */
 function labelOf(row: Record<string, unknown>): string {
   const letter = row.variant_label ? ` ${String(row.variant_label)}` : "";
-  return `${recordLabel(String(row.bws_project_number), Number(row.record_no))}${letter}`;
+  return `${recordLabel(String(row.bws_project_number), numberingFromRow(row))}${letter}`;
 }

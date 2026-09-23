@@ -24,6 +24,7 @@
 // `exportAnswers()` applies the export's filter in ONE place, rather than a
 // WHERE clause here and a different one somewhere else.
 // ============================================================================
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import type { Row } from "@/lib/db";
 import {
   isDimensionSlot,
@@ -90,12 +91,14 @@ export type RecordAtoms = {
  * 2 — each attribute carries the finish its code resolves to (0018).
  * 3 — the record carries the item level a TGQ tier is read against (0019).
  * 5 — the record carries the dimension note typed beside the five slots (0034).
+ * 6 — the record carries its bill line's number and its own under it (0039),
+ *     which is what orders a configuration under its line in every file.
  *
  * Bumped whenever a field is added, and every addition since 1 is optional on
  * read, so an older version still parses rather than reading as "everything
  * was deleted that day".
  */
-export const RECORD_ATOMS_SCHEMA_VERSION = 5;
+export const RECORD_ATOMS_SCHEMA_VERSION = 6;
 
 function text(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
@@ -201,7 +204,10 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
   const recordRows = await exec`
     select r.id, r.record_no, r.item_description, r.product_reference, r.qty, r.designer, r.area,
            r.boq_category, r.status, r.category_id, r.level, r.run_id, r.parent_id, r.split_reason,
-           r.variant_label, r.dimension_note,
+           r.variant_label, r.dimension_note, r.variant_ordinal,
+           -- 0039: a configuration is NAMED by its bill line's number and its
+           -- own under it (P18181-012.3), so the line's record_no comes too.
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            p.bws_project_number, p.name as project_name, p.client,
            run.name as run_name,
            c.name as category_name,
@@ -237,7 +243,13 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
       record: {
         id,
         recordNo: Number(row.record_no),
-        label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+        // THE ONE LABEL HELPER (0039). A version taken from here on carries
+        // `P18181-012.3` for a configuration; one taken before keeps the label
+        // it was taken with, because history is history and a diff never
+        // compares labels.
+        label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
+        parentRecordNo: num(row.parent_record_no),
+        variantOrdinal: num(row.variant_ordinal),
         itemDescription: String(row.item_description),
         qty: num(row.qty),
         area: text(row.area),

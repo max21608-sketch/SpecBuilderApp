@@ -27,6 +27,7 @@
 // is what catches a BWS column insertion, which shifts every letter after it
 // while the ids stay put.
 // ============================================================================
+import { compareRecordOrder } from "@/lib/record-label";
 import {
   ATTRIBUTE_GROUP_LABELS,
   DIMENSION_SLOT_LABELS,
@@ -206,6 +207,14 @@ export type ExportRecord = {
   area: string | null;
   runName: string;
   boqCodes: string[];
+  /**
+   * 0039: the bill line's `record_no` and this configuration's number under
+   * it. Both null on a bill line. Optional for the reason `variantLabel` is;
+   * what they are FOR is `compareRecordOrder`, which lists 12.1 … 12.5 under
+   * line 12 in every file rather than at the end.
+   */
+  parentRecordNo?: number | null;
+  variantOrdinal?: number | null;
 };
 
 export type ExportAttribute = {
@@ -598,12 +607,17 @@ export const SPECS_SHEET_HEADER = [
 export function composeWorkbook(scope: ExportScope): Workbook {
   const fieldNameById = new Map(BWS_EXPORT_COLUMNS.filter((c) => c.jsonId !== null).map((c) => [c.jsonId as number, c.name]));
 
+  // BILL ORDER, each configuration under its line (0039): 12, 12.1 … 12.5,
+  // 13. It changes NOTHING about what an import replaces — BWS keys a row by
+  // its job, not by where it sits in the file, and every record in scope is
+  // still here — it only puts 12.3 where somebody reading the file looks
+  // for it, instead of after the last line on the bill.
   const rows = [...scope.records]
-    .sort((a, b) => a.recordNo - b.recordNo)
+    .sort(compareRecordOrder)
     .map((record) => composeRow(scope, record, scope.attributes, scope.answers));
 
   const specs = scope.records
-    .sort((a, b) => a.recordNo - b.recordNo)
+    .sort(compareRecordOrder)
     .flatMap((record) =>
       scope.attributes
         .filter((attribute) => attribute.recordId === record.id)

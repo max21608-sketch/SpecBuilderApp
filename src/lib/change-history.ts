@@ -12,6 +12,7 @@
 // version twice. It is bounded by how many times one record has changed, which
 // is small, and the alternative is a cache that can be wrong.
 // ============================================================================
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { diffSnapshots, parseAtoms, type SnapshotDiff } from "@/lib/snapshot-diff";
 import { CHANGE_SET_KIND_LABELS, isChangeSetKind, type ChangeSetKind } from "@/lib/change-sets";
 import type { SqlLike } from "@/lib/record-atoms";
@@ -174,12 +175,13 @@ export async function loadProjectHistory(
 
   const ids = rows.map((row) => String(row.change_set_id));
   const touched = await exec`
-    select s.change_set_id, s.record_id, s.snapshot_no, r.record_no, p.bws_project_number
+    select s.change_set_id, s.record_id, s.snapshot_no, r.record_no, p.bws_project_number,
+           r.variant_ordinal, (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no
     from record_snapshots s
     join spec_records r on r.id = s.record_id
     join projects p on p.id = r.project_id
     where s.change_set_id = any(${ids}::uuid[])
-    order by r.record_no
+    order by coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no), r.variant_ordinal nulls first, r.record_no
   `;
   const byChange = new Map<string, ProjectChange["records"]>();
   for (const row of touched) {
@@ -187,7 +189,7 @@ export async function loadProjectHistory(
     const list = byChange.get(key) ?? [];
     list.push({
       id: String(row.record_id),
-      label: `${String(row.bws_project_number)}-${String(row.record_no).padStart(3, "0")}`,
+      label: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
       snapshotNo: Number(row.snapshot_no),
     });
     byChange.set(key, list);

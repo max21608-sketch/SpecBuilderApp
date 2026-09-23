@@ -48,6 +48,10 @@ export type GroupableQuestion = {
   groupNo: number;
   groupLabel: string;
   variantCount: number;
+  /** 0039: `12.3`, the number a finish option reads by. Optional so a fixture need not know it. */
+  recordShortLabel?: string;
+  /** 0039: the 3 in 12.3 — what a line's finish options are ordered by. */
+  variantOrdinal?: number | null;
 };
 
 export type FinishOptionGroup<Q> = {
@@ -57,6 +61,14 @@ export type FinishOptionGroup<Q> = {
   label: string;
   /** What a person says out loud: `S-301 A`. The ref is the client's, the letter is ours. */
   name: string;
+  /**
+   * `12.3` — its number under the line (0039), or null where the question did
+   * not carry one. Printed beside the name, never instead of it: the name is
+   * what the drawings say, the number is what the file carries.
+   */
+  number: string | null;
+  /** 0039's ordinal, for the order the options are listed in. */
+  ordinal: number | null;
   /**
    * THE FINISH OPTION'S OWN QUANTITY, AND NOTHING IS APPORTIONED TO GET IT.
    * A configuration is created with `qty = null` — the bill says 45 of S-201
@@ -159,6 +171,8 @@ export function groupIntoLines<Q extends GroupableQuestion>(questions: readonly 
           recordId: question.recordId,
           label: question.variantLabel,
           name: `${(question.parentRefs || line.code || line.recordLabel).trim()} ${question.variantLabel}`.trim(),
+          number: question.recordShortLabel ?? null,
+          ordinal: question.variantOrdinal ?? null,
           qty: question.qty,
           questions: [],
         };
@@ -170,7 +184,12 @@ export function groupIntoLines<Q extends GroupableQuestion>(questions: readonly 
 
   for (const [lineId, options] of optionsByLine) {
     const line = lines.get(lineId)!;
-    line.options = [...options.values()].sort((a, b) => a.label.localeCompare(b.label));
+    // BY THEIR NUMBER UNDER THE LINE where they carry one (0039): as text,
+    // `TYPE 10` sorts before `TYPE 2`. The name breaks a tie, and is the whole
+    // order for a question that carried no number.
+    line.options = [...options.values()].sort(
+      (a, b) => (a.ordinal ?? Number.MAX_SAFE_INTEGER) - (b.ordinal ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label),
+    );
     // A line whose bill row carried no outstanding questions never reported a
     // variant count, so fall back to what is actually on screen.
     line.optionCount = Math.max(line.optionCount, line.options.length);

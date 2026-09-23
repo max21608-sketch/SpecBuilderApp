@@ -903,7 +903,7 @@ function DraftsView() {
               {inventory.unauthored.map((row) => (
                 <li key={String(row.id)}>
                   <Link href={`/dashboard/records/${String(row.id)}`} className="underline">
-                    {String(row.bws_project_number)}-{String(row.record_no).padStart(3, "0")}
+                    {String(row.record_label ?? "")}
                   </Link>{" "}
                   {String(row.item_description)} — {String(row.category_name)} has no requirements authored yet
                 </li>

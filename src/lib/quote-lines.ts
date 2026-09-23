@@ -41,6 +41,7 @@
 // one field and `TIMBER1` / `TIMBER 1` for another -- written by hand, over
 // years. We emit one spelling per field, from one constant.
 // ============================================================================
+import { compareRecordOrder } from "@/lib/record-label";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import { renderAttributeValue, type ExportAttribute, type ExportRecord, type ExportScope } from "@/lib/bws-export";
 import type { AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
@@ -240,7 +241,7 @@ export function composeQuoteSheet(
 ): QuoteSheet {
   const rows: string[][] = [];
 
-  for (const record of [...scope.records].sort((a, b) => a.recordNo - b.recordNo)) {
+  for (const record of [...scope.records].sort(compareRecordOrder)) {
     const mine = scope.attributes.filter((attribute) => attribute.recordId === record.id);
     const answers = scope.answers
       .filter((answer) => answer.recordId === record.id)

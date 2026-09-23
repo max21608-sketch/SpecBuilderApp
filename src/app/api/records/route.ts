@@ -112,6 +112,10 @@ export async function GET(request: Request): Promise<Response> {
       r.run_id,
       r.parent_id,
       r.variant_label,
+      -- 0039: a configuration reads 12.3 -- its bill line's number and its own
+      -- under it -- rather than the next free number in the project.
+      r.variant_ordinal,
+      (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
       -- A CONFIGURATION SHOWS ITS PARENT'S CLIENT REF. S-201 A carries no
       -- boq_code of its own, deliberately (copying it would make every drawing
       -- card for that code ambiguous), so the ref it is KNOWN by has to be
@@ -177,6 +181,9 @@ export async function GET(request: Request): Promise<Response> {
     order by run.sort_order,
              coalesce((select p2.record_no from spec_records p2 where p2.id = r.parent_id), r.record_no),
              r.parent_id nulls first,
+             -- BY ITS NUMBER UNDER THE LINE (0039), not by name: as text,
+             -- TYPE 10 sorts before TYPE 2.
+             r.variant_ordinal,
              r.variant_label
   `;
 
