@@ -1459,7 +1459,47 @@ starting. He also said he does not think it is unique to this page.
 
 ### An answer typed on the infill screen is refused on the LOCAL dev server, and only there
 
-**Status: open — found 2026-09-21 by the verifier's first-session runs, three
+**Status: FIXED 2026-09-23, `018822a`** (plan item 4c.1) — and **the load
+theory was WRONG.** It reproduced three of three on a QUIET machine, every
+other coder stood down. The log line added at `6e72594` named it on the first
+run:
+
+```
+sqlstate=55P03 lock_not_available (lock_timeout, 5s)
+· statement=insert into change_sets (…)
+```
+
+Not a deadlock and not `statement_timeout`. A poller on `pg_blocking_pids`
+caught the holder WHILE IT WAS HELD — which is why two earlier sessions looking
+afterwards found nothing: **`POST /api/drafts/generate`, idle in transaction for
+26 s**, holding its deliberate project-wide `for update`. `insert into
+change_sets` needs a key share on that same row for its FK, so the infill edit
+waited out its 5 s `lock_timeout`.
+
+**Why 26 s, traced statement by statement: 492 `insert into email_draft_items`,
+one per coverage row, one round trip each — 22.3 s of a 24.9 s transaction.**
+Round trip from a laptop to Neon London is 39 ms; on `lhr1` beside the database
+it is ~1 ms, which is exactly why staging never saw it. **It is a real defect,
+not a local artefact:** the lock's duration is set by the question count, so a
+large enough chase refuses edits anywhere.
+
+Coverage rows now insert batched through `jsonb_to_recordset`, 500 a statement —
+same rows, same transaction, same `sort_order`, computed over the whole covered
+set BEFORE chunking and held at 1..N contiguous by a new db assertion. **No
+timeout was raised and no lock was moved.**
+
+| | generate | the infill edit | contended log lines |
+|---|---|---|---|
+| before | 24.9 s, 492 statements | failed 3 of 3 | 2 per run |
+| after | **2.9 s, 1 statement** | **passed 2 of 2** | none |
+
+**What it did NOT explain, said plainly:** this entry guessed the by-question
+tab's 24 s was the same cause. **It is not** — that request was 218 ms before
+and 207 ms after, with no contended line either way. It fails intermittently
+(runs 1, 3 and 6; passed in 2 and 4) and is a screen or selector problem, still
+open. The original entry follows.
+
+**Status when found: open — found 2026-09-21 by the verifier's first-session runs, three
 of three on `http://localhost:3000`, zero of one on the staging deployment.**
 Filling a text answer on an opened infill line and blurring leaves it unwritten
 and the row prints "Nothing was written — try again"; two attempts 45 s apart
