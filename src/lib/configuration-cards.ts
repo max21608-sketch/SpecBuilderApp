@@ -42,6 +42,8 @@ import {
   measuredRows,
   codeGroupFor,
   variantLettersByItem,
+  namedConfigurationPlans,
+  type NamedConfiguration,
   type StagedDrawings,
   type DrawingItem,
   type DrawingObservation,
@@ -134,7 +136,41 @@ export type ReviewCard<R> =
       pages: number[];
       members: ConfigurationMember<R>[];
       geometry: GeometryComparison;
+      /**
+       * A code whose pages NAME its configurations (schemaVersion 3): one tab
+       * per configuration, named as the document names it. Null for a lettered
+       * or one-item card, which keeps `members` and `geometry` as before.
+       */
+      named: NamedCardView | null;
     };
+
+/** One row on a named configuration's tab — the SAME observation on every tab it lands on. */
+export type NamedTabRow = {
+  item: DrawingItem;
+  observation: DrawingObservation;
+  /** Every configuration this row lands on, in the code's order. */
+  lands: string[];
+};
+
+export type NamedTab = {
+  /** Folded, as stored: `TYPE 2`. */
+  label: string;
+  /** Its place in the code's list — what colours it. */
+  index: number;
+  /** Every wording the pages used for it. */
+  namesRaw: string[];
+  /** The rows that land on it, pending ones only, dimensions first. */
+  rows: NamedTabRow[];
+  /** Pending rows landing on it. */
+  pending: number;
+  /** Applied once every row that lands on it has been written or ignored. */
+  state: MemberState;
+};
+
+export type NamedCardView = {
+  configurations: NamedConfiguration[];
+  tabs: NamedTab[];
+};
 
 /**
  * Every page of one item, in order.
@@ -274,7 +310,59 @@ export function compareGeometry(members: readonly { item: DrawingItem; letter: s
  * a page with no code — it is its own item, it can never commit, and it opens
  * collapsed.
  */
-export function configurationCards<R extends { variantLabel?: string | null }>(
+/**
+ * The tabs of a named card: one per configuration of the code, each carrying
+ * every pending row that lands on it.
+ *
+ * A ROW IS LISTED ON EVERY TAB IT LANDS ON AND IS ONE OBSERVATION. The shared
+ * geometry is on all five tabs; editing it on TYPE 2 edits it for all of them,
+ * because it is one row and the confirm writes it to each. Only one tab is on
+ * screen at a time, so there is still one input per observation.
+ *
+ * `rowsOf` is the SERVER'S landing when the resolution has arrived and the
+ * local plan until then — both `namedConfigurationPlans` over the same items.
+ */
+export function namedTabs(
+  pages: readonly DrawingItem[],
+  configurations: readonly NamedConfiguration[],
+  rowsOf: (item: DrawingItem) => Record<string, string[]> | undefined,
+): NamedTab[] {
+  const all = configurations.map((entry) => entry.label);
+  return configurations.map((configuration, index) => {
+    const rows: NamedTabRow[] = [];
+    let applied = 0;
+    for (const item of pages) {
+      const landing = rowsOf(item) ?? {};
+      for (const observation of item.observations) {
+        const lands = landing[observation.id] ?? all;
+        if (!lands.includes(configuration.label)) continue;
+        if (observation.reviewStatus === "applied") applied += 1;
+        if (observation.reviewStatus !== "pending") continue;
+        rows.push({ item, observation, lands });
+      }
+    }
+    const state: MemberState = rows.length > 0 ? "pending" : applied > 0 ? "applied" : "ignored";
+    return {
+      label: configuration.label,
+      index,
+      namesRaw: configuration.namesRaw,
+      rows,
+      pending: rows.length,
+      state,
+    };
+  });
+}
+
+/** How a row says where else it lands: "shared by all 5", "shared with TYPE 1 · TYPE 5", or nothing. */
+export function sharedWithSentence(lands: readonly string[], here: string, total: number): string | null {
+  if (lands.length <= 1) return null;
+  if (lands.length === total) return `shared by all ${total}`;
+  return `shared with ${lands.filter((label) => label !== here).join(" · ")}`;
+}
+
+export function configurationCards<
+  R extends { variantLabel?: string | null; named?: { rows: Record<string, string[]> } | null },
+>(
   items: readonly DrawingItem[],
   resolved: ReadonlyMap<string, R | undefined>,
   // The DOCUMENT, not only its items, because whether a repeated code is one
@@ -285,11 +373,15 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
 ): ReviewCard<R>[] {
   const letters = variantLettersByItem(items, doc);
   const groups = groupItemsByCode(items, doc);
+  // Pages whose code NAMES its configurations. Such a code is a card of its own
+  // even when it is drawn on ONE page: S-301's sheet alone is five chairs.
+  const plans = namedConfigurationPlans(items, doc);
   const cards: ReviewCard<R>[] = [];
   const grouped = new Set<string>();
 
   for (const [code, group] of groups) {
-    if (group.length < 2) continue;
+    const plan = group.map((item) => plans.get(item.id)).find(Boolean) ?? null;
+    if (group.length < 2 && !plan) continue;
     for (const item of group) grouped.add(item.id);
     // TWO DIFFERENT LETTERS, AND KEEPING THEM APART IS THE POINT.
     //
@@ -305,7 +397,7 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
     // The SERVER'S answer first, exactly as `letter` below resolves it: the
     // resolution is what the confirm will act on, and a card whose sentence
     // disagreed with what the confirm does would be the worse of the two lies.
-    const split = group.some((item) => resolved.get(item.id)?.variantLabel ?? letters.get(item.id));
+    const split = Boolean(plan) || group.some((item) => resolved.get(item.id)?.variantLabel ?? letters.get(item.id));
     const members: ConfigurationMember<R>[] = group.map((item, index) => ({
       item,
       // `resolution.variantLabel` is the server's answer and the one the
@@ -332,6 +424,16 @@ export function configurationCards<R extends { variantLabel?: string | null }>(
       pages: pagesOfCard(group, doc),
       members,
       geometry: compareGeometry(members.filter((member) => member.state === "pending")),
+      named: plan
+        ? {
+            configurations: plan.configurations,
+            tabs: namedTabs(
+              group,
+              plan.configurations,
+              (item) => resolved.get(item.id)?.named?.rows ?? plans.get(item.id)?.rows,
+            ),
+          }
+        : null,
     });
   }
 

@@ -392,11 +392,16 @@ export default function DrawingsReview({
   }
 
   async function saveTargets(item: DrawingItem, ticked: string[], unticked: string[]) {
+    await saveItem(item, { ticked, unticked });
+  }
+
+  /** Any change to a staged ITEM (its phases, a configuration acknowledgement). */
+  async function saveItem(item: DrawingItem, changes: Record<string, unknown>) {
     await queueSave(async () => {
       const res = await apiFetch(`/api/imports/${importId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ itemId: item.id, expectedVersion: item.version, changes: { ticked, unticked } }),
+        body: JSON.stringify({ itemId: item.id, expectedVersion: item.version, changes }),
       });
       await reloadThen(res.ok ? null : res.error);
     });
@@ -786,12 +791,18 @@ export default function DrawingsReview({
               Item {Math.min(current + 1, cards.length)} of {cards.length}
             </b>{" "}
             — <span className="font-mono">{code}</span>
-            {card.kind === "configurations" && (
-              <>
-                , drawn on {card.members.length} pages as{" "}
-                {card.split ? `${card.members.length} configurations` : "one item"}
-              </>
-            )}
+            {card.kind === "configurations" &&
+              (card.named ? (
+                <>
+                  , {card.named.tabs.length} configurations named on {card.members.length} page
+                  {card.members.length === 1 ? "" : "s"}
+                </>
+              ) : (
+                <>
+                  , drawn on {card.members.length} pages as{" "}
+                  {card.split ? `${card.members.length} configurations` : "one item"}
+                </>
+              ))}
             .
           </Note>
         );
@@ -836,6 +847,7 @@ export default function DrawingsReview({
                 onSaveObservation={saveObservation}
                 onSaveObservations={saveObservations}
                 onSaveTargets={saveTargets}
+                onSaveItem={saveItem}
                 onSetBulkUnit={setBulkUnit}
                 onReview={review}
                 onReviewMany={reviewMany}

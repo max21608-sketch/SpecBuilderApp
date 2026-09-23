@@ -59,6 +59,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cropPdfRegion, type CroppedImage } from "@/lib/pdf-crop";
 import PageCropper from "@/components/imports/PageCropper";
+import PagePicker from "@/components/imports/PagePicker";
 import Button from "@/components/ui/Button";
 
 export default function SwatchPicker({
@@ -141,26 +142,23 @@ export default function SwatchPicker({
     [importId, track],
   );
 
+  // Eight buttons, then previous / next — see PagePicker. An item drawn across
+  // thirty pages must not become thirty buttons beside one swatch.
   const selector =
     pageOptions.length > 1 ? (
-      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-neutral-500">Crop from:</span>
-        {pageOptions.map((option) => (
-          <Button
-            key={option}
-            size="xs"
-            variant={option === chosen ? "secondary" : "quiet"}
-            disabled={disabled || busy}
-            onClick={() => {
-              setChosen(option);
-              // Changing the page while the cropper is open swaps the page
-              // under it, rather than making somebody cancel and start again.
-              if (cropping) void start(option);
-            }}
-          >
-            page {option}
-          </Button>
-        ))}
+      <div className="mt-1">
+        <PagePicker
+          label="Crop from:"
+          pages={pageOptions}
+          current={chosen}
+          disabled={disabled || busy}
+          onPick={(option) => {
+            setChosen(option);
+            // Changing the page while the cropper is open swaps the page
+            // under it, rather than making somebody cancel and start again.
+            if (cropping) void start(option);
+          }}
+        />
       </div>
     ) : null;
 

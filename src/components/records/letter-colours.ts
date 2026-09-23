@@ -21,6 +21,8 @@
 // an interpolated `text-${name}-700` is purged and renders as nothing at all.
 // ============================================================================
 
+import { isVariantLetter } from "@/lib/record-variants";
+
 const LETTER_TEXT = [
   "text-sky-700",
   "text-emerald-700",
@@ -30,8 +32,17 @@ const LETTER_TEXT = [
   "text-teal-700",
 ];
 
-/** The text colour for a configuration letter. Wraps past Z rather than fail. */
+/**
+ * The text colour for a configuration letter. Wraps past Z rather than fail.
+ *
+ * A NAME a document gave (`TYPE 2`, schemaVersion 3) is NOT a letter, and it is
+ * plain: coloured by its first character, `TYPE 1` … `TYPE 5` would all be the
+ * same colour, which on a screen where colour means "the same configuration" is
+ * a false statement. The name itself tells them apart. The drawings card, which
+ * knows the whole list, colours a name by its place in it.
+ */
 export function letterColour(label: string): string {
+  if (!isVariantLetter(label)) return "text-neutral-700";
   const index = label.trim().toUpperCase().charCodeAt(0) - 65;
   if (Number.isNaN(index)) return "text-neutral-700";
   const wrapped = ((index % LETTER_TEXT.length) + LETTER_TEXT.length) % LETTER_TEXT.length;
