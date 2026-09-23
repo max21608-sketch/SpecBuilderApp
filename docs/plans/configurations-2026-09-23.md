@@ -1,6 +1,7 @@
 # Configurations, manual control and intake accuracy — plan, 2026-09-23
 
-**Status: written 2026-09-23, awaiting Max's go.** Two coders were already
+**Status: GO given 2026-09-23 ("just use the real docs"); step 0 amended to
+run on copies of the real pack.** Two coders were already
 running when Max asked for this plan (steps 2 and 4). They commit only to
 their own branches, so nothing has reached `staging`; their output lands
 through the review and browser gates below like everything else.
@@ -70,14 +71,17 @@ unrun.
   database host is `localhost`, so it cannot be switched on in a deployment by
   mistake. The pathname scope checks (`projects/<id>/`) stay exactly as they
   are.
-- **Invented documents**: `tests/fixtures/build-pdf.mjs` extended to write an
-  S-301-shaped specification sheet (a small picture top right, `FABRIC
-  REFERENCE — As per room type` with Types 1–5 and invented cloths) and a
-  four-page drawing set (`MUR 1 & TYPO 5`, `MUR 2`, `TYPO 3`, `TYPO 4`), plus a
-  bill that lists the code on two phases. None of the real Panther wording.
-- **Model reads on the local stack are real, charged calls on invented
-  documents** (Max: cost does not matter), so the whole path (upload, Read,
-  review, Confirm, record, export) can be driven end to end.
+- **The real Panther pack, COPIED** (Max, 2026-09-23: *"just use the real
+  docs"*): the seating BOQ, the nine `SPEC-346` sheets and the preamble, copied
+  to `~/dev/localstack/panther/` from Max's download. The originals are never
+  touched, and the copies never enter the repo, a fixture or a seed. The local
+  database and blob folder that hold them are Claude's own workspace, not a
+  company system. The drawing set (`Apx 1a`) is not in that download; step 5
+  fetches it read-only from SharePoint. Committed tests still use invented
+  fixtures, as CLAUDE.md requires.
+- **Model reads on the local stack are real, charged calls** (Max: cost does
+  not matter), so the whole path (upload, Read, review, Confirm, record,
+  export) can be driven end to end on the real documents.
 - `npm run checks` runs against the local database, so the database tier runs
   on every landing from here on.
 
@@ -229,9 +233,11 @@ template (spec sheet or shop drawing). That count has never been taken.
 proposes the corner photograph, not the page.
 ~1 h coder (inside step 2's prompt work), measured in §8.
 
-## Step 8 — the real pack, with Max (~45 min of his time)
+## Step 8 — the real pack on staging, with Max (~30 min of his time)
 
-On staging, in a `TEST:` project (it stays, named for what it exercised):
+Steps 0–7 are verified on the real documents on the local stack, so this is
+acceptance on the deployment itself rather than first contact. On staging, in
+a `TEST:` project (it stays, named for what it exercised):
 Max uploads the Panther seating BOQ, the S-301 specification sheet and the
 drawing set, and presses Read (Opus, charged). Claude drives the pages
 read-only beside him, compares each card with its page, and takes the
@@ -274,12 +280,12 @@ is briefed as soon as step 2 lands. Step 6 is independent and fills a gap.
 | 5 two documents | 3 h | 1 h | tomorrow |
 | 6 status refresh | 1 h | 30 min | tomorrow |
 | 7 crop prompt | in step 2 | measured in §8 | — |
-| 8 real pack with Max | — | 45 min with Max | end of tomorrow or the day after |
+| 8 staging acceptance with Max | — | 30 min with Max | end of tomorrow or the day after |
 | 9 close out | — | 1 h | last |
 
 **Estimate: about two working days to "ready for the real-pack session"**,
-realistically 1.5–2.5, with the session itself (45 minutes of Max's time) at
-the end. The spread is in steps 2 and 5, which touch the most load-bearing
+realistically 1.5–2.5, with the session itself (about 30 minutes of Max's
+time) at the end. The spread is in steps 2 and 5, which touch the most load-bearing
 code in the app (the confirm fan-out and variant creation), and in whatever the
 local stack turns up the first time the database tier runs off the sandbox.
 
