@@ -225,6 +225,16 @@ describeIfDb("chase drafts", () => {
     expect(absent).toHaveLength(1);
     expect(absent[0].snapshot_answer_version).toBeNull();
 
+    // SORT ORDER IS 1..N, CONTIGUOUS AND UNIQUE. The coverage rows are written
+    // in batched inserts rather than one statement each (2026-09-23: one
+    // statement per row held the project lock for 22 of a 24.9s transaction
+    // and refused every other writer), so the ordinal is computed over the
+    // whole covered set BEFORE anything is chunked. A chunk boundary that
+    // restarted it would be invisible in the row count and would reorder the
+    // email's questions.
+    const orders = items.rows.map((r: { sort_order: number }) => Number(r.sort_order)).sort((a, b) => a - b);
+    expect(orders).toEqual(items.rows.map((_, i) => i + 1));
+
     // The Cc snapshot is the project inbox, taken at generation.
     expect(drafts[0].cc_email).toBe(INBOX);
     // Non-production, so the subject is marked.
