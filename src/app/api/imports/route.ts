@@ -71,7 +71,6 @@
 // from Vercel, so it never fires against localhost. Building the only write
 // path on something that cannot run in development would mean the import could
 // not be tested end to end without a tunnel.
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readSpreadsheetSheets, pdfHasTextLayer } from "@/lib/intake-source";
 import { sql, json } from "@/lib/db";
@@ -80,10 +79,10 @@ import { intakeSourceKind, outlookMsgAdvice, spreadsheetRefusal } from "@/lib/in
 import { scannedPdfRefusal } from "@/lib/document-classify";
 import { parseBoqSheets, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
 import { loadBoqReadingRegisters, loadLineSuggester, stageSheet } from "@/lib/boq-stage";
-import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
+import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
-import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
-import { takeReadSlot, deferRead, WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
+import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
+import { dispatchRegisteredRead, insertSpecDocumentRun } from "@/lib/spec-registration";
 import { recordMessage } from "@/lib/email-ingest";
 import { assignMessage } from "@/lib/email-registration";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
@@ -346,53 +345,29 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
   }
 
   try {
-    const result = await withTransaction(async (txn) => {
-      // The idempotency check and the insert in one transaction, so two
-      // deliveries of the same retried request cannot both insert.
-      if (input.registrationRequestId) {
-        const existing = await txn`
-          select id, status from intake_runs where registration_request_id = ${input.registrationRequestId}
-        `;
-        if (existing[0]) return { importId: String(existing[0].id), reused: true as const };
-      }
-
-      const attachment = await txn`
-        insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
-        values ('project', ${input.projectId}, 'spec_document', ${meta.pathname}, ${input.filename},
-                ${meta.contentType || input.contentType || null}, ${meta.size}, ${actor})
-        returning id
-      `;
-      if (!attachment[0]) throw new Error("the attachment was not recorded");
-
-      const run = await txn`
-        insert into intake_runs
-          (project_id, attachment_id, batch_id, source_kind, document_kind, status,
-           registration_request_id, created_by, updated_by)
-        values (${input.projectId}, ${attachment[0].id}, ${input.batchId ?? null}, 'spec_document',
-                ${input.documentKind}, 'pending', ${input.registrationRequestId ?? null}, ${actor}, ${actor})
-        returning id
-      `;
-      if (!run[0]) throw new Error("the import was not recorded");
-
-      // AT MOST THREE OF ONE PACK ARE READ AT ONCE. Over the cap the document
-      // is still stored and still registered — it is marked as a read that has
-      // been promised and not started, and the worker that frees a slot starts
-      // it. Refusing the upload instead would tell somebody their file did not
-      // arrive when it did.
-      const scope = { projectId: input.projectId, batchId: input.batchId ?? null };
-      if (!(await takeReadSlot(txn, scope))) {
-        await deferRead(txn, String(run[0].id), actor);
-        return { importId: String(run[0].id), attemptId: null, reused: false as const };
-      }
-
-      // The attempt is opened in the SAME transaction as the insert, so a run
-      // can never be committed at `pending` with a message already published
-      // against it. The publish itself is below, after the commit.
-      const attemptId = randomUUID();
-      const opened = await openAttempt(txn, String(run[0].id), attemptId, actor, "pending");
-      if (!opened) throw new Error("the import was recorded but could not be queued for reading");
-      return { importId: String(run[0].id), attemptId: opened, reused: false as const };
-    });
+    // The idempotency check, the insert, the per-pack read cap and the attempt,
+    // in one transaction — `src/lib/spec-registration.ts`, which a confirmed
+    // bill's "Read the specifications in this bill" registers through too, so
+    // the rules about when a paid call may be claimed exist once.
+    const result = await withTransaction((txn) =>
+      insertSpecDocumentRun(txn, {
+        projectId: input.projectId,
+        batchId: input.batchId ?? null,
+        documentKind: input.documentKind as DocumentKind,
+        registrationRequestId: input.registrationRequestId ?? null,
+        actor,
+        attach: async () => {
+          const attachment = await txn`
+            insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+            values ('project', ${input.projectId}, 'spec_document', ${meta.pathname}, ${input.filename},
+                    ${meta.contentType || input.contentType || null}, ${meta.size}, ${actor})
+            returning id
+          `;
+          if (!attachment[0]) throw new Error("the attachment was not recorded");
+          return String(attachment[0].id);
+        },
+      }),
+    );
 
     // A REPLAYED registration must not open a second attempt. It returns the
     // run it already made, whose read was dispatched the first time round;
@@ -402,44 +377,18 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
       return json({ ok: true, importId: result.importId, reused: true, sourcePreserved: true }, 200);
     }
 
-    // Deferred by the cap. Nothing to publish; the document is registered and
-    // is read when one of the three in flight finishes.
-    //
-    // `waiting` and NOT `error`, though both mean "dispatched: false". The
-    // upload screen paints an error red, and this is the ordinary outcome for
-    // eight documents of an eleven-document pack — eight red rows for a pack
-    // that is working correctly is the lesson about painting a blocked thing
-    // red, applied to an upload.
-    if (!result.attemptId) {
-      return json(
-        {
-          ok: true,
-          importId: result.importId,
-          reused: false,
-          sourcePreserved: true,
-          autoRead: { dispatched: false, waiting: true, note: WAITING_FOR_SLOT_MESSAGE },
-        },
-        201,
-      );
-    }
-
-    // Committed. Now publish — outside the transaction, because a queue publish
-    // is network I/O and a transaction must never be held across it.
-    const failure = await publishAttempt(result.importId, result.attemptId, actor);
-
     // 201 EITHER WAY. The document is stored and registered; whether its read
-    // reached the queue is a separate fact about the run, recorded on the run,
-    // and the screens already offer the retry it needs. Failing the upload over
-    // it would tell somebody their file did not arrive when it did.
+    // reached the queue — or is waiting behind the pack's three in flight — is
+    // a separate fact about the run, recorded on the run, and the screens
+    // already offer the retry it needs. Failing the upload over it would tell
+    // somebody their file did not arrive when it did.
     return json(
       {
         ok: true,
         importId: result.importId,
         reused: false,
         sourcePreserved: true,
-        autoRead: failure
-          ? { dispatched: false, code: failure.code, error: failure.error }
-          : { dispatched: true },
+        autoRead: await dispatchRegisteredRead(result, actor),
       },
       201,
     );
