@@ -37,7 +37,8 @@ import { randomUUID } from "node:crypto";
 import { sql } from "@/lib/db";
 import { prepareDocumentSource } from "@/lib/intake-source";
 import { readTrustedBlob, UntrustedBlobError, blobPathname } from "@/lib/blob-source";
-import { extractSpecDocument } from "@/lib/anthropic";
+import { extractSpecDocument, type ExtractionResult } from "@/lib/anthropic";
+import { readSpecDocument, type WindowCall } from "@/lib/extraction-windows";
 import { resolveProposals, PROPOSAL_SCHEMA_VERSION, type StagedSpecDocument } from "@/lib/spec-document";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import {
@@ -182,7 +183,9 @@ export async function runDocumentExtraction({
         projectDefaultUnit = normaliseUnit(projectRows[0]?.default_dimension_unit);
       }
     } else {
-      registers = await loadExtractionRegisters(claim.projectId);
+      // With this run's id, so a bill's OWN specification read also loads the
+      // bill's row → record map and resolves every proposal by its row.
+      registers = await loadExtractionRegisters(claim.projectId, { intakeRunId: claim.runId });
     }
   } catch (cause) {
     return await releaseAndThrow(claim, actor, message(cause));
@@ -195,7 +198,18 @@ export async function runDocumentExtraction({
   }
   const abort = AbortSignal.timeout(remaining);
 
-  const result = await extractSpecDocument(source, claim.documentKind, { signal: abort });
+  // An OBSERVATION kind reads a long spreadsheet in row windows, inside this
+  // one attempt (`extraction-windows.ts`); everything else is one call.
+  let result: ExtractionResult;
+  let windows: WindowCall[] | null = null;
+  if (isRegisterFreeKind(claim.documentKind)) {
+    result = await extractSpecDocument(source, claim.documentKind, { signal: abort });
+  } else {
+    ({ result, windows } = await readSpecDocument(source, claim.documentKind, {
+      signal: abort,
+      billRows: registers?.billRows ?? null,
+    }));
+  }
 
   if (!result.ok) {
     // The wrapper, not an exception, is what tells a refusal from a socket
@@ -252,6 +266,8 @@ export async function runDocumentExtraction({
             usage: result.usage,
             elapsedMs: result.elapsedMs,
             proposals: stagedCount,
+            // One line per call where the read was made in row windows.
+            ...(windows ? { windows } : {}),
           })}::jsonb,
           error = null,
           processing_started_at = null,
