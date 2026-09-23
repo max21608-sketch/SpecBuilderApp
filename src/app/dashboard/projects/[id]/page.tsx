@@ -960,6 +960,7 @@ function ProjectOverview() {
               setUploading(false);
               void load();
             }}
+            onRegistered={() => void load()}
           />
         </div>
       )}

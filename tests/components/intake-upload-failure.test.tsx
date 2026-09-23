@@ -193,3 +193,26 @@ describe("no empty packs", () => {
     expect(calls("/batches")).toHaveLength(0);
   });
 });
+
+// ============================================================================
+// THE PANEL STAYS OPEN WHILE ANYTHING IS HELD. `onUploaded` is the parent's
+// signal to CLOSE this panel (the project page unmounts it), and it used to
+// fire on every press — so thirty failed rows, each with its reason, vanished
+// together. It fires only when nothing is waiting on a person; otherwise
+// `onRegistered` asks the parent to refresh and the rows stay where they are.
+// ============================================================================
+describe("closing the panel", () => {
+  it("does not close it when every file failed, and keeps the rows", async () => {
+    server(() => NO_KEY);
+    const onUploaded = vi.fn();
+    const onRegistered = vi.fn();
+    const view = render(<IntakeBatchUpload projectId="p1" onUploaded={onUploaded} onRegistered={onRegistered} />);
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: ["A.pdf", "B.pdf"].map((name) => new File(["x"], name, { type: "" })) } });
+    await userEvent.click(screen.getByRole("button", { name: /Start intake/ }));
+    await waitFor(() => expect(onRegistered).toHaveBeenCalled());
+    expect(onUploaded).not.toHaveBeenCalled();
+    expect(screen.getByTitle("A.pdf")).toBeTruthy();
+    expect(screen.getByTitle("B.pdf")).toBeTruthy();
+  });
+});

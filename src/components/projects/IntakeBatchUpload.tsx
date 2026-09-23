@@ -218,7 +218,22 @@ function uploadTally(queue: Queued[]) {
   );
 }
 
-export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId: string; onUploaded?: () => void }) {
+export default function IntakeBatchUpload({
+  projectId,
+  onUploaded,
+  onRegistered,
+}: {
+  projectId: string;
+  /** Everything in the press is settled: the parent may close this panel. */
+  onUploaded?: () => void;
+  /**
+   * Something registered, but a file is still waiting on a person (held for a
+   * kind, or failed). The parent refreshes what it shows and must NOT close
+   * this panel: the held rows, and the reason each one failed, exist nowhere
+   * else.
+   */
+  onRegistered?: () => void;
+}) {
   const [queue, setQueue] = useState<Queued[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -553,14 +568,23 @@ export default function IntakeBatchUpload({ projectId, onUploaded }: { projectId
         });
       }
 
-      onUploaded?.();
-      // ONLY WHEN NOTHING IS STILL WAITING ON A PERSON. Navigating away from a
-      // file the app could not identify would lose it — it is uploaded, it is
-      // in no batch row, and this screen is the only place that knows.
+      // ONLY WHEN NOTHING IS STILL WAITING ON A PERSON — both the redirect and
+      // closing the panel. Navigating away from a file the app could not
+      // identify would lose it: it is uploaded, it is in no batch row, and this
+      // screen is the only place that knows. Closing the panel loses it just
+      // as surely, and that is what `onUploaded` used to do on every press —
+      // the parent unmounts this component — so on pilot (2026-09-23) thirty
+      // files that had each failed with a reason vanished together and read as
+      // "one mass fail". A press that leaves anything held only asks the
+      // parent to refresh.
       setQueue((current) => {
         const id = batchId.current;
-        if (id && !current.some((row) => row.status === "needs-kind" || row.status === "failed")) {
-          window.location.href = `/dashboard/projects/${projectId}/intake/${id}`;
+        const waiting = current.some((row) => row.status === "needs-kind" || row.status === "failed");
+        if (waiting) {
+          queueMicrotask(() => onRegistered?.());
+        } else {
+          queueMicrotask(() => onUploaded?.());
+          if (id) window.location.href = `/dashboard/projects/${projectId}/intake/${id}`;
         }
         return current;
       });
