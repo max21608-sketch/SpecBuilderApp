@@ -130,7 +130,8 @@ export function commonGroupKey(attribute: Pick<CommonSourceAttribute, "dimension
   return `label:${attribute.attrGroup}:${fold(attribute.label)}`;
 }
 
-function sectionOf(attrGroup: AttributeGroup): CommonSection {
+/** Which heading a group is shown under. Exported so a configuration's own tab uses the same split. */
+export function sectionOfGroup(attrGroup: AttributeGroup): CommonSection {
   if (attrGroup === "dimension") return "dimensions";
   if (isFinishGroup(attrGroup) || attrGroup === "material") return "finishes";
   return "notes";
@@ -190,7 +191,7 @@ export function readCommonSpecs<A extends CommonSourceAttribute>(
     const first = entry.first;
     groups.push({
       key,
-      section: sectionOf(first.attrGroup),
+      section: sectionOfGroup(first.attrGroup),
       title: first.dimensionSlot ? first.dimensionSlot : first.fieldName?.trim() || first.label,
       attrGroup: first.attrGroup,
       dimensionSlot: first.dimensionSlot,
@@ -246,6 +247,8 @@ export type CommonSourceAnswer = {
   requirementId: string;
   prompt: string;
   jsonId: number | null;
+  /** A readiness question's key into Matthew's matrix, which is also how its palette is found. */
+  localKey?: string | null;
   value: string | null;
   qualifier: string | null;
   state: string;
@@ -256,6 +259,7 @@ export type CommonAnswerGroup = {
   requirementId: string;
   prompt: string;
   jsonId: number | null;
+  localKey: string | null;
   status: "common" | "differs";
   /** The shared answer, on a common group only. */
   shared: { value: string | null; qualifier: string | null; state: string } | null;
@@ -276,12 +280,15 @@ export function readCommonAnswers(
 ): CommonAnswerGroup[] {
   if (configurations.length < 2) return [];
   const order: string[] = [];
-  const byRequirement = new Map<string, { prompt: string; jsonId: number | null; answers: Map<string, CommonSourceAnswer> }>();
+  const byRequirement = new Map<
+    string,
+    { prompt: string; jsonId: number | null; localKey: string | null; answers: Map<string, CommonSourceAnswer> }
+  >();
   for (const configuration of configurations) {
     for (const answer of configuration.answers) {
       let entry = byRequirement.get(answer.requirementId);
       if (!entry) {
-        entry = { prompt: answer.prompt, jsonId: answer.jsonId, answers: new Map() };
+        entry = { prompt: answer.prompt, jsonId: answer.jsonId, localKey: answer.localKey ?? null, answers: new Map() };
         byRequirement.set(answer.requirementId, entry);
         order.push(answer.requirementId);
       }
@@ -311,6 +318,7 @@ export function readCommonAnswers(
       requirementId,
       prompt: entry.prompt,
       jsonId: entry.jsonId,
+      localKey: entry.localKey,
       status: common ? "common" : "differs",
       shared: common && reference ? { value: reference.value, qualifier: reference.qualifier, state: reference.state } : null,
       members,

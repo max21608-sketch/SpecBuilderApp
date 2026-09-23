@@ -58,6 +58,9 @@ import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
 import AddSpec from "@/components/records/AddSpec";
 import AddConfiguration from "@/components/records/AddConfiguration";
+import BillLineConfigurations from "@/components/records/BillLineConfigurations";
+import CommonChecklist from "@/components/records/CommonChecklist";
+import type { ConfigurationFamily } from "@/lib/configuration-family";
 import DifferingFields from "@/components/records/DifferingFields";
 import RecordChecklist from "@/components/records/RecordChecklist";
 import { dimensionProvenance } from "@/components/records/dimension-provenance";
@@ -167,6 +170,12 @@ export type Payload = {
   /** Which palette a question offers, by BWS field id or by local key. */
   paletteByQuestion: { json_id: number | null; local_key: string | null; palette_key: string }[];
   family: FamilyMember[];
+  /**
+   * A split bill line's configurations with their live specs and answers,
+   * for what they have in common. Null on a configuration and on a line with
+   * none.
+   */
+  configurationFamily?: ConfigurationFamily | null;
   /** Null where this record's category is not on Matthew's matrix. */
   gates: Record<Gate, GateStatus> | null;
   /**
@@ -285,6 +294,9 @@ function RecordView() {
   // lives in the Configurations card, beside the family it adds to.
   const router = useRouter();
   const [addingConfiguration, setAddingConfiguration] = useState(false);
+  // A split bill line's own pre-split specs fold away, CLOSED: they are not
+  // exported, and heading the tab they read as the item.
+  const [lineOwnOpen, setLineOwnOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
   /** The reason box for retiring a configuration; null while it is closed. */
@@ -641,6 +653,10 @@ function RecordView() {
   // from the parent because a configuration deliberately carries none of its
   // own — see `ensureVariant`.
   const family = data.family ?? [];
+  // Older payloads have no `configurationFamily`; a bill line then renders as
+  // it always did.
+  const configurationFamily = data.configurationFamily ?? null;
+  const splitLine = !record.parent_id && Boolean(configurationFamily && configurationFamily.configurations.length > 0);
   const billLine = family.find((member) => member.variant_label === null) ?? null;
   const variants = family.filter((member) => member.variant_label !== null);
   const parentRefs = billLine?.refs ?? refs.map((ref) => ref.ref_value).join(", ");
@@ -1007,6 +1023,29 @@ function RecordView() {
                 </div>
               )}
 
+              {/* A SPLIT BILL LINE SHOWS WHAT ITS CONFIGURATIONS HAVE IN COMMON
+                  (2026-09-23). Its own specs — anything it carried before it
+                  was split — are NOT exported, so they fold into one closed
+                  section below rather than heading the tab as though they
+                  were the item. */}
+              {splitLine && configurationFamily && (
+                <BillLineConfigurations
+                  lineId={record.id}
+                  family={configurationFamily}
+                  specFields={data.specFields ?? []}
+                  onDone={reloadThen}
+                />
+              )}
+              {splitLine && (
+                <div className="mt-4">
+                  <Button variant="quiet" size="xs" onClick={() => setLineOwnOpen((value) => !value)}>
+                    {lineOwnOpen ? "▾" : "▸"} On the bill line itself — not exported
+                    {attributes.length > 0 ? ` (${attributes.length} spec${attributes.length === 1 ? "" : "s"})` : " (none)"}
+                  </Button>
+                </div>
+              )}
+              {(!splitLine || lineOwnOpen) && (
+              <>
               {/* What BWS field 3 will receive, composed by the same function
                   the export calls. The rows below keep each figure's ORIGINAL
                   value and unit, which is what makes a converted W1900
@@ -1480,6 +1519,8 @@ function RecordView() {
                   )}
                 </div>
               )}
+              </>
+              )}
 
               {/* THE BILL'S OWN WORDS, AND THE TWO FREE-TEXT COLUMNS (0028).
                   Last, because the specs are what you came to read and this is
@@ -1737,6 +1778,20 @@ function RecordView() {
           </div>
         )}
 
+        {tab === "checklist" && splitLine && configurationFamily && (
+          <div className="mb-4">
+            <CommonChecklist
+              lineId={record.id}
+              family={configurationFamily}
+              palettes={data.palettes ?? []}
+              paletteByQuestion={data.paletteByQuestion ?? []}
+              onDone={reloadThen}
+            />
+            <p className="mt-3 text-xs text-neutral-500">
+              Below: the bill line&rsquo;s OWN checklist, which is not exported while it has configurations.
+            </p>
+          </div>
+        )}
         {tab === "checklist" && (
           <RecordChecklist
             recordId={record.id}

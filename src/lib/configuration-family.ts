@@ -162,7 +162,7 @@ export async function loadConfigurationFamily(
   // record route drives it: a question with no answer row is still asked, as
   // missing, and carries a null answer id.
   const answers = await exec`
-    select r.id as record_id, q.id as requirement_id, q.prompt, q.sort_order, f.json_id,
+    select r.id as record_id, q.id as requirement_id, q.prompt, q.sort_order, f.json_id, q.local_key,
            a.id as answer_id, a.value, a.qualifier, coalesce(a.state, 'missing') as state, a.version
       from spec_records r
       join requirements q on q.category_id = r.category_id
@@ -217,6 +217,7 @@ export async function loadConfigurationFamily(
           requirementId: String(answer.requirement_id),
           prompt: String(answer.prompt ?? ""),
           jsonId: num(answer.json_id),
+          localKey: text(answer.local_key),
           value: text(answer.value),
           qualifier: text(answer.qualifier),
           state: String(answer.state),

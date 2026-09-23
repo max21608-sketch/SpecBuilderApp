@@ -19,6 +19,7 @@ import { ITEM_LEVELS } from "@/lib/spec-vocab";
 import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
 import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
 import { loadPalettes } from "@/lib/palette-load";
+import { loadConfigurationFamily } from "@/lib/configuration-family";
 import {
   designerKey,
   loadOutstanding,
@@ -222,7 +223,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const familyId = record.parent_id ? String(record.parent_id) : String(record.id);
   const family = await sql`
     select r.id, r.record_no, r.variant_label, r.variant_ordinal, r.qty, r.status, r.item_description,
-           r.version,
+           r.version, r.parent_id,
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            (select count(*) from record_attributes ra where ra.record_id = r.id and ra.status = 'active')
              as attribute_count,
@@ -236,6 +237,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
      -- the text of their names sorts in.
      order by r.parent_id nulls first, r.variant_ordinal, r.variant_label
   `;
+
+  // ---- what a SPLIT bill line's configurations have in common --------------
+  //
+  // A bill line with live configurations is a heading, and its own screen used
+  // to show only the specs it held before it was split — which are not
+  // exported. Max, 2026-09-23: it must show what is COMMON to all of them, and
+  // edit it once for all of them. So the configurations' live specs and
+  // answers come in the SAME request, through the loader the edit route
+  // re-reads under its lock (configuration-family.ts), so the screen and the
+  // check cannot disagree about what "the configurations" are. Bounded by what
+  // a line has — S-301 has five — and loaded only for a bill line that has any.
+  const configurationFamily =
+    !record.parent_id && family.some((member) => member.parent_id !== null && member.parent_id !== undefined)
+      ? await loadConfigurationFamily(sql, id)
+      : null;
 
   // ---- what has already been ASKED about this record ----------------------
   //
@@ -372,6 +388,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     palettes,
     paletteByQuestion,
     family,
+    configurationFamily,
     gates,
     tgqMatrix: tgqMatrix
       ? { fields: [...tgqMatrix.fields], localKeys: [...tgqMatrix.localKeys] }
