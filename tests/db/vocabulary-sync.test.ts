@@ -37,6 +37,7 @@ import {
 } from "@/lib/spec-vocab";
 import { CHANGE_SET_KINDS, REASON_REQUIRED_KINDS } from "@/lib/change-sets";
 import { FINISH_CODE_ORIGINS, FINISH_KINDS } from "@/lib/finishes";
+import { BOQ_ROLES } from "@/lib/boq-roles";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -77,6 +78,8 @@ const VOCABULARIES: {
     constraint: "project_finishes_code_origin_check",
     values: FINISH_CODE_ORIGINS,
   },
+  // 0040: what a bill column can be read as.
+  { name: "BOQ_ROLES", constraint: "boq_column_aliases_role_check", values: BOQ_ROLES },
 ];
 
 /** Every single-quoted literal in a constraint definition. */
