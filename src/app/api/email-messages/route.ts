@@ -142,12 +142,30 @@ export async function GET(request: Request): Promise<Response> {
     where routing_status <> 'assigned' and triage = 'open'
   `;
 
-  // ---- the two tiles -------------------------------------------------------
+  // ---- the three tiles -----------------------------------------------------
   //
   // Their own query, not a count over `rows`. The list is capped at 200 and —
   // the half that matters — it hides triaged messages unless asked, so
   // "ruled on this week" computed from it would read zero on exactly the screen
   // it appears on.
+  //
+  // ---- AND THAT CAP IS WHY THE FAILED READS ARE COUNTED HERE ---------------
+  //
+  // 3c.4 gave a failed read a tile, counted client-side over the rows this
+  // route returns. Held mail survives that because it SORTS FIRST and is never
+  // truncated away — the comment beside the "arrived today" tile says so. A
+  // failed read is the opposite: it is `assigned`, so it sorts into the second
+  // group by `received_at desc`, and on a mailbox with more than 200 open
+  // messages an older one falls off the page. The tile would then read a
+  // number smaller than the queue, silently, on the ONE count whose whole
+  // purpose is that nobody is watching this queue — the app placed the message
+  // and started the charged read itself, so there is no person waiting for a
+  // result who would notice it never came.
+  //
+  // So the count is the server's and the screen renders THIS number. The list
+  // under it is still the page's, and the screen says in words when it is
+  // showing fewer rows than the count, rather than quietly disagreeing with
+  // its own tile.
   //
   // BOTH SIDES OF THE DAY COMPARISON NAME ONE ZONE. `received_at` is a
   // timestamptz and has no calendar day until something says where: comparing
@@ -169,8 +187,17 @@ export async function GET(request: Request): Promise<Response> {
       -- thirty lines away pointing at a word in the comment.)
       count(*) filter (
         where em.triage <> 'open' and em.triaged_at >= now() - interval '7 days'
-      )::int as ruled_this_week
+      )::int as ruled_this_week,
+      -- The reads nobody is coming back for: assigned, still open, and the run
+      -- this app started for it failed. The three clauses are the three the
+      -- screen's own reading applies, in the same order -- a message that was
+      -- never placed has no read to fail, and one somebody has already ruled
+      -- on is off the queue by their decision.
+      count(*) filter (
+        where em.routing_status = 'assigned' and em.triage = 'open' and r.status = 'failed'
+      )::int as failed_reads
     from email_messages em
+    left join intake_runs r on r.id = em.intake_run_id
     where (${projectId}::uuid is null or em.project_id = ${projectId}::uuid)
   `;
 
@@ -187,6 +214,7 @@ export async function GET(request: Request): Promise<Response> {
     heldCount: Number(heldRows[0]?.n ?? 0),
     arrivedToday: Number(counts[0]?.arrived_today ?? 0),
     ruledThisWeek: Number(counts[0]?.ruled_this_week ?? 0),
+    failedReads: Number(counts[0]?.failed_reads ?? 0),
     projects,
   });
 }

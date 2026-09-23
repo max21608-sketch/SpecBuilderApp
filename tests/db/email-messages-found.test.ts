@@ -28,7 +28,13 @@ const databaseUrl = process.env.DATABASE_URL;
 
 type Found = { proposals: number; runs: number; changesConfirmed: number; nothingToRecord: boolean };
 type Message = { id: string; subject: string; found: Found | null; chaseReply: boolean };
-type Payload = { ok: boolean; messages: Message[]; arrivedToday: number; ruledThisWeek: number };
+type Payload = {
+  ok: boolean;
+  messages: Message[];
+  arrivedToday: number;
+  ruledThisWeek: number;
+  failedReads: number;
+};
 
 /** A staged proposal, in the shape `spec-document.ts` writes and stores. */
 function proposal(over: Record<string, unknown>): Record<string, unknown> {
@@ -257,6 +263,56 @@ describeIfDb("the inbox says what an email found", () => {
     // A weaker reading is a hint the review screen states with its caveat. A
     // boolean cannot carry a caveat, so it does not claim one.
     expect(find(payload, "__QA same sender only")?.chaseReply).toBe(false);
+  });
+
+  // ==========================================================================
+  // THE FAILED-READ COUNT IS THE SERVER'S, BECAUSE THE LIST IS CAPPED AT 200
+  //
+  // 3c.4 gave a failed read a tile and counted it out of the rows this route
+  // returns. Held mail survives that cap because it sorts FIRST; a failed read
+  // is `assigned`, so it sorts into the second group by arrival and an older
+  // one falls off the page. The count that exists because nobody is watching
+  // this queue was the one count that could silently read low.
+  //
+  // The 200-row truncation itself is not asserted here — proving it wants 200
+  // fixture messages, which is a slow test of the cap rather than of the rule.
+  // What is asserted is that the number does not come from the page at all:
+  // it is a count over the table, with the same three clauses the screen reads
+  // a row by.
+  // ==========================================================================
+  it("counts a failed read over the table, not over the page", async () => {
+    const before = await read();
+
+    const failedRunId = await run("failed", null);
+    await message({
+      subject: "__QA the read that failed",
+      runId: failedRunId,
+      receivedAt: new Date().toISOString(),
+    });
+
+    expect((await read()).failedReads).toBe(before.failedReads + 1);
+  });
+
+  it("leaves out a failed read somebody has already ruled on, and one still queued", async () => {
+    const before = await read();
+
+    // Ruled on: off the queue by a person's decision, not by a retry.
+    const ruledRunId = await run("failed", null);
+    await message({
+      subject: "__QA a failed read, dismissed",
+      runId: ruledRunId,
+      receivedAt: new Date().toISOString(),
+      triage: { state: "not_specification", at: new Date().toISOString() },
+    });
+
+    // Not read yet is not a failure: this one needs nobody.
+    await message({
+      subject: "__QA queued, not failed",
+      runId: queuedRunId,
+      receivedAt: new Date().toISOString(),
+    });
+
+    expect((await read()).failedReads).toBe(before.failedReads);
   });
 
   it("counts what arrived today and what was ruled on this week", async () => {

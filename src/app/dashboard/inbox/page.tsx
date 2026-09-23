@@ -92,6 +92,14 @@ type Project = { id: string; bws_project_number: string; name: string };
 type Payload = {
   messages: Message[];
   heldCount: number;
+  /**
+   * THE SERVER'S COUNT OF FAILED READS, over every message rather than the 200
+   * this screen holds. A failed read is `assigned`, so it sorts BELOW the held
+   * mail that is never truncated away, and counting it out of `messages` made
+   * the one tile that watches an unwatched queue the one tile that could
+   * silently read low. The table below still renders the rows this page has.
+   */
+  failedReads: number;
   arrivedToday: number;
   ruledThisWeek: number;
   projects: Project[];
@@ -309,12 +317,17 @@ function InboxView() {
               QUEUE rather than an incident — with Graph on, one of these is a
               document to retry and three in a morning is a mailbox to look at —
               which is why it earns a tile and not a chip on one row. Slate at
-              zero: red for an empty queue teaches people to ignore red. */}
+              zero: red for an empty queue teaches people to ignore red.
+
+              THE NUMBER IS THE SERVER'S, not this page's rows. Counted out of
+              `messages` it was capped at 200 and sorted below every held
+              message, so the count that exists because nobody is watching the
+              queue was itself the count that could quietly go short. */}
           <StatTile
             label="Reads that failed"
-            tone={buckets.failed.length > 0 ? "danger" : "plain"}
-            value={buckets.failed.length}
-            meaning={buckets.failed.length === 0 ? "nothing waiting on a retry" : "each needs a person to retry it"}
+            tone={data.failedReads > 0 ? "danger" : "plain"}
+            value={data.failedReads}
+            meaning={data.failedReads === 0 ? "nothing waiting on a retry" : "each needs a person to retry it"}
           />
           {/* THE SERVER'S COUNT, over every message rather than the 200 this
               screen holds. What is said UNDER it is about the held ones, which
@@ -390,13 +403,25 @@ function InboxView() {
             person waiting for the result who would notice it never came. The
             row is the same one the main list renders — Open goes to the review
             screen, where Retry lives and where the cost of pressing it is
-            stated. */}
-        {buckets.failed.length > 0 && (
+            stated.
+
+            IT RENDERS ON THE SERVER'S COUNT, not on this page's rows. The two
+            disagree only when the 200-row page has truncated one away, and the
+            tile without a table would be a number with nothing under it to act
+            on — so the heading appears either way and says how many rows are
+            missing from it. */}
+        {(data.failedReads > 0 || buckets.failed.length > 0) && (
           <>
             <h2 className="mt-6 text-th font-bold uppercase tracking-wider text-red-700">
               Reads that failed
               <span className="font-medium normal-case tracking-normal text-neutral-500">
                 {" "}· the message is on its project and the read did not finish — open it to retry
+                {/* NAME THE GAP, AND DO NOT INVENT A WAY OUT OF IT. This
+                    screen has no project filter and no paging, so there is
+                    nothing to tell somebody to press: what is owed them is
+                    that the tile and the table do not quietly disagree. */}
+                {data.failedReads > buckets.failed.length &&
+                  ` · showing ${buckets.failed.length} of ${data.failedReads} — the rest are older than the 200 messages this page holds`}
               </span>
             </h2>
             <Card flush className="mt-2 border-red-200">

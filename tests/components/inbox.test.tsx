@@ -118,6 +118,9 @@ const PAYLOAD = {
   heldCount: 1,
   arrivedToday: 0,
   ruledThisWeek: 3,
+  // One failed read on the page, and the server agrees. The tests below drive
+  // the case where it does not.
+  failedReads: 1,
   projects: [{ id: "proj-1", bws_project_number: "AP401", name: "Ashcombe House" }],
 };
 
@@ -239,5 +242,67 @@ describe("the inbox — an automatic assignment", () => {
     // is waiting for a result that never came.
     expect(screen.getByText("Read failed")).toBeInTheDocument();
     expect(screen.getByText("The model could not be reached.")).toBeInTheDocument();
+  });
+
+  // ==========================================================================
+  // AND THE COUNT IS THE SERVER'S, BECAUSE THE PAGE IS CAPPED AT 200 (4c.2)
+  //
+  // Held mail survives that cap because it sorts FIRST. A failed read does not:
+  // it is `assigned`, so it sorts into the second group by arrival, and on a
+  // busy mailbox an older one falls off the page. Counted out of the rows, the
+  // one tile that exists because nobody is watching this queue was the one
+  // tile that could quietly read low.
+  // ==========================================================================
+
+  /** The whole tile, so a number can be read against its own label. */
+  function tile(label: string): HTMLElement {
+    // "Reads that failed" is also the table's own heading, so the tile is
+    // picked by its label element rather than by the words alone.
+    const caption = screen
+      .getAllByText(label)
+      .find((node) => node.tagName === "SPAN" && node.className.includes("tracking-wide"));
+    const box = caption?.parentElement;
+    if (!box) throw new Error(`no tile around ${label}`);
+    return box;
+  }
+
+  function payload(over: Record<string, unknown>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ ...PAYLOAD, ...over }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+  }
+
+  it("shows the server's count of failed reads, not the rows this page holds", async () => {
+    payload({ failedReads: 4 });
+    render(<InboxPage />);
+    await screen.findByRole("heading", { name: /Reads that failed/ });
+    // One failed row is on the page; the server says four exist.
+    expect(tile("Reads that failed").textContent).toContain("4");
+    expect(screen.getByRole("heading", { name: /showing 1 of 4/ })).toBeInTheDocument();
+  });
+
+  it("still heads the section when every failed read fell off the page", async () => {
+    // The tile would otherwise be a number with nothing under it to act on.
+    payload({
+      failedReads: 2,
+      messages: (PAYLOAD.messages as { id: string }[]).filter((m) => m.id !== "msg-5"),
+    });
+    render(<InboxPage />);
+    await screen.findByRole("heading", { name: /Reads that failed/ });
+    expect(tile("Reads that failed").textContent).toContain("2");
+    expect(screen.getByRole("heading", { name: /showing 0 of 2/ })).toBeInTheDocument();
+  });
+
+  it("says nothing about a gap when the page holds every failed read", async () => {
+    render(<InboxPage />);
+    await screen.findByRole("heading", { name: /Reads that failed/ });
+    expect(screen.queryByText(/showing \d+ of \d+/)).not.toBeInTheDocument();
   });
 });
