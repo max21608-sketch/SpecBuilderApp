@@ -120,6 +120,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            (r.attachment_id is not null) as source_preserved,
            r.batch_id,
            b.label as batch_label,
+           -- Deferred by the pack's in-flight cap, not by a person. THE SAME
+           -- EXPRESSION as /api/projects/[id]/batches and
+           -- src/lib/drawing-resolution.ts (the driver cannot share a SQL
+           -- fragment; change all three). The overview polls on it.
+           (r.status = 'pending' and r.attempt_id is null
+              and r.attempt_deadline_at > now()) as waiting_for_slot,
            b.created_at as batch_created_at,
            -- WHAT THIS DOCUMENT PRODUCED, which is the only thing that makes a
            -- list of eleven filenames worth reading. A state on its own says

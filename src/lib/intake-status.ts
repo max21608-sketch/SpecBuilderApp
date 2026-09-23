@@ -63,6 +63,23 @@ export function isIntakeRunWorking(status: string): boolean {
 }
 
 /**
+ * WILL CHANGE WITHOUT ANYBODY CLICKING: being read, OR promised a read and
+ * waiting for one of the pack's three slots. This is the POLLING predicate for
+ * every screen that shows a document's state, and it is wider than
+ * `isIntakeRunWorking` on purpose.
+ *
+ * Found 2026-09-23 (found-in-use, "stays being read until the page is
+ * reloaded"): the pack screen polled only while a run was `queued` or
+ * `parsing`, so a pack whose last unsettled documents were all waiting for a
+ * slot stopped polling and never saw them start; and the overview did not poll
+ * at all. A plain `pending` run with no promise behind it is NOT in flight —
+ * nobody has pressed Read, and polling it would never stop.
+ */
+export function isIntakeRunInFlight(run: { status: string; waitingForSlot?: boolean | null }): boolean {
+  return isIntakeRunWorking(run.status) || (run.status === "pending" && Boolean(run.waitingForSlot));
+}
+
+/**
  * A document's REVIEW state, which is two states and a count — never a tick.
  *
  * ============================================================================

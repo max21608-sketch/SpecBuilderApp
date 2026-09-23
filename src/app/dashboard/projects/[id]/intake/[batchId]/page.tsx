@@ -22,7 +22,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
-import { hasPendingReview, isIntakeRunWorking, isReviewComplete, packTally } from "@/lib/intake-status";
+import { hasPendingReview, isIntakeRunInFlight, isIntakeRunWorking, isReviewComplete, packTally } from "@/lib/intake-status";
 import PackSummary from "@/components/imports/PackSummary";
 import DocumentState from "@/components/imports/DocumentState";
 import { formatDay } from "@/lib/format-day";
@@ -187,8 +187,10 @@ export default function IntakeBatchPage({
     });
   }, [projectId]);
 
-  // Only while something is actually in flight. A settled pack polls nothing.
-  const inFlight = (batch?.runs ?? []).some((run) => isIntakeRunWorking(run.status));
+  // Only while something is actually in flight -- INCLUDING a document waiting
+  // for a slot, which starts on its own (isIntakeRunInFlight says why). A
+  // settled pack polls nothing.
+  const inFlight = (batch?.runs ?? []).some((run) => isIntakeRunInFlight(run));
   usePoll(load, { intervalMs: 3000, active: inFlight });
 
   /** Returns whether the attempt was accepted, so a caller doing several can stop. */

@@ -48,7 +48,8 @@ import {
 } from "@/lib/project-programme";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import { ATTRIBUTE_UNITS, ATTRIBUTE_UNIT_LABELS } from "@/lib/spec-vocab";
-import { intakeStatusLabel, intakeStatusTone, isIntakeRunWorking } from "@/lib/intake-status";
+import { intakeStatusLabel, intakeStatusTone, isIntakeRunInFlight, isIntakeRunWorking } from "@/lib/intake-status";
+import { usePoll } from "@/lib/use-poll";
 import Button, { buttonClass } from "@/components/ui/Button";
 import {
   completionSentence,
@@ -105,6 +106,8 @@ type DocumentRun = {
   batch_id: string | null;
   batch_label: string | null;
   batch_created_at: string | null;
+  /** Promised a read and waiting for a slot: it will start on its own. */
+  waiting_for_slot?: boolean | null;
   /** What this document PRODUCED, counted off the FKs the confirm wrote. */
   specs_applied: string | number | null;
   runs_created: string | number | null;
@@ -556,6 +559,24 @@ function ProjectOverview() {
     void loadContacts();
     void loadContactsOutstanding();
   }, [projectId, load, loadContacts, loadContactsOutstanding]);
+
+  // THE OVERVIEW POLLS ITS DOCUMENTS while any is being read or waiting for a
+  // slot (found-in-use 2026-09-23: "you have to reload the page to get it to
+  // switch ... to ready"). It refreshes the DOCUMENTS ONLY, never through
+  // load(): that also resets the details form, and a poll must not wipe a
+  // project name somebody is halfway through typing.
+  const documentsInFlight = (documents ?? []).some((run) =>
+    isIntakeRunInFlight({ status: run.status, waitingForSlot: run.waiting_for_slot }),
+  );
+  const pollDocuments = useCallback(async () => {
+    const res = await apiFetch<{ documents: DocumentRun[]; failedDocuments: number }>(
+      `/api/projects/${encodeURIComponent(projectId)}`,
+    );
+    if (!res.ok) return; // a failed tick is retried by the next one; load() owns the banner
+    setDocuments(res.data.documents);
+    setFailedDocuments(Number(res.data.failedDocuments ?? 0));
+  }, [projectId]);
+  usePoll(pollDocuments, { intervalMs: 5000, active: documentsInFlight });
 
   // Runs grouped into the packs they arrived in, newest first, each pack's own
   // runs oldest first so they read in the order the work happens.

@@ -396,11 +396,11 @@ export async function loadBatchDrawings(
            -- openAttempt always writes both.
            --
            -- THE SAME EXPRESSION IS IN src/app/api/projects/[id]/batches/route.ts,
-           -- which is where the pack screen reads it. The HTTP driver cannot
-           -- share a SQL fragment, so the two copies are the price — the
-           -- loadExportScope situation, in a smaller place. Change one and
-           -- change the other, or the drawings step and the pack screen start
-           -- disagreeing about which documents are waiting.
+           -- which is where the pack screen reads it, and in
+           -- src/app/api/projects/[id]/route.ts, where the overview polls on
+           -- it. The HTTP driver cannot share a SQL fragment, so the three
+           -- copies are the price, and tests/lib/intake-in-flight.test.ts
+           -- fails the moment they differ.
            (r.status = 'pending' and r.attempt_id is null and r.attempt_deadline_at > now())
              as waiting_for_slot
     from intake_runs r
