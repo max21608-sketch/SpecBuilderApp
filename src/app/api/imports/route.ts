@@ -86,17 +86,18 @@ import { takeReadSlot, deferRead, WAITING_FOR_SLOT_MESSAGE } from "@/lib/extract
 import { recordMessage } from "@/lib/email-ingest";
 import { assignMessage } from "@/lib/email-registration";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
+import { MAX_MODEL_PDF_BYTES } from "@/lib/upload-limits";
 
 export const maxDuration = 60;
 
 const MAX_DIRECT_BYTES = 4 * 1024 * 1024; // below the serverless request-body ceiling
 const MAX_BOQ_BYTES = 30 * 1024 * 1024;
 
-// Below the 30MB storage cap on purpose. Base64 expands a PDF by about a third
-// and Anthropic's total request ceiling is 32MB, so a 24MB PDF blows the request
-// before a single page of it is read. Rejecting it here, at registration, costs
-// nothing; discovering it in the worker costs an attempt.
-const MAX_MODEL_PDF_BYTES = 20 * 1024 * 1024;
+// `MAX_MODEL_PDF_BYTES` (upload-limits.ts) is below the 30MB storage cap on
+// purpose — base64 and the 32MB request ceiling. The upload screen refuses a
+// larger PDF before a byte is stored; this is the backstop, and rejecting it
+// here, at registration, still costs nothing where the worker would cost an
+// attempt.
 
 const UUID = z.string().uuid();
 

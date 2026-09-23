@@ -2,6 +2,7 @@ import readExcelFile, { type SheetData } from "read-excel-file/node";
 import { parse } from "csv-parse/sync";
 import { inflateSync } from "node:zlib";
 import { intakeSourceKind } from "@/lib/intake-source-types";
+import { MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
 
 export type DocumentSource =
   | { type: "pdf"; base64: string }
@@ -102,21 +103,12 @@ export async function readSpreadsheetSheets(
 // up to 20MB each through a serverless request. Counting pages needs the bytes.
 // ============================================================================
 
-/**
- * The most pages one extraction can carry.
- *
- * THE MODEL'S OWN DOCUMENTED CEILING, NOT A NUMBER THIS APP CHOSE, and it is
- * tied to the model: 600 for a 1M-context model, which `EXTRACTION_MODEL`
- * (`claude-opus-5`) is, and 100 for a 200k-context one. If the extraction
- * model is ever changed to a 200k-context model this has to come down with it,
- * which is the reason the figure is a named constant with this sentence beside
- * it rather than a literal in a message.
- *
- * In practice the 20MB registration cap and the 32MB request cap bite first on
- * any real drawing set of this length; this is the gate for a file with a great
- * many small pages.
- */
-export const MAX_MODEL_PDF_PAGES = 600;
+// The most pages one extraction can carry: the model's own ceiling. It lives in
+// the leaf `upload-limits.ts` so the upload screen can refuse a document before
+// a byte is stored without importing this server module. In practice the 20MB
+// cap bites first on any real drawing set of this length; this is the gate for
+// a file with a great many small pages.
+export { MAX_MODEL_PDF_PAGES };
 
 /**
  * How many pages a PDF has, or NULL where this cannot tell.

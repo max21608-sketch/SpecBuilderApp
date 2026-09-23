@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { INTAKE_UPLOAD_ACCEPT } from "@/lib/intake-source-types";
 import { DOCUMENT_KINDS, DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
 import { projectUploadPrefix } from "@/lib/blob-source";
+import { checkUpload } from "@/lib/upload-check";
 
 type ImportType = "boq" | "spec_document";
 
@@ -25,6 +26,8 @@ export default function DocumentUpload({ projectId, onUploaded }: { projectId: s
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** A PDF long enough that one read may not finish. Said, and the upload proceeds. */
+  const [warning, setWarning] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   async function onFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -34,6 +37,18 @@ export default function DocumentUpload({ projectId, onUploaded }: { projectId: s
 
     setBusy(true);
     setError(null);
+    setWarning(null);
+
+    // TOO LARGE FOR ONE READ is refused BEFORE a byte is stored — the byte cap
+    // and the page count (upload-limits.ts). A count that fails proceeds; the
+    // server checks again at registration and at the read.
+    const verdict = await checkUpload(file);
+    if (verdict.kind === "refuse") {
+      setError(verdict.message);
+      setBusy(false);
+      return;
+    }
+    if (verdict.kind === "warn") setWarning(verdict.message);
     setProgress(0);
     // Generated ONCE per user action and reused if this fails and is retried,
     // so a lost response cannot register the same upload twice.
@@ -105,6 +120,9 @@ export default function DocumentUpload({ projectId, onUploaded }: { projectId: s
     <div className="mt-3 border border-neutral-200 rounded-lg bg-white p-3">
       {error && (
         <p className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
+      )}
+      {warning && (
+        <p className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">{warning}</p>
       )}
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-xs text-neutral-500">
