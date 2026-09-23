@@ -3288,7 +3288,45 @@ export type CodeConfigurations = {
   removed: string[];
   /** Did a reviewer set this list? */
   edited: boolean;
+  /**
+   * The pages NAME configurations and give them nothing different — every row
+   * lands on all of them — so the code is read as ONE ITEM and `effective` is
+   * empty. S-100's shop drawing is titled "SOFA MUR 1 & TYPO 5": that says
+   * which rooms the drawing is for, not that there are two sofas. A reviewer's
+   * own list overrides it.
+   */
+  undistinguished: boolean;
 };
+
+/**
+ * DO THESE NAMED CONFIGURATIONS DIFFER IN ANYTHING?
+ *
+ * A configuration exists only where the document gives it something different.
+ * The test is structural and needs no reading of values: at least one row, on
+ * any page of the code, lands on a STRICT SUBSET of the named configurations —
+ * its own names, or the ones its page depicts. S-301's fabric rows land on
+ * {Type 1, Type 5}, {Type 2}, {Type 3} and {Type 4}: five chairs. S-100's rows
+ * all land on both names its title block gives: one sofa, and two identical
+ * BWS jobs out of it would be the page-count trap in a new form.
+ *
+ * Every row counts, whatever its review state, so ignoring one cannot turn a
+ * split card into one item halfway through a review. ONE FUNCTION, behind
+ * `codeConfigurations` — which the grouping, the card, the confirm and
+ * `variantLettersByItem` all read.
+ */
+export function configurationsDistinguishSomething(pages: readonly DrawingItem[], labels: readonly string[]): boolean {
+  if (labels.length < 2) return labels.length === 1;
+  const known = new Set(labels);
+  return pages.some((item) => {
+    const depicted = foldedNames(pageDepicts(item)).filter((label) => known.has(label));
+    const fallback = depicted.length > 0 ? depicted : labels;
+    return item.observations.some((observation) => {
+      const own = foldedNames(rowConfigurations(observation)).filter((label) => known.has(label));
+      const lands = own.length > 0 ? own : fallback;
+      return lands.length > 0 && lands.length < labels.length;
+    });
+  });
+}
 
 /**
  * Per canonical folded code, the configurations as READ and as they COUNT.
@@ -3329,12 +3367,17 @@ export function codeConfigurations(
     const override = reviewerOverride(pages, reviewerConfigurationList);
     if (!override) {
       if (read.length > 0) {
+        const distinguished = configurationsDistinguishSomething(
+          pages,
+          read.map((entry) => entry.label),
+        );
         out.set(code, {
           read,
-          effective: read,
+          effective: distinguished ? read : [],
           rename: new Map(read.map((entry) => [entry.label, entry.label])),
           removed: [],
           edited: false,
+          undistinguished: !distinguished,
         });
       }
       continue;
@@ -3353,7 +3396,7 @@ export function codeConfigurations(
       };
     });
     const removed = read.map((entry) => entry.label).filter((label) => !rename.has(label));
-    out.set(code, { read, effective, rename, removed, edited: true });
+    out.set(code, { read, effective, rename, removed, edited: true, undistinguished: false });
   }
   return out;
 }

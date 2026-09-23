@@ -398,3 +398,40 @@ export function PagesAreControl({
     </span>
   );
 }
+
+/** "TYPE 1 and TYPE 5", "TYPE 1, TYPE 2 and TYPE 5". */
+function andList(names: readonly string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * A title block naming rooms is not a split — said in words, with a way out.
+ *
+ * S-100's shop drawing is titled "SOFA MUR 1 & TYPO 5" and nothing on its pages
+ * differs between the two, so the card is ONE item and confirms onto the bill
+ * line (`configurationsDistinguishSomething`). The reviewer who knows the
+ * document means two sofas splits it by those names, as a C1 edit.
+ */
+export function UnsplitNote({
+  names,
+  disabled,
+  onSplit,
+}: {
+  names: readonly string[];
+  disabled: boolean;
+  onSplit?: () => void;
+}) {
+  return (
+    <p className="mt-1.5 flex max-w-3xl flex-wrap items-center gap-2 text-xs text-neutral-600">
+      <span>
+        The pages name {andList(names)} but give them nothing different, so this is read as one item. Split it by hand if
+        the document means it.
+      </span>
+      {onSplit && (
+        <Button size="xs" variant="quiet" disabled={disabled} onClick={onSplit}>
+          Split into {andList(names)}
+        </Button>
+      )}
+    </p>
+  );
+}

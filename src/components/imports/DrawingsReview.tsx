@@ -819,6 +819,7 @@ export default function DrawingsReview({
             {card.kind === "single" ? (
               <ItemCard
                 item={card.item}
+                unsplitNames={card.unsplitNames}
                 pages={card.pages}
                 importId={importId}
                 resolution={byItem.get(card.item.id)}

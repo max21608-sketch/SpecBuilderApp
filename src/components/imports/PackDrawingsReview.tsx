@@ -835,6 +835,7 @@ export default function PackDrawingsReview({
           {card.kind === "single" ? (
             <ItemCard
               item={card.item}
+                unsplitNames={card.unsplitNames}
               pages={card.pages}
               importId={run.importId}
               resolution={run.items.find((entry) => entry.id === card.item.id)}

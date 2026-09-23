@@ -659,7 +659,8 @@ export const DRAWINGS_TOOL = {
               description:
                 "Which of this item's configurations THIS PAGE SHOWS, by `name`, when the page itself says so — a shop " +
                 "drawing titled 'MUR 1 & TYPO 5 DESK CHAIR' shows Type 1 and Type 5 only. Empty when the page does not " +
-                "restrict itself to some of them.",
+                "restrict itself to some of them. A title block or room label on its own is NOT a configuration: use " +
+                "this only where the document also gives those configurations different specifications somewhere.",
             },
             // WHERE the pictures of this item are, so one can be shown against
             // the record. The model reports every view it can see and which

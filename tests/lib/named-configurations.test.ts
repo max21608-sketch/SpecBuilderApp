@@ -3,9 +3,11 @@
 // confirm does. Synthetic fixture in the S-301 shape — see
 // tests/fixtures/named-configurations.ts.
 import { readFileSync } from "node:fs";
+import { PROMPTS } from "@/lib/anthropic";
 import { describe, expect, it } from "vitest";
 import {
   alreadyRecorded,
+  configurationsDistinguishSomething,
   crossPageClaims,
   codeConfigurations,
   configurationEditSummary,
@@ -529,5 +531,80 @@ describe("two pages giving one configuration the same BWS field", () => {
     ).toBe(true);
     expect(alreadyRecorded({ ...drawingTimber }, { value: "Dark tinted wood", unit: null, state: "confirmed", materialCode: "QW-02" })).toBe(false);
     expect(alreadyRecorded({ ...drawingFabric }, { value: "Maker A", unit: null, state: "confirmed", materialCode: null })).toBe(false);
+  });
+});
+
+// ============================================================================
+// A TITLE-BLOCK ROOM LABEL IS NOT A CONFIGURATION (2026-09-23).
+//
+// S-100 SOFA came out as TYPE 1 and TYPE 5 because its shop drawing is titled
+// "SOFA MUR 1 & TYPO 5"; nothing on its pages differs between the two.
+// A configuration exists only where the document gives it something different.
+// ============================================================================
+describe("configurations that distinguish nothing", () => {
+  const sofaSheet = {
+    ...SPEC_SHEET,
+    itemCodeRaw: "Q-100",
+    itemNameRaw: "Sofa",
+    materials: [{ labelRaw: "FABRIC", valueRaw: "Invented cloth YC-01", materialCodeRaw: null, configurations: [] }],
+    configurations: [],
+    depictsConfigurations: [],
+  };
+  const sofaDrawing = {
+    ...SHOP_DRAWING,
+    itemCodeRaw: "SOFA MUR 1 & TYPO 5",
+    itemNameRaw: "Sofa",
+    materials: [{ labelRaw: "FABRIC", valueRaw: "Invented cloth YC-01", materialCodeRaw: null, configurations: [] }],
+  };
+  const sofaRun = () =>
+    stageDrawings([sofaSheet, sofaDrawing], NAMED_FIELDS, null, null, null, [
+      { itemCodes: ["Q-100", "SOFA MUR 1 & TYPO 5"], pages: [1, 2], relationship: "one_item", evidence: "one sofa" },
+    ]);
+
+  it("reads S-100's shape as ONE item: no plan, no letters, onto the bill line", () => {
+    const doc = sofaRun();
+    const entry = [...codeConfigurations(doc.items, doc).values()][0]!;
+    expect(entry.read.map((c) => c.label)).toEqual(["TYPE 1", "TYPE 5"]);
+    expect(entry.undistinguished).toBe(true);
+    expect(entry.effective).toEqual([]);
+    expect(namedConfigurationPlans(doc.items, doc).size).toBe(0);
+    expect(namedConfigurationsByCode(doc.items, doc).size).toBe(0);
+    expect([...variantLettersByItem(doc.items, doc).values()]).toEqual([null, null]);
+    // The confirm reads the same plan: no named targets, so it writes the bill line.
+    expect(configurationsDistinguishSomething(doc.items, ["TYPE 1", "TYPE 5"])).toBe(false);
+  });
+
+  it("still reads S-301's shape as five", () => {
+    const doc = namedSheetRun();
+    expect(namedConfigurationsByCode(doc.items, doc).values().next().value?.length).toBe(5);
+  });
+
+  it("keeps two where only ONE of them has a row of its own", () => {
+    const item = {
+      ...sofaSheet,
+      configurations: [
+        { name: "Type 1", nameRaw: "Type 1", evidence: null },
+        { name: "Type 5", nameRaw: "Type 5", evidence: null },
+      ],
+      materials: [
+        { labelRaw: "FABRIC", valueRaw: "Invented cloth YC-01", materialCodeRaw: null, configurations: [] },
+        { labelRaw: "PIPING", valueRaw: "Contrast piping", materialCodeRaw: null, configurations: ["Type 5"] },
+      ],
+    };
+    const doc = stageDrawings([item], NAMED_FIELDS, null, null);
+    expect(namedConfigurationPlans(doc.items, doc).get(doc.items[0]!.id)!.labels).toEqual(["TYPE 1", "TYPE 5"]);
+  });
+
+  it("lets a reviewer split it by hand all the same", () => {
+    const doc = sofaRun();
+    const split = {
+      ...doc,
+      items: doc.items.map((i) => ({ ...i, configurationsByReviewer: [{ label: "TYPE 1", readAs: "TYPE 1" }, { label: "TYPE 5", readAs: "TYPE 5" }] })),
+    };
+    expect(namedConfigurationPlans(split.items, split).size).toBe(2);
+  });
+
+  it("tells the model a title block names no configuration on its own", () => {
+    expect(PROMPTS.shop_drawings).toMatch(/A TITLE BLOCK OR "WHERE USED" LABEL IS NOT A CONFIGURATION ON ITS OWN/);
   });
 });
