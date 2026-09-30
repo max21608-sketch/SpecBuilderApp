@@ -211,7 +211,7 @@ function Captured({
   const pct = (n: number) => `${Math.round((n / total) * 100)}%`;
   return (
     <span
-      className="flex min-w-[6.5rem] items-center gap-2"
+      className="flex min-w-[5.5rem] items-center gap-2"
       title={`${settled} settled, ${tbc} TBC, ${total - settled - tbc} nobody has looked at, of ${total}`}
     >
       <span className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-200">
@@ -262,7 +262,19 @@ export function ClientRefs({ code }: { code: string }) {
       {parts.map((part, index) => (
         <Fragment key={`${part}-${index}`}>
           {index > 0 && ", "}
-          <span className="whitespace-nowrap">{part}</span>
+          {/* No break INSIDE a word of the ref, where the hyphens are; a ref
+              the bill wrote with spaces in it (`GR-FAB-13 (GR / MUR-FUR-04)`)
+              may still wrap at those spaces. A whole long ref kept on one
+              line held the column at 250px and pushed TG1 off the screen. */}
+          {part.split(/(\s+)/).map((token, at) =>
+            /^\s+$/.test(token) || token === "" ? (
+              token
+            ) : (
+              <span key={at} className="whitespace-nowrap">
+                {token}
+              </span>
+            ),
+          )}
         </Fragment>
       ))}
     </>
@@ -281,6 +293,20 @@ export const ITEM_CLAMP = { lines: 2, chars: 90 } as const;
 
 export function ItemName({ text }: { text: string }) {
   const { clamped, wasClamped } = clampText(text, ITEM_CLAMP.lines, ITEM_CLAMP.chars);
+  return <span title={wasClamped ? text : undefined}>{clamped}</span>;
+}
+
+/**
+ * A LEVEL SUGGESTION'S REASON, CUT TO ONE SHORT LINE. The evidence stays on
+ * the row — a suggestion is never shown without what it was read from — but a
+ * whole sentence under every button made every row five lines tall. The full
+ * reason is the title, and the record's own screen prints it whole.
+ */
+export const LEVEL_EVIDENCE_CLAMP = { lines: 1, chars: 34 } as const;
+
+function LevelEvidence({ reason }: { reason: string | null }) {
+  const text = reason ?? "guessed from the bill";
+  const { clamped, wasClamped } = clampText(text, LEVEL_EVIDENCE_CLAMP.lines, LEVEL_EVIDENCE_CLAMP.chars);
   return <span title={wasClamped ? text : undefined}>{clamped}</span>;
 }
 
@@ -810,7 +836,11 @@ export default function SpecTable({
           )}
 
           <div className="mt-3 rounded-[10px] border border-neutral-200 bg-white">
-            <Table scroll>
+            {/* THIRTEEN COLUMNS IN A 1358px BODY, so the cells are a notch
+                tighter than the primitive's default: at px-4 the phase ran
+                ~150px wider than its box on a 1920 screen and TG1 and the row
+                actions were off the right-hand edge with no sign they existed. */}
+            <Table scroll className="[&_td]:px-3 [&_th]:px-3">
               <thead>
                 <tr>
                   <Th>No.</Th>
@@ -820,7 +850,7 @@ export default function SpecTable({
                   <Th num>Qty</Th>
                   <Th>Category</Th>
                   <Th>Level</Th>
-                  <Th className="w-[130px]">
+                  <Th className="w-[112px]">
                     Captured
                     <Tip>
                       How much of the checklist is answered — green settled, amber TBC. The split between spec
@@ -928,7 +958,7 @@ export default function SpecTable({
                         )}
                         <OtherRefs clientCode={record.client_code} refs={record.refs} />
                       </Td>
-                      <Td className={`min-w-[15rem] ${isConfiguration ? "pl-6" : ""}`}>
+                      <Td className={`min-w-[13rem] ${isConfiguration ? "pl-6" : ""}`}>
                         <Link
                           href={`/dashboard/records/${record.id}`}
                           className="text-blue-700 no-underline hover:underline"
@@ -948,7 +978,7 @@ export default function SpecTable({
                           </p>
                         )}
                       </Td>
-                      <Td className="min-w-[7rem] text-neutral-700">{record.area ?? "—"}</Td>
+                      <Td className="min-w-[6rem] text-neutral-700">{record.area ?? "—"}</Td>
                       <Td num className="text-neutral-700">
                         {/* THE BILL'S QUANTITY IS NOT APPORTIONED BY ANYTHING.
                             The bill says 45 of S-201 and never says how many
@@ -1026,7 +1056,7 @@ export default function SpecTable({
                         ) : record.level_suggested ? (
                           <SuggestButton
                             value={record.level_suggested}
-                            evidence={record.level_suggested_reason ?? "guessed from the bill"}
+                            evidence={<LevelEvidence reason={record.level_suggested_reason} />}
                             busy={acceptingRow === record.id || acceptingLevels}
                             onAccept={() => void acceptLevel(record)}
                             className="flex-col items-start gap-0.5"
@@ -1182,7 +1212,7 @@ export default function SpecTable({
                         {/* STACKED, not side by side: two buttons in a row made
                             this the widest cell on the table, and the Item
                             column was what gave way. */}
-                        <div className="flex flex-col items-end gap-1 whitespace-nowrap">
+                        <div className="flex flex-col items-end gap-1 text-right">
                           {/* ADD A CONFIGURATION, on a live bill line (2026-09-23).
                               It opens a panel under the row, and nothing is
                               written until Add inside it. */}
