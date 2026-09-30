@@ -170,9 +170,29 @@ describe("readDimension — a bill's size line", () => {
     const reading = readDimension("Sizes(mm)", "L 520 x W 330 x H440");
     expect(reading?.parts.map((part) => part.slot)).toEqual(["W", "H"]);
     expect(reading?.qualifier).toBe("L 520");
+  });
+
+  it("reads OAH as the height only through the vocabulary, which says where the word came from", () => {
+    // "Overall height" is the bill's own word (spec-reading-vocab.ts,
+    // SIZE_PREFIX_SLOTS); L has no such entry and stays unmapped above.
     const oah = readDimension("Sizes(mm)", "W 1600 x D 470 x OAH 400 x SH 350");
-    expect(oah?.parts.map((part) => part.slot)).toEqual(["W", "D", "SH"]);
-    expect(oah?.qualifier).toBe("OAH 400");
+    expect(oah?.parts.map((part) => [part.slot, part.figure, part.slotSuggested])).toEqual([
+      ["W", "1600", false],
+      ["D", "470", false],
+      ["H", "400", false],
+      ["SH", "350", false],
+    ]);
+    expect(oah?.qualifier).toBeNull();
+    // An OAH beside a printed H is the line naming one slot twice: nothing is placed.
+    expect(readDimension("Sizes(mm)", "W 1600 x OAH 400 x H 410")).toBeNull();
+  });
+
+  it("reads a comma and a space as a separator, never a decimal or thousands comma", () => {
+    const reading = readDimension("Sizes (cm)", "Dia 118, 28cm Clearance");
+    expect(reading?.parts).toEqual([{ slot: "DIA", figure: "118", slotSuggested: false }]);
+    expect(reading?.unit).toBe("cm");
+    expect(reading?.qualifier).toBe("28cm Clearance");
+    expect(readDimension("Sizes (cm)", "W 1,5 x D 60")?.parts[0]?.figure).toBe("1,5");
   });
 
   it("stops at a component named partway along the line", () => {
@@ -188,6 +208,9 @@ describe("readDimension — a bill's size line", () => {
     expect(sizeLineRefusal("Sizes (ft-in)", 'W 3\'5" X D 1\'-9 1/2" X H 2\'-4"')).toMatch(/Feet and inches are not converted/);
     // Not a size line, or one that read: nothing to say.
     expect(sizeLineRefusal("Arm height", "1'6\"")).toBeNull();
+    // A TBC figure among feet and inches does not make the line a TBC.
+    expect(sizeLineRefusal("Sizes (ft-in)", "W 5'-8'' X D TBC X H 2'-5''")).toMatch(/Feet and inches are not converted/);
+    expect(sizeLineRefusal("Sizes (ft-in)", "TBC")).toBeNull();
     expect(sizeLineRefusal("Sizes (mm)", "W 600 x D 600 x H 700")).toBeNull();
   });
 

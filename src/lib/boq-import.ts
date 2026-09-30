@@ -89,6 +89,15 @@ export type BoqLine = {
   /** The client's code. NOT unique — see the SX11A note above. */
   code: string | null;
   itemDescription: string;
+  /**
+   * THE DESCRIPTION CELL AS PRINTED, line breaks and all — present only where
+   * the cell has more than one line. `itemDescription` is the same text with
+   * its whitespace collapsed, which is what every matcher reads; this is what
+   * `bill-description.ts` reads the item's NAME and its specifications out of
+   * (the Aman pricing document, 2026-09-30). Absent on a single-line cell and
+   * on every bill staged before it existed, so those read exactly as they did.
+   */
+  itemDescriptionRaw?: string;
   productReference: string | null;
   qty: number | null;
   /** The unit of measure as written ("pcs"). Written to `spec_records.qty_unit` since 0040. */
@@ -1011,6 +1020,7 @@ function readRows(
     if (!row) continue;
 
     const itemDescription = text(at(row, "itemDescription"));
+    const descriptionCell = at(row, "itemDescription");
     const code = text(at(row, "code"));
 
     // A row with neither a code nor a description is a spacer or a totals row.
@@ -1027,6 +1037,11 @@ function readRows(
       area: text(at(row, "area")),
       code,
       itemDescription: itemDescription ?? "",
+      // Verbatim, and only where the cell breaks over lines: a single-line
+      // cell stages exactly the line it always did.
+      ...(typeof descriptionCell === "string" && /[\r\n]/.test(descriptionCell.trim())
+        ? { itemDescriptionRaw: descriptionCell }
+        : {}),
       productReference: text(at(row, "productReference")),
       qty: quantity(at(row, "qty")),
       qtyUnit: text(at(row, "qtyUnit")),
