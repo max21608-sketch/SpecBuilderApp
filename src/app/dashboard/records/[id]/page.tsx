@@ -44,7 +44,7 @@ import {
   normaliseItemLevel,
 } from "@/lib/spec-vocab";
 import { isFinishGroup } from "@/lib/finishes";
-import { composeDimensionCell } from "@/lib/dimensions";
+import { composeDimensionCell, valueCarriesItsUnit } from "@/lib/dimensions";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
@@ -1129,7 +1129,7 @@ function RecordView() {
                                         back out of the drawing's capitals. Both
                                         are display only — see src/lib/shout.ts. */}
                                     {attribute.value && <SpecValue text={attribute.value} />}
-                                    {attribute.unit && <span className="text-neutral-500">{attribute.unit}</span>}
+                                    {attribute.unit && !valueCarriesItsUnit(attribute.value) && <span className="text-neutral-500">{attribute.unit}</span>}
                                     {attribute.state === "tbc" && (
                                       <span className="ml-1.5 align-middle"><Chip tone="warn">TBC</Chip></span>
                                     )}
@@ -1229,7 +1229,10 @@ function RecordView() {
                               </Td>
                               <Td muted>{specSource(attribute)}</Td>
                               <Td className="text-right">
-                                <span className="inline-flex items-center gap-1">
+                                {/* May WRAP: three buttons side by side made
+                                    this a 279px column, and the table ran 39px
+                                    past its card at 1440. */}
+                                <span className="flex flex-wrap items-center justify-end gap-1">
                                   {/* A CONTROL LIVES BESIDE THE THING IT ACTS
                                       ON. Matthew went looking for
                                       confirm-or-update on a confirmed record
@@ -1510,7 +1513,7 @@ function RecordView() {
                           <span className="w-40 shrink-0 text-neutral-400 line-through">{attribute.label}</span>
                           <span className="min-w-[10rem] flex-1 text-neutral-400 line-through">
                             {attribute.value}
-                            {attribute.unit}
+                            {valueCarriesItsUnit(attribute.value) ? null : attribute.unit}
                           </span>
                           <span className="text-xs text-neutral-400">
                             retired{attribute.retired_by ? ` by ${attribute.retired_by}` : ""}

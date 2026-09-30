@@ -151,7 +151,7 @@ describe("resolveDrawingTargets — a code read off the end of a bill code", () 
     // The confirm's targets_changed guard reads `suggested` against what the
     // reviewer decided: with nothing suggested, a pick is the whole decision.
     const resolution = resolveDrawingTargets("ZQ-08", BILL);
-    const item = { targets: { ticked: ["rec-UP-ZQ-08"], unticked: [] } } as Parameters<typeof targetRecordIds>[0];
+    const item = { targets: { ticked: ["rec-UP-ZQ-08"], unticked: [] } } as unknown as Parameters<typeof targetRecordIds>[0];
     expect(targetRecordIds(item, resolution)).toEqual(["rec-UP-ZQ-08"]);
     expect(resolution.suggested).toEqual([]);
   });

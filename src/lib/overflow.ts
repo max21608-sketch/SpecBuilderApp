@@ -13,7 +13,9 @@
 //
 // WHAT COUNTS. A box whose content is wider than it (`scrollWidth >
 // clientWidth`) where the box CLIPS or SCROLLS horizontally — the page itself,
-// and every element whose computed `overflow-x` is not `visible`. That is
+// and every element whose computed `overflow-x` is not `visible` — and any
+// TABLE wider than the box it sits in, which spills visibly past a card's
+// border even where nothing clips it. That is
 // exactly the case a person cannot see: the rest of the content is there, one
 // sideways scroll away. Three things are NOT overflows and are skipped:
 //   * form controls (`input`, `textarea`, `select`), which scroll their own
@@ -79,6 +81,22 @@ export function findOverflows(doc: Document): Overflow[] {
     // Not laid out (hidden, collapsed, display none), or a 1px screen-reader
     // box (`sr-only`), which clips its text by design and is never seen.
     if (el.clientWidth <= 1) continue;
+    // A TABLE WIDER THAN ITS CONTAINER spills past the card it sits in even
+    // where nothing clips it — the record's specs table ran 39px over its
+    // card's border at 1440 and no clipping box saw it. Measured against the
+    // parent's content box, so a table in a deliberate scroller is caught by
+    // the clipping test below instead.
+    if (el.tagName === "TABLE" && el.parentElement) {
+      const parentStyle = win.getComputedStyle(el.parentElement);
+      if (!CLIPPING.has(parentStyle.overflowX)) {
+        const room =
+          el.parentElement.clientWidth -
+          parseFloat(parentStyle.paddingLeft || "0") -
+          parseFloat(parentStyle.paddingRight || "0");
+        const spill = Math.round(el.getBoundingClientRect().width - room);
+        if (spill > SLACK) out.push({ where: describe(el), overBy: spill });
+      }
+    }
     const over = el.scrollWidth - el.clientWidth;
     if (over <= SLACK) continue;
     const style = win.getComputedStyle(el);

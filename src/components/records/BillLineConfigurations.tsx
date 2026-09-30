@@ -41,7 +41,7 @@ import Note from "@/components/ui/Note";
 import Tabs from "@/components/ui/Tabs";
 import { Table, Th, Td, Tr, GroupRow } from "@/components/ui/Table";
 import SpecValue from "@/components/records/SpecValue";
-import { composeDimensionCell, parseDimensionFigure } from "@/lib/dimensions";
+import { composeDimensionCell, parseDimensionFigure, valueCarriesItsUnit } from "@/lib/dimensions";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
@@ -97,7 +97,7 @@ function ValueCell({ value, unit, state, qualifier }: { value: string | null; un
           {/* The unit belongs to a FIGURE. "TBC", "N/A" or "REFER TO … DRAWINGS"
               carry the row's unit too, and printing it welded on ("TBCmm")
               reads as a measurement nobody took. */}
-          {unit && parseDimensionFigure(value).figure !== null && !parseDimensionFigure(value).imperial && (
+          {unit && parseDimensionFigure(value).figure !== null && !valueCarriesItsUnit(value) && (
             <span className="text-neutral-500">{unit}</span>
           )}
           {state === "tbc" && (

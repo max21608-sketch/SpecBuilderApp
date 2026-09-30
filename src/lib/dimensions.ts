@@ -200,6 +200,18 @@ function properFraction(numerator: string | undefined, denominator: string | und
   return num / den;
 }
 
+/**
+ * Does this value print its OWN unit — a foot or inch mark (`6'-4"`, `2 1/2"`,
+ * `R 8"`, primes)? Then a screen or a cell must not append the stored unit as
+ * well: `7'-3"in` says it twice. The one test every display path asks, so the
+ * record screen, the export cell and the configurations panel cannot differ.
+ */
+export function valueCarriesItsUnit(value: string | null | undefined): boolean {
+  const text = (value ?? "").trim();
+  if (text === "") return false;
+  return /["'\u2032\u2033]$/.test(text) || parseDimensionFigure(text).imperial === true;
+}
+
 export type DimensionFigure = {
   figure: number | null;
   tbcInline: boolean;
