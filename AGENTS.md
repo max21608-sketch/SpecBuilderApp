@@ -62,6 +62,8 @@ one agent.
 | `npm run db:backfill-standards` | one-off: where a palette pick at intake OVERWROTE the drawing's words (before 0041), puts the words back into `value` and the pick into `standard_*` as `proposed`, read from the staged run. Dry run unless `--apply`; safe to re-run; ambiguous rows are reported, never guessed |
 | `npm run spec:gap -- <runId>` | read only, local stack: a specification-document run's proposals by outcome (placed / record only / ambiguous / nothing) as STAGED and as a free re-match would leave them, and the top unplaced labels. Run it before and after any change to `spec-reading-vocab.ts` |
 | `npm run palette:gap` | read only: every callout that lands on a palette-backed BWS field, how many match an option exactly, and — the point — what a SUBSTRING step would have written instead. Run it before widening the match past the exact step. On 2026-09-22 it read 98 callouts over 47 staged runs, **0 matching and 0 near misses**, which is the evidence §6.2 asked for |
+| `npm run bill:descriptions -- <bill.xlsx> [--layouts f.json] [--kinds golden.json] [--out file]` | read only: per item line, the name, the composed dimension cell, each finish with its field and each note — exactly what the confirm will write from the description cells. Output goes OUTSIDE the repo. Run it before and after changing the reader. On the real Aman bill, 2026-09-30: 67 of 67 read, 61 with dimensions (164 slots), 70 finishes (64 in a BWS field) |
+| `node tools/overflow-audit.mjs` | read only, against a DEV server (`PLAYWRIGHT_DIR`, `QA_EMAIL`, `QA_PASSWORD`, `BASE` as for `first-session.mjs`): walks the projects list, a project's tabs, two records' four tabs, fill-in, the inbox and the document reviews at 1920 and 1440, and exits 1 on any box wider than itself. Run it after any screen change |
 
 Tests run in FOUR tiers — pure / component / db-gated / route. **A db-tier
 fixture asks for its project number** — `qaNumber("P90010")` from
@@ -911,6 +913,99 @@ priced under. A client template writes `Revision:` in one cell and `0` in the
 NEXT one, so the reader handles the split form as well as the inline one. Both
 stay **strings**: parsing "14-Sep-26" into a `date` hits the TOE-dates trap for
 a value nothing computes with.
+
+### A bill line's description cell is a name and its specifications
+
+`src/lib/bill-description.ts`, `src/lib/bill-description-load.ts`,
+`src/lib/confirm-boq.ts`, `src/components/imports/BillDescription.tsx`,
+`tools/bill-description-read.ts` (`npm run bill:descriptions`)
+
+The Aman Miami Beach bill (P18181, 2026-09-30) writes each item's size, model
+and finishes into its description cell, one statement per line — `Drawers` /
+`Spec size: D380 x W965 x H860 mm` / `Finish: STN-02, MTL-01, TIM-03`. The
+reader collapsed the line breaks, so every record was NAMED with the whole
+cell and nothing it said reached a slot or a field; the charged "Read the
+specifications in this bill" was a second step nobody had pressed. Max: "the
+name is including all of the finishes and like dimensions".
+
+A multi-line cell is staged verbatim as `itemDescriptionRaw` (only when it
+has more than one line, so every single-line bill stages byte for byte as
+before). The first line is the record's name; every later line becomes a
+`record_attributes` row sourced to the bill run with no page, through
+`readDimension` / `readFinishes` — there is no second parser. The review GET
+and the confirm both call `planSheetDescriptions` over the staged JSON with
+one loader, so the BOQ review IS the approval gate for these values: each
+line shows the composed cell, each code and its field, and every statement
+verbatim behind a toggle. Traps:
+
+- **One metric size line fills the slots.** The imperial twin and a second
+  size line are notes; plain inches or complete feet-and-inches convert only
+  when there is no metric line. Never two attributes on one slot.
+- **Not overall is not a slot:** `Fully reclined`, `SEAT`, `x Base:`, a
+  clearance, an undertable, a garbled figure (`D 51 0`) stay notes. `D` with
+  no `W` is placed as printed and flagged, never read as a diameter. `OAH`
+  is H by a vocab entry citing this bill; `L` is not a slot.
+- **A description fabric claims no COM when the item has a fabric line**, and
+  `Fabric: COM` never claims one: a second COM would ship a cloth that does
+  not exist. Both are notes.
+- **An unlabelled line that starts with a code continues the label above it**
+  (`Finish:` / `GR-TIM-10 …` / `GR-MTL-01 …`); a value listing codes is one
+  statement per code, each keeping its own words.
+- **A revision writes nothing onto a carried record** that already holds a
+  bill's description specs or whose slot/field is occupied, and says so.
+- **A bill whose confirm read its descriptions refuses the charged read** on
+  the server (409), because it would propose everything again.
+
+### A seeded bill layout reads like a known heading, and may carry a row rule
+
+`db/seed/0013_boq_layouts.sql`, `db/migrations/0042_boq_layout_row_rules.sql`,
+`src/lib/boq-roles.ts` (`columnsAwaitingALook`, `SEED_ACTOR`),
+`src/lib/boq-stage.ts`, `src/lib/boq-import.ts` (`readSheet`),
+`src/lib/boq-row-kinds.ts` (`applyCategoryFinishRule`)
+
+A person-saved layout lives in ONE database, which is how pilot came to read
+the Aman bill with a charged model call and wait for "Columns checked" while
+the local stack knew the layout. So a layout this repo has verified against a
+real bill is SEED DATA (`created_by = 'seed'`): it stages
+`layoutOrigin: "seed"` and waits for no columns check; a person's layout and a
+model reading keep theirs. The guard against a seeded layout reading another
+specifier's bill is the unchanged exact-heading match (`layoutAt`), never the
+origin. Re-seeding restores it, including over a retired row of that name.
+
+A seeded layout may carry `row_rules` (0042). Aman's is
+`{"finishForCategoryPrefix": "FBX-"}`: a line whose own Category Code begins
+`FBX-` is fabric for the nearest item line above it — the bill's own column
+speaking, verified on both real copies (34 of 34 sit under their item). Per
+layout, never global. The bracket rule still wins; a bracket naming another
+line, or naming a ref no line carries, is flagged amber naming both; an FBX
+line with no item above gets no parent and a flag, never a silent record.
+Without the rule the same bill staged 96 records and 5 fabric specs; with it,
+67 and 34. Only seeds write the column.
+
+### Nothing on a screen is wider than its box
+
+`src/lib/overflow.ts`, `src/components/ui/OverflowWatch.tsx`,
+`tools/overflow-audit.mjs`, `src/app/globals.css`
+
+Max, 2026-09-30: an app-wide rule to prevent overflows. The phase table on
+the real Aman bill ran 256px past its 1358px body at 1920 AND 1440, so TG1 and
+every row's actions sat off-screen inside a scrolling wrapper, and no check
+could see it: jsdom has no widths and a screenshot of a cut-off table looks
+like a table with fewer columns.
+
+`findOverflows` is the ONE predicate: a box that clips or scrolls
+horizontally (the page included) whose content is wider than it. Form
+controls, an intentional ellipsis, a 1px `sr-only` box and anything inside
+`[data-overflow-ok]` are excepted — that attribute is the reviewable
+exception, and every use of it is a decision. `OverflowWatch`, in the shell
+in development only, reports each as a console error (which the browser
+walks already fail on) and exposes `window.__specBuilderOverflows`;
+`tools/overflow-audit.mjs` walks the main screens at 1920 and 1440 through it
+and exits 1 on any. Run it against a dev server after any screen change. The
+body carries `overflow-wrap: break-word`, which never changes a table
+column's minimum, so a code still never splits at its hyphens in a cell. In a
+table, a ref is a no-wrap run per WORD (`ClientRefs`) and long text is cut
+with `clampText`, never left to push a column wide.
 
 ### One drawing, several runs: the item card is the unit of commit
 
@@ -2296,9 +2391,25 @@ failing a paid read over a hint** — `dimensions`, `materials`,
 `items`, an ABSENT required array and an over-long one stay terminal, each
 saying why). **Plain inches convert exactly** (`in` has been in
 `ATTRIBUTE_UNITS` and `TO_MM` since 0007 — `18"` is `W457mm`, and "never
-converted" would have lost a correct figure); **a feet-and-inches compound
-(`1'6"`) is refused WHOLE** on both the drawings and the email path and the
-cell says *imperial, not converted* — it used to half-read as a figure of 1.
+converted" would have lost a correct figure); **a feet-and-inches value
+converts exactly when it reads COMPLETELY, and is refused WHOLE when it does
+not** (2026-09-30: every P18181 drawing is dimensioned in feet and inches
+only, and the refusal left no dimension on any of them). `feetAndInches` in
+`dimensions.ts` is the one reader — `6'-4"`, `2'-0 1/2"`, `3'7""`, `5'-8''`,
+primes, `ft`/`in` words → total inches — and returns null for a stray word
+(`8'-6" eq`), a lost inch mark (`2'-5`), a range, a zero or improper fraction,
+or 12 inches or more after feet, which keeps the cell's *imperial, not
+converted* (it used to half-read `1'6"` as a figure of 1). `parseDimensionFigure`
+returns a complete one as one figure marked `imperial`, so `toMillimetres`
+stays the one conversion and `composeDimensionCell` the one composer; the
+attribute keeps the document's words as `value` with unit `in` (no new unit,
+no CHECK change). The marks ARE a printed unit, so a compound never takes the
+project default; it never votes in `suggestUnit` (76 inches would vote a page
+into centimetres); beside mm or cm it is a `unit_conflict`, never read at that
+unit; and on a size line one slot part that fails to read refuses the whole
+line. Files: `src/lib/dimensions.ts`, `src/lib/spec-dimensions.ts`,
+`src/lib/drawing-document.ts` (`splitFigureAndUnit`, `rejoinInchMark`,
+`suggestUnit`).
 **A PDF over 600 pages is refused before the call**, with the number in words:
 600 is the documented ceiling for a 1M-context model, which `EXTRACTION_MODEL`
 is, and 100 for a 200k one, so `MAX_MODEL_PDF_PAGES` is a named constant with
