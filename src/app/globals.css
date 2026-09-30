@@ -14,5 +14,11 @@
 @layer base {
   body {
     @apply bg-stone-50 text-sm text-neutral-900 antialiased;
+    /* NO WORD MAKES A BOX WIDER THAN IT IS. A long unbroken string — a URL, a
+       filename, a code run together — breaks rather than pushing its block out
+       of the page. `break-word`, not `anywhere`: this does not change what a
+       table column's minimum width is, so a code still never splits at its
+       hyphens in a table cell. The rest of the rule is src/lib/overflow.ts. */
+    overflow-wrap: break-word;
   }
 }

@@ -21,6 +21,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import { TONE } from "./tone";
+import OverflowWatch from "./OverflowWatch";
 
 // The app's top-level sections. Keep this list short — it is a workflow, not
 // a sitemap, and it should read in the order the work happens.
@@ -137,6 +138,8 @@ export default function NavShell({
         )}
       </header>
       <main className="w-full flex-1">{children}</main>
+      {/* Development only: says, in the console, when anything is wider than its box. */}
+      <OverflowWatch />
     </div>
   );
 }
