@@ -10,6 +10,35 @@
 -- a dining chair, a desk chair or an armchair, and the matcher showing
 -- candidates is the correct outcome. Add a term when the business decides what
 -- it means, not to make a number go up.
+--
+-- 2026-09-30, THE AMAN MIAMI BEACH BILL (P18181). Four item words on that
+-- bill matched no sheet, verified against the bill itself, each put on the
+-- sheet whose questions fit the item. Each is this repo's judgement, for
+-- Matthew to confirm: the category is his call, not this file's.
+--
+--   * "Drawers" -> Sideboards Dressers: a free-standing casegood with stone,
+--     metal and timber; that sheet asks drawer liner, runners, handles and
+--     stone. Wardrobes asks the same, but a wardrobe is a hanging carcass.
+--   * "Pouf" -> Ottomans Storage boxes: upholstered, no back. The Armchairs
+--     sheet asks back cushion, back build and swivel, none of which a pouf has.
+--   * "Bench Ottoman" -> Ottomans Storage boxes, for the same reason: it is an
+--     OTTOMAN in bench form (the head noun is the last word), a seat and a
+--     COM with no back. The two-word term is an EXACT match for the item's
+--     name, which is what lets it beat "Bench" and "Ottoman" pointing at two
+--     different sheets; a name carrying more words than it stays a question.
+--   * "Chaise Lounge" -> Sofas bed Daybeds: an outdoor reclining lounger with
+--     a cushion; that sheet asks the mattress or cushion type, the storm
+--     covers and indoor or outdoor. The bill's own spelling, "Lounge" -- the
+--     matcher compares WHOLE words, so neither "Chair" nor "Lounge" alone
+--     reaches it (one word of two is under the cutoff).
+--
+-- Two misses on that bill are deliberately NOT given a term. "Desk Chair"
+-- already has one; it missed because the item's name was the whole
+-- description cell, whose other words include "Desk" -- which is a second
+-- sheet at the same score. "Bedframe & Headboard - TWIN (X18 = BED BASES -
+-- X1 HEADBOARD PER X2 BED BASES)" names BOTH a bed base and a headboard,
+-- whole words each, so two sheets tie and a person is asked: that is the
+-- matcher refusing to guess, not failing to read.
 -- ==========================================================================
 
 insert into item_category_aliases (category_id, term, term_norm, created_by)
@@ -26,6 +55,7 @@ from (values
   ('armchairs-benches-stools-sofas', 'Bathroom Stool'),
   ('sofas-bed-daybeds', 'Sofa bed'),
   ('sofas-bed-daybeds', 'Daybed'),
+  ('sofas-bed-daybeds', 'Chaise Lounge'),
   ('banquettes', 'Banquette'),
   ('bar-counter-stools', 'Bar stool'),
   ('bar-counter-stools', 'Bar stools'),
@@ -38,6 +68,8 @@ from (values
   ('desk-chair-cinema-chair', 'Cinema chair'),
   ('ottomans-storage-boxes', 'Ottoman'),
   ('ottomans-storage-boxes', 'Storage box'),
+  ('ottomans-storage-boxes', 'Pouf'),
+  ('ottomans-storage-boxes', 'Bench Ottoman'),
   ('consoles-desks-dressing-tables', 'Console'),
   ('consoles-desks-dressing-tables', 'Desk'),
   ('consoles-desks-dressing-tables', 'Dressing table'),
@@ -54,6 +86,7 @@ from (values
   ('side-coffee-bedside-tables', 'Bathroom side table'),
   ('sideboards-dressers', 'Sideboard'),
   ('sideboards-dressers', 'Dresser'),
+  ('sideboards-dressers', 'Drawers'),
   ('wardrobes', 'Wardrobe')
 ) as t(slug, term)
 join item_categories c on c.slug = t.slug
