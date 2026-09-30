@@ -33,6 +33,14 @@
 -- Target Unit Cost, Unit Price and Total Price are NOT in the mapping, so they
 -- are never read -- there is no pricing anywhere in this app.
 --
+-- ITS ROW RULE (0042, 2026-09-30): a line whose Category Code begins `FBX-`
+-- is a fabric line for the nearest item line above it. The bill writes
+-- `FBX-SEA-IN` on every fabric line and prints each under its item -- 34 of
+-- them, checked against both copies of the real file -- where only five name
+-- their item in brackets. Without it the seeded read staged 96 records and 5
+-- fabric specs; with it, 67 and 34, the reading pilot's model made. The
+-- bracket still wins where it names one item line. This file REQUIRES 0042.
+--
 -- `headings` is the whole folded header, blanks included (three headings are
 -- merged across two columns), as the person-saved row carried it: it records
 -- what the layout was saved against; the match reads `mapping` only.
@@ -44,7 +52,7 @@
 -- removing it from this file, never by hand on one database.
 -- ==========================================================================
 
-insert into boq_layouts (name, headings, mapping, header_rows, created_by)
+insert into boq_layouts (name, headings, mapping, header_rows, row_rules, created_by)
 values (
   'Aman Interiors — AMB pricing document',
   array[
@@ -63,11 +71,13 @@ values (
     'notes', 'notes'
   ),
   1,
+  jsonb_build_object('finishForCategoryPrefix', 'FBX-'),
   'seed'
 )
 on conflict (name) do update set
   headings = excluded.headings,
   mapping = excluded.mapping,
   header_rows = excluded.header_rows,
+  row_rules = excluded.row_rules,
   created_by = excluded.created_by,
   retired_at = null;

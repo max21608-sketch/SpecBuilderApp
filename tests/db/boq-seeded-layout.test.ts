@@ -31,6 +31,19 @@ import { describeIfDb, qaNumber } from "./db-tier";
 import { assertBoqDocument, sheetsAwaitingColumnCheck } from "@/lib/boq-import";
 import { columnsAwaitingALook, foldHeading } from "@/lib/boq-roles";
 import { pricingDocWorkbook } from "../fixtures/build-boq";
+import { pricingDoc } from "../fixtures/boq-shapes";
+import { boqConfirmCounts } from "@/lib/boq-row-kinds";
+import ExcelJS from "exceljs";
+
+/** The pricing document with its fabric lines' Category Code written FBX-, as the real bill writes it. */
+async function fbxWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet("CASEGOODS+SEATING+TABLES");
+  for (const row of pricingDoc({ titled: true })) {
+    sheet.addRow(row.map((cell) => (cell === "FAB-SEAT-X" ? "FBX-SEAT-X" : cell)) as ExcelJS.CellValue[]);
+  }
+  return Buffer.from(await book.xlsx.writeBuffer());
+}
 
 const SEEDED_NAME = "Aman Interiors — AMB pricing document";
 
@@ -150,13 +163,18 @@ describeIfDb("a seeded bill layout reads like a known heading", () => {
 
   it("holds the seeded layout, as the seed wrote it", async () => {
     const rows = await client.query(
-      `select mapping, header_rows, created_by, retired_at from boq_layouts where name = $1`,
+      `select mapping, header_rows, created_by, retired_at, row_rules from boq_layouts where name = $1`,
       [SEEDED_NAME],
     );
     // Not a skip: a database without the seed reads this bill with the model,
     // which is the defect this seed closes. Say so and stop.
     expect(rows.rows, "db/seed/0013_boq_layouts.sql has not run on this database").toHaveLength(1);
-    expect(rows.rows[0]).toMatchObject({ header_rows: 1, created_by: "seed", retired_at: null });
+    expect(rows.rows[0]).toMatchObject({
+      header_rows: 1,
+      created_by: "seed",
+      retired_at: null,
+      row_rules: { finishForCategoryPrefix: "FBX-" },
+    });
     expect(rows.rows[0].mapping).toEqual({
       sourceLine: "line",
       area: "area",
@@ -229,6 +247,35 @@ describeIfDb("a seeded bill layout reads like a known heading", () => {
     expect(model.dispatched).toBe(0);
   });
 
+  it("reads every FBX line as a fabric spec on the item above it, by the seeded row rule", async () => {
+    // The fixture's fabric lines categorised the way the real bill writes
+    // them: FBX- in the Category Code. Only the first names its item in
+    // brackets; the other two name nothing but sit under the OPTION 2 sofa.
+    const { importId: fbxId, status } = await register(await fbxWorkbook(), "__QA seeded pricing FBX.xlsx");
+    expect(status).toBe(201);
+    const staged = await run(fbxId);
+    const bill = assertBoqDocument(staged.parsed).sheets[0]!;
+    expect(bill).toMatchObject({ mappingSource: "layout", layoutOrigin: "seed" });
+    const fabrics = bill.lines.filter((line) => line.rowKind === "finish_for");
+    expect(fabrics.map((line) => [line.lineNo, line.finishFor?.row, line.rowKindSource])).toEqual([
+      [10, 9, "bill"],
+      [14, 13, "bill"],
+      [15, 13, "bill"],
+    ]);
+    expect(fabrics[1]!.rowKindEvidence).toBe("Category Code FBX-SEAT-X — the bill's fabric line; under row 13, ZZ-FUR-03.");
+    expect(boqConfirmCounts(assertBoqDocument(staged.parsed).sheets)).toEqual({ records: 5, fabricSpecs: 3, phases: 1 });
+
+    const { POST } = await import("@/app/api/imports/[id]/confirm/route");
+    const res = await POST(request({ version: staged.version }), params(fbxId));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({ imported: 5, fabricSpecs: 3 });
+    const records = await client.query(`select count(*)::int as n from spec_records where source_import_id = $1`, [fbxId]);
+    expect(records.rows[0].n).toBe(5);
+    expect(model.structureReads).toBe(0);
+    expect(model.dispatched).toBe(0);
+  });
+
   it("a PERSON'S layout on the same shape still waits to be looked at", async () => {
     // Saved from the bill the seed read: same mapping, a person's name on it.
     const { POST: saveLayout } = await import("@/app/api/boq-layouts/route");
@@ -243,6 +290,9 @@ describeIfDb("a seeded bill layout reads like a known heading", () => {
     expect(bill).toMatchObject({ mappingSource: "layout", layoutOrigin: "person" });
     expect(bill.layout?.name).toBe(personLayout);
     expect(columnsAwaitingALook(bill)).toBe(true);
+    // A person's layout carries no row rule: the route never writes one.
+    const rules = await client.query(`select row_rules from boq_layouts where name = $1`, [personLayout]);
+    expect(rules.rows[0].row_rules).toBeNull();
     expect(model.structureReads).toBe(0);
   });
 });

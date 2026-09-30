@@ -29,6 +29,7 @@ import type {
   StagedBoqSheet,
 } from "@/lib/boq-import";
 import { SEED_ACTOR, isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
+import { parseRowRules } from "@/lib/boq-row-kinds";
 
 /**
  * The headings the reader knows and the layouts people have saved, from the
@@ -57,7 +58,7 @@ export async function loadBoqReadingRegisters(exec: TxnSql): Promise<BoqReadingR
   // `created_by` says whose it is: the seed's actor makes it a SEEDED layout,
   // which reads without a columns check; anybody else's keeps the check.
   const layoutRows = await exec`
-    select id, name, header_rows, mapping, created_by
+    select id, name, header_rows, mapping, created_by, row_rules
     from boq_layouts
     where retired_at is null
     order by created_at desc, name
@@ -78,6 +79,9 @@ export async function loadBoqReadingRegisters(exec: TxnSql): Promise<BoqReadingR
         headerRows: Number(row.header_rows) === 2 ? (2 as const) : (1 as const),
         mapping,
         origin: row.created_by === SEED_ACTOR ? ("seed" as const) : ("person" as const),
+        // What the bill's own words license on this layout's rows (0042).
+        // Null on every layout a person saved: the route never writes it.
+        rowRules: parseRowRules(row.row_rules),
       },
     ];
   });

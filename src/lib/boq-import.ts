@@ -67,7 +67,12 @@ import {
   type BoqReadRole,
   type BoqRole,
 } from "@/lib/boq-roles";
-import { applyBracketRule, type RowKindFields } from "@/lib/boq-row-kinds";
+import {
+  applyBracketRule,
+  applyCategoryFinishRule,
+  type BoqLayoutRowRules,
+  type RowKindFields,
+} from "@/lib/boq-row-kinds";
 import type { StructureRowReading } from "@/lib/boq-structure";
 
 /**
@@ -349,6 +354,8 @@ export type BoqLayout = {
   mapping: Partial<Record<BoqReadRole, string>>;
   /** Seeded by this repo, or saved by a person. Absent: a person's. */
   origin?: BoqLayoutOrigin;
+  /** Row rules the bill's own words license (0042). Absent or null: none. */
+  rowRules?: BoqLayoutRowRules | null;
 };
 
 /** What the reader is allowed to know about headings. The routes load both. */
@@ -808,7 +815,16 @@ function readSheet(
       });
       // WHOSE layout, staged beside it: a seeded one reads like a known
       // heading and a person's keeps its columns check (`columnsAwaitingALook`).
-      return { sheet: { ...read, layoutOrigin: layout.origin ?? "person" }, closest: null };
+      // Its ROW RULE, where it carries one, runs after the bracket rule
+      // `readRows` already applied — the bracket still wins (0042).
+      return {
+        sheet: {
+          ...read,
+          lines: applyCategoryFinishRule(read.lines, layout.rowRules),
+          layoutOrigin: layout.origin ?? "person",
+        },
+        closest: null,
+      };
     }
   }
 
