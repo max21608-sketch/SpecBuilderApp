@@ -120,11 +120,17 @@ describe("planBillDescription — sizes", () => {
     expect(result.dimensionCell).toBe("W508 x D559 x SH432mm");
   });
 
-  it("refuses feet and inches whole, keeps it as a note, and cautions the reviewer", () => {
+  it("converts feet and inches exactly where they read completely and there is no metric line", () => {
     const result = plan("Desk\nSizes (ft-in): W 3'5\"\" X D 1'-9 1/2\"\" X H 2'-4\"\"");
+    expect(result.dimensionCell).toBe("W1041 x D546 x H711mm");
+    expect(result.cautions).toEqual([]);
+  });
+
+  it("refuses a feet-and-inches line whole where one part does not read, keeps it as a note, and cautions", () => {
+    const result = plan("Desk\nSizes (ft-in): W 3'5\"\" X D TBC X H 2'-4\"\"");
     expect(slots(result.attributes)).toEqual([]);
     expect(notes(result.attributes)).toHaveLength(1);
-    expect(result.cautions.join(" ")).toMatch(/Feet and inches are not converted/);
+    expect(result.cautions.join(" ")).toMatch(/feet and inches that could not be read completely/);
   });
 
   it("keeps a TBC size as a TBC note, with no slots", () => {

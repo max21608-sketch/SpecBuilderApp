@@ -247,7 +247,7 @@ describe("readDimension — a bill's size line", () => {
     // Not a size line, or one that read: nothing to say.
     expect(sizeLineRefusal("Arm height", "1'6\"")).toBeNull();
     // A TBC figure among feet and inches does not make the line a TBC.
-    expect(sizeLineRefusal("Sizes (ft-in)", "W 5'-8'' X D TBC X H 2'-5''")).toMatch(/Feet and inches are not converted/);
+    expect(sizeLineRefusal("Sizes (ft-in)", "W 5'-8'' X D TBC X H 2'-5''")).toMatch(/feet and inches that could not be read completely/);
     expect(sizeLineRefusal("Sizes (ft-in)", "TBC")).toBeNull();
     expect(sizeLineRefusal("Sizes (mm)", "W 600 x D 600 x H 700")).toBeNull();
   });

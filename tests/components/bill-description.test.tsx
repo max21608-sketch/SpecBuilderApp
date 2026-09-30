@@ -69,14 +69,14 @@ describe("a bill line's description on the review screen", () => {
   });
 
   it("says in amber what needs a look: an unconverted size, and a revision that writes nothing", () => {
-    const feet = planBillDescription("Desk\nSizes (ft-in): W 3'5\"\" X D 1'-9\"\" X H 2'-4\"\"", { fields: FIELDS, hasFabricLine: false })!;
+    const feet = planBillDescription("Desk\nSizes (ft-in): W 3'5\"\" X D TBC X H 2'-4\"\"", { fields: FIELDS, hasFabricLine: false })!;
     render(
       <Harness
         plan={{ ...feet, revisionRefusal: "The record this line continues already holds specifications from a bill." }}
       />,
     );
     expect(screen.getByText("no size placed")).toBeInTheDocument();
-    expect(screen.getByText(/Feet and inches are not converted/)).toHaveClass("text-amber-700");
+    expect(screen.getByText(/feet and inches that could not be read completely/)).toHaveClass("text-amber-700");
     expect(screen.getByText(/already holds specifications from a bill/)).toHaveClass("text-amber-700");
   });
 });
