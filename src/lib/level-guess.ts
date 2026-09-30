@@ -56,8 +56,26 @@ const METAL_WORDS = ["metal", "metalwork", "brass", "bronze", "steel", "chrome",
 const HERO_WORDS = ["hero", "feature", "statement", "centrepiece"];
 
 function words(text: string | null | undefined): Set<string> {
-  return new Set(normaliseName(text ?? "").split(" ").filter(Boolean));
+  // Every run of punctuation is a word break here, colons included: the Aman
+  // bill writes "Metal: MTL-01", and `normaliseName` (built for supplier
+  // names) keeps the colon, so "metal:" never matched "metal" and every item
+  // with a metal finish read "the bill names no metalwork" (2026-09-30).
+  return new Set(
+    normaliseName(text ?? "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter(Boolean),
+  );
 }
+
+/**
+ * A METAL FINISH CODE the bill prints, zone and all (`MTL-01`, `GR-MTL-03`):
+ * the client's own code for a metal, which is what the BWS boilerplate split
+ * turns on (MF1 or MF2 populated is the with-Metalwork template). `MTL` only
+ * — the one metal prefix a bill has printed; `MT` alone is too short to be
+ * sure of.
+ */
+const METAL_CODE = /\b(?:[a-z]{2,4}-)?mtl-?\s?\d+/i;
 
 function firstMatch(found: Set<string>, list: string[]): string | null {
   return list.find((word) => found.has(word)) ?? null;
@@ -100,6 +118,8 @@ export function guessLevelFromBill(line: {
 
   const metal = firstMatch(found, METAL_WORDS);
   if (metal) return { level: "complex", reason: `the bill names ${metal}` };
+  const metalCode = METAL_CODE.exec(line.itemDescription ?? "");
+  if (metalCode) return { level: "complex", reason: `the bill gives a metal finish, ${metalCode[0].toUpperCase()}` };
 
   return {
     level: "simple",

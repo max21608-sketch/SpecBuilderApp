@@ -62,3 +62,20 @@ describe("guessLevelFromAttributes", () => {
     expect(guess?.level).toBe("hero");
   });
 });
+
+describe("guessLevelFromBill — a description cell written as labelled lines", () => {
+  it("reads a metal named before a colon, the way a pricing document labels it", () => {
+    const guess = guessLevelFromBill({ itemDescription: "Stool Spec size: D 400 X H 420 mm Finish:TIM-99 Metal: MTL-99" });
+    expect(guess).toEqual({ level: "complex", reason: "the bill names metal" });
+  });
+
+  it("reads a metal finish CODE, zone and all, where no metal word is printed", () => {
+    const guess = guessLevelFromBill({ itemDescription: "Chest Finish: STN-98, XX-MTL-07, TIM-98" });
+    expect(guess).toEqual({ level: "complex", reason: "the bill gives a metal finish, XX-MTL-07" });
+  });
+
+  it("does not read a metal out of a word that merely contains the letters", () => {
+    expect(guessLevelFromBill({ itemDescription: "Armchair Finish: BESPOKE Fabric: COM" })?.level).toBe("simple");
+    expect(guessLevelFromBill({ itemDescription: "Side table SMTL finish" })?.level).toBe("simple");
+  });
+});
