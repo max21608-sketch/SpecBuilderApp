@@ -93,3 +93,73 @@ export function findRecordsByRef(refRaw: string | null, records: RecordEntry[]):
   // always the better answer where there is one.
   return records.filter((record) => normaliseRef(record.label) === normalised);
 }
+
+// ---- a code read off the END of a bill code --------------------------------
+
+/**
+ * A ref folded the way `normaliseRef` folds it, remembering where its printed
+ * SEGMENTS began and ended.
+ *
+ * `normaliseRef` throws the hyphens away, which is right for "is this the same
+ * code" and useless for "does this code end with that one": `GR-FUR-08A` folds
+ * to `GRFUR08A`, and without the boundaries `R-08A` would look like one of its
+ * endings. A segment is a run of letters and digits the document printed
+ * together; its boundaries are the only places a shorter code may start or
+ * stop.
+ */
+export type SegmentedRef = { fold: string; starts: ReadonlySet<number>; ends: ReadonlySet<number> };
+
+export function segmentRef(raw: string): SegmentedRef {
+  const starts = new Set<number>();
+  const ends = new Set<number>();
+  let fold = "";
+  let inSegment = false;
+  for (const char of raw.toUpperCase()) {
+    if (/[A-Z0-9]/.test(char)) {
+      if (!inSegment) starts.add(fold.length);
+      fold += char;
+      inSegment = true;
+    } else {
+      if (inSegment) ends.add(fold.length);
+      inSegment = false;
+    }
+  }
+  if (inSegment) ends.add(fold.length);
+  return { fold, starts, ends };
+}
+
+/**
+ * Could a page's `short` code be the END of the bill's `long` one?
+ *
+ * `FUR-08` ends `GR-FUR-08` and `PL-FUR-08`, and does NOT end `GR-FUR-08A` or
+ * `XFUR-08` — the shorter code has to begin where a printed segment of the
+ * longer one begins. Whitespace inside the short code is folded away, so a
+ * title block reading `FUR-03 B` still ends `PL-FUR-03B`.
+ *
+ * A code that is the whole of the other is NOT an ending: that is an exact
+ * match, and `findRecordsByRef` has already answered it. A code with no letter
+ * or no digit in it is refused outright — `08` would end half the bill.
+ */
+export function endsOnSegment(long: string, short: string): boolean {
+  const whole = segmentRef(long);
+  const tail = normaliseRef(short);
+  if (!/[A-Z]/.test(tail) || !/[0-9]/.test(tail)) return false;
+  if (tail.length >= whole.fold.length) return false;
+  if (!whole.fold.endsWith(tail)) return false;
+  return whole.starts.has(whole.fold.length - tail.length);
+}
+
+/**
+ * Does `text` name `code` WHOLE — starting and stopping on its own segment
+ * boundaries? `AM-ID-PL-FUR-08 Bed frame` names `PL-FUR-08`; it does not name
+ * `GR-FUR-08`, and `AM-ID-PL-FUR-08A` does not name `PL-FUR-08`.
+ */
+export function namesOnSegments(text: string, code: string): boolean {
+  const haystack = segmentRef(text);
+  const needle = normaliseRef(code);
+  if (!needle) return false;
+  for (let at = haystack.fold.indexOf(needle); at !== -1; at = haystack.fold.indexOf(needle, at + 1)) {
+    if (haystack.starts.has(at) && haystack.ends.has(at + needle.length)) return true;
+  }
+  return false;
+}

@@ -61,6 +61,7 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import { AddConfiguration, UnsplitNote } from "@/components/imports/ConfigurationControls";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
+import Note from "@/components/ui/Note";
 import Tip from "@/components/ui/Tip";
 
 // Re-exported from where they now live, so the screens keep one import.
@@ -69,7 +70,16 @@ import type { FinishFilingView, NamedResolution } from "@/lib/drawing-resolution
 
 export type ItemResolution = {
   id: string;
-  resolution: { runs: RunResolution[]; suggested: string[] };
+  resolution: {
+    runs: RunResolution[];
+    suggested: string[];
+    /**
+     * How the code was matched where it was NOT matched exactly: read off the
+     * end of a bill code (`FUR-08` → `PL-FUR-08`). The sentence is the server's
+     * (`resolveDrawingTargets`), so the card says what the confirm will do.
+     */
+    matchedBy?: { kind: "code_end"; code: string | null; message: string };
+  };
   targets: string[];
   /**
    * Which configuration of its code this card is, or null for a code drawn
@@ -604,6 +614,15 @@ export default function ItemCard({
             busy={busy}
             onToggle={toggleRun}
             onPick={(recordId) => void onSaveTargets(item, [recordId], [])}
+            // Amber whether or not it settled on one: a code read off the end
+            // of a bill code is a reading a person checks, like a guessed slot.
+            note={
+              resolution?.resolution.matchedBy ? (
+                <Note tone="warn" className="mt-2">
+                  {resolution.resolution.matchedBy.message}
+                </Note>
+              ) : undefined
+            }
             className="rounded-lg border border-neutral-200 px-3 py-2.5"
           />
 

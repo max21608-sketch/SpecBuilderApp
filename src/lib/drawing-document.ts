@@ -34,7 +34,7 @@
 // identical to a matcher that ignores runs, which is why grouping by run is the
 // whole of this function.
 // ============================================================================
-import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
+import { endsOnSegment, findRecordsByRef, namesOnSegments, normaliseRef, type RecordEntry } from "@/lib/record-refs";
 import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
 // `finishes.ts` is a leaf here and imports nothing from this file.
@@ -453,6 +453,44 @@ export type DrawingResolution = {
   runs: RunResolution[];
   /** Every record a confirm would write to if the reviewer changed nothing. */
   suggested: string[];
+  /**
+   * How the code was matched, where it was NOT matched exactly. Absent on every
+   * exact match, which is most of any pack and needs no sentence. Present, the
+   * card prints `message` in amber: a code read off the end of a bill code is a
+   * reading a person has to check, like any other.
+   */
+  matchedBy?: CodeEndMatch;
+};
+
+/**
+ * A page whose code is the END of a bill code: the Aman title block prints
+ * `BEDFRAME FUR-08` where the bill lists `GR-FUR-08` and `PL-FUR-08`.
+ *
+ * `code` is the bill code it settled on, or null when the page did not say
+ * which of `candidates` it is — and then every phase is ambiguous and nothing
+ * is suggested.
+ */
+export type CodeEndMatch = {
+  kind: "code_end";
+  /** What the page printed. */
+  pageCode: string;
+  /** Every bill code the page code ends, in the bill's own spelling. */
+  candidates: string[];
+  code: string | null;
+  /** The document's own number, where that is what chose among several. */
+  drawingNumber: string | null;
+  message: string;
+};
+
+/** What a resolution may read besides the item code itself. */
+export type ResolutionContext = {
+  /**
+   * Every code the document gave this item — its code group, canonical code
+   * first. The end-of-code step runs only when NONE of them matches exactly.
+   */
+  codes?: readonly string[];
+  /** The drawing's own number: the stored filename with its extension off. */
+  drawingNumber?: string | null;
 };
 
 /**
@@ -462,11 +500,137 @@ export type DrawingResolution = {
  * (exact, then normalised) `findRecordsByRef` the spec-document resolver uses —
  * a third normaliser would eventually disagree with the other two about
  * `FU06C - CG27.2`.
+ *
+ * ---- A CODE THAT IS THE END OF A BILL CODE (2026-09-30) ---------------------
+ *
+ * The Aman drawings title their items `FUR-08` and `FUR-03 B`; the bill lists
+ * `GR-FUR-08`, `PL-FUR-08` and `PL-FUR-03B`, the prefix being the floor. So
+ * where NOTHING matches exactly, a bill code whose segments END with the page's
+ * code is a candidate (`endsOnSegment`: `FUR-08` ends `PL-FUR-08`, never
+ * `GR-FUR-08A`). One candidate code resolves. Several are settled only by the
+ * document naming one WHOLE in its own number (`AM-ID-PL-FUR-08` names
+ * `PL-FUR-08` and not `GR-FUR-08`), and only if it names exactly one;
+ * otherwise every candidate is OFFERED and none is picked — the `SX11A` rule.
+ * Never before an exact match: a suffix step that fired beside one would let
+ * `FUR-08` quietly out-vote a bill that really does list `FUR-08`.
  */
-export function resolveDrawingTargets(itemCodeRaw: string | null, records: RecordEntry[]): DrawingResolution {
+export function resolveDrawingTargets(
+  itemCodeRaw: string | null,
+  records: RecordEntry[],
+  context: ResolutionContext = {},
+): DrawingResolution {
   const byBoqCode = records.map((record) => ({ ...record, refs: record.boqCodes }));
-  const matches = findRecordsByRef(itemCodeRaw, byBoqCode);
+  const exact = findRecordsByRef(itemCodeRaw, byBoqCode);
+  if (exact.length > 0) return groupByRun(exact, records);
 
+  // Every code the document gave this item must miss before an ending is read.
+  const codes = [itemCodeRaw, ...(context.codes ?? [])].filter(
+    (code): code is string => typeof code === "string" && code.trim() !== "",
+  );
+  if (codes.some((code) => findRecordsByRef(code, byBoqCode).length > 0)) return groupByRun([], records);
+  const pageCode = codes[0];
+  if (!pageCode) return groupByRun([], records);
+
+  // The candidate bill CODES, one per fold, in the bill's own spelling.
+  const candidates = new Map<string, string>();
+  for (const record of records) {
+    for (const ref of record.boqCodes) {
+      if (codes.some((code) => endsOnSegment(ref, code)) && !candidates.has(normaliseRef(ref))) {
+        candidates.set(normaliseRef(ref), ref.trim());
+      }
+    }
+  }
+  if (candidates.size === 0) return groupByRun([], records);
+  const candidateCodes = [...candidates.values()].sort((a, b) => a.localeCompare(b));
+
+  const drawingNumber = context.drawingNumber?.trim() || null;
+  let code: string | null = null;
+  let chosenByNumber = false;
+  if (candidateCodes.length === 1) {
+    code = candidateCodes[0]!;
+  } else if (drawingNumber) {
+    const named = candidateCodes.filter((candidate) => namesOnSegments(drawingNumber, candidate));
+    if (named.length === 1) {
+      code = named[0]!;
+      chosenByNumber = true;
+    }
+  }
+
+  const printed = pageCode.trim();
+  if (code) {
+    const matchedBy: CodeEndMatch = {
+      kind: "code_end",
+      pageCode: printed,
+      candidates: candidateCodes,
+      code,
+      drawingNumber: chosenByNumber ? drawingNumber : null,
+      message: chosenByNumber
+        ? `Matched ${code}: the page names ${printed}, and the drawing number ${numberNaming(drawingNumber!, code)} names ${code}.`
+        : `Matched ${code}: the page names ${printed}, and ${code} is the only bill code ending with it.`,
+    };
+    return { ...groupByRun(findRecordsByRef(code, byBoqCode), records), matchedBy };
+  }
+
+  // Several, and the document did not say which: every one of them offered,
+  // and every phase ambiguous -- a phase holding ONE of the candidates is not
+  // a match, because the choice between the codes has not been made.
+  const offered = byBoqCode.filter((record) => record.refs.some((ref) => candidates.has(normaliseRef(ref))));
+  const grouped = groupByRun(offered, records);
+  return {
+    runs: grouped.runs.map((run) =>
+      run.status === "matched"
+        ? { runId: run.runId, runName: run.runName, status: "ambiguous" as const, candidates: [run.record] }
+        : run,
+    ),
+    suggested: [],
+    matchedBy: {
+      kind: "code_end",
+      pageCode: printed,
+      candidates: candidateCodes,
+      code: null,
+      drawingNumber,
+      message: `The page names ${printed}, which is the end of ${candidateCodes.length} bill codes (${candidateCodes.join(", ")}), and ${
+        drawingNumber ? `the drawing number ${drawingNumber} does not name one of them` : "the document carries no drawing number"
+      }. Choose which record this drawing is.`,
+    },
+  };
+}
+
+/**
+ * The part of a drawing number that names the code: `AM-ID-PL-FUR-08` out of
+ * `AM-ID-PL-FUR-08 Bed frame`, or the whole of it where the code spans a gap.
+ */
+function numberNaming(drawingNumber: string, code: string): string {
+  const word = drawingNumber.split(/\s+/).find((part) => namesOnSegments(part, code));
+  return word ?? drawingNumber;
+}
+
+/** The drawing's own number: its stored filename, extension off. */
+export function drawingNumberOf(filename: string | null | undefined): string | null {
+  const name = (filename ?? "").trim().replace(/\.[A-Za-z0-9]{1,5}$/, "").trim();
+  return name || null;
+}
+
+/**
+ * One staged item, resolved the way the review screen AND the confirm resolve
+ * it: its canonical code, every code its group gave it, and the document's own
+ * number. One helper so the two callers cannot drift apart about which of
+ * those they pass -- a card that matched on the screen and not at confirm
+ * would be `targets_changed` for a reason nobody could see.
+ */
+export function resolveStagedItem(
+  staged: Pick<StagedDrawings, "schemaVersion" | "codeGroups" | "filename">,
+  item: Pick<DrawingItem, "itemCodeRaw">,
+  records: RecordEntry[],
+): DrawingResolution {
+  const canonical = canonicalCode(staged, item.itemCodeRaw);
+  return resolveDrawingTargets(canonical, records, {
+    codes: codesOfItem(staged, item.itemCodeRaw),
+    drawingNumber: drawingNumberOf(staged.filename),
+  });
+}
+
+function groupByRun(matches: RecordEntry[], records: RecordEntry[]): DrawingResolution {
   const byRun = new Map<string, RecordEntry[]>();
   for (const match of matches) {
     // findRecordsByRef returned the projected copy; take the original back so
@@ -953,6 +1117,8 @@ export const METAL_SLOTS = [5, 35] as const; // Main metal finish, Metal Finish 
 // would silently re-classify rows on every existing document.
 import {
   CODE_PREFIXES,
+  projectCodeKind,
+  stackedTagCode,
   FABRIC_CALLOUT_WORDS,
   HARDWARE_WORDS,
   METAL_WORDS,
@@ -1061,6 +1227,13 @@ export function classifyCallout(input: {
     if (match) {
       return reading(match.kind, false, `the code ${String(input.materialCodeRaw).trim()} says so`);
     }
+  }
+  // 2b. A three-part project code says what it is in its MIDDLE group:
+  //     `GR-FAB-04`, where the `GR` is the floor. After the prefix test, so no
+  //     code that test already read changes its reading.
+  const projectKind = projectCodeKind(input.materialCodeRaw);
+  if (projectKind) {
+    return reading(projectKind, false, `the code ${String(input.materialCodeRaw).trim()} says so`);
   }
 
   // 3. The caption names the item itself, and carries a specification.
@@ -1442,7 +1615,13 @@ export function drawingItemBlockers(
       blockers.push({
         code: "ambiguous_run",
         runId: run.runId,
-        message: `${run.runName} has ${run.candidates.length} lines with this code. Choose which one this drawing is.`,
+        // A code read off the END of several bill codes is a different
+        // question from two lines carrying one code, and the count of lines
+        // would not say what the choice is between.
+        message:
+          resolution.matchedBy && resolution.matchedBy.code === null
+            ? `${run.runName}: ${resolution.matchedBy.message}`
+            : `${run.runName} has ${run.candidates.length} lines with this code. Choose which one this drawing is.`,
       });
     }
   }
@@ -2688,11 +2867,23 @@ function upgradeCalloutGuesses(doc: StagedDrawings, fields: SpecFieldEntry[]): S
     }
 
     let touched = false;
-    const observations = item.observations.map((observation) => {
-      if (observation.reviewStatus !== "pending") return observation;
-      if (observation.version !== 1) return observation;
+    const observations = item.observations.map((original) => {
+      if (original.reviewStatus !== "pending") return original;
+      if (original.version !== 1) return original;
+      if (original.attrGroup === "dimension" || original.attrGroup === "note") return original;
+
+      // A TAG DRAWN AS STACKED BOXES IS ITS CODE. `GR FAB 04` is how a reader
+      // transcribes three boxes; the bill writes `GR-FAB-04`, and the library
+      // is keyed on that. Read into `materialCodeRaw` -- what the classifier,
+      // the finishes library and the confirm's `material_code` all read --
+      // while `value` and `valueRaw` keep the drawing's own words. Ahead of
+      // the field check, so a row staging already gave a field still files
+      // under the bill's finish rather than minting a second one.
+      const stacked = stackedTagCode(original.materialCodeRaw) ?? (original.materialCodeRaw?.trim() ? null : stackedTagCode(original.valueRaw));
+      const observation = stacked && stacked !== original.materialCodeRaw ? { ...original, materialCodeRaw: stacked } : original;
+      if (observation !== original) touched = true;
+
       if (observation.specFieldId) return observation;
-      if (observation.attrGroup === "dimension" || observation.attrGroup === "note") return observation;
 
       const callout = classifyCallout({
         labelRaw: observation.labelRaw,
@@ -3330,6 +3521,18 @@ export function canonicalCode(
     }
   }
   return raw;
+}
+
+/** Every code the document gave an item: its code group, canonical first, or the page's own. */
+export function codesOfItem(
+  doc: Pick<StagedDrawings, "schemaVersion" | "codeGroups"> | undefined,
+  itemCodeRaw: string | null,
+): string[] {
+  const raw = (itemCodeRaw ?? "").trim();
+  if (!raw) return [];
+  const folded = normaliseRef(raw);
+  const group = codeGroupsOf(doc).find((entry) => entry.itemCodes.some((code) => normaliseRef(code) === folded));
+  return group ? [...group.itemCodes] : [raw];
 }
 
 export function groupItemsByCode(
