@@ -182,8 +182,23 @@ describe("resolveProposals — by the bill's row", () => {
     expect(imperial[0]?.dimension ?? null).toBeNull();
     expect(imperial[0]?.readingNote).toMatch(/“Sizes \(mm\)” line is the one placed/);
     expect(lines.filter((line) => line.sourceOrdinal === 1).map((line) => line.dimension?.figure)).toEqual(["2030", "915", "790"]);
-    // A feet-and-inches line on an item with no metric line: kept, and why.
-    expect(lines.find((line) => line.sourceOrdinal === 2)?.readingNote).toMatch(/Feet and inches are not converted/);
+    // A feet-and-inches line on an item with no metric line is the item's size,
+    // each part read whole and kept as the bill wrote it (2026-09-30).
+    expect(lines.filter((line) => line.sourceOrdinal === 2).map((line) => [line.dimension?.slot, line.dimension?.figure, line.dimension?.unit])).toEqual([
+      ["W", "1'6\"", "in"],
+      ["D", "1'6\"", "in"],
+      ["H", "1'5\"", "in"],
+    ]);
+  });
+
+  it("keeps a feet-and-inches line that does not read completely, and says why", () => {
+    const [line] = resolveProposals(
+      [observation({ sourceRow: 2, attributeRaw: "Sizes (ft-in)", valueRaw: "W 1'6\" x D 1'6\" x H 1'5" })],
+      registers(),
+      ids,
+    );
+    expect(line?.dimension ?? null).toBeNull();
+    expect(line?.readingNote).toMatch(/feet and inches that could not be read completely/);
   });
 
   it("places the plain-inch line where it is the only size the item has", () => {

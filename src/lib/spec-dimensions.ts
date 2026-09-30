@@ -34,8 +34,10 @@
 //   wording or it is left null, and `composeDimensionCell` then renders the
 //   value verbatim in a bracket saying why.
 // - It never HALF-reads a measurement. Plain inches are a unit this app holds
-//   and `18"` converts exactly; feet-and-inches is not, and `1'6"` is refused
-//   whole rather than read as its feet figure. See `imperialCompound`.
+//   and `18"` converts exactly; a feet-and-inches value converts exactly too
+//   when it reads COMPLETELY (`6'-4"` is kept as written, unit `in`, and
+//   composes as 1930mm), and anything that does not — `8'-6" eq`, `2'-5` —
+//   is refused whole rather than read as its feet figure. See `feetAndInches`.
 // - It never matches a slot on a SUBSTRING. `normaliseDimensionSlot` folds the
 //   WHOLE label, so "ARM HEIGHT" is not a height and "WIDTH SEAT" is not a
 //   width. Both are printed beside values they would destroy.
@@ -45,7 +47,7 @@
 //   the figure and unit are taken out is handed back for the caller to keep as
 //   a note.
 // ============================================================================
-import { imperialCompound, parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
+import { feetAndInches, imperialCompound, parseCombinedDimensions, parseDimensionFigure } from "@/lib/dimensions";
 import {
   containsPhrase,
   normaliseDimensionSlot,
@@ -141,12 +143,19 @@ function fold(raw: string | null): string {
  * "from".
  */
 function splitFigure(raw: string): { figure: string | null; unit: AttributeUnit | null; rest: string } {
-  // FEET AND INCHES IS REFUSED WHOLE, before the leading figure is taken.
-  // `1'6"` matched the regex below as a figure of ONE with `' 6"` left over as
-  // the qualifier, so an 18-inch arm height reached the reviewer as a 1 with a
-  // unit box beside it. Plain inches are NOT this case and are not touched:
-  // `in` is in the unit vocabulary and `18"` converts exactly.
-  if (imperialCompound(raw)) return { figure: null, unit: null, rest: raw.trim() };
+  // FEET AND INCHES IS READ WHOLE OR REFUSED WHOLE, before the leading figure
+  // is taken. `1'6"` matched the regex below as a figure of ONE with `' 6"`
+  // left over as the qualifier, so an 18-inch arm height reached the reviewer
+  // as a 1 with a unit box beside it. A value that is entirely one
+  // feet-and-inches measurement is kept as the document wrote it, in `in`,
+  // and `toMillimetres` converts it; one with anything beside it keeps no
+  // figure at all. Plain inches are NOT this case and are not touched: `in`
+  // is in the unit vocabulary and `18"` converts exactly.
+  if (imperialCompound(raw)) {
+    return feetAndInches(normaliseMarks(raw)) !== null
+      ? { figure: raw.trim(), unit: "in", rest: "" }
+      : { figure: null, unit: null, rest: raw.trim() };
+  }
   const match = /^\s*([0-9]+(?:[.,][0-9]+)?)\s*([A-Za-z"']+\.?)?\s*([\s\S]*)$/.exec(raw);
   if (!match || !match[1]) return { figure: null, unit: null, rest: raw.trim() };
 
@@ -208,11 +217,6 @@ export function readDimension(attributeRaw: string | null, valueRaw: string | nu
   if (isTbc(value)) return null; // "Dimensions: TBC" places no slot at all.
 
   const text = normaliseMarks(value);
-  // FEET AND INCHES ANYWHERE ON THE LINE REFUSES THE WHOLE LINE. One part in
-  // `2'-5"` beside two plain-inch parts is not a line with two readable
-  // figures: it is an imperial line this app does not convert, and placing the
-  // two it could read would present a half-read size as the item's.
-  if (imperialCompoundAnywhere(text)) return null;
 
   const combined = parseCombinedDimensions(splitSlashStatements(text));
   const parts: DimensionPart[] = [];
@@ -241,6 +245,11 @@ export function readDimension(attributeRaw: string | null, valueRaw: string | nu
     }
     const figure = figureWithUnit(part.value);
     if (!figure) {
+      // A SLOT IN FEET AND INCHES THAT DOES NOT READ COMPLETELY REFUSES THE
+      // WHOLE LINE. `W 3'7" x D 1'-10 5/8" x H 2'-5` is not a line with two
+      // readable figures and a note: it is a size this app could only
+      // half-read, and placing the two would present that as the item's.
+      if (imperialCompoundAnywhere(part.value)) return null;
       leftovers.push(shown);
       continue;
     }
@@ -299,6 +308,11 @@ function splitSlashStatements(text: string): string {
  * `21"`. Strict like `parseDimensionFigure`: anything else is not a figure.
  */
 function figureWithUnit(value: string): { figure: string; unit: AttributeUnit | null } | null {
+  // One feet-and-inches measurement, read completely: the figure is the
+  // document's own words and the unit is the marks it printed.
+  if (imperialCompoundAnywhere(value)) {
+    return feetAndInches(value) !== null ? { figure: value.trim(), unit: "in" } : null;
+  }
   const match = /^([0-9]+(?:[.,][0-9]+)?)\s*([A-Za-z"]+)?\.?$/.exec(value.trim());
   if (!match?.[1]) return null;
   if (parseDimensionFigure(match[1]).figure === null) return null;
@@ -312,13 +326,16 @@ function figureWithUnit(value: string): { figure: string; unit: AttributeUnit | 
  * Why a SIZE line reads no dimension, in the reviewer's words — or null where
  * it is not a size line, or it read.
  *
- * Only the refusal worth saying: a feet-and-inches line. Every other size line
- * that reads nothing (a TBC, a sentence) is plain to a person looking at it.
+ * Only the refusal worth saying: a feet-and-inches line that did not read
+ * completely. One that did is converted and says nothing here. Every other
+ * size line that reads nothing (a TBC, a sentence) is plain to a person
+ * looking at it.
  */
 export function sizeLineRefusal(attributeRaw: string | null, valueRaw: string | null): string | null {
   if (!sizeLabel(attributeRaw)) return null;
   const value = (valueRaw ?? "").trim();
   if (value === "" || isTbc(value)) return null;
   if (!imperialCompoundAnywhere(normaliseMarks(value))) return null;
-  return "Feet and inches are not converted, so this size is kept as the document wrote it and fills no slot.";
+  if (readDimension(attributeRaw, valueRaw) !== null) return null;
+  return "This size is in feet and inches that could not be read completely, so it is kept as the document wrote it and fills no slot.";
 }

@@ -525,7 +525,9 @@ export type UnitSuggestion = { status: "confident"; unit: AttributeUnit } | { st
  * silent 10x is not a thing to leave one feature away.
  */
 export function suggestUnit(values: (string | null)[]): UnitSuggestion {
-  const numbers = values.map(figureOf).filter((n): n is number => n !== null);
+  // A feet-and-inches figure has already said what it is in, and 76 (inches)
+  // beside a page's bare figures would vote "centimetres" for all of them.
+  const numbers = values.map(metricCandidateOf).filter((n): n is number => n !== null);
   if (numbers.length === 0) return { status: "none" };
 
   // The boundary lives in dimensions.ts because `guessSlotsFromViews` asks the
@@ -548,9 +550,13 @@ export function suggestUnit(values: (string | null)[]): UnitSuggestion {
 export const UNIT_SOURCES = ["printed", "figures", "project_default"] as const;
 export type UnitSource = (typeof UNIT_SOURCES)[number];
 
-/** The numeric part of a drawn figure, or null if there isn't one. */
-function figureOf(raw: string | null): number | null {
-  return parseDimensionFigure(raw).figure;
+/**
+ * The numeric part of a drawn figure whose unit is still an open question, or
+ * null — including for a feet-and-inches figure, which printed its own marks.
+ */
+function metricCandidateOf(raw: string | null): number | null {
+  const parsed = parseDimensionFigure(raw);
+  return parsed.imperial ? null : parsed.figure;
 }
 
 export type SplitFigure = { value: string | null; unit: AttributeUnit | null };
@@ -578,14 +584,42 @@ export function splitFigureAndUnit(valueRaw: string | null): SplitFigure {
   if (text === "") return { value: valueRaw, unit: null };
 
   const match = /^([0-9]+(?:[.,][0-9]+)?)\s*([a-zA-Z"']+\.?)$/.exec(text);
-  if (!match) return { value: valueRaw, unit: null };
+  // ONE FEET-AND-INCHES MEASUREMENT keeps its marks in the value — `6'-4"`
+  // split into `6'-4` and `"` is a value nothing can finish reading — and the
+  // marks are its unit. So a reviewer typing one gets `in` beside it too.
+  if (!match) return { value: valueRaw, unit: parseDimensionFigure(text).imperial ? "in" : null };
 
   const unit = normaliseUnit(match[2]);
   // An unrecognised suffix is not a unit we know: "1800off" keeps its wording
-  // rather than being silently truncated to "1800".
-  if (!unit) return { value: valueRaw, unit: null };
+  // rather than being silently truncated to "1800". `10'` is a figure with its
+  // own mark, though, as above.
+  if (!unit) return { value: valueRaw, unit: parseDimensionFigure(text).imperial ? "in" : null };
 
   return { value: match[1] ?? valueRaw, unit };
+}
+
+/**
+ * `in` where a value is ONE feet-and-inches (or inches) measurement that
+ * printed its own marks, and null otherwise. The mark is the page stating the
+ * unit, which is why the staging path treats it as printed.
+ */
+function printedImperialUnit(value: string | null): AttributeUnit | null {
+  return parseDimensionFigure(value).imperial ? "in" : null;
+}
+
+/**
+ * `6'-4` with `"` reported as its unit is `6'-4"` split in two, and it is put
+ * back together — the page printed one measurement, and read apart the feet
+ * half is a value no reader can finish. Only where the value carries a feet
+ * mark, the unit is an inch mark, and the joined text reads COMPLETELY;
+ * everything else is returned exactly as the model reported it.
+ */
+function rejoinInchMark(valueRaw: string | null, unitRaw: string | null | undefined): string | null {
+  if (valueRaw === null || normaliseUnit(unitRaw) !== "in") return valueRaw;
+  if (!/[0-9]\s*(?:'|\u2032|ft\b|foot\b|feet\b)/i.test(valueRaw)) return valueRaw;
+  if (parseDimensionFigure(valueRaw).figure !== null) return valueRaw;
+  const joined = `${valueRaw.trim()}"`;
+  return parseDimensionFigure(joined).imperial ? joined : valueRaw;
 }
 
 export type ResolvedUnit = { unit: AttributeUnit | null; source: UnitSource | null };
@@ -659,13 +693,15 @@ const MAX_PLAUSIBLE_MM = 4000;
  */
 export function implausibleDimension(value: string | null, unit: AttributeUnit | null): string | null {
   if (!unit) return null;
-  const figure = figureOf(value);
+  const parsed = parseDimensionFigure(value);
+  const figure = parsed.figure;
   // A value that is not a single figure ("190 x 79 x 72", "TBC") is not
   // something this check can reason about, and guessing at it would produce
   // warnings nobody can act on.
   if (figure === null) return null;
 
-  const mm = figure * TO_MM[unit];
+  // Feet and inches are inches whatever sits in the unit box.
+  const mm = figure * TO_MM[parsed.imperial ? "in" : unit];
   if (mm >= MIN_PLAUSIBLE_MM && mm <= MAX_PLAUSIBLE_MM) return null;
 
   const asMetres = mm / 1000;
@@ -1226,8 +1262,12 @@ export function alreadyRecorded(
 function inMillimetres(value: string | null, unit: string | null): number | null {
   const normalised = normaliseUnit(unit);
   if (!normalised) return null;
-  const figure = parseDimensionFigure(value).figure;
-  return figure === null ? null : figure * TO_MM[normalised];
+  const { figure, imperial } = parseDimensionFigure(value);
+  if (figure === null) return null;
+  // A feet-and-inches value at any unit but `in` is a contradiction, and a
+  // contradiction is never "the same value" as anything.
+  if (imperial && normalised !== "in") return null;
+  return figure * TO_MM[normalised];
 }
 
 /**
@@ -2119,10 +2159,15 @@ export function stageDrawings(
     // its figures read as 1800/1120/120 — all >= 300, so `mm` by luck here and
     // by coincidence on the next page.
     const dimensions = item.dimensions.map((dimension) => {
-      const split = splitFigureAndUnit(dimension.valueRaw);
+      const split = splitFigureAndUnit(rejoinInchMark(dimension.valueRaw, dimension.unitRaw));
       return {
         ...dimension,
         valueRaw: split.value,
+        // A FEET OR INCH MARK IS A UNIT PRINTED ON THE PAGE. `6'-4"` states its
+        // unit as plainly as `1800mm` does, so a compound that reads
+        // completely is `in`, printed — no project default, no magnitude vote.
+        // One that does not read completely gets nothing here, and the card
+        // names it as imperial, not converted.
         printedUnit: normaliseUnit(dimension.unitRaw) ?? split.unit,
       };
     });
@@ -2135,7 +2180,7 @@ export function stageDrawings(
       return parsed.parts.map((part) => ({
         labelRaw: part.slot && !part.slotSuggested ? DIMENSION_SLOT_LABELS[part.slot] : null,
         valueRaw: part.value,
-        printedUnit,
+        printedUnit: printedUnit ?? printedImperialUnit(part.value),
         // A PREFIX THE LINE PRINTED IS THE PAGE SPEAKING AND IS KEPT. A slot
         // the parser worked out from print ORDER is NOT, any more: those three
         // bare figures are reported by the model in `dimensions`, each with the

@@ -159,6 +159,19 @@ describe("composeRow", () => {
     expect(composeDimensions(attributes)).toBe("W1900mm");
   });
 
+  it("writes a feet-and-inches value as the page did, and composes it in millimetres", () => {
+    // The long-form value is the document's words, re-checkable against the
+    // page; `in` beside `6'-4"` would say the unit twice. The cell converts.
+    expect(renderAttributeValue({ value: "6'-4\"", unit: "in", state: "confirmed" })).toBe("6'-4\"");
+    expect(renderAttributeValue({ value: "18", unit: "in", state: "confirmed" })).toBe("18in");
+    const attributes = [
+      attribute({ attrGroup: "dimension", dimensionSlot: "W", label: "Width", value: "6'-4\"", unit: "in", specFieldJsonId: null, sortOrder: 0 }),
+      attribute({ attrGroup: "dimension", dimensionSlot: "D", label: "Depth", value: "2'-0 1/2\"", unit: "in", specFieldJsonId: null, sortOrder: 1 }),
+    ];
+    const row = composeRow(scope({ attributes }), record(), attributes, []);
+    expect(row[indexOfField(3)]).toBe("W1930 x D622mm");
+  });
+
   it("appends the unit exactly once, so a value must never carry its own", () => {
     // renderAttributeValue concatenates value and unit with no separator. That
     // is correct and deliberate for a material or a finish -- but it means a
