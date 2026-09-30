@@ -23,8 +23,10 @@
 //     (`columnsFromSelections`, `columnMappingProblem` — one leaf, both sides).
 //     A disabled button with no sentence beside it is a form nobody can finish.
 //   * A SAVED LAYOUT IS NEVER APPLIED UNSEEN. The page keeps this panel open on
-//     any sheet a layout read until the reviewer closes it once, and "Close"
-//     records that they did.
+//     any sheet a PERSON'S layout read until the reviewer closes it once, and
+//     "Close" records that they did. A SEEDED layout (`created_by = 'seed'`)
+//     is the app's own knowledge of a document and reads like a known
+//     heading: the panel stays shut and says which layout read it.
 //   * "REMEMBER" SAVES WHAT WAS READ, not what the selects say. A layout is
 //     saved from the sheet's staged mapping, so it is offered only once the
 //     selects match it — otherwise the name would go on a mapping that never
@@ -42,9 +44,11 @@ import {
   BOQ_ROLE_LABELS,
   columnLetter,
   columnMappingProblem,
+  columnsAwaitingALook,
   columnsFromSelections,
   isBoqRole,
   type BoqColumnRef,
+  type BoqLayoutOrigin,
   type BoqMappingSource,
   type BoqReadRole,
   type BoqRole,
@@ -61,6 +65,7 @@ export type ColumnsPanelSheet = {
   headings?: string[];
   mappingSource?: BoqMappingSource;
   layout?: { id: string; name: string } | null;
+  layoutOrigin?: BoqLayoutOrigin | null;
   mappingEvidence?: Partial<Record<BoqReadRole, string>>;
   needsColumns?: boolean;
   columnsNote?: string | null;
@@ -69,6 +74,9 @@ export type ColumnsPanelSheet = {
   /** What a model's reading dropped, in words (Step 2). */
   structure?: { notes?: string[] } | null;
 };
+
+/** The badge a column read by a SEEDED layout carries. */
+const SEEDED_LAYOUT_LABEL = "standard layout";
 
 /**
  * The badge under a select says where its role came from. A model's reading is
@@ -80,6 +88,9 @@ export type ColumnsPanelSheet = {
 const BADGE_TONE: Record<string, "plain" | "info" | "guess" | "warn"> = {
   [BOQ_MAPPING_SOURCE_LABELS.synonym]: "plain",
   [BOQ_MAPPING_SOURCE_LABELS.layout]: "info",
+  // A seeded layout is plain, like a known heading: it is the app's own
+  // knowledge of the document, not a decision about another bill.
+  [SEEDED_LAYOUT_LABEL]: "plain",
   [BOQ_MAPPING_SOURCE_LABELS.person]: "plain",
   [BOQ_MAPPING_SOURCE_LABELS.model]: "guess",
   "changed here": "warn",
@@ -159,8 +170,9 @@ export default function BoqColumnsPanel({
       ? "Click the row number the column headings are on."
       : columnMappingProblem({ columns: mapped.columns, headerRow, headerRows, rowCount: preview.length, width }));
 
-  /** A layout's or a model's mapping nobody has agreed to yet. */
-  const needsCheck = (sheet.mappingSource === "layout" || sheet.mappingSource === "model") && !sheet.columnsChecked;
+  /** A person's layout or a model's mapping nobody has agreed to yet. Never a seeded layout. */
+  const needsCheck = columnsAwaitingALook(sheet);
+  const seeded = sheet.mappingSource === "layout" && sheet.layoutOrigin === "seed";
 
   const unchanged =
     !sheet.needsColumns &&
@@ -276,7 +288,11 @@ export default function BoqColumnsPanel({
     );
   }
 
-  const sourceLabel = sheet.mappingSource ? BOQ_MAPPING_SOURCE_LABELS[sheet.mappingSource] : null;
+  const sourceLabel = seeded
+    ? SEEDED_LAYOUT_LABEL
+    : sheet.mappingSource
+      ? BOQ_MAPPING_SOURCE_LABELS[sheet.mappingSource]
+      : null;
   const readButton = (
     <Button
       variant="primary"
@@ -297,7 +313,8 @@ export default function BoqColumnsPanel({
         Columns
         {sheet.layout && sheet.mappingSource === "layout" && (
           <span className="font-medium normal-case tracking-normal text-neutral-700">
-            Read with the <b>{sheet.layout.name}</b> layout
+            Read with the {seeded ? "standard " : ""}
+            <b>{sheet.layout.name}</b> layout
           </span>
         )}
         {sheet.mappingSource === "model" && (
@@ -334,6 +351,12 @@ export default function BoqColumnsPanel({
             The model read this sheet&rsquo;s header, its columns and its row kinds; every cell below was then read
             by code from the stored spreadsheet. Check each column against the sheet, and the row kinds in the lines
             table, then press <b>The columns are right</b> — the confirm waits for it.
+          </p>
+        ) : seeded ? (
+          <p>
+            The standard layout for this specifier&rsquo;s document matched every heading it names on this sheet, so
+            it was read the way a known heading is. If a column below is wrong, change it and read the bill again.
+            Prices, costs and pictures are never read.
           </p>
         ) : sheet.mappingSource === "layout" ? (
           <p>

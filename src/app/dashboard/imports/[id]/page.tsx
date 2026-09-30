@@ -42,7 +42,13 @@ import BoqRowKindCell from "@/components/imports/BoqRowKindCell";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
 // function the confirm writes it with, so the table shows what will be written.
 import { effectiveArea } from "@/lib/boq-reconcile";
-import { BOQ_ROLE_LABELS, BOQ_MAPPING_SOURCE_LABELS, columnLetter, type BoqReadRole } from "@/lib/boq-roles";
+import {
+  BOQ_ROLE_LABELS,
+  BOQ_MAPPING_SOURCE_LABELS,
+  columnLetter,
+  columnsAwaitingALook,
+  type BoqReadRole,
+} from "@/lib/boq-roles";
 import BoqColumnsPanel, { type ColumnsPanelSheet } from "@/components/imports/BoqColumnsPanel";
 // Pure: the "this may not be furniture" question, and the set the batch action
 // acts on. The page NEVER decides either for itself — one function behind the
@@ -1134,11 +1140,12 @@ export default function ReviewImportPage() {
           /**
            * THE COLUMNS PANEL IS OPEN when nobody has mapped this sheet yet
            * (unless it is dropped, when it waits to be asked for), when a
-           * SAVED LAYOUT read it and nobody has looked — a remembered layout
-           * must never apply unseen — or when somebody pressed Change columns.
+           * PERSON'S saved layout or a model read it and nobody has looked — a
+           * remembered layout must never apply unseen — or when somebody
+           * pressed Change columns. A SEEDED layout reads like a known heading
+           * and opens nothing (`columnsAwaitingALook`, the panel's own test).
            */
-          const layoutUnchecked =
-            (sheet.mappingSource === "layout" || sheet.mappingSource === "model") && !sheet.columnsChecked;
+          const layoutUnchecked = columnsAwaitingALook(sheet);
           const panelOpen =
             openPanels.has(sheetIndex) || (sheet.needsColumns === true && !sheet.ignored) || layoutUnchecked;
           const setPanel = (open: boolean) =>
@@ -1222,7 +1229,8 @@ export default function ReviewImportPage() {
                   <p className="mt-1 text-xs text-neutral-500">
                     {sheet.mappingSource === "layout" && sheet.layout ? (
                       <>
-                        Read with the <b className="text-neutral-700">{sheet.layout.name}</b> layout:{" "}
+                        Read with the {sheet.layoutOrigin === "seed" ? "standard " : ""}
+                        <b className="text-neutral-700">{sheet.layout.name}</b> layout:{" "}
                       </>
                     ) : sheet.mappingSource ? (
                       <>Columns ({BOQ_MAPPING_SOURCE_LABELS[sheet.mappingSource]}): </>

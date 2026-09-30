@@ -62,6 +62,7 @@ import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
 import {
   foldHeading,
   type BoqColumnRef,
+  type BoqLayoutOrigin,
   type BoqMappingSource,
   type BoqReadRole,
   type BoqRole,
@@ -228,6 +229,12 @@ export type StagedBoqSheet = {
   mappingSource?: BoqMappingSource;
   /** The saved layout that read this sheet, when one did. */
   layout?: { id: string; name: string } | null;
+  /**
+   * Whose that layout is: `seed` reads like a known heading, with no columns
+   * check; `person` keeps the check. Absent on every sheet no layout read,
+   * and on one staged before 2026-09-30, which a person's layout read.
+   */
+  layoutOrigin?: BoqLayoutOrigin | null;
   /** Per role, what a MODEL read it from (Step 2). Absent from every other source. */
   mappingEvidence?: Partial<Record<BoqReadRole, string>>;
   /**
@@ -340,6 +347,8 @@ export type BoqLayout = {
   name: string;
   headerRows: 1 | 2;
   mapping: Partial<Record<BoqReadRole, string>>;
+  /** Seeded by this repo, or saved by a person. Absent: a person's. */
+  origin?: BoqLayoutOrigin;
 };
 
 /** What the reader is allowed to know about headings. The routes load both. */
@@ -792,14 +801,14 @@ function readSheet(
     for (const layout of layouts) {
       const found = layoutAt(data, rowIndex, layout);
       if (!found) continue;
-      return {
-        sheet: readRows(sheet, data, rowIndex, found, {
-          headerRows: layout.headerRows,
-          source: "layout",
-          layout: { id: layout.id, name: layout.name },
-        }),
-        closest: null,
-      };
+      const read = readRows(sheet, data, rowIndex, found, {
+        headerRows: layout.headerRows,
+        source: "layout",
+        layout: { id: layout.id, name: layout.name },
+      });
+      // WHOSE layout, staged beside it: a seeded one reads like a known
+      // heading and a person's keeps its columns check (`columnsAwaitingALook`).
+      return { sheet: { ...read, layoutOrigin: layout.origin ?? "person" }, closest: null };
     }
   }
 

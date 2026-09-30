@@ -28,7 +28,7 @@ import type {
   StagedBoqLine,
   StagedBoqSheet,
 } from "@/lib/boq-import";
-import { isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
+import { SEED_ACTOR, isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
 
 /**
  * The headings the reader knows and the layouts people have saved, from the
@@ -54,8 +54,10 @@ export async function loadBoqReadingRegisters(exec: TxnSql): Promise<BoqReadingR
 
   // Newest first, so of two equally specific layouts the one saved later —
   // the one somebody set most recently for this specifier — is tried first.
+  // `created_by` says whose it is: the seed's actor makes it a SEEDED layout,
+  // which reads without a columns check; anybody else's keeps the check.
   const layoutRows = await exec`
-    select id, name, header_rows, mapping
+    select id, name, header_rows, mapping, created_by
     from boq_layouts
     where retired_at is null
     order by created_at desc, name
@@ -75,6 +77,7 @@ export async function loadBoqReadingRegisters(exec: TxnSql): Promise<BoqReadingR
         name: String(row.name),
         headerRows: Number(row.header_rows) === 2 ? (2 as const) : (1 as const),
         mapping,
+        origin: row.created_by === SEED_ACTOR ? ("seed" as const) : ("person" as const),
       },
     ];
   });

@@ -87,6 +87,47 @@ export const BOQ_MAPPING_SOURCE_LABELS: Record<BoqMappingSource, string> = {
 };
 
 /**
+ * WHO A SAVED LAYOUT IS: one a PERSON saved on the review screen, or one this
+ * repo SEEDS (`db/seed/0013_boq_layouts.sql`, `created_by = 'seed'`) for a
+ * specifier whose bills keep arriving in one known shape.
+ *
+ * The difference is the columns check and nothing else. A person's layout is
+ * their decision about ANOTHER bill, so the panel stays open until somebody
+ * has looked. A seeded one is the app's own knowledge of a document, reviewed
+ * and committed like an alias, so it reads the way a known heading does. Both
+ * apply only on the same exact-heading match (`layoutAt`), which is what
+ * keeps either off a bill whose columns moved.
+ *
+ * Absent on a staged sheet means `person`: every layout that read a sheet
+ * before 2026-09-30 was one a person saved.
+ */
+export const BOQ_LAYOUT_ORIGINS = ["seed", "person"] as const;
+export type BoqLayoutOrigin = (typeof BOQ_LAYOUT_ORIGINS)[number];
+
+/** The actor a seed file writes as, and the one `created_by` value that makes a layout seeded. */
+export const SEED_ACTOR = "seed";
+
+/**
+ * DOES THIS SHEET'S MAPPING WAIT FOR A PERSON TO LOOK AT IT? A model's reading
+ * or a person-saved layout, until somebody closes the Columns panel. The one
+ * reading behind the review page's open panel and the panel's own close
+ * button, so the two cannot disagree about which sheet is unseen.
+ *
+ * A SEEDED layout, a known heading and a person's own columns never wait.
+ * What the CONFIRM waits for is narrower still — a model's reading only
+ * (`sheetsAwaitingColumnCheck`) — and unchanged.
+ */
+export function columnsAwaitingALook(sheet: {
+  mappingSource?: BoqMappingSource;
+  layoutOrigin?: BoqLayoutOrigin | null;
+  columnsChecked?: boolean;
+}): boolean {
+  if (sheet.columnsChecked) return false;
+  if (sheet.mappingSource === "model") return true;
+  return sheet.mappingSource === "layout" && sheet.layoutOrigin !== "seed";
+}
+
+/**
  * The fold every heading is compared under: case and whitespace, and nothing
  * else. A heading that differs by punctuation is a different heading — the
  * `normaliseFinishCode` rule, because a fold clever enough to merge two
