@@ -1428,7 +1428,11 @@ export function alreadyRecorded(
   const mine = inMillimetres(observation.value ?? observation.valueRaw, observation.unit);
   const theirs = inMillimetres(occupant.value, occupant.unit);
   if (mine === null || theirs === null) return false;
-  if (Math.abs(mine - theirs) > 1e-6) return false;
+  // Compared in WHOLE millimetres, the precision the composed cell writes
+  // (`toMillimetres` rounds): a drawing's 6'-4" is 1930.4mm and the bill's
+  // "Sizes (mm): W 1930" is the same width in the same cell. Compared
+  // unrounded, the card asked the reviewer to "replace" 1930 with 1930.
+  if (Math.round(mine) !== Math.round(theirs)) return false;
   return (occupant.state ?? null) !== null && occupant.state === stateToWrite(observation as DrawingObservation);
 }
 

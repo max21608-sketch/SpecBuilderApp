@@ -294,3 +294,12 @@ describe("read time, a run staged before either reading existed", () => {
     );
   });
 });
+
+describe("alreadyRecorded — a converted figure and the bill's millimetres", () => {
+  it("reads 6'-4\" and 1930mm as the same width, and 6'-5\" as a different one", () => {
+    const base = { attrGroup: "dimension" as const, dimensionSlot: "W" as const, valueRaw: null, state: "confirmed" as const };
+    const occupant = { value: "1930", unit: "mm", state: "confirmed" };
+    expect(alreadyRecorded({ ...base, value: "6'-4\"", unit: "in" }, occupant)).toBe(true);
+    expect(alreadyRecorded({ ...base, value: "6'-5\"", unit: "in" }, occupant)).toBe(false);
+  });
+});
