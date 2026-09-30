@@ -25,6 +25,7 @@ import { useNextStep } from "@/lib/use-next-step";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import Tip from "@/components/ui/Tip";
+import { ClientRefs } from "@/components/ui/ClientRefs";
 import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
@@ -1167,7 +1168,10 @@ export default function ReviewImportPage() {
           // accept: its cell prints "not furniture?" instead, so counting it
           // here would put a number on the button the table does not show.
           const suggested = live.filter(
-            (line) => line.level && line.levelStatus !== "chosen" && !notFurnitureIds.has(line.index),
+            // A fabric line is not a record, so it has no level to accept:
+            // counting the 34 under the Aman items made "Accept all 101".
+            (line) =>
+              line.level && line.levelStatus !== "chosen" && !notFurnitureIds.has(line.index) && line.rowKind !== "finish_for",
           );
           // A fabric line is not a record, so the code it carries is not a client
           // ref two records share: `GR-FAB-13` under six items is one fabric.
@@ -1451,7 +1455,10 @@ export default function ReviewImportPage() {
                     ) : undefined
                   }
                 >
-                  <Table scroll>
+                  {/* Ten columns, two of them selects: a notch tighter than the
+                      primitive, or the category select pushed the bill 29px past
+                      its box at 1440 and 1920 (the overflow rule caught it). */}
+                  <Table scroll className="[&_td]:px-3 [&_th]:px-3">
                     <thead>
                       <tr>
                         <Th>Row</Th>
@@ -1511,7 +1518,7 @@ export default function ReviewImportPage() {
                                 onSet={(kind, finishForRow) => void setLineKind(sheetIndex, line.index, kind, finishForRow)}
                               />
                             </Td>
-                            <Td mono>{line.code ?? "—"}</Td>
+                            <Td mono>{line.code ? <ClientRefs code={line.code} /> : "—"}</Td>
                             <Td>
                               {description ? (
                                 <span className="font-medium text-neutral-900">{description.name}</span>

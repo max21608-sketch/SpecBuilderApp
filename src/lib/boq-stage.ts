@@ -15,6 +15,7 @@
 import type { TxnSql } from "@/lib/db-transaction";
 import { matchName, type MatchCandidate } from "@/lib/matching";
 import { guessLevelFromBill } from "@/lib/level-guess";
+import { billItemName } from "@/lib/bill-description";
 import { guessNonFurniture } from "@/lib/non-furniture-guess";
 import type { SheetData } from "read-excel-file/node";
 import { readSheetWithColumns } from "@/lib/boq-import";
@@ -131,7 +132,12 @@ export async function loadLineSuggester(exec: TxnSql): Promise<(line: SuggestInp
   // never to fire on. And the level is worked out LAST, because a line this
   // suggests is not furniture gets no level at all.
   return (line, index) => {
-    const match = matchName(line.itemDescription, candidates);
+    // THE CATEGORY IS MATCHED ON THE ITEM'S NAME, the first line of a
+    // multi-line description cell — never on the whole cell, whose other
+    // lines ("Desk Chair / Finish - Wood…", "Bench Ottoman / … Finish") put a
+    // second sheet's word at the same score and left the line ambiguous.
+    // The level is still read off the whole cell: that is where the metal is.
+    const match = matchName(billItemName(line), candidates);
     const decided = (
       categoryId: string | null,
       categoryStatus: string,
