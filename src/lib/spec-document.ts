@@ -669,7 +669,7 @@ export function resolveProposals(
           );
         }
       } else if (note && record && context.metricSize.has(record.id)) {
-        note = `Not placed: feet and inches are not converted, and this item's “${context.metricSize.get(record.id)}” line is the one placed.`;
+        note = `Not placed: these feet and inches could not be read completely, and this item's “${context.metricSize.get(record.id)}” line is the one placed.`;
       }
 
       // A FINISH does not either. It carries a BWS field, and which slot it

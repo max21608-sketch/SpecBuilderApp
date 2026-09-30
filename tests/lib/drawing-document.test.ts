@@ -41,6 +41,7 @@ import {
   type UnitSource,
 } from "@/lib/drawing-document";
 import type { AttributeUnit } from "@/lib/spec-vocab";
+import { composeDimensionCell } from "@/lib/dimensions";
 import type { RecordEntry } from "@/lib/spec-document";
 import type { RawCodeGroup, RawDrawingDimension, RawDrawingItem } from "@/lib/extraction-schema";
 
@@ -851,6 +852,16 @@ describe("splitFigureAndUnit", () => {
     expect(splitFigureAndUnit("1800MM")).toEqual({ value: "1800", unit: "mm" });
     expect(splitFigureAndUnit("180 centimetres")).toEqual({ value: "180", unit: "cm" });
     expect(splitFigureAndUnit('36"')).toEqual({ value: "36", unit: "in" });
+  });
+
+  it("keeps a feet-and-inches value whole, and names its marks as the unit", () => {
+    // `6'-4` beside `"` is a value nothing can finish reading, so the marks stay
+    // in it. What a reviewer types gets `in` beside it, as staging does.
+    expect(splitFigureAndUnit("6'-4\"")).toEqual({ value: "6'-4\"", unit: "in" });
+    expect(splitFigureAndUnit("10'")).toEqual({ value: "10'", unit: "in" });
+    expect(splitFigureAndUnit("2'-0 1/2\"")).toEqual({ value: "2'-0 1/2\"", unit: "in" });
+    // Not one complete measurement: left alone, with no unit.
+    expect(splitFigureAndUnit("8'-6\" eq")).toEqual({ value: "8'-6\" eq", unit: null });
   });
 
   it("leaves a value alone when the suffix is not a unit it knows", () => {
@@ -2194,7 +2205,7 @@ describe("stageDrawings and imperial figures", () => {
     expect(rows.every((observation) => unitSourceOf(observation) === "printed")).toBe(true);
   });
 
-  it("refuses a feet compound rather than letting the project default read it", () => {
+  it("reads a feet compound as a unit the page printed, never through the project default", () => {
     const page = rawItem({
       dimensions: [
         { labelRaw: "SEAT HEIGHT", valueRaw: "1'6\"", slot: "seat_height", isOverall: true },
@@ -2202,18 +2213,31 @@ describe("stageDrawings and imperial figures", () => {
     });
     const item = stageDrawings([page], FIELDS, null, null, "cm").items[0]!;
     const row = item.observations.find((observation) => observation.dimensionSlot === "SH")!;
-    // The wording is kept exactly as the page wrote it — never converted,
-    // never dropped.
+    // The wording is kept exactly as the page wrote it; the marks are its unit.
     expect(row.value).toBe("1'6\"");
-    // It votes on nothing: `parseDimensionFigure` refuses it, so it cannot
-    // carry the page's unit guess either.
+    expect(row.unit).toBe("in");
+    expect(unitSourceOf(row)).toBe("printed");
+    // It votes on nothing: it has already said what it is in, and 18 (inches)
+    // beside a page's bare figures would otherwise vote "centimetres".
     expect(suggestUnit(["1'6\""])).toEqual({ status: "none" });
+    expect(suggestUnit(["1'6\"", "840", "790"])).toEqual({ status: "confident", unit: "mm" });
+  });
+
+  it("gives a compound that does not read completely no unit, rather than the project default", () => {
+    const page = rawItem({
+      dimensions: [{ labelRaw: "WIDTH", valueRaw: "8'-6\" eq", slot: "width", isOverall: true }] as RawDrawingDimension[],
+    });
+    const row = stageDrawings([page], FIELDS, null, null, null).items[0]!.observations[0]!;
+    expect(row.value).toBe("8'-6\" eq");
+    const composed = composeDimensionCell([{ slot: "W", value: row.value, unit: row.unit, state: "confirmed", sortOrder: 0 }]);
+    expect(composed.text).toBe("[W \"8'-6\" eq\" — imperial, not converted]");
   });
 
   it("does not strip a feet mark off a combined line and read what is left", () => {
     // "5'6\" x 2'4\" x 3'" used to strip the last apostrophe as a trailing
     // unit, leaving a readable 3 — placed, at whatever unit the page or the
-    // project offered.
+    // project offered. Its three bare parts get no slot here (the model reads
+    // those, with evidence), and each keeps its own words and its own unit.
     const item = stageDrawings(
       [rawItem({ dimensionsCombinedRaw: ["5'6\" x 2'4\" x 3'"] })],
       FIELDS,
@@ -2222,8 +2246,80 @@ describe("stageDrawings and imperial figures", () => {
       "cm",
     ).items[0]!;
     expect(item.observations.filter((observation) => observation.attrGroup === "dimension")).toEqual([]);
-    expect(item.observations.some((observation) => (observation.value ?? "").includes("3'"))).toBe(true);
+    expect(item.observations.map((observation) => [observation.value, observation.unit])).toEqual([
+      ["5'6\"", "in"],
+      ["2'4\"", "in"],
+      ["3'", "in"],
+    ]);
   });
+});
+
+// ============================================================================
+// A DRAWING DIMENSIONED IN FEET AND INCHES ONLY, END TO END (2026-09-30).
+//
+// The shape of the P18181 drawing set: every figure `6'-4"`, `2'-0 1/2"`, no
+// unit printed anywhere else, and a prefixed overall line. Staged, written to
+// JSON the way `intake_runs.parsed` holds it, read back through
+// `assertStagedDrawings`, resolved and blocked exactly as the review screen
+// does, and composed by the one composer. No model call: the raw items are
+// what the tool schema would carry. Every figure and code is invented.
+// ============================================================================
+describe("a feet-and-inches drawing, staged to composed cell", () => {
+  const raw = (): RawDrawingItem[] => [
+    rawItem({
+      itemCodeRaw: "X-100",
+      itemNameRaw: "Bench",
+      dimensions: [
+        { labelRaw: "Width", valueRaw: "6'-4\"", unitRaw: null, slot: "width", slotEvidence: "spans the plan", isOverall: true },
+        // The model split the inch mark off into the unit: put back together.
+        { labelRaw: "Depth", valueRaw: "6'-8", unitRaw: "\"", slot: "depth", slotEvidence: "side elevation", isOverall: true },
+        { labelRaw: "Height", valueRaw: "2'-0 1/2\"", unitRaw: null, slot: "height", slotEvidence: "front elevation", isOverall: true },
+        { labelRaw: "Seat height", valueRaw: "1'-5 5/8\"", unitRaw: null, slot: "seat_height", slotEvidence: "labelled", isOverall: true },
+        // A component, not overall: folded, and never asked for a unit.
+        { labelRaw: null, valueRaw: "R 8\"", unitRaw: null, slot: null, slotEvidence: null, isOverall: false },
+      ] as RawDrawingDimension[],
+      dimensionsCombinedRaw: ["W 6'-4\" x D 6'-8\" x H 2'-0 1/2\""],
+    }),
+  ];
+
+  const readBack = (schemaVersion: 2 | 3) => {
+    // `cm` as the project default, so a compound falling through to it would show.
+    const staged = stageDrawings(raw(), FIELDS, "bench.pdf", null, "cm");
+    const stored = JSON.parse(JSON.stringify({ ...staged, schemaVersion })) as unknown;
+    return assertStagedDrawings(stored, FIELDS).items[0]!;
+  };
+
+  for (const schemaVersion of [2, 3] as const) {
+    it(`composes W x D x H x SH in millimetres with the unit printed and nothing blocking (schemaVersion ${schemaVersion})`, () => {
+      const item = readBack(schemaVersion);
+      const slotted = item.observations.filter((observation) => observation.attrGroup === "dimension" && observation.dimensionSlot);
+      // One row per slot: the combined line's prefixed parts are the same statements.
+      expect(slotted.map((observation) => [observation.dimensionSlot, observation.value, observation.unit])).toEqual([
+        ["W", "6'-4\"", "in"],
+        ["D", "6'-8\"", "in"],
+        ["H", "2'-0 1/2\"", "in"],
+        ["SH", "1'-5 5/8\"", "in"],
+      ]);
+      expect(slotted.every((observation) => unitSourceOf(observation) === "printed")).toBe(true);
+
+      const blockers = drawingItemBlockers(item, resolveDrawingTargets("X-100", [record()]), NO_OCCUPANCY);
+      expect(blockers.filter((blocker) => blocker.code === "unit_missing")).toEqual([]);
+
+      // What the card previews and the export ships, through the same function.
+      const cell = composeDimensionCell(
+        slotted.map((observation, index) => ({
+          slot: observation.dimensionSlot as DimensionSlot,
+          value: observation.value,
+          unit: observation.unit,
+          state: observation.state ?? "confirmed",
+          sortOrder: index,
+        })),
+      );
+      // 76in, 80in, 24.5in, 17.625in.
+      expect(cell.text).toBe("W1930 x D2032 x H622 x SH448mm");
+      expect(cell.problems).toEqual([]);
+    });
+  }
 });
 
 // ============================================================================

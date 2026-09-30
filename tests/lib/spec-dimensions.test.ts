@@ -106,7 +106,10 @@ describe("readDimension", () => {
 // An email writes prose, so this is the path where a compound was actually
 // half-read: `splitFigure` takes a leading figure and then an optional unit
 // word, and `1'6"` matched as a figure of ONE with `' 6"` kept as the
-// qualifier. Plain inches are a different case and still proceed.
+// qualifier. Plain inches are a different case and still proceed. Since
+// 2026-09-30 a compound that reads COMPLETELY converts, kept as the email
+// wrote it with the unit `in`; anything with more beside it is still refused
+// whole.
 // ============================================================================
 describe("readDimension and imperial", () => {
   it("reads plain inches as the unit they are", () => {
@@ -121,18 +124,34 @@ describe("readDimension and imperial", () => {
     expect(spelt?.unit).toBe("in");
   });
 
-  it("refuses a feet-and-inches compound whole, rather than reading its feet", () => {
-    // 1'6" is 457mm. Read as a 1 it is whatever unit somebody picks next.
-    expect(readDimension("Seat height", "1'6\"")).toBeNull();
-    expect(readDimension("Width", "5' 6\"")).toBeNull();
-    expect(readDimension("Height", "4 ft 6 in")).toBeNull();
-    expect(readDimension("Depth", "2ft")).toBeNull();
+  it("reads a complete feet-and-inches value whole, keeping the document's words", () => {
+    const reading = readDimension("Seat height", "1'6\"");
+    expect(reading?.parts).toEqual([{ slot: "SH", figure: "1'6\"", slotSuggested: false }]);
+    expect(reading?.unit).toBe("in");
+    expect(reading?.unitSource).toBe("stated");
+    expect(reading?.qualifier).toBeNull();
+    expect(readDimension("Width", "5' 6\"")?.parts[0]?.figure).toBe("5' 6\"");
+    expect(readDimension("Height", "4 ft 6 in")?.unit).toBe("in");
+    expect(readDimension("Depth", "2ft")?.parts[0]?.figure).toBe("2ft");
   });
 
-  it("refuses a compound on an overall line too, and places nothing from it", () => {
-    // Every part fails `parseDimensionFigure`, so no slot is placed and the
-    // wording stays on the ordinary path for a person to re-state.
-    expect(readDimension("Overall", "5'6\" x 2'4\" x 3'")).toBeNull();
+  it("refuses a feet-and-inches value with anything beside it, rather than reading its feet", () => {
+    // 1'6" is 457mm. Read as a 1 it is whatever unit somebody picks next, and
+    // read as 1'6" with the rest dropped it claims a size the email qualified.
+    expect(readDimension("Seat height", "1'6\" to top of cushion")).toBeNull();
+    expect(readDimension("Width", "8'-6\" eq")).toBeNull();
+    expect(readDimension("Height", "2'-5")).toBeNull();
+  });
+
+  it("reads three bare compounds on an overall line as W x D x H, flagged as printed order", () => {
+    // The same positional rule, and the same flag, as three bare metric figures.
+    const reading = readDimension("Overall", "5'6\" x 2'4\" x 3'");
+    expect(reading?.parts).toEqual([
+      { slot: "W", figure: "5'6\"", slotSuggested: true },
+      { slot: "D", figure: "2'4\"", slotSuggested: true },
+      { slot: "H", figure: "3'", slotSuggested: true },
+    ]);
+    expect(reading?.unit).toBe("in");
   });
 });
 
@@ -202,10 +221,29 @@ describe("readDimension — a bill's size line", () => {
     expect(reading?.qualifier).toBe("Base: W 60 x D 60");
   });
 
-  it("refuses a feet-and-inches line whole, and says why", () => {
-    expect(readDimension("Sizes (ft-in)", 'W 3\'5" X D 1\'-9 1/2" X H 2\'-4"')).toBeNull();
+  it("reads a feet-and-inches line, each part whole, however the workbook escaped the marks", () => {
+    for (const value of ['W 3\'5" X D 1\'-9 1/2" X H 2\'-4"', 'W 3\'5"" X D 1\'-9 1/2"" X H 2\'-4""']) {
+      const reading = readDimension("Sizes (ft-in)", value);
+      expect(reading?.parts).toEqual([
+        { slot: "W", figure: "3'5\"", slotSuggested: false },
+        { slot: "D", figure: "1'-9 1/2\"", slotSuggested: false },
+        { slot: "H", figure: "2'-4\"", slotSuggested: false },
+      ]);
+      expect(reading?.unit).toBe("in");
+      expect(reading?.imperial).toBe(true);
+      expect(sizeLineRefusal("Sizes (ft-in)", value)).toBeNull();
+    }
+    // A line that says TBC anywhere places nothing — the metric rule, unchanged.
     expect(readDimension("Sizes(ft-in)", "W 5'-6'' X D TBC X H 2'-4''")).toBeNull();
-    expect(sizeLineRefusal("Sizes (ft-in)", 'W 3\'5" X D 1\'-9 1/2" X H 2\'-4"')).toMatch(/Feet and inches are not converted/);
+    expect(readDimension("Sizes(ft-in)", "W 5'-6'' X D 2' X H 2'-4''")?.parts).toHaveLength(3);
+  });
+
+  it("refuses a feet-and-inches line whole where one part does not read completely, and says why", () => {
+    // The H lost its inch mark. Placing W and D would present a half-read size as the item's.
+    const half = 'W 3\'7" X D 1\'-10 5/8" X H 2\'-5';
+    expect(readDimension("Sizes (ft-in)", half)).toBeNull();
+    expect(sizeLineRefusal("Sizes (ft-in)", half)).toMatch(/feet and inches that could not be read completely/);
+    expect(readDimension("Sizes (ft-in)", 'W 8\'-6" eq X D 2\'')).toBeNull();
     // Not a size line, or one that read: nothing to say.
     expect(sizeLineRefusal("Arm height", "1'6\"")).toBeNull();
     // A TBC figure among feet and inches does not make the line a TBC.

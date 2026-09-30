@@ -36,7 +36,7 @@ import {
   type AttributeUnit,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
-import { composeDimensionCell } from "@/lib/dimensions";
+import { composeDimensionCell, parseDimensionFigure } from "@/lib/dimensions";
 import { type Finish } from "@/lib/finishes";
 import { composeAttributeStatement, type AttributeStandard } from "@/lib/bw-standard";
 
@@ -378,8 +378,10 @@ export function renderAttributeValue(attribute: {
   // the file exactly as it holds the answer at TBC.
   const { value, state, fromStandard } = composeAttributeStatement(attribute);
   // A BWS option name is not a figure, and the unit column belongs to the
-  // page's statement, not to BW's.
-  const withUnit = value && attribute.unit && !fromStandard ? `${value}${attribute.unit}` : value;
+  // page's statement, not to BW's. A value that printed its own feet or inch
+  // marks (`6'-4"`) already says its unit, and `6'-4"in` says it twice.
+  const withUnit =
+    value && attribute.unit && !fromStandard && !parseDimensionFigure(value).imperial ? `${value}${attribute.unit}` : value;
   // THE QUALIFIER GOES ON LAST, AFTER the TBC marker. A placement is not part
   // of the statement MENTIONS_TBC is asking about — "Main body and self pipe"
   // can never carry the client's not-decided marker — so folding it in first

@@ -37,7 +37,7 @@ const TO_MM: Record<AttributeUnit, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 
 /** How each slot is written in a BWS cell. `Dia.` carries its own full stop. */
 const SLOT_PREFIX: Record<DimensionSlot, string> = { W: "W", D: "D", H: "H", SH: "SH", DIA: "Dia." };
 
-export type MillimetreResult = { ok: true; mm: number } | { ok: false; reason: "not_numeric" };
+export type MillimetreResult = { ok: true; mm: number } | { ok: false; reason: "not_numeric" | "unit_conflict" };
 
 /**
  * A figure and its unit to whole millimetres.
@@ -47,10 +47,17 @@ export type MillimetreResult = { ok: true; mm: number } | { ok: false; reason: "
  * The original value and unit stay on the row, so the rounding is always
  * reversible by looking. At most half a millimetre is lost, and only from an
  * inch source.
+ *
+ * A FEET-AND-INCHES VALUE converts here too, and only here: `6'-4"` is 76
+ * inches by `feetAndInches`, and then exactly the inch conversion above —
+ * `W1930`. Its own marks state its unit, so a row carrying it with any unit
+ * but `in` is refused (`unit_conflict`) rather than read at that unit: 76 at
+ * `cm` is a 760mm bench somebody measured at six foot four.
  */
 export function toMillimetres(value: string | null, unit: AttributeUnit): MillimetreResult {
-  const { figure } = parseDimensionFigure(value);
+  const { figure, imperial } = parseDimensionFigure(value);
   if (figure === null) return { ok: false, reason: "not_numeric" };
+  if (imperial && unit !== "in") return { ok: false, reason: "unit_conflict" };
   return { ok: true, mm: Math.round(figure * TO_MM[unit]) };
 }
 
@@ -82,26 +89,23 @@ export function sharesAScale(figures: readonly number[]): boolean {
 }
 
 /**
- * A FEET-AND-INCHES compound, which is not a unit this app holds.
+ * Does this value OPEN with a feet figure — `1'6"`, `5' 6"`, `4ft`, `6 feet`?
  *
- * Inches ARE one: `in` is in `ATTRIBUTE_UNITS`, in
- * `record_attributes_unit_check` (0007) and in `TO_MM` at 25.4, so a page or an
- * email writing `18"` or `18 in` states a measurement this app converts
- * exactly. A COMPOUND does not — `1'6"` is two figures and one of them is in a
- * unit the vocabulary has never carried.
+ * It no longer decides whether a value converts; `feetAndInches` does, and a
+ * compound that parses COMPLETELY is an exact measurement (2026-09-30: every
+ * Aman Miami Beach drawing is dimensioned in feet and inches only, and the
+ * bill's size lines too). What this still answers is the question the refusal
+ * needs: a value that opens with a feet figure and does NOT parse completely —
+ * `8'-6" eq`, `2'-5` with its inch mark lost, `1'-14"` — is a measurement this
+ * app could only half-read, and it is refused WHOLE and named "imperial, not
+ * converted", never read as its leading figure.
  *
  * WHAT IT PREVENTS, and it is not hypothetical. `splitFigure` reads a leading
- * figure and then an optional unit word, so `1'6"` came back as a figure of
- * ONE with `' 6"` kept as the qualifier: an 18-inch arm height recorded as a 1,
- * ready for somebody to pick a unit beside on the review screen. On the
- * drawings path the same value falls through to the project default, and 1cm is
- * a number that looks exactly like a real one.
- *
- * So the whole value is refused rather than half-read, and the refusal is
- * named: a reviewer is told it is imperial and not converted, with the
- * document's own wording intact beside it. Never converted (there is no
- * feet-to-millimetre path anywhere in this app and inventing one here would be
- * a second composer), never dropped, never read as mm or cm.
+ * figure and then an optional unit word, so `1'6"` once came back as a figure
+ * of ONE with `' 6"` kept as the qualifier: an 18-inch arm height recorded as
+ * a 1, ready for somebody to pick a unit beside on the review screen. On the
+ * drawings path the same value fell through to the project default, and 1cm
+ * is a number that looks exactly like a real one.
  *
  * Deliberately anchored to a LEADING figure. A feet mark loose in prose is an
  * apostrophe far more often than a measurement, and `normaliseFinishCode`'s
@@ -114,7 +118,99 @@ export function imperialCompound(value: string | null): boolean {
   return /^[0-9]+(?:[.,][0-9]+)?\s*(?:'|\u2032|ft\b|foot\b|feet\b)/i.test(text);
 }
 
-export type DimensionFigure = { figure: number | null; tbcInline: boolean };
+// ---- feet and inches -------------------------------------------------------
+
+/** A feet mark, as a page, a model or a workbook writes one. */
+const FEET_MARK = String.raw`(?:feet|foot|ft\.?|')`;
+/** An inch mark. `''` and `""` are how a copied spreadsheet cell arrives. */
+const INCH_MARK = String.raw`(?:inches|inch|in\.?|"|'')`;
+/** Inches: a whole number with an optional fraction, a decimal, or a fraction alone. */
+const INCH_FIGURE = String.raw`(?:(?<whole>\d+)(?:(?:\s+|\s*-\s*)(?<num>\d+)\s*\/\s*(?<den>\d+))?|(?<decimal>\d+[.,]\d+)|(?<fnum>\d+)\s*\/\s*(?<fden>\d+))`;
+const FEET_AND_INCHES = new RegExp(
+  String.raw`^(?:(?<feet>\d+(?:[.,]\d+)?)\s*${FEET_MARK}(?![a-z]))?(?:\s*(?:-\s*)?${INCH_FIGURE}\s*${INCH_MARK}(?![a-z]))?$`,
+  "i",
+);
+
+/**
+ * A value written in feet and inches, as total INCHES — or null.
+ *
+ * `6'-4"` is 76, `2'-0 1/2"` is 24.5, `1'-10 5/8"` is 22.625, `10'` is 120,
+ * `18"` is 18. The shapes are the ones the Aman Miami Beach drawings and bill
+ * print: a hyphen, a space or nothing between the two parts, `′`/`″` primes,
+ * `''` or `""` as the inch mark (a copied cell), `ft`/`in` spelt out.
+ *
+ * THE WHOLE VALUE PARSES OR NOTHING DOES. That is the rule the old refusal
+ * existed for, and it stands: `1'6"` must never be read as 1. So a range, a
+ * second figure, a stray word (`8'-6" eq`), an inch figure with no inch mark
+ * after feet (`2'-5`), `TBC` and anything else not wholly one feet-and-inches
+ * statement is null, and the caller refuses it as it always has. So is a
+ * fraction with a zero denominator or one that is not proper (`5/4`), and
+ * inches of twelve or more after a feet figure (`1'-14"`): each is a misread
+ * far more often than a measurement, and a number from one would look exactly
+ * like a real one.
+ *
+ * Decimal feet (`2.5'`) are read only alone — `2.5'-6"` states two scales at
+ * once. The answer is never rounded here; `toMillimetres` rounds once.
+ */
+export function feetAndInches(value: string | null): number | null {
+  const text = (value ?? "")
+    .trim()
+    .replace(/\u2032/g, "'")
+    .replace(/\u2033/g, '"')
+    .replace(/""/g, '"');
+  if (text === "") return null;
+  const match = FEET_AND_INCHES.exec(text);
+  const groups = match?.groups;
+  if (!groups) return null;
+
+  const feetText = groups.feet;
+  const hasInches = [groups.whole, groups.decimal, groups.fnum].some((part) => part !== undefined);
+  if (feetText === undefined && !hasInches) return null;
+  // The hyphen joins feet to inches; before a bare inch figure it is a minus.
+  if (feetText === undefined && text.startsWith("-")) return null;
+
+  const feet = feetText === undefined ? 0 : Number(feetText.replace(",", "."));
+  if (feetText !== undefined && hasInches && !/^\d+$/.test(feetText)) return null;
+
+  let inches = 0;
+  if (groups.whole !== undefined) {
+    inches = Number(groups.whole);
+    if (groups.num !== undefined) {
+      const fraction = properFraction(groups.num, groups.den);
+      if (fraction === null) return null;
+      inches += fraction;
+    }
+  } else if (groups.decimal !== undefined) {
+    inches = Number(groups.decimal.replace(",", "."));
+  } else if (groups.fnum !== undefined) {
+    const fraction = properFraction(groups.fnum, groups.fden);
+    if (fraction === null) return null;
+    inches = fraction;
+  }
+  if (feetText !== undefined && hasInches && inches >= 12) return null;
+
+  const total = feet * 12 + inches;
+  return Number.isFinite(total) && total > 0 ? total : null;
+}
+
+function properFraction(numerator: string | undefined, denominator: string | undefined): number | null {
+  const num = Number(numerator);
+  const den = Number(denominator);
+  if (!Number.isInteger(num) || !Number.isInteger(den) || den === 0 || num >= den) return null;
+  return num / den;
+}
+
+export type DimensionFigure = {
+  figure: number | null;
+  tbcInline: boolean;
+  /**
+   * Present, and true, where the figure is INCHES because the value printed
+   * its own feet or inch marks (`6'-4"` → 76). Such a figure means nothing at
+   * any other unit, so everything that multiplies one by a unit reads this
+   * first. Absent otherwise, so a bare figure's reading is unchanged.
+   */
+  imperial?: true;
+};
 
 /**
  * The single number in a dimension value, and whether it is marked TBC.
@@ -126,7 +222,9 @@ export type DimensionFigure = { figure: number | null; tbcInline: boolean };
  * one figure returns null and contributes nothing.
  *
  * `suggestUnit` shares this, so the magnitude vote and the conversion can never
- * disagree about what counts as a number.
+ * disagree about what counts as a number. A feet-and-inches value is one
+ * figure too, in inches and marked `imperial` — and it never votes, because it
+ * has already said what unit it is in.
  */
 export function parseDimensionFigure(value: string | null): DimensionFigure {
   const text = (value ?? "").trim();
@@ -138,10 +236,18 @@ export function parseDimensionFigure(value: string | null): DimensionFigure {
   const stripped = text.replace(/^tbc\b[\s:.-]*/i, "").replace(/[\s:.-]*\btbc\.?$/i, "").trim();
   const tbcInline = stripped !== text;
 
-  if (!/^[0-9]+(?:[.,][0-9]+)?$/.test(stripped)) return { figure: null, tbcInline };
+  if (!/^[0-9]+(?:[.,][0-9]+)?$/.test(stripped)) {
+    // ONE MEASUREMENT IN FEET AND INCHES IS ONE FIGURE, read completely or
+    // not at all — see `feetAndInches`. Its unit is its own marks.
+    const inches = feetAndInches(stripped);
+    return inches === null ? { figure: null, tbcInline } : { figure: inches, tbcInline, imperial: true };
+  }
   const figure = Number(stripped.replace(",", "."));
   return { figure: Number.isFinite(figure) && figure > 0 ? figure : null, tbcInline };
 }
+
+/** A feet mark after a figure, anywhere in a segment: `3'`, `H 2'-5"`, `4 ft`. */
+const FEET_MARK_AFTER_FIGURE = /[0-9]\s*(?:'|\u2032|ft\b|foot\b|feet\b)/i;
 
 export type CombinedPart = {
   slot: DimensionSlot | null;
@@ -196,8 +302,10 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
     // it then takes the page's own unit: a three-foot bench staged as 3cm.
     // Left whole, `parseDimensionFigure` refuses it and the segment stays as
     // the page wrote it. Found by "5'6\" x 2'4\" x 3'", which placed a HEIGHT
-    // of 3 and dropped the other two.
-    if (index === segments.length - 1 && !imperialCompound(body)) {
+    // of 3 and dropped the other two. And tested ANYWHERE in the segment, not
+    // at its start: `H 2'-5"` opens with its prefix, and stripping its inch
+    // mark left `2'-5`, which is no longer a whole measurement.
+    if (index === segments.length - 1 && !FEET_MARK_AFTER_FIGURE.test(body)) {
       const trailing = /^(.*?)[\s]*([a-zA-Z"']+\.?)$/.exec(body);
       // Only strip a trailing word that is NOT itself part of a slot prefix:
       // "H450mm" must lose "mm", "Dia.460" must not lose "Dia.".
@@ -236,6 +344,8 @@ export type DimensionRow = {
 export type DimensionProblem =
   | { code: "no_unit"; slot: DimensionSlot; message: string }
   | { code: "not_numeric"; slot: DimensionSlot; message: string }
+  /** A feet-and-inches value on a row whose unit says something else. */
+  | { code: "unit_conflict"; slot: DimensionSlot; message: string }
   | { code: "dia_conflict"; slots: DimensionSlot[]; message: string }
   | { code: "duplicate_slot"; slot: DimensionSlot; message: string }
   /** A note with nothing to qualify: the cell is the bracket and nothing else. */
@@ -312,7 +422,7 @@ export function composeDimensionCell(rows: DimensionRow[], note?: string | null)
     const row = bySlot.get(slot);
     if (!row) continue;
     const prefix = SLOT_PREFIX[slot];
-    const { figure, tbcInline } = parseDimensionFigure(row.value);
+    const { figure, tbcInline, imperial } = parseDimensionFigure(row.value);
     // Either source counts. The state is a reviewer's decision; `tbcInline` is
     // the document's own word next to the figure ("1520 TBC" on the Panther
     // sheets). Reading only the state would drop a TBC the page printed.
@@ -327,23 +437,38 @@ export function composeDimensionCell(rows: DimensionRow[], note?: string | null)
     }
 
     if (figure === null) {
-      // AN IMPERIAL COMPOUND IS NAMED, not reported as an unreadable string.
-      // "not a number" sends a reviewer looking for a typo; `1'6"` is a
-      // perfectly good measurement in a unit this app does not hold, and the
-      // action it wants is to re-state it in millimetres.
-      const imperial = imperialCompound(row.value);
+      // A FEET-AND-INCHES VALUE THAT DID NOT READ COMPLETELY IS NAMED, not
+      // reported as an unreadable string. "not a number" sends a reviewer
+      // looking for a typo; `8'-6" eq` is a measurement with something beside
+      // it this app will not guess at, and the action it wants is to re-state
+      // it. A compound that DOES read completely never gets here: it converts.
+      const compound = imperialCompound(row.value);
       problems.push({
         code: "not_numeric",
         slot,
-        message: imperial
-          ? `${prefix} ${quoted(row.value)} is in feet and inches, which this app does not convert. Record it in mm or cm.`
+        message: compound
+          ? `${prefix} ${quoted(row.value)} is in feet and inches this app could not read completely, so it is not converted. Record it as one measurement, or in mm or cm.`
           : `${prefix} ${quoted(row.value)} is not a measurement BWS can take.`,
       });
-      trailing.push(`[${prefix} ${quoted(row.value)} — ${imperial ? "imperial, not converted" : "not a number"}]`);
+      trailing.push(`[${prefix} ${quoted(row.value)} — ${compound ? "imperial, not converted" : "not a number"}]`);
       continue;
     }
 
-    if (!row.unit) {
+    // A value that prints its own feet or inch marks HAS stated its unit, on
+    // the page — the first step of the unit order — so it needs none beside
+    // it. A different unit beside it is the row contradicting its own value,
+    // and nothing converts that: `6'-4"` at cm is not a 76cm anything.
+    if (imperial && row.unit !== null && row.unit !== "in") {
+      problems.push({
+        code: "unit_conflict",
+        slot,
+        message: `${prefix} ${quoted(row.value)} is in feet and inches, but its unit says ${row.unit}. Set the unit to in.`,
+      });
+      trailing.push(`[${prefix} ${quoted(row.value)} — feet and inches, recorded as ${row.unit}]`);
+      continue;
+    }
+
+    if (!row.unit && !imperial) {
       problems.push({
         code: "no_unit",
         slot,
@@ -353,7 +478,7 @@ export function composeDimensionCell(rows: DimensionRow[], note?: string | null)
       continue;
     }
 
-    const result = toMillimetres(row.value, row.unit);
+    const result = toMillimetres(row.value, row.unit ?? "in");
     if (!result.ok) continue; // unreachable: figure is non-null, so the parse agreed
     converted = true;
     inline.push({ text: `${prefix}${result.mm}`, hasFigure: true, tbc });

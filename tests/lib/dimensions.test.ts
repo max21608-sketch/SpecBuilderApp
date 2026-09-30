@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   composeDimensionCell,
+  feetAndInches,
   imperialCompound,
   parseCombinedDimensions,
   parseDimensionFigure,
@@ -302,10 +303,15 @@ describe("composeDimensionCell with a typed note", () => {
 //   measurement this app converts exactly. Turning that into a note would lose
 //   a correct figure.
 //
-//   A FEET-AND-INCHES COMPOUND IS FLAGGED. It is two figures in a unit the
-//   vocabulary has never held, so it is never converted, never dropped and
-//   never read as mm or cm — it renders verbatim in a bracket that says it is
-//   imperial, exactly as a value with no unit does.
+//   A FEET-AND-INCHES COMPOUND CONVERTS WHEN IT READS COMPLETELY (2026-09-30).
+//   Every P18181 drawing is dimensioned in feet and inches only, so
+//   refusing all of them meant no dimension off those drawings reached W/D/H.
+//   `feetAndInches` turns a WHOLE compound into inches, and `toMillimetres`
+//   converts those exactly as it converts `18"`. The trap the old refusal was
+//   written for still stands: a compound that does NOT read completely — a
+//   stray word, a lost inch mark, a range — is never read as its leading
+//   figure. It renders verbatim in a bracket that says it is imperial, exactly
+//   as a value with no unit does.
 // ============================================================================
 describe("imperial measurements", () => {
   it("converts plain inches exactly, because `in` is a unit this app holds", () => {
@@ -324,21 +330,56 @@ describe("imperial measurements", () => {
     expect(normaliseUnit(parsed.unitRaw)).toBe("in");
   });
 
-  it("names a feet-and-inches compound as imperial rather than as a typo", () => {
+  it("converts a complete feet-and-inches value exactly, kept as the document wrote it", () => {
+    expect(toMillimetres("6'-4\"", "in")).toEqual({ ok: true, mm: 1930 });
+    const composed = cell([row("W", "6'-4\"", "in"), row("D", "6'-8\"", "in"), row("H", "2'-0 1/2\"", "in")]);
+    // 76in, 80in, 24.5in — rounded once, to whole millimetres, like `18"`.
+    expect(composed.text).toBe("W1930 x D2032 x H622mm");
+    expect(composed.problems).toEqual([]);
+    // The marks ARE the unit: a row that carries none still converts.
+    expect(cell([row("SH", "1'-6\"", null)]).text).toBe("SH457mm");
+    expect(cell([row("H", "1'-10 5/8\"", "in")]).text).toBe("H575mm");
+  });
+
+  it("keeps a TBC the page printed beside a feet-and-inches figure", () => {
+    expect(parseDimensionFigure("6'-4\" TBC")).toEqual({ figure: 76, tbcInline: true, imperial: true });
+    expect(cell([row("W", "6'-4\" TBC", "in")]).text).toBe("W1930mm TBC");
+  });
+
+  it("refuses a feet-and-inches value beside a metric unit rather than reading it at that unit", () => {
+    // 1'6" at mm is not 18mm, and 6'-4" at cm is not a 760mm bench.
+    expect(toMillimetres("6'-4\"", "cm")).toEqual({ ok: false, reason: "unit_conflict" });
     const composed = cell([row("SH", "1'6\"", "mm")]);
-    expect(composed.text).toBe("[SH \"1'6\"\" — imperial, not converted]");
+    expect(composed.text).toBe("[SH \"1'6\"\" — feet and inches, recorded as mm]");
+    expect(composed.problems[0]?.code).toBe("unit_conflict");
+    expect(composed.problems[0]?.message).toContain("Set the unit to in");
+  });
+
+  it("names a compound that does not read completely as imperial rather than as a typo", () => {
+    const composed = cell([row("W", "8'-6\" eq", "in")]);
+    expect(composed.text).toBe("[W \"8'-6\" eq\" — imperial, not converted]");
     expect(composed.problems[0]?.code).toBe("not_numeric");
     expect(composed.problems[0]?.message).toContain("feet and inches");
-    expect(composed.problems[0]?.message).toContain("Record it in mm or cm");
+    expect(composed.problems[0]?.message).toContain("in mm or cm");
   });
 
   it("never reads a compound as its feet figure, whatever unit sits beside it", () => {
     // The trap this row exists for: 1'6" is 457mm, and a 1 with a unit of cm
-    // beside it is 10mm — a number nothing downstream would question.
-    expect(parseDimensionFigure("1'6\"").figure).toBeNull();
-    expect(parseDimensionFigure("5'").figure).toBeNull();
-    expect(parseDimensionFigure("4 ft 6 in").figure).toBeNull();
+    // beside it is 10mm — a number nothing downstream would question. A whole
+    // compound is ONE figure, in inches; a partial one is no figure at all.
+    expect(parseDimensionFigure("1'6\"")).toEqual({ figure: 18, tbcInline: false, imperial: true });
+    expect(parseDimensionFigure("5'")).toEqual({ figure: 60, tbcInline: false, imperial: true });
+    expect(parseDimensionFigure("4 ft 6 in")).toEqual({ figure: 54, tbcInline: false, imperial: true });
+    expect(parseDimensionFigure("2'-5").figure).toBeNull();
+    expect(parseDimensionFigure("8'-6\" eq").figure).toBeNull();
     expect(cell([row("W", "1'6\"", "cm")]).text).not.toContain("W10");
+    expect(cell([row("W", "2'-5", "cm")]).text).toBe("[W \"2'-5\" — imperial, not converted]");
+  });
+
+  it("leaves a bare figure's reading exactly as it was", () => {
+    // No `imperial` key at all, so every caller of a metric figure is unchanged.
+    expect(parseDimensionFigure("1900")).toEqual({ figure: 1900, tbcInline: false });
+    expect("imperial" in parseDimensionFigure("1900")).toBe(false);
   });
 
   it("marks the compounds and leaves plain inches and ordinary figures alone", () => {
@@ -354,5 +395,67 @@ describe("imperial measurements", () => {
     expect(imperialCompound("the client's own sofa")).toBe(false);
     expect(imperialCompound("1900")).toBe(false);
     expect(imperialCompound(null)).toBe(false);
+  });
+});
+
+// ============================================================================
+// FEET AND INCHES, READ WHOLE (2026-09-30). The shapes are the ones a drawing
+// set dimensioned only in feet and inches prints, and the ones a pricing
+// document's size lines carry — every figure here is invented.
+// ============================================================================
+describe("feetAndInches", () => {
+  it("reads every shape the drawings and the bill print, as total inches", () => {
+    const cases: [string, number][] = [
+      ["6'-4\"", 76],
+      ["6' 4\"", 76],
+      ["6'4\"", 76],
+      ["6' - 4\"", 76],
+      ["10'", 120],
+      ["2'-0 1/2\"", 24.5],
+      ["1'-10 5/8\"", 22.625],
+      ["1' 9 1/4\"", 21.25],
+      ["3'7\"\"", 43],
+      ["5'-8''", 68],
+      ["4'-3-1/2\"", 51.5],
+      ["6′4″", 76],
+      ["6 ft 4 in", 76],
+      ["6ft 4in", 76],
+      ["2 feet 6 inches", 30],
+      ["3 foot", 36],
+      ["18\"", 18],
+      ["18 in", 18],
+      ["18''", 18],
+      ["7.5\"", 7.5],
+      ["3/4\"", 0.75],
+      ["2.5'", 30],
+    ];
+    for (const [value, inches] of cases) expect(feetAndInches(value), value).toBe(inches);
+  });
+
+  it("refuses anything that is not wholly one feet-and-inches measurement", () => {
+    const refused = [
+      "8'-6\" eq",
+      "8'-6\" eq (adjustment)",
+      "2'-5", // the inch mark lost: 2'-5 could be anything
+      "6'-4\" - 6'-8\"", // a range
+      "6'-4\" x 6'-8\"", // a second figure
+      "R 8\"", // a radius note, not a size
+      "approx 6'",
+      "TBC",
+      "eq",
+      "1/0\"", // zero denominator
+      "2'-0 1/0\"",
+      "5/4\"", // an improper fraction is a misread
+      "1'-14\"", // fourteen inches after a foot figure
+      "2.5'-6\"", // decimal feet beside inches: two scales at once
+      "10'-",
+      "-4\"",
+      "0'-0\"",
+      "1900",
+      "6'4\"5",
+      "",
+    ];
+    for (const value of refused) expect(feetAndInches(value), value).toBeNull();
+    expect(feetAndInches(null)).toBeNull();
   });
 });

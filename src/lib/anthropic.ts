@@ -227,7 +227,9 @@ centimetres between pages, so \`unitRaw\` is null on most of them; a specificati
 print one ("WIDTH 1800mm"), and then \`valueRaw\` is "1800" and \`unitRaw\` is "mm". Report a unit only
 where you can see it on the page. Never infer one from how large the number is, never convert, and
 never append a unit to the figure — a wrong unit is worse than none, because it reads as a real
-measurement and nothing afterwards questions it.
+measurement and nothing afterwards questions it. FEET AND INCHES ARE ONE FIGURE: a page that prints
+6'-4" or 2'-0 1/2" has \`valueRaw\` exactly that, marks and all, and \`unitRaw\` null — never split
+the inch mark off into \`unitRaw\`, and never convert it.
 
 ONE ITEM DRAWN TWICE, OR TWO THINGS TO MAKE. For every item you reported on more than one page, add
 a \`codeGroups\` entry saying which it is.

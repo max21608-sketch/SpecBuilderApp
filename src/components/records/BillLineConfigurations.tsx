@@ -97,7 +97,9 @@ function ValueCell({ value, unit, state, qualifier }: { value: string | null; un
           {/* The unit belongs to a FIGURE. "TBC", "N/A" or "REFER TO … DRAWINGS"
               carry the row's unit too, and printing it welded on ("TBCmm")
               reads as a measurement nobody took. */}
-          {unit && parseDimensionFigure(value).figure !== null && <span className="text-neutral-500">{unit}</span>}
+          {unit && parseDimensionFigure(value).figure !== null && !parseDimensionFigure(value).imperial && (
+            <span className="text-neutral-500">{unit}</span>
+          )}
           {state === "tbc" && (
             <span className="ml-1.5 align-middle">
               <Chip tone="warn">TBC</Chip>
