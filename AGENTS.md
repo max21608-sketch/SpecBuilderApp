@@ -1007,6 +1007,39 @@ column's minimum, so a code still never splits at its hyphens in a cell. In a
 table, a ref is a no-wrap run per WORD (`ClientRefs`) and long text is cut
 with `clampText`, never left to push a column wide.
 
+### A page code that is the END of a bill code, and a tag drawn as boxes
+
+`src/lib/record-refs.ts` (`endsOnSegment`, `namesOnSegments`),
+`src/lib/drawing-document.ts` (`resolveDrawingTargets`, `resolveStagedItem`,
+`drawingNumberOf`, `alreadyRecorded`), `src/lib/material-words.ts`
+(`stackedTagCode`, `projectCodeKind`)
+
+The Aman drawings title each item by its FAMILY code — `BEDFRAME FUR-08`,
+`SOFA (KIDS BED) FUR-03 B` — while the bill carries `GR-FUR-08`, `PL-FUR-08`
+and `PL-FUR-03B`, so neither real card matched a record (2026-09-30). **Only
+where nothing matches exactly**, a bill code whose printed segments END with
+the page code is a candidate (never `GR-FUR-08A` for `FUR-08`). One candidate
+resolves; several resolve only when the run's drawing number (its stored
+filename, `AM-ID-PL-FUR-08 Bed frame`) names exactly one whole; otherwise
+every phase is ambiguous and nothing is suggested. The card says how it
+matched, in amber. `resolveStagedItem` is the only call the screen and the
+confirm make, so `targets_changed` still holds.
+
+**A tag drawn as stacked boxes is its code.** The drawing prints `GR / FAB /
+04` in three boxes and the model writes `GR FAB 04`; exactly that three-group
+shape, anchored to the whole value, is read into `materialCodeRaw` as
+`GR-FAB-04` at read time, so it files as the SAME finish the bill created and
+lands on COM 1 as "already recorded — the same finish", never a second COM.
+`value` keeps the drawing's words and `normaliseFinishCode` stays case and
+whitespace only. A three-part code's kind is its middle group, read after the
+prefix test.
+
+**A converted figure and the bill's millimetres are compared in whole mm**
+(`alreadyRecorded`), the precision the cell writes: `6'-4"` is 1930.4mm and
+the bill's `W 1930` is the same width; compared unrounded, the card asked to
+replace 1930 with 1930. And a value printing its own foot or inch mark shows
+no second unit (`valueCarriesItsUnit`, every display path), or `7'-3"in`.
+
 ### One drawing, several runs: the item card is the unit of commit
 
 `src/lib/drawing-document.ts`, `src/lib/confirm-drawings.ts`

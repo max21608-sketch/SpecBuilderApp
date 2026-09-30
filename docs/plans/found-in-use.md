@@ -37,7 +37,11 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ### A bill's own specification read repeats the bill's columns, ~400 rows to ignore one by one
 
-**Status: open, recorded 2026-09-23** on the local stack, real AMB bill (read
+**Status: SUPERSEDED 2026-09-30.** A bill whose description cells have more
+than one line now has them read by code at its own confirm
+(`src/lib/bill-description.ts`), and the charged "Read the specifications in
+this bill" is refused for it, so these ~400 proposals are never made.
+Originally: **open, recorded 2026-09-23** on the local stack, real AMB bill (read
 `0a679852…`, re-matched free). Of 667 proposals, 233 place and **411 are
 "record only"** — nearly all of them the bill's own columns read back as
 specifications (`Item Description` 101, `Model Ref` 57, `DWG REF` 19, `Unit`

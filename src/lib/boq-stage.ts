@@ -58,8 +58,13 @@ export async function loadBoqReadingRegisters(exec: TxnSql): Promise<BoqReadingR
   // the one somebody set most recently for this specifier — is tried first.
   // `created_by` says whose it is: the seed's actor makes it a SEEDED layout,
   // which reads without a columns check; anybody else's keeps the check.
+  //
+  // `row_rules` is read THROUGH THE ROW'S JSON, not as a column, so a database
+  // that has the code before migration 0042 reads every layout with no rule
+  // instead of failing every bill upload on a missing column. The code reaches
+  // staging on push and the migration reaches the sandbox when Max runs it.
   const layoutRows = await exec`
-    select id, name, header_rows, mapping, created_by, row_rules
+    select id, name, header_rows, mapping, created_by, to_jsonb(boq_layouts.*) -> 'row_rules' as row_rules
     from boq_layouts
     where retired_at is null
     order by created_at desc, name

@@ -21,6 +21,49 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-30 (evening) — The Aman bill reads itself: names, specs, no column step; the overflow rule
+
+Max, on the pilot P18181 upload: the names carried every finish and size, no
+dimension came through, the table was mis-sized, he had had to tick the
+columns, and every item and every option must land. Built on `amb-int`
+(coders A–D in worktrees, reviewed and merged here) and verified on the LOCAL
+stack with the real bill and two real drawings (the sandbox and pilot are
+read-only for Claude):
+
+- **Every multi-line description cell is a name plus its specs.** Line 1 is
+  the record's name ("Drawers", "Armchair (Option 1)"); the rest become
+  attributes at confirm, shown on the review first. Real bill, measured
+  (`npm run bill:descriptions`): 67/67 read, 61 with dimensions (164 slots),
+  70 finishes (64 in a BWS field), 192 notes, every imperial twin a note.
+- **Feet and inches convert exactly** when they read completely.
+- **The Aman layout is seed data** (0013) with a row rule (0042): the bill
+  reads with no column step and no model call, and the confirm says
+  "creates 67 records and 34 fabric specs" — before the rule, 96 and 5.
+  Options 1 and 2 of GR-FUR-22 and PL-FUR-22 are each their own record, with
+  their own sizes.
+- **A drawing lands on its bill line** through the end of the bill code and
+  its drawing number; its stacked tags (`GR FAB 04`) are the bill's own codes.
+  PL-FUR-08 and PL-FUR-03B confirmed (34 and 51 specs, two charged reads):
+  the sofa's size, TBC on the bill, is `W2210 x D991 x H635mm` off the
+  drawing; nothing was written twice.
+- **Levels** read "Metal: MTL-01" (30 complex, 37 simple); **categories** match
+  on the name (6 left, for a person: Desk Chair ×3, Bench Ottoman ×2, the TWIN
+  bed); four aliases seeded, Matthew's to confirm.
+- **Nothing is wider than its box** (`src/lib/overflow.ts`, a dev-time
+  watcher, `tools/overflow-audit.mjs`): its first catches were the phase
+  table (256px), the bill review (29px), the drawings page (520px) and the
+  record's specs (39px), all fixed.
+
+Checks at the pushed SHA: typecheck, lint (0 errors), 2719 tests with the
+database tier on the local stack, `next build`. **Max's, in this order,
+before anybody uploads the bill on the sandbox or pilot:** migration 0042
+and the seed (`npm run db:migrate && npm run db:seed` on the sandbox; the
+`--yes-pilot` pair on pilot, after its backup). Without them the code still
+runs — the layout's rule is read through the row's JSON — but the bill falls
+back to the charged model read and the column tick. **Not accepted by Max or
+Matthew.** The P18181 bill already confirmed on pilot keeps its long names:
+it has to be uploaded again into a fresh project (or its phase retired).
+
 ## 2026-09-30 — Promoted to pilot: any bill, never stuck, at `0b55985` (v1.3)
 
 At Max's instruction ("promote staging to pilot"). Steps 1–2 of
