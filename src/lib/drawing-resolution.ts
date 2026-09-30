@@ -24,9 +24,8 @@ import {
   drawingItemBlockers,
   drawingItemWarnings,
   occupancyThrough,
-  resolveDrawingTargets,
+  resolveStagedItem,
   targetRecordIds,
-  canonicalCode,
   variantLettersByItem,
   alreadyRecorded,
   crossPageClaims,
@@ -349,7 +348,7 @@ export function resolveStagedRun(
     // THE CANONICAL CODE, not the page's own heading. A shop drawing titled
     // `MUR.2 ARMCHAIR` is the S-200 the bill lists, and matching on its title
     // block would leave it an item no record carries.
-    const resolution = resolveDrawingTargets(canonicalCode(staged, item.itemCodeRaw), context.records);
+    const resolution = resolveStagedItem(staged, item, context.records);
     const targets = targetRecordIds(item, resolution);
     const variantLabel = letters.get(item.id) ?? null;
 
