@@ -134,3 +134,44 @@ export const CODE_PREFIXES: { prefix: string; kind: "fabric" | "timber" | "metal
   { prefix: "mtl", kind: "metal" },
   { prefix: "mt", kind: "metal" },
 ];
+
+// ---- a finish tag drawn as three stacked boxes ------------------------------
+
+/**
+ * The Aman drawings draw a finish tag as three stacked boxes — `GR` over `FAB`
+ * over `04` — and a reader transcribes it `GR FAB 04`. The bill writes the same
+ * finish `GR-FAB-04`. This reads the tag's LAYOUT back into the code: exactly
+ * three groups, two to four letters, two to four letters, digits with an
+ * optional letter, separated by whitespace and nothing else.
+ *
+ * ANCHORED TO THE WHOLE VALUE, and it is not a normaliser. `normaliseFinishCode`
+ * stays case and whitespace only, because a rule clever enough to merge two
+ * spellings is clever enough to merge two codes a client kept apart. This one
+ * cannot: it fires on one shape, and `GR FAB 04 walnut`, `FAB 04` or
+ * `CH 01 2` are not that shape.
+ */
+const STACKED_TAG = /^\s*([A-Za-z]{2,4})\s+([A-Za-z]{2,4})\s+(\d{1,4}[A-Za-z]?)\s*$/;
+
+export function stackedTagCode(raw: string | null | undefined): string | null {
+  const match = STACKED_TAG.exec(raw ?? "");
+  if (!match) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`.toUpperCase();
+}
+
+/**
+ * What a THREE-PART project code says it is, by its middle group: `GR-FAB-04`
+ * is a fabric, `GR-TIM-03` a timber, `PL-MTL-01` a metal. The first group is
+ * where it is used (a floor, a room type), which is why a prefix test over the
+ * whole code finds nothing in it.
+ *
+ * Exact on the middle group, and only through `CODE_PREFIXES` — so `GR-STN-04`
+ * and `GR-CH-01` say nothing, as `CH-01.2` never has.
+ */
+const PROJECT_CODE = /^\s*[A-Za-z]{2,4}-([A-Za-z]{2,4})-\d{1,4}[A-Za-z]?\s*$/;
+
+export function projectCodeKind(raw: string | null | undefined): (typeof CODE_PREFIXES)[number]["kind"] | null {
+  const match = PROJECT_CODE.exec(raw ?? "");
+  if (!match) return null;
+  const middle = match[1]!.toLowerCase();
+  return CODE_PREFIXES.find((entry) => entry.prefix === middle)?.kind ?? null;
+}

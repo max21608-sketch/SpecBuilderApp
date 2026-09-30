@@ -1117,6 +1117,8 @@ export const METAL_SLOTS = [5, 35] as const; // Main metal finish, Metal Finish 
 // would silently re-classify rows on every existing document.
 import {
   CODE_PREFIXES,
+  projectCodeKind,
+  stackedTagCode,
   FABRIC_CALLOUT_WORDS,
   HARDWARE_WORDS,
   METAL_WORDS,
@@ -1225,6 +1227,13 @@ export function classifyCallout(input: {
     if (match) {
       return reading(match.kind, false, `the code ${String(input.materialCodeRaw).trim()} says so`);
     }
+  }
+  // 2b. A three-part project code says what it is in its MIDDLE group:
+  //     `GR-FAB-04`, where the `GR` is the floor. After the prefix test, so no
+  //     code that test already read changes its reading.
+  const projectKind = projectCodeKind(input.materialCodeRaw);
+  if (projectKind) {
+    return reading(projectKind, false, `the code ${String(input.materialCodeRaw).trim()} says so`);
   }
 
   // 3. The caption names the item itself, and carries a specification.
@@ -2858,11 +2867,23 @@ function upgradeCalloutGuesses(doc: StagedDrawings, fields: SpecFieldEntry[]): S
     }
 
     let touched = false;
-    const observations = item.observations.map((observation) => {
-      if (observation.reviewStatus !== "pending") return observation;
-      if (observation.version !== 1) return observation;
+    const observations = item.observations.map((original) => {
+      if (original.reviewStatus !== "pending") return original;
+      if (original.version !== 1) return original;
+      if (original.attrGroup === "dimension" || original.attrGroup === "note") return original;
+
+      // A TAG DRAWN AS STACKED BOXES IS ITS CODE. `GR FAB 04` is how a reader
+      // transcribes three boxes; the bill writes `GR-FAB-04`, and the library
+      // is keyed on that. Read into `materialCodeRaw` -- what the classifier,
+      // the finishes library and the confirm's `material_code` all read --
+      // while `value` and `valueRaw` keep the drawing's own words. Ahead of
+      // the field check, so a row staging already gave a field still files
+      // under the bill's finish rather than minting a second one.
+      const stacked = stackedTagCode(original.materialCodeRaw) ?? (original.materialCodeRaw?.trim() ? null : stackedTagCode(original.valueRaw));
+      const observation = stacked && stacked !== original.materialCodeRaw ? { ...original, materialCodeRaw: stacked } : original;
+      if (observation !== original) touched = true;
+
       if (observation.specFieldId) return observation;
-      if (observation.attrGroup === "dimension" || observation.attrGroup === "note") return observation;
 
       const callout = classifyCallout({
         labelRaw: observation.labelRaw,
