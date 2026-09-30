@@ -21,6 +21,23 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-09-30 — Promoted to pilot: any bill, never stuck, at `0b55985` (v1.3)
+
+At Max's instruction ("promote staging to pilot"). Steps 1–2 of
+`docs/environments.md` run by Max: pilot backed up
+(`spec-builder-pilot-2026-09-30T09-36-28-177Z.sql`, outside the repo), then
+0039–0041 applied BEFORE the code ("Applied 3 migration(s); 38 already
+present") and the seed re-run (27 bill column synonyms). Before that, 0041's
+two re-listed CHECKs were compared read-only with pilot's LIVE constraints:
+all 22 change kinds and 7 reason-required kinds kept, three added. Step 3 by
+Claude: `pilot` fast-forwarded `be4f45f` → `0b55985` (48 commits; the last is
+the chip's v1.3). Steps 4–7 checked in Max's signed-in session:
+`/api/auth/me` reports `pilot`/`pilot` and commit `0b55985…`, the chip reads
+PILOT v1.3, the title ends [PILOT], and P18181, the projects list and the
+per-project inbox load with every request 200. **Not done:** step 8, the
+first-session walk on pilot (Max's), and a first upload proving pilot's
+`ANTHROPIC_API_KEY` (Max's).
+
 ## 2026-09-23 (afternoon) — Any bill, never stuck: built on `anybill-int`, not yet on staging
 
 The plan is `docs/plans/any-bill-2026-09-23.md`, from Max and Matthew's
