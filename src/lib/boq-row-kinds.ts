@@ -21,7 +21,11 @@
 //     one code), the NEARER ONE ABOVE is proposed and flagged amber; where it
 //     is on none, nothing is inferred and the row says so. A plain fabric code
 //     on the line under an item is NOT read as one: position is evidence the
-//     model may cite and a person may accept, never a rule.
+//     model may cite and a person may accept, never a rule — EXCEPT where a
+//     seeded layout carries a row rule (0042, `applyCategoryFinishRule`): the
+//     Aman bill's own Category Code says `FBX-` on every fabric line, and for
+//     that one layout, the category plus the item above is the document
+//     speaking too. It runs after the bracket, which still wins.
 //   * A FABRIC LINE ALWAYS NAMES ITS ITEM. `rowKind: "finish_for"` without a
 //     `finishFor` is unrepresentable by the writers here, and `rowKindProblems`
 //     refuses one on the review and at the confirm with the same sentence.
@@ -67,8 +71,9 @@ export const IGNORED_BECAUSE: Record<"section" | "subtotal" | "blank", string> =
 };
 
 /**
- * Who said what kind a row is. `bill` is the bracket rule — the document's own
- * words — and is the only one that needs neither a model nor a person.
+ * Who said what kind a row is. `bill` is the bracket rule, or a seeded
+ * layout's category rule — the document's own words — and is the only one that
+ * needs neither a model nor a person.
  */
 export type BoqRowKindSource = "bill" | "model" | "person";
 
@@ -179,6 +184,114 @@ export function applyBracketRule<T extends KindLine>(lines: readonly T[]): T[] {
       rowKindFlag:
         `The code names ${bracket.itemRef} in brackets, and no line on this sheet carries it. Say which item this ` +
         "fabric belongs to, or leave it as a line.",
+    };
+  });
+}
+
+// ---- a layout's row rule -------------------------------------------------------
+
+/**
+ * WHAT A SEEDED LAYOUT MAY SAY ABOUT ROWS (`boq_layouts.row_rules`, 0042).
+ *
+ * `finishForCategoryPrefix`: a line whose category column (`boqCategory`)
+ * begins with this is a fabric line for the nearest item line above it. The
+ * Aman pricing document writes `FBX-SEA-IN` in the Category Code of every
+ * fabric line and prints it under its item — the bill's own column saying so,
+ * which is why it can be a rule for THAT layout and never a global one.
+ */
+export type BoqLayoutRowRules = { finishForCategoryPrefix?: string };
+
+/**
+ * A stored `row_rules` value, validated. Anything unrecognised is dropped, and
+ * a value that leaves nothing is null — "has a rule" is then one test.
+ */
+export function parseRowRules(value: unknown): BoqLayoutRowRules | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const prefix = (value as Record<string, unknown>).finishForCategoryPrefix;
+  if (typeof prefix !== "string" || prefix.trim() === "") return null;
+  return { finishForCategoryPrefix: prefix.trim() };
+}
+
+type CategoryLine = KindLine & { boqCategory?: string | null };
+
+const describeRow = (line: { lineNo: number; code: string | null }) =>
+  `row ${line.lineNo}, ${line.code ?? "no code"}`;
+
+/**
+ * THE CATEGORY RULE, applied at staging AFTER the bracket rule and only where a
+ * layout carries one. Returns a new list.
+ *
+ * "The item line above" is the nearest line above that is still an item: not
+ * a fabric line by either rule, not ignored, and not itself in the fabric
+ * category. Four outcomes, each a trap:
+ *
+ *   * THE BRACKET NAMED ONE ITEM LINE AND IT IS THE ONE ABOVE: kept, and the
+ *     evidence says both agree.
+ *   * THE BRACKET NAMED A DIFFERENT LINE: the bracket is kept — it is the
+ *     document naming its item — and the row is flagged naming BOTH, because
+ *     two readings of one bill that disagree are a person's to settle.
+ *   * THE BRACKET NAMED NOTHING USABLE (no line carries it, or several and
+ *     none above): the line goes under the item above by its category, and
+ *     the flag says what the bracket said, so it is checked rather than
+ *     silently read past.
+ *   * NO ITEM LINE ABOVE IT: no parent, and a flag. It stays a line for a
+ *     person to place or leave — never a fabric spec on a guessed item.
+ *
+ * A kind a person or a model set is never touched.
+ */
+export function applyCategoryFinishRule<T extends CategoryLine>(
+  lines: readonly T[],
+  rules: BoqLayoutRowRules | null | undefined,
+): T[] {
+  const prefix = rules?.finishForCategoryPrefix?.trim();
+  if (!prefix) return [...lines];
+  const want = prefix.toUpperCase();
+  const isFabricCategory = (line: CategoryLine) => (line.boqCategory ?? "").trim().toUpperCase().startsWith(want);
+
+  let above: T | null = null;
+  return lines.map((line) => {
+    if (!isFabricCategory(line)) {
+      if (!line.ignored && (line.rowKind ?? "item") === "item") above = line;
+      return line;
+    }
+    if (line.rowKind && line.rowKindSource !== "bill") return line;
+
+    const category = (line.boqCategory ?? "").trim();
+    const said = `Category Code ${category} — the bill's fabric line`;
+    const parent = above as T | null;
+
+    // The bracket placed it.
+    if (line.rowKind === "finish_for" && line.finishFor) {
+      if (parent && line.finishFor.row === parent.lineNo) {
+        return { ...line, rowKindEvidence: `${line.rowKindEvidence ?? ""} ${said}, under it.`.trim() };
+      }
+      const bracketRow = `row ${line.finishFor.row}, ${line.finishFor.code ?? "no code"}`;
+      return {
+        ...line,
+        rowKindFlag:
+          `The bracket names ${bracketRow}, but the item line above this fabric line is ` +
+          `${parent ? describeRow(parent) : "none"}. The bracket is kept; check which item it belongs to.`,
+      };
+    }
+
+    if (!parent) {
+      return {
+        ...line,
+        rowKindFlag: `${said}, and there is no item line above it. Say which item it belongs to, or leave it as a line.`,
+      };
+    }
+
+    const bracket = parseBracketCode(line.code);
+    return {
+      ...line,
+      rowKind: "finish_for" as const,
+      rowKindSource: "bill" as const,
+      rowKindEvidence: `${said}; under ${describeRow(parent)}.`,
+      rowKindFlag: bracket
+        ? `The code names ${bracket.itemRef} in brackets, and no one item line on this sheet carries it; placed ` +
+          `under ${describeRow(parent)}, the item line above, by its category. Check it.`
+        : null,
+      finishFor: { row: parent.lineNo, code: parent.code },
     };
   });
 }
