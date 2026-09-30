@@ -195,6 +195,13 @@ describeIfDb("a bill's own specification read, by row, in windows", () => {
     const body = (await res.json()) as { importId: string };
     expect(res.status).toBe(201);
     specId = body.importId;
+    // ONCE: a second press returns the read the first one registered and
+    // publishes nothing. (Held here since 2026-09-30: the pricing-document
+    // fixture in bill-structure.test.ts has multi-line descriptions, which the
+    // confirm now reads itself, so that bill refuses the charged read.)
+    const again = await POST(request({}), params(billId));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ importId: specId, reused: true });
 
     const attemptId = (await run(specId)).attempt_id;
     expect(attemptId).toBeTruthy();

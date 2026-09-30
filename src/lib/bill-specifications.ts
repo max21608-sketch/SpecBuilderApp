@@ -26,6 +26,8 @@
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { insertSpecDocumentRun, type SpecRunRegistration } from "@/lib/spec-registration";
 import { billSpecsRequestId } from "@/lib/bill-rows";
+import { billReadsDescriptions } from "@/lib/bill-description";
+import { assertBoqDocument } from "@/lib/boq-import";
 // The id lives in the leaf `bill-rows.ts`, so the registers loader can read one
 // without importing the registration protocol. Re-exported for every caller.
 export { billSpecsRequestId };
@@ -35,7 +37,7 @@ export async function registerBillSpecifications(
   { billRunId, actor }: { billRunId: string; actor: string },
 ): Promise<SpecRunRegistration> {
   const rows = await txn`
-    select id, project_id, batch_id, status, source_kind, attachment_id
+    select id, project_id, batch_id, status, source_kind, attachment_id, parsed
     from intake_runs where id = ${billRunId}
     for update
   `;
@@ -50,6 +52,19 @@ export async function registerBillSpecifications(
     throw new DomainConflictError(
       "not_confirmed",
       "Confirm the bill first: its specifications are read onto the records the confirm creates.",
+    );
+  }
+  // A BILL WHOSE CONFIRM ALREADY READ ITS DESCRIPTIONS has nothing left for
+  // a charged read to find: every multi-line description cell was read into
+  // its record's name and specifications, which the reviewer approved on the
+  // review screen (`bill-description.ts`). A second, paid reading of the same
+  // cells would stage every one of them again as proposals over values the
+  // record already holds. Refused here as well as unoffered on the screen,
+  // because a hidden button is not a gate.
+  if (bill.parsed && billReadsDescriptions(assertBoqDocument(bill.parsed).sheets)) {
+    throw new DomainConflictError(
+      "descriptions_read",
+      "This bill's descriptions were read when it was confirmed: each record already carries their sizes, finishes and notes. There is nothing more to read.",
     );
   }
   if (!bill.attachment_id) {

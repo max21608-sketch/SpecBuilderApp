@@ -7,7 +7,7 @@
 // and an ambiguous match offers candidates rather than picking one. A line the
 // matcher could not resolve stays blank — a plausible guess in a field a human
 // skims past is worse than an obvious gap.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -39,6 +39,13 @@ import {
   type RowKindFields,
 } from "@/lib/boq-row-kinds";
 import BoqRowKindCell from "@/components/imports/BoqRowKindCell";
+// What each item's description cell becomes — the plan the confirm writes,
+// computed on the server by `planSheetDescriptions` and only rendered here.
+import {
+  BillDescriptionPanelRow,
+  BillDescriptionSummary,
+  type ReviewDescription,
+} from "@/components/imports/BillDescription";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
 // function the confirm writes it with, so the table shows what will be written.
 import { effectiveArea } from "@/lib/boq-reconcile";
@@ -63,6 +70,8 @@ type Line = {
   index: number; lineNo: number; designer: string | null; boqCategory: string | null;
   area: string | null; code: string | null; itemDescription: string; productReference: string | null;
   qty: number | null; qtyUnit: string | null;
+  // The description cell as printed, where it breaks over lines — see `BoqLine`.
+  itemDescriptionRaw?: string;
   // Present only where the bill has the column (v4) — see `BoqLine`.
   subArea?: string | null; sourceLine?: string | null; notes?: string | null;
   categoryId: string | null; categoryStatus: string;
@@ -301,6 +310,10 @@ export default function ReviewImportPage() {
     runs: ProjectRun[];
     reconciliation: Record<number, Reconciliation>;
     billSpecs: { id: string; status: string } | null;
+    /** Per sheet, per staged line index: what its description cell becomes. */
+    descriptions: Record<number, Record<number, ReviewDescription>>;
+    /** The confirm reads (or read) this bill's descriptions, so there is no charged read to offer. */
+    descriptionsRead: boolean;
   } | null>(null);
   /**
    * WHETHER A RELOAD IS IN FLIGHT, and it is now RENDERED.
@@ -357,6 +370,15 @@ export default function ReviewImportPage() {
   /** Once per visit: the automatic read never fires twice from one screen. */
   const autoAsked = useRef(false);
   const [specsBusy, setSpecsBusy] = useState(false);
+  /** Lines whose description panel is open, as `sheet:index`. */
+  const [openDescriptions, setOpenDescriptions] = useState<Set<string>>(() => new Set());
+  const toggleDescription = (key: string) =>
+    setOpenDescriptions((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // `quiet` skips the loading state. The spec-document view re-reads every
   // three seconds while a document is being read, and blanking the screen out
@@ -371,6 +393,8 @@ export default function ReviewImportPage() {
       runs?: ProjectRun[];
       reconciliation?: Record<number, Reconciliation>;
       billSpecs?: { id: string; status: string } | null;
+      descriptions?: Record<number, Record<number, ReviewDescription>>;
+      descriptionsRead?: boolean;
     }>(`/api/imports/${id}`);
     if (!quiet) setLoading(false);
     if (!res.ok) { setError(res.error); return; }
@@ -382,6 +406,8 @@ export default function ReviewImportPage() {
       runs: res.data.runs ?? [],
       reconciliation: res.data.reconciliation ?? {},
       billSpecs: res.data.billSpecs ?? null,
+      descriptions: res.data.descriptions ?? {},
+      descriptionsRead: res.data.descriptionsRead ?? false,
     });
   }, [id]);
 
@@ -1069,7 +1095,18 @@ export default function ReviewImportPage() {
             sizes, models and finishes; the confirm made records and never read
             what the words say. One press registers this file as a specification
             document and reads it — charged, and said so on the button. */}
-        {run.status === "confirmed" && run.has_source !== false && (
+        {/* A BILL WHOSE CONFIRM READ ITS DESCRIPTIONS has nothing left for a
+            charged read to find, so none is offered — and the route refuses
+            one too. Said where the button would have been, so its absence is
+            not a mystery. */}
+        {run.status === "confirmed" && data.descriptionsRead && !data.billSpecs && (
+          <Note tone="good" title="The descriptions in this bill were read when it was confirmed.">
+            Each record carries its name and what its description cell said — sizes in their slots, finish codes
+            in their fields, every other line as a note — sourced to this bill. There is nothing more to read, so no
+            charged read is offered.
+          </Note>
+        )}
+        {run.status === "confirmed" && run.has_source !== false && (!data.descriptionsRead || data.billSpecs) && (
           <Note
             tone="info"
             title="The descriptions in this bill carry specifications."
@@ -1130,7 +1167,11 @@ export default function ReviewImportPage() {
           // ref two records share: `GR-FAB-13` under six items is one fabric.
           const duplicates = duplicateGroups({ ...sheet, lines: sheet.lines.filter((line) => line.rowKind !== "finish_for") });
           const problemByRow = new Map(rowKindProblems(sheet.lines).map((problem) => [problem.lineNo, problem.problem]));
-          const columns = reconciliation ? 10 : 9;
+          // Row, Kind, Client ref, Item, Area, Qty, Designer, (Against the
+          // phase), Category, Level, Include.
+          const columns = reconciliation ? 11 : 10;
+          const descriptions = data.descriptions[sheetIndex] ?? {};
+          const described = Object.keys(descriptions).length;
           /**
            * THE COLUMNS PANEL IS OPEN when nobody has mapped this sheet yet
            * (unless it is dropped, when it waits to be asked for), when a
@@ -1342,6 +1383,16 @@ export default function ReviewImportPage() {
                 </Note>
               )}
 
+              {/* THE REVIEW IS THE GATE FOR WHAT THE DESCRIPTIONS SAY: the
+                  confirm writes exactly what is shown under each line. */}
+              {!sheet.ignored && !sheet.needsColumns && described > 0 && run.status === "parsed" && (
+                <Note tone="info" title="Each item's description is read as you confirm.">
+                  {described} line{described === 1 ? "'s" : "s'"} description cell{described === 1 ? " is" : "s are"}{" "}
+                  more than a name: the first line becomes the item&rsquo;s name, and the rest is written to its record —
+                  sizes in their slots, finish codes in their BWS fields and the finishes library, every other line as a
+                  note. Check what is shown under each line; amber is what needs a look.
+                </Note>
+              )}
               {!sheet.ignored && !sheet.needsColumns && (
                 <Card
                   flush
@@ -1424,9 +1475,12 @@ export default function ReviewImportPage() {
                       {sheet.lines.map((line) => {
                         const fabric = line.rowKind === "finish_for";
                         const duplicated = !fabric && isDuplicated(sheet, line);
+                        const description = fabric ? undefined : descriptions[line.index];
+                        const descriptionKey = `${sheetIndex}:${line.index}`;
+                        const descriptionOpen = openDescriptions.has(descriptionKey);
                         return (
+                          <Fragment key={line.index}>
                           <Tr
-                            key={line.index}
                             tone={duplicated ? "warn" : "plain"}
                             className={line.ignored ? "opacity-40" : undefined}
                           >
@@ -1451,12 +1505,23 @@ export default function ReviewImportPage() {
                             </Td>
                             <Td mono>{line.code ?? "—"}</Td>
                             <Td>
-                              {line.itemDescription}
+                              {description ? (
+                                <span className="font-medium text-neutral-900">{description.name}</span>
+                              ) : (
+                                line.itemDescription
+                              )}
                               {line.productReference && (
                                 <span className="text-neutral-500"> · {line.productReference}</span>
                               )}
                               {line.notes && (
                                 <span className="mt-0.5 block text-xs text-neutral-500">Notes: {line.notes}</span>
+                              )}
+                              {description && (
+                                <BillDescriptionSummary
+                                  plan={description}
+                                  open={descriptionOpen}
+                                  onToggle={() => toggleDescription(descriptionKey)}
+                                />
                               )}
                             </Td>
                             {/* What the record will carry: `effectiveArea` is
@@ -1640,6 +1705,14 @@ export default function ReviewImportPage() {
                               })()}
                             </Td>
                           </Tr>
+                          {description && descriptionOpen && (
+                            <BillDescriptionPanelRow
+                              plan={description}
+                              raw={line.itemDescriptionRaw ?? line.itemDescription}
+                              colSpan={columns}
+                            />
+                          )}
+                          </Fragment>
                         );
                       })}
                       {/* THE SAME CLIENT REF ON TWO LINES IS NORMAL, AND IS THE

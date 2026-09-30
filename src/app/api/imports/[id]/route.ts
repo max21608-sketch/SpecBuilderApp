@@ -38,6 +38,13 @@ import {
 import { assertBoqDocument } from "@/lib/boq-import";
 import { fabricParentOptions, isBoqRowKind, kindChoicePatch } from "@/lib/boq-row-kinds";
 import { billSpecsRequestId } from "@/lib/bill-specifications";
+import {
+  billItemName,
+  billReadsDescriptions,
+  planSheetDescriptions,
+  revisionDescriptionRefusal,
+} from "@/lib/bill-description";
+import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
 // Pure: which rows on the OTHER tabs a decision reaches, and what lands on
 // them. The screen reads the same module for its duplicate panel, so the rows
 // it calls ambiguous and the rows the carry refuses are one set.
@@ -848,7 +855,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         index: line.index,
         lineNo: line.lineNo,
         code: line.code,
-        itemDescription: line.itemDescription,
+        // The NAME the record will carry, so a revision compares like with
+        // like: a record's description is its cell's first line.
+        itemDescription: billItemName(line),
         productReference: line.productReference,
         qty: line.qty,
         designer: line.designer,
@@ -862,6 +871,33 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     }
   }
 
+  // THE DESCRIPTION CELLS, planned by the function the confirm writes them
+  // with (`planSheetDescriptions`), against the same register — so what this
+  // screen shows under each line is exactly what the confirm writes. Computed
+  // on read and never stored: a line re-kinded as a fabric line changes which
+  // item "has a fabric line", and a frozen plan would then disagree with the
+  // confirm. A line a REVISION carries says, in the confirm's own words, when
+  // its description will not be written.
+  const descriptions: Record<number, Record<number, unknown>> = {};
+  if (parsed) {
+    const fields = await loadDescriptionFields(sql);
+    for (const [sheetIndex, sheet] of parsed.sheets.entries()) {
+      const plans = planSheetDescriptions(sheet.lines, fields);
+      if (plans.size === 0) continue;
+      const carried = sheet.lines.flatMap((line) =>
+        line.replaces && plans.has(line.index) ? [line.replaces.recordId] : [],
+      );
+      const held = await loadHeldAttributes(sql, carried);
+      const bySheet: Record<number, unknown> = {};
+      for (const [index, plan] of plans) {
+        const line = sheet.lines.find((entry) => entry.index === index);
+        const holding = line?.replaces ? held.get(line.replaces.recordId) : undefined;
+        bySheet[index] = { ...plan, revisionRefusal: holding ? revisionDescriptionRefusal(plan, holding) : null };
+      }
+      descriptions[sheetIndex] = bySheet;
+    }
+  }
+
   // THE SPECIFICATIONS IN THIS BILL, where somebody has asked for them to be
   // read: the spec-document run registered from this bill's own stored file,
   // found by the request id its registration always carries.
@@ -870,7 +906,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   `;
   const billSpecs = specsRows[0] ? { id: String(specsRows[0].id), status: String(specsRows[0].status) } : null;
 
-  return json({ ok: true, import: { ...run, parsed }, categories, runs, reconciliation, billSpecs });
+  return json({
+    ok: true,
+    import: { ...run, parsed },
+    categories,
+    runs,
+    reconciliation,
+    billSpecs,
+    descriptions,
+    descriptionsRead: parsed ? billReadsDescriptions(parsed.sheets) : false,
+  });
 }
 
 // ---- the BOQ's positional autosave -----------------------------------------
