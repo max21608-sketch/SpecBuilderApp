@@ -55,7 +55,7 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
-import { SIZE_LABELS } from "@/lib/spec-reading-vocab";
+import { SIZE_LABELS, SIZE_PREFIX_SLOTS } from "@/lib/spec-reading-vocab";
 
 export type DimensionPart = {
   slot: DimensionSlot;
@@ -233,19 +233,25 @@ export function readDimension(attributeRaw: string | null, valueRaw: string | nu
       leftovers.push(shown);
       continue;
     }
-    if (!part.slot) {
-      // `L`, `OAH`, `P`: printed, and not one of the five. Never mapped — `L`
-      // is not `W` — and never dropped.
+    // A prefix the document uses for a slot that is not one of the five slot
+    // words — `OAH`, "overall height" — read through the vocabulary, which
+    // says where each came from. Exact on the whole prefix.
+    const aliased = part.slot ? null : prefixSlot(part.value);
+    const slot = part.slot ?? aliased?.slot ?? null;
+    const partValue = aliased ? aliased.value : part.value;
+    if (!slot) {
+      // `L`, `P`: printed, and not one of the five. Never mapped — `L` is not
+      // `W` — and never dropped.
       leftovers.push(part.value);
       continue;
     }
-    const figure = figureWithUnit(part.value);
+    const figure = figureWithUnit(partValue);
     if (!figure) {
       leftovers.push(shown);
       continue;
     }
     if (figure.unit) units.add(figure.unit);
-    parts.push({ slot: part.slot, figure: figure.figure, slotSuggested: part.slotSuggested });
+    parts.push({ slot, figure: figure.figure, slotSuggested: part.slotSuggested });
   }
   if (parts.length === 0) return null;
 
@@ -291,7 +297,29 @@ function imperialCompoundAnywhere(text: string): boolean {
  * one part — and then fails to read as a figure, which is right.
  */
 function splitSlashStatements(text: string): string {
-  return text.replace(/([0-9]"?)\s*\/\s*(?=[A-Za-z]{1,3}\.?\s*[0-9])/g, "$1 x ");
+  return (
+    text
+      .replace(/([0-9]"?)\s*\/\s*(?=[A-Za-z]{1,3}\.?\s*[0-9])/g, "$1 x ")
+      // A COMMA AND A SPACE separate statements too: "Dia 122, 30cm Clearance"
+      // is a diameter and then a clearance. Only where a figure (or a prefixed
+      // one) follows, and only with the space, so a decimal comma ("1,5") and
+      // a thousands comma ("1,200") stay inside their figure.
+      .replace(/,\s+(?=(?:[A-Za-z]{1,3}\.?\s*)?[0-9])/g, " x ")
+  );
+}
+
+/**
+ * A combined part whose prefix is a vocabulary word for a slot (`OAH 406`), or
+ * null. The five slot words are `normaliseDimensionSlot`'s and are read before
+ * this is asked.
+ */
+function prefixSlot(value: string): { slot: DimensionSlot; value: string } | null {
+  const match = /^([A-Za-z.]+?)\s*([0-9].*)$/.exec(value.trim());
+  if (!match?.[1] || !match[2]) return null;
+  const folded = match[1].toLowerCase().replace(/\./g, "");
+  const entry = SIZE_PREFIX_SLOTS.find((candidate) => candidate.prefix === folded);
+  const slot = entry ? normaliseDimensionSlot(entry.slot) : null;
+  return slot ? { slot, value: match[2] } : null;
 }
 
 /**
@@ -318,7 +346,10 @@ function figureWithUnit(value: string): { figure: string; unit: AttributeUnit | 
 export function sizeLineRefusal(attributeRaw: string | null, valueRaw: string | null): string | null {
   if (!sizeLabel(attributeRaw)) return null;
   const value = (valueRaw ?? "").trim();
-  if (value === "" || isTbc(value)) return null;
+  // Only a WHOLLY undecided size says nothing worth refusing. "W 5'-8'' X D
+  // TBC X H 2'-5''" states two figures in feet and inches, and is refused for
+  // that — the TBC depth does not make the line a TBC.
+  if (value === "" || TBC_TOKENS.includes(normaliseName(value))) return null;
   if (!imperialCompoundAnywhere(normaliseMarks(value))) return null;
   return "Feet and inches are not converted, so this size is kept as the document wrote it and fills no slot.";
 }

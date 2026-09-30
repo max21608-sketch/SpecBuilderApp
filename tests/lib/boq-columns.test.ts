@@ -253,9 +253,14 @@ describe("read with a person's columns", () => {
     // and the 350 target cost on this row is nowhere in it.
     expect(Object.keys(sheet.lines[0]!).sort()).toEqual(
       [
-        "area", "boqCategory", "code", "designer", "itemDescription", "lineNo", "notes", "productReference",
-        "qty", "qtyUnit", "sourceLine", "subArea",
+        "area", "boqCategory", "code", "designer", "itemDescription", "itemDescriptionRaw", "lineNo", "notes",
+        "productReference", "qty", "qtyUnit", "sourceLine", "subArea",
       ].sort(),
+    );
+    // The multi-line cell staged AS PRINTED beside the collapsed description,
+    // which is what the confirm reads the item's name and specs out of.
+    expect(sheet.lines[0]!.itemDescriptionRaw).toBe(
+      "Stool\nModel Ref: Bespoke\nSizes (mm): W 450 x D 450 x SH 460\nFinish: Example oak\nFabric: COM",
     );
     expect(Object.values(sheet.lines[0]!)).not.toContain(350);
     expect(sheet.columns?.code).toEqual({ index: 4, heading: "Spec Code" });

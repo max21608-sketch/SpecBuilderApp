@@ -254,11 +254,19 @@ describeIfDb("a bill is mapped, not refused", () => {
     // The fabric row is on its item, the code without the bracket.
     expect(rows.rows.some((row) => row.code === "ZZ-FAB-13 (ZZ-FUR-10)")).toBe(false);
     const fabric = await client.query(
-      `select value, material_code from record_attributes where record_id = $1 and status = 'active' and label = 'Fabric'`,
+      `select value, material_code from record_attributes
+        where record_id = $1 and status = 'active' and label = 'Fabric' and attr_group = 'material'`,
       [rows.rows[0].id],
     );
     expect(fabric.rows).toHaveLength(1);
     expect(fabric.rows[0].material_code).toBe("ZZ-FAB-13");
+    // The description's own "Fabric: COM" names no cloth: a note, never a second COM.
+    const com = await client.query(
+      `select attr_group, spec_field_id from record_attributes
+        where record_id = $1 and status = 'active' and label = 'Fabric' and value = 'COM'`,
+      [rows.rows[0].id],
+    );
+    expect(com.rows).toEqual([{ attr_group: "note", spec_field_id: null }]);
     // A fabric row no bracket places stays a line: no quantity, never a 1, and its unit.
     expect(rows.rows.find((row) => row.code === "N/A")).toMatchObject({ qty: null, qty_unit: "m" });
     // The same code twice, told apart by the notes that became internal notes.

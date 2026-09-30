@@ -51,6 +51,13 @@ import {
 } from "@/lib/finishes";
 import { createFinish } from "@/lib/finish-edit";
 import { recomposeAnswers } from "@/lib/attribute-retire";
+import {
+  billItemName,
+  planSheetDescriptions,
+  revisionDescriptionRefusal,
+  type BillDescriptionPlan,
+} from "@/lib/bill-description";
+import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
 
 type StagedLine = {
   index: number;
@@ -109,6 +116,13 @@ export type ConfirmBoqResult = {
   changeSetId: string;
   /** Fabric lines written as a COM spec on their item, rather than as records. */
   fabricSpecs: number;
+  /** Specifications read out of the lines' description cells and written as attributes. */
+  descriptionSpecs: number;
+  /**
+   * Carried-forward lines whose description was NOT written, because the
+   * record already holds what it would write (`revisionDescriptionRefusal`).
+   */
+  descriptionsHeldBack: number;
 };
 
 export async function confirmBoqImport(
@@ -293,6 +307,11 @@ export async function confirmBoqImport(
     .map(String);
   const recomposeIds = new Set<string>();
   let fabricSpecs = 0;
+  // THE DESCRIPTION CELLS, planned by the function the review screen showed
+  // them with, over the same staged lines, against the same register.
+  const descriptionFields = await loadDescriptionFields(txn);
+  let descriptionSpecs = 0;
+  let descriptionsHeldBack = 0;
 
   for (const sheet of sheets as StagedBoqSheet[]) {
     const live = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
@@ -302,6 +321,17 @@ export async function confirmBoqImport(
     if (lines.length === 0) continue;
     /** The record each item line became or continues, by its row on the sheet. */
     const recordByRow = new Map<number, { recordId: string; carried: boolean }>();
+    const plans = planSheetDescriptions(sheet.lines as StagedLine[], descriptionFields);
+    // What each record this revision carries already holds, read under the
+    // lock, so the refusal is decided against what is there now.
+    const held = await loadHeldAttributes(
+      txn,
+      lines.flatMap((line) => (line.replaces && plans.has(line.index) ? [line.replaces.recordId] : [])),
+    );
+    const writeDescription = async (recordId: string, plan: BillDescriptionPlan) => {
+      descriptionSpecs += await writeDescriptionAttributes(txn, { recordId, plan, runId, projectId, actor, library });
+      recomposeIds.add(recordId);
+    };
 
     const replacesRunId = sheet.replacesRunId ?? null;
 
@@ -368,7 +398,7 @@ export async function confirmBoqImport(
         }
         const changed = await txn`
           update spec_records
-          set item_description = ${line.itemDescription},
+          set item_description = ${billItemName(line)},
               product_reference = ${line.productReference},
               qty = ${line.qty},
               designer = ${line.designer},
@@ -418,6 +448,19 @@ export async function confirmBoqImport(
         recordIds.push(target.recordId);
         recordByRow.set(line.lineNo, { recordId: target.recordId, carried: true });
 
+        // A CARRIED RECORD KEEPS ITS SPECS. The description is written only
+        // where the record holds nothing it would duplicate or replace — the
+        // review said which, in the same words, from the same function.
+        const plan = plans.get(line.index);
+        if (plan) {
+          const refusal = revisionDescriptionRefusal(
+            plan,
+            held.get(target.recordId) ?? { fromBill: false, slots: [], fieldIds: [] },
+          );
+          if (refusal) descriptionsHeldBack += 1;
+          else await writeDescription(target.recordId, plan);
+        }
+
         // The client ref can be re-punctuated between revisions. Refs are
         // write-once-and-delete by design (0002), so the old one goes and the
         // new one is written rather than edited in place.
@@ -448,13 +491,16 @@ export async function confirmBoqImport(
       // lands in `level`; one this app guessed lands in `level_suggested`,
       // where `questionTier` cannot see it and no gate can rest on it.
       const decided = levelDecision(line);
+      // THE NAME IS THE CELL'S FIRST LINE where the cell has more than one;
+      // everything the rest of it says is written below as attributes.
+      const plan = plans.get(line.index) ?? null;
       const inserted = await txn`
         insert into spec_records
           (project_id, run_id, record_no, status, category_id, item_description, product_reference, qty,
            qty_unit, designer, area, boq_category, level, level_suggested, level_suggested_reason,
            internal_notes, source_import_id, source_line_no, created_by, updated_by)
         values
-          (${projectId}, ${specRunId}, ${recordNo}, 'active', ${line.categoryId ?? null}, ${line.itemDescription},
+          (${projectId}, ${specRunId}, ${recordNo}, 'active', ${line.categoryId ?? null}, ${plan?.name ?? line.itemDescription},
            ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${line.designer},
            ${effectiveArea(line)}, ${line.boqCategory ?? null},
            ${decided.level}, ${decided.suggested}, ${decided.reason},
@@ -486,6 +532,8 @@ export async function confirmBoqImport(
         join spec_records r on r.category_id = q.category_id
         where r.id = ${recordId}
       `;
+
+      if (plan) await writeDescription(recordId, plan);
 
       imported += 1;
     }
@@ -559,7 +607,17 @@ export async function confirmBoqImport(
   // returned.
   await snapshotRecords(txn, recordIds, changeSetId);
 
-  return { imported, updated, retired, projectId, runIds, changeSetId, fabricSpecs };
+  return {
+    imported,
+    updated,
+    retired,
+    projectId,
+    runIds,
+    changeSetId,
+    fabricSpecs,
+    descriptionSpecs,
+    descriptionsHeldBack,
+  };
 }
 
 async function loadLibrary(txn: TxnSql, projectId: string): Promise<Finish[]> {
@@ -654,36 +712,7 @@ async function writeFabricLine(
     );
   }
 
-  let finishId: string | null = null;
-  const resolution = resolveFinishCode(materialCode, value, library);
-  if (resolution.status === "matched") {
-    finishId = resolution.finish.id;
-  } else if (resolution.status === "new") {
-    finishId = await createFinish(txn, {
-      projectId,
-      // What THIS line said, as a starting point, and TBC: a bill naming a
-      // code is not somebody confirming what it is.
-      fields: { code: resolution.code, description: value, state: "tbc" },
-      actor,
-    });
-    library.push({
-      id: finishId,
-      code: resolution.code,
-      codeNorm: normaliseFinishCode(resolution.code),
-      codeOrigin: "client",
-      kind: null,
-      description: value,
-      supplierRaw: null,
-      reference: null,
-      colour: null,
-      state: "tbc",
-    });
-  } else if (resolution.status === "none") {
-    // No code: linked only to an internal finish worded EXACTLY the same, which
-    // is the one filing that needs no person. Nothing is minted here.
-    const reading = readUncodedFinish(value, library, null);
-    finishId = reading.outcome === "link" && reading.finish ? reading.finish.id : null;
-  }
+  const finishId = await fileFinishCode(txn, { projectId, code: materialCode, says: value, library, actor });
 
   await txn`
     insert into record_attributes
@@ -694,4 +723,86 @@ async function writeFabricLine(
        ${fabricLineState(value)}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
   `;
   return true;
+}
+
+/**
+ * A code a bill line names, filed in the project's finishes library — the
+ * drawings path's resolution and its CONFLICT rule, shared by the fabric lines
+ * and the description cells so the two cannot file one code two ways.
+ *
+ * `says` is what the bill says the code IS: a new code is created TBC with it
+ * as its description (a bill naming a code is not somebody confirming what it
+ * is); a code the library already describes the same way is linked; one it
+ * describes DIFFERENTLY links nothing and shows on the finishes page as a code
+ * needing a person. No code: linked only to an internal finish worded exactly
+ * the same, which is the one filing that needs nobody. Returns the finish id,
+ * or null.
+ */
+async function fileFinishCode(
+  txn: TxnSql,
+  input: { projectId: string; code: string | null; says: string | null; library: Finish[]; actor: string },
+): Promise<string | null> {
+  const { projectId, code, says, library, actor } = input;
+  const resolution = resolveFinishCode(code, says, library);
+  if (resolution.status === "matched") return resolution.finish.id;
+  if (resolution.status === "new") {
+    const finishId = await createFinish(txn, {
+      projectId,
+      fields: { code: resolution.code, description: says, state: "tbc" },
+      actor,
+    });
+    library.push({
+      id: finishId,
+      code: resolution.code,
+      codeNorm: normaliseFinishCode(resolution.code),
+      codeOrigin: "client",
+      kind: null,
+      description: says,
+      supplierRaw: null,
+      reference: null,
+      colour: null,
+      state: "tbc",
+    });
+    return finishId;
+  }
+  if (resolution.status === "none" && says) {
+    const reading = readUncodedFinish(says, library, null);
+    return reading.outcome === "link" && reading.finish ? reading.finish.id : null;
+  }
+  return null;
+}
+
+/**
+ * ONE DESCRIPTION CELL, WRITTEN AS THE ATTRIBUTES ITS PLAN NAMES — exactly
+ * those, in plan order, because the plan is what the reviewer was shown
+ * (`planBillDescription`). Sourced to this bill's run with no page, as the
+ * fabric lines are: a spreadsheet has none. A coded finish is filed in the
+ * library by its WORDS — the value with the code taken off, so "GR-TIM-10 -
+ * Lime Washed Oak" and "GR-TIM-10 LIME WASHED OAK" describe one timber — and
+ * a no-field code (stone) is filed too: the library is the client's codes, not
+ * BWS's fields. A note links nothing. Returns how many rows were written.
+ */
+async function writeDescriptionAttributes(
+  txn: TxnSql,
+  input: { recordId: string; plan: BillDescriptionPlan; runId: string; projectId: string; actor: string; library: Finish[] },
+): Promise<number> {
+  const { recordId, plan, runId, projectId, actor, library } = input;
+  let written = 0;
+  for (const [order, attribute] of plan.attributes.entries()) {
+    const finishId =
+      attribute.materialCode && attribute.attrGroup !== "note" && attribute.attrGroup !== "dimension"
+        ? await fileFinishCode(txn, { projectId, code: attribute.materialCode, says: attribute.finishWords, library, actor })
+        : null;
+    await txn`
+      insert into record_attributes
+        (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
+         source_run_id, source_page, sort_order, created_by, updated_by)
+      values
+        (${recordId}, ${attribute.attrGroup}, ${attribute.slot}, ${attribute.label}, ${attribute.value},
+         ${attribute.unit}, ${attribute.materialCode}, ${finishId}, ${attribute.specFieldId}, ${attribute.state},
+         ${runId}, null, ${order}, ${actor}, ${actor})
+    `;
+    written += 1;
+  }
+  return written;
 }

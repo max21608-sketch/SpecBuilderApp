@@ -362,24 +362,33 @@ describeIfDb("a bill's structure, read; its fabric lines, written onto their ite
     expect(versions.rows.every((row) => row.n === 1 && row.cs === changes.rows[0]!.id)).toBe(true);
   });
 
-  it("registers the bill's own file as a specification read ONCE", async () => {
+  it("offers no charged read of a bill whose confirm already read its descriptions", async () => {
+    // Every item line of this bill is a multi-line description cell, and the
+    // confirm read each into its record's name and specifications
+    // (bill-description.ts). A paid second reading of the same cells would
+    // stage them all again over values the records already hold, so the
+    // route refuses it in words and registers nothing. The registration's
+    // own ONCE rule is held by bill-spec-read.test.ts, on a single-line bill.
     published.length = 0;
     const { POST } = await import("@/app/api/imports/[id]/read-specifications/route");
-    const first = await POST(request({}), params(billId));
-    const firstBody = (await first.json()) as { importId: string; reused: boolean };
-    expect(first.status).toBe(201);
-    expect(firstBody.reused).toBe(false);
-    const second = await POST(request({}), params(billId));
-    const secondBody = (await second.json()) as { importId: string; reused: boolean };
-    expect(second.status).toBe(200);
-    expect(secondBody).toMatchObject({ importId: firstBody.importId, reused: true });
-    expect(published.map((message) => message.extractionId)).toEqual([firstBody.importId]);
-
-    const rows = await client.query(
-      `select s.source_kind, s.document_kind, s.attachment_id = b.attachment_id as same_file, s.batch_id is not distinct from b.batch_id as same_batch
-         from intake_runs s, intake_runs b where s.id = $1 and b.id = $2`,
-      [firstBody.importId, billId],
+    const refused = await POST(request({}), params(billId));
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toMatch(/descriptions were read when it was confirmed/);
+    expect(published).toEqual([]);
+    const registered = await client.query(
+      `select count(*)::int as n from intake_runs where project_id = $1 and source_kind = 'spec_document'`,
+      [projectId],
     );
-    expect(rows.rows[0]).toMatchObject({ source_kind: "spec_document", document_kind: "ffe_schedule", same_file: true, same_batch: true });
+    expect(registered.rows[0].n).toBe(0);
+    // And the stool's description reached its record: named after the cell's
+    // first line, its size in its slots.
+    const stool = await client.query(
+      `select r.item_description,
+              (select string_agg(a.dimension_slot || ' ' || a.value, ', ' order by a.sort_order)
+                 from record_attributes a where a.record_id = r.id and a.status = 'active' and a.attr_group = 'dimension') as dims
+         from spec_records r where r.source_import_id = $1 and r.source_line_no = 9`,
+      [billId],
+    );
+    expect(stool.rows[0]).toMatchObject({ item_description: "Stool", dims: "W 450, D 450, SH 460" });
   });
 });

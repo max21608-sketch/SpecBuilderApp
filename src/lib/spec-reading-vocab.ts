@@ -89,3 +89,33 @@ export const COM_ONLY_VALUES: readonly string[] = [
   "client s own material",
   "clients own material",
 ];
+
+/**
+ * A size PREFIX that is not one of the five slot words but that a document
+ * uses for one, inside a combined size line. Matched on the WHOLE prefix,
+ * lower-cased, dots dropped — never as a substring, and never as a label:
+ * `normaliseDimensionSlot` (the drawings path's validator over a page's own
+ * label) does not read these, so an `OAH` caption on a drawing is untouched.
+ *
+ * NOT HERE, on purpose: `L`. A length is not a width, and the bill that prints
+ * `L 540 x W 345 x H450` prints both — reading L as W would put two widths on
+ * one item and ship whichever won.
+ */
+export const SIZE_PREFIX_SLOTS: readonly { prefix: string; slot: "W" | "D" | "H" | "SH" | "DIA"; from: string }[] = [
+  {
+    prefix: "oah",
+    slot: "H",
+    from: "Aman bill, \"Sizes(mm): W 1651 x D 482 x OAH 406 x SH 355\" — overall height, the page's own word, 2026-09-30",
+  },
+];
+
+/**
+ * Statement labels a bill cell has been seen WELDED onto the figure before
+ * them — the line break lost, `SH 355Finish: GR-TIM-09`. A line is split before
+ * one of these only where a DIGIT sits immediately in front of it and a colon
+ * follows it, so "x Base: W 66" (a space in front) and a word that merely
+ * contains the label are never split. Matched case-insensitively, whole word.
+ */
+export const WELDED_LABELS: readonly { label: string; from: string }[] = [
+  { label: "finish", from: "Aman bill, \"Sizes(mm): W 1651 x D 482 x OAH 406 x SH 355Finish: GR-TIM-09 …\", 2026-09-30" },
+];
