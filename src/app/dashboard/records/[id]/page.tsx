@@ -79,6 +79,7 @@ import { Table, Th, Td, Tr, GroupRow } from "@/components/ui/Table";
 import { TONE } from "@/components/ui/tone";
 import Tabs from "@/components/ui/Tabs";
 import { useUrlTab } from "@/lib/use-url-tab";
+import RecordTitle from "@/components/records/RecordTitle";
 
 export type Answer = {
   requirement_id: string; kind: string; prompt: string; help_text: string | null; section: string | null;
@@ -915,7 +916,10 @@ function RecordView() {
         // mock-up run and the main run, and landing on the wrong tab means
         // hunting for the row you just left.
         crumbs={[{ label: `${record.bws_project_number} · ${record.run_name}`, href: runHref }]}
-        title={`${recordLabel} · ${record.item_description}`}
+        // A LONG NAME IS CUT AS A STRING, one line, with the whole of it on
+        // hover and in the Description beside the picture. The h1 used to be
+        // the bill's entire description cell and stood four lines tall.
+        title={<RecordTitle label={recordLabel} name={record.item_description} />}
         titleAside={
           // THE NAME A PERSON USES. A configuration's own record number is the
           // next free one in the project and says nothing about what it belongs

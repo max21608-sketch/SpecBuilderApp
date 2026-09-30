@@ -33,6 +33,7 @@
 // 12 panels).
 // ============================================================================
 import { recordShortLabel } from "@/lib/record-label";
+import { clampText } from "@/lib/shout";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
@@ -244,6 +245,43 @@ function NoClientRef() {
       no client ref
     </span>
   );
+}
+
+/**
+ * A CLIENT REF NEVER BREAKS INSIDE ITSELF. A browser may wrap at a hyphen, so
+ * in a squeezed column `GR-FUR-10` came out as three lines of `GR-` / `FUR-`
+ * / `10` — which reads as three codes, and as a dash that is not the bill's.
+ * Each ref is its own no-wrap run, printed exactly as the bill wrote it (the
+ * cell is the stored `ref_value`, ASCII hyphens and all — nothing on the way
+ * rewrites a dash); a list of several still wraps BETWEEN them, at the comma.
+ */
+export function ClientRefs({ code }: { code: string }) {
+  const parts = code.split(", ");
+  return (
+    <>
+      {parts.map((part, index) => (
+        <Fragment key={`${part}-${index}`}>
+          {index > 0 && ", "}
+          <span className="whitespace-nowrap">{part}</span>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/**
+ * THE ITEM CELL IS A NAME, AND A LONG ONE IS CUT, NOT WRAPPED TO TEN LINES.
+ * Cut as a STRING (`clampText`), because CSS `line-clamp` does nothing beside
+ * the block utilities these cells carry — `docs/design-language.md`'s DOM
+ * rule. The whole text is the link's `title` and the record's own
+ * Description, so nothing is lost; the row just stops standing taller than
+ * the rest of the screen.
+ */
+export const ITEM_CLAMP = { lines: 2, chars: 90 } as const;
+
+export function ItemName({ text }: { text: string }) {
+  const { clamped, wasClamped } = clampText(text, ITEM_CLAMP.lines, ITEM_CLAMP.chars);
+  return <span title={wasClamped ? text : undefined}>{clamped}</span>;
 }
 
 /**
@@ -850,7 +888,7 @@ export default function SpecTable({
                           : undefined
                       }
                     >
-                      <Td className={`text-neutral-500 tabular-nums ${isConfiguration ? "pl-6" : ""}`}>
+                      <Td className={`whitespace-nowrap text-neutral-500 tabular-nums ${isConfiguration ? "pl-6" : ""}`}>
                         <span
                           title={URGENCY_LABELS[urgency]}
                           className={`mr-2 inline-block h-2 w-2 rounded-full align-middle ${dot}`}
@@ -878,22 +916,24 @@ export default function SpecTable({
                             through a configuration's parent. */}
                         {isConfiguration ? (
                           <span className="text-neutral-500">
-                            {record.client_code ?? <NoClientRef />}{" "}
+                            {record.client_code ? <ClientRefs code={record.client_code} /> : <NoClientRef />}{" "}
                             {/* THE LETTER, coloured the way the review card
                                 colours it — A is sky on every screen. */}
                             <b className={letterColour(record.variant_label!)}>{record.variant_label}</b>
                           </span>
+                        ) : record.client_code ? (
+                          <ClientRefs code={record.client_code} />
                         ) : (
-                          (record.client_code ?? <NoClientRef />)
+                          <NoClientRef />
                         )}
                         <OtherRefs clientCode={record.client_code} refs={record.refs} />
                       </Td>
-                      <Td className={isConfiguration ? "pl-6" : ""}>
+                      <Td className={`min-w-[15rem] ${isConfiguration ? "pl-6" : ""}`}>
                         <Link
                           href={`/dashboard/records/${record.id}`}
                           className="text-blue-700 no-underline hover:underline"
                         >
-                          {record.item_description}
+                          <ItemName text={record.item_description} />
                         </Link>
                         {record.product_reference && (
                           <span className="text-neutral-500"> · {record.product_reference}</span>
@@ -908,7 +948,7 @@ export default function SpecTable({
                           </p>
                         )}
                       </Td>
-                      <Td className="text-neutral-700">{record.area ?? "—"}</Td>
+                      <Td className="min-w-[7rem] text-neutral-700">{record.area ?? "—"}</Td>
                       <Td num className="text-neutral-700">
                         {/* THE BILL'S QUANTITY IS NOT APPORTIONED BY ANYTHING.
                             The bill says 45 of S-201 and never says how many
@@ -1139,7 +1179,10 @@ export default function SpecTable({
                         );
                       })}
                       <Td>
-                        <div className="flex justify-end gap-1">
+                        {/* STACKED, not side by side: two buttons in a row made
+                            this the widest cell on the table, and the Item
+                            column was what gave way. */}
+                        <div className="flex flex-col items-end gap-1 whitespace-nowrap">
                           {/* ADD A CONFIGURATION, on a live bill line (2026-09-23).
                               It opens a panel under the row, and nothing is
                               written until Add inside it. */}
