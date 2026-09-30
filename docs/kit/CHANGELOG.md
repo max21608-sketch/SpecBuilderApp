@@ -366,3 +366,11 @@ Also worth porting, found the same way: a read-only `tools/dump-*.ts` that
 prints what a staged document reduces to, calling the app's own functions and
 reimplementing none of them. "Verified against the real pack" was prose in
 CLAUDE.md, and prose cannot be re-run.
+
+## 2026-09-30 — `new-screen`: nothing is wider than its box
+
+The skill's DOM traps gain the overflow rule, and "Before calling it done"
+gains `node tools/overflow-audit.mjs` against a dev server. The phase table on
+a real bill had run 256px past its body with two columns off-screen, and every
+check the skill listed passed. The detector (`src/lib/overflow.ts`) is one
+file and one dev-only shell component, and ports to any app on this chassis.

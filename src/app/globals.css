@@ -21,4 +21,11 @@
        hyphens in a table cell. The rest of the rule is src/lib/overflow.ts. */
     overflow-wrap: break-word;
   }
+  /* A native select is as wide as its LONGEST option. One naming a record
+     and its phase ran 856px on the drawings card and pushed the page 520px
+     past a 1440 screen. Never wider than its box; the open list still shows
+     each option whole. */
+  select {
+    max-width: 100%;
+  }
 }

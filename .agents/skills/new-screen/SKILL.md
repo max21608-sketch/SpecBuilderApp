@@ -67,6 +67,13 @@ mean, the thing has no colour.
 - `divide-y` on the data row, not the tbody, where rows carry panels.
 - `clampText`, not CSS `line-clamp`. `softenShout` offers *As printed*.
 - The drawings review renders no pdfjs canvas in a hidden browser tab.
+- **Nothing is wider than its box** (`src/lib/overflow.ts`). In development the
+  shell logs `[overflow] …` for any box whose content runs past its edge — a
+  console error, so a browser walk fails on it. A native `select` is as wide as
+  its longest option (capped globally, but give it a width in a flex row); a
+  code is a no-wrap run per word (`ClientRefs`); long text is `clampText`. A
+  box that is MEANT to scroll sideways carries `data-overflow-ok`, and that is
+  a decision somebody reviews.
 
 ## Data the mock-up shows is data the screen shows
 
@@ -85,6 +92,8 @@ rule; two implementations is how two screens come to disagree.
    mock-up tab open beside it. Check: the blocking number is the first thing on
    the page; a guess is visibly a guess; every number goes somewhere; the error
    path (a refused request) shows its message and does not freeze the screen.
-4. The environment chip is in the top bar and `[STAGING]` is in the title.
-5. Report it as built and verified, and human acceptance as OUTSTANDING until
+4. `node tools/overflow-audit.mjs` against the dev server exits 0: every main
+   screen at 1920x1080 and 1440x900, no box wider than itself.
+5. The environment chip is in the top bar and `[STAGING]` is in the title.
+6. Report it as built and verified, and human acceptance as OUTSTANDING until
    Max has compared the two side by side. "Looks right to me" is not sign-off.

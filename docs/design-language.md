@@ -220,6 +220,19 @@ Collected from CLAUDE.md so they are in one place. Each has bitten once.
   in a visible pane or you will hunt a deadlock that is not there.
 - **`RecordDetails` saves as one act**, not on blur.
 - **The record's picture is a grid track, never a float.**
+- **Nothing is wider than its box** (2026-09-30, Max: "an app wide rule to
+  prevent overflows"). `src/lib/overflow.ts` is the one predicate — a box that
+  clips or scrolls sideways whose content is wider than it, the page included —
+  and `OverflowWatch` reports every one as a console error in development;
+  `tools/overflow-audit.mjs` walks the main screens at 1920 and 1440 and fails.
+  It exists because the phase table on the real Aman bill ran 256px past its
+  body with TG1 and the row actions off-screen, and nothing — four checks,
+  jsdom, a screenshot — could see it. Its first two catches the same evening:
+  the bill review 29px over, and a record-picker select (as wide as its longest
+  option) pushing the drawings page 520px past a 1440 screen. Selects are
+  capped at `max-width: 100%` globally, the body wraps a long word rather than
+  widening, a ref is a no-wrap run per word, a dense table's cells are `px-3`,
+  and `data-overflow-ok` is the one reviewable exception.
 
 ## Deviations from the mock-up, and why
 
