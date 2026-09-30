@@ -1232,7 +1232,11 @@ export function RunTargets({
                   onChange={(event) => {
                     if (event.target.value) onPick(event.target.value);
                   }}
-                  className="ml-2 border border-neutral-300 rounded px-2 py-1 text-xs disabled:opacity-50"
+                  // A native select is as wide as its LONGEST option, and an
+                  // option names a record and its phase: on the Aman bill this
+                  // one ran 856px and pushed the page 520px past a 1440 screen.
+                  // The open list still shows every option whole.
+                  className="ml-2 w-[26rem] max-w-full border border-neutral-300 rounded px-2 py-1 text-xs disabled:opacity-50"
                 >
                   <option value="">— choose a record —</option>
                   {records.map((record) => (
