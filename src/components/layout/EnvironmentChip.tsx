@@ -33,7 +33,7 @@ const COLOUR: Record<"DEV" | "STAGING" | "PILOT", string> = {
 // The pilot build's version, beside its label (2026-09-23, at Max's request),
 // so a screenshot says WHICH pilot as well as that it is pilot. Bumped by hand
 // at a promotion; staging moves hourly and carries none.
-export const PILOT_VERSION = "1.3";
+export const PILOT_VERSION = "1.4";
 
 export default function EnvironmentChip() {
   const label = currentEnvLabel();

@@ -50,7 +50,7 @@ describe("the environment chip", () => {
 
   it("carries the version on PILOT only", async () => {
     const pilot = await renderChip("pilot");
-    expect(screen.getByText("v1.3")).toBeInTheDocument();
+    expect(screen.getByText("v1.4")).toBeInTheDocument();
     pilot.unmount();
     await renderChip("staging");
     expect(screen.queryByText(/^v\d/)).toBeNull();
