@@ -21,6 +21,21 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-01 — Promoted to pilot: the Aman bill reads itself, at `a5065eb` (v1.4)
+
+At Max's instruction ("yes, promote it to pilot"). Run by Max: migration 0042
+on pilot ("Applied 1 migration(s); 41 already present") and the seed, 13
+files including 0012 and 0013, both from the `amb-int` worktree (a first run
+from the main checkout, 97 commits behind, applied nothing new: its seeds
+0001–0011 are byte-identical to pilot's). Checked read-only by Claude: the
+Aman layout is on pilot as a seed with `{"finishForCategoryPrefix": "FBX-"}`,
+and the four new category aliases are present. Step 3 by Claude: the chip
+bumped to v1.4 on staging, then `pilot` fast-forwarded `0b55985` → `a5065eb`
+(27 commits). **Not done:** a pre-promotion backup was recommended and is not
+recorded here; the deployment's `Ready`, `/api/auth/me` at `a5065eb`, the
+PILOT v1.4 chip, and the first upload of the bill and the two drawings are
+Max's. Not accepted by Max or Matthew.
+
 ## 2026-09-30 (evening) — The Aman bill reads itself: names, specs, no column step; the overflow rule
 
 Max, on the pilot P18181 upload: the names carried every finish and size, no
