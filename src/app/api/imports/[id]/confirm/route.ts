@@ -25,6 +25,7 @@ import {
 } from "@/lib/confirm-spec-document";
 import { confirmDrawingItem, reviewDrawingObservations } from "@/lib/confirm-drawings";
 import { confirmPreambleNotes, reviewPreambleNotes } from "@/lib/confirm-preamble";
+import { confirmFinishScheduleEntries, reviewFinishScheduleEntries } from "@/lib/confirm-finish-schedule";
 
 export const maxDuration = 60;
 
@@ -90,6 +91,8 @@ const ConfirmBody = z
       .optional(),
     // Preamble notes.
     notes: z.array(StagedRef).min(1).max(500).optional(),
+    // Finishes schedule entries (schemaVersion 2).
+    entries: z.array(StagedRef).min(1).max(600).optional(),
   })
   .strict();
 
@@ -117,7 +120,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   // Which pipeline, read from the run itself rather than from the request. The
   // client does not get to say which confirm logic applies to a row.
-  const runs = await sql`select id, source_kind, document_kind from intake_runs where id = ${id}`;
+  const runs = await sql`
+    select id, source_kind, document_kind, parsed->>'kind' as staged_kind from intake_runs where id = ${id}
+  `;
   const run = runs[0];
   if (!run) return json({ ok: false, error: "No such import." }, 404);
 
@@ -199,6 +204,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
                 runId: id,
                 expectedVersion,
                 notes,
+                action: body.action as "ignore" | "restore",
+                actor: user.email,
+              }),
+            );
+      return json({ ok: true, ...result });
+    }
+
+    // A finishes schedule read as ENTRIES. A version 1 schedule (proposals)
+    // carries no `kind` and goes on through the proposals path below.
+    if (run.document_kind === "finishes_schedule" && run.staged_kind === "finishes_schedule") {
+      const entries = body.entries ?? [];
+      if (entries.length === 0) return json({ ok: false, error: "Say which finishes this applies to." }, 400);
+      if (!distinct(entries)) return json({ ok: false, error: "That request lists a finish twice." }, 400);
+      const result =
+        body.action === "confirm"
+          ? await withTransaction((txn) =>
+              confirmFinishScheduleEntries(txn, { runId: id, expectedVersion, entries, actor: user.email }),
+            )
+          : await withTransaction((txn) =>
+              reviewFinishScheduleEntries(txn, {
+                runId: id,
+                expectedVersion,
+                entries,
                 action: body.action as "ignore" | "restore",
                 actor: user.email,
               }),

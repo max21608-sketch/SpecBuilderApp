@@ -15,6 +15,12 @@
 // is the right eventual answer; it also forces a re-read of every document
 // already read, which is eleven billed calls for the Panther pack alone.
 //
+// [2026-10-04: the scanning half now exists. A finishes schedule is read with
+// its own tool, which carries a code field (`FINISHES_SCHEDULE_TOOL`), staged
+// as a list of finishes and confirmed into the library by
+// `confirm-finish-schedule.ts`, with the verdict vocabulary below plus a
+// conflict. The paste box stays: a list off an email has no document to read.]
+//
 // So the part that needs no inference is built: a person pastes the codes —
 // off the schedule, out of an email, from anywhere — and the app says which
 // are new, which it already holds, and which are duplicates of each other.

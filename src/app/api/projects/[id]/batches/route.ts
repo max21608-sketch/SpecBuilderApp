@@ -26,10 +26,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // HOW MANY PROPOSALS ARE STILL PENDING, counted here so the pack screen can
   // stop ticking a document because somebody opened it (found-in-use 4).
   //
-  // Three staged shapes carry a reviewStatus and they are named rather than
+  // Four staged shapes carry a reviewStatus and they are named rather than
   // searched: items[].observations[] (src/lib/drawing-document.ts), lines[]
-  // (src/lib/spec-document.ts, which is also an email) and notes[]
-  // (src/lib/preamble-document.ts). A recursive jsonpath would need no shape
+  // (src/lib/spec-document.ts, which is also an email), notes[]
+  // (src/lib/preamble-document.ts) and entries[] (src/lib/finish-schedule.ts). A recursive jsonpath would need no shape
   // knowledge and would also silently mean whatever it meant; a named path is
   // readable, and a fourth shape reads as zero rather than as a wrong number.
   //
@@ -81,17 +81,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                               '$.lines[*] ? (@.reviewStatus == "pending")')
                          || jsonb_path_query_array(coalesce(r.parsed, '{}'::jsonb),
                               '$.notes[*] ? (@.reviewStatus == "pending")')
+                         || jsonb_path_query_array(coalesce(r.parsed, '{}'::jsonb),
+                              '$.entries[*] ? (@.reviewStatus == "pending")')
                        )
                      ) order by
                        -- Read order, not upload order: the preamble gives the
-                       -- context, the bill creates the records, the drawings
-                       -- attach to them.
-                       case r.document_kind
-                         when 'preamble' then 0
-                         when 'shop_drawings' then 2
-                         else 1
+                       -- context, the bill creates the records, the finishes
+                       -- schedule sets the library out (D1), the drawings
+                       -- attach to all of it.
+                       case
+                         when r.document_kind = 'preamble' then 0
+                         when r.source_kind = 'boq_xlsx' then 1
+                         when r.document_kind = 'finishes_schedule' then 2
+                         when r.document_kind = 'shop_drawings' then 4
+                         else 3
                        end,
-                       case r.source_kind when 'boq_xlsx' then 0 else 1 end,
                        r.created_at)
                 from intake_runs r
                 left join attachments a on a.id = r.attachment_id

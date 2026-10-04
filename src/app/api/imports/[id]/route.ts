@@ -69,6 +69,10 @@ import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { paletteOptionFor } from "@/lib/palettes";
 import type { StagedStandard } from "@/lib/bw-standard";
 import { normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
+// ---- finishes schedule (brief C) ----
+import { assertStagedFinishSchedule, isStagedFinishSchedule, reviewFinishSchedule } from "@/lib/finish-schedule";
+import { loadScheduleLibrary, setFinishScheduleEntryKind } from "@/lib/confirm-finish-schedule";
+import { isFinishKind } from "@/lib/finishes";
 
 export const dynamic = "force-dynamic";
 
@@ -659,6 +663,41 @@ async function patchPreamble(id: string, raw: unknown, actor: string): Promise<R
 
 
 
+// ---- a finishes schedule entry's kind, filed by a person's click ------------
+
+const FinishEntryPatch = z
+  .object({
+    entryId: z.string().min(1),
+    expectedVersion: z.number().int().nonnegative(),
+    changes: z.object({ kind: z.string().nullable() }).strict(),
+  })
+  .strict();
+
+async function patchFinishScheduleEntry(id: string, raw: unknown, actor: string): Promise<Response> {
+  const parsed = FinishEntryPatch.safeParse(raw);
+  if (!parsed.success) {
+    return json({ ok: false, error: parsed.error.issues[0]?.message ?? "That change is not valid." }, 400);
+  }
+  const { entryId, expectedVersion, changes } = parsed.data;
+  if (changes.kind !== null && !isFinishKind(changes.kind)) {
+    return json({ ok: false, error: "That is not a kind of finish." }, 400);
+  }
+  try {
+    const result = await withTransaction((txn) =>
+      setFinishScheduleEntryKind(txn, {
+        runId: id,
+        entryId,
+        expectedVersion,
+        kind: changes.kind === null ? null : (changes.kind as Parameters<typeof setFinishScheduleEntryKind>[1]["kind"]),
+        actor,
+      }),
+    );
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
   const rows = await sql`
@@ -742,6 +781,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       specFields: fields,
       records: recordChoices(context),
     });
+  }
+
+  // ---- a finishes schedule read as ENTRIES (schemaVersion 2) --------------
+  // Null `parsed` is a schedule not read yet, and it will be read in the new
+  // shape. A version 1 run (proposals) falls through to the old screen below.
+  if (
+    run.source_kind === "spec_document" &&
+    run.document_kind === "finishes_schedule" &&
+    (!run.parsed || isStagedFinishSchedule(run.parsed))
+  ) {
+    if (!run.parsed) return json({ ok: true, import: { ...run, parsed: null }, review: [] });
+    // The verdict against the LIVE library, by the function the confirm calls.
+    const staged = assertStagedFinishSchedule(run.parsed);
+    const library = await loadScheduleLibrary(sql, String(run.project_id));
+    return json({ ok: true, import: { ...run, parsed: staged }, review: reviewFinishSchedule(staged, library) });
   }
 
   if (run.source_kind === "spec_document" && run.document_kind === "preamble") {
@@ -1518,8 +1572,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   // Which shape, read from the run, not from the request.
-  const rows = await sql`select source_kind, document_kind from intake_runs where id = ${id}`;
+  const rows = await sql`
+    select source_kind, document_kind, parsed->>'kind' as staged_kind from intake_runs where id = ${id}
+  `;
   if (!rows[0]) return json({ ok: false, error: "No such import." }, 404);
+
+  if (rows[0].document_kind === "finishes_schedule" && rows[0].staged_kind === "finishes_schedule") {
+    return patchFinishScheduleEntry(id, raw, user.email);
+  }
 
   if (rows[0].document_kind === "shop_drawings") {
     // Two shapes on one route, told apart by the key the body carries rather

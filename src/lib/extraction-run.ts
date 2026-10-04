@@ -51,6 +51,7 @@ import { handOffReadSlot } from "@/lib/extraction-slots";
 import { isRegisterFreeKind, normaliseUnit, type AttributeUnit, type DocumentKind } from "@/lib/spec-vocab";
 import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
 import { stagePreamble, type StagedPreamble } from "@/lib/preamble-document";
+import { stageFinishSchedule, type StagedFinishSchedule } from "@/lib/finish-schedule";
 
 const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
 
@@ -224,7 +225,7 @@ export async function runDocumentExtraction({
   // the schema together; it chooses the staging too, so a drawing can never be
   // staged as a list of proposals no reviewer can display.
   const filename = String(attachment.filename ?? "");
-  let staged: StagedSpecDocument | StagedDrawings | StagedPreamble;
+  let staged: StagedSpecDocument | StagedDrawings | StagedPreamble | StagedFinishSchedule;
   let stagedCount: number;
 
   if (result.output.outputKind === "drawing_items") {
@@ -242,6 +243,12 @@ export async function runDocumentExtraction({
     const preamble = stagePreamble(result.output.data.notes, filename, result.output.data.documentNotes);
     staged = preamble;
     stagedCount = preamble.notes.length;
+  } else if (result.output.outputKind === "finish_entries") {
+    // A finishes schedule: a list of finishes under the client's codes. The
+    // verdict against the library is read at review time (finish-schedule.ts).
+    const schedule = stageFinishSchedule(result.output.data.entries, filename, result.output.data.documentNotes);
+    staged = schedule;
+    stagedCount = schedule.entries.length;
   } else {
     if (!registers) return await releaseAndThrow(claim, actor, "The registers were not loaded for this document.");
     const document: StagedSpecDocument = {

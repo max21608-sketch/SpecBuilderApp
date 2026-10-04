@@ -15,6 +15,7 @@ import SpecDocumentReview, { type Registers, type SpecImport } from "@/component
 import { type EmailMessage } from "@/components/imports/EmailHeader";
 import DrawingsReview from "@/components/imports/DrawingsReview";
 import PreambleReview from "@/components/imports/PreambleReview";
+import FinishScheduleReview from "@/components/imports/FinishScheduleReview";
 import Button, { buttonClass } from "@/components/ui/Button";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
@@ -907,6 +908,21 @@ export default function ReviewImportPage() {
   if (run.document_kind === "preamble") {
     return (
       <PreambleReview
+        importId={run.id}
+        crumb={packCrumb}
+        project={{ id: run.project_id, number: run.bws_project_number, name: run.project_name }}
+      />
+    );
+  }
+
+  // A finishes schedule read as ENTRIES (schemaVersion 2), or one not read yet
+  // — which will be. A version 1 schedule (proposals) keeps the screen below.
+  if (
+    run.document_kind === "finishes_schedule" &&
+    (!run.parsed || (run.parsed as unknown as { kind?: string }).kind === "finishes_schedule")
+  ) {
+    return (
+      <FinishScheduleReview
         importId={run.id}
         crumb={packCrumb}
         project={{ id: run.project_id, number: run.bws_project_number, name: run.project_name }}
