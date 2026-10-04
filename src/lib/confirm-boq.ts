@@ -58,6 +58,8 @@ import {
   type BillDescriptionPlan,
 } from "@/lib/bill-description";
 import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
+import { rowImageFor, type BillRowImage } from "@/lib/bill-row-image";
+import { assertProjectScopedPathname } from "@/lib/blob-source";
 
 type StagedLine = {
   index: number;
@@ -123,6 +125,8 @@ export type ConfirmBoqResult = {
    * record already holds what it would write (`revisionDescriptionRefusal`).
    */
   descriptionsHeldBack: number;
+  /** Records given the picture their bill row prints, having had none. */
+  billPictures: number;
 };
 
 export async function confirmBoqImport(
@@ -312,6 +316,7 @@ export async function confirmBoqImport(
   const descriptionFields = await loadDescriptionFields(txn);
   let descriptionSpecs = 0;
   let descriptionsHeldBack = 0;
+  let billPictures = 0;
 
   for (const sheet of sheets as StagedBoqSheet[]) {
     const live = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
@@ -447,6 +452,13 @@ export async function confirmBoqImport(
         carriedForward.add(target.recordId);
         recordIds.push(target.recordId);
         recordByRow.set(line.lineNo, { recordId: target.recordId, carried: true });
+        billPictures += await giveBillPicture(txn, {
+          recordId: target.recordId,
+          projectId,
+          lineNo: line.lineNo,
+          picture: rowImageFor(parsed.rowImages, sheet.sheetName, line.lineNo),
+          actor,
+        });
 
         // A CARRIED RECORD KEEPS ITS SPECS. The description is written only
         // where the record holds nothing it would duplicate or replace — the
@@ -511,6 +523,13 @@ export async function confirmBoqImport(
       if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
       recordIds.push(recordId);
       recordByRow.set(line.lineNo, { recordId, carried: false });
+      billPictures += await giveBillPicture(txn, {
+        recordId,
+        projectId,
+        lineNo: line.lineNo,
+        picture: rowImageFor(parsed.rowImages, sheet.sheetName, line.lineNo),
+        actor,
+      });
       // A line new to a REVISION is on the run from this moment, and must not
       // be swept up by the retirement of what the revision no longer lists.
       carriedForward.add(recordId);
@@ -617,7 +636,54 @@ export async function confirmBoqImport(
     fabricSpecs,
     descriptionSpecs,
     descriptionsHeldBack,
+    billPictures,
   };
+}
+
+/**
+ * THE PICTURE A BILL PRINTS ON AN ITEM'S ROW, given to its record only where
+ * the record has NONE — the same `attachments` row a drawing crop writes
+ * (`confirm-drawings.ts`), so every screen showing a record's picture shows
+ * this one. A bill picture never replaces a picture somebody already has: a
+ * crop off the drawings is the reviewed one. A later drawing crop replaces
+ * this, because that confirm deletes whatever `item_image` it finds.
+ *
+ * The pathname was written by `bill-images.ts` at registration; it is
+ * re-checked against the project's prefix here anyway, because it is about
+ * to become the record's and a check in only one place is a check the others
+ * skipped. Returns 1 where a picture was given, 0 otherwise.
+ */
+async function giveBillPicture(
+  txn: TxnSql,
+  input: { recordId: string; projectId: string; lineNo: number; picture: BillRowImage | null; actor: string },
+): Promise<number> {
+  const { recordId, projectId, lineNo, picture, actor } = input;
+  if (!picture?.pathname) return 0;
+  let pathname: string;
+  try {
+    pathname = assertProjectScopedPathname(picture.pathname, projectId);
+  } catch {
+    throw new DomainConflictError(
+      "picture_elsewhere",
+      `Row ${lineNo}'s picture is not stored under this project. Read the bill again from its file.`,
+      { status: 400 },
+    );
+  }
+  const extension = picture.contentType === "image/jpeg" ? "jpg" : picture.contentType === "image/gif" ? "gif" : "png";
+  const given = await txn`
+    insert into attachments
+      (entity_type, entity_id, kind, storage_path, filename, content_type, size,
+       image_width, image_height, uploaded_by)
+    select 'spec_records', ${recordId}, 'item_image', ${pathname},
+           ${`bill row ${lineNo}.${extension}`}, ${picture.contentType ?? "image/png"}, ${picture.size},
+           ${picture.width}, ${picture.height}, ${actor}
+    where not exists (
+      select 1 from attachments
+      where entity_type = 'spec_records' and entity_id = ${recordId} and kind = 'item_image'
+    )
+    returning id
+  `;
+  return given.length;
 }
 
 async function loadLibrary(txn: TxnSql, projectId: string): Promise<Finish[]> {

@@ -16,12 +16,31 @@
 // statement verbatim beside what it became, with the cell as printed. The
 // panel is its OWN `<tr>`, never a `<td colSpan>` beside the data cells, which
 // is the rule `Table.tsx` states.
+//
+// ONE THING HERE CHANGES SOMETHING: a size part's slot. The bill printed
+// `D 400` on a round stool, and a person says it is the diameter — before the
+// confirm, on the screen that is the gate. The change is posted (the caller's
+// `onSetSlot`), stored on the staged line, and applied INSIDE the plan the
+// server recomposes; nothing here composes a cell, so the chip after the
+// reload is `composeDimensionCell`'s own text again.
 // ============================================================================
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import { TONE } from "@/components/ui/tone";
-import type { BillDescriptionPlan, PlannedAttribute } from "@/lib/bill-description";
-import { DIMENSION_SLOT_LABELS } from "@/lib/spec-vocab";
+import type { BillDescriptionPlan, PlannedAttribute, SlotOverride } from "@/lib/bill-description";
+import { DIMENSION_SLOT_LABELS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
+
+/** Set a size part's slot (`null` puts it back as printed). Absent where the line cannot change. */
+export type SetSlot = (key: string, slot: SlotOverride | null) => void;
+
+const SLOT_CHOICES: { value: SlotOverride; short: string; long: string }[] = [
+  ...DIMENSION_SLOTS.map((slot) => ({
+    value: slot as SlotOverride,
+    short: slot === "DIA" ? "Dia" : slot,
+    long: DIMENSION_SLOT_LABELS[slot].toLowerCase(),
+  })),
+  { value: "note", short: "note", long: "a note, not a slot" },
+];
 
 /** The plan as the review GET sends it: plus, on a line a revision carries, why it will not be written. */
 export type ReviewDescription = BillDescriptionPlan & { revisionRefusal?: string | null };
@@ -39,11 +58,16 @@ export function BillDescriptionSummary({
   plan,
   open,
   onToggle,
+  onSetSlot,
+  busy = false,
 }: {
   plan: ReviewDescription;
   open: boolean;
   onToggle: () => void;
+  onSetSlot?: SetSlot;
+  busy?: boolean;
 }) {
+  const depthKey = plan.depthWithoutWidth ?? null;
   const finishes = plan.attributes.filter(isFinish);
   const notes = plan.attributes.filter((attribute) => attribute.attrGroup === "note");
   return (
@@ -78,6 +102,23 @@ export function BillDescriptionSummary({
           {caution}
         </p>
       ))}
+      {/* THE ANSWER BESIDE THE QUESTION. A D with no W is the shape a round
+          item is written in when D means its diameter; the person looking at
+          the bill says which, and the plan places it so. "It's a depth" is
+          the third answer, so a caution somebody has checked can be put away. */}
+      {depthKey && onSetSlot && (
+        <div className="flex flex-wrap items-center gap-1">
+          <Button variant="secondary" size="xs" disabled={busy} onClick={() => onSetSlot(depthKey, "DIA")}>
+            It&apos;s the diameter
+          </Button>
+          <Button variant="secondary" size="xs" disabled={busy} onClick={() => onSetSlot(depthKey, "W")}>
+            It&apos;s the width
+          </Button>
+          <Button variant="quiet" size="xs" disabled={busy} onClick={() => onSetSlot(depthKey, "D")}>
+            It&apos;s a depth
+          </Button>
+        </div>
+      )}
       {plan.revisionRefusal && <p className={`text-xs ${TONE.warn.text}`}>{plan.revisionRefusal}</p>}
     </div>
   );
@@ -88,11 +129,15 @@ export function BillDescriptionPanelRow({
   plan,
   raw,
   colSpan,
+  onSetSlot,
+  busy = false,
 }: {
   plan: ReviewDescription;
   /** The cell as the bill printed it. */
   raw: string;
   colSpan: number;
+  onSetSlot?: SetSlot;
+  busy?: boolean;
 }) {
   return (
     <tr>
@@ -117,6 +162,19 @@ export function BillDescriptionPanelRow({
                     {attribute.materialCode && isFinish(attribute) && (
                       <span className="text-neutral-500"> · {attribute.materialCode} filed in the finishes library</span>
                     )}
+                    {attribute.part?.overridden && (
+                      <Chip tone="info" className="ml-1.5" title={`The bill printed ${attribute.part.key}`}>
+                        changed on review
+                      </Chip>
+                    )}
+                    {attribute.part && onSetSlot && (
+                      <SlotControl
+                        part={attribute.part}
+                        current={attribute.slot ?? "note"}
+                        busy={busy}
+                        onSetSlot={onSetSlot}
+                      />
+                    )}
                   </td>
                   <td className="py-1 text-neutral-600">{attribute.why ?? ""}</td>
                 </tr>
@@ -135,5 +193,53 @@ export function BillDescriptionPanelRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+/**
+ * W · D · H · SH · Dia · note for one size part. BUTTONS, never a select: a
+ * select already showing "D" fires no change when somebody picks D, so the
+ * press recording "yes, it is a depth" would do nothing — the level picker's
+ * trap. The current slot is pressed; "As printed" removes the change.
+ */
+function SlotControl({
+  part,
+  current,
+  busy,
+  onSetSlot,
+}: {
+  part: NonNullable<PlannedAttribute["part"]>;
+  current: SlotOverride;
+  busy: boolean;
+  onSetSlot: SetSlot;
+}) {
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-0.5" role="group" aria-label={`What ${part.key} is`}>
+      {SLOT_CHOICES.map((choice) => {
+        const pressed = choice.value === current;
+        return (
+          <button
+            key={choice.value}
+            type="button"
+            aria-pressed={pressed}
+            title={`${part.key} is ${choice.long}`}
+            disabled={busy}
+            onClick={() => onSetSlot(part.key, choice.value)}
+            className={`rounded border px-1.5 py-0.5 font-mono text-[11px] leading-4 disabled:opacity-50 ${
+              pressed
+                ? "border-neutral-800 bg-neutral-800 text-white"
+                : "border-neutral-300 bg-white text-neutral-700 hover:border-neutral-500"
+            }`}
+          >
+            {choice.short}
+          </button>
+        );
+      })}
+      {part.overridden && (
+        <Button variant="quiet" size="xs" disabled={busy} onClick={() => onSetSlot(part.key, null)}>
+          As printed
+        </Button>
+      )}
+    </span>
   );
 }

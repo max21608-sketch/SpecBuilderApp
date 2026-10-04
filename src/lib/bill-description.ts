@@ -55,7 +55,13 @@ import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import { readDimension, sizeLabel, sizeLineRefusal, type DimensionReading } from "@/lib/spec-dimensions";
 import { leadingFinishCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
-import { TBC_TOKENS, type AttributeGroup, type DimensionSlot } from "@/lib/spec-vocab";
+import {
+  DIMENSION_SLOT_LABELS,
+  TBC_TOKENS,
+  isDimensionSlot,
+  type AttributeGroup,
+  type DimensionSlot,
+} from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
 import { WELDED_LABELS } from "@/lib/spec-reading-vocab";
 
@@ -193,7 +199,118 @@ export type PlannedAttribute = {
   line: string;
   /** Why it became what it did, where that is worth saying — a note's reason, a field not taken. */
   why: string | null;
+  /**
+   * The PART of the placed size line this row is, where it is one — the
+   * address a reviewer's slot change is stored under (`slotOverrides`), the
+   * slot the bill printed, and whether a person has set it. Absent on every
+   * other row.
+   */
+  part?: { key: string; printed: DimensionSlot; overridden: boolean } | null;
 };
+
+// ---- a reviewer's slot change ----------------------------------------------
+
+/**
+ * WHAT A REVIEWER SAYS A PART OF THE SIZE LINE IS: one of the five slots, or
+ * a note. Matthew, 2026-10-01: a round stool's "D" is its diameter, and the
+ * bill review had no way to say so before the confirm wrote it as a depth.
+ */
+export type SlotOverride = DimensionSlot | "note";
+
+export function isSlotOverride(value: unknown): value is SlotOverride {
+  return value === "note" || isDimensionSlot(value);
+}
+
+/**
+ * The address of one part of a size line: the slot it was printed with and
+ * its figure, `D 380`. Keyed on what the BILL printed, never on a position,
+ * so the plan recomputed on every read finds the same part — and a part the
+ * line no longer prints matches nothing, rather than the override landing on
+ * whatever now sits in its place.
+ */
+export function slotPartKey(part: { slot: DimensionSlot; figure: string | null }): string {
+  return part.figure ? `${part.slot} ${part.figure}` : part.slot;
+}
+
+/** The size line the plan places: its statement and its reading, or null. */
+export type PlacedSize = { index: number; statement: BillStatement; reading: DimensionReading; metric: boolean };
+
+/**
+ * WHICH SIZE LINE IS PLACED — the one rule, shared by the plan and by the
+ * route that accepts a slot change, so the parts a reviewer is offered are
+ * the parts the confirm writes. The first metric line, else the first inch
+ * line; every other size line is a note.
+ */
+export function placedSizeOf(statements: readonly BillStatement[]): PlacedSize | null {
+  const sizes: PlacedSize[] = [];
+  statements.forEach((statement, index) => {
+    if (!statement.label || !sizeLabel(statement.label)) return;
+    const dimension = readDimension(statement.label, statement.value);
+    if (!dimension || dimension.parts.length === 0) return;
+    const metric = !dimension.imperial && (dimension.unit === "mm" || dimension.unit === "cm");
+    const inches = dimension.unit === "in";
+    if (metric || inches) sizes.push({ index, statement, reading: dimension, metric });
+  });
+  return sizes.find((candidate) => candidate.metric) ?? sizes.find((candidate) => !candidate.metric) ?? null;
+}
+
+export type ResolvedSlotOverrides = {
+  /** Each part's key → the slot it is written in, or `note`. Every part of the line, overridden or not. */
+  effective: Map<string, SlotOverride>;
+  /** The keys a person set that this line's parts carry. */
+  applied: Set<string>;
+  /** Keys that name no part of the line as it now reads — ignored, and said so. */
+  unmatched: string[];
+  /**
+   * Why NONE of the changes is applied: they would put two parts in one slot.
+   * A slot holds one figure (`composeDimensionCell`'s `duplicate_slot`), and
+   * picking which of two a person meant would be this app deciding.
+   */
+  problem: string | null;
+};
+
+/**
+ * A reviewer's slot changes, read against the parts of the placed size line.
+ * Pure: the plan applies the result, and the PATCH refuses a change whose
+ * result carries a `problem` before anything is stored.
+ */
+export function resolveSlotOverrides(
+  placed: PlacedSize | null,
+  overrides: Readonly<Record<string, unknown>> | null | undefined,
+): ResolvedSlotOverrides {
+  const effective = new Map<string, SlotOverride>();
+  const applied = new Set<string>();
+  const parts = placed?.reading.parts ?? [];
+  const keys = new Set(parts.map(slotPartKey));
+  const wanted = Object.entries(overrides ?? {}).filter(([, value]) => isSlotOverride(value)) as [string, SlotOverride][];
+  const unmatched = wanted.map(([key]) => key).filter((key) => !keys.has(key));
+  const asked = new Map(wanted.filter(([key]) => keys.has(key)));
+
+  const candidate = new Map<string, SlotOverride>();
+  for (const part of parts) {
+    const key = slotPartKey(part);
+    candidate.set(key, asked.get(key) ?? part.slot);
+  }
+  const bySlot = new Map<DimensionSlot, string[]>();
+  for (const [key, slot] of candidate) {
+    if (slot === "note") continue;
+    bySlot.set(slot, [...(bySlot.get(slot) ?? []), key]);
+  }
+  const clash = [...bySlot.entries()].find(([, holders]) => holders.length > 1);
+  if (clash && asked.size > 0) {
+    const [slot, holders] = clash;
+    for (const part of parts) effective.set(slotPartKey(part), part.slot);
+    return {
+      effective,
+      applied,
+      unmatched,
+      problem: `That would put ${holders.map((key) => `“${key}”`).join(" and ")} both in the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()} slot, and a slot holds one figure. Move the other part first.`,
+    };
+  }
+  for (const [key, slot] of candidate) effective.set(key, slot);
+  for (const key of asked.keys()) applied.add(key);
+  return { effective, applied, unmatched, problem: null };
+}
 
 export type BillDescriptionPlan = {
   name: string;
@@ -203,9 +320,13 @@ export type BillDescriptionPlan = {
   dimensionCell: string;
   /** Things a person must look at: an unconverted imperial size, a TBC size, a cell the composer flags. */
   cautions: string[];
+  /**
+   * The key of the placed line's `D` part where the line gives a D and no W
+   * and nobody has said what it is — the caution's own address, so the screen
+   * can offer "It's the diameter" / "It's the width" beside it. Null otherwise.
+   */
+  depthWithoutWidth: string | null;
 };
-
-type SizeCandidate = { index: number; statement: BillStatement; reading: DimensionReading; metric: boolean };
 
 /**
  * The WHOLE value says "not decided" — "TBC", "To be confirmed". A size line
@@ -264,24 +385,30 @@ function innerLabel(value: string): { label: string; value: string } | null {
  */
 export function planBillDescription(
   raw: string | null | undefined,
-  { fields, hasFabricLine }: { fields: SpecFieldEntry[]; hasFabricLine: boolean },
+  {
+    fields,
+    hasFabricLine,
+    slotOverrides,
+  }: {
+    fields: SpecFieldEntry[];
+    hasFabricLine: boolean;
+    /** A reviewer's slot changes, by part key (`StagedBoqLine.slotOverrides`). */
+    slotOverrides?: Readonly<Record<string, unknown>> | null;
+  },
 ): BillDescriptionPlan | null {
   const reading = readBillDescription(raw);
   if (!reading) return null;
   const { statements } = reading;
   const cautions: string[] = [];
+  let depthWithoutWidth: string | null = null;
 
-  // ---- which size line is placed ------------------------------------------
-  const sizes: SizeCandidate[] = [];
-  statements.forEach((statement, index) => {
-    if (!statement.label || !sizeLabel(statement.label)) return;
-    const dimension = readDimension(statement.label, statement.value);
-    if (!dimension || dimension.parts.length === 0) return;
-    const metric = !dimension.imperial && (dimension.unit === "mm" || dimension.unit === "cm");
-    const inches = dimension.unit === "in";
-    if (metric || inches) sizes.push({ index, statement, reading: dimension, metric });
-  });
-  const placed = sizes.find((candidate) => candidate.metric) ?? sizes.find((candidate) => !candidate.metric) ?? null;
+  // ---- which size line is placed, and what a reviewer said about its parts --
+  const placed = placedSizeOf(statements);
+  const resolved = resolveSlotOverrides(placed, slotOverrides);
+  if (resolved.problem) cautions.push(`Your slot changes on this line are not applied: ${resolved.problem}`);
+  for (const key of resolved.unmatched) {
+    cautions.push(`A slot change for “${key}” is ignored: the size line no longer prints that part.`);
+  }
 
   const attributes: PlannedAttribute[] = [];
   const taken = new Set<string>();
@@ -298,29 +425,61 @@ export function planBillDescription(
       }
       if (placed && placed.index === index) {
         const unit = placed.reading.unit;
+        const converted = placed.metric ? null : "Converted from inches, exactly: the bill gives no metric size.";
         for (const part of placed.reading.parts) {
+          const key = slotPartKey(part);
+          const slot = resolved.effective.get(key) ?? part.slot;
+          const overridden = resolved.applied.has(key);
+          const printedAs = `printed as ${DIMENSION_SLOT_LABELS[part.slot].toLowerCase()} (${key})`;
+          if (slot === "note") {
+            attributes.push({
+              attrGroup: "note",
+              label,
+              value: key,
+              unit,
+              slot: null,
+              materialCode: null,
+              finishWords: null,
+              specFieldId: null,
+              specFieldName: null,
+              state: "confirmed",
+              line: statement.line,
+              why: `Set by the reviewer: ${printedAs}, kept as a note rather than a slot.`,
+              part: { key, printed: part.slot, overridden },
+            });
+            continue;
+          }
           attributes.push({
             attrGroup: "dimension",
             label,
             value: part.figure ?? statement.value,
             unit,
-            slot: part.slot,
+            slot,
             materialCode: null,
             finishWords: null,
             specFieldId: null,
             specFieldName: null,
             state: "confirmed",
             line: statement.line,
-            why: placed.metric ? null : "Converted from inches, exactly: the bill gives no metric size.",
+            why: overridden
+              ? slot === part.slot
+                ? `Checked by the reviewer: a ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}, as printed.${converted ? ` ${converted}` : ""}`
+                : `Set by the reviewer: ${printedAs}, written as the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}.${converted ? ` ${converted}` : ""}`
+              : converted,
+            part: { key, printed: part.slot, overridden },
           });
         }
         // A DEPTH WITH NO WIDTH, on a line that names no diameter, is the
         // shape a round stool or side table is written in when "D" means its
         // diameter. The slot is taken as printed — `D` is a depth in this
         // app's vocabulary, and reading it as a diameter from the ABSENCE of
-        // a W would be an inference nothing states — and the reviewer is told.
-        const printed = new Set(placed.reading.parts.map((part) => part.slot));
-        if (printed.has("D") && !printed.has("W") && !printed.has("DIA")) {
+        // a W would be an inference nothing states — and the reviewer is told,
+        // with the two answers beside it. Once a person has said what the D
+        // is, there is nothing left to tell them.
+        const depth = placed.reading.parts.find((part) => resolved.effective.get(slotPartKey(part)) === "D");
+        const holds = new Set(resolved.effective.values());
+        if (depth && !holds.has("W") && !holds.has("DIA") && !resolved.applied.has(slotPartKey(depth))) {
+          depthWithoutWidth = slotPartKey(depth);
           cautions.push(
             `“${statement.line}” gives a D and no W. It is placed as a depth, as printed; on a round item D may mean the diameter — check it against the drawing.`,
           );
@@ -416,7 +575,14 @@ export function planBillDescription(
   const cell = rows.length > 0 ? composeDimensionCell(rows) : { text: "", problems: [] };
   for (const problem of cell.problems) cautions.push(problem.message);
 
-  return { name: reading.name, statements, attributes, dimensionCell: cell.text, cautions: [...new Set(cautions)] };
+  return {
+    name: reading.name,
+    statements,
+    attributes,
+    dimensionCell: cell.text,
+    cautions: [...new Set(cautions)],
+    depthWithoutWidth,
+  };
 }
 
 // ---- over a sheet ------------------------------------------------------------
@@ -428,6 +594,7 @@ type PlanLine = {
   ignored?: boolean;
   rowKind?: string;
   finishFor?: { row: number } | null;
+  slotOverrides?: Readonly<Record<string, unknown>> | null;
 };
 
 /**
@@ -448,7 +615,11 @@ export function planSheetDescriptions(
   const plans = new Map<number, BillDescriptionPlan>();
   for (const line of lines) {
     if (line.rowKind === "finish_for") continue;
-    const plan = planBillDescription(line.itemDescriptionRaw, { fields, hasFabricLine: withFabric.has(line.lineNo) });
+    const plan = planBillDescription(line.itemDescriptionRaw, {
+      fields,
+      hasFabricLine: withFabric.has(line.lineNo),
+      slotOverrides: line.slotOverrides ?? null,
+    });
     if (plan) plans.set(line.index, plan);
   }
   return plans;

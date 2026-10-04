@@ -40,6 +40,7 @@
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { deflateSync } from "node:zlib";
 import ExcelJS from "exceljs";
 import type { SheetData } from "read-excel-file/node";
 import { bill300, pricingDoc, programmeDatesSheet, tenderSummarySheet, twoRowHeader } from "./boq-shapes";
@@ -145,6 +146,94 @@ export async function programmeDatesWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+// ---- pictures on rows -------------------------------------------------------
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(bytes: Buffer): number {
+  let c = 0xffffffff;
+  for (const byte of bytes) c = (CRC_TABLE[(c ^ byte) & 0xff] as number) ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function chunk(type: string, data: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, crc]);
+}
+
+/**
+ * A real PNG of one flat colour, `width` x `height` — invented, built here, and
+ * different bytes for every (size, colour), which is what makes two pictures
+ * two pictures.
+ */
+export function flatPng(width: number, height: number, [r, g, b]: readonly [number, number, number]): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // truecolour
+  const scanline = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3).map((_, i) => [r, g, b][i % 3] as number)]);
+  const raw = Buffer.concat(Array.from({ length: height }, () => scanline));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** The pictures `picturedBillWorkbook` anchors, so a test can compare bytes. */
+export const BILL_PICTURES = {
+  logo: flatPng(6, 2, [20, 20, 20]),
+  stool: flatPng(4, 3, [200, 120, 40]),
+  drawers: flatPng(5, 5, [40, 90, 160]),
+  alternative: flatPng(3, 4, [90, 160, 40]),
+} as const;
+
+/**
+ * A BILL WITH A PICTURE ON ITS ROWS — the Aman pricing document's "Image"
+ * column, invented (2026-10-04). One sheet, a title row carrying a logo, the
+ * header on row 2, then:
+ *
+ *   row 3  ZZ-FUR-10 Stool        one picture
+ *   row 4  ZZ-FUR-26 Drawers      the SAME picture anchored twice — one picture
+ *   row 5  ZZ-FUR-04 Armchair     two DIFFERENT pictures — none is taken
+ *   row 6  ZZ-FUR-05 Side table   no picture
+ */
+export async function picturedBillWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  const sheet = addSheet(book, "Bill", [
+    ["Example pricing document", null, null, null, null],
+    ["Area", "FF&E code", "Item description", "TOTAL Q-ty", "Image"],
+    ["Example Corridor", "ZZ-FUR-10", "Stool", 2, null],
+    ["Example Corridor", "ZZ-FUR-26", "Drawers", 1, null],
+    ["Example Lounge", "ZZ-FUR-04", "Armchair", 4, null],
+    ["Example Lounge", "ZZ-FUR-05", "Side table", 2, null],
+  ]);
+  const id = (bytes: Buffer) => book.addImage({ buffer: bytes as unknown as ExcelJS.Buffer, extension: "png" });
+  const logo = id(BILL_PICTURES.logo);
+  const stool = id(BILL_PICTURES.stool);
+  const drawers = id(BILL_PICTURES.drawers);
+  const alternative = id(BILL_PICTURES.alternative);
+  // `tl` is 0-based: sheet row N is `row: N - 1`. The 0.1 sits the picture a
+  // little way inside the cell, which is how Excel places one.
+  const at = (imageId: number, row: number) =>
+    sheet.addImage(imageId, { tl: { col: 4.1, row: row - 1 + 0.1 }, ext: { width: 40, height: 40 } });
+  sheet.addImage(logo, { tl: { col: 0, row: 0 }, ext: { width: 60, height: 20 } });
+  at(stool, 3);
+  at(drawers, 4);
+  at(drawers, 4);
+  at(stool, 5);
+  at(alternative, 5);
+  return bytes(book);
+}
+
 /** Every workbook this module can build, by the filename the CLI gives it. */
 export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-two-row-header.xlsx": twoRowHeaderWorkbook,
@@ -152,6 +241,7 @@ export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-pricing-document.xlsx": () => pricingDocWorkbook({ titled: true }),
   "bill-pricing-document-untitled.xlsx": () => pricingDocWorkbook({ titled: false, sharedFormulaGap: true }),
   "programme-dates.xlsx": programmeDatesWorkbook,
+  "bill-with-pictures.xlsx": picturedBillWorkbook,
 };
 
 async function main(): Promise<void> {

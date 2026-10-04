@@ -57,8 +57,9 @@
 //     a wrong column nobody can correct.
 // ============================================================================
 import type { SheetData } from "read-excel-file/node";
-import type { ItemLevel } from "@/lib/spec-vocab";
+import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
+import type { BoqRowImages } from "@/lib/bill-row-image";
 import {
   foldHeading,
   type BoqColumnRef,
@@ -183,6 +184,23 @@ export type StagedBoqLine = BoqLine & {
    */
   nonFurnitureSuggested?: NonFurnitureGuess | null;
   ignored: boolean;
+  /**
+   * WHAT A REVIEWER SAID A PART OF THE SIZE LINE IS, by the part's printed
+   * key (`D 380` — `slotPartKey`): one of the five slots, or `note`. Applied
+   * INSIDE `planBillDescription`, which the review GET and the confirm both
+   * call, so the two cannot disagree; the plan itself is still recomputed on
+   * every read and never stored. A key the line no longer prints is ignored
+   * and the plan says so.
+   *
+   * `slotOverridesVersion` is this map's own optimistic lock: absent is 0,
+   * and every accepted change bumps it. Not the run's version — every
+   * autosave on every row bumps that, and two people on two lines would
+   * conflict for nothing.
+   *
+   * OPTIONAL, and absent on every bill staged before 2026-10-04.
+   */
+  slotOverrides?: Record<string, DimensionSlot | "note">;
+  slotOverridesVersion?: number;
   /** The record this line continues, at the version the reviewer was shown. */
   replaces?: { recordId: string; recordVersion: number } | null;
 };
@@ -291,6 +309,16 @@ export type BoqDocument = {
   filename: string | null;
   sourcePreserved: boolean;
   sheets: StagedBoqSheet[];
+  /**
+   * The pictures the workbook prints on its rows, by sheet name and row
+   * (`bill-images.ts`), stored at registration. On the DOCUMENT rather than on
+   * each staged line, so re-staging a sheet's lines keeps them. OPTIONAL:
+   * absent on a csv, on a bill posted without keeping its file, and on every
+   * bill staged before 2026-10-04.
+   */
+  rowImages?: BoqRowImages;
+  /** Why the workbook's pictures could not be read or stored, where they could not. */
+  rowImagesNote?: string | null;
 };
 
 /**

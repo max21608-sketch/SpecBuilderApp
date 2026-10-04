@@ -134,6 +134,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         fabricSpecs: result.fabricSpecs,
         descriptionSpecs: result.descriptionSpecs,
         descriptionsHeldBack: result.descriptionsHeldBack,
+        billPictures: result.billPictures,
         projectId: result.projectId,
         runs: result.runIds.length,
       });

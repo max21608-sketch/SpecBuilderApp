@@ -47,6 +47,8 @@ import {
   BillDescriptionSummary,
   type ReviewDescription,
 } from "@/components/imports/BillDescription";
+import type { SlotOverride } from "@/lib/bill-description";
+import { rowImageFor, type BillRowImage, type BoqRowImages } from "@/lib/bill-row-image";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
 // function the confirm writes it with, so the table shows what will be written.
 import { effectiveArea } from "@/lib/boq-reconcile";
@@ -101,7 +103,51 @@ type Line = {
   // "This may not be furniture", asked at staging. ABSENT on a bill staged
   // before the question existed, which `nonFurnitureOf` answers at read time.
   nonFurnitureSuggested?: NonFurnitureGuess | null;
+  // A reviewer's slot changes on the size line, and the version of that map
+  // the screen was drawn with — sent back with every change.
+  slotOverridesVersion?: number;
 } & RowKindFields;
+
+/**
+ * THE PICTURE THE BILL PRINTS ON THIS ROW, as a thumbnail at a FIXED size
+ * floated beside the item's name — never a column of its own and never wider
+ * than 40px, so a bill of three hundred pictures cannot push the table past
+ * its box (the overflow rule). It is what the confirm gives the record where
+ * the record has no picture; a drawing crop later replaces it. Several
+ * different pictures on one row are said in words, and none is taken.
+ */
+function BillRowPicture({
+  importId,
+  sheetIndex,
+  lineNo,
+  image,
+}: {
+  importId: string;
+  sheetIndex: number;
+  lineNo: number;
+  image: BillRowImage | null;
+}) {
+  if (!image) return null;
+  if (!image.pathname) {
+    return (
+      <span className="mb-0.5 block text-[10.5px] text-neutral-500">
+        {image.pictures} pictures on this row — none is taken as the item&apos;s
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- a private, session-scoped stream; next/image would proxy it
+    <img
+      src={`/api/imports/${importId}/row-image?sheet=${sheetIndex}&row=${lineNo}`}
+      alt={`The picture on row ${lineNo} of the bill`}
+      title="The bill's picture for this line — the record's picture until a drawing crop replaces it"
+      loading="lazy"
+      width={40}
+      height={40}
+      className="float-left mr-2 h-10 w-10 rounded border border-neutral-200 bg-white object-contain"
+    />
+  );
+}
 
 /** "17 and 18", "17, 18 and 19" — a list a person reads rather than parses. */
 function listOf(values: number[]): string {
@@ -273,7 +319,15 @@ type Import = {
   has_source?: boolean;
   /** What a model's structure read left on the run (`/suggest-columns`). */
   model_metadata?: { structureRead?: StructureReadState } | null;
-  parsed: { schemaVersion: 3 | 4; filename: string | null; sourcePreserved?: boolean; sheets: Sheet[] } | null;
+  parsed: {
+    schemaVersion: 3 | 4;
+    filename: string | null;
+    sourcePreserved?: boolean;
+    sheets: Sheet[];
+    // The pictures the workbook prints on its rows (`bill-images.ts`).
+    rowImages?: BoqRowImages;
+    rowImagesNote?: string | null;
+  } | null;
 };
 
 /** The parts of `model_metadata.structureRead` the screen reads. */
@@ -685,6 +739,34 @@ export default function ReviewImportPage() {
   }, [otherTabReading, load]);
 
   /** A line's kind, set by a person. The route checks the item against the live sheet. */
+  /**
+   * WHAT A PART OF A LINE'S SIZE IS — a person's answer, before the confirm.
+   * The server checks it against the live line and the version of the line's
+   * slot changes this screen was drawn with; the plan it recomposes is what
+   * the reload shows. Reload first, then report.
+   */
+  async function setSlot(sheetIndex: number, line: Line, key: string, slot: SlotOverride | null) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch(`/api/imports/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sheetIndex,
+          index: line.index,
+          slotOverride: { key, slot },
+          slotOverridesVersion: line.slotOverridesVersion ?? 0,
+        }),
+      });
+      await load(true);
+      if (!res.ok) setError(res.error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function setLineKind(sheetIndex: number, index: number, rowKind: BoqRowKind, finishForRow: number | null) {
     setError(null);
     setNotice(null);
@@ -1084,6 +1166,12 @@ export default function ReviewImportPage() {
             "."
           )}
         </Note>
+        )}
+
+        {run.parsed?.rowImagesNote && run.status === "parsed" && (
+          <Note tone="warn" title="No pictures from this workbook.">
+            {run.parsed.rowImagesNote} The bill itself is read as normal.
+          </Note>
         )}
 
         {run.parsed?.sourcePreserved === false && (
@@ -1520,6 +1608,14 @@ export default function ReviewImportPage() {
                             </Td>
                             <Td mono>{line.code ? <ClientRefs code={line.code} /> : "—"}</Td>
                             <Td>
+                              {!fabric && (
+                                <BillRowPicture
+                                  importId={id}
+                                  sheetIndex={sheetIndex}
+                                  lineNo={line.lineNo}
+                                  image={rowImageFor(run.parsed?.rowImages, sheet.sheetName, line.lineNo)}
+                                />
+                              )}
                               {description ? (
                                 <span className="font-medium text-neutral-900">{description.name}</span>
                               ) : (
@@ -1536,6 +1632,12 @@ export default function ReviewImportPage() {
                                   plan={description}
                                   open={descriptionOpen}
                                   onToggle={() => toggleDescription(descriptionKey)}
+                                  busy={busy}
+                                  onSetSlot={
+                                    run.status === "parsed" && !line.ignored
+                                      ? (key, slot) => void setSlot(sheetIndex, line, key, slot)
+                                      : undefined
+                                  }
                                 />
                               )}
                             </Td>
@@ -1725,6 +1827,12 @@ export default function ReviewImportPage() {
                               plan={description}
                               raw={line.itemDescriptionRaw ?? line.itemDescription}
                               colSpan={columns}
+                              busy={busy}
+                              onSetSlot={
+                                run.status === "parsed" && !line.ignored
+                                  ? (key, slot) => void setSlot(sheetIndex, line, key, slot)
+                                  : undefined
+                              }
                             />
                           )}
                           </Fragment>

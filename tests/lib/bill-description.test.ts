@@ -8,8 +8,10 @@ import {
   billItemName,
   billReadsDescriptions,
   planBillDescription,
+  placedSizeOf,
   planSheetDescriptions,
   readBillDescription,
+  resolveSlotOverrides,
   revisionDescriptionRefusal,
   type PlannedAttribute,
 } from "@/lib/bill-description";
@@ -298,5 +300,97 @@ describe("revisionDescriptionRefusal", () => {
   it("never replaces a slot or a field another document filled", () => {
     expect(revisionDescriptionRefusal(result(), { fromBill: false, slots: ["W"], fieldIds: [] })).toMatch(/a W dimension/);
     expect(revisionDescriptionRefusal(result(), { fromBill: false, slots: [], fieldIds: ["f-mtl1"] })).toMatch(/Main metal finish/);
+  });
+});
+
+describe("planBillDescription — a reviewer's slot change", () => {
+  const STOOL = "Stool\nSpec size: D 400 X H 420 mm";
+  const withOverrides = (cell: string, slotOverrides: Record<string, unknown>) => {
+    const result = planBillDescription(cell, { fields: FIELDS, hasFabricLine: false, slotOverrides });
+    if (!result) throw new Error("expected a plan");
+    return result;
+  };
+
+  it("addresses the D-without-W caution by the part's printed key", () => {
+    const result = plan(STOOL);
+    expect(result.depthWithoutWidth).toBe("D 400");
+    expect(result.attributes.filter((attribute) => attribute.part).map((attribute) => attribute.part)).toEqual([
+      { key: "D 400", printed: "D", overridden: false },
+      { key: "H 420", printed: "H", overridden: false },
+    ]);
+  });
+
+  it("writes the D as the diameter when the reviewer says so, and the cell recomposes", () => {
+    const result = withOverrides(STOOL, { "D 400": "DIA" });
+    expect(slots(result.attributes)).toEqual(["DIA 400mm", "H 420mm"]);
+    expect(result.dimensionCell).toBe("Dia.400 x H420mm");
+    expect(result.depthWithoutWidth).toBeNull();
+    expect(result.cautions.join(" ")).not.toMatch(/gives a D and no W/);
+    const diameter = result.attributes.find((attribute) => attribute.slot === "DIA");
+    expect(diameter?.part).toEqual({ key: "D 400", printed: "D", overridden: true });
+    expect(diameter?.why).toMatch(/Set by the reviewer/);
+  });
+
+  it("takes 'it's a depth' as an answer: the slot stays and the caution goes", () => {
+    const result = withOverrides(STOOL, { "D 400": "D" });
+    expect(slots(result.attributes)).toEqual(["D 400mm", "H 420mm"]);
+    expect(result.depthWithoutWidth).toBeNull();
+    expect(result.cautions.join(" ")).not.toMatch(/gives a D and no W/);
+    expect(result.attributes.find((attribute) => attribute.slot === "D")?.why).toMatch(/Checked by the reviewer/);
+  });
+
+  it("keeps a part as a note, with its unit, when the reviewer says it is not a slot", () => {
+    const result = withOverrides(STOOL, { "H 420": "note" });
+    expect(slots(result.attributes)).toEqual(["D 400mm"]);
+    const note = result.attributes.find((attribute) => attribute.part?.key === "H 420");
+    expect(note).toMatchObject({ attrGroup: "note", slot: null, value: "H 420", unit: "mm", label: "Spec size" });
+  });
+
+  it("refuses a change that would put two parts in one slot, placing the line as printed", () => {
+    const result = withOverrides(STOOL, { "D 400": "H" });
+    expect(slots(result.attributes)).toEqual(["D 400mm", "H 420mm"]);
+    expect(result.cautions.join(" ")).toMatch(/both in the height slot/);
+    expect(result.attributes.some((attribute) => attribute.part?.overridden)).toBe(false);
+  });
+
+  it("ignores, and says so, a change for a part the line no longer prints", () => {
+    const result = withOverrides(STOOL, { "D 380": "DIA" });
+    expect(slots(result.attributes)).toEqual(["D 400mm", "H 420mm"]);
+    expect(result.cautions.join(" ")).toMatch(/“D 380” is ignored/);
+    expect(result.depthWithoutWidth).toBe("D 400");
+  });
+
+  it("ignores a value that is not a slot", () => {
+    const result = withOverrides(STOOL, { "D 400": "Diameter" });
+    expect(slots(result.attributes)).toEqual(["D 400mm", "H 420mm"]);
+    expect(result.cautions).toEqual([expect.stringMatching(/gives a D and no W/)]);
+  });
+
+  it("is applied by the sheet plan the review and the confirm both call", () => {
+    const plans = planSheetDescriptions(
+      [{ index: 0, lineNo: 9, itemDescriptionRaw: STOOL, slotOverrides: { "D 400": "DIA" } }],
+      FIELDS,
+    );
+    expect(plans.get(0)?.dimensionCell).toBe("Dia.400 x H420mm");
+  });
+});
+
+describe("resolveSlotOverrides", () => {
+  it("names both parts and the slot when a change would double one up", () => {
+    const reading = readBillDescription("Table\nSizes(mm): W 900 x D 600 x H 750");
+    const placed = placedSizeOf(reading!.statements);
+    const resolved = resolveSlotOverrides(placed, { "D 600": "W" });
+    expect(resolved.problem).toBe(
+      "That would put “W 900” and “D 600” both in the width slot, and a slot holds one figure. Move the other part first.",
+    );
+    expect(resolved.applied.size).toBe(0);
+    // Moving the width out first makes the same change acceptable.
+    const moved = resolveSlotOverrides(placed, { "W 900": "note", "D 600": "W" });
+    expect(moved.problem).toBeNull();
+    expect([...moved.effective]).toEqual([
+      ["W 900", "note"],
+      ["D 600", "W"],
+      ["H 750", "H"],
+    ]);
   });
 });
