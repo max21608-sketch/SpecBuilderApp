@@ -3,7 +3,7 @@
 // confirm does. Synthetic fixture in the S-301 shape — see
 // tests/fixtures/named-configurations.ts.
 import { readFileSync } from "node:fs";
-import { PROMPTS } from "@/lib/anthropic";
+import { PROMPT_VARIANTS } from "@/lib/anthropic";
 import { describe, expect, it } from "vitest";
 import {
   alreadyRecorded,
@@ -680,11 +680,11 @@ describe("configurations that distinguish nothing", () => {
   });
 
   it("tells the model a title block names configurations only where the pages differ, in their own words", () => {
-    expect(PROMPTS.shop_drawings).toMatch(/A TITLE BLOCK OR "WHERE USED" LABEL SAYS WHICH ROOMS A DRAWING IS FOR/);
-    expect(PROMPTS.shop_drawings).toMatch(/where nothing differs[^]*name none/);
+    expect(PROMPT_VARIANTS.shop_drawings!.v3).toMatch(/A TITLE BLOCK OR "WHERE USED" LABEL SAYS WHICH ROOMS A DRAWING IS FOR/);
+    expect(PROMPT_VARIANTS.shop_drawings!.v3).toMatch(/where nothing differs[^]*name none/);
     // Where the pages DO differ, the title blocks name them, in the page's own words.
-    expect(PROMPTS.shop_drawings).toMatch(/in the page's own words \("MUR 1", "TYPO 5", "MUR 2",/);
-    expect(PROMPTS.shop_drawings).toMatch(/IS THE PAGE'S OWN WORDS[^]*never a\s+translation/);
+    expect(PROMPT_VARIANTS.shop_drawings!.v3).toMatch(/in the page's own words \("MUR 1", "TYPO 5", "MUR 2",/);
+    expect(PROMPT_VARIANTS.shop_drawings!.v3).toMatch(/IS THE PAGE'S OWN WORDS[^]*never a\s+translation/);
   });
 });
 

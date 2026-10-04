@@ -4,9 +4,13 @@
 // the wrong instructions, or returns a shape no reviewer can display.
 import { describe, it, expect } from "vitest";
 import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/spec-vocab";
-import { PROMPTS } from "@/lib/anthropic";
+import { PROMPTS, PROMPT_VARIANTS } from "@/lib/anthropic";
+
+/** The page-centric v3 prompt, kept for the harness and for re-reading old raw. Its rules still hold for it. */
+const V3_PROMPT = PROMPT_VARIANTS.shop_drawings!.v3!;
 import {
   TOOLS,
+  TOOL_VARIANTS,
   DRAWINGS_TOOL,
   ExtractionOutput,
   DrawingsOutput,
@@ -33,7 +37,10 @@ describe("per-kind extraction contract", () => {
   });
 
   it("gives the two register-free kinds their own shapes", () => {
-    expect(TOOLS.shop_drawings.outputKind).toBe("drawing_items");
+    // Version 4, the item-centric read, since 2026-10-04; the v3 tool is kept
+    // as a variant for the harness's baseline.
+    expect(TOOLS.shop_drawings.outputKind).toBe("drawing_items_v4");
+    expect(TOOL_VARIANTS.shop_drawings?.v3?.outputKind).toBe("drawing_items");
     expect(TOOLS.preamble.outputKind).toBe("preamble_notes");
     expect(TOOLS.ffe_schedule.outputKind).toBe("observations");
     expect(TOOLS.other.outputKind).toBe("observations");
@@ -42,16 +49,16 @@ describe("per-kind extraction contract", () => {
   it("tells the model not to invent a unit the drawings do not print", () => {
     // A shop drawing set mixes millimetres and centimetres between pages and
     // prints neither, so an inferred figure would read as a real measurement.
-    expect(PROMPTS.shop_drawings).toMatch(/never infer one from how large the number is/i);
-    expect(PROMPTS.shop_drawings).toMatch(/never convert/i);
+    expect(V3_PROMPT).toMatch(/never infer one from how large the number is/i);
+    expect(V3_PROMPT).toMatch(/never convert/i);
   });
 
   it("tells the model to report a unit the page DOES print, separately from the figure", () => {
     // The Panther specification sheets state "WIDTH 1800mm". Reading a unit
     // that is on the page is not inference, and guessing from magnitude at a
     // document that already said so would be strictly worse.
-    expect(PROMPTS.shop_drawings).toMatch(/unitRaw/);
-    expect(PROMPTS.shop_drawings).toMatch(/never combined into the value/i);
+    expect(V3_PROMPT).toMatch(/unitRaw/);
+    expect(V3_PROMPT).toMatch(/never combined into the value/i);
   });
 
   it("gives the model no operational field to be talked into", () => {
@@ -69,6 +76,7 @@ describe("per-kind extraction contract", () => {
       }
     };
     for (const kind of DOCUMENT_KINDS) walk(TOOLS[kind].tool.input_schema);
+    walk(DRAWINGS_TOOL.input_schema);
     for (const forbidden of ["recordId", "requirementId", "state", "confirmed", "specFieldId", "unit"]) {
       expect(names).not.toContain(forbidden);
     }
@@ -421,8 +429,8 @@ describe("configurations a page names", () => {
     expect(itemSchema.required).toEqual(expect.arrayContaining(["configurations", "depictsConfigurations"]));
     expect(itemSchema.properties.dimensions?.items?.required).toContain("configurations");
     expect(itemSchema.properties.materials?.items?.required).toContain("configurations");
-    expect(PROMPTS.shop_drawings).toMatch(/NEVER put the configuration into the label/);
-    expect(PROMPTS.shop_drawings).toMatch(/still describes the PAGES/);
+    expect(V3_PROMPT).toMatch(/NEVER put the configuration into the label/);
+    expect(V3_PROMPT).toMatch(/still describes the PAGES/);
   });
 
   it("requires only properties each object declares", () => {
@@ -437,5 +445,6 @@ describe("configurations a page names", () => {
       for (const value of Object.values(node as Record<string, unknown>)) walk(value);
     };
     for (const kind of DOCUMENT_KINDS) walk(TOOLS[kind].tool.input_schema);
+    walk(DRAWINGS_TOOL.input_schema);
   });
 });

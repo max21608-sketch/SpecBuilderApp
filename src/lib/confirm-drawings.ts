@@ -69,10 +69,12 @@ import {
   isFinishGroup,
   isFinishKind,
   normaliseFinishCode,
+  finishWordsOf,
   readUncodedFinish,
   resolveFinishCode,
   type Finish,
 } from "@/lib/finishes";
+import { pagesInWords } from "@/lib/drawing-items";
 
 /** A swatch chip cropped off the page, keyed by the row it was cropped for. */
 export type SwatchCrop = {
@@ -614,7 +616,11 @@ export async function confirmDrawingItem(
     projectId: run.projectId,
     kind: "drawing_confirm",
     actor,
-    reason: `${taken.length} spec${taken.length === 1 ? "" : "s"} from ${run.staged.filename ?? "the shop drawings"}${item.page ? ` page ${item.page}` : ""}${item.itemCodeRaw ? ` (${item.itemCodeRaw})` : ""}`,
+    // A version 4 item names every page it spans; an earlier one, its page.
+    reason: `${taken.length} spec${taken.length === 1 ? "" : "s"} from ${run.staged.filename ?? "the shop drawings"}${(() => {
+      const pages = pagesInWords(Array.isArray(item.pages) && item.pages.length > 0 ? item.pages : item.page ? [item.page] : []);
+      return pages ? ` ${pages}` : "";
+    })()}${item.itemCodeRaw ? ` (${item.itemCodeRaw})` : ""}`,
     sourceIntakeRunId: runId,
   });
 
@@ -657,8 +663,10 @@ export async function confirmDrawingItem(
         fields: {
           code: resolution.code,
           // What THIS page said, as a starting point. `tbc` because a drawing
-          // naming a code is not somebody confirming what it is.
-          description: observation.value,
+          // naming a code is not somebody confirming what it is. A value that
+          // IS the code says nothing about the words, so the library is left
+          // to be told rather than told the code (`finishWordsOf`).
+          description: finishWordsOf(observation.materialCodeRaw, observation.value),
           state: "tbc",
         },
         actor,
@@ -669,7 +677,7 @@ export async function confirmDrawingItem(
         codeNorm: resolution.codeNorm,
         codeOrigin: "client",
         kind: null,
-        description: observation.value,
+        description: finishWordsOf(observation.materialCodeRaw, observation.value),
         supplierRaw: null,
         reference: null,
         colour: null,
@@ -919,7 +927,7 @@ export async function confirmDrawingItem(
            -- would never fire. stateToWrite is that default, shared with the
            -- empty_value blocker so the two cannot disagree. A row that WAS
            -- asked writes exactly what the reviewer chose.
-           ${stateToWrite(observation)}, ${runId}, ${item.page}, ${sortOrder},
+           ${stateToWrite(observation)}, ${runId}, ${observation.page ?? item.page}, ${sortOrder},
            ${standard?.value ?? null}, ${standard?.optionId ?? null}, ${standard?.state ?? null},
            ${standard ? actor : null}, ${standard ? new Date().toISOString() : null},
            ${actor}, ${actor})

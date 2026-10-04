@@ -50,6 +50,7 @@ import {
 import { handOffReadSlot } from "@/lib/extraction-slots";
 import { isRegisterFreeKind, normaliseUnit, type AttributeUnit, type DocumentKind } from "@/lib/spec-vocab";
 import { stageDrawings, type SpecFieldEntry, type StagedDrawings } from "@/lib/drawing-document";
+import { stageDrawingsV4 } from "@/lib/drawing-items";
 import { stagePreamble, type StagedPreamble } from "@/lib/preamble-document";
 
 const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
@@ -227,7 +228,14 @@ export async function runDocumentExtraction({
   let staged: StagedSpecDocument | StagedDrawings | StagedPreamble;
   let stagedCount: number;
 
-  if (result.output.outputKind === "drawing_items") {
+  if (result.output.outputKind === "drawing_items_v4") {
+    // EVERY NEW SHOP-DRAWINGS READ (2026-10-04): the item-centric read, staged
+    // as schemaVersion 4. The page-centric branch below stays for the v3 tool,
+    // which nothing in the app asks for any more but a harness re-read can.
+    const drawings = stageDrawingsV4(result.output.data, fields, filename, projectDefaultUnit);
+    staged = drawings;
+    stagedCount = drawings.items.reduce((total, item) => total + item.observations.length, 0);
+  } else if (result.output.outputKind === "drawing_items") {
     const drawings = stageDrawings(
       result.output.data.items,
       fields,

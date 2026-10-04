@@ -30,6 +30,8 @@
 // ============================================================================
 import type { AttributeState } from "@/lib/spec-vocab";
 import type { Row } from "@/lib/db";
+// A leaf: it imports nothing.
+import { stackedTagCode } from "@/lib/material-words";
 
 /**
  * Either driver, declared HERE rather than imported.
@@ -218,6 +220,27 @@ export async function loadUnlinkedFinishCodes(
   return rows.map((row) => ({ code: String(row.code), records: Number(row.records) }));
 }
 
+/**
+ * The WORDS a finish row states about its finish, or null where its value is
+ * nothing but the code.
+ *
+ * The item-centric drawings read (2026-10-04) records a callout that prints
+ * only `GR TIM 04` as exactly that — the code is the page's whole statement,
+ * and the library, filled from the finishes schedule first, supplies the
+ * words. Such a value says NOTHING about the description: compared against the
+ * library's "Oak natural" it is not a disagreement, and copied into a new
+ * library row it is not a description. A tag drawn as stacked boxes is the
+ * same code (`stackedTagCode`), so `GR TIM 04` against `GR-TIM-04` is the code.
+ */
+export function finishWordsOf(materialCodeRaw: string | null, value: string | null): string | null {
+  const says = value?.trim();
+  if (!says) return null;
+  const code = materialCodeRaw?.trim();
+  if (!code) return says;
+  const asCode = (text: string) => normaliseFinishCode(stackedTagCode(text) ?? text);
+  return asCode(says) === asCode(code) ? null : says;
+}
+
 export function resolveFinishCode(
   materialCodeRaw: string | null,
   observedValue: string | null,
@@ -233,8 +256,9 @@ export function resolveFinishCode(
 
   // A conflict only when the library has actually committed to a description.
   // A `tbc` finish with no description is waiting to be told, not disagreeing.
+  // And only when the page said WORDS: a value that is the code alone is not.
   const described = finish.description?.trim();
-  const says = observedValue?.trim();
+  const says = finishWordsOf(raw, observedValue);
   if (described && says && described.toLowerCase() !== says.toLowerCase()) {
     return { status: "conflict", finish, saysInstead: says };
   }
