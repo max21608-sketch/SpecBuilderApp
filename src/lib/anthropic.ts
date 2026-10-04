@@ -829,7 +829,7 @@ function classifyTransportFailure(cause: unknown, elapsedMs: number): Extraction
       return { ok: false, retryable: false, code: "auth", error: "The model rejected this deployment's credentials.", elapsedMs };
     }
     if (status === 400 || status === 404 || status === 422) {
-      return { ok: false, retryable: false, code: "invalid_request", error: `The request was refused (${status}).`, elapsedMs };
+      return { ok: false, retryable: false, code: "invalid_request", error: refusedRequestSentence(String(status), apiErrorMessage(cause)), elapsedMs };
     }
     if (status === 429) {
       // Retryable, and the queue's backoff is what waits. Nothing here sleeps:
@@ -879,12 +879,52 @@ function classifyTransportFailure(cause: unknown, elapsedMs: number): Extraction
     return { ok: false, retryable: false, code: "auth", error: "The model rejected this deployment's credentials.", elapsedMs };
   }
   if (streamed === "invalid_request_error" || streamed === "not_found_error") {
-    return { ok: false, retryable: false, code: "invalid_request", error: "The request was refused as invalid.", elapsedMs };
+    return { ok: false, retryable: false, code: "invalid_request", error: refusedRequestSentence(null, streamedErrorMessage(message)), elapsedMs };
   }
 
   // A socket, a DNS failure, an abort. Retryable: none of them says anything
   // about the document.
   return { ok: false, retryable: true, code: "transport", error: `The model could not be reached: ${message}`, elapsedMs };
+}
+
+// ============================================================================
+// A REFUSED REQUEST SAYS WHY. Found 2026-10-04 when the API account ran out of
+// credit mid-batch: Anthropic answered "Your credit balance is too low to access
+// the Anthropic API", and the run recorded only "The request was refused (400)"
+// — which reads like a broken document and sends a person to the wrong place.
+// The model service's own sentence is kept (bounded), and a credit failure is
+// named in words, because it is the one 400 a person fixes outside this app and
+// then simply retries.
+// ============================================================================
+const API_MESSAGE_MAX = 300;
+
+/** The `error.message` Anthropic sent with a non-streamed failure, or null. */
+export function apiErrorMessage(cause: unknown): string | null {
+  const body = (cause as { error?: unknown } | null)?.error as { error?: { message?: unknown }; message?: unknown } | undefined;
+  const text = body?.error?.message ?? body?.message;
+  return typeof text === "string" && text.trim() ? text.trim().slice(0, API_MESSAGE_MAX) : null;
+}
+
+/** The `error.message` inside a streamed `error` event, or null. */
+export function streamedErrorMessage(message: string): string | null {
+  const start = message.indexOf("{");
+  if (start === -1) return null;
+  try {
+    const parsed = JSON.parse(message.slice(start)) as { error?: { message?: unknown } };
+    const text = parsed?.error?.message;
+    return typeof text === "string" && text.trim() ? text.trim().slice(0, API_MESSAGE_MAX) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What a person is told about a request the model service refused. */
+export function refusedRequestSentence(status: string | null, apiMessage: string | null): string {
+  if (apiMessage && /credit balance/i.test(apiMessage)) {
+    return "The Anthropic account has run out of credit, so nothing could be read. Nothing is wrong with the document: top up the API credit (Plans & Billing in the Anthropic console), then press Retry.";
+  }
+  const head = status ? `The request was refused (${status})` : "The request was refused as invalid";
+  return apiMessage ? `${head}: ${apiMessage}` : `${head}.`;
 }
 
 /**
