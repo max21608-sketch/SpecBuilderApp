@@ -309,6 +309,10 @@ const DrawingPatch = z
                 recordId: z.string().uuid(),
                 attributeId: z.string().uuid(),
                 attributeVersion: z.number().int().nonnegative(),
+                // On a DIAMETER row: the record's W or D this retires (brief
+                // G). The confirm reads it only while the row is a diameter,
+                // and pins the retire to that slot.
+                retiresSlot: z.enum(["W", "D"]).optional(),
               })
               .strict(),
           )

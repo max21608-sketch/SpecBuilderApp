@@ -73,6 +73,8 @@ import Tip from "@/components/ui/Tip";
 // Re-exported from where they now live, so the screens keep one import.
 export type { Occupant, RecordChoice, RunResolution, SpecField } from "@/components/imports/ObservationRows";
 import type { FinishFilingView, NamedResolution } from "@/lib/drawing-resolution";
+import type { BillReplacement } from "@/lib/bill-over-drawing";
+import BillValuesAction, { type BillValuesEdit } from "@/components/imports/BillValuesAction";
 
 export type ItemResolution = {
   id: string;
@@ -117,6 +119,12 @@ export type ItemResolution = {
    * it out. From `swatchRefusalsFor`, the confirm's own reading.
    */
   swatchRefusals?: Record<string, string>;
+  /**
+   * The values THE BILL wrote that this card would replace (brief G), for the
+   * card's one "use this drawing's values over the bill's" press. From
+   * `billReplacements`, over the occupancy the blockers read.
+   */
+  billReplacements?: BillReplacement[];
   // NOT blockers. These never disable Confirm and the confirm route never sees
   // them -- see drawingItemWarnings() for why they are a separate type.
   warnings?: RowWarning[];
@@ -176,6 +184,7 @@ export default function ItemCard({
   setDrafts,
   busy,
   onSaveObservation,
+  onSaveObservations,
   onSaveTargets,
   onSetBulkUnit,
   onReview,
@@ -203,6 +212,11 @@ export default function ItemCard({
   setDrafts: React.Dispatch<React.SetStateAction<Record<string, Partial<DrawingObservation>>>>;
   busy: boolean;
   onSaveObservation: (item: DrawingItem, observation: DrawingObservation, changes: Record<string, unknown>) => Promise<void>;
+  /**
+   * Several rows in ONE batched save, reloaded once — the bill-values press
+   * (brief G). Optional: without it the rows are saved one by one.
+   */
+  onSaveObservations?: (edits: BillValuesEdit[]) => Promise<void>;
   onSaveTargets: (item: DrawingItem, ticked: string[], unticked: string[]) => Promise<void>;
   onSetBulkUnit: (scope: "item" | "run", unit: BulkUnitChoice, itemId?: string) => Promise<void>;
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
@@ -638,6 +652,18 @@ export default function ItemCard({
               </p>
             ))}
           </div>
+
+          {/* THE BILL'S VALUES, ONE PRESS (brief G): every value the bill wrote
+              that confirming would replace, named before the press. */}
+          <BillValuesAction
+            groups={[{ item, entries: resolution?.billReplacements }]}
+            fieldName={(fieldId) => specFields.find((field) => field.id === fieldId)?.name ?? null}
+            busy={busy}
+            onSave={(edits) => {
+              if (onSaveObservations) void onSaveObservations(edits);
+              else for (const edit of edits) void onSaveObservation(edit.item, edit.observation, edit.changes);
+            }}
+          />
         </div>
 
         {/* THE SIDEBAR. Sticky, because the page is what the rows are checked

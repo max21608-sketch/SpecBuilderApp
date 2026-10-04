@@ -33,6 +33,7 @@ import { applyAnswerFills, applyAnswerRetractions, loadDimensionNote, planAnswer
 import { loadPromotable } from "@/lib/attribute-retire";
 import {
   acknowledgedReplacements,
+  acknowledgedSquareRetirements,
   alreadyRecorded,
   crossPageClaims,
   assertStagedDrawings,
@@ -821,6 +822,33 @@ export async function confirmDrawingItem(
 
   /** Old row → the row that took over, linked once the new id is known. */
   const superseded: { oldId: string; observationId: string; recordId: string }[] = [];
+
+  /**
+   * Retire what an acknowledgement names, at the version the reviewer saw.
+   *
+   * ONE statement for a revised drawing's replacement and for the W or D a
+   * diameter retires (brief G) — `slot`, where given, pins it to the slot the
+   * card showed. An occupant that has moved since is refused, never replaced:
+   * the value they agreed to drop is not the value that is there.
+   */
+  async function retireOccupant(attributeId: string, version: number, recordId: string, slot: "W" | "D" | null) {
+    const rows = await txn`
+      update record_attributes
+      set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
+      where id = ${attributeId}
+        and record_id = ${recordId}
+        and version = ${version}
+        and status = 'active'
+        and (${slot}::text is null or dimension_slot = ${slot})
+      returning id
+    `;
+    if (!rows[0]) {
+      throw new DomainConflictError(
+        "occupant_changed",
+        "The spec this page would replace has changed since you looked at it. Nothing was written — reload and check what is there now.",
+      );
+    }
+  }
   const now = new Date().toISOString();
   let answersFilled = 0;
 
@@ -871,6 +899,16 @@ export async function confirmDrawingItem(
       // saw — an occupant that changed since is refused rather than replaced,
       // because the value they agreed to drop is not the value that is there.
       const replacement = acknowledgedReplacements(observation).get(ackKey);
+      // A DIAMETER RETIRES THE W AND D IT WAS ACKNOWLEDGED TO (brief G). The
+      // same retire as a replacement — version-checked, before the insert —
+      // and pinned to the slot the reviewer was shown, so an acknowledgement
+      // can never retire a row that has since become something else.
+      const retiredSquare: string[] = [];
+      for (const [slot, retire] of acknowledgedSquareRetirements(observation).get(ackKey) ?? []) {
+        await retireOccupant(retire.attributeId, retire.attributeVersion, recordId, slot);
+        retiredSquare.push(retire.attributeId);
+        superseded.push({ oldId: retire.attributeId, observationId: observation.id, recordId });
+      }
       // ---- the same measurement, already on this record ------------------
       // Same slot, same figure in millimetres, same state, from another page:
       // not a replacement, and nothing to write — the unique index would
@@ -890,6 +928,14 @@ export async function confirmDrawingItem(
       if (existingDimension && alreadyRecorded(observation, existingDimension)) {
         sortOrder -= 1;
         inserts -= 1;
+        // The diameter is already there, so IT is what took the retired
+        // square's place.
+        if (retiredSquare.length > 0) {
+          await txn`
+            update record_attributes set superseded_by_id = ${existingDimension.attributeId}, updated_by = ${actor}
+            where id = any(${retiredSquare}::uuid[])
+          `;
+        }
         const list = attributeIdsByObservation.get(observation.id) ?? [];
         list.push(existingDimension.attributeId);
         attributeIdsByObservation.set(observation.id, list);
@@ -899,21 +945,7 @@ export async function confirmDrawingItem(
         continue;
       }
       if (replacement) {
-        const supersededRows = await txn`
-          update record_attributes
-          set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}
-          where id = ${replacement.attributeId}
-            and record_id = ${recordId}
-            and version = ${replacement.attributeVersion}
-            and status = 'active'
-          returning id
-        `;
-        if (!supersededRows[0]) {
-          throw new DomainConflictError(
-            "occupant_changed",
-            "The spec this page would replace has changed since you looked at it. Nothing was written — reload and check what is there now.",
-          );
-        }
+        await retireOccupant(replacement.attributeId, replacement.attributeVersion, recordId, null);
         superseded.push({ oldId: replacement.attributeId, observationId: observation.id, recordId });
       }
 
@@ -961,10 +993,11 @@ export async function confirmDrawingItem(
       // Which row took over, so "why did the width change on the 14th" is
       // answered by following a link rather than by guessing which of two
       // retired rows came next.
-      if (replacement) {
+      const tookOver = [...(replacement ? [replacement.attributeId] : []), ...retiredSquare];
+      if (tookOver.length > 0) {
         await txn`
           update record_attributes set superseded_by_id = ${attributeId}, updated_by = ${actor}
-          where id = ${replacement.attributeId}
+          where id = any(${tookOver}::uuid[])
         `;
       }
 

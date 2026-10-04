@@ -85,6 +85,7 @@ import type { CroppedImage } from "@/lib/pdf-crop";
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
 import PagePicker from "@/components/imports/PagePicker";
 import NamedConfigurationCard from "@/components/imports/NamedConfigurationCard";
+import BillValuesAction from "@/components/imports/BillValuesAction";
 import {
   AddConfiguration,
   groupPairQuestions,
@@ -744,6 +745,19 @@ function PageConfigurationCard({
               showMm={showMm}
             />
           ))}
+
+          {/* THE BILL'S VALUES, ONE PRESS FOR THE CARD (brief G): every page's
+              own acknowledgements, each at the version it was shown. */}
+          <BillValuesAction
+            groups={pendingMembers.map((member) => ({
+              item: member.item,
+              entries: member.resolution?.billReplacements,
+              prefix: card.split ? `${member.letter} · ` : undefined,
+            }))}
+            fieldName={(fieldId) => specFields.find((field) => field.id === fieldId)?.name ?? null}
+            busy={busyHere}
+            onSave={(edits) => void onSaveObservations(edits)}
+          />
         </div>
 
         {/* THE SIDEBAR. Sticky, and one preview rather than one per band: the

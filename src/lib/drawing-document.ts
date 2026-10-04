@@ -178,8 +178,15 @@ export type DrawingObservation = {
    *
    * OPTIONAL, like `unitSource` and `dimensionSlot`, so runs staged before
    * this existed keep reading.
+   *
+   * `retiresSlot` (brief G): on a DIAMETER row only, an entry saying the
+   * record's W or D goes too. A round item is written Dia. INSTEAD of W x D,
+   * so a bill that gave `D460` for a stool the drawing shows as Dia 1'-6" has
+   * to lose its depth for the diameter to land. It is the same acknowledgement
+   * with the same version check, retired by the same statement in the
+   * confirm — not a second path. An entry WITHOUT it is the row's own slot.
    */
-  replaces?: { recordId: string; attributeId: string; attributeVersion: number }[];
+  replaces?: { recordId: string; attributeId: string; attributeVersion: number; retiresSlot?: "W" | "D" }[];
   /**
    * WHICH OF THE ITEM'S NAMED CONFIGURATIONS THIS ROW APPLIES TO, as the model
    * read it off the page, by the `name` the item's `configurations` gave them.
@@ -1619,6 +1626,15 @@ export type OccupiedSlot = {
   materialCode?: string | null;
   sourceFilename: string | null;
   sourcePage: number | null;
+  /**
+   * The occupant is what the BILL said (brief G): written by a bill of
+   * quantities' own run, never corrected by a person since, and carrying no BW
+   * standard a person set beside it. Only these are offered to the card's
+   * "use this drawing's values over the bill's" press; a person's value or
+   * another drawing's keeps the per-row tick. OPTIONAL: absent is "not known
+   * to be the bill's", which is the cautious reading.
+   */
+  fromBill?: boolean;
 };
 
 export type OccupiedSlots = {
@@ -1701,7 +1717,30 @@ function inMillimetres(value: string | null, unit: string | null): number | null
 export function acknowledgedReplacements(observation: DrawingObservation): Map<string, { attributeId: string; attributeVersion: number }> {
   const out = new Map<string, { attributeId: string; attributeVersion: number }>();
   for (const entry of observation.replaces ?? []) {
+    // A W or D a diameter retires is not this row's own slot.
+    if (entry.retiresSlot) continue;
     out.set(entry.recordId, { attributeId: entry.attributeId, attributeVersion: entry.attributeVersion });
+  }
+  return out;
+}
+
+/**
+ * The W and D a DIAMETER row is acknowledged to retire, per record (brief G).
+ *
+ * Only a dimension row in the DIA slot can retire anything this way: an entry
+ * left behind on a row since moved to another slot describes nothing, and is
+ * read as nothing — by the `dia_conflict` blocker and by the confirm alike.
+ */
+export function acknowledgedSquareRetirements(
+  observation: DrawingObservation,
+): Map<string, Map<"W" | "D", { attributeId: string; attributeVersion: number }>> {
+  const out = new Map<string, Map<"W" | "D", { attributeId: string; attributeVersion: number }>>();
+  if (observation.attrGroup !== "dimension" || observation.dimensionSlot !== "DIA") return out;
+  for (const entry of observation.replaces ?? []) {
+    if (entry.retiresSlot !== "W" && entry.retiresSlot !== "D") continue;
+    const slots = out.get(entry.recordId) ?? new Map<"W" | "D", { attributeId: string; attributeVersion: number }>();
+    slots.set(entry.retiresSlot, { attributeId: entry.attributeId, attributeVersion: entry.attributeVersion });
+    out.set(entry.recordId, slots);
   }
   return out;
 }
@@ -2018,8 +2057,14 @@ export function drawingItemBlockers(
     const diaHere = inScope.find((o) => o.attrGroup === "dimension" && o.dimensionSlot === "DIA");
     const squareHere = inScope.filter((o) => o.attrGroup === "dimension" && (o.dimensionSlot === "W" || o.dimensionSlot === "D"));
     const records = recordsInScope(scope);
-    const squareThere = records.some(
-      (recordId) => occupied.dimensions.get(recordId)?.has("W") || occupied.dimensions.get(recordId)?.has("D"),
+    // A W or D the diameter row is acknowledged to RETIRE is not in the way:
+    // the confirm retires it before the diameter is inserted (brief G).
+    const retiring = diaHere ? acknowledgedSquareRetirements(diaHere) : null;
+    const squareThere = records.some((recordId) =>
+      (["W", "D"] as const).some((slot) => {
+        const occupant = occupied.dimensions.get(recordId)?.get(slot);
+        return Boolean(occupant) && retiring?.get(recordId)?.get(slot)?.attributeId !== occupant?.attributeId;
+      }),
     );
     const diaThere = records.some((recordId) => occupied.dimensions.get(recordId)?.has("DIA"));
     if (diaHere && (squareHere.length > 0 || squareThere) && !reported.has(diaHere.id)) {

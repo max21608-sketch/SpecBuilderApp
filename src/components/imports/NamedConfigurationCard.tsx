@@ -72,6 +72,7 @@ import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
 import Tip from "@/components/ui/Tip";
+import BillValuesAction from "@/components/imports/BillValuesAction";
 
 type Member = ConfigurationCardProps["card"]["members"][number];
 
@@ -90,6 +91,7 @@ export default function NamedConfigurationCard({
   setDrafts,
   busy,
   onSaveObservation,
+  onSaveObservations,
   onSaveTargets,
   onSetBulkUnit,
   onReview,
@@ -855,6 +857,14 @@ export default function NamedConfigurationCard({
               ))}
             </div>
           </div>
+
+          {/* THE BILL'S VALUES, ONE PRESS FOR THE CARD (brief G). */}
+          <BillValuesAction
+            groups={pendingMembers.map((member) => ({ item: member.item, entries: member.resolution?.billReplacements }))}
+            fieldName={(fieldId) => specFields.find((field) => field.id === fieldId)?.name ?? null}
+            busy={busyHere}
+            onSave={(edits) => void onSaveObservations(edits)}
+          />
 
           {/* A PAGE'S PICTURE goes on every configuration that page writes, so
               it is chosen per page, below the tabs rather than on one of them. */}

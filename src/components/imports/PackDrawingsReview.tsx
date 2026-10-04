@@ -893,6 +893,7 @@ export default function PackDrawingsReview({
               setDrafts={setDrafts}
               busy={busy === card.item.id}
               onSaveObservation={saveObservation}
+              onSaveObservations={saveObservations}
               onSaveTargets={saveTargets}
                 onSaveItem={saveItem}
               onSetBulkUnit={setBulkUnit}
