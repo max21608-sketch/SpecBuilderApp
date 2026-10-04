@@ -3639,8 +3639,14 @@ through a first session beats work that adds anything.
 (P18181, Aman Interiors), and the catch-up of 2026-10-01 showed it on pilot:
 the bill held, and one desk drawing put two figures in Width and a height in
 Depth. Read `docs/plans/catchup-2026-10-01.md` before planning intake work.
-Whether M8's step 4 is now judged on this pack rather than on Panther has
-**not** been decided, and is Max's call.
+
+**DECIDED 2026-10-04 (Max): intake work is on the Aman pack, and the drawing
+read is being rebuilt around the ITEM, not the page, on Opus 5.5.** The plan
+is `docs/plans/intake-items-2026-10-04.md` — read it before touching
+extraction, staging or the drawings review. Its end state is the Aman project
+in PILOT, correct, with Max pressing the buttons Claude may not (pilot is
+read-only for Claude). Panther stays in the golden because it holds the
+multi-page and configuration cases.
 
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
