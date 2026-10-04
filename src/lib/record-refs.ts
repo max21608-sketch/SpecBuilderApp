@@ -58,6 +58,13 @@ export type RecordEntry = {
   level?: ItemLevel | null;
   levelSuggested?: ItemLevel | null;
   levelSuggestedReason?: string | null;
+  /**
+   * Whether this record's phase is the project's MOCK-UP phase (0043). A
+   * drawing the page marks as mock-up resolves among these only. Optional:
+   * absent is read as "not on one", so a loader that never read it can never
+   * send a mock-up drawing anywhere.
+   */
+  onMockupPhase?: boolean;
 };
 
 // ---- refs ------------------------------------------------------------------

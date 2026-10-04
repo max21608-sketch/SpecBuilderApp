@@ -43,6 +43,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            p.bws_project_number, p.name as project_name, p.id as project_id,
            run.id as run_id, run.name as run_name,
+           -- 0043: is this record on the mock-up phase, and what was it added from.
+           run.is_mockup as run_is_mockup, r.mockup_of,
            c.name as category_name, c.family as category_family, c.requirements_authored,
            -- WHETHER THERE IS A PICTURE, so the screen does not have to find
            -- out by asking for one and being refused. The record page rendered
@@ -384,9 +386,36 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         }))
       : null;
 
+  // ---- the mock-up phase, in both directions (0043) -------------------------
+  //
+  // A mock-up record names the record it was added from, and that record names
+  // its copies. Retired copies come too, marked, so the record that has one
+  // can say it was there and was taken off -- the reason is on the trail.
+  const mockupRows = await sql`
+    select r.id, r.record_no, r.status, run.name as run_name, run.is_mockup,
+           case when r.id = ${record.mockup_of ?? null}::uuid then 'source' else 'copy' end as role
+      from spec_records r
+      join spec_runs run on run.id = r.run_id
+     where r.id = ${record.mockup_of ?? null}::uuid
+        or (r.mockup_of = ${id} and run.is_mockup and run.status = 'active')
+     order by r.record_no
+  `;
+  const mockupLink = (row: Record<string, unknown>) => ({
+    id: String(row.id),
+    recordNo: Number(row.record_no),
+    runName: String(row.run_name),
+    status: String(row.status),
+  });
+  const mockup = {
+    isMockup: record.run_is_mockup === true,
+    of: mockupRows.filter((row) => row.role === "source").map(mockupLink)[0] ?? null,
+    copies: mockupRows.filter((row) => row.role === "copy").map(mockupLink),
+  };
+
   return json({
     ok: true,
     record,
+    mockup,
     refs,
     attributes,
     retiredAttributes: retired,

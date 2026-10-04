@@ -40,7 +40,7 @@ import {
   drawingItemBlockers,
   hasPendingObservations,
   occupancyThrough,
-  resolveStagedItem,
+  resolveDrawingItem,
   targetRecordIds,
   variantLettersByItem,
   namedConfigurationPlans,
@@ -206,7 +206,7 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
 async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[]> {
   const rows = await txn`
     select r.id, r.record_no, r.item_description, r.category_id, r.version,
-           r.run_id, run.name as run_name, p.bws_project_number,
+           r.run_id, run.name as run_name, run.is_mockup, p.bws_project_number,
            r.parent_id, r.variant_label, r.variant_ordinal,
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            coalesce((select array_agg(x.ref_value order by x.ref_value)
@@ -230,6 +230,8 @@ async function loadRecords(txn: TxnSql, projectId: string): Promise<RecordEntry[
     variantLabel: row.variant_label ? String(row.variant_label) : null,
     runId: String(row.run_id),
     runName: String(row.run_name),
+    // 0043: what `resolveDrawingItem` narrows a mock-up drawing to.
+    onMockupPhase: row.is_mockup === true,
     version: Number(row.version),
   }));
 }
@@ -368,7 +370,7 @@ export async function confirmDrawingItem(
   // The canonical code, matching `resolveStagedRun` exactly: the screen and the
   // confirm must resolve an item the same way or a card commits somewhere the
   // reviewer was not shown.
-  const resolution = resolveStagedItem(run.staged, item, records);
+  const resolution = resolveDrawingItem(run.staged, item, records);
   const targets = targetRecordIds(item, resolution);
 
   // The card-changed guard, in its fan-out form. A record the live resolution

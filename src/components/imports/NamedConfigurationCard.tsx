@@ -828,6 +828,9 @@ export default function NamedConfigurationCard({
               for (const member of pendingMembers) void onSaveTargets(member.item, [recordId], []);
             }}
             className="rounded-lg border border-neutral-200 px-3 py-2.5"
+            mockup={
+              pendingMembers[0]?.resolution?.resolution.mockup ?? card.members[0]?.resolution?.resolution.mockup ?? null
+            }
             note={
               mixed.size > 0 ? (
                 <p className="mt-1 text-xs text-amber-800">

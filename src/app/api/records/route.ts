@@ -131,6 +131,21 @@ export async function GET(request: Request): Promise<Response> {
       (select coalesce(sum(v.qty), 0) from spec_records v
         where v.parent_id = r.id and v.status = 'active') as variant_qty,
       run.name as run_name,
+      -- THE MOCK-UP PHASE (0043), in both directions. A mock-up record names
+      -- the record it was added from; that record says it is also on the
+      -- mock-up phase. Only a LIVE copy on a LIVE mock-up phase counts as
+      -- "also in": a retired one is out of the export and out of the claim.
+      run.is_mockup as run_is_mockup,
+      r.mockup_of,
+      (select s.record_no from spec_records s where s.id = r.mockup_of) as mockup_of_no,
+      (select sr.name from spec_records s join spec_runs sr on sr.id = s.run_id
+        where s.id = r.mockup_of) as mockup_of_run_name,
+      (select m.id from spec_records m join spec_runs mr on mr.id = m.run_id
+        where m.mockup_of = r.id and m.status = 'active' and mr.status = 'active' and mr.is_mockup
+        order by m.record_no limit 1) as mockup_copy_id,
+      (select mr.name from spec_records m join spec_runs mr on mr.id = m.run_id
+        where m.mockup_of = r.id and m.status = 'active' and mr.status = 'active' and mr.is_mockup
+        order by m.record_no limit 1) as mockup_copy_run_name,
       -- How much a document has actually said about this item. The intake
       -- stage's own progress measure: the cheat-sheet counts beside it measure
       -- a checklist that may not have been assigned yet.
@@ -172,7 +187,7 @@ export async function GET(request: Request): Promise<Response> {
     where r.project_id = ${projectId}
       and (${includeRetired}::boolean or r.status = 'active')
       and (${runId}::uuid is null or r.run_id = ${runId}::uuid)
-    group by r.id, c.name, c.family, c.requirements_authored, run.name, run.sort_order
+    group by r.id, c.name, c.family, c.requirements_authored, run.name, run.sort_order, run.is_mockup
     -- CONFIGURATIONS SORT WITH THEIR PARENT, not by their own record number: a
     -- variant is allocated the next number in the project, so S-201 A could be
     -- #33 and land pages away from the bill line it belongs to. Ordering on the
@@ -186,6 +201,19 @@ export async function GET(request: Request): Promise<Response> {
              r.variant_ordinal,
              r.variant_label
   `;
+
+  // WHICH PHASE THIS IS, so the table can say what a mock-up phase is and
+  // offer "Also in a mock-up phase" only on every OTHER phase. Read off the
+  // phase row rather than off the first record, because an empty phase has
+  // no first record.
+  const phaseRows = runId
+    ? await sql`
+        select id, name, is_mockup from spec_runs where id = ${runId}::uuid and project_id = ${projectId}
+      `
+    : [];
+  const phase = phaseRows[0]
+    ? { id: String(phaseRows[0].id), name: String(phaseRows[0].name), isMockup: phaseRows[0].is_mockup === true }
+    : null;
 
   // How many the table is NOT showing, so "38 records" cannot quietly mean
   // "38 of 41". Counted even when they are included, so the toggle can say
@@ -310,6 +338,7 @@ export async function GET(request: Request): Promise<Response> {
     }),
     retiredCount: Number(retiredRows[0]?.n ?? 0),
     includeRetired,
+    phase,
   });
 }
 

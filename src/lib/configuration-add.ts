@@ -615,19 +615,27 @@ export async function setConfigurationStatus(
   }: { recordId: string; status: "active" | "retired"; reason?: string | null; expectedVersion: number; actor: string },
 ): Promise<ConfigurationStatusResult> {
   const rows = await txn`
-    select r.id, r.project_id, r.parent_id, r.variant_label, r.version, r.status,
+    select r.id, r.project_id, r.parent_id, r.variant_label, r.version, r.status, r.record_no, r.run_id,
+           r.mockup_of, run.is_mockup, run.status as run_status, run.name as run_name,
            (select p.status from spec_records p where p.id = r.parent_id) as parent_status,
            (select string_agg(x.ref_value, ', ' order by x.ref_value)
-              from spec_record_refs x where x.record_id = r.parent_id and x.ref_system = 'boq_code') as client_ref,
+              from spec_record_refs x
+             where x.record_id = coalesce(r.parent_id, r.id) and x.ref_system = 'boq_code') as client_ref,
            (select p.record_no from spec_records p where p.id = r.parent_id) as parent_no
-      from spec_records r where r.id = ${recordId} for update
+      from spec_records r join spec_runs run on run.id = r.run_id
+     where r.id = ${recordId}
+       for update of r
   `;
   const record = rows[0];
   if (!record) throw new DomainConflictError("not_found", "No such record.", { status: 404 });
-  if (!record.parent_id) {
+  // A MOCK-UP ITEM (0043) is retired by this same verb: it was added by a
+  // person from another phase, and one added wrongly has to be able to go
+  // again -- with a reason, because it leaves the export.
+  const mockup = !record.parent_id && record.is_mockup === true;
+  if (!record.parent_id && !mockup) {
     throw new DomainConflictError(
       "not_a_configuration",
-      "Only a configuration can be retired here. A bill line leaves the export with its phase, or with a revised bill.",
+      "Only a configuration or a mock-up item can be retired here. A bill line leaves the export with its phase, or with a revised bill.",
       { status: 400 },
     );
   }
@@ -637,7 +645,9 @@ export async function setConfigurationStatus(
       "Someone else changed this configuration while you had it open. Reload before trying again.",
     );
   }
-  const name = `${text(record.client_ref) ?? `#${String(record.parent_no)}`} ${String(record.variant_label)}`;
+  const name = mockup
+    ? `${text(record.client_ref) ?? `#${String(record.record_no)}`} on ${String(record.run_name)}`
+    : `${text(record.client_ref) ?? `#${String(record.parent_no)}`} ${String(record.variant_label)}`;
 
   if (status === "retired") {
     if (String(record.status) !== "active") {
@@ -650,10 +660,32 @@ export async function setConfigurationStatus(
     if (String(record.status) !== "retired") {
       throw new DomainConflictError("not_retired", `${name} is not retired.`, { status: 400 });
     }
-    if (String(record.parent_status) !== "active") {
+    if (mockup) {
+      if (String(record.run_status) !== "active") {
+        throw new DomainConflictError("run_retired", `${name} cannot be put back: its phase has been retired.`);
+      }
+      // ONE LIVE MOCK-UP COPY PER SOURCE: put back beside one added since, the
+      // phase would hold the item twice and a mock-up drawing of it would ask
+      // which -- a question this app created.
+      const twin = record.mockup_of
+        ? await txn`
+            select id from spec_records
+             where run_id = ${record.run_id} and mockup_of = ${record.mockup_of}
+               and id <> ${recordId} and status = 'active'
+          `
+        : [];
+      if (twin[0]) {
+        throw new DomainConflictError(
+          "mockup_taken",
+          `${name} cannot be put back: the same item has been added to ${String(record.run_name)} again since.`,
+        );
+      }
+    } else if (String(record.parent_status) !== "active") {
       throw new DomainConflictError("parent_not_active", `The bill line ${name} belongs to is retired. Restore it first.`);
     }
-    const clash = await txn`
+    const clash = mockup
+      ? []
+      : await txn`
       select id from spec_records
        where parent_id = ${record.parent_id} and id <> ${recordId} and status = 'active'
          and variant_label = ${record.variant_label}
