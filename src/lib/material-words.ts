@@ -142,7 +142,8 @@ export const CODE_PREFIXES: { prefix: string; kind: "fabric" | "timber" | "metal
  * over `04` — and a reader transcribes it `GR FAB 04`. The bill writes the same
  * finish `GR-FAB-04`. This reads the tag's LAYOUT back into the code: exactly
  * three groups, two to four letters, two to four letters, digits with an
- * optional letter, separated by whitespace and nothing else.
+ * optional letter and an optional point sub-code (`08.1`), separated by
+ * whitespace and nothing else.
  *
  * ANCHORED TO THE WHOLE VALUE, and it is not a normaliser. `normaliseFinishCode`
  * stays case and whitespace only, because a rule clever enough to merge two
@@ -150,7 +151,9 @@ export const CODE_PREFIXES: { prefix: string; kind: "fabric" | "timber" | "metal
  * cannot: it fires on one shape, and `GR FAB 04 walnut`, `FAB 04` or
  * `CH 01 2` are not that shape.
  */
-const STACKED_TAG = /^\s*([A-Za-z]{2,4})\s+([A-Za-z]{2,4})\s+(\d{1,4}[A-Za-z]?)\s*$/;
+// A SUB-CODE is the same shape with a point: the finishes schedule files
+// `GR-TIM-08.1` (2026-10-04), so a tag reading `GR TIM 08.1` is that code.
+const STACKED_TAG = /^\s*([A-Za-z]{2,4})\s+([A-Za-z]{2,4})\s+(\d{1,4}[A-Za-z]?(?:\.\d{1,3})?)\s*$/;
 
 export function stackedTagCode(raw: string | null | undefined): string | null {
   const match = STACKED_TAG.exec(raw ?? "");

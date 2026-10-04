@@ -229,6 +229,62 @@ describeIfDb("confirming an item the drawings read returned whole", () => {
     expect(after.items[0]!.observations.every((o) => o.reviewStatus === "applied")).toBe(true);
   });
 
+  it("links a finish printed as a code alone to the library row the schedule described, never a conflict", async () => {
+    const code = `__QA X-500-${Date.now()}`;
+    const bill = await phase("__QA DESKS", code);
+    // The schedule came first: the library already describes both codes.
+    const library = async (finishCode: string) =>
+      String(
+        (
+          await client.query(
+            `insert into project_finishes (project_id, code, code_norm, code_origin, kind, description, state, created_by, updated_by)
+             values ($1, $2, $2, 'client', 'timber', 'Invented oak, natural', 'confirmed', 'qa', 'qa') returning id`,
+            [projectId, finishCode],
+          )
+        ).rows[0].id,
+      );
+    const subCode = await library("QA-TIM-08.1");
+    const worded = await library("QA-TIM-04");
+    const runId = await stage(
+      {
+        documentNotes: null,
+        nonItemPages: [],
+        items: [
+          item({
+            codes: [code],
+            name: "Desk",
+            finishes: [
+              // Only the code, as a stacked tag with a sub-code.
+              { part: null, spec: null, code: "QA TIM 08.1", configurations: [], page: 1, swatch: [] },
+              // The page's OWN words differ from the described row: a conflict, as before.
+              { part: "TOP", spec: "Invented walnut", code: "QA-TIM-04", configurations: [], page: 1, swatch: [] },
+            ],
+          }),
+        ],
+      },
+      "__QA x-500.pdf",
+    );
+
+    const confirmed = await confirmOnlyItem(runId);
+    expect(confirmed.response.ok, JSON.stringify(confirmed.body)).toBe(true);
+    const rows = (
+      await client.query(
+        `select material_code, value, state, finish_id from record_attributes where record_id = $1 and status = 'active' and material_code is not null order by sort_order`,
+        [bill],
+      )
+    ).rows;
+    expect(rows).toEqual([
+      { material_code: "QA-TIM-08.1", value: "QA TIM 08.1", state: "confirmed", finish_id: subCode },
+      { material_code: "QA-TIM-04", value: "Invented walnut", state: "confirmed", finish_id: null },
+    ]);
+    // Nothing new was filed, and the described row kept its words.
+    const finishes = (await client.query(`select id, description from project_finishes where project_id = $1 and code like 'QA-TIM-%' order by code`, [projectId])).rows;
+    expect(finishes).toEqual([
+      { id: worded, description: "Invented oak, natural" },
+      { id: subCode, description: "Invented oak, natural" },
+    ]);
+  });
+
   it("writes one record per named configuration through the v3 plan, a configuration's own width on it alone", async () => {
     const code = `__QA X-301-${Date.now()}`;
     const bill = await phase("__QA DESK CHAIRS", code);
