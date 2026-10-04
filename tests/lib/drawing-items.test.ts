@@ -162,17 +162,32 @@ describe("one item on two pages under two titles", () => {
     expect(remarks.find((o) => o.page === 2)!.value).toBe("CHECK SITE ACCESS.");
   });
 
-  it("never votes a unit from magnitude: the unprinted depth is asked for, or the project's default stands in", () => {
+  it("reads an unprinted unit off the overall figures, flagged, as version 3 does", () => {
+    // Page 2 prints 790 with no unit; the item's overall figures sit in one
+    // scale, so the vote says millimetres — `figures`, amber, correctable.
     const item = one(raw);
     const depth = item.observations.find((o) => o.dimensionSlot === "D")!;
-    expect(depth.unit).toBeNull();
+    expect([depth.unit, depth.unitSource, depth.unitSuggested]).toEqual(["mm", "figures", true]);
     expect(item.observations.find((o) => o.dimensionSlot === "W")!.unitSource).toBe("printed");
-    const blockers = drawingItemBlockers(item, { runs: [], suggested: [] }, NO_OCCUPANCY);
-    expect(blockers.some((b) => b.code === "unit_missing" && b.observationId === depth.id)).toBe(true);
 
-    const withDefault = one(raw, "mm").observations.find((o) => o.dimensionSlot === "D")!;
-    expect(withDefault.unit).toBe("mm");
-    expect(withDefault.unitSource).toBe("project_default");
+    // A sofa sheet drawn in centimetres states no unit anywhere: 190 x 79 x 72.
+    const sofa = one({
+      overall: { ...noOverall, width: fig("190"), depth: fig("79"), height: fig("72") },
+      otherDimensions: [{ label: "RAIL", valueRaw: "5", unitRaw: null, view: null, page: 1 }],
+    });
+    expect(sofa.observations.filter((o) => o.dimensionSlot).map((o) => o.unit)).toEqual(["cm", "cm", "cm"]);
+    expect(rowLabelled(sofa, "RAIL")!.unit).toBe("cm");
+  });
+
+  it("asks for the unit where the overall figures disagree, and lets the project's default stand in", () => {
+    const mixed = { overall: { ...noOverall, width: fig("190"), depth: fig("790") } };
+    const item = one(mixed);
+    const width = item.observations.find((o) => o.dimensionSlot === "W")!;
+    expect(width.unit).toBeNull();
+    const blockers = drawingItemBlockers(item, { runs: [], suggested: [] }, NO_OCCUPANCY);
+    expect(blockers.some((b) => b.code === "unit_missing" && b.observationId === width.id)).toBe(true);
+    const withDefault = one(mixed, "mm").observations.find((o) => o.dimensionSlot === "W")!;
+    expect([withDefault.unit, withDefault.unitSource]).toEqual(["mm", "project_default"]);
   });
 
   it("resolves by its first code, fanning out across the phases as v3 does", () => {
@@ -628,7 +643,33 @@ describe("the page-gluing does not run on version 4", () => {
       ["H", "1005", "mm", "confirmed"],
     ]);
     expect(rowLabelled(item, "Overall size as printed")!.value).toBe("W1520 TBC x D560 x H1005 mm");
+    expect(item.observations.filter((o) => o.dimensionSlot).every((o) => o.slotSuggested === false)).toBe(true);
+  });
+
+  it("reads three bare figures as W x D x H in printed order, flagged as the convention", () => {
+    // The read left the slots out: the convention fills them, amber.
     const bare = one({ combinedLine: "80 x 70 x 90 cm" });
-    expect(bare.observations.some((o) => o.dimensionSlot)).toBe(false);
+    const slotted = bare.observations.filter((o) => o.dimensionSlot);
+    expect(slotted.map((o) => [o.dimensionSlot, o.value, o.unit, o.slotSuggested])).toEqual([
+      ["W", "80", "cm", true],
+      ["D", "70", "cm", true],
+      ["H", "90", "cm", true],
+    ]);
+    expect(slotted[0]!.slotReason).toMatch(/printed order/);
+
+    // The read placed them itself, as it is asked to: the same flag on its rows.
+    const placed = one({
+      combinedLine: "80 x 70 x 90 cm",
+      overall: { ...noOverall, width: fig("80 cm"), depth: fig("70 cm"), height: fig("90 cm") },
+    });
+    expect(placed.observations.filter((o) => o.dimensionSlot).map((o) => [o.dimensionSlot, o.value, o.slotSuggested])).toEqual([
+      ["W", "80", true],
+      ["D", "70", true],
+      ["H", "90", true],
+    ]);
+
+    // A figure the read gave a slot by something the page printed is never overwritten by the order.
+    const differs = one({ combinedLine: "80 x 70 x 90 cm", overall: { ...noOverall, width: fig("70 cm", { evidence: "labelled WIDTH" }) } });
+    expect(differs.observations.filter((o) => o.dimensionSlot === "W").map((o) => [o.value, o.slotSuggested])).toEqual([["70", false]]);
   });
 });

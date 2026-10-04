@@ -412,9 +412,10 @@ export type StagedDrawings = {
    *     thing to be made, spanning its pages, with its overall size as five
    *     slots of one figure each. The page-gluing below — code groups, page
    *     letters, cross-page claims, the cross-view de-duplication, the
-   *     magnitude vote, the slot guess — does NOT run on it: each is gated on
+   *     slot guess — does NOT run on it: each is gated on
    *     the version where it runs, and never deleted, because versions 1–3
-   *     still read through it exactly as they did.
+   *     still read through it exactly as they did. The unit vote DOES run,
+   *     narrowed to the figures the read placed (`drawing-items.ts`).
    *
    * All four are read. An older run is not upgraded into a newer one:
    * inventing the fields it never carried would be one more inference layer,

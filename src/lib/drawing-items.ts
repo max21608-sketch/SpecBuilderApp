@@ -38,8 +38,8 @@
 // code groups and the canonical-code regrouping (the item carries its codes),
 // page lettering (a page count is not a split), cross-page claims (one item is
 // one card), the cross-view de-duplication (each slot is one figure already),
-// the magnitude unit vote and the slot guess (the page states a unit or a
-// person is asked; the model said which figure is which).
+// and the slot guess (the model said which figure is which). The unit vote IS
+// applied, narrowed to the figures the read placed — see `unitVoteFor`.
 // ============================================================================
 import {
   classifyCallout,
@@ -51,6 +51,7 @@ import {
   rejoinInchMark,
   resolveDimensionUnit,
   ScopedClaims,
+  suggestUnit,
   splitFigureAndUnit,
   suggestAttributeState,
   suggestSpecField,
@@ -61,8 +62,9 @@ import {
   type SpecFieldEntry,
   type StagedConfiguration,
   type StagedDrawings,
+  type UnitSuggestion,
 } from "@/lib/drawing-document";
-import { parseCombinedDimensions, toMillimetres } from "@/lib/dimensions";
+import { parseCombinedDimensions, parseDimensionFigure, toMillimetres } from "@/lib/dimensions";
 import { DIMENSION_SLOT_LABELS, normaliseDimensionSlot, normaliseUnit, type AttributeState, type AttributeUnit, type DimensionSlot } from "@/lib/spec-vocab";
 import { normaliseRef } from "@/lib/record-refs";
 import {
@@ -84,14 +86,42 @@ function stagedFigure(valueRaw: string | null, unitRaw: string | null): { value:
 }
 
 /**
- * Printed, else the project's own default, else nothing — and NEVER the
- * magnitude vote. A version 4 read states the unit where the page prints one;
- * where it does not, `suggestUnit` reading 840 as millimetres is exactly the
- * inference the read was asked not to make, and a missing unit is asked for on
- * the card (`unit_missing`), as it always has been.
+ * THE UNIT, IN CLAUDE.md'S ORDER, UNCHANGED FOR VERSION 4: printed on the page,
+ * then the page's figures agreeing, then the item's OVERALL figures agreeing,
+ * then the project's default, then nothing (`unit_missing` asks).
+ *
+ * The vote is `suggestUnit`, the same magnitude reading version 3 takes — the
+ * "unit vote is deliberately kept" rule — and it is NARROWED THE WAY VERSION 3
+ * NARROWS IT: on each page, to the overall figures the read placed in slots
+ * where the page has any, else to every figure on the page; where a page's
+ * figures disagree, to the item's overall figures across all its pages. A
+ * shop drawing prints 5, 50 and 110 beside 840 and 790, and only the overall
+ * figures carry the page's scale. A unit read this way is `figures` —
+ * `unitSuggested`, amber on the card, one click corrects the card.
+ *
+ * (The first version 4 build left the vote out, as its brief said. That cost
+ * the Panther shop-drawing set every one of its 21 overall figures — all read
+ * right, none with a unit — and the brief was corrected the same day.)
  */
-function unitFor(printed: AttributeUnit | null, projectDefault: AttributeUnit | null) {
-  return resolveDimensionUnit({ printed, pageGuess: { status: "none" }, projectDefault });
+type UnitVote = (page: number | null) => UnitSuggestion;
+
+function unitVoteFor(figures: { page: number | null; value: string | null; overall: boolean }[]): UnitVote {
+  const overall = figures.filter((figure) => figure.overall);
+  const itemOverall = suggestUnit(overall.map((figure) => figure.value));
+  const anyFigures = suggestUnit(figures.map((figure) => figure.value));
+  return (page) => {
+    const onPage = figures.filter((figure) => figure.page === page);
+    const overallOnPage = onPage.filter((figure) => figure.overall);
+    const pageVote = suggestUnit((overallOnPage.length > 0 ? overallOnPage : onPage).map((figure) => figure.value));
+    if (pageVote.status === "confident") return pageVote;
+    if (itemOverall.status === "confident") return itemOverall;
+    return overall.length === 0 ? anyFigures : pageVote;
+  };
+}
+
+function unitFor(printed: AttributeUnit | null, projectDefault: AttributeUnit | null, pageGuess: UnitSuggestion) {
+  const resolved = resolveDimensionUnit({ printed, pageGuess, projectDefault });
+  return { ...resolved, suggested: resolved.source === "figures" || resolved.source === "project_default" };
 }
 
 /** The pending row every staging path starts from. */
@@ -142,10 +172,11 @@ function overallRow(
   firstPage: number | null,
   projectDefault: AttributeUnit | null,
   configurations: string[],
+  vote: UnitVote,
 ): DrawingObservation {
   const slot: DimensionSlot = OVERALL_SLOT[key];
   const staged = stagedFigure(figure.valueRaw, figure.unitRaw);
-  const unit = unitFor(staged.printed, projectDefault);
+  const unit = unitFor(staged.printed, projectDefault, vote(figure.page ?? firstPage));
   const state = suggestAttributeState(staged.value);
   const fromView = normaliseDimensionSlot(figure.view);
   const disagrees = fromView !== null && fromView !== slot;
@@ -164,7 +195,7 @@ function overallRow(
     valueRaw: staged.value,
     value: state.value,
     unit: unit.unit,
-    unitSuggested: unit.source === "project_default",
+    unitSuggested: unit.suggested,
     ...(unit.source ? { unitSource: unit.source } : {}),
     state: state.state,
     stateReason: state.reason,
@@ -264,13 +295,28 @@ export function stageItemV4(
     }
   }
   const allNames = raw.configurations.map((configuration) => configuration.name);
+  const combined = raw.combinedLine?.trim() ? parseCombinedDimensions(raw.combinedLine) : null;
+  const vote = unitVoteFor([
+    ...[raw.overall, ...raw.configurations.map((configuration) => configuration.overall)].flatMap((overall) =>
+      OVERALL_KEYS.flatMap((key) => {
+        const figure = overall[key];
+        return figure ? [{ page: figure.page ?? firstPage, value: stagedFigure(figure.valueRaw, figure.unitRaw).value, overall: true }] : [];
+      }),
+    ),
+    ...(combined?.parts ?? []).map((part) => ({ page: firstPage, value: part.value, overall: true })),
+    ...raw.otherDimensions.map((dimension) => ({
+      page: dimension.page ?? firstPage,
+      value: stagedFigure(dimension.valueRaw, dimension.unitRaw).value,
+      overall: false,
+    })),
+  ]);
   const filled = new Map<DimensionSlot, number | null>();
   for (const key of OVERALL_KEYS) {
     const figure = raw.overall[key];
     if (!figure) continue;
     const overriddenBy = overrides.get(key) ?? [];
     const landsOn = overriddenBy.length > 0 ? allNames.filter((name) => !overriddenBy.includes(name)) : [];
-    const row = overallRow(key, figure, firstPage, projectDefault, landsOn);
+    const row = overallRow(key, figure, firstPage, projectDefault, landsOn, vote);
     if (overriddenBy.length > 0 && landsOn.length === 0) {
       observations.push({
         ...row,
@@ -288,22 +334,63 @@ export function stageItemV4(
     for (const key of OVERALL_KEYS) {
       const figure = configuration.overall[key];
       if (!figure) continue;
-      observations.push(overallRow(key, figure, configuration.pages[0] ?? firstPage, projectDefault, [configuration.name]));
+      observations.push(overallRow(key, figure, configuration.pages[0] ?? firstPage, projectDefault, [configuration.name], vote));
     }
   }
 
   // ---- a size printed as one line ------------------------------------------
-  // Its PRINTED prefixes only: `W1520` is the page saying which figure is the
-  // width. A prefixed part fills a slot the overall size left empty; one the
-  // overall size already holds at the same figure says nothing new; one that
-  // DISAGREES is kept beside it as a note, so the disagreement is on the card.
+  // A PRINTED PREFIX (`W1520`) is the page saying which figure is the width,
+  // and is taken exactly. A prefixed part fills a slot the overall size left
+  // empty; one the overall size already holds at the same figure says nothing
+  // new; one that DISAGREES is kept beside it as a note, so the disagreement is
+  // on the card.
+  //
+  // THREE BARE FIGURES (`80 x 70 x 90 cm`) are W x D x H IN PRINTED ORDER —
+  // the convention `parseCombinedDimensions` has always read, and the one
+  // inference here the page does not state — so every slot it settles is
+  // `slotSuggested`, amber, with the reason on the row, whether the read placed
+  // the figures itself (it is asked to, saying so in `uncertain`) or left them
+  // out. The read's own figure for a slot is never overwritten by the order.
   // The line itself is kept verbatim, folded, so it can be checked.
-  if (raw.combinedLine?.trim()) {
-    const parsed = parseCombinedDimensions(raw.combinedLine);
+  if (raw.combinedLine?.trim() && combined) {
+    const parsed = combined;
     const printedUnit = normaliseUnit(parsed.unitRaw);
+    const line = raw.combinedLine.trim();
+    const conventionReason = `Read as W x D x H in printed order from "${line}" — the page does not label them, so the order is the convention, not something printed. Check it against the drawing.`;
+    const figureOf = (value: string | null | undefined) => parseDimensionFigure(value ?? null).figure;
+    for (const part of parsed.parts) {
+      if (!part.slot || !part.slotSuggested) continue;
+      const existing = observations.find((row) => row.dimensionSlot === part.slot && !(row.configurations?.length));
+      if (existing) {
+        if (figureOf(existing.value ?? existing.valueRaw) === figureOf(part.value)) {
+          existing.slotSuggested = true;
+          existing.slotReason = conventionReason;
+        }
+        continue;
+      }
+      const unit = unitFor(printedUnit ?? printedImperialUnit(part.value), projectDefault, vote(firstPage));
+      const hasFigure = figureOf(part.value) !== null;
+      const row = baseRow({
+        attrGroup: "dimension",
+        dimensionSlot: part.slot,
+        slotSuggested: true,
+        slotReason: conventionReason,
+        isOverall: true,
+        labelRaw: DIMENSION_SLOT_LABELS[part.slot],
+        valueRaw: part.value,
+        value: part.value,
+        unit: unit.unit,
+        unitSuggested: unit.suggested,
+        ...(unit.source ? { unitSource: unit.source } : {}),
+        state: part.tbc || !hasFigure ? "tbc" : "confirmed",
+        page: firstPage,
+      });
+      filled.set(part.slot, millimetres(row));
+      observations.push(row);
+    }
     for (const part of parsed.parts) {
       if (!part.slot || part.slotSuggested) continue;
-      const unit = unitFor(printedUnit ?? printedImperialUnit(part.value), projectDefault);
+      const unit = unitFor(printedUnit ?? printedImperialUnit(part.value), projectDefault, vote(firstPage));
       const hasFigure = part.value !== null && /\d/.test(part.value);
       const state: AttributeState = part.tbc || !hasFigure ? "tbc" : "confirmed";
       const row = baseRow({
@@ -316,7 +403,7 @@ export function stageItemV4(
         valueRaw: part.value,
         value: part.value,
         unit: unit.unit,
-        unitSuggested: unit.source === "project_default",
+        unitSuggested: unit.suggested,
         ...(unit.source ? { unitSource: unit.source } : {}),
         state,
         page: firstPage,
@@ -415,7 +502,7 @@ export function stageItemV4(
   for (const dimension of raw.otherDimensions) {
     dimensionNo += 1;
     const staged = stagedFigure(dimension.valueRaw, dimension.unitRaw);
-    const unit = unitFor(staged.printed, projectDefault);
+    const unit = unitFor(staged.printed, projectDefault, vote(dimension.page ?? firstPage));
     const state = suggestAttributeState(staged.value);
     observations.push(
       baseRow({
@@ -427,7 +514,7 @@ export function stageItemV4(
         valueRaw: staged.value,
         value: state.value,
         unit: unit.unit,
-        unitSuggested: unit.source === "project_default",
+        unitSuggested: unit.suggested,
         ...(unit.source ? { unitSource: unit.source } : {}),
         state: state.state,
         stateReason: state.reason,
