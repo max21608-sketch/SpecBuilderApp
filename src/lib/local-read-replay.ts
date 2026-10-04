@@ -19,12 +19,12 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export function readReplayEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function readReplayEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return env.LOCAL_STACK === "1" && env.APP_ENV === "development" && Boolean(env.LOCAL_READ_REPLAY_DIR);
 }
 
 /** The saved raw model response for this document's bytes, or null. */
-export function replayedResponse(base64: string, env: NodeJS.ProcessEnv = process.env): unknown | null {
+export function replayedResponse(base64: string, env: Record<string, string | undefined> = process.env): unknown | null {
   if (!readReplayEnabled(env)) return null;
   const dir = String(env.LOCAL_READ_REPLAY_DIR);
   try {
