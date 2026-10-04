@@ -1254,7 +1254,7 @@ export function ReplacePanel({
           </p>
           {occupants.map(({ recordId, occupant }) => {
             const acknowledged = (observation.replaces ?? []).some(
-              (entry) => entry.recordId === recordId && entry.attributeId === occupant.attributeId,
+              (entry) => !entry.retiresSlot && entry.recordId === recordId && entry.attributeId === occupant.attributeId,
             );
             const runName =
               recordNames?.[recordId] ??
@@ -1267,7 +1267,11 @@ export function ReplacePanel({
                   checked={acknowledged}
                   disabled={busy}
                   onChange={(event) => {
-                    const others = (observation.replaces ?? []).filter((entry) => entry.recordId !== recordId);
+                    // Only this slot's own entry: a W or D a diameter retires
+                    // on the same record (brief G) is a separate decision.
+                    const others = (observation.replaces ?? []).filter(
+                      (entry) => entry.recordId !== recordId || Boolean(entry.retiresSlot),
+                    );
                     const next = event.target.checked
                       ? [...others, { recordId, attributeId: occupant.attributeId, attributeVersion: occupant.attributeVersion }]
                       : others;

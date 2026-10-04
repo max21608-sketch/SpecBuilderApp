@@ -48,6 +48,7 @@ import {
   type StagedDrawings,
 } from "@/lib/drawing-document";
 import { isDimensionSlot, type DimensionSlot } from "@/lib/spec-vocab";
+import { billReplacements, type BillReplacement } from "@/lib/bill-over-drawing";
 import {
   isFinishCodeOrigin,
   isFinishGroup,
@@ -97,6 +98,13 @@ export type ResolvedItem = {
    * run (which proposes no swatch) resolves to exactly the bytes it did.
    */
   swatchRefusals?: Record<string, string>;
+  /**
+   * The values THE BILL wrote that this card's pending rows would replace
+   * (brief G): what the card's one press acknowledges, and lists before the
+   * press. From `billReplacements`, over the same occupancy the blockers read.
+   * Absent where there are none, like `swatchRefusals`.
+   */
+  billReplacements?: BillReplacement[];
   /**
    * For a page of a code that NAMES its configurations (schemaVersion 3), where
    * it lands — the server's answer, computed by the same pure functions the
@@ -231,6 +239,11 @@ function withSwatchRefusals(refusals: Record<string, string>): { swatchRefusals?
   return Object.keys(refusals).length > 0 ? { swatchRefusals: refusals } : {};
 }
 
+/** The key only where it says something, for the reason `withSwatchRefusals` gives. */
+function withBillReplacements(entries: BillReplacement[]): { billReplacements?: BillReplacement[] } {
+  return entries.length > 0 ? { billReplacements: entries } : {};
+}
+
 /**
  * Which BWS fields and which dimension slots are already spoken for, per record.
  *
@@ -246,7 +259,14 @@ function withSwatchRefusals(refusals: Record<string, string>): { swatchRefusals?
 export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlots> {
   const rows = await sql`
     select a.id, a.record_id, a.spec_field_id, a.dimension_slot, a.version, a.label, a.value, a.unit,
-           a.state, a.material_code, a.source_page, at.filename as source_filename
+           a.state, a.material_code, a.source_page, at.filename as source_filename,
+           -- WHAT THE BILL SAID, and only that (brief G): the bill's own run,
+           -- no standard a person set beside it, and not the new row of a
+           -- person's correction (a correction keeps the bill's run and page,
+           -- and points the row it retired at itself).
+           coalesce(ir.source_kind = 'boq_xlsx', false)
+             and a.standard_set_by is null
+             and not exists (select 1 from record_attributes p where p.superseded_by_id = a.id) as from_bill
     from record_attributes a
     join spec_records r on r.id = a.record_id
     left join intake_runs ir on ir.id = a.source_run_id
@@ -272,6 +292,7 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
       materialCode: row.material_code === null || row.material_code === undefined ? null : String(row.material_code),
       sourceFilename: row.source_filename === null || row.source_filename === undefined ? null : String(row.source_filename),
       sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
+      fromBill: row.from_bill === true,
     };
     if (row.spec_field_id) {
       const map = fields.get(recordId) ?? new Map<string, OccupiedSlot>();
@@ -433,6 +454,7 @@ export function resolveStagedRun(
       writesTo: Object.fromEntries(writesTo),
       finishFilings: finishFilingsFor(item, context.finishes),
       ...withSwatchRefusals(swatchRefusalsFor(item, context.finishes)),
+      ...withBillReplacements(billReplacements(item, targets, occupied, named)),
       named: named ? namedResolution(targets, resolution, named) : null,
     };
   });
