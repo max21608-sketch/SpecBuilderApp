@@ -823,10 +823,12 @@ export function ObservationRow({
             also printed:{" "}
             {observation.candidates
               .map(
-                (candidate) =>
-                  `${candidate.valueRaw}${candidate.unitRaw ? ` ${candidate.unitRaw}` : ""} (${[candidate.view, candidate.page ? `p${candidate.page}` : null]
-                    .filter(Boolean)
-                    .join(", ")})`,
+                (candidate) => {
+                  // The read writes a candidate as one line ("740 (SIDE, page 2)"); a
+                  // structured one is spelled out the same way.
+                  const where = [candidate.view, candidate.page ? `p${candidate.page}` : null].filter(Boolean).join(", ");
+                  return `${candidate.valueRaw}${candidate.unitRaw ? ` ${candidate.unitRaw}` : ""}${where ? ` (${where})` : ""}`;
+                },
               )
               .join("; ")}
           </p>

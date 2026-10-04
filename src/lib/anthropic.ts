@@ -231,7 +231,7 @@ WHAT ARE THE THINGS TO BE MADE, AND WHAT DOES THIS DOCUMENT SAY ABOUT EACH ONE?
 An item is one piece of furniture to manufacture. It may be drawn on one page or across several (a
 specification sheet and its shop drawing, an elevation sheet and a section sheet, a continuation page
 with no title). One page may carry several items. Some pages carry no item at all (a cover, a legend,
-general notes) — list those in \`nonItemPages\` with the reason. Pages that describe the same piece of
+general notes) — list those in \`nonItemPages\` as "page: reason". Pages that describe the same piece of
 furniture belong to ONE item even when they title it differently ("S-200" on a sheet, "MUR.2 ARMCHAIR"
 in a title block) or name the same material in different words. List every code the item is titled by
 in \`codes\` — the item code as the title prints it FIRST ("FUR-33", "S-200"), other titles after it,
@@ -263,7 +263,7 @@ For each item:
    and say so in \`uncertain\`.
    - Prefer a figure that is LABELLED ("WIDTH 550MM", "W1520") or that two views agree on.
    - When candidates still disagree, give your best choice in the slot AND list every other candidate
-     (figure, view, page) in that slot's \`candidates\`, with an \`uncertain\` entry. Do not force a
+     in that slot's \`candidates\`, each as "figure (view, page)", with an \`uncertain\` entry. Do not force a
      confident choice where a person should decide.
    - When a specification sheet's labelled table and a shop drawing in this document disagree, the
      SPECIFICATION SHEET fills the slot and the drawing's figure is listed as a candidate, with an
@@ -284,17 +284,18 @@ For each item:
    configuration differently ("Type 5" / "TYPO 5"), use the sheet's name and keep the drawing's words
    in \`nameRaw\`; never take a name from anything outside this document. Say in \`differsIn\` what
    differs between them. One item drawn for two rooms with nothing different is ONE configuration-free
-   item. Sizes that differ per configuration go in that configuration's \`overall\`, and only those.
+   item. A size that differs for a configuration is its own \`overall\` entry naming that configuration
+   in its \`configurations\`, beside the item's own entry for the slot (which names none).
 3. ITS FINISHES AND MATERIALS, in \`finishes\` — each callout with the PART it names ("SOFA FEET",
    "TOP") or null where the page does not name one, the SPECIFICATION as printed ("Dark tinted wood",
    "Antique bronze") or null where only a code is printed, and the client's own finish code where one
    is printed ("GR TIM 04", "UPH-07"). Never describe a code in your own words. Which configurations it
    applies to, if any. One entry per distinct callout, even if it is pointed to from several views.
-4. EVERY OTHER DIMENSION on the item, briefly, in \`otherDimensions\`: label or view, figure, unit as
-   printed. These are kept for reference and folded away for the reviewer; on a dense sheet the list
+4. EVERY OTHER DIMENSION on the item, briefly, in \`otherDimensions\`: its label and view, and the
+   figure with its unit as printed. These are kept for reference and folded away for the reviewer; on a dense sheet the list
    may be partial — say so in \`uncertain\`.
-5. NOTES — anything else stated about THIS item, one note per remark or bullet, in the document's
-   words. Boilerplate printed on every sheet (general notes, copyright, "do not scale") and revision
+5. NOTES — anything else stated about THIS item, one per remark or bullet, in the document's words,
+   as a \`statements\` entry with an EMPTY label. Boilerplate printed on every sheet (general notes, copyright, "do not scale") and revision
    notes go once into \`documentNotes\`, not onto items — except a revision note that changes this
    item's figure, which also goes on the item.
 6. PICTURES — where each drawn view or photo OF THE ITEM sits on its page (fractions 0 to 1, origin
@@ -306,21 +307,23 @@ For each item:
    finish above goes in with its label and value as printed ("FILLING: Feather wrap", "LEAD TIME: 12
    weeks", "FR STANDARD: BS 7176 Medium hazard"). Take in everything; a person decides later what
    matters.
-8. A SWATCH PER FINISH — where a finish is shown as a printed swatch chip or a material photo, give
-   that chip's box in the finish's \`swatch\` (page and fractions, as for pictures).
-9. WHETHER IT IS A MOCK-UP ITEM — set \`mockup.is\` true only where the page itself says the drawing is
-   for a mock-up (a title block reading "MOCKUP ROOM", a drawing number with a MUR segment, "(MUR)" in
-   the title), and say in \`mockup.evidence\` what printed it.
+8. A SWATCH PER FINISH — where a finish is shown as a printed swatch chip or a material photo on the
+   callout's page, give that chip's box in the finish's \`swatchBox\` (fractions, as for pictures).
+9. WHETHER IT IS A MOCK-UP ITEM — only where the page itself says the drawing is for a mock-up (a
+   title block reading "MOCKUP ROOM", a drawing number with a MUR segment, "(MUR)" in the title), put
+   what printed it, quoted, in \`mockup\`; leave it empty otherwise.
 10. WHAT YOU ARE UNSURE OF — in \`uncertain\`, say plainly anything you could not settle: a figure you
    could not read, a slot you chose between two candidates, pages you were not sure belonged together.
+   Start each with what it is about and a colon ("width: …", "grouping: …", "conflict: …").
    A stated doubt is useful; a confident guess is the one answer nobody downstream can catch.
 
 FIGURES AND UNITS, EXACTLY AS PRINTED:
-- \`valueRaw\` is the figure as printed; \`unitRaw\` the unit only if the page prints it ("mm", "cm").
-  Never convert, never infer a unit from how big a number is, never append one. A wrong unit is worse
+- \`valueRaw\` is the figure as printed, with its unit ONLY where the page prints one beside it
+  ("840 mm", "79 cm"), and so in a candidate and in another dimension. Never convert, never infer a
+  unit from how big a number is, never append one. A wrong unit is worse
   than none: it reads as a real measurement and nothing afterwards questions it.
 - Feet and inches are one figure: 5'-7" and 2'-5 1/2" go into \`valueRaw\` exactly, marks and all,
-  with \`unitRaw\` empty. Inches alone likewise: 11 7/8", \`unitRaw\` empty. Write a fraction after a
+  and nothing is added. Inches alone likewise: 11 7/8". Write a fraction after a
   space: 2'-5 1/2", even where the page stacks it.
 - A size printed as one line ("80 x 70 x 90 cm", "W1520 x D560 x H1005 mm") is copied verbatim into
   \`combinedLine\`, and its figures go into the slots only where the page tells you which is which (a

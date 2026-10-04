@@ -388,15 +388,18 @@ export function stageItemV4(
 
   // ---- everything else a specification sheet states -------------------------
   // Kept as notes, requirement-free, with the label and value as printed: that
-  // is what `record_attributes` was made for. Never merged into a block — the
-  // label is the sheet's own field name and each line is its own statement.
+  // is what `record_attributes` was made for. A labelled line is never merged
+  // into a block — the label is the sheet's own field name and each line is its
+  // own statement; an unlabelled one is a remark, and merges like one.
   for (const statement of raw.statements) {
     if (!statement.value?.trim() && !statement.label?.trim()) continue;
     const state = suggestAttributeState(statement.value);
     observations.push(
       baseRow({
         attrGroup: "note",
-        labelRaw: statement.label?.trim() || "Statement",
+        // An UNLABELLED statement is a plain remark about the item, and reads
+        // as one: labelled "Note", so a page's remarks merge into one block.
+        labelRaw: statement.label?.trim() || "Note",
         valueRaw: statement.value,
         value: state.value,
         state: state.state,

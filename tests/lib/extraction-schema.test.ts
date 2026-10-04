@@ -455,6 +455,27 @@ describe("configurations a page names", () => {
     expect(unions(toOutputSchema(DRAWINGS_TOOL.input_schema))).toBe(16);
   });
 
+  it("keeps the drawings read inside the grammar budget structured outputs accepted", () => {
+    // "The compiled grammar is too large": not a documented number, so this is
+    // the MEASURED proxy — property slots, counted below — of 2026-10-04: v3 35
+    // (accepted), 43 accepted, 47 refused. A field added past 43 is a 400 on
+    // every drawings read until it is probed against the live API.
+    const slots = (node: unknown): number => {
+      if (Array.isArray(node)) return node.reduce((total: number, entry) => total + slots(entry), 0);
+      if (!node || typeof node !== "object") return 0;
+      let count = 0;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === "properties") {
+          count += Object.keys(value as object).length;
+          for (const sub of Object.values(value as object)) count += slots(sub);
+        } else if (key !== "enum" && key !== "required" && key !== "description") count += slots(value);
+      }
+      return count;
+    };
+    expect(slots(toOutputSchema(DRAWINGS_TOOL.input_schema))).toBe(35);
+    expect(slots(toOutputSchema(TOOLS.shop_drawings.tool.input_schema))).toBeLessThanOrEqual(43);
+  });
+
   it("requires only properties each object declares", () => {
     // The code-group object listed `itemCodeRaw` as required while declaring
     // `itemCodes` and forbidding anything else — a request no answer could meet.

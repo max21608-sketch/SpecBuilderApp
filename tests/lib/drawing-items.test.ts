@@ -491,7 +491,8 @@ describe("the read's own tolerance", () => {
     expect(item.notes[0]!.text).toBe("Hand made.");
     expect(item.uncertain[0]).toEqual({ about: "other", why: "Could not read the depth." });
     expect(item.pictures).toHaveLength(1);
-    expect(item.mockup).toEqual({ is: false, evidence: null });
+    // The schema's `mockup` is the quoted evidence: any words are a mock-up.
+    expect(item.mockup).toEqual({ is: true, evidence: "yes" });
     expect(parsed.nonItemPages).toEqual([]);
   });
 
@@ -526,6 +527,63 @@ describe("the read's own tolerance", () => {
     expect(item.overall.height).toBeNull();
     expect(item.finishes[0]).toMatchObject({ part: null, spec: null, code: "WD-01", swatch: { page: 1, box: [0.1, 0.1, 0.2, 0.2] } });
     expect(item.mockup.evidence).toBeNull();
+  });
+
+  it("reads the schema's FLAT shape back into the one staging reads", () => {
+    const staged = stage({
+      documentNotes: "",
+      nonItemPages: ["3: general notes only", "page 4 - legend"],
+      items: [
+        {
+          ...rawItem(),
+          codes: ["X-301"],
+          overall: [
+            { slot: "width", valueRaw: "550 mm", view: "TABLE", page: 1, evidence: "labelled", candidates: ["560 (PLAN, page 2)"], configurations: [] },
+            { slot: "width", valueRaw: "600 mm", view: "TABLE", page: 1, evidence: "Type 2 row", candidates: [], configurations: ["Type 2"] },
+            { slot: "height", valueRaw: "1'-6\"", view: "SIDE", page: 1, evidence: "side", candidates: [], configurations: ["Type 9"] },
+          ],
+          configurations: [
+            { name: "Type 1", nameRaw: "Type 1", differsIn: "fabric" },
+            { name: "Type 2", nameRaw: "Type 2", differsIn: "fabric and width" },
+          ],
+          finishes: [
+            { part: "SEAT", spec: "Invented raffia", code: null, configurations: ["Type 1"], page: 1, swatchBox: [0.6, 0.1, 0.7, 0.2] },
+            { part: "SEAT", spec: "Invented velvet", code: null, configurations: ["Type 2"], page: 1, swatchBox: [] },
+          ],
+          statements: [
+            { label: "", value: "REMARKS: SUBMIT SAMPLES.", page: 1, configurations: [] },
+            { label: "", value: "REMARKS: CHECK ACCESS.", page: 1, configurations: [] },
+            { label: "FILLING", value: "Feathers", page: 1, configurations: [] },
+          ],
+          mockup: "title block reads MOCKUP ROOM",
+          otherDimensions: [{ label: "ARM HEIGHT, SECTION B", valueRaw: "620 mm", page: 1 }],
+          uncertain: ["width: the plan prints 560", "nothing labelled here"],
+        },
+      ],
+    });
+    expect(staged.nonItemPages).toEqual([
+      { page: 3, why: "general notes only" },
+      { page: 4, why: "legend" },
+    ]);
+    const item = staged.items[0]!;
+    const widths = item.observations.filter((o) => o.dimensionSlot === "W");
+    expect(widths.map((o) => [o.value, o.unit, o.unitSource, o.configurations ?? []])).toEqual([
+      ["550", "mm", "printed", ["Type 1"]],
+      ["600", "mm", "printed", ["Type 2"]],
+    ]);
+    expect(widths[0]!.candidates).toEqual([{ valueRaw: "560 (PLAN, page 2)", unitRaw: null, view: null, page: null }]);
+    // A size naming a configuration the item does not list reads as the item's own.
+    expect(item.observations.find((o) => o.dimensionSlot === "H")).toMatchObject({ value: `1'-6"`, unit: "in" });
+    expect(item.observations.find((o) => o.value === "Invented raffia")!.swatchProposal).toEqual({ page: 1, bbox: [0.6, 0.1, 0.7, 0.2] });
+    expect(item.observations.find((o) => o.value === "Invented velvet")!.swatchProposal).toBeUndefined();
+    expect(rowLabelled(item, "Remarks")!.value).toBe("SUBMIT SAMPLES.\nCHECK ACCESS.");
+    expect(rowLabelled(item, "FILLING")!.value).toBe("Feathers");
+    expect(rowLabelled(item, "ARM HEIGHT, SECTION B")).toMatchObject({ value: "620", unit: "mm" });
+    expect(item.mockup).toEqual({ is: true, evidence: "title block reads MOCKUP ROOM" });
+    expect(item.uncertain).toEqual([
+      { about: "width", why: "the plan prints 560" },
+      { about: "other", why: "nothing labelled here" },
+    ]);
   });
 
   it("refuses a read whose items are not a list: that is a failure to answer", () => {
