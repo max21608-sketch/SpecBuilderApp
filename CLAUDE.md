@@ -1105,6 +1105,14 @@ rows would be the opposite of the library's edit-once rule, where correcting
 one code corrects every item carrying it. `kind` is still never inferred, so a
 pasted code arrives filed as nothing.
 
+**THE SCAN IS BUILT (2026-10-04, `docs/plans/intake-items-2026-10-04.md` Phase
+4).** `finishes_schedule` has its own tool with a code field (staged
+`schemaVersion: 2`; version 1 runs keep the old screen), a review listing
+finishes with the library's verdict per code, and a confirm that creates and
+fills the library in one change set — a conflict still writes nothing. The pack
+reads bill → finishes schedule → drawings. The paragraphs above are the history
+of why it waited.
+
 **Asked for again on 2026-10-01, as a step in the pack** (D1 of
 `docs/plans/catchup-2026-10-01.md`). Matthew set the order as bill → finishes
 schedule → drawings, so that a drawing read lands on finishes already expected.
@@ -1223,7 +1231,9 @@ week and wonders why column K is empty.
 
 **Verified against the sandbox, 2026-09-18**, not fixtures: AP364c MAIN RUN
 composed 19 rows with 11 carrying dimensions off the real shop drawings
-(`S-100 W1900 x D790 x H720 x SH440mm`, `S-400 W570 x D493 x H473 x SH358mm`),
+(`S-100 W1900 x D790 x H720 x SH440mm`, and `S-400 W570 x D493 x H473 x SH358mm` —
+**which was WRONG**: checked against the page 2026-10-04, S-400 is W570 x D460 x
+H493; 473 is to the cushion edge and 358 is between the legs),
 11 links into the real pack, 11 pictures, and `S-201 Armchair (A)` correctly
 carrying a blank quantity. **`Specs 2` has never fired against real data** — no
 record in the sandbox is yet specified across two pages — so it holds unit
@@ -3538,9 +3548,14 @@ the others.
 
 **Active integrations:** Anthropic (M2 extraction) — a key is set in Vercel
 staging and verified calls have been billed, including one against an email.
-**Extraction reads with `claude-opus-5` at effort `high` since 2026-09-23**
-(Max: accuracy over API cost and read time; Opus 5 rather than 5.5 because 5.5
-refuses the forced `tool_choice` every extraction uses). The timing inequality
+**Extraction reads with `claude-opus-5-5` at effort `high` since 2026-10-04**
+(Max: accuracy over API cost and read time), asked for as STRUCTURED OUTPUT
+(`output_config.format`) rather than a forced tool, which 5.5 refuses — one
+implementation, `src/lib/model-request.ts`, chosen by model id; the refusal
+fallback (`fallbacks: "default"`) is on. Measured on the Aman pack the same day:
+Opus 5 with the forced tool FAILED 12 of 30 drawings outright (the inch mark in
+`5'-5"` broke the tool's JSON); Opus 5.5 failed none. Opus 5 at effort `high`
+was the model from 2026-09-23. The timing inequality
 moved with it: model 740 s < abort 770 s < `maxDuration` 800 s (Pro's GA
 maximum; the project default was raised to match) < claim 900 s < queue
 visibility 1200 s. Measured on the merged 44-page Panther pack: 358 s and 43,095
