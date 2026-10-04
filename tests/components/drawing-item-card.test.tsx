@@ -85,7 +85,7 @@ describe("the item card's dimension rows", () => {
     expect(rowLabels().filter((label) => label === "FRONT")).toHaveLength(2);
     expect(screen.queryByDisplayValue("42")).toBeNull();
 
-    await userEvent.click(screen.getByRole("button", { name: /show/i }));
+    await userEvent.click(screen.getByRole("button", { name: /Other dimensions \(3\) — show/ }));
     expect(rowLabels().filter((label) => label === "FRONT")).toHaveLength(4);
     expect(screen.getByDisplayValue("42")).toBeInTheDocument();
   });
@@ -158,15 +158,17 @@ describe("the unit control", () => {
     // The column is gone -- it was 99px of em-dash on every row that is not a
     // measurement, and losing it is what stopped the card being clipped -- so
     // the unit is simply absent, which says the same thing more quietly.
-    expect(within(row).queryByLabelText("Unit")).toBeNull();
+    expect(within(row).queryByLabelText("printed in")).toBeNull();
   });
 
-  it("offers the bulk mm/cm control whenever the page holds a measurement", () => {
+  it("offers the bulk unit control whenever the page holds a measurement", () => {
     // Gated on `attrGroup === "dimension"`, it was hidden from exactly the
-    // pages whose figures were all still notes.
+    // pages whose figures were all still notes. Since brief F it says what it
+    // does: it states what the figures are PRINTED in, and converts nothing.
     resetIds();
     renderCard([figure("FRONT", "640")]);
-    expect(screen.getByText(/All dimensions:/)).toBeInTheDocument();
+    expect(screen.getByText(/Every figure on this card is printed in:/)).toBeInTheDocument();
+    for (const unit of ["mm", "cm", "in"]) expect(screen.getByRole("button", { name: unit })).toBeInTheDocument();
   });
 });
 
@@ -269,7 +271,7 @@ describe("the table's width", () => {
     renderCard([figure("FRONT", "640", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm", unitSource: "printed" })]);
     const row = rowFor("640");
     const valueCell = row.querySelectorAll("td")[2]!;
-    expect(within(valueCell).getByLabelText("Unit")).toHaveValue("mm");
+    expect(within(valueCell).getByLabelText("printed in")).toHaveValue("mm");
     expect(within(valueCell).getByText("printed on the page")).toBeInTheDocument();
   });
 });

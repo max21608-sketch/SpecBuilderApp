@@ -69,12 +69,15 @@ import {
   ReplacePanel,
   RowNotes,
   RunTargets,
+  ShowInMillimetres,
   orderRows,
   type RecordChoice,
   type RowBlocker,
   type SpecField,
+  type SwatchOrigin,
 } from "@/components/imports/ObservationRows";
-import { BulkUnit, type ItemResolution } from "@/components/imports/DrawingItemCard";
+import { BulkUnit, type BulkUnitChoice, type ItemResolution } from "@/components/imports/DrawingItemCard";
+import { candidateRowFor, swapSlotRequest } from "@/lib/slot-swap";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Tip from "@/components/ui/Tip";
@@ -107,7 +110,7 @@ export type ConfigurationCardProps = {
   onSaveObservation: (item: DrawingItem, observation: DrawingObservation, changes: Record<string, unknown>) => Promise<void>;
   onSaveObservations: (edits: { item: DrawingItem; observation: DrawingObservation; changes: Record<string, unknown> }[]) => Promise<void>;
   onSaveTargets: (item: DrawingItem, ticked: string[], unticked: string[]) => Promise<void>;
-  onSetBulkUnit: (scope: "item" | "run", unit: "mm" | "cm", itemId?: string) => Promise<void>;
+  onSetBulkUnit: (scope: "item" | "run", unit: BulkUnitChoice, itemId?: string) => Promise<void>;
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
   onReviewMany: (
     key: string,
@@ -115,7 +118,7 @@ export type ConfigurationCardProps = {
   ) => Promise<void>;
   onImage: (itemId: string, image: CroppedImage | null) => void;
   /** The page is the one the crop was taken FROM — the card covers several. */
-  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
+  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null, origin?: SwatchOrigin) => void;
   /** One level on the records this card applies to, through the levels route. */
   onSetLevel: (recordIds: string[], level: ItemLevel) => Promise<void>;
   /**
@@ -156,6 +159,8 @@ function PageConfigurationCard({
 }: ConfigurationCardProps) {
   const [open, setOpen] = useState(true);
   const [showOther, setShowOther] = useState(false);
+  // "Show in mm" (brief F): client state, display only.
+  const [showMm, setShowMm] = useState(false);
   /** Which of the card's pages the sidebar preview is showing. */
   const [previewPage, setPreviewPage] = useState<number | null>(null);
   /** Which configuration's tab is open. Local state: nothing links into it. */
@@ -219,13 +224,15 @@ function PageConfigurationCard({
         {card.split && <Chip tone="info">{card.members.length} configurations</Chip>}
         <span className="flex-1" />
         {open && pendingMembers.length > 0 && (
-          <BulkUnit
-            label="All dimensions:"
-            disabled={busyHere}
-            onSet={(unit) => {
-              for (const member of pendingMembers) void onSetBulkUnit("item", unit, member.item.id);
-            }}
-          />
+          <>
+            <BulkUnit
+              disabled={busyHere}
+              onSet={(unit) => {
+                for (const member of pendingMembers) void onSetBulkUnit("item", unit, member.item.id);
+              }}
+            />
+            <ShowInMillimetres shown={showMm} onToggle={() => setShowMm((value) => !value)} />
+          </>
         )}
         <Button size="xs" variant="quiet" onClick={() => setOpen((value) => !value)}>
           {open ? "Collapse" : "Expand"}
@@ -453,6 +460,21 @@ function PageConfigurationCard({
     void onSaveObservations(edits);
   };
 
+  /**
+   * "Use as W" on a shared row: the same swap on every configuration's
+   * matching row, each against ITS OWN page's rows and versions, in one batch.
+   */
+  const fanOutSwap = (leaderRow: DrawingObservation, slot: DimensionSlot) => {
+    if (geometry.status !== "shared") return;
+    const row = geometry.rows.find((entry) => entry.leader.id === leaderRow.id);
+    if (!row) return;
+    const edits = pendingMembers.flatMap((member) => {
+      const observation = row.byMember[member.item.id];
+      return observation ? [{ item: member.item, observation, changes: swapSlotRequest(member.item, observation, slot) }] : [];
+    });
+    void onSaveObservations(edits);
+  };
+
   const fanOutIgnore = (leaderRow: DrawingObservation) => {
     if (geometry.status !== "shared") return;
     const row = geometry.rows.find((entry) => entry.leader.id === leaderRow.id);
@@ -619,7 +641,8 @@ function PageConfigurationCard({
                                 busy={busyHere}
                                 blocked={blockers.length > 0 || warnings.length > 0}
                                 guessWhy={guessWhy.get(leaderRow.id)}
-                                callbacks={{ onChange: fanOut, onIgnore: fanOutIgnore, onSwatch }}
+                                showMm={showMm}
+                                callbacks={{ onChange: fanOut, onIgnore: fanOutIgnore, onSwatch, onSwapSlot: fanOutSwap }}
                               />
                               {row.missingOn.length > 0 && (
                                 <tr>
@@ -718,6 +741,7 @@ function PageConfigurationCard({
               onReview={onReview}
               onImage={onImage}
               onSwatch={onSwatch}
+              showMm={showMm}
             />
           ))}
         </div>
@@ -875,6 +899,7 @@ function ConfigurationSection({
   onReview,
   onImage,
   onSwatch,
+  showMm = false,
 }: {
   card: Extract<ReviewCard<ItemResolution>, { kind: "configurations" }>;
   member: ConfigurationMember<ItemResolution>;
@@ -888,7 +913,9 @@ function ConfigurationSection({
   onSaveObservation: (item: DrawingItem, observation: DrawingObservation, changes: Record<string, unknown>) => Promise<void>;
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
   onImage: (itemId: string, image: CroppedImage | null) => void;
-  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
+  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null, origin?: SwatchOrigin) => void;
+  /** The card's "Show in mm" (brief F). */
+  showMm?: boolean;
 }) {
   const colour = colourFor(member.letter);
   const [armed, setArmed] = useState(false);
@@ -923,6 +950,8 @@ function ConfigurationSection({
       void onSaveObservation(member.item, observation, changes),
     onIgnore: (observation: DrawingObservation) => void onReview(member.item, [observation], "ignore"),
     onSwatch,
+    onSwapSlot: (observation: DrawingObservation, slot: DimensionSlot) =>
+      void onSaveObservation(member.item, observation, swapSlotRequest(member.item, observation, slot)),
   };
 
   return (
@@ -1025,6 +1054,11 @@ function ConfigurationSection({
                       blocked={blockers.length > 0 || warnings.length > 0}
                       guessWhy={undefined}
                       finishFiling={member.resolution?.finishFilings?.[observation.id]}
+                      swatchRefusal={member.resolution?.swatchRefusals?.[observation.id] ?? null}
+                      showMm={showMm}
+                      candidateRows={observation.candidates?.map((candidate) =>
+                        candidateRowFor(member.item, observation, candidate),
+                      )}
                       callbacks={callbacks}
                     />
                     <ReplacePanel

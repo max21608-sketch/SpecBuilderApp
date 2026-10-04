@@ -65,6 +65,7 @@ import {
   type UnitSuggestion,
 } from "@/lib/drawing-document";
 import { parseCombinedDimensions, parseDimensionFigure, toMillimetres } from "@/lib/dimensions";
+import { readCandidateLine } from "@/lib/slot-swap";
 import { DIMENSION_SLOT_LABELS, normaliseDimensionSlot, normaliseUnit, type AttributeState, type AttributeUnit, type DimensionSlot } from "@/lib/spec-vocab";
 import { normaliseRef } from "@/lib/record-refs";
 import {
@@ -493,6 +494,11 @@ export function stageItemV4(
         stateReason: state.reason,
         page: statement.page ?? firstPage,
         ...(statement.configurations.length > 0 ? { configurations: [...statement.configurations] } : {}),
+        // A LABELLED line is the sheet's own field and value, and the card
+        // folds these under "Everything else the sheet states" (brief F) so
+        // they do not sit between the sizes and the finishes. An unlabelled
+        // one is a remark: it merges and reads like any other note.
+        ...(statement.label?.trim() ? { statement: true } : {}),
       }),
     );
   }
@@ -522,6 +528,58 @@ export function stageItemV4(
         view: dimension.view,
       }),
     );
+  }
+
+  // ---- every rival figure for a slot, as a row a person can point at --------
+  // Brief F. The read keeps the figures it did NOT choose for a slot beside
+  // the one it did (`candidates`), and the card offers "Use this instead" on
+  // each — which swaps a MEASURED ROW into the slot, so the candidate must be
+  // one. Where the read also listed it among the other dimensions (same page,
+  // same view, same figure) that row is the candidate; otherwise it is added
+  // here, folded with the rest, carrying the slot row's configurations. The
+  // candidate records which row it is, so the button never has to search.
+  const figureIn = (value: string | null | undefined) => parseDimensionFigure(value ?? null).figure;
+  for (const holder of [...observations]) {
+    if (holder.attrGroup !== "dimension" || !holder.dimensionSlot || !holder.candidates?.length) continue;
+    const slotLabel = DIMENSION_SLOT_LABELS[holder.dimensionSlot].toLowerCase();
+    holder.candidates = holder.candidates.map((candidate) => {
+      // The flat schema writes a candidate as ONE line, "740 (SIDE, page 2)".
+      const read = readCandidateLine(candidate);
+      const staged = stagedFigure(read.figure, candidate.unitRaw);
+      const page = read.page ?? holder.page ?? firstPage;
+      const view = read.view;
+      const existing = observations.find(
+        (row) =>
+          row.attrGroup === "note" &&
+          row.isOverall === false &&
+          row.page === page &&
+          (row.view ?? null) === view &&
+          figureIn(row.value ?? row.valueRaw) !== null &&
+          figureIn(row.value ?? row.valueRaw) === figureIn(staged.value),
+      );
+      if (existing) return { ...candidate, observationId: existing.id };
+      const unit = unitFor(staged.printed, projectDefault, vote(page));
+      const state = suggestAttributeState(staged.value);
+      const row = baseRow({
+        attrGroup: "note",
+        dimensionSlot: null,
+        slotSuggested: false,
+        isOverall: false,
+        labelRaw: view ?? `Another reading of the ${slotLabel}`,
+        valueRaw: staged.value,
+        value: state.value,
+        unit: unit.unit,
+        unitSuggested: unit.suggested,
+        ...(unit.source ? { unitSource: unit.source } : {}),
+        state: state.state,
+        stateReason: state.reason,
+        page,
+        view,
+        ...(holder.configurations?.length ? { configurations: [...holder.configurations] } : {}),
+      });
+      observations.push(row);
+      return { ...candidate, observationId: row.id };
+    });
   }
 
   // ---- notes ----------------------------------------------------------------

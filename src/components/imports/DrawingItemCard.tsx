@@ -44,6 +44,7 @@ import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
 import ItemReadNotes from "@/components/imports/ItemReadNotes";
 import { pagesInWords } from "@/lib/drawing-items";
+import { candidateRowFor, swapSlotRequest } from "@/lib/slot-swap";
 import {
   ObservationRow,
   ObservationTableHead,
@@ -51,7 +52,10 @@ import {
   ReplacePanel,
   RowNotes,
   RunTargets,
+  ShowInMillimetres,
+  StatementsToggle,
   orderRows,
+  type SwatchOrigin,
   type Occupant,
   type RecordChoice,
   type RowBlocker,
@@ -107,6 +111,12 @@ export type ItemResolution = {
    * route also calls, so the chip and the write cannot disagree.
    */
   finishFilings?: Record<string, FinishFilingView>;
+  /**
+   * Per finish row whose PROPOSED swatch has no finish to attach to: why
+   * (brief F). The picker shows such a proposal unticked; the confirm leaves
+   * it out. From `swatchRefusalsFor`, the confirm's own reading.
+   */
+  swatchRefusals?: Record<string, string>;
   // NOT blockers. These never disable Confirm and the confirm route never sees
   // them -- see drawingItemWarnings() for why they are a separate type.
   warnings?: RowWarning[];
@@ -118,28 +128,35 @@ export type ItemResolution = {
   named?: NamedResolution | null;
 };
 
+/** The units the card-wide control offers. */
+export const BULK_UNITS = ["mm", "cm", "in"] as const;
+export type BulkUnitChoice = (typeof BULK_UNITS)[number];
+
 /**
  * Setting the unit on many dimensions at once.
  *
  * The per-row select stays the override; this is for the case the project
  * default exists to solve, where a pack states no unit anywhere and a reviewer
- * would otherwise answer the same question once per figure. Deliberately only
- * mm and cm: those are the two a furniture drawing is ever in, and offering
- * metres beside them invites a misclick that is 100x wrong.
+ * would otherwise answer the same question once per figure. mm, cm and — since
+ * the Aman pack, dimensioned in feet and inches throughout — in. Never metres:
+ * offering them invites a misclick that is 100x wrong.
+ *
+ * IT RELABELS, IT NEVER CONVERTS, and since brief F it says so: "Every figure
+ * on this card is printed in". The composer converts; "Show in mm" displays.
  */
 export function BulkUnit({
-  label,
+  label = "Every figure on this card is printed in:",
   disabled,
   onSet,
 }: {
-  label: string;
+  label?: string;
   disabled: boolean;
-  onSet: (unit: "mm" | "cm") => void;
+  onSet: (unit: BulkUnitChoice) => void;
 }) {
   return (
     <span className="flex items-center gap-1 text-xs text-neutral-500">
       {label}
-      {(["mm", "cm"] as const).map((unit) => (
+      {BULK_UNITS.map((unit) => (
         <Button key={unit} size="xs" disabled={disabled} onClick={() => onSet(unit)}>
           {unit}
         </Button>
@@ -187,7 +204,7 @@ export default function ItemCard({
   busy: boolean;
   onSaveObservation: (item: DrawingItem, observation: DrawingObservation, changes: Record<string, unknown>) => Promise<void>;
   onSaveTargets: (item: DrawingItem, ticked: string[], unticked: string[]) => Promise<void>;
-  onSetBulkUnit: (scope: "item" | "run", unit: "mm" | "cm", itemId?: string) => Promise<void>;
+  onSetBulkUnit: (scope: "item" | "run", unit: BulkUnitChoice, itemId?: string) => Promise<void>;
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
   /** The crop this card currently holds, remembered by the screen until confirm. */
   onImage: (itemId: string, image: CroppedImage | null) => void;
@@ -195,7 +212,7 @@ export default function ItemCard({
    *  Held by the screen and uploaded at confirm, like the item picture. The
    *  page is the one the crop was taken FROM, which on a two-page item need
    *  not be the page the row was read from. */
-  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
+  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null, origin?: SwatchOrigin) => void;
   /**
    * Set ONE level on the records this card writes to, through the levels route.
    *
@@ -230,12 +247,20 @@ export default function ItemCard({
   // there is less on the page than there is.
   // ==========================================================================
   const [showOtherDimensions, setShowOtherDimensions] = useState(false);
+  // The sheet's other statements, folded the same way (brief F).
+  const [showStatements, setShowStatements] = useState(false);
+  // "Show in mm" (brief F): client state, display only, nothing saved.
+  const [showMm, setShowMm] = useState(false);
   //
   // FOLDED BY WHETHER IT IS A MEASUREMENT, NEVER BY WHETHER IT HAS A UNIT.
   // The two are different questions -- see `isMeasuredRow` -- and asking the
   // second one here is what left forty-four figures rendered inline on a page
   // whose units could not be inferred.
-  const { ordered, otherIds, otherDimensionRows, firstOtherId } = orderRows(pending);
+  // A row with a blocker on it is never folded away among the statements.
+  const rowBlocked = (observation: DrawingObservation) =>
+    (resolution?.blockers ?? []).some((blocker) => blocker.observationId === observation.id);
+  const { ordered, otherIds, otherDimensionRows, firstOtherId, statementIds, statementRows, firstStatementId } =
+    orderRows(pending, rowBlocked);
 
   // Every control on a row of THIS card writes to THIS page's observation. The
   // configuration card passes callbacks that reach further; nothing in
@@ -245,6 +270,10 @@ export default function ItemCard({
       void onSaveObservation(item, observation, changes),
     onIgnore: (observation: DrawingObservation) => void onReview(item, [observation], "ignore"),
     onSwatch,
+    // "Use as W": the swap names every row the card shows holding that slot,
+    // at the version shown; the server decides which it displaces.
+    onSwapSlot: (observation: DrawingObservation, slot: DimensionSlot) =>
+      void onSaveObservation(item, observation, swapSlotRequest(item, observation, slot)),
   };
 
   // A page whose code could not be read opens CLOSED.
@@ -393,11 +422,10 @@ export default function ItemCard({
           is exactly the page that needs this control, and gating it on
           `attrGroup === "dimension"` hid it from every one of them. */}
       {open && pending.some(isMeasuredRow) && (
-        <BulkUnit
-          label="All dimensions:"
-          disabled={busy}
-          onSet={(unit) => void onSetBulkUnit("item", unit, item.id)}
-        />
+        <>
+          <BulkUnit disabled={busy} onSet={(unit) => void onSetBulkUnit("item", unit, item.id)} />
+          <ShowInMillimetres shown={showMm} onToggle={() => setShowMm((value) => !value)} />
+        </>
       )}
       <Button size="xs" variant="quiet" onClick={() => setOpen((value) => !value)}>
         {open ? "Collapse" : "Expand"}
@@ -407,7 +435,18 @@ export default function ItemCard({
   const header = (
     <>
       {headerBar}
-      <ItemReadNotes items={[item]} />
+      <ItemReadNotes
+        items={[item]}
+        busy={busy}
+        onCheck={
+          onSaveItem
+            ? (_, index) =>
+                void onSaveItem(item, {
+                  uncertainChecked: [...(Array.isArray(item.uncertainChecked) ? item.uncertainChecked : []), index],
+                })
+            : undefined
+        }
+      />
       {unsplit}
     </>
   );
@@ -500,6 +539,7 @@ export default function ItemCard({
                   const rowOccupants = resolution?.occupants?.[observation.id] ?? [];
                   const blocked = rowBlockers.length > 0 || rowWarnings.length > 0;
                   const isOther = otherIds.has(observation.id);
+                  const isStatement = statementIds.has(observation.id);
                   return (
                     <Fragment key={observation.id}>
                       {observation.id === firstOtherId && (
@@ -509,10 +549,22 @@ export default function ItemCard({
                           onToggle={() => setShowOtherDimensions((value) => !value)}
                         />
                       )}
-                      {(!isOther || showOtherDimensions) && (
+                      {observation.id === firstStatementId && (
+                        <StatementsToggle
+                          count={statementRows.length}
+                          shown={showStatements}
+                          onToggle={() => setShowStatements((value) => !value)}
+                        />
+                      )}
+                      {(!isOther || showOtherDimensions) && (!isStatement || showStatements) && (
                         <>
                           <ObservationRow
                             observation={observation}
+                            showMm={showMm}
+                            candidateRows={observation.candidates?.map((candidate) =>
+                              candidateRowFor(item, observation, candidate),
+                            )}
+                            swatchRefusal={resolution?.swatchRefusals?.[observation.id] ?? null}
                             page={item.page}
                             itemPages={pages}
                             importId={importId}

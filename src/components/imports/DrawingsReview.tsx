@@ -51,7 +51,9 @@ import ItemCard, {
   type ItemResolution,
   type RecordChoice,
   type SpecField,
+  type BulkUnitChoice,
 } from "@/components/imports/DrawingItemCard";
+import type { SwatchOrigin } from "@/components/imports/ObservationRows";
 import ConfigurationCard from "@/components/imports/ConfigurationCard";
 import { cardHasPending, configurationCards } from "@/lib/configuration-cards";
 import ReviewItemList, { type ReviewItemLine } from "@/components/imports/ReviewItemList";
@@ -155,14 +157,20 @@ export default function DrawingsReview({
    * store, and the `project_finishes` row a swatch attaches to does not exist
    * until the confirm creates it.
    */
-  const swatches = useRef<Map<string, { image: CroppedImage; page: number | null } | null>>(new Map());
+  // `origin` says who made it (brief F): the read's proposal, untouched, is
+  // left out at confirm where it has no finish to attach to; a person's crop
+  // keeps the old rule and is refused with the reason.
+  const swatches = useRef<Map<string, { image: CroppedImage; page: number | null; origin: SwatchOrigin } | null>>(new Map());
   // THE PAGE IS THE ONE THAT WAS CROPPED, not the card's. A two-page item
   // prints its chips on whichever page prints them, and a swatch citing the
   // page the row was read from would be a false provenance rather than a
   // missing one.
-  const rememberSwatch = useCallback((observationId: string, image: CroppedImage | null, page: number | null) => {
-    swatches.current.set(observationId, image ? { image, page } : null);
-  }, []);
+  const rememberSwatch = useCallback(
+    (observationId: string, image: CroppedImage | null, page: number | null, origin: SwatchOrigin = "person") => {
+      swatches.current.set(observationId, image ? { image, page, origin } : null);
+    },
+    [],
+  );
 
   /** The crops for the rows being confirmed, uploaded together. */
   async function uploadSwatches(observationIds: string[], projectId: string) {
@@ -174,11 +182,12 @@ export default function DrawingsReview({
       height: number;
       size: number;
       page: number | null;
+      origin: SwatchOrigin;
     }[] = [];
     for (const observationId of observationIds) {
       const crop = swatches.current.get(observationId);
       if (!crop) continue;
-      const { image, page } = crop;
+      const { image, page, origin } = crop;
       const blob = await upload(
         `${projectUploadPrefix(projectId)}finish-swatches/${observationId}-${Date.now()}.png`,
         image.blob,
@@ -192,6 +201,7 @@ export default function DrawingsReview({
         height: image.height,
         size: image.blob.size,
         page,
+        origin,
       });
     }
     return out;
@@ -384,7 +394,7 @@ export default function DrawingsReview({
     });
   }
 
-  async function setBulkUnit(scope: "item" | "run", unit: "mm" | "cm", itemId?: string) {
+  async function setBulkUnit(scope: "item" | "run", unit: BulkUnitChoice, itemId?: string) {
     await queueSave(async () => {
       const res = await apiFetch(`/api/imports/${importId}`, {
         method: "PATCH",
@@ -821,7 +831,7 @@ export default function DrawingsReview({
       {unitsOutstanding > 0 && (
         <Note
           tone="warn"
-          actions={<BulkUnit label="Set every one to:" disabled={busy !== null} onSet={(unit) => void setBulkUnit("run", unit)} />}
+          actions={<BulkUnit label="Every figure in this document is printed in:" disabled={busy !== null} onSet={(unit) => void setBulkUnit("run", unit)} />}
         >
           {unitsOutstanding} dimension{unitsOutstanding === 1 ? "" : "s"} across this document still need a unit.
           Setting a project default on the overview does this for future documents.

@@ -84,6 +84,10 @@ const ConfirmBody = z
             width: z.number().int().positive().max(20_000).nullable().optional(),
             height: z.number().int().positive().max(20_000).nullable().optional(),
             size: z.number().int().nonnegative().max(32 * 1024 * 1024).nullable().optional(),
+            // WHO MADE IT (brief F): the read's proposal, untouched, or a
+            // person's crop or tick. A proposal with no finish to attach to is
+            // left out; a person's is refused with the reason, as before.
+            origin: z.enum(["proposed", "person"]).optional(),
           })
           .strict(),
       )

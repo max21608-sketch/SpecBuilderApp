@@ -53,6 +53,7 @@ import {
   isFinishGroup,
   isFinishKind,
   readUncodedFinish,
+  resolveFinishCode,
   type Finish,
 } from "@/lib/finishes";
 
@@ -86,6 +87,16 @@ export type ResolvedItem = {
    * map entirely: the code is the key there and stays the key.
    */
   finishFilings: Record<string, FinishFilingView>;
+  /**
+   * Per pending finish row whose PROPOSED swatch could not attach — the
+   * row's words for its code disagree with a described library row, so the
+   * confirm has no finish to put it on (brief F). The sentence says why; the
+   * card shows the proposal unticked and the confirm leaves it out. Absent
+   * for every row whose proposal can attach, and for every row with none —
+   * and the key itself is absent where there is nothing in it, so a v1–v3
+   * run (which proposes no swatch) resolves to exactly the bytes it did.
+   */
+  swatchRefusals?: Record<string, string>;
   /**
    * For a page of a code that NAMES its configurations (schemaVersion 3), where
    * it lands — the server's answer, computed by the same pure functions the
@@ -183,6 +194,41 @@ export function finishFilingsFor(
     };
   }
   return out;
+}
+
+/**
+ * The proposed swatches on one card that have nowhere to go (brief F).
+ *
+ * AN AUTOMATICALLY PROPOSED SWATCH NEVER BLOCKS A CARD. The read proposes a
+ * crop per finish; where that finish's own words CONFLICT with a library row
+ * that already describes the code, `resolveFinishCode` links nothing — so the
+ * swatch has no finish to attach to and the confirm would refuse the whole
+ * card over a picture nobody asked for. Such a proposal is shown unticked with
+ * this sentence, and the confirm leaves it out. A swatch a PERSON cropped or
+ * ticked keeps the old rule: refused with the reason, never dropped.
+ *
+ * The same reading the confirm takes (`resolveFinishCode` against the live
+ * library), so the card and the confirm cannot disagree about which rows
+ * these are.
+ */
+export function swatchRefusalsFor(
+  item: StagedDrawings["items"][number],
+  library: readonly Finish[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const observation of item.observations) {
+    if (observation.reviewStatus !== "pending" || !observation.swatchProposal) continue;
+    const reading = resolveFinishCode(observation.materialCodeRaw, observation.value, [...library]);
+    if (reading.status !== "conflict") continue;
+    out[observation.id] =
+      `Not used: the finishes library describes ${reading.finish.code} as "${reading.finish.description ?? ""}", and this page says "${reading.saysInstead}", so the swatch has no finish to attach to. Settle the code on the finishes page, or tick it to keep it — the confirm will then refuse the card until the code is settled.`;
+  }
+  return out;
+}
+
+/** The key only where it says something: `{}` would change every frozen v1–v3 resolution. */
+function withSwatchRefusals(refusals: Record<string, string>): { swatchRefusals?: Record<string, string> } {
+  return Object.keys(refusals).length > 0 ? { swatchRefusals: refusals } : {};
 }
 
 /**
@@ -386,6 +432,7 @@ export function resolveStagedRun(
       variantLabel,
       writesTo: Object.fromEntries(writesTo),
       finishFilings: finishFilingsFor(item, context.finishes),
+      ...withSwatchRefusals(swatchRefusalsFor(item, context.finishes)),
       named: named ? namedResolution(targets, resolution, named) : null,
     };
   });

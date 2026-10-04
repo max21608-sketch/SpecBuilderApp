@@ -41,6 +41,7 @@ import {
   type DrawingObservation,
   type FieldClash,
 } from "@/lib/drawing-document";
+import { canTakeSlot, millimetreReading } from "@/lib/slot-swap";
 import { useReviewRowActions } from "@/components/imports/review-row-actions";
 import type { ClashChoice } from "@/lib/clash-resolution";
 import {
@@ -129,20 +130,48 @@ export type RowBlocker = {
 };
 export type RowWarning = { code: string; message: string; observationId: string };
 
+/** Who made a swatch crop: the read's proposal, untouched, or a person (brief F). */
+export type SwatchOrigin = "proposed" | "person";
+
 /** What a control on a row does. The caller decides how far it reaches. */
 export type RowCallbacks = {
   onChange: (observation: DrawingObservation, changes: Record<string, unknown>) => void;
   onIgnore: (observation: DrawingObservation) => void;
-  /** The PAGE is the one the crop was taken from, which may not be the row's own. */
-  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null) => void;
+  /**
+   * The PAGE is the one the crop was taken from, which may not be the row's
+   * own. `origin` says whether a person made it or it is the read's proposal
+   * nobody pressed; absent means a person, which is every crop before brief F.
+   */
+  onSwatch: (observationId: string, image: CroppedImage | null, page: number | null, origin?: SwatchOrigin) => void;
+  /**
+   * "Use as W" — this figure takes the slot and the row holding it returns to
+   * a note, in one write (brief F). Optional: a caller without it offers no
+   * buttons, and the slot select below still works as it always has.
+   */
+  onSwapSlot?: (observation: DrawingObservation, slot: DimensionSlot) => void;
 };
 
-/** Split a card's pending rows into the ones that matter, the rest, and the fold. */
-export function orderRows(pending: DrawingObservation[]): {
+/**
+ * Split a card's pending rows into the ones that matter, the rest, and the folds.
+ *
+ * TWO FOLDS. The other dimensions, as before; and EVERYTHING ELSE THE SHEET
+ * STATES (brief F) — a version 4 item's labelled specification lines, which
+ * are what the document said and confirm with the card, and which used to sit
+ * inline between the sizes and the finishes. Display only. A statement that
+ * `keepOpen` names (a row with a blocker on it) stays in view: a fold must
+ * never hide the one row stopping the card.
+ */
+export function orderRows(
+  pending: DrawingObservation[],
+  keepOpen: (observation: DrawingObservation) => boolean = () => false,
+): {
   ordered: DrawingObservation[];
   otherIds: Set<string>;
   otherDimensionRows: DrawingObservation[];
   firstOtherId: string | undefined;
+  statementIds: Set<string>;
+  statementRows: DrawingObservation[];
+  firstStatementId: string | undefined;
 } {
   // IN SLOT ORDER, not in the order the model happened to report them. The
   // composed cell above the table is written W x D x H x SH by
@@ -165,18 +194,72 @@ export function orderRows(pending: DrawingObservation[]): {
   // is the other half of "nothing's grouped, it's all over the place". Within a
   // group the staged order is kept, because that is the order of the page.
   const rank = (o: DrawingObservation) => GROUP_ORDER.indexOf(o.attrGroup);
-  const restRows = pending
-    .filter((o) => !o.dimensionSlot && !otherIds.has(o.id))
+  const unfolded = pending.filter((o) => !o.dimensionSlot && !otherIds.has(o.id));
+  // NOTHING TO FOLD BEHIND, the same rule: a card holding nothing but the
+  // sheet's statements shows them, rather than a toggle and nothing else.
+  const statementCandidates = unfolded.filter((o) => o.statement === true && !keepOpen(o));
+  const statementRows = statementCandidates.length < pending.length ? statementCandidates : [];
+  const statementIds = new Set(statementRows.map((o) => o.id));
+  const restRows = unfolded
+    .filter((o) => !statementIds.has(o.id))
     .map((o, index) => ({ o, index }))
     .sort((a, b) => rank(a.o) - rank(b.o) || a.index - b.index)
     .map((entry) => entry.o);
   return {
-    ordered: [...keyRows, ...restRows, ...otherDimensionRows],
+    ordered: [...keyRows, ...restRows, ...otherDimensionRows, ...statementRows],
     otherIds,
     otherDimensionRows,
     firstOtherId: otherDimensionRows[0]?.id,
+    statementIds,
+    statementRows,
+    firstStatementId: statementRows[0]?.id,
   };
 }
+
+/**
+ * The fold for a specification sheet's other statements (brief F) — the
+ * other dimensions' toggle, with its own words.
+ */
+export function StatementsToggle({ count, shown, onToggle }: { count: number; shown: boolean; onToggle: () => void }) {
+  return (
+    <tr className="border-t border-neutral-200 bg-neutral-50">
+      <td colSpan={OBSERVATION_COLUMNS} className="px-4 py-2">
+        <Button size="xs" variant="quiet" onClick={onToggle}>
+          {shown
+            ? `Hide everything else the sheet states (${count})`
+            : `Everything else the sheet states (${count}) — show`}
+        </Button>
+        <span className="ml-2 text-xs text-neutral-500">
+          Every other labelled line on the specification sheet, as printed. Kept on the item and confirmed with the
+          card.
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * The card-level "Show in mm" toggle (brief F). Client state only; nothing is
+ * saved. A pressed button rather than a tick box, so it is never mistaken for
+ * the phase ticks, which ARE saved.
+ */
+export function ShowInMillimetres({ shown, onToggle }: { shown: boolean; onToggle: () => void }) {
+  return (
+    <Button
+      size="xs"
+      variant="quiet"
+      aria-pressed={shown}
+      title="Display only: each figure converted to millimetres beside what was printed. Nothing is saved."
+      onClick={onToggle}
+      className={shown ? "border-neutral-400 bg-neutral-100" : undefined}
+    >
+      Show in mm
+    </Button>
+  );
+}
+
+/** The five slots as the card's buttons write them. `Dia` is how the cell prints it. */
+const SLOT_BUTTON: Record<DimensionSlot, string> = { W: "W", D: "D", H: "H", SH: "SH", DIA: "Dia" };
 
 /**
  * The order the groups read in: what the item is made of, then what was said
@@ -639,8 +722,24 @@ export function ObservationRow({
   guessWhy,
   finishFiling,
   callbacks,
+  showMm = false,
+  candidateRows,
+  swatchRefusal = null,
 }: {
   observation: DrawingObservation;
+  /** The card's "Show in mm" (brief F): print each figure converted beside the value. Display only. */
+  showMm?: boolean;
+  /**
+   * The measured row each of `observation.candidates` IS, in the same order,
+   * or null where none can be named — see `candidateRowFor`. Absent: no
+   * "Use this instead" buttons.
+   */
+  candidateRows?: (DrawingObservation | null)[];
+  /**
+   * Why the read's proposed swatch for this row cannot attach (brief F), from
+   * the server's `swatchRefusals`. The picker then shows it unticked.
+   */
+  swatchRefusal?: string | null;
   page: number | null;
   /**
    * Every page of the ITEM this row belongs to, so a swatch printed on the
@@ -775,10 +874,18 @@ export function ObservationRow({
             being asked. */}
         {(observation.attrGroup === "dimension" || isMeasuredRow(observation)) && (
           <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+            {/* "PRINTED IN", SAID ON THE CONTROL (brief F). It RELABELS: it
+                states what unit the printed figure is in, and the composer
+                converts. Matthew, 2026-10-01: "You change it to millimeters,
+                it doesn't convert it" — correct, and it read as broken because
+                nothing said so. "Show in mm" on the card is the display. */}
+            <span className="text-xs text-neutral-500" aria-hidden="true">
+              printed in
+            </span>
             <select
               value={observation.unit ?? ""}
               onChange={(event) => callbacks.onChange(observation, { unit: event.target.value || null })}
-              aria-label="Unit"
+              aria-label="printed in"
               className={`border rounded px-1 py-0.5 text-xs ${
                 observation.unit === null && observation.attrGroup === "dimension"
                   ? "border-amber-400 bg-amber-50"
@@ -801,6 +908,20 @@ export function ObservationRow({
             )}
           </div>
         )}
+        {/* SHOW IN MM (brief F, 2026-10-01 D3): the figure converted, through
+            the composer's own step, with what was printed beside it. A figure
+            that cannot be converted says why in the composer's words. */}
+        {showMm && (observation.attrGroup === "dimension" || isMeasuredRow(observation)) && (() => {
+          const reading = millimetreReading(value, observation.unit);
+          return (
+            <p
+              className={`mt-0.5 font-mono text-xs ${reading.ok ? "text-neutral-800" : "text-amber-800"}`}
+              data-testid="in-millimetres"
+            >
+              {reading.ok ? `= ${reading.text}` : `[${reading.text}]`}
+            </p>
+          );
+        })()}
         {/* Not for a block: its raw form is the same lines with the heading
             repeated down every one of them. */}
         {observation.valueRaw !== null && observation.valueRaw !== observation.value && !(value ?? "").includes("\n") && (
@@ -816,22 +937,43 @@ export function ObservationRow({
           </p>
         )}
         {/* THE FIGURES THE READ DID NOT CHOOSE for this slot, so the choice is
-            checkable against the page rather than taken on trust. Display only:
-            nothing here writes a second value into the slot. */}
+            checkable against the page rather than taken on trust. Nothing here
+            writes a SECOND value into the slot: "Use this instead" (brief F)
+            swaps one in — a rival figure is a MEASURED ROW on the item, so it
+            is the same swap as "Use as W" on that row, and this row goes back
+            to a note in the same write. */}
         {observation.candidates && observation.candidates.length > 0 && (
-          <p className="mt-0.5 text-xs text-amber-800">
-            also printed:{" "}
-            {observation.candidates
-              .map(
-                (candidate) => {
-                  // The read writes a candidate as one line ("740 (SIDE, page 2)"); a
-                  // structured one is spelled out the same way.
-                  const where = [candidate.view, candidate.page ? `p${candidate.page}` : null].filter(Boolean).join(", ");
-                  return `${candidate.valueRaw}${candidate.unitRaw ? ` ${candidate.unitRaw}` : ""}${where ? ` (${where})` : ""}`;
-                },
-              )
-              .join("; ")}
-          </p>
+          <div className="mt-0.5 text-xs text-amber-800">
+            also printed:
+            <ul className="mt-0.5 space-y-0.5">
+              {observation.candidates.map((candidate, index) => {
+                // The read writes a candidate as one line ("740 (SIDE, page 2)"); a
+                // structured one is spelled out the same way.
+                const where = [candidate.view, candidate.page ? `p${candidate.page}` : null].filter(Boolean).join(", ");
+                const row = candidateRows?.[index] ?? null;
+                const slot = observation.dimensionSlot;
+                return (
+                  <li key={index} className="flex flex-wrap items-center gap-1.5">
+                    <span>
+                      {candidate.valueRaw}
+                      {candidate.unitRaw ? ` ${candidate.unitRaw}` : ""}
+                      {where ? ` (${where})` : ""}
+                    </span>
+                    {row && slot && callbacks.onSwapSlot && (
+                      <Button
+                        size="xs"
+                        variant="quiet"
+                        disabled={busy}
+                        onClick={() => callbacks.onSwapSlot!(row, slot)}
+                      >
+                        Use this instead
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
         {palette && (
           <PaletteChoice
@@ -910,9 +1052,10 @@ export function ObservationRow({
               page={typeof observation.page === "number" ? observation.page : page}
               pages={itemPages}
               proposed={observation.swatchProposal ?? null}
+              proposalRefused={swatchRefusal}
               code={target.code}
               disabled={busy}
-              onCropped={(image, croppedPage) => callbacks.onSwatch(observation.id, image, croppedPage)}
+              onCropped={(image, croppedPage, origin) => callbacks.onSwatch(observation.id, image, croppedPage, origin)}
             />
           );
         })()}
@@ -949,6 +1092,38 @@ export function ObservationRow({
                 </option>
               ))}
             </select>
+            {/* "USE AS W · D · H · SH · DIA" (brief F) — on every figure,
+                folded or not. One click points at a figure the read already
+                found and gives it the slot; whatever held the slot goes back
+                to a note in the same write, so the card never reads "two of
+                these are the width". The select above stays for "keep as a
+                note" and for anything the buttons do not say. */}
+            {callbacks.onSwapSlot && canTakeSlot(observation) && (
+              <div className="flex flex-wrap items-center gap-1 text-[11px] text-neutral-500" role="group" aria-label="Use as">
+                Use as
+                {DIMENSION_SLOTS.map((slot) => {
+                  const current = observation.attrGroup === "dimension" && observation.dimensionSlot === slot;
+                  return (
+                    <Button
+                      key={slot}
+                      size="xs"
+                      variant="quiet"
+                      disabled={busy || current}
+                      aria-pressed={current}
+                      aria-label={`Use as ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}`}
+                      title={
+                        current
+                          ? `This figure is the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}`
+                          : `Make this the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}; whatever holds it now goes back to a note`
+                      }
+                      onClick={() => callbacks.onSwapSlot!(observation, slot)}
+                    >
+                      {SLOT_BUTTON[slot]}
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
             {observation.slotSuggested && observation.dimensionSlot ? (
               <span className="text-[11px] text-amber-700">
                 {/* WHAT THE PAGE SHOWS, in preference to what this app worked
