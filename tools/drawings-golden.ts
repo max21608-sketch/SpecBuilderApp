@@ -43,6 +43,7 @@ import {
 import { composeDimensionCell, toMillimetres, type DimensionRow } from "../src/lib/dimensions";
 import { endsOnSegment, normaliseRef, type RecordEntry } from "../src/lib/record-refs";
 import { normaliseFinishCode } from "../src/lib/finishes";
+import { stackedTagCode } from "../src/lib/material-words";
 import { normaliseVariantLabel } from "../src/lib/record-variants";
 import type { DrawingsOutput } from "../src/lib/extraction-schema";
 import type { DimensionSlot } from "../src/lib/spec-vocab";
@@ -169,6 +170,17 @@ function emptySlots<T>(make: () => T): Record<GoldenSlotKey, T> {
 
 const uniqueSorted = (values: number[]) => [...new Set(values)].sort((a, b) => a - b);
 
+/**
+ * A finish code as the library would key it: a tag drawn as stacked boxes
+ * (`GR TIM 04`) is read as the bill writes it (`GR-TIM-04`), the read-time
+ * upgrade's own rule, then folded by case and whitespace only. Applied to the
+ * golden's codes too, so a golden copied off the page as printed still meets
+ * the code the card files.
+ */
+export function finishKey(code: string): string {
+  return normaliseFinishCode(stackedTagCode(code) ?? code);
+}
+
 /** A staged document, reduced to what the review screen would show per item. */
 export function reduceStagedDrawings(stagedInput: StagedDrawings): DrawingRead {
   // Through the read-time pipeline every screen calls. With no spec-field
@@ -214,7 +226,7 @@ export function reduceStagedDrawings(stagedInput: StagedDrawings): DrawingRead {
           if (observation.slotSuggested || observation.unitSuggested || observation.groupSuggested) rowsFlagged += 1;
         }
         const code = (observation.materialCodeRaw ?? "").trim();
-        if (code && !finishCodes.some((kept) => normaliseFinishCode(kept) === normaliseFinishCode(code))) {
+        if (code && !finishCodes.some((kept) => finishKey(kept) === finishKey(code))) {
           finishCodes.push(code);
         }
         const slot = observation.attrGroup === "dimension" ? observation.dimensionSlot : null;
@@ -445,8 +457,8 @@ export function scoreDrawingRead(golden: GoldenDocument, read: DrawingRead): Doc
     const goldenConfigurations = item.configurations.map(normaliseVariantLabel).sort();
     const readConfigurations = [...new Set(reads.flatMap((entry) => entry.configurations))].sort();
 
-    const readFinishes = reads.flatMap((entry) => entry.finishCodes).map(normaliseFinishCode);
-    const missingFinishes = item.finishCodes.filter((code) => !readFinishes.includes(normaliseFinishCode(code)));
+    const readFinishes = reads.flatMap((entry) => entry.finishCodes).map(finishKey);
+    const missingFinishes = item.finishCodes.filter((code) => !readFinishes.includes(finishKey(code)));
 
     return {
       goldenCodes: item.codes,

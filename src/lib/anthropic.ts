@@ -30,19 +30,24 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { DocumentSource } from "@/lib/intake-source";
 import type { DocumentKind } from "@/lib/spec-vocab";
 import { TOOLS, type ExtractionPayload } from "@/lib/extraction-schema";
+import { answerRequest, readAnswer } from "@/lib/model-request";
 // One source of truth for the timings. They are an inequality, not three
 // independent knobs -- see the header of extraction-claim.ts.
 import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
 
 // Opus, not Sonnet, from 2026-09-23. Max: "I'm not too bothered about how long
 // this extraction process takes, or how much it costs in API cost … the key
-// is really just the accuracy of the data." Opus 5 and not Opus 5.5: 5.5
-// refuses a forced `tool_choice` with a 400, and every extraction below
-// forces its tool; Opus 5 accepts it, like Sonnet 5 did. Same 1M context and
-// 600-page PDF ceiling as Sonnet 5, so MAX_MODEL_PDF_PAGES does not move. The
-// timings in extraction-claim.ts were raised in the same change, because
-// Opus reads slower. Effort stays "high" (Max, same day).
-export const EXTRACTION_MODEL = "claude-opus-5";
+// is really just the accuracy of the data."
+//
+// OPUS 5.5 FROM 2026-10-04 (Max: every extraction on 5.5). 5.5 refuses a
+// forced `tool_choice` with a 400, which is what kept this on Opus 5 until
+// then; every read now asks for its object as STRUCTURED OUTPUT on a model that
+// refuses the forced tool, and keeps the forced tool on one that accepts it —
+// `model-request.ts` decides from the model id, so the eval harness can still
+// reproduce the Opus 5 baseline exactly. Same 1M context and 600-page PDF
+// ceiling, so MAX_MODEL_PDF_PAGES does not move. Effort stays "high" and is
+// now always sent: 5.5 defaults to "medium".
+export const EXTRACTION_MODEL = "claude-opus-5-5";
 
 export const MAX_TOKENS = 128_000;
 
@@ -401,7 +406,8 @@ export type ExtractionFailure = {
     | "invalid_request"
     | "refusal"
     | "truncated"
-    | "no_tool_use"
+    /** The response held no structured answer: no forced tool call, or text that is not one JSON object. */
+    | "no_json"
     | "schema";
   error: string;
   /**
@@ -448,9 +454,9 @@ export function readExtractionResponse(
   documentKind: DocumentKind,
 ):
   | { ok: true; output: ExtractionPayload }
-  | { ok: false; code: "truncated" | "refusal" | "no_tool_use" | "schema"; error: string } {
+  | { ok: false; code: "truncated" | "refusal" | "no_json" | "schema"; error: string } {
   const spec = TOOLS[documentKind];
-  // Truncation is terminal. A tool call cut off mid-object is not a thin
+  // Truncation is terminal. An answer cut off mid-object is not a thin
   // answer; it is an unparseable one, and the same document will truncate again.
   if (response.stop_reason === "max_tokens") {
     return {
@@ -459,27 +465,27 @@ export function readExtractionResponse(
       error: "The document produced more output than one extraction can hold. Split it into smaller documents.",
     };
   }
+  // With the refusal fallback on, this is the WHOLE chain declining: the
+  // substitute model refused too.
   if (response.stop_reason === "refusal") {
     return { ok: false, code: "refusal", error: "The model declined to read this document. Check what was uploaded." };
   }
 
-  const toolUse = (response.content ?? []).find(
-    (block): block is { type: "tool_use"; name: string; input: unknown } =>
-      Boolean(block) &&
-      typeof block === "object" &&
-      (block as { type?: unknown }).type === "tool_use" &&
-      (block as { name?: unknown }).name === spec.tool.name,
-  );
-  if (!toolUse) {
-    return { ok: false, code: "no_tool_use", error: "The model answered without recording any observations." };
+  // The forced tool's input, or the structured answer in the text — whichever
+  // way the model was asked (model-request.ts).
+  const answer = readAnswer(response, spec.tool.name);
+  if (!answer.ok) {
+    return { ok: false, code: "no_json", error: `The model answered without recording any observations. ${answer.reason}` };
   }
 
-  const validated = spec.schema.safeParse(toolUse.input);
+  const validated = spec.schema.safeParse(answer.value);
   if (!validated.success) {
+    const issue = validated.error.issues[0];
+    const where = issue?.path.length ? ` (at ${issue.path.join(".")})` : "";
     return {
       ok: false,
       code: "schema",
-      error: `The model's output did not match the expected shape: ${validated.error.issues[0]?.message ?? "unknown"}.`,
+      error: `The model's output did not match the expected shape: ${issue?.message ?? "unknown"}${where}.`,
     };
   }
   return { ok: true, output: { outputKind: spec.outputKind, data: validated.data } as ExtractionPayload };
@@ -561,14 +567,10 @@ export async function extractSpecDocument(
     // Streamed, and then awaited whole. A multi-minute high-effort run over a
     // long document is exactly the shape of request that a non-streaming call
     // has no way to keep alive.
+    const request = answerRequest({ model, tool: spec.tool, effort, thinking: true });
     const streamed = await anthropicStream(anthropic)({
-      model,
-      max_tokens: MAX_TOKENS,
-      thinking: { type: "adaptive" },
-      output_config: { effort },
-      tool_choice: { type: "tool", name: spec.tool.name },
-      tools: [spec.tool],
-      messages: [{ role: "user", content }],
+      ...request,
+      body: { model, max_tokens: MAX_TOKENS, ...request.body, messages: [{ role: "user", content }] },
       signal,
     });
     response = streamed.message;
@@ -613,11 +615,35 @@ export async function extractSpecDocument(
 // `_request_id` that a plain (non-streamed) response carries is not on it. The
 // id is the only handle anyone has when asking the provider about a bad
 // extraction, so it is read from `stream.request_id` and returned explicitly.
+//
+// TWO ENDPOINTS, ONE SHAPE BACK. A structured-output request carries the
+// refusal fallback, which is a beta, so it goes to `beta.messages`; the
+// forced-tool request (the Opus 5 baseline) goes where it always went. The
+// body is built by `answerRequest` and is untyped there: the SDK's types
+// predate `fallbacks: "default"`, so it is cast here, once.
+export type ModelResponse = {
+  model: string;
+  stop_reason: string | null;
+  content: { type: string; [key: string]: unknown }[];
+  usage: unknown;
+};
+
 function anthropicStream(anthropic: Anthropic) {
-  return async (params: Parameters<typeof anthropic.messages.stream>[0] & { signal?: AbortSignal }) => {
-    const { signal, ...body } = params;
-    const stream = anthropic.messages.stream(body, signal ? { signal } : undefined);
-    const message = await stream.finalMessage();
+  return async (params: {
+    mode: "forced_tool" | "structured";
+    betas: string[];
+    body: Record<string, unknown>;
+    signal?: AbortSignal;
+  }): Promise<{ message: ModelResponse; requestId: string | null }> => {
+    const options = params.signal ? { signal: params.signal } : undefined;
+    const stream =
+      params.mode === "structured"
+        ? anthropic.beta.messages.stream(
+            { ...params.body, betas: params.betas } as unknown as Parameters<typeof anthropic.beta.messages.stream>[0],
+            options,
+          )
+        : anthropic.messages.stream(params.body as unknown as Parameters<typeof anthropic.messages.stream>[0], options);
+    const message = (await stream.finalMessage()) as unknown as ModelResponse;
     return { message, requestId: stream.request_id ?? null };
   };
 }

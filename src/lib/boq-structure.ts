@@ -34,6 +34,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { SheetData } from "read-excel-file/node";
 import { EXTRACTION_MODEL, streamedErrorType } from "@/lib/anthropic";
+import { answerRequest, readAnswer } from "@/lib/model-request";
 import {
   BOQ_ROLES,
   BOQ_ROLE_LABELS,
@@ -552,41 +553,49 @@ async function readChunk(
     { type: "text" as const, text: STRUCTURE_PROMPT },
   ];
   try {
-    const stream = anthropic.messages.stream(
-      {
-        model: STRUCTURE_MODEL,
-        max_tokens: MAX_TOKENS,
-        // Medium, not the extraction's high: this reads a layout, not a
-        // document's every statement, and a person checks the answer on the
-        // same screen before anything is confirmed.
-        thinking: { type: "adaptive" },
-        output_config: { effort: "medium" },
-        tool_choice: { type: "tool", name: STRUCTURE_TOOL_NAME },
-        tools: [STRUCTURE_TOOL],
-        messages: [{ role: "user", content }],
-      },
-      { signal },
-    );
-    const message = await stream.finalMessage();
+    // Medium, not the extraction's high: this reads a layout, not a document's
+    // every statement, and a person checks the answer on the same screen
+    // before anything is confirmed. HOW the answer is asked for (a forced tool,
+    // or structured output with the refusal fallback on a model that refuses
+    // one) is model-request.ts's, the same rule the extraction uses.
+    const request = answerRequest({ model: STRUCTURE_MODEL, tool: STRUCTURE_TOOL, effort: "medium", thinking: true });
+    const body = {
+      model: STRUCTURE_MODEL,
+      max_tokens: MAX_TOKENS,
+      ...request.body,
+      messages: [{ role: "user", content }],
+    };
+    // The SDK's types predate `fallbacks: "default"`; the body is cast once.
+    const stream =
+      request.mode === "structured"
+        ? anthropic.beta.messages.stream(
+            { ...body, betas: request.betas } as unknown as Parameters<typeof anthropic.beta.messages.stream>[0],
+            { signal },
+          )
+        : anthropic.messages.stream(body as unknown as Parameters<typeof anthropic.messages.stream>[0], { signal });
+    const message = (await stream.finalMessage()) as unknown as {
+      stop_reason: string | null;
+      content: unknown[];
+      usage: unknown;
+    };
     const requestId = stream.request_id ?? null;
     const base = { sheet: sheetName, chunk, requestId, usage: message.usage, elapsedMs: Date.now() - startedAt };
-    const toolUse = message.content.find(
-      (block): block is Extract<typeof block, { type: "tool_use" }> =>
-        block.type === "tool_use" && block.name === STRUCTURE_TOOL_NAME,
-    );
-    if (message.stop_reason === "max_tokens" || !toolUse) {
+    const answer = readAnswer(message, STRUCTURE_TOOL_NAME);
+    if (message.stop_reason === "max_tokens" || message.stop_reason === "refusal" || !answer.ok) {
       const error =
         message.stop_reason === "max_tokens"
           ? "The model's reading of this sheet was cut off before it finished."
-          : "The model answered without saying how the sheet is laid out.";
+          : message.stop_reason === "refusal"
+            ? "The model declined to read this sheet."
+            : "The model answered without saying how the sheet is laid out.";
       return { call: { ...base, ok: false, error }, output: null, raw: message.content, failure: { error, charged: true } };
     }
-    const parsed = StructureOutput.safeParse(toolUse.input);
+    const parsed = StructureOutput.safeParse(answer.value);
     if (!parsed.success) {
       const error = "The model's reading did not match the expected shape.";
-      return { call: { ...base, ok: false, error }, output: null, raw: toolUse.input, failure: { error, charged: true } };
+      return { call: { ...base, ok: false, error }, output: null, raw: answer.value, failure: { error, charged: true } };
     }
-    return { call: { ...base, ok: true }, output: parsed.data, raw: toolUse.input, failure: null };
+    return { call: { ...base, ok: true }, output: parsed.data, raw: answer.value, failure: null };
   } catch (cause) {
     const failure = structureFailureOf(cause, signal.aborted);
     return {

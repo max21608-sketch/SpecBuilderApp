@@ -180,6 +180,19 @@ describe("configurations", () => {
   });
 });
 
+describe("finish codes", () => {
+  it("meets a tag the card files as the bill writes it, whichever way the golden copied it", () => {
+    const read = readFromModelOutput(
+      output([page("X-200", 1, CHAIR_MM, [{ labelRaw: "TIMBER", valueRaw: "Invented oak", materialCodeRaw: "ZZ TIM 04" }])]),
+      "X.pdf",
+    );
+    // The read-time upgrade files the stacked tag as ZZ-TIM-04.
+    expect(read.items[0]!.finishCodes).toEqual(["ZZ-TIM-04"]);
+    const score = scoreDrawingRead({ ...chairGolden([1]), items: [{ ...chairGolden([1]).items[0]!, finishCodes: ["ZZ TIM 04", "ZZ-MTL-01"] }] }, read);
+    expect(score.items[0]!.finishes).toEqual({ golden: 2, found: 1, missing: ["ZZ-MTL-01"] });
+  });
+});
+
 describe("imperial, and a page code that is the end of the bill code", () => {
   it("converts feet and inches through the app's own conversion and resolves the bill code", () => {
     const read = readFromModelOutput(
