@@ -316,9 +316,11 @@ For each item:
    matters.
 8. A SWATCH PER FINISH — where a finish is shown as a printed swatch chip or a material photo on the
    callout's page, give that chip's box in the finish's \`swatchBox\` (fractions, as for pictures).
-9. WHETHER IT IS A MOCK-UP ITEM — only where the page itself says the drawing is for a mock-up (a
-   title block reading "MOCKUP ROOM", a drawing number with a MUR segment, "(MUR)" in the title), put
-   what printed it, quoted, in \`mockup\`; leave it empty otherwise.
+9. WHETHER IT IS A MOCK-UP ITEM — only where the TITLE BLOCK or the DRAWING NUMBER says the drawing
+   is for a mock-up (a drawing title reading "MOCKUP ROOM", a drawing number with a MUR segment such as
+   AM-ID-MUR-FUR-05), put what printed it, quoted, in \`mockup\`; leave it empty otherwise. A caption
+   or sheet name ending "(MUR)" on a sheet whose title block and drawing number say otherwise is NOT a
+   mock-up drawing — sheets are often copied from the mock-up set and keep its caption.
 10. WHAT YOU ARE UNSURE OF — in \`uncertain\`, say plainly anything you could not settle: a figure you
    could not read, a slot you chose between two candidates, pages you were not sure belonged together.
    Start each with what it is about and a colon ("width: …", "grouping: …", "conflict: …").
