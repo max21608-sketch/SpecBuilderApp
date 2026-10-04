@@ -1105,6 +1105,14 @@ rows would be the opposite of the library's edit-once rule, where correcting
 one code corrects every item carrying it. `kind` is still never inferred, so a
 pasted code arrives filed as nothing.
 
+**Asked for again on 2026-10-01, as a step in the pack** (D1 of
+`docs/plans/catchup-2026-10-01.md`). Matthew set the order as bill → finishes
+schedule → drawings, so that a drawing read lands on finishes already expected.
+The cost above is smaller than it reads on a real pack: P18181's schedule is
+ONE 14-page document (`260824 - OMS and FF&E Tracker.pdf`, not named as a
+schedule, which is why nobody in the room recognised it). Building the code
+field and a schedule stage on the pack screen is still Max's decision.
+
 ### The quote file fills eight of twelve, and names the four it will not
 
 `db/migrations/0031_bws_boilerplates.sql`, `db/seed/0010_bws_boilerplates.sql`,
@@ -3625,6 +3633,14 @@ section.** M8's four steps are unchanged and step 4 is still what "done" means.
 What changed is what comes first: Matthew is now using the app himself (D4), and
 he and Max agreed to stabilise rather than build (D5). Work that lets him get
 through a first session beats work that adds anything.
+
+**2026-10-01: the pack being worked on is Aman's, not Panther's.** Since
+2026-09-23 the bill and drawing work has been driven by the Miami Beach pack
+(P18181, Aman Interiors), and the catch-up of 2026-10-01 showed it on pilot:
+the bill held, and one desk drawing put two figures in Width and a height in
+Depth. Read `docs/plans/catchup-2026-10-01.md` before planning intake work.
+Whether M8's step 4 is now judged on this pack rather than on Panther has
+**not** been decided, and is Max's call.
 
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,

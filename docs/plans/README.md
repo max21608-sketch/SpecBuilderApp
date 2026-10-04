@@ -21,6 +21,34 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-01 — Catch-up: the Aman bill held, the drawing read did not
+
+Recap: `docs/plans/catchup-2026-10-01.md`. Defects:
+`found-in-use.md`, 2026-10-01. Shown on PILOT v1.4 to Matthew, Sebastian,
+Claudia (first time) and Steve. Decided in the room:
+
+- **D1 — the pack's order is bill → finishes schedule → drawings** (Matthew,
+  49:36). A schedule sets up the expected finishes so a drawing read lands on
+  them. The pack screen has no schedule stage, and `finishes_schedule` has no
+  code field.
+- **D2 — Matthew sends more bills in other formats, plus finishes schedules**
+  (53:45). Easy ones first.
+- **D3 — work in millimetres; the quote shows the client's original figure
+  beside it** (Sebastian 39:24, Matthew 45:12). Whether the BWS cell carries it
+  too is Max's call.
+- **D4 — Matthew briefs by voice note straight into Claude; a project brief
+  becomes a shared working document** (54:50).
+- **D5 — Claudia splits timber finish into substrate, colour and sheen on her
+  cheat sheets** (52:57).
+
+Found afterwards, by reading the pack on disk: the "OMS and FF&E Tracker" in
+the P18181 folder IS the finishes schedule the room concluded was missing.
+Max asked on 2026-10-04 whether the drawing read is over-structured or the
+model not knowing what to look for. The recap's answer is that both are true,
+with a resolution hypothesis to measure. Proposed order: a golden for the 29
+Aman drawings first, then change the prompt. **Nothing built. Recap not
+confirmed by anybody who was in the room.**
+
 ## 2026-10-01 — Promoted to pilot: the Aman bill reads itself, at `a5065eb` (v1.4)
 
 At Max's instruction ("yes, promote it to pilot"). Run by Max: migration 0042

@@ -33,6 +33,68 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-10-01
+
+Seen on PILOT v1.4 (`a5065eb`) in the catch-up with Matthew, Sebastian, Claudia
+and Steve, project *P18181 v2 — Miami Beach*. Times are the recording's. The
+recap is `docs/plans/catchup-2026-10-01.md`.
+
+### A one-page desk drawing put two figures in Width and a section height in Depth
+
+`AM-ID-PL-FUR-33 Desk.pdf` (one A1 sheet, feet and inches). The card showed
+PLAN 5'-5" → Width, ELEVATION 1 5'-7" → Width, SECTION A 2'-5 1/2" → Depth. The
+room read the page aloud and settled on W = ELEVATION 1, D = SECTION B 2'-7"
+(which was among the 57 folded rows), H = SECTION A. The blocker "Two of these
+are the width" fired correctly and nothing wrong was written. Seen at
+36:05–45:00. **Cause, separately and not proven:** the prompt asks for every
+figure on the page, and its view guidance (`extraction-schema.ts:506`) does not
+mention section views, numbered elevations or one figure per slot. The model's
+own note says small fractional strings "may have been read from layout
+proximity".
+
+### "To review 68" for one single-page item, 57 of them folded
+
+Same card. The figure that mattered was in the fold, so finding it meant
+scrolling the 57. Seen at 38:33.
+
+### A reviewer cannot point at a figure the read found and give it a slot
+
+Sebastian, 42:10: "I don't think you'd want to manually add in the value if
+you've got it in that full list. You might as well use that full list." They
+did it by hand, by changing each row's field select. A folded row has the
+control, but you have to unfold, find and scroll to reach it. Seen at 40:03–44:46.
+
+### The unit select reads as a converter and is a label
+
+Matthew, 45:03: "You change it to millimeters, it doesn't convert it, no."
+**Checked**: the per-row select and "All dimensions: mm / cm" both state what the
+printed figure IS in (`ObservationRows.tsx:776`, `BulkUnit`). On `5'-7"`,
+choosing mm makes the cell refuse the figure (`unit_conflict`). Correct in the
+model, and not what a person expects. Seen at 45:00.
+
+### The bill review flags a round item's D and cannot correct it
+
+The stool row: "gives a D and no W … on a round item D may mean the diameter —
+check it against the drawing". Matthew asked how to change it to a diameter.
+Max: "At the moment in the intake phase there isn't … that's something that
+definitely needs to change". `BillDescription.tsx` has only expand/collapse.
+Seen at 29:18–30:02.
+
+### The pack's finishes schedule was not recognised as one, by the people or the screen
+
+Asked "is there a finishing schedule?" at 47:46, the room concluded no. The
+folder's `260824 - OMS and FF&E Tracker.pdf` (14 pages) is one: GR TIM 01–13,
+GR MTL 01/03 and GR STN codes, each with supplier, sample and approval, and
+the timbers with substrate, stain and surface stated apart. Checked 2026-10-04
+by reading its text. Its name does not say "finishes", and the pack screen has
+no schedule stage to put it in.
+
+### Max could not find "fill in ourselves" on the project
+
+"I was looking for the fill in ourselves button. It's been a while since I've
+worked on it." Seen at 22:05. The presenter, not a new user, hunting for the
+infill entry point.
+
 ## 2026-09-23
 
 ### A bill's own specification read repeats the bill's columns, ~400 rows to ignore one by one
