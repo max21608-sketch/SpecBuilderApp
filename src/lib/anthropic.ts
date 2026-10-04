@@ -34,6 +34,7 @@ import { answerRequest, readAnswer } from "@/lib/model-request";
 // One source of truth for the timings. They are an inequality, not three
 // independent knobs -- see the header of extraction-claim.ts.
 import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
+import { replayedResponse } from "@/lib/local-read-replay";
 
 // Opus, not Sonnet, from 2026-09-23. Max: "I'm not too bothered about how long
 // this extraction process takes, or how much it costs in API cost … the key
@@ -715,6 +716,17 @@ export async function extractSpecDocument(
       error: `This document becomes a ${(requestBytes / 1024 / 1024).toFixed(1)}MB request, over the ${MAX_REQUEST_BYTES / 1024 / 1024}MB limit. Split it and upload the parts separately.`,
       elapsedMs: elapsed(),
     };
+  }
+
+  // LOCAL STACK ONLY (`local-read-replay.ts`): a saved response stands in for
+  // the API. Off everywhere a real read happens.
+  const replayed = source.type === "pdf" ? replayedResponse(source.base64) : null;
+  if (replayed) {
+    const response = replayed as ModelResponse;
+    const read = readExtractionResponse(response, documentKind, options.promptVariant);
+    return read.ok
+      ? { ok: true, output: read.output, model: response.model ?? model, rawResponse: response, usage: response.usage, requestId: null, elapsedMs: elapsed() }
+      : { ok: false, retryable: false, code: read.code, error: read.error, model, rawResponse: response, usage: response.usage, requestId: null, elapsedMs: elapsed() };
   }
 
   let anthropic: Anthropic;
