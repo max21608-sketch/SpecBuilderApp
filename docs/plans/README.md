@@ -21,6 +21,19 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-04 — Promoted to pilot: intake reads the document, at `e8456f0` (v1.5)
+
+At Max's instruction ("promote"). Run by Max: pilot migration 0043 ("Applied 1
+migration(s); 42 already present"); no seed change was needed. By Claude:
+pilot backed up first (`spec-builder-pilot-2026-10-04T15-31-29-668Z.sql`,
+outside the repo, read-only), pilot's migration ledger checked read-only, the
+chip bumped to v1.5 on staging, then `pilot` fast-forwarded `a5065eb` →
+`e8456f0` (42 commits). **Not done, Max's:** the deployment's Ready,
+`/api/auth/me` at `e8456f0`, the PILOT v1.5 chip; the API credit on pilot's key;
+the Aman pack uploaded into a fresh project. Claude then checks every card
+read-only and hands over a confirm-as-is / change-X-to-Y list. Not accepted by
+Max or Matthew.
+
 ## 2026-10-04 — Intake reads the document, not the page: on staging at `f24d481`
 
 Plan: `docs/plans/intake-items-2026-10-04.md` (GO from Max: "go run all
