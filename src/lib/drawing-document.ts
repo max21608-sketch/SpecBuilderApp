@@ -314,6 +314,13 @@ export type DrawingItem = {
    * two chairs, or the reverse. Same storage rule. Absent: the model's answer.
    */
   relationshipByReviewer?: "one_item" | "configurations" | null;
+  /**
+   * Whether the PAGE says this is a mock-up drawing (schemaVersion 4), with
+   * what printed it. STAGED BY BRIEF D (the item-centric read); declared here
+   * alone so the mock-up resolution (`resolveDrawingItem`) can read it before
+   * that lands. Absent on every earlier run, which is read as "not mock-up".
+   */
+  mockup?: { is: boolean; evidence: string | null };
 };
 
 /** One picture of an item, and where it sits on its page. */
@@ -460,6 +467,12 @@ export type DrawingResolution = {
    * reading a person has to check, like any other.
    */
   matchedBy?: CodeEndMatch;
+  /**
+   * Present when the page marks this item as a MOCK-UP drawing (0043): it was
+   * resolved among the mock-up phase's records only, and `message` says so --
+   * including, when nothing there carries the code, what to do about it.
+   */
+  mockup?: { evidence: string | null; message: string };
 };
 
 /**
@@ -628,6 +641,65 @@ export function resolveStagedItem(
     codes: codesOfItem(staged, item.itemCodeRaw),
     drawingNumber: drawingNumberOf(staged.filename),
   });
+}
+
+/** Did the page mark this item as a mock-up drawing? Only an explicit yes counts. */
+export function isMockupDrawing(item: object): boolean {
+  const mockup = (item as { mockup?: unknown }).mockup;
+  return typeof mockup === "object" && mockup !== null && (mockup as { is?: unknown }).is === true;
+}
+
+/**
+ * ONE STAGED ITEM, RESOLVED -- the function the review screen AND the confirm
+ * call (`resolveStagedRun`, `confirmDrawingItem`). It is `resolveStagedItem`
+ * with the mock-up rule in front of it, and nothing calls that one directly
+ * any more: a caller that did would let a mock-up drawing land on the bill's
+ * own lines.
+ *
+ * ---- A MOCK-UP DRAWING RESOLVES AMONG MOCK-UP RECORDS ONLY (2026-10-04) ---
+ *
+ * The Aman MUR drawings carry the codes of the GR and PL lines, and may be a
+ * different design from both. Where the PAGE marks the item as mock-up (a
+ * `MUR` segment in the drawing number, MOCKUP ROOM in the title block -- read
+ * by the model, brief D), the records it may land on are those on a mock-up
+ * phase (0043) and no others. Nothing there carrying the code is the existing
+ * "no record" outcome, with a sentence naming why and the action that fixes
+ * it. Ambiguity among mock-up records is asked exactly as now.
+ *
+ * ---- A DRAWING NOT MARKED MOCK-UP IS UNCHANGED ----------------------------
+ *
+ * It fans out by the per-phase rule as it always has -- which INCLUDES a
+ * mock-up record carrying the same code, because the mock-up phase is a phase
+ * and its record matches. Decided deliberately: where no MUR drawing exists
+ * the mock-up item is the same design, and the main drawing is the only
+ * document that will ever specify it; where one does, the reviewer unticks the
+ * mock-up phase on the main card, which is what that tick is for ("the
+ * reviewer unticks a run whose spec genuinely differs").
+ */
+export function resolveDrawingItem(
+  staged: Pick<StagedDrawings, "schemaVersion" | "codeGroups" | "filename">,
+  item: Pick<DrawingItem, "itemCodeRaw">,
+  records: RecordEntry[],
+): DrawingResolution {
+  if (!isMockupDrawing(item)) return resolveStagedItem(staged, item, records);
+  const evidence = (item as Pick<DrawingItem, "mockup">).mockup?.evidence?.trim() || null;
+  const resolution = resolveStagedItem(
+    staged,
+    item,
+    records.filter((record) => record.onMockupPhase === true),
+  );
+  const why = evidence ? ` (${evidence})` : "";
+  const code = item.itemCodeRaw?.trim() || "this item";
+  return {
+    ...resolution,
+    mockup: {
+      evidence,
+      message:
+        resolution.runs.length > 0
+          ? `This is a mock-up drawing${why}, so it lands on the mock-up phase only.`
+          : `This is a mock-up drawing${why}, and no mock-up record carries ${code} yet. On the phase table, tick the bill line it belongs to and press "Also in a mock-up phase", then reload.`,
+    },
+  };
 }
 
 function groupByRun(matches: RecordEntry[], records: RecordEntry[]): DrawingResolution {
@@ -1608,7 +1680,9 @@ export function drawingItemBlockers(
       // reviewer to the BOQ is advice that cannot work.
       message: resolution.runs.length
         ? "Every phase this item appears in is unticked or unresolved."
-        : item.itemCodeRaw === null
+        : resolution.mockup
+          ? resolution.mockup.message
+          : item.itemCodeRaw === null
           ? "This page carries no item code, so nothing matched it. Say which record it is, or ignore the page."
           : "No record carries this item code yet. Confirm the BOQ for this pack first.",
     });

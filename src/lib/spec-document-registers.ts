@@ -43,7 +43,7 @@ export async function loadExtractionRegisters(
            r.level, r.level_suggested, r.level_suggested_reason,
            c.name as category_name,
            p.bws_project_number,
-           r.run_id, run.name as run_name,
+           r.run_id, run.name as run_name, run.is_mockup,
            r.parent_id, r.variant_label, r.variant_ordinal,
            (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
            coalesce(
@@ -75,6 +75,8 @@ export async function loadExtractionRegisters(
     boqCodes: (row.boq_codes as string[] | null)?.map(String) ?? [],
     runId: String(row.run_id),
     runName: String(row.run_name),
+    // 0043: a mock-up drawing resolves among these only.
+    onMockupPhase: row.is_mockup === true,
     // A CONFIGURATION carries no client ref of its own (variant-create.ts keeps
     // `S-201` on the parent, deliberately, or every card would resolve as
     // ambiguous). So it can never be reached by `findRecordsByRef`, and without

@@ -161,8 +161,17 @@ export type DesignerContact = { id: string; name: string; email: string | null; 
 const RECORD_TABS = ["specs", "checklist", "gates", "versions"] as const;
 type RecordTab = (typeof RECORD_TABS)[number];
 
+/** One end of a mock-up link (0043): a record, its number and its phase. */
+type MockupLink = { id: string; recordNo: number; runName: string; status: string };
+
 export type Payload = {
   record: SpecRecord;
+  /**
+   * The mock-up phase, in both directions (0043). `of` is the record a mock-up
+   * item was added from; `copies` are this record's copies on the mock-up
+   * phase, a retired one included and marked. Optional: an older payload has none.
+   */
+  mockup?: { isMockup: boolean; of: MockupLink | null; copies: MockupLink[] };
   refs: { ref_system: string; ref_value: string }[];
   attributes: Attribute[];
   retiredAttributes: RetiredAttribute[];
@@ -810,8 +819,32 @@ function RecordView() {
         // and never says how many are fabric A. Stated, never divided.
         <Chip tone="warn">qty not set</Chip>
       ) : (
-        <span className="text-neutral-400">no qty</span>
+        // The phase table's words for the same state. A mock-up item (0043)
+        // always reads this: the bill never said how many are in the room.
+        <span className="text-amber-800">quantity not given</span>
       )}
+      {/* THE MOCK-UP, IN WHICHEVER DIRECTION THIS RECORD SITS (0043). */}
+      {data.mockup?.of && (
+        <>
+          <span aria-hidden>·</span>
+          <span>
+            mock-up of{" "}
+            <Link href={`/dashboard/records/${data.mockup.of.id}`} className="underline hover:text-neutral-900">
+              {recordShortLabel(data.mockup.of.recordNo)} · {data.mockup.of.runName}
+            </Link>
+          </span>
+        </>
+      )}
+      {(data.mockup?.copies ?? [])
+        .filter((copy) => copy.status === "active")
+        .map((copy) => (
+          <Fragment key={copy.id}>
+            <span aria-hidden>·</span>
+            <Link href={`/dashboard/records/${copy.id}`} className="underline hover:text-neutral-900">
+              Also in {copy.runName}
+            </Link>
+          </Fragment>
+        ))}
       {record.source_line_no && <><span aria-hidden>·</span><span>BOQ row {record.source_line_no}</span></>}
       <span aria-hidden>·</span>
       {record.category_name ? (
@@ -1656,6 +1689,85 @@ function RecordView() {
                   configuration has to name the bill line it came from, because
                   its record number does not.
                   ========================================================== */}
+              {/* ==========================================================
+                  A MOCK-UP ITEM (0043) SAYS WHAT IT IS AND WHERE IT CAME
+                  FROM, and can be taken off the mock-up phase by the same
+                  verb that retires a configuration — with a reason, because
+                  it leaves the export.
+                  ========================================================== */}
+              {data.mockup?.isMockup && (
+                <Card title="Mock-up">
+                  <p className="text-[12.5px] text-neutral-700">
+                    {data.mockup.of ? (
+                      <>
+                        Added to {record.run_name} from{" "}
+                        <Link
+                          href={`/dashboard/records/${data.mockup.of.id}`}
+                          className="underline hover:text-neutral-900"
+                        >
+                          {recordShortLabel(data.mockup.of.recordNo)} on {data.mockup.of.runName}
+                        </Link>
+                        , which keeps its own place there.
+                      </>
+                    ) : (
+                      <>On {record.run_name}. The item it was added from no longer exists.</>
+                    )}{" "}
+                    Its identity was copied and nothing else: no quantity, and no specs — it takes its own from the
+                    mock-up drawings, which may differ.
+                  </p>
+                  {record.status === "retired" ? (
+                    <Note
+                      tone="blocked"
+                      title="Retired."
+                      actions={
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          disabled={configStatusBusy}
+                          onClick={() => void setConfigurationStatus("active")}
+                        >
+                          Put it back
+                        </Button>
+                      }
+                    >
+                      This mock-up item is not exported.
+                    </Note>
+                  ) : configReason !== null ? (
+                    <div className="mt-2">
+                      <label className="block text-xs text-neutral-600">
+                        Why is it coming off {record.run_name}?
+                        <textarea
+                          autoFocus
+                          value={configReason}
+                          onChange={(event) => setConfigReason(event.target.value)}
+                          rows={2}
+                          className="mt-1 block w-full rounded border border-neutral-300 px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <div className="mt-2 flex gap-2">
+                        <Button
+                          variant="danger"
+                          size="xs"
+                          disabled={configStatusBusy || !configReason.trim()}
+                          onClick={() => void setConfigurationStatus("retired")}
+                        >
+                          Retire it
+                        </Button>
+                        <Button variant="quiet" size="xs" onClick={() => setConfigReason(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <Button variant="quiet" size="xs" onClick={() => setConfigReason("")}>
+                        Retire
+                      </Button>
+                    </div>
+                  )}
+                </Card>
+              )}
+
               <Card title="Configurations">
                 {record.parent_id ? (
                   <>

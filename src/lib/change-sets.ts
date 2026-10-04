@@ -80,6 +80,10 @@ export const CHANGE_SET_KINDS = [
   "standard_set",
   "standard_agreed",
   "standard_change",
+  // 0043: items added to the project's mock-up phase from another phase --
+  // their identity only, never their specs. No reason: it overrides nothing,
+  // and retiring the record it made (which does need one) undoes it.
+  "mockup_add",
 ] as const;
 export type ChangeSetKind = (typeof CHANGE_SET_KINDS)[number];
 
@@ -129,6 +133,7 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   standard_set: "BW standard proposed",
   standard_agreed: "BW standard agreed by the client",
   standard_change: "Agreed BW standard changed",
+  mockup_add: "Added to the mock-up phase",
 };
 
 export type OpenChangeSet = {

@@ -1191,6 +1191,7 @@ export function RunTargets({
   onToggle,
   onPick,
   note,
+  mockup,
   className,
 }: {
   runs: RunResolution[];
@@ -1202,6 +1203,12 @@ export function RunTargets({
   onToggle: (recordId: string, on: boolean) => void;
   onPick: (recordId: string) => void;
   note?: ReactNode;
+  /**
+   * The page marks this item as a MOCK-UP drawing (0043): the server's
+   * sentence, which says it lands on the mock-up phase only -- or, with no
+   * runs, that no mock-up record carries its code yet and what to press.
+   */
+  mockup?: { message: string } | null;
   /** Layout only. The card decides whether this is a band or a sidebar box. */
   className?: string;
 }) {
@@ -1211,9 +1218,11 @@ export function RunTargets({
       {runs.length === 0 && (
         <div className="mt-1">
           <p className="text-sm text-amber-900">
-            {itemCodeRaw
-              ? `No record carries ${itemCodeRaw}. Confirm the bill of quantities for this pack, then reload.`
-              : "No item code could be read on this page, so nothing matched."}
+            {mockup
+              ? mockup.message
+              : itemCodeRaw
+                ? `No record carries ${itemCodeRaw}. Confirm the bill of quantities for this pack, then reload.`
+                : "No item code could be read on this page, so nothing matched."}
           </p>
           {/* WHY THIS ESCAPE HATCH EXISTS. On a 40-page set a couple of
               unreadable codes are tolerable — the rest of the set still
@@ -1295,6 +1304,7 @@ export function RunTargets({
           ),
         )}
       </div>
+      {mockup && runs.length > 0 && <p className="mt-1.5 text-xs text-neutral-600">{mockup.message}</p>}
       {note}
     </div>
   );

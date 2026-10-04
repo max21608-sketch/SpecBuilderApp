@@ -79,6 +79,8 @@ export type ItemResolution = {
      * (`resolveDrawingTargets`), so the card says what the confirm will do.
      */
     matchedBy?: { kind: "code_end"; code: string | null; message: string };
+    /** The page marks the item as mock-up (0043): resolved among mock-up records only. The server's sentence. */
+    mockup?: { evidence: string | null; message: string };
   };
   targets: string[];
   /**
@@ -614,6 +616,7 @@ export default function ItemCard({
             busy={busy}
             onToggle={toggleRun}
             onPick={(recordId) => void onSaveTargets(item, [recordId], [])}
+            mockup={resolution?.resolution.mockup ?? null}
             // Amber whether or not it settled on one: a code read off the end
             // of a bill code is a reading a person checks, like a guessed slot.
             note={

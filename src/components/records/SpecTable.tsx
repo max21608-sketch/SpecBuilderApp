@@ -145,7 +145,20 @@ export type SpecRecord = {
    * nobody could quote.
    */
   gates: Record<Gate, GateSummaryEntry> | null;
+  /**
+   * THE MOCK-UP PHASE (0043), both directions. On a mock-up record, the record
+   * it was added from; on any other, its live copy on the mock-up phase. All
+   * optional, so a payload from before 0043 still renders.
+   */
+  mockup_of?: string | null;
+  mockup_of_no?: number | null;
+  mockup_of_run_name?: string | null;
+  mockup_copy_id?: string | null;
+  mockup_copy_run_name?: string | null;
 };
+
+/** The phase this table is showing, as `/api/records` reads it off the phase row. */
+export type PhaseInfo = { id: string; name: string; isMockup: boolean };
 
 /** One outstanding to-quote question on a record, as `/api/records` names it. */
 export type ToQuoteQuestion = {
@@ -380,6 +393,16 @@ export default function SpecTable({
   const [category, setCategory] = useState("");
   const [designer, setDesigner] = useState("");
   const [categories, setCategories] = useState<{ id: string; family: string; name: string }[]>([]);
+  /**
+   * WHICH ROWS ARE TICKED, for "Also in a mock-up phase" (2026-10-04). The
+   * selection is the truth, as on the chase screen: a filter that hides a
+   * ticked row does not untick it, and the bar counts what the button sends.
+   */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [phase, setPhase] = useState<PhaseInfo | null>(null);
+  const [mockupBusy, setMockupBusy] = useState(false);
+  /** What the last press did, in the server's words. Kept until the next press or a dismissal. */
+  const [mockupMessage, setMockupMessage] = useState<string | null>(null);
 
   // The callback lives in a ref so a caller passing a lambda — which is every
   // caller — does not make `load` a new function on every render and re-fetch
@@ -396,6 +419,7 @@ export default function SpecTable({
       programme: ProgrammeDates;
       retiredCount: number;
       categories: { id: string; family: string; name: string }[];
+      phase?: PhaseInfo | null;
     }>(`/api/records?${query.toString()}`);
     if (!res.ok) {
       setError(res.error);
@@ -406,6 +430,7 @@ export default function SpecTable({
     setProgramme(res.data.programme);
     setRetiredCount(Number(res.data.retiredCount ?? 0));
     setCategories(res.data.categories ?? []);
+    setPhase(res.data.phase ?? null);
     summaryRef.current?.({
       records: res.data.records.length,
       toQuote: res.data.records.reduce((sum, record) => sum + (record.to_quote_outstanding ?? 0), 0),
@@ -416,6 +441,35 @@ export default function SpecTable({
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * "Also in a mock-up phase": the ticked items, put on the project's mock-up
+   * phase as well. The server finds or makes the phase and says what it did;
+   * this reloads FIRST and reports after, because a successful load clears the
+   * banner and a sentence set before it would flash and vanish.
+   */
+  async function addToMockup() {
+    if (selected.size === 0) return;
+    setMockupBusy(true);
+    try {
+      const res = await apiFetch<{ message: string }>(`/api/projects/${encodeURIComponent(projectId)}/mockup`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ recordIds: [...selected] }),
+      });
+      await load();
+      if (res.ok) {
+        setSelected(new Set());
+        setMockupMessage(res.data.message);
+      } else {
+        setMockupMessage(null);
+        setError(res.error);
+      }
+    } finally {
+      // Always, so a non-JSON error cannot leave the button dead.
+      setMockupBusy(false);
+    }
+  }
 
   /** Agree with every level this run's records were guessed. */
   async function acceptLevels() {
@@ -579,8 +633,36 @@ export default function SpecTable({
   });
   const narrowed = focus !== null || term !== "" || category !== "" || designer !== "" || area !== "";
 
+  // A ROW CAN BE TICKED when it is a live bill line on a phase that is not
+  // itself the mock-up phase. A configuration's identity is its bill line's
+  // plus a letter, and it carries no client ref of its own, so its copy could
+  // never be matched by a drawing; the server refuses it in words too.
+  const selectable = phase !== null && !phase.isMockup;
+  const canTick = (record: SpecRecord) => record.status === "active" && !record.variant_label && !record.parent_id;
+  const columns = COLUMNS + (selectable ? 1 : 0);
+  const tickable = shown.filter(canTick);
+  const allShownTicked = tickable.length > 0 && tickable.every((record) => selected.has(record.id));
+  const hiddenTicked = [...selected].filter((id) => !shown.some((record) => record.id === id)).length;
+  const toggle = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   return (
     <>
+      {/* THE MOCK-UP PHASE SAYS WHAT IT IS. Its items were added from other
+          phases with their identity only, so a reader seeing no quantity and
+          no specs must not take either for a fault. */}
+      {phase?.isMockup && (
+        <Note tone="info" title="This is the mock-up phase.">
+          — its items were added from other phases with their identity only: no quantity and no specs. Each takes
+          its specs from the mock-up drawings, and a drawing the page marks as mock-up lands only here.
+        </Note>
+      )}
+
       {/* ONE CLICK FOR THE RUN, because 59 records must not mean 59 visits —
           the same reason the drafts screen carries an inline level picker. It
           is still a person agreeing: the level of every record is on this
@@ -792,6 +874,48 @@ export default function SpecTable({
             <AddItem projectId={projectId} runId={runId} categories={categories} onAdded={load} />
           </div>
 
+          {/* THE SELECTION BAR. Only while something is ticked, and it counts
+              what the button sends — including ticked rows a filter is hiding,
+              which it says in words. */}
+          {selectable && selected.size > 0 && (
+            <div
+              role="region"
+              aria-label="Selected items"
+              className="mt-3 flex flex-wrap items-center gap-3 rounded-[10px] border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm"
+            >
+              <span className="font-medium text-neutral-800">
+                {selected.size} item{selected.size === 1 ? "" : "s"} selected
+                {hiddenTicked > 0 && (
+                  <span className="font-normal text-neutral-500"> ({hiddenTicked} hidden by the filters)</span>
+                )}
+              </span>
+              <Button variant="secondary" size="sm" disabled={mockupBusy} onClick={() => void addToMockup()}>
+                {mockupBusy ? "Adding…" : "Also in a mock-up phase"}
+              </Button>
+              <span className="text-xs text-neutral-500">
+                Adds each to the project&rsquo;s mock-up phase as well, without taking it off this one. Its
+                identity only — no quantity, no specs.
+              </span>
+              <span className="flex-1" />
+              <Button variant="quiet" size="xs" onClick={() => setSelected(new Set())}>
+                Clear
+              </Button>
+            </div>
+          )}
+          {mockupMessage && (
+            <Note
+              tone="info"
+              className="mt-3"
+              actions={
+                <Button variant="quiet" size="xs" onClick={() => setMockupMessage(null)}>
+                  Dismiss
+                </Button>
+              }
+            >
+              {mockupMessage}
+            </Note>
+          )}
+
           {/* Said out loud, so "38 records" cannot quietly mean "38 of 41". A
               record retired by a BOQ revision is out of the export, and a BWS
               job created from it is NOT deleted by that absence — so somebody
@@ -813,6 +937,26 @@ export default function SpecTable({
             <Table scroll className="[&_td]:px-3 [&_th]:px-3">
               <thead>
                 <tr>
+                  {selectable && (
+                    <Th className="w-8">
+                      <input
+                        type="checkbox"
+                        aria-label="Select every item shown"
+                        checked={allShownTicked}
+                        disabled={tickable.length === 0}
+                        onChange={() =>
+                          setSelected((current) => {
+                            const next = new Set(current);
+                            for (const record of tickable) {
+                              if (allShownTicked) next.delete(record.id);
+                              else next.add(record.id);
+                            }
+                            return next;
+                          })
+                        }
+                      />
+                    </Th>
+                  )}
                   <Th>No.</Th>
                   <Th>Client ref</Th>
                   <Th>Item</Th>
@@ -888,6 +1032,18 @@ export default function SpecTable({
                           : undefined
                       }
                     >
+                      {selectable && (
+                        <Td className="w-8">
+                          {canTick(record) ? (
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${numberOf(record)}`}
+                              checked={selected.has(record.id)}
+                              onChange={() => toggle(record.id)}
+                            />
+                          ) : null}
+                        </Td>
+                      )}
                       <Td className={`whitespace-nowrap text-neutral-500 tabular-nums ${isConfiguration ? "pl-6" : ""}`}>
                         <span
                           title={URGENCY_LABELS[urgency]}
@@ -941,6 +1097,29 @@ export default function SpecTable({
                         {/* A HEADING, not an item. Its configurations are what
                             the export ships — and a row that stayed silent
                             would read as an item nobody had specced. */}
+                        {/* THE MOCK-UP, IN WHICHEVER DIRECTION THIS ROW SITS. */}
+                        {record.mockup_of && (
+                          <span className="block text-xs text-neutral-500">
+                            mock-up of{" "}
+                            <Link
+                              href={`/dashboard/records/${record.mockup_of}`}
+                              className="text-blue-700 no-underline hover:underline"
+                            >
+                              {record.mockup_of_no ?? "its line"}
+                              {record.mockup_of_run_name ? ` · ${record.mockup_of_run_name}` : ""}
+                            </Link>
+                          </span>
+                        )}
+                        {record.mockup_copy_id && (
+                          <span className="block text-xs text-neutral-500">
+                            <Link
+                              href={`/dashboard/records/${record.mockup_copy_id}`}
+                              className="text-blue-700 no-underline hover:underline"
+                            >
+                              Also in {record.mockup_copy_run_name ?? "the mock-up phase"}
+                            </Link>
+                          </span>
+                        )}
                         {isHeading && (
                           <p className="text-xs text-neutral-500">
                             {n(record.variant_count)} configuration{n(record.variant_count) === 1 ? "" : "s"} — they
@@ -1222,7 +1401,7 @@ export default function SpecTable({
                   const adding =
                     addingTo === record.id ? (
                       <tr className="bg-[#fbfbfb]">
-                        <td colSpan={COLUMNS} className="border-b border-neutral-200 px-4 py-3 align-top">
+                        <td colSpan={columns} className="border-b border-neutral-200 px-4 py-3 align-top">
                           <AddConfiguration
                             billLineId={record.id}
                             onCancel={() => setAddingTo(null)}
@@ -1251,7 +1430,7 @@ export default function SpecTable({
                           the panel BESIDE the data, squeezed into a ribbon.
                           The drawings card paid for that once already. */}
                       <tr className="bg-[#fbfbfb]">
-                        <td colSpan={COLUMNS} className="border-b border-neutral-200 px-4 py-3 align-top">
+                        <td colSpan={columns} className="border-b border-neutral-200 px-4 py-3 align-top">
                           <ToQuotePanel
                             record={record}
                             questions={record.to_quote_questions}
