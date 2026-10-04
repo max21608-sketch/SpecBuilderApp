@@ -806,6 +806,33 @@ export function ObservationRow({
         {observation.valueRaw !== null && observation.valueRaw !== observation.value && !(value ?? "").includes("\n") && (
           <p className="mt-0.5 text-xs text-neutral-400">drawing said: {observation.valueRaw}</p>
         )}
+        {/* WHERE THIS ROW IS PRINTED, on an item read whole (schemaVersion 4).
+            An item spans pages, so the card's page is only its first; the row
+            says its own, and that is the page the confirm records. */}
+        {typeof observation.page === "number" && (
+          <p className="mt-0.5 text-xs text-neutral-500">
+            page {observation.page}
+            {observation.view ? ` · ${observation.view}` : ""}
+          </p>
+        )}
+        {/* THE FIGURES THE READ DID NOT CHOOSE for this slot, so the choice is
+            checkable against the page rather than taken on trust. Display only:
+            nothing here writes a second value into the slot. */}
+        {observation.candidates && observation.candidates.length > 0 && (
+          <p className="mt-0.5 text-xs text-amber-800">
+            also printed:{" "}
+            {observation.candidates
+              .map(
+                (candidate) => {
+                  // The read writes a candidate as one line ("740 (SIDE, page 2)"); a
+                  // structured one is spelled out the same way.
+                  const where = [candidate.view, candidate.page ? `p${candidate.page}` : null].filter(Boolean).join(", ");
+                  return `${candidate.valueRaw}${candidate.unitRaw ? ` ${candidate.unitRaw}` : ""}${where ? ` (${where})` : ""}`;
+                },
+              )
+              .join("; ")}
+          </p>
+        )}
         {palette && (
           <PaletteChoice
             palette={palette}
@@ -880,8 +907,9 @@ export function ObservationRow({
             <SwatchPicker
               importId={importId}
               observationId={observation.id}
-              page={page}
+              page={typeof observation.page === "number" ? observation.page : page}
               pages={itemPages}
+              proposed={observation.swatchProposal ?? null}
               code={target.code}
               disabled={busy}
               onCropped={(image, croppedPage) => callbacks.onSwatch(observation.id, image, croppedPage)}

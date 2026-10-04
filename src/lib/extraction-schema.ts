@@ -1109,6 +1109,778 @@ export const DrawingsOutput = z.object({
 export type DrawingsOutput = z.infer<typeof DrawingsOutput>;
 
 // ============================================================================
+// THE ITEM-CENTRIC READ (staged schemaVersion 4, 2026-10-04).
+//
+// Everything above asks for ONE ENTRY PER ITEM PER PAGE, every figure on that
+// page (seven required fields each, up to 120), and a separate `codeGroups` to
+// say which pages belong together — and a dozen helpers then glue the pages
+// back together and second-guess the model (`canonicalCode`,
+// `groupItemsByCode`, `variantLettersByItem`, `crossPageClaims`, the
+// cross-view de-duplication, the magnitude vote). Max, 2026-10-04: the read
+// "is structured around the page", so every real-world nuance — an item drawn
+// over two pages, a codeless continuation sheet, a title block naming the item
+// differently from the bill — became another piece of glue, "and there are
+// endless issues that arise from it".
+//
+// This asks the real question once: WHAT ARE THE THINGS TO BE MADE, AND WHAT
+// DOES THE DOCUMENT SAY ABOUT EACH. An item spans whatever pages describe it.
+// Its overall size is FIVE SLOTS, one figure each by the SHAPE of the answer,
+// with the view and page each came from and every rival figure the model saw
+// kept beside it as a candidate — so "two of these are the width" cannot be
+// produced, and a choice the model made between two figures is shown rather
+// than silently taken. Everything else the page measures is kept, secondary.
+// A doubt is said in words (`uncertain`) instead of being silent.
+//
+// The prompt that matches it is `PROMPTS.shop_drawings` in anthropic.ts, and
+// it was trialled on six real documents before it was written here.
+//
+// SAME TOLERANCE AS EVERYTHING ABOVE: never fail a paid read over a hint. A
+// bare value is a one-entry list where the element can hold it; a malformed
+// entry is dropped and its siblings kept; a malformed scalar degrades to null.
+// ONE DEPARTURE, and it is deliberate: an OVER-LONG list is TRUNCATED and
+// SAID, not refused. Version 3 failed the read on a 121st figure because a
+// silently truncated list stages a page as having fewer figures than it
+// prints; here every list past its bound keeps its first N entries AND adds an
+// `uncertain` line saying how many were dropped, so the loss is on the card in
+// words. Everything this read lists past the overall size is secondary by
+// construction (the prompt says the other dimensions "may be partial"), and a
+// read that has said what it lost is worth more than a failed one.
+// `items` stays terminal, for the reason it always was.
+// ============================================================================
+
+export const DRAWINGS_ITEMS_TOOL_NAME = "record_items_to_make";
+
+/** Every code one item may be titled by. A handful in practice: S-200 and MUR.2 ARMCHAIR. */
+export const MAX_ITEM_CODES = 12;
+/** The pages one item may span. A configuration sheet set can run to a dozen; this is generous. */
+export const MAX_ITEM_PAGES = 60;
+/** The rival figures one slot may list. */
+export const MAX_SLOT_CANDIDATES = 12;
+/** A detailed specification sheet is the richest source an item will ever have: take it all in. */
+export const MAX_STATEMENTS = 200;
+/** The doubts one item may state. */
+export const MAX_UNCERTAIN = 40;
+
+/** The words `uncertain.about` may take. Anything else reads as `other`. */
+export const UNCERTAIN_ABOUT = [
+  "width",
+  "depth",
+  "height",
+  "seatHeight",
+  "diameter",
+  "grouping",
+  "configurations",
+  "finish",
+  "code",
+  "conflict",
+  "other",
+] as const;
+export type UncertainAbout = (typeof UNCERTAIN_ABOUT)[number];
+
+/** The five overall slots, as the read names them. `MODEL_SLOT_WORDS` above is the v3 spelling. */
+export const OVERALL_KEYS = ["width", "depth", "height", "seatHeight", "diameter"] as const;
+export type OverallKey = (typeof OVERALL_KEYS)[number];
+
+export const OVERALL_SLOT: Record<OverallKey, DimensionSlot> = {
+  width: "W",
+  depth: "D",
+  height: "H",
+  seatHeight: "SH",
+  diameter: "DIA",
+};
+
+/** The picture kinds the read may report. `section` is new in version 4. */
+export const PICTURE_KINDS = ["photo", "render", "3d", "front", "side", "back", "plan", "section", "detail", "other"] as const;
+
+// ============================================================================
+// SIXTEEN UNIONS AND A GRAMMAR BUDGET — WHY THE SHAPE IS NOT THE DRAFT'S.
+//
+// Structured outputs compiles the schema into a grammar, and refuses two kinds
+// of schema with a 400, before a token is read (measured 2026-10-04, each
+// refusal free):
+//   1. more than SIXTEEN union-typed parameters (a nullable type or an
+//      `anyOf`), counted per LOCATION. The draft's shape — five nullable slot
+//      objects with nullable fields, again per configuration — was 62. The v3
+//      tool is exactly 16.
+//   2. "The compiled grammar is too large". Descriptions, integer and number
+//      types made no difference; the number of PROPERTY SLOTS did. Counted the
+//      way the test counts them, v3 is 35, 43 was accepted, 47 was refused.
+//
+// So the shape is FLAT where the draft nested, and keeps every question:
+//   * `overall` is a LIST of slot entries (`slot` an enum), at most one per
+//     slot; a slot the page does not print is absent. A configuration's own
+//     size is an entry naming the configuration, not a second `overall`.
+//   * a figure carries its printed unit IN `valueRaw` ("840 mm"), the way
+//     `splitFigureAndUnit` already reads one; a candidate is one line,
+//     "740 (SIDE ELEVATION, page 2)"; a doubt is "width: …"; a non-item page
+//     is "3: general notes".
+//   * a plain remark is a statement with an EMPTY label; `mockup` is the quoted
+//     evidence or empty; a swatch is `swatchBox` on the callout's page.
+//   * every optional text is a plain string, EMPTY for none; the only unions
+//     left are a finish's `part`, `spec` and `code`, where null means "not
+//     printed" and the library supplies the words.
+// The Zod check reads the flat shape back into the nested one staging reads
+// (`itemFromSchemaShape`, `overallAsSlots`, `blankText`), and reads the
+// draft's nested shape too. `tests/lib/extraction-schema.test.ts` counts both
+// limits for every tool.
+// ============================================================================
+const blankString = (max: number, description: string) => ({ type: "string", maxLength: max, description });
+const pageNumber = (description: string) => ({ type: "integer", minimum: 1, description });
+const pageBox = (description: string) => ({
+  type: "array",
+  minItems: 4,
+  maxItems: 4,
+  items: { type: "number", minimum: 0, maximum: 1 },
+  description,
+});
+
+const candidateProperties = {
+  valueRaw: { type: "string", maxLength: MAX_SHORT, description: "The figure exactly as printed, marks and all ('840', '5'-7\"')." },
+  unitRaw: blankString(MAX_SHORT, "The unit only if the page prints it beside this figure ('mm', 'cm'). Empty otherwise; never inferred."),
+  view: blankString(MAX_SHORT, "The view it is printed on, in the page's own words ('ELEVATION 1', 'SECTION A', 'PLAN'). Empty if none."),
+  page: pageNumber("1-based page it is printed on."),
+};
+
+/** The overall size: one entry per slot the page prints, at most one per slot. */
+const overallSchema = (description: string) => ({
+  type: "array",
+  maxItems: OVERALL_KEYS.length,
+  description,
+  items: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      slot: {
+        type: "string",
+        enum: [...OVERALL_KEYS],
+        description:
+          "width: side to side as seen from the front (a plan or front elevation; never a side elevation or a section). " +
+          "depth: front to back. height: floor to the highest point as drawn. seatHeight: seating only, floor to seat top " +
+          "(on a bench, stool or ottoman you sit on the top of, the overall height). diameter: round items only, instead of width and depth.",
+      },
+      valueRaw: {
+        type: "string",
+        maxLength: MAX_SHORT,
+        description:
+          "The figure exactly as printed, marks and all, with its unit ONLY where the page prints one beside it ('840', '840 mm', '5'-7\"'). Never inferred.",
+      },
+      view: candidateProperties.view,
+      page: candidateProperties.page,
+      evidence: {
+        type: "string",
+        maxLength: MAX_NOTE,
+        description:
+          "Which view it is on and what printed it, quoting the page — \"ELEVATION 1, the dimension spanning the full front\", " +
+          "\"labelled WIDTH 550MM on the specification table\"; for height, what it is to. A reviewer checks this against the drawing.",
+      },
+      candidates: {
+        type: "array",
+        maxItems: MAX_SLOT_CANDIDATES,
+        description:
+          "Every OTHER figure that could be this slot and that you did not choose (a different view printing a different figure, " +
+          "a shop drawing disagreeing with the specification sheet), one entry each written as figure (view, page): " +
+          "\"740 (SIDE ELEVATION, page 2)\". Empty when no other view disagrees.",
+        items: { type: "string", maxLength: MAX_SHORT },
+      },
+      configurations: {
+        type: "array",
+        maxItems: MAX_CONFIGURATIONS,
+        items: { type: "string", maxLength: MAX_SHORT },
+        description:
+          "EMPTY for the item's own size, which is the usual case. Only where a configuration's size DIFFERS: an entry of its own " +
+          "naming that configuration (by its `name`), beside the item's entry for the same slot.",
+      },
+    },
+    required: ["slot", "valueRaw", "view", "page", "evidence", "candidates", "configurations"],
+  },
+});
+
+const configurationNamesSchema = {
+  type: "array",
+  maxItems: MAX_CONFIGURATIONS,
+  items: { type: "string", maxLength: MAX_SHORT },
+  description:
+    "Which of the item's configurations this applies to, by the `name` you gave them. Empty when it applies to every configuration, " +
+    "and when the item has none — which is the usual case.",
+};
+
+export const DRAWINGS_ITEMS_SCHEMA = {
+  type: "object" as const,
+  additionalProperties: false,
+  properties: {
+    documentNotes: blankString(
+      MAX_NOTE,
+      "One note about the document as a whole: what it covers, general notes printed on every sheet, units if they ARE stated anywhere, pages you could not read. Empty if nothing.",
+    ),
+    nonItemPages: {
+      type: "array",
+      maxItems: MAX_DRAWING_ITEMS,
+      description: "Every page that describes no item at all — a cover, a legend, general notes — with the reason.",
+      items: { type: "string", maxLength: MAX_SHORT, description: "The page number, a colon, and what the page is: \"3: general notes only\"." },
+    },
+    items: {
+      type: "array",
+      maxItems: MAX_DRAWING_ITEMS,
+      description: "One entry per THING TO BE MADE — not per page. An item may span several pages; a page may hold several items.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          codes: {
+            type: "array",
+            maxItems: MAX_ITEM_CODES,
+            items: { type: "string", maxLength: MAX_SHORT },
+            description:
+              "Every code the item is titled by: the item code as the title prints it FIRST ('FUR-33', 'S-200'), other titles after it " +
+              "('MUR.2 ARMCHAIR'), and a drawing or sheet number ('AM-ID-PL-FUR-33') LAST. Empty only when nothing titles it.",
+          },
+          name: blankString(MAX_SHORT, "What the document calls the item ('Desk', 'Armchair'), from a title block or caption. Empty if none."),
+          pages: {
+            type: "array",
+            maxItems: MAX_ITEM_PAGES,
+            items: { type: "integer", minimum: 1 },
+            description: "Every 1-based page that describes this item.",
+          },
+          whyOneItem: blankString(
+            MAX_NOTE,
+            "Where the item spans more than one page or carries more than one code: what tied them together, quoting the pages. Empty otherwise.",
+          ),
+          overall: overallSchema(
+            "The item's overall size read off the page: AT MOST ONE entry per slot, the figure that measures the whole item. " +
+              "Leave a slot out when the page does not print it — never add parts together and never estimate.",
+          ),
+          combinedLine: blankString(
+            MAX_VALUE,
+            "A size printed as ONE line ('80 x 70 x 90 cm', 'W1520 x D560 x H1005 mm'), copied verbatim. Empty where there is none.",
+          ),
+          configurations: {
+            type: "array",
+            maxItems: MAX_CONFIGURATIONS,
+            description:
+              "Only where the document itself tells variants of the item apart ('Type 1 – 5', 'Option A / B', a fabric per room type). " +
+              "One entry per configuration: 'Type 1 & 5' is two. Empty for one item drawn for two rooms with nothing different — the usual case.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                name: {
+                  type: "string",
+                  maxLength: MAX_SHORT,
+                  description:
+                    "This configuration's own label in the document's words ('Type 2', 'MUR 1'). Where the specification sheet and the shop drawing " +
+                    "name one configuration differently ('Type 5' / 'TYPO 5'), the sheet's name.",
+                },
+                nameRaw: { type: "string", maxLength: MAX_SHORT, description: "The exact printed text it came from ('Type 1 & 5 - <fabric>')." },
+                differsIn: { type: "string", maxLength: MAX_NOTE, description: "What differs between this configuration and the others." },
+              },
+              required: ["name", "nameRaw", "differsIn"],
+            },
+          },
+          finishes: {
+            type: "array",
+            maxItems: MAX_PER_ITEM,
+            description: "Each distinct finish, material, fabric or hardware callout, once, even if several views point to it.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                part: { type: ["string", "null"], maxLength: MAX_SHORT, description: "The PART it names ('SOFA FEET', 'TOP'), or null where the page names none." },
+                spec: {
+                  type: ["string", "null"],
+                  maxLength: MAX_VALUE,
+                  description:
+                    "The SPECIFICATION as printed ('Dark tinted wood', 'Antique bronze'), or null where only a code is printed. Never describe a code in your own words.",
+                },
+                code: { type: ["string", "null"], maxLength: MAX_SHORT, description: "The client's own finish code where one is printed ('GR TIM 04', 'UPH-07'). Null otherwise." },
+                configurations: configurationNamesSchema,
+                page: pageNumber("1-based page the callout is on."),
+                swatchBox: {
+                  type: "array",
+                  maxItems: 4,
+                  items: { type: "number", minimum: 0, maximum: 1 },
+                  description:
+                    "Where the finish is shown as a printed swatch chip or material photo on the callout's page, that chip as [x0, y0, x1, y1], " +
+                    "fractions of the page from 0 to 1, origin top-left; approximate is fine. EMPTY when no chip is printed there.",
+                },
+              },
+              required: ["part", "spec", "code", "configurations", "page", "swatchBox"],
+            },
+          },
+          statements: {
+            type: "array",
+            maxItems: MAX_STATEMENTS,
+            description:
+              "Every labelled line of a specification table, schedule or remarks block that is not already a size or a finish above, " +
+              "label and value as printed ('FILLING: Feather wrap', 'LEAD TIME: 12 weeks'). Take in everything. A remark with no label " +
+              "of its own — any other note about THIS item, one per remark or bullet — is an entry with an EMPTY label.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                label: { type: "string", maxLength: MAX_SHORT, description: "The line's label as printed ('FILLING'), or empty for a plain remark." },
+                value: { type: "string", maxLength: MAX_VALUE, description: "Its value as printed ('Feather wrap')." },
+                page: pageNumber("1-based page."),
+                configurations: configurationNamesSchema,
+              },
+              required: ["label", "value", "page", "configurations"],
+            },
+          },
+          mockup: blankString(
+            MAX_SHORT,
+            "ONLY where the page itself says the drawing is for a mock-up (a title block reading MOCKUP ROOM, a drawing number with a MUR segment, " +
+              "'(MUR)' in the title): what printed it, quoted. EMPTY otherwise, which is the usual case.",
+          ),
+          otherDimensions: {
+            type: "array",
+            maxItems: MAX_PER_ITEM,
+            description:
+              "Every other dimension on the item, briefly — kept for reference and folded away. On a dense sheet this may be partial; say so in uncertain.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                label: blankString(
+                  MAX_SHORT,
+                  "The page's label for it and the view it is on, in the page's words ('ARM HEIGHT, SECTION B'), or empty.",
+                ),
+                valueRaw: {
+                  type: "string",
+                  maxLength: MAX_SHORT,
+                  description: "The figure exactly as printed, with its unit only where the page prints one beside it ('620', '620 mm', '1'-6\"').",
+                },
+                page: pageNumber("1-based page."),
+              },
+              required: ["label", "valueRaw", "page"],
+            },
+          },
+          pictures: {
+            type: "array",
+            maxItems: MAX_VIEW_REGIONS,
+            description: "Every drawn view or photo OF THE ITEM. Not swatch chips, title blocks or logos. An approximate box is wanted.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                kind: { type: "string", maxLength: MAX_SHORT, description: `What the picture is, one of: ${PICTURE_KINDS.join(", ")}.` },
+                page: pageNumber("1-based page."),
+                box: pageBox("[x0, y0, x1, y1] as fractions of the page from 0 to 1, origin top-left."),
+              },
+              required: ["kind", "page", "box"],
+            },
+          },
+          uncertain: {
+            type: "array",
+            maxItems: MAX_UNCERTAIN,
+            description:
+              "Anything you could not settle, said plainly: a figure you could not read, a slot chosen between candidates, pages you were not sure belonged together.",
+            items: {
+              type: "string",
+              maxLength: MAX_NOTE,
+              description: `One doubt, starting with what it is about and a colon — one of ${UNCERTAIN_ABOUT.join(", ")} — then the doubt in words: "width: the plan prints 5'-7\" and ELEVATION 2 prints 5'-6\"".`,
+            },
+          },
+          confidence: {
+            type: "string",
+            enum: ["high", "medium", "low"],
+            description:
+              "'high' = every overall figure read clearly and agreed; 'medium' = a figure chosen between candidates or hard to read; 'low' = the grouping or most sizes are doubtful.",
+          },
+        },
+        required: [
+          "codes",
+          "name",
+          "pages",
+          "whyOneItem",
+          "overall",
+          "combinedLine",
+          "configurations",
+          "finishes",
+          "statements",
+          "mockup",
+          "otherDimensions",
+          "pictures",
+          "uncertain",
+          "confidence",
+        ],
+      },
+    },
+  },
+  required: ["documentNotes", "nonItemPages", "items"],
+};
+
+export const DRAWINGS_ITEMS_TOOL = {
+  name: DRAWINGS_ITEMS_TOOL_NAME,
+  description:
+    "Record every thing to be made in this document — one entry per ITEM, spanning whatever pages describe it — with its overall size, " +
+    "configurations, finishes and everything else the document states about it. Copy the document's own wording and figures; never convert, tidy or infer.",
+  input_schema: DRAWINGS_ITEMS_SCHEMA,
+};
+
+// ---- the check ---------------------------------------------------------------
+
+/** Text the schema asks for as a plain string, EMPTY for "none": read back as null, so staging sees one shape. */
+const blankText = (max: number) =>
+  z.preprocess((value) => (typeof value === "string" && value.trim() === "" ? null : value), nullableText(max));
+
+const pageOrNull = z.number().int().min(1).max(100_000).nullable().catch(null).default(null);
+
+/** A list of page numbers that survives a bare number and drops anything that is not one. */
+const pageList = z
+  .preprocess((value) => {
+    if (value === undefined || value === null) return [];
+    const list = Array.isArray(value) ? value : [value];
+    return list.filter((entry) => Number.isInteger(entry) && (entry as number) >= 1 && (entry as number) <= 100_000);
+  }, z.array(z.number().int()))
+  .catch([])
+  .transform((pages) => [...new Set(pages)].sort((a, b) => a - b).slice(0, MAX_ITEM_PAGES));
+
+/** A box on a page: four numbers, or null. Cleaned again by `usableBox` at staging. */
+const boxOrNull = z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable().catch(null).default(null);
+
+/**
+ * A list kept to its bound, with how many were dropped. The count is turned
+ * into an `uncertain` line by the item transform, so a truncation is said on
+ * the card rather than lost.
+ */
+type Bounded<T> = { kept: T[]; dropped: number };
+function boundedList<T extends z.ZodTypeAny>(entry: T, max: number, wrap: ((scalar: string) => unknown) | null) {
+  return z
+    .preprocess((value) => {
+      if (value === undefined || value === null) return [];
+      const list = Array.isArray(value) ? value : [value];
+      return list
+        .filter((element) => element !== null && element !== undefined)
+        .map((element) =>
+          typeof element === "string" || typeof element === "number" || typeof element === "boolean"
+            ? wrap
+              ? wrap(String(element))
+              : null
+            : element,
+        )
+        .filter((element) => entry.safeParse(element).success);
+    }, z.array(entry))
+    .catch([])
+    .transform((list): Bounded<z.infer<T>> => ({ kept: list.slice(0, max), dropped: Math.max(0, list.length - max) }));
+}
+
+const RawCandidate = z.object({
+  valueRaw: z.preprocess((value) => (typeof value === "number" ? String(value) : value), z.string().trim().min(1).max(MAX_SHORT)),
+  unitRaw: blankText(MAX_SHORT),
+  view: blankText(MAX_SHORT),
+  page: pageOrNull,
+});
+export type RawCandidate = z.infer<typeof RawCandidate>;
+
+/**
+ * One overall figure. A bare string or number is the figure with nothing else
+ * claimed — the element can hold it — and anything that is not a figure is
+ * null: one lost slot is an amber row in front of a reviewer, a failed read is
+ * another call.
+ */
+const RawOverallFigure = z
+  .preprocess(
+    (value) => (typeof value === "string" || typeof value === "number" ? { valueRaw: String(value) } : value),
+    z.object({
+      valueRaw: z.preprocess((value) => (typeof value === "number" ? String(value) : value), z.string().trim().min(1).max(MAX_SHORT)),
+      unitRaw: blankText(MAX_SHORT),
+      view: blankText(MAX_SHORT),
+      page: pageOrNull,
+      evidence: blankText(MAX_NOTE),
+      candidates: boundedList(RawCandidate, MAX_SLOT_CANDIDATES, (scalar) => ({ valueRaw: scalar })).transform(
+        (bounded) => bounded.kept,
+      ),
+    }),
+  )
+  .nullable()
+  .catch(null)
+  .default(null);
+export type RawOverallFigure = z.infer<typeof RawOverallFigure>;
+
+/**
+ * The overall size as a LIST of slot entries (the schema's shape), read into
+ * one figure per slot. The FIRST entry for a slot is the answer; a second entry
+ * for the same slot is the model breaking the one-per-slot rule, and it is kept
+ * as a CANDIDATE of the first rather than dropped or allowed to stand beside it
+ * — so the card shows it under the slot and "two of these are the width"
+ * cannot be produced. The draft's object-of-five-slots shape is read as well.
+ */
+function overallAsSlots(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const { slot, ...figure } = entry as Record<string, unknown>;
+    if (typeof slot !== "string" || !(OVERALL_KEYS as readonly string[]).includes(slot)) continue;
+    const kept = out[slot];
+    if (!kept) {
+      out[slot] = figure;
+      continue;
+    }
+    const candidates = Array.isArray(kept.candidates) ? kept.candidates : [];
+    out[slot] = {
+      ...kept,
+      candidates: [...candidates, { valueRaw: figure.valueRaw, unitRaw: figure.unitRaw, view: figure.view, page: figure.page }],
+    };
+  }
+  return out;
+}
+
+const RawOverall = z
+  .preprocess(overallAsSlots, z.object({
+    width: RawOverallFigure,
+    depth: RawOverallFigure,
+    height: RawOverallFigure,
+    seatHeight: RawOverallFigure,
+    diameter: RawOverallFigure,
+  }))
+  .catch({ width: null, depth: null, height: null, seatHeight: null, diameter: null })
+  .default({ width: null, depth: null, height: null, seatHeight: null, diameter: null });
+export type RawOverall = z.infer<typeof RawOverall>;
+
+const configurationNames = looseTextList(MAX_SHORT, MAX_CONFIGURATIONS).catch([]);
+
+const RawItemConfiguration = z.object({
+  name: z.string().trim().min(1).max(MAX_SHORT),
+  nameRaw: blankText(MAX_SHORT),
+  differsIn: blankText(MAX_NOTE),
+  pages: pageList,
+  overall: RawOverall,
+});
+export type RawItemConfiguration = z.infer<typeof RawItemConfiguration>;
+
+const RawFinish = z.object({
+  part: blankText(MAX_SHORT),
+  spec: blankText(MAX_VALUE),
+  code: blankText(MAX_SHORT),
+  configurations: configurationNames,
+  page: pageOrNull,
+  // A list of at most one box in the schema (a nullable object would spend a
+  // union); the first box is the swatch, and a bare object is read too.
+  swatch: z
+    .preprocess((value) => (Array.isArray(value) ? (value[0] ?? null) : value), z.object({ page: pageOrNull, box: boxOrNull }).nullable())
+    .catch(null)
+    .default(null),
+});
+export type RawFinish = z.infer<typeof RawFinish>;
+
+const RawStatement = z.object({
+  label: blankText(MAX_SHORT),
+  value: blankText(MAX_VALUE),
+  page: pageOrNull,
+  configurations: configurationNames,
+});
+export type RawStatement = z.infer<typeof RawStatement>;
+
+const RawOtherDimension = z.object({
+  label: blankText(MAX_SHORT),
+  valueRaw: z.preprocess((value) => (typeof value === "number" ? String(value) : value), z.string().trim().min(1).max(MAX_SHORT)),
+  unitRaw: blankText(MAX_SHORT),
+  view: blankText(MAX_SHORT),
+  page: pageOrNull,
+});
+export type RawOtherDimension = z.infer<typeof RawOtherDimension>;
+
+const RawItemNote = z.object({ text: z.string().trim().min(1).max(MAX_VALUE), page: pageOrNull });
+
+const RawPicture = z.object({
+  kind: z.enum(PICTURE_KINDS).catch("other").default("other"),
+  page: pageOrNull,
+  box: boxOrNull,
+});
+export type RawPicture = z.infer<typeof RawPicture>;
+
+const RawUncertain = z.object({
+  about: z.enum(UNCERTAIN_ABOUT).catch("other").default("other"),
+  why: z.string().trim().min(1).max(MAX_NOTE),
+});
+export type RawUncertain = z.infer<typeof RawUncertain>;
+
+/** "width: the plan prints 5'-7\"" → about width; anything without a known word first is `other`, whole. */
+function uncertainFromText(text: string): { about: string; why: string } {
+  const match = /^\s*([A-Za-z]+)\s*:\s*([\s\S]+)$/.exec(text);
+  if (match && (UNCERTAIN_ABOUT as readonly string[]).includes(match[1]!)) return { about: match[1]!, why: match[2]!.trim() };
+  return { about: "other", why: text };
+}
+
+/**
+ * The schema's FLAT shape, read into the one staging reads (see the head of
+ * `DRAWINGS_ITEMS_SCHEMA` for why it is flat):
+ *   * an `overall` entry naming configurations is that configuration's own
+ *     size, moved onto the configuration — the item's `overall` keeps the
+ *     entries naming none. A name the item does not list is dropped, and the
+ *     entry reads as the item's own (`RawDrawingItem`'s rule);
+ *   * `mockup` is the quoted evidence, or empty;
+ *   * a finish's `swatchBox` is a chip on the callout's page.
+ * The nested shape (the draft's) passes through untouched.
+ */
+function itemFromSchemaShape(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const item: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  if (typeof item.mockup === "string") {
+    item.mockup = { is: item.mockup.trim() !== "", evidence: item.mockup };
+  } else if (typeof item.mockup === "boolean") {
+    item.mockup = { is: item.mockup, evidence: typeof item.mockupEvidence === "string" ? item.mockupEvidence : null };
+  }
+  if (Array.isArray(item.finishes)) {
+    item.finishes = item.finishes.map((finish) => {
+      if (!finish || typeof finish !== "object" || "swatch" in finish || !("swatchBox" in finish)) return finish;
+      const { swatchBox, swatchPage, ...rest } = finish as Record<string, unknown>;
+      const box = Array.isArray(swatchBox) && swatchBox.length === 4 ? swatchBox : null;
+      return { ...rest, swatch: box ? { page: swatchPage ?? (rest as { page?: unknown }).page ?? null, box } : null };
+    });
+  }
+  if (Array.isArray(item.overall) && Array.isArray(item.configurations)) {
+    const named = new Map<string, Record<string, unknown>>();
+    for (const configuration of item.configurations) {
+      if (configuration && typeof configuration === "object" && typeof (configuration as { name?: unknown }).name === "string") {
+        named.set(foldConfigurationName((configuration as { name: string }).name), configuration as Record<string, unknown>);
+      }
+    }
+    const own = new Map<string, unknown[]>();
+    const shared: unknown[] = [];
+    for (const entry of item.overall) {
+      const names = entry && typeof entry === "object" ? (entry as { configurations?: unknown }).configurations : undefined;
+      const known = (Array.isArray(names) ? names : [])
+        .filter((name): name is string => typeof name === "string")
+        .map(foldConfigurationName)
+        .filter((name) => named.has(name));
+      if (known.length === 0) shared.push(entry);
+      else for (const name of new Set(known)) own.set(name, [...(own.get(name) ?? []), entry]);
+    }
+    item.overall = shared;
+    item.configurations = item.configurations.map((configuration) => {
+      if (!configuration || typeof configuration !== "object" || "overall" in configuration) return configuration;
+      const name = (configuration as { name?: unknown }).name;
+      return { ...configuration, overall: typeof name === "string" ? (own.get(foldConfigurationName(name)) ?? []) : [] };
+    });
+  }
+  return item;
+}
+
+const RawDrawingItemV4Shape = z.object({
+  codes: z
+    .preprocess(bareValuesAsList((scalar) => scalar), z.array(z.unknown()))
+    .catch([])
+    .transform((list) =>
+      list
+        .filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+        .map((entry) => entry.trim().slice(0, MAX_SHORT))
+        .slice(0, MAX_ITEM_CODES),
+    ),
+  name: blankText(MAX_SHORT),
+  pages: pageList,
+  whyOneItem: blankText(MAX_NOTE),
+  overall: RawOverall,
+  combinedLine: blankText(MAX_VALUE),
+  configurations: boundedList(RawItemConfiguration, MAX_CONFIGURATIONS, (scalar) => ({
+    name: scalar,
+    nameRaw: scalar,
+    differsIn: null,
+    pages: [],
+  })),
+  finishes: boundedList(RawFinish, MAX_PER_ITEM, (scalar) => ({ part: null, spec: scalar, code: null })),
+  statements: boundedList(RawStatement, MAX_STATEMENTS, (scalar) => ({ label: null, value: scalar })),
+  mockup: z
+    .object({ is: z.boolean().catch(false).default(false), evidence: blankText(MAX_SHORT) })
+    .catch({ is: false, evidence: null })
+    .default({ is: false, evidence: null }),
+  otherDimensions: boundedList(RawOtherDimension, MAX_PER_ITEM, (scalar) => ({ valueRaw: scalar })),
+  notes: boundedList(RawItemNote, MAX_PER_ITEM, (scalar) => ({ text: scalar })),
+  pictures: boundedList(RawPicture, MAX_VIEW_REGIONS, null),
+  uncertain: boundedList(RawUncertain, MAX_UNCERTAIN, uncertainFromText),
+  confidence: z.enum(["high", "medium", "low"]).nullable().catch(null).default(null),
+});
+
+/**
+ * One item, with the configuration names on every row checked against the
+ * item's own list (a name the item does not list is dropped and the row reads
+ * as shared — `RawDrawingItem`'s rule), duplicate configurations collapsed,
+ * and every truncation said in `uncertain`.
+ */
+export const RawDrawingItemV4 = z.preprocess(itemFromSchemaShape, RawDrawingItemV4Shape).transform((item) => {
+  const configurations: RawItemConfiguration[] = [];
+  const known = new Set<string>();
+  for (const entry of item.configurations.kept) {
+    const folded = foldConfigurationName(entry.name);
+    if (known.has(folded)) continue;
+    known.add(folded);
+    configurations.push(entry);
+  }
+  const keepKnown = (names: readonly string[]) => {
+    const kept: string[] = [];
+    for (const name of names) {
+      const folded = foldConfigurationName(name);
+      if (!known.has(folded) || kept.some((entry) => foldConfigurationName(entry) === folded)) continue;
+      kept.push(name);
+    }
+    return kept;
+  };
+  const truncated: RawUncertain[] = [];
+  const said = (what: string, bounded: { dropped: number; kept: unknown[] }) => {
+    if (bounded.dropped > 0) {
+      truncated.push({
+        about: "other",
+        why: `The read listed ${bounded.kept.length + bounded.dropped} ${what}; only the first ${bounded.kept.length} are kept.`,
+      });
+    }
+  };
+  said("configurations", item.configurations);
+  said("finishes", item.finishes);
+  said("statements", item.statements);
+  said("other dimensions", item.otherDimensions);
+  said("notes", item.notes);
+  said("pictures", item.pictures);
+  return {
+    codes: item.codes,
+    name: item.name,
+    pages: item.pages,
+    whyOneItem: item.whyOneItem,
+    overall: item.overall,
+    combinedLine: item.combinedLine,
+    configurations,
+    finishes: item.finishes.kept.map((finish) => ({ ...finish, configurations: keepKnown(finish.configurations) })),
+    statements: item.statements.kept.map((statement) => ({ ...statement, configurations: keepKnown(statement.configurations) })),
+    mockup: item.mockup,
+    otherDimensions: item.otherDimensions.kept,
+    notes: item.notes.kept,
+    pictures: item.pictures.kept,
+    uncertain: [...item.uncertain.kept, ...truncated],
+    confidence: item.confidence,
+  };
+});
+export type RawDrawingItemV4 = z.infer<typeof RawDrawingItemV4>;
+
+export const DrawingsItemsOutput = z.object({
+  documentNotes: blankText(MAX_NOTE),
+  // "3: general notes only" in the schema's shape; an object is read too.
+  nonItemPages: z
+    .preprocess(
+      (value) =>
+        objectEntriesAsList(
+          Array.isArray(value)
+            ? value.map((entry) => {
+                if (typeof entry !== "string") return entry;
+                const match = /^\s*(?:page\s*)?(\d+)\s*[:\-–]?\s*([\s\S]*)$/i.exec(entry);
+                return match ? { page: Number(match[1]), why: match[2] } : null;
+              })
+            : value,
+        ),
+      z.array(z.object({ page: pageOrNull, why: blankText(MAX_SHORT) })),
+    )
+    .catch([])
+    .default([])
+    .transform((pages) =>
+      pages
+        .filter((entry): entry is { page: number; why: string | null } => entry.page !== null)
+        .slice(0, MAX_DRAWING_ITEMS),
+    ),
+  // TERMINAL ON PURPOSE, as `DrawingsOutput.items` is: an item is a container,
+  // and `items` arriving as anything but a list is a failure to answer.
+  items: z.array(RawDrawingItemV4).max(MAX_DRAWING_ITEMS),
+});
+export type DrawingsItemsOutput = z.infer<typeof DrawingsItemsOutput>;
+
+// ============================================================================
 // PREAMBLE
 //
 // Project-level prose, not item data: flameproofing standards, tagging and
@@ -1373,6 +2145,7 @@ import type { DocumentKind } from "@/lib/spec-vocab";
 export type ExtractionToolSpec =
   | { outputKind: "observations"; tool: typeof SPEC_DOCUMENT_TOOL | typeof EMAIL_TOOL; schema: typeof ExtractionOutput }
   | { outputKind: "drawing_items"; tool: typeof DRAWINGS_TOOL; schema: typeof DrawingsOutput }
+  | { outputKind: "drawing_items_v4"; tool: typeof DRAWINGS_ITEMS_TOOL; schema: typeof DrawingsItemsOutput }
   | { outputKind: "preamble_notes"; tool: typeof PREAMBLE_TOOL; schema: typeof PreambleOutput }
   | { outputKind: "finish_entries"; tool: typeof FINISHES_SCHEDULE_TOOL; schema: typeof FinishesScheduleOutput };
 
@@ -1391,7 +2164,10 @@ export const TOOLS: Record<DocumentKind, ExtractionToolSpec> = {
   fabric_schedule: OBSERVATIONS,
   other: OBSERVATIONS,
   email: { outputKind: "observations", tool: EMAIL_TOOL, schema: ExtractionOutput },
-  shop_drawings: { outputKind: "drawing_items", tool: DRAWINGS_TOOL, schema: DrawingsOutput },
+  // Version 4, the item-centric read (2026-10-04). The page-centric v3 tool is
+  // `TOOL_VARIANTS.shop_drawings.v3`, kept for the eval harness's baseline and
+  // for re-reading a run's saved raw output.
+  shop_drawings: { outputKind: "drawing_items_v4", tool: DRAWINGS_ITEMS_TOOL, schema: DrawingsItemsOutput },
   preamble: { outputKind: "preamble_notes", tool: PREAMBLE_TOOL, schema: PreambleOutput },
 };
 
@@ -1399,5 +2175,26 @@ export const TOOLS: Record<DocumentKind, ExtractionToolSpec> = {
 export type ExtractionPayload =
   | { outputKind: "observations"; data: ExtractionOutput }
   | { outputKind: "drawing_items"; data: DrawingsOutput }
+  | { outputKind: "drawing_items_v4"; data: DrawingsItemsOutput }
   | { outputKind: "preamble_notes"; data: PreambleOutput }
   | { outputKind: "finish_entries"; data: FinishesScheduleOutput };
+
+/**
+ * Earlier tools for a kind, by the harness's pipeline name, so the eval harness
+ * (`tools/eval-drawings.ts`) can re-ask a document exactly as an earlier
+ * pipeline asked it, and re-check its saved response against the shape it was
+ * asked for. `PROMPT_VARIANTS` in anthropic.ts is the prompt half of the same
+ * pair. Nothing in the app passes a variant.
+ */
+export const TOOL_VARIANTS: Partial<Record<DocumentKind, Record<string, ExtractionToolSpec>>> = {
+  shop_drawings: {
+    v3: { outputKind: "drawing_items", tool: DRAWINGS_TOOL, schema: DrawingsOutput },
+    v4: TOOLS.shop_drawings,
+  },
+};
+
+/** The tool for a kind, or for one of its named variants; null for a variant that does not exist. */
+export function toolFor(documentKind: DocumentKind, variant?: string): ExtractionToolSpec | null {
+  if (!variant) return TOOLS[documentKind];
+  return TOOL_VARIANTS[documentKind]?.[variant] ?? null;
+}

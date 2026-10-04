@@ -14,7 +14,9 @@
 // `assertStagedDrawings` (the same read-time pipeline every screen calls),
 // then is reduced with the app's OWN grouping (`groupItemsByCode`,
 // `codesOfItem`, `namedConfigurationsByCode`, `variantLettersByItem`) and its
-// OWN conversion (`toMillimetres`, `composeDimensionCell`). A scorer with its
+// OWN conversion (`toMillimetres`, `composeDimensionCell`). A version 4 read
+// is staged by `stageDrawingsV4` and reduced one read item per staged item,
+// with no regrouping: the item is what the read returned. A scorer with its
 // own copy of any of those would report a read getting better while the card
 // got worse — the `foldableRow` rule, one layer out.
 //
@@ -28,6 +30,7 @@
 // ============================================================================
 import {
   assertStagedDrawings,
+  readAsItems,
   codesOfItem,
   drawingNumberOf,
   foldableRow,
@@ -45,7 +48,8 @@ import { endsOnSegment, normaliseRef, type RecordEntry } from "../src/lib/record
 import { normaliseFinishCode } from "../src/lib/finishes";
 import { stackedTagCode } from "../src/lib/material-words";
 import { normaliseVariantLabel } from "../src/lib/record-variants";
-import type { DrawingsOutput } from "../src/lib/extraction-schema";
+import type { DrawingsItemsOutput, DrawingsOutput } from "../src/lib/extraction-schema";
+import { stageDrawingsV4 } from "../src/lib/drawing-items";
 import type { DimensionSlot } from "../src/lib/spec-vocab";
 
 // ---- the golden ------------------------------------------------------------
@@ -186,13 +190,23 @@ export function reduceStagedDrawings(stagedInput: StagedDrawings): DrawingRead {
   // Through the read-time pipeline every screen calls. With no spec-field
   // register: nothing scored here depends on which BWS field a callout lands on.
   const staged = assertStagedDrawings(JSON.parse(JSON.stringify(stagedInput)));
-  const byCode = groupItemsByCode(staged.items, staged);
   const named = namedConfigurationsByCode(staged.items, staged);
+  // A VERSION 4 ITEM IS ALREADY ONE ITEM, and it is scored as the read gave
+  // it: one read item per staged item, its own codes and pages. Running the v3
+  // regrouping over it would score the glue the read was built to retire —
+  // two items the model kept apart could be merged by a shared code, and the
+  // grouping score would credit the app with the model's mistake.
+  const asItems = readAsItems(staged);
+  const byCode = asItems ? new Map<string, DrawingItem[]>() : groupItemsByCode(staged.items, staged);
   const letters = variantLettersByItem(staged.items, staged);
 
-  const groups: { code: string | null; pages: DrawingItem[] }[] = [...byCode].map(([code, pages]) => ({ code, pages }));
-  for (const item of staged.items) {
-    if (!normaliseRef(item.itemCodeRaw ?? "")) groups.push({ code: null, pages: [item] });
+  const groups: { code: string | null; pages: DrawingItem[] }[] = asItems
+    ? staged.items.map((item) => ({ code: normaliseRef(item.itemCodeRaw ?? "") || null, pages: [item] }))
+    : [...byCode].map(([code, pages]) => ({ code, pages }));
+  if (!asItems) {
+    for (const item of staged.items) {
+      if (!normaliseRef(item.itemCodeRaw ?? "")) groups.push({ code: null, pages: [item] });
+    }
   }
 
   const items = groups.map(({ code, pages }): ReadItem => {
@@ -202,7 +216,8 @@ export function reduceStagedDrawings(stagedInput: StagedDrawings): DrawingRead {
       if (text && !codes.some((kept) => normaliseRef(kept) === normaliseRef(text))) codes.push(text);
     };
     for (const page of pages) {
-      for (const entry of codesOfItem(staged, page.itemCodeRaw)) addCode(entry);
+      if (asItems) for (const entry of page.itemCodes ?? []) addCode(entry);
+      else for (const entry of codesOfItem(staged, page.itemCodeRaw)) addCode(entry);
       addCode(page.itemCodeRaw);
     }
 
@@ -250,9 +265,10 @@ export function reduceStagedDrawings(stagedInput: StagedDrawings): DrawingRead {
 
     return {
       codes,
-      pages: [...new Set(pages.map((page) => page.page).filter((page): page is number => page !== null))].sort(
-        (a, b) => a - b,
-      ),
+      // A version 4 item spans its own pages; an earlier one is one page per staged item.
+      pages: [
+        ...new Set(pages.flatMap((page) => (asItems && Array.isArray(page.pages) ? page.pages : [page.page])).filter((page): page is number => page !== null)),
+      ].sort((a, b) => a - b),
       configurations,
       overall,
       unconverted,
@@ -274,6 +290,11 @@ export function reduceStagedDrawings(stagedInput: StagedDrawings): DrawingRead {
 export function readFromModelOutput(output: DrawingsOutput, filename: string | null): DrawingRead {
   const staged = stageDrawings(output.items, [], filename, output.documentNotes, null, output.codeGroups ?? []);
   return reduceStagedDrawings(staged);
+}
+
+/** The same for a version 4 (item-centric) answer, staged with the app's own `stageDrawingsV4`. */
+export function readFromItemsOutput(output: DrawingsItemsOutput, filename: string | null): DrawingRead {
+  return reduceStagedDrawings(stageDrawingsV4(output, [], filename, null));
 }
 
 // ---- matching --------------------------------------------------------------

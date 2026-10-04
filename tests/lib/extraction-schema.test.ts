@@ -4,9 +4,14 @@
 // the wrong instructions, or returns a shape no reviewer can display.
 import { describe, it, expect } from "vitest";
 import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/spec-vocab";
-import { PROMPTS } from "@/lib/anthropic";
+import { toOutputSchema } from "@/lib/model-request";
+import { PROMPTS, PROMPT_VARIANTS } from "@/lib/anthropic";
+
+/** The page-centric v3 prompt, kept for the harness and for re-reading old raw. Its rules still hold for it. */
+const V3_PROMPT = PROMPT_VARIANTS.shop_drawings!.v3!;
 import {
   TOOLS,
+  TOOL_VARIANTS,
   DRAWINGS_TOOL,
   ExtractionOutput,
   DrawingsOutput,
@@ -33,7 +38,10 @@ describe("per-kind extraction contract", () => {
   });
 
   it("gives the two register-free kinds their own shapes", () => {
-    expect(TOOLS.shop_drawings.outputKind).toBe("drawing_items");
+    // Version 4, the item-centric read, since 2026-10-04; the v3 tool is kept
+    // as a variant for the harness's baseline.
+    expect(TOOLS.shop_drawings.outputKind).toBe("drawing_items_v4");
+    expect(TOOL_VARIANTS.shop_drawings?.v3?.outputKind).toBe("drawing_items");
     expect(TOOLS.preamble.outputKind).toBe("preamble_notes");
     expect(TOOLS.ffe_schedule.outputKind).toBe("observations");
     expect(TOOLS.other.outputKind).toBe("observations");
@@ -42,16 +50,16 @@ describe("per-kind extraction contract", () => {
   it("tells the model not to invent a unit the drawings do not print", () => {
     // A shop drawing set mixes millimetres and centimetres between pages and
     // prints neither, so an inferred figure would read as a real measurement.
-    expect(PROMPTS.shop_drawings).toMatch(/never infer one from how large the number is/i);
-    expect(PROMPTS.shop_drawings).toMatch(/never convert/i);
+    expect(V3_PROMPT).toMatch(/never infer one from how large the number is/i);
+    expect(V3_PROMPT).toMatch(/never convert/i);
   });
 
   it("tells the model to report a unit the page DOES print, separately from the figure", () => {
     // The Panther specification sheets state "WIDTH 1800mm". Reading a unit
     // that is on the page is not inference, and guessing from magnitude at a
     // document that already said so would be strictly worse.
-    expect(PROMPTS.shop_drawings).toMatch(/unitRaw/);
-    expect(PROMPTS.shop_drawings).toMatch(/never combined into the value/i);
+    expect(V3_PROMPT).toMatch(/unitRaw/);
+    expect(V3_PROMPT).toMatch(/never combined into the value/i);
   });
 
   it("gives the model no operational field to be talked into", () => {
@@ -69,6 +77,7 @@ describe("per-kind extraction contract", () => {
       }
     };
     for (const kind of DOCUMENT_KINDS) walk(TOOLS[kind].tool.input_schema);
+    walk(DRAWINGS_TOOL.input_schema);
     for (const forbidden of ["recordId", "requirementId", "state", "confirmed", "specFieldId", "unit"]) {
       expect(names).not.toContain(forbidden);
     }
@@ -421,8 +430,50 @@ describe("configurations a page names", () => {
     expect(itemSchema.required).toEqual(expect.arrayContaining(["configurations", "depictsConfigurations"]));
     expect(itemSchema.properties.dimensions?.items?.required).toContain("configurations");
     expect(itemSchema.properties.materials?.items?.required).toContain("configurations");
-    expect(PROMPTS.shop_drawings).toMatch(/NEVER put the configuration into the label/);
-    expect(PROMPTS.shop_drawings).toMatch(/still describes the PAGES/);
+    expect(V3_PROMPT).toMatch(/NEVER put the configuration into the label/);
+    expect(V3_PROMPT).toMatch(/still describes the PAGES/);
+  });
+
+  it("keeps every tool within structured outputs' sixteen union-typed parameters", () => {
+    // The API counts a nullable type or an anyOf per LOCATION and refuses a
+    // schema with more than 16 — with a 400, before a token is read. The first
+    // v4 drawings schema was 62 and failed its first live call; v3 is exactly
+    // 16. Counted here the way the API counted it (62 and 16 respectively).
+    const unions = (node: unknown): number => {
+      if (Array.isArray(node)) return node.reduce((total: number, entry) => total + unions(entry), 0);
+      if (!node || typeof node !== "object") return 0;
+      const schema = node as Record<string, unknown>;
+      let count = (Array.isArray(schema.type) && schema.type.length > 1) || Array.isArray(schema.anyOf) ? 1 : 0;
+      for (const [key, value] of Object.entries(schema)) {
+        if (key === "enum" || key === "required" || key === "description") continue;
+        if (key === "properties") for (const sub of Object.values(value as object)) count += unions(sub);
+        else count += unions(value);
+      }
+      return count;
+    };
+    for (const kind of DOCUMENT_KINDS) expect(unions(toOutputSchema(TOOLS[kind].tool.input_schema)), kind).toBeLessThanOrEqual(16);
+    expect(unions(toOutputSchema(DRAWINGS_TOOL.input_schema))).toBe(16);
+  });
+
+  it("keeps the drawings read inside the grammar budget structured outputs accepted", () => {
+    // "The compiled grammar is too large": not a documented number, so this is
+    // the MEASURED proxy — property slots, counted below — of 2026-10-04: v3 35
+    // (accepted), 43 accepted, 47 refused. A field added past 43 is a 400 on
+    // every drawings read until it is probed against the live API.
+    const slots = (node: unknown): number => {
+      if (Array.isArray(node)) return node.reduce((total: number, entry) => total + slots(entry), 0);
+      if (!node || typeof node !== "object") return 0;
+      let count = 0;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === "properties") {
+          count += Object.keys(value as object).length;
+          for (const sub of Object.values(value as object)) count += slots(sub);
+        } else if (key !== "enum" && key !== "required" && key !== "description") count += slots(value);
+      }
+      return count;
+    };
+    expect(slots(toOutputSchema(DRAWINGS_TOOL.input_schema))).toBe(35);
+    expect(slots(toOutputSchema(TOOLS.shop_drawings.tool.input_schema))).toBeLessThanOrEqual(43);
   });
 
   it("requires only properties each object declares", () => {
@@ -437,5 +488,6 @@ describe("configurations a page names", () => {
       for (const value of Object.values(node as Record<string, unknown>)) walk(value);
     };
     for (const kind of DOCUMENT_KINDS) walk(TOOLS[kind].tool.input_schema);
+    walk(DRAWINGS_TOOL.input_schema);
   });
 });

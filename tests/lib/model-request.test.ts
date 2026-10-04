@@ -10,7 +10,7 @@ import {
   readAnswer,
   toOutputSchema,
 } from "@/lib/model-request";
-import { TOOLS } from "@/lib/extraction-schema";
+import { TOOLS, TOOL_VARIANTS } from "@/lib/extraction-schema";
 import { STRUCTURE_TOOL } from "@/lib/boq-structure";
 import { CLASSIFY_TOOL } from "@/lib/document-classify";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
@@ -91,6 +91,7 @@ function walk(node: unknown, visit: (schema: Record<string, unknown>, path: stri
 
 const EVERY_TOOL = [
   ...DOCUMENT_KINDS.map((kind) => [`extraction: ${kind}`, TOOLS[kind].tool] as const),
+  ["extraction: shop_drawings v3", TOOL_VARIANTS.shop_drawings!.v3!.tool] as const,
   ["bill structure", STRUCTURE_TOOL] as const,
   ["classify", CLASSIFY_TOOL] as const,
 ];
@@ -180,10 +181,22 @@ describe("reading the answer back", () => {
 
 describe("what a finished extraction response amounts to", () => {
   const drawings = { items: [], codeGroups: [], documentNotes: null };
+  const items = { documentNotes: null, nonItemPages: [], items: [] };
 
   it("validates a structured answer read from the text", () => {
-    const read = readExtractionResponse({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(drawings) }] }, "shop_drawings");
+    const read = readExtractionResponse({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(items) }] }, "shop_drawings");
+    expect(read).toMatchObject({ ok: true, output: { outputKind: "drawing_items_v4" } });
+  });
+
+  it("checks a response against the shape its pipeline asked for", () => {
+    // The harness re-scores a saved v3 response: it must be read as v3.
+    const read = readExtractionResponse(
+      { stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(drawings) }] },
+      "shop_drawings",
+      "v3",
+    );
     expect(read).toMatchObject({ ok: true, output: { outputKind: "drawing_items" } });
+    expect(readExtractionResponse({ stop_reason: "end_turn", content: [] }, "shop_drawings", "v9")).toMatchObject({ ok: false });
   });
 
   it("calls text that is not one JSON object no_json", () => {

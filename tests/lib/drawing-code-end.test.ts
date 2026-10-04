@@ -161,6 +161,9 @@ describe("a finish tag drawn as stacked boxes", () => {
   it("reads exactly three groups separated by whitespace, and nothing else", () => {
     expect(stackedTagCode("LV FAB 04")).toBe("LV-FAB-04");
     expect(stackedTagCode(" up  tim\n03a ")).toBe("UP-TIM-03A");
+    // A sub-code, as the finishes schedule files it (2026-10-04).
+    expect(stackedTagCode("GR TIM 08.1")).toBe("GR-TIM-08.1");
+    expect(stackedTagCode("GR TIM 08.")).toBeNull();
     expect(stackedTagCode("LV-FAB-04")).toBeNull();
     expect(stackedTagCode("LV FAB 04 walnut")).toBeNull();
     expect(stackedTagCode("FAB 04")).toBeNull();

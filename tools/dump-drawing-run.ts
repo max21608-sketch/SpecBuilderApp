@@ -132,6 +132,8 @@ async function dumpRun(row: Record<string, unknown>) {
   }
 
   const letters = variantLettersByItem(staged.items, staged);
+  console.log(`  staged schemaVersion ${staged.schemaVersion}${staged.schemaVersion === 4 ? " (read item by item)" : ""}`);
+  for (const entry of staged.nonItemPages ?? []) console.log(`  page ${entry.page} carries no item: ${entry.why ?? "(no reason)"}`);
   const context = await loadDrawingContext(String(row.project_id));
   // The screen's own resolution — named configurations (schemaVersion 3)
   // included — rather than a copy of it here.
@@ -148,12 +150,15 @@ async function dumpRun(row: Record<string, unknown>) {
     const placed = pending.filter((o) => o.dimensionSlot);
     const folded = measured.filter((o) => !o.dimensionSlot);
     console.log(
-      `  ${pad(String(item.page ?? "-"), 5)}${pad(item.itemCodeRaw ?? "(no code)", 10)}${pad(item.itemNameRaw ?? "-", 14)}` +
+      // A version 4 item spans pages: "3-4", "2,5".
+      `  ${pad(Array.isArray(item.pages) && item.pages.length > 1 ? item.pages.join(",") : String(item.page ?? "-"), 5)}${pad(item.itemCodeRaw ?? "(no code)", 10)}${pad(item.itemNameRaw ?? "-", 14)}` +
         `${pad(letters.get(item.id) ?? "-", 4)}${pad(String(measured.length), 6)}${pad(String(placed.length), 5)}` +
         `${pad(String(folded.length), 5)}${pad(unitSummary(placed), 22)}${composed(item)}`,
     );
 
     const resolved = resolvedById.get(item.id);
+    if (Array.isArray(item.itemCodes) && item.itemCodes.length > 1) console.log(`         codes: ${item.itemCodes.join(" / ")}`);
+    for (const doubt of item.uncertain ?? []) console.log(`         ? ${doubt.about}: ${doubt.why}`);
     if (resolved?.named) {
       console.log(`         configurations: ${resolved.named.labels.join(", ")}`);
     }
@@ -166,8 +171,9 @@ async function dumpRun(row: Record<string, unknown>) {
       for (const observation of pending) {
         const slot = observation.dimensionSlot ? `${observation.dimensionSlot}${observation.slotSuggested ? "?" : ""}` : "";
         const lands = resolved?.named?.rows[observation.id];
+        const where = typeof observation.page === "number" ? `p${observation.page} ` : "";
         console.log(
-          `         ${pad(observation.attrGroup, 10)}${pad(observation.labelRaw ?? "-", 16)}` +
+          `         ${where}${pad(observation.attrGroup, 10)}${pad(observation.labelRaw ?? "-", 16)}` +
             `${pad((observation.value ?? "").slice(0, 28), 30)}${pad(observation.unit ?? "-", 5)}` +
             `${pad(unitSourceOf(observation) ?? "-", 16)}${slot}${lands ? `  → ${lands.join(" · ")}` : ""}`,
         );

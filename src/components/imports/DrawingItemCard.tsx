@@ -42,6 +42,8 @@ import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
+import ItemReadNotes from "@/components/imports/ItemReadNotes";
+import { pagesInWords } from "@/lib/drawing-items";
 import {
   ObservationRow,
   ObservationTableHead,
@@ -357,7 +359,8 @@ export default function ItemCard({
           rel="noreferrer"
           className="text-blue-700 no-underline hover:underline"
         >
-          <Chip>page {item.page}</Chip>
+          {/* An item read whole (schemaVersion 4) spans its pages: "pages 3–4". */}
+          <Chip>{(Array.isArray(item.pages) && pagesInWords(item.pages)) || `page ${item.page}`}</Chip>
         </a>
       ) : (
         <Chip tone="warn">page unknown</Chip>
@@ -404,6 +407,7 @@ export default function ItemCard({
   const header = (
     <>
       {headerBar}
+      <ItemReadNotes items={[item]} />
       {unsplit}
     </>
   );

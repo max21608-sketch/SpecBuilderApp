@@ -218,6 +218,30 @@ export type DrawingObservation = {
    * different on purpose: the read-time upgrade fires on absent only.
    */
   standard?: StagedStandard | null;
+  /**
+   * THE PAGE THIS VALUE IS PRINTED ON (schemaVersion 4). A version 4 item spans
+   * every page that describes it, so the item's own `page` is only its first,
+   * and the confirm writes `source_page` from this — `record_attributes` keeps
+   * true provenance when an item is a specification sheet on page 3 and a shop
+   * drawing on page 4. Absent on every earlier run, where the item's page IS
+   * the row's.
+   */
+  page?: number | null;
+  /** The view a figure is printed on, in the page's words ('ELEVATION 1'). Version 4 only. */
+  view?: string | null;
+  /**
+   * The OTHER figures the read saw for this overall slot and did not choose —
+   * a side view printing 740 where the plan printed 760 — each with its view
+   * and page (schemaVersion 4). Shown under the row so the choice is checkable;
+   * never written, never a second value in the slot.
+   */
+  candidates?: { valueRaw: string; unitRaw: string | null; view: string | null; page: number | null }[];
+  /**
+   * Where the read saw this finish's printed swatch chip (schemaVersion 4).
+   * The swatch picker renders it as its proposed crop; nothing is uploaded
+   * until the card is confirmed, exactly as a crop a person drew.
+   */
+  swatchProposal?: { page: number; bbox: [number, number, number, number] } | null;
   /** One attribute row per target record, once applied. */
   applied: {
     attributeIds: string[];
@@ -237,7 +261,10 @@ export type StagedConfiguration = {
   name: string;
   /** The page's own words: `Type 1 & 5`, `TYPO 5`. */
   nameRaw: string | null;
+  /** Version 3: where the page names it. Version 4: what DIFFERS about it, as the read said. */
   evidence: string | null;
+  /** The pages that show or name it (schemaVersion 4). Absent: the item's own page. */
+  pages?: number[];
 };
 
 export type DrawingItem = {
@@ -315,10 +342,31 @@ export type DrawingItem = {
    */
   relationshipByReviewer?: "one_item" | "configurations" | null;
   /**
+   * EVERY PAGE THIS ITEM SPANS (schemaVersion 4), in order. `page` is the
+   * first of them, for every reader that knows only one. Its presence is also
+   * how an ITEM says it was read whole rather than a page at a time.
+   */
+  pages?: number[];
+  /**
+   * Every code the document titles this item by (schemaVersion 4): the item
+   * code first, other titles after it, a drawing number last. `itemCodeRaw` is
+   * the first. Resolution reads all of them — the read's own answer to what
+   * `codeGroups` used to say beside the items.
+   */
+  itemCodes?: string[];
+  /** What tied the pages or codes together, as the read said (schemaVersion 4). */
+  whyOneItem?: string | null;
+  /**
+   * What the read could NOT settle, in its own words (schemaVersion 4): a slot
+   * chosen between candidates, a figure it could not read, pages it was not
+   * sure belonged together. Amber notices at the top of the card. Before
+   * version 4 a doubt was silent.
+   */
+  uncertain?: { about: string; why: string }[];
+  /**
    * Whether the PAGE says this is a mock-up drawing (schemaVersion 4), with
-   * what printed it. STAGED BY BRIEF D (the item-centric read); declared here
-   * alone so the mock-up resolution (`resolveDrawingItem`) can read it before
-   * that lands. Absent on every earlier run, which is read as "not mock-up".
+   * what printed it. `resolveDrawingItem` resolves such an item among records on
+   * a mock-up phase only (brief E, migration 0043).
    */
   mockup?: { is: boolean; evidence: string | null };
 };
@@ -360,18 +408,34 @@ export type StagedDrawings = {
    *     ("as per room type: Type 1 & 5 - …, Type 2 - …") and which rows belong
    *     to which. Everything version 2 does, version 3 does identically.
    *
-   * All three are read. An older run is not upgraded into a newer one:
+   * 4 — THE ITEM-CENTRIC READ (2026-10-04, `drawing-items.ts`). One item per
+   *     thing to be made, spanning its pages, with its overall size as five
+   *     slots of one figure each. The page-gluing below — code groups, page
+   *     letters, cross-page claims, the cross-view de-duplication, the
+   *     slot guess — does NOT run on it: each is gated on
+   *     the version where it runs, and never deleted, because versions 1–3
+   *     still read through it exactly as they did. The unit vote DOES run,
+   *     narrowed to the figures the read placed (`drawing-items.ts`).
+   *
+   * All four are read. An older run is not upgraded into a newer one:
    * inventing the fields it never carried would be one more inference layer,
    * which is the thing version 2 removes — and no string rule parses
    * `- Type 2` out of an old label. It is re-read, or it stays as it is.
    */
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   kind: "shop_drawings";
   filename: string | null;
   documentNotes: string | null;
   items: DrawingItem[];
-  /** Version 2 and later. Absent on every version 1 run. */
+  /** Versions 2 and 3. Absent on every version 1 run and every version 4 run. */
   codeGroups?: StagedCodeGroup[];
+  /**
+   * The pages the read said describe NO item — a cover, a legend, general
+   * notes — with its reason (schemaVersion 4). No card is made for them: a
+   * codeless page is a statement the read makes, not an empty card a person
+   * has to ignore.
+   */
+  nonItemPages?: { page: number; why: string | null }[];
   /**
    * Where THIS document's configurations already landed, written by the
    * confirm: per (bill record, folded label), the variant it created or paired
@@ -391,7 +455,16 @@ export type ConfigurationLink = { recordId: string; label: string; variantId: st
  * pipeline.
  */
 export function readByModel(doc: { schemaVersion?: unknown } | null | undefined): boolean {
-  return doc?.schemaVersion === 2 || doc?.schemaVersion === 3;
+  return doc?.schemaVersion === 2 || doc?.schemaVersion === 3 || doc?.schemaVersion === 4;
+}
+
+/**
+ * Was this document read ITEM BY ITEM (version 4)? The one test every gate on
+ * the page-gluing reads, so "does this run on version 4" is answered in one
+ * place rather than as a literal in eight.
+ */
+export function readAsItems(doc: { schemaVersion?: unknown } | null | undefined): boolean {
+  return doc?.schemaVersion === 4;
 }
 
 /**
@@ -441,7 +514,11 @@ export function isOverallRow(observation: DrawingObservation): boolean {
  * '80 x 70 x 90 cm'" — the card contradicting itself, and the louder half being
  * the one that was no longer true.
  */
-export function wasReadByModel(item: Pick<DrawingItem, "observations">): boolean {
+export function wasReadByModel(item: Pick<DrawingItem, "observations"> & Partial<Pick<DrawingItem, "pages">>): boolean {
+  // A version 4 item says so by carrying its pages, whether or not the page
+  // gave it a single figure: an item with no dimensions at all must not have
+  // the slot guess run over its statements.
+  if (Array.isArray(item.pages)) return true;
   return item.observations.some((observation) => observation.isOverall !== undefined);
 }
 
@@ -633,9 +710,21 @@ export function drawingNumberOf(filename: string | null | undefined): string | n
  */
 export function resolveStagedItem(
   staged: Pick<StagedDrawings, "schemaVersion" | "codeGroups" | "filename">,
-  item: Pick<DrawingItem, "itemCodeRaw">,
+  item: Pick<DrawingItem, "itemCodeRaw"> & Partial<Pick<DrawingItem, "itemCodes">>,
   records: RecordEntry[],
 ): DrawingResolution {
+  // VERSION 4: the item carries every code the document titles it by, so
+  // there is no code group to look it up in. The same resolver, the same
+  // suffix rule, no new matching rule — only where the codes come from.
+  if (readAsItems(staged)) {
+    const codes = (Array.isArray(item.itemCodes) ? item.itemCodes : []).filter(
+      (code): code is string => typeof code === "string" && code.trim() !== "",
+    );
+    return resolveDrawingTargets(item.itemCodeRaw, records, {
+      codes: codes.length > 0 ? codes : item.itemCodeRaw ? [item.itemCodeRaw] : [],
+      drawingNumber: drawingNumberOf(staged.filename),
+    });
+  }
   const canonical = canonicalCode(staged, item.itemCodeRaw);
   return resolveDrawingTargets(canonical, records, {
     codes: codesOfItem(staged, item.itemCodeRaw),
@@ -839,7 +928,7 @@ export function splitFigureAndUnit(valueRaw: string | null): SplitFigure {
  * printed its own marks, and null otherwise. The mark is the page stating the
  * unit, which is why the staging path treats it as printed.
  */
-function printedImperialUnit(value: string | null): AttributeUnit | null {
+export function printedImperialUnit(value: string | null): AttributeUnit | null {
   return parseDimensionFigure(value).imperial ? "in" : null;
 }
 
@@ -850,7 +939,7 @@ function printedImperialUnit(value: string | null): AttributeUnit | null {
  * mark, the unit is an inch mark, and the joined text reads COMPLETELY;
  * everything else is returned exactly as the model reported it.
  */
-function rejoinInchMark(valueRaw: string | null, unitRaw: string | null | undefined): string | null {
+export function rejoinInchMark(valueRaw: string | null, unitRaw: string | null | undefined): string | null {
   if (valueRaw === null || normaliseUnit(unitRaw) !== "in") return valueRaw;
   if (!/[0-9]\s*(?:'|\u2032|ft\b|foot\b|feet\b)/i.test(valueRaw)) return valueRaw;
   if (parseDimensionFigure(valueRaw).figure !== null) return valueRaw;
@@ -2013,7 +2102,7 @@ export const VIEW_PREFERENCE = [
 export type ViewType = (typeof VIEW_PREFERENCE)[number];
 
 /** A bbox that is the right shape, the right way round, and not a sliver. */
-function usableBox(bbox: unknown): [number, number, number, number] | null {
+export function usableBox(bbox: unknown): [number, number, number, number] | null {
   if (!Array.isArray(bbox) || bbox.length !== 4) return null;
   const [x0, y0, x1, y1] = bbox.map((n) => (typeof n === "number" && Number.isFinite(n) ? n : NaN));
   if ([x0, y0, x1, y1].some((n) => Number.isNaN(n))) return null;
@@ -2213,7 +2302,7 @@ export function classifyGroup(
 }
 
 let stagingCounter = 0;
-const nextId = (): string =>
+export const nextId = (): string =>
   typeof globalThis.crypto?.randomUUID === "function"
     ? globalThis.crypto.randomUUID()
     : `obs-${Date.now()}-${(stagingCounter += 1)}`;
@@ -2308,7 +2397,12 @@ export function mergeNoteBlocks(observations: DrawingObservation[]): DrawingObse
       continue;
     }
     const { prefix } = splitNotePrefix(observation.value ?? observation.valueRaw ?? "");
-    const key = prefix ? `p:${prefix.toLowerCase()}` : "plain";
+    // A VERSION 4 note carries the page it is printed on, and a block is one
+    // statement ON ONE PAGE: merging remarks off two pages would leave one row
+    // citing the first page for lines printed on the second. Absent on every
+    // earlier run, where the key is exactly what it was.
+    const onPage = typeof observation.page === "number" ? `@${observation.page}|` : "";
+    const key = onPage + (prefix ? `p:${prefix.toLowerCase()}` : "plain");
     if (!members.has(key)) {
       members.set(key, []);
       prefixes.set(key, prefix);
@@ -2350,7 +2444,7 @@ export function mergeNoteBlocks(observations: DrawingObservation[]): DrawingObse
  * a BWS field only collides with another row written to the same record, and
  * one page's rows all land together.
  */
-function fieldClaimScopes(
+export function fieldClaimScopes(
   item: Pick<DrawingItem, "configurations" | "depictsConfigurations">,
 ): (row: { configurations?: string[] }) => string[] {
   const named = itemConfigurationLabels(item);
@@ -2384,7 +2478,7 @@ function itemConfigurationLabels(item: Pick<DrawingItem, "configurations">): str
 }
 
 /** BWS fields taken, per configuration scope. */
-class ScopedClaims {
+export class ScopedClaims {
   private readonly byScope = new Map<string, Set<string>>();
 
   /** Every field taken in ANY of these scopes: a row landing on all of them may use none of those. */
@@ -3056,7 +3150,14 @@ function upgradeDimensionSlots(doc: StagedDrawings): StagedDrawings {
     // block: a pack staged before this existed holds fifteen REMARKS rows, and
     // a reviewer would face them a page at a time. Ids are stable, so the
     // screen and the confirm route agree about what the card holds.
-    const observations = dedupeMeasured(mergeNoteBlocks(slotted), readByModel(doc));
+    // THE DE-DUPLICATION IS NOT RUN ON VERSION 4. It exists because a page-
+    // centric read reports every figure on every view, and the same width
+    // came back three times; a version 4 read gives each slot ONE figure by
+    // the shape of its answer, and its other dimensions are listed once per
+    // item. Collapsing two of them by label and figure would merge figures
+    // printed on two different pages into one row citing only the first.
+    const merged = mergeNoteBlocks(slotted);
+    const observations = readAsItems(doc) ? merged : dedupeMeasured(merged, readByModel(doc));
     // Identity, not length: a lone `SUPPLIER: TO BID` is rewritten in place to
     // a Supplier row, and a length check would throw that away.
     if (observations.length !== slotted.length || observations.some((row, index) => row !== slotted[index])) {
@@ -3574,7 +3675,9 @@ export function occupancyThrough(occupied: OccupiedSlots, writeTo: ReadonlyMap<s
  * in the function whose whole point is that there are none left.
  */
 function codeGroupsOf(doc: Pick<StagedDrawings, "schemaVersion" | "codeGroups"> | undefined): StagedCodeGroup[] {
-  if (!doc || !readByModel(doc)) return [];
+  // Version 4 has no code groups: the read returns the item whole, with its
+  // codes on it, so there is nothing to regroup.
+  if (!doc || !readByModel(doc) || readAsItems(doc)) return [];
   const groups: StagedCodeGroup[] = [];
   for (const group of doc.codeGroups ?? []) {
     const codes = Array.isArray(group?.itemCodes)
@@ -3671,6 +3774,13 @@ export function variantLettersByItem(
 ): Map<string, string | null> {
   const byCode = groupItemsByCode(items, doc);
   const letters = new Map<string, string | null>();
+  // VERSION 4 LETTERS NOTHING. A page count was never evidence of a split, and
+  // a version 4 read does not hand over pages to count: an item IS one thing
+  // to make, and its configurations are the ones the document names.
+  if (readAsItems(doc)) {
+    for (const item of items) letters.set(item.id, null);
+    return letters;
+  }
   // Keyed the way the group is — on the canonical code, folded — so `S-201` and
   // `s 201` cannot be looked up differently from the way they were grouped.
   const relationship = new Map<string, StagedCodeGroup["relationship"]>();
@@ -3871,7 +3981,7 @@ export function codeConfigurations(
   const out = new Map<string, CodeConfigurations>();
   for (const [code, pages] of groupItemsByCode(items, doc)) {
     const read: NamedConfiguration[] = [];
-    if (doc?.schemaVersion === 3) {
+    if (doc?.schemaVersion === 3 || readAsItems(doc)) {
       const add = (name: string, nameRaw: string | null, evidence: string | null, page: number | null) => {
         const label = normaliseVariantLabel(name);
         if (!label) return;
@@ -3886,7 +3996,11 @@ export function codeConfigurations(
         if (page !== null && !entry.pages.includes(page)) entry.pages.push(page);
       };
       for (const item of pages) {
-        for (const entry of pageConfigurations(item)) add(entry.name, entry.nameRaw, entry.evidence, item.page);
+        for (const entry of pageConfigurations(item)) {
+          // A version 4 configuration carries the pages that show it.
+          const pages = Array.isArray(entry.pages) && entry.pages.length > 0 ? entry.pages : [item.page];
+          for (const page of pages) add(entry.name, entry.nameRaw, entry.evidence, page);
+        }
         // A title block naming the ones it shows is the page naming them too.
         for (const name of pageDepicts(item)) add(name, null, null, item.page);
       }
@@ -4417,6 +4531,10 @@ export function crossPageClaims(
   fields: readonly SpecFieldEntry[] = [],
 ): Map<string, CrossPageClaim> {
   const out = new Map<string, CrossPageClaim>();
+  // VERSION 4 HAS NO CROSS-PAGE CLAIMS TO COMPARE: one item is one card, its
+  // fields were claimed once across all its pages at staging, and two rows of
+  // one card on one field are `drawingItemBlockers`' own `slot_taken`.
+  if (readAsItems(doc)) return out;
   const plans = namedConfigurationPlans(items, doc);
   const letters = variantLettersByItem(items, doc);
   const fieldName = (id: string) => fields.find((field) => field.id === id)?.name ?? "the same BWS field";

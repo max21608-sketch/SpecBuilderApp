@@ -2,7 +2,7 @@
 // Score a drawings read against the golden, with no database, queue or blob store.
 //
 //   npm run eval:drawings -- --golden <dir> --files <dir> --model claude-opus-5 \
-//       --effort high --pipeline v3 --label baseline-opus5 [--only <substr>] [--concurrency 3]
+//       --effort high --pipeline v3|v4 --label baseline-opus5 [--only <substr>] [--concurrency 3]
 //   npm run eval:drawings -- --golden <dir> --rescore baseline-opus5 [--only <substr>]
 //
 // ============================================================================
@@ -41,6 +41,7 @@ import { prepareDocumentSource } from "../src/lib/intake-source";
 import {
   GOLDEN_SLOTS,
   parseGolden,
+  readFromItemsOutput,
   readFromModelOutput,
   scoreDrawingRead,
   totalScores,
@@ -60,7 +61,11 @@ function arg(name: string): string | null {
 }
 
 const EFFORTS: ExtractionEffort[] = ["low", "medium", "high", "xhigh", "max"];
-const PIPELINES = ["v3"] as const;
+// v3: the page-centric read (DRAWINGS_TOOL). v4: the item-centric read
+// (DRAWINGS_ITEMS_TOOL, the app's own since 2026-10-04). The pipeline picks the
+// prompt AND the tool, and a saved response is re-read under the one it was
+// asked with.
+const PIPELINES = ["v3", "v4"] as const;
 const EVAL_ROOT = path.join(os.homedir(), "dev", "localstack", "drawings-eval");
 
 /** $ per million tokens, input / output. Cache writes are 1.25x input, reads 0.1x. */
@@ -84,7 +89,7 @@ function costOf(model: string, tokens: TokenUsage | null): number | null {
 function usage(message: string): never {
   console.error(message);
   console.error(
-    "usage: npm run eval:drawings -- --golden <dir> --files <dir> --model <id> --effort <level> --pipeline v3 --label <name> [--only <substr>] [--concurrency 3]\n" +
+    "usage: npm run eval:drawings -- --golden <dir> --files <dir> --model <id> --effort <level> --pipeline v3|v4 --label <name> [--only <substr>] [--concurrency 3]\n" +
       "       npm run eval:drawings -- --golden <dir> --rescore <label> [--only <substr>]",
   );
   process.exit(2);
@@ -150,9 +155,16 @@ function stageSaved(saved: Saved, goldens: Map<string, GoldenDocument>): Outcome
   let read: DrawingRead | null = null;
   let readError: string | null = saved.ok ? null : `${saved.code}: ${saved.error}`;
   if (saved.rawResponse && typeof saved.rawResponse === "object") {
-    const parsed = readExtractionResponse(saved.rawResponse as Parameters<typeof readExtractionResponse>[0], "shop_drawings");
+    const parsed = readExtractionResponse(
+      saved.rawResponse as Parameters<typeof readExtractionResponse>[0],
+      "shop_drawings",
+      saved.pipeline || "v3",
+    );
     if (parsed.ok && parsed.output.outputKind === "drawing_items") {
       read = readFromModelOutput(parsed.output.data, saved.file);
+      readError = null;
+    } else if (parsed.ok && parsed.output.outputKind === "drawing_items_v4") {
+      read = readFromItemsOutput(parsed.output.data, saved.file);
       readError = null;
     } else if (!parsed.ok) {
       readError = `${parsed.code}: ${parsed.error}`;

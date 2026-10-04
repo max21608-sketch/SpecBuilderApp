@@ -243,6 +243,8 @@ export function pagesOfCard(
   };
   for (const item of items) {
     add(item.page);
+    // A version 4 item carries every page it spans.
+    for (const page of Array.isArray(item.pages) ? item.pages : []) add(page);
     for (const page of (doc ? codeGroupFor(doc, item.itemCodeRaw)?.pages : null) ?? []) add(page);
   }
   return [...pages].sort((a, b) => a - b);
@@ -600,7 +602,9 @@ export function configurationCards<
       kind: "configurations",
       id: `code:${code}`,
       split,
-      groupedBecause: codeGroupFor(doc ?? { schemaVersion: 1 }, group[0]!.itemCodeRaw)?.evidence ?? null,
+      // A version 4 item says what tied its pages together itself.
+      groupedBecause:
+        codeGroupFor(doc ?? { schemaVersion: 1 }, group[0]!.itemCodeRaw)?.evidence ?? group[0]!.whyOneItem ?? null,
       unsplitNames: unsplit(code),
       relationshipRead: codeGroupFor(doc ?? { schemaVersion: 1 }, group[0]!.itemCodeRaw)?.relationship ?? null,
       relationshipByReviewer:
