@@ -39,6 +39,8 @@ import type { DimensionSlot } from "@/lib/spec-vocab";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
 import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
+import ItemReadNotes from "@/components/imports/ItemReadNotes";
+import { pagesInWords } from "@/lib/drawing-items";
 import {
   ObservationRow,
   OBSERVATION_COLUMNS,
@@ -325,6 +327,7 @@ export default function NamedConfigurationCard({
 
   // ------------------------------------------------------------------ header
   const header = (
+    <>
     <div className="border-b border-neutral-200 px-4 pt-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-[13px] font-semibold text-neutral-900">{card.codeRaw}</span>
@@ -332,6 +335,10 @@ export default function NamedConfigurationCard({
         <Chip tone="info">
           {total} configuration{total === 1 ? "" : "s"}
         </Chip>
+        {/* An item read whole (schemaVersion 4) is ONE member spanning its pages. */}
+        {card.members.length === 1 && Array.isArray(card.members[0]!.item.pages) && card.members[0]!.item.pages.length > 1 && (
+          <Chip>{pagesInWords(card.members[0]!.item.pages)}</Chip>
+        )}
         <span className="flex-1" />
         {open && pendingMembers.length > 0 && (
           <BulkUnit
@@ -414,6 +421,9 @@ export default function NamedConfigurationCard({
         </div>
       )}
     </div>
+    {/* What the read could not settle (schemaVersion 4), above the rows. */}
+    <ItemReadNotes items={card.members.map((member) => member.item)} />
+    </>
   );
 
   if (!open) {

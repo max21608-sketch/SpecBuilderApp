@@ -56,6 +56,16 @@
 // none: the whole reason this control exists is that a picture has to be
 // checkable against a page somebody can open.
 // ============================================================================
+// A CHIP THE READ FOUND IS PROPOSED, like the item's picture (2026-10-04).
+//
+// The item-centric read (schemaVersion 4) reports where a finish's printed
+// swatch sits (`swatchProposal`). That box is cropped on arrival and shown as
+// this row's swatch, labelled as proposed, with Remove and Crop it again one
+// click away — exactly the item picture's rule (`ItemImagePicker`): the reviewer
+// sees the pixels before anything is stored, and NOTHING IS UPLOADED UNTIL THE
+// CARD IS CONFIRMED. A crop the screen already holds for the row wins; a
+// proposal is never re-made over a person's choice.
+// ============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cropPdfRegion, type CroppedImage } from "@/lib/pdf-crop";
 import PageCropper from "@/components/imports/PageCropper";
@@ -70,6 +80,7 @@ export default function SwatchPicker({
   pages = [],
   code,
   disabled,
+  proposed = null,
   onCropped,
 }: {
   importId: string;
@@ -93,6 +104,8 @@ export default function SwatchPicker({
    */
   code: string | null;
   disabled?: boolean;
+  /** Where the read saw the chip (schemaVersion 4). Cropped on arrival as the proposed swatch. */
+  proposed?: { page: number; bbox: [number, number, number, number] } | null;
   onCropped: (image: CroppedImage | null, page: number | null) => void;
 }) {
   // The row's own page is always offered even where the item's page list does
@@ -113,7 +126,12 @@ export default function SwatchPicker({
   const [cropping, setCropping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fromProposal, setFromProposal] = useState(false);
   const objectUrls = useRef<string[]>([]);
+  // The callback in a ref, for `ItemImagePicker`'s reason: the card passes a
+  // new arrow on every render, and the proposal must be cropped once.
+  const report = useRef(onCropped);
+  report.current = onCropped;
 
   // A CROP THE SCREEN HOLDS FOR THIS ROW, shown. Only fills an empty preview:
   // one this picker made itself is already the screen's, under the same key.
@@ -142,6 +160,36 @@ export default function SwatchPicker({
     objectUrls.current.push(url);
     return url;
   }, []);
+
+  // THE PROPOSED CHIP, cropped once on arrival. Not where the screen already
+  // holds a crop for this row, and never again after somebody removes it.
+  const proposalTried = useRef(false);
+  useEffect(() => {
+    if (!proposed || proposalTried.current) return;
+    if (actions && observationId && actions.heldSwatch(observationId)) return;
+    proposalTried.current = true;
+    const controller = new AbortController();
+    setBusy(true);
+    void cropPdfRegion(`/api/imports/${importId}/source`, proposed.page, proposed.bbox, { signal: controller.signal })
+      .then((image) => {
+        setPreview(track(image.blob));
+        setFromProposal(true);
+        setChosen(proposed.page);
+        report.current(image, proposed.page);
+      })
+      .catch((cause) => {
+        // A cancelled crop is the card leaving the screen, not a failure; a
+        // failed one leaves the row as it was before proposals existed.
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "The proposed swatch could not be rendered.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setBusy(false);
+      });
+    return () => controller.abort();
+    // Once per row: the proposal is a value from the staged JSON, and `actions`
+    // changes identity on every render of the screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposed?.page, proposed?.bbox?.join(","), observationId, importId]);
 
   /** The whole page, rendered once, only when somebody wants to crop. */
   const start = useCallback(
@@ -207,11 +255,15 @@ export default function SwatchPicker({
             disabled={disabled}
             onClick={() => {
               setPreview(null);
+              setFromProposal(false);
               onCropped(null, null);
             }}
           >
             Remove
           </Button>
+        )}
+        {preview && fromProposal && (
+          <span className="text-[11px] text-amber-800">Proposed by the read — check it is the right chip.</span>
         )}
         {preview && (
           <span className="text-[11px] text-neutral-500">
@@ -245,6 +297,7 @@ export default function SwatchPicker({
               try {
                 const image = await cropPdfRegion(`/api/imports/${importId}/source`, croppedFrom ?? 1, bbox);
                 setPreview(track(image.blob));
+                setFromProposal(false);
                 onCropped(image, croppedFrom);
               } catch (cause) {
                 setError(cause instanceof Error ? cause.message : "That area could not be captured.");
