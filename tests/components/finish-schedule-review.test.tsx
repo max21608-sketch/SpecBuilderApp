@@ -47,7 +47,7 @@ function setup(staged: StagedFinishSchedule, library: LibraryFinish[]) {
   // Everything tickable, as the screen ticks it on arrival.
   const selected = new Set(
     review
-      .filter((row) => row.verdict && ["new", "fills", "agrees"].includes(row.verdict.status))
+      .filter((row) => row.verdict && ["new", "fills", "enriches", "agrees"].includes(row.verdict.status))
       .map((row) => row.entryId),
   );
   render(
@@ -132,6 +132,34 @@ describe("the finishes schedule review", () => {
     const conflict = screen.getByText("already held and DIFFERENT").closest("tr")!;
     expect(within(conflict).queryByRole("combobox")).toBeNull();
     expect(within(conflict).getByText("Stone")).toBeInTheDocument();
+  });
+});
+
+describe("a held TBC finish the schedule says more about", () => {
+  it("says the library will be updated, and counts it as a write", () => {
+    n = 0;
+    const staged = stageFinishSchedule(
+      [entry({ codeRaw: "AB MTL 01", nameRaw: "BRUSHED BRASS", finishRaw: "Antique" })],
+      "__QA schedule.pdf",
+      null,
+      ids,
+    );
+    setup(staged, [held("AB-MTL-01", { description: "Brushed brass" })]);
+    expect(screen.getByText("agrees and adds detail")).toBeInTheDocument();
+    expect(screen.getByText(/The library says “Brushed brass”; the schedule says more — it will be updated/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add 1 to the library" })).toBeInTheDocument();
+  });
+});
+
+describe("the provenance line", () => {
+  it("is clamped, and opens whole on a press", async () => {
+    n = 0;
+    const long = Array.from({ length: 12 }, (_, i) => ({ labelRaw: `Line ${i}`, valueRaw: "an invented further detail" }));
+    const staged = stageFinishSchedule([entry({ codeRaw: "AB TIM 01", nameRaw: "NATURAL OAK", otherRaw: long })], "__QA schedule.pdf", null, ids);
+    setup(staged, []);
+    expect(screen.queryByText(/Line 11: an invented further detail/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(screen.getByText(/Line 11: an invented further detail/)).toBeInTheDocument();
   });
 });
 

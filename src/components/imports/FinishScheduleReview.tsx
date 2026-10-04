@@ -20,6 +20,7 @@
 // same three bands, the same primitives) with the finishes page's table and
 // kind control, because those are the two jobs it is. Not accepted by anybody.
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { clampText } from "@/lib/shout";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import { usePoll } from "@/lib/use-poll";
@@ -62,6 +63,7 @@ type Run = {
 const VERDICT_TONE: Record<ScheduleVerdict["status"], Tone> = {
   new: "good",
   fills: "info",
+  enriches: "info",
   agrees: "plain",
   conflict: "warn",
   repeated: "blocked",
@@ -69,7 +71,11 @@ const VERDICT_TONE: Record<ScheduleVerdict["status"], Tone> = {
 };
 
 /** The verdicts a tick can do something with. The rest write nothing and stay for a person. */
-const TICKABLE: ReadonlySet<ScheduleVerdict["status"]> = new Set(["new", "fills", "agrees"]);
+const TICKABLE: ReadonlySet<ScheduleVerdict["status"]> = new Set(["new", "fills", "enriches", "agrees"]);
+
+/** The provenance line, clamped: it is a whole row of the schedule and runs long. */
+const NOTES_LINES = 2;
+const NOTES_CHARS = 140;
 
 export default function FinishScheduleReview({
   importId,
@@ -175,6 +181,7 @@ export default function FinishScheduleReview({
       const res = await apiFetch<{
         created: number;
         filled: number;
+        enriched?: number;
         unchanged: number;
         skipped: { code: string | null; why: string }[];
       }>(`/api/imports/${importId}/confirm`, {
@@ -187,6 +194,7 @@ export default function FinishScheduleReview({
         const said = [
           `${res.data.created} added to the library`,
           res.data.filled > 0 ? `${res.data.filled} filled in` : null,
+          (res.data.enriched ?? 0) > 0 ? `${res.data.enriched} given the schedule's fuller description` : null,
           res.data.unchanged > 0 ? `${res.data.unchanged} already held and agreeing` : null,
         ].filter(Boolean);
         info = `${said.join(", ")}.`;
@@ -379,7 +387,7 @@ export function FinishScheduleTable({
     const verdict = byEntry.get(entry.id)?.verdict;
     return verdict && !TICKABLE.has(verdict.status);
   }).length;
-  const writes = count("new") + count("fills");
+  const writes = count("new") + count("fills") + count("enriches");
 
   return (
     <>
@@ -459,9 +467,7 @@ export function FinishScheduleTable({
                         {[row.composed.supplierRaw, row.composed.reference].filter(Boolean).join(" · ")}
                       </span>
                     )}
-                    {row?.composed.notes && (
-                      <span className="mt-1 block text-[11px] text-neutral-500">{row.composed.notes}</span>
-                    )}
+                    {row?.composed.notes && <ClampedNotes text={row.composed.notes} />}
                   </Td>
                   <Td>
                     <KindControl
@@ -495,7 +501,9 @@ export function FinishScheduleTable({
 
         <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
           <span className="text-neutral-600">
-            {count("new")} new, {count("fills")} filling in a held code, {count("agrees")} already agreeing.
+            {count("new")} new, {count("fills")} filling in a held code
+            {count("enriches") > 0 && <>, {count("enriches")} adding detail to a held code</>}, {count("agrees")} already
+            agreeing.
             {waitingOnPerson > 0 && (
               <> {waitingOnPerson} cannot be added as they stand — each says why.</>
             )}{" "}
@@ -545,6 +553,11 @@ function VerdictCell({ verdict }: { verdict: ScheduleVerdict | null }) {
           Fills its empty {verdict.fills.join(", ")} — nothing already there changes.
         </span>
       )}
+      {verdict.status === "enriches" && (
+        <span className="mt-1 block text-[11.5px] text-neutral-600">
+          The library says “{verdict.finish.description}”; the schedule says more — it will be updated.
+        </span>
+      )}
       {verdict.status === "agrees" && verdict.finish.code !== verdict.code && (
         <span className="mt-1 block text-[11.5px] text-neutral-600">held as {verdict.finish.code}</span>
       )}
@@ -585,8 +598,16 @@ function KindControl({
   onKind: (entry: FinishScheduleEntry, kind: FinishKind | null) => void;
 }) {
   const writable =
-    verdict?.status === "new" || (verdict?.status === "fills" && !verdict.finish.kind);
-  if (verdict && (verdict.status === "agrees" || verdict.status === "conflict" || verdict.status === "fills") && verdict.finish.kind) {
+    verdict?.status === "new" ||
+    ((verdict?.status === "fills" || verdict?.status === "enriches") && !verdict.finish.kind);
+  if (
+    verdict &&
+    (verdict.status === "agrees" ||
+      verdict.status === "conflict" ||
+      verdict.status === "fills" ||
+      verdict.status === "enriches") &&
+    verdict.finish.kind
+  ) {
     return <Chip>{FINISH_KIND_LABELS[verdict.finish.kind]}</Chip>;
   }
   if (!writable) return <span className="text-neutral-400">—</span>;
@@ -657,7 +678,9 @@ function Collapsed({
                   ? "added"
                   : entry.applied.outcome === "filled"
                     ? "filled in"
-                    : "already held"}
+                    : entry.applied.outcome === "enriched"
+                      ? "given more detail"
+                      : "already held"}
               </span>
             )}
             {onRestore && (
@@ -669,5 +692,26 @@ function Collapsed({
         ))}
       </DisclosureList>
     </Disclosure>
+  );
+}
+
+/**
+ * Where the entry came from and every further line on it — a whole row of the
+ * schedule, so it is clamped with `clampText` (the string, not CSS) and opens
+ * whole on a press. Nothing is dropped: the full text is the title and the
+ * expansion. The `SpecValue` pattern.
+ */
+function ClampedNotes({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const { clamped, wasClamped } = clampText(text, NOTES_LINES, NOTES_CHARS);
+  return (
+    <span className="mt-1 block text-[11px] text-neutral-500" title={wasClamped && !expanded ? text : undefined}>
+      {expanded ? text : clamped}
+      {wasClamped && (
+        <Button variant="quiet" size="xs" className="ml-1" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "Show less" : "Show all"}
+        </Button>
+      )}
+    </span>
   );
 }

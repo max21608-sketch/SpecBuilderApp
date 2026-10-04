@@ -21,7 +21,13 @@
 // rule — because the library moves between the paid read and the review.
 // ============================================================================
 import type { RawFinishEntry } from "@/lib/extraction-schema";
-import { normaliseFinishCode, resolveFinishCode, type Finish, type FinishKind } from "@/lib/finishes";
+import {
+  foldFinishDescription,
+  normaliseFinishCode,
+  resolveFinishCode,
+  type Finish,
+  type FinishKind,
+} from "@/lib/finishes";
 import { suggestFinishKind, type FinishKindSuggestion } from "@/lib/finish-kind-guess";
 
 export const FINISH_SCHEDULE_SCHEMA_VERSION = 2 as const;
@@ -55,7 +61,7 @@ export type FinishScheduleEntry = {
   reviewedAt: string | null;
   reviewedBy: string | null;
   /** What the confirm did with it. `unchanged`: the library already said so. */
-  applied: { outcome: "created" | "filled" | "unchanged"; finishId: string | null } | null;
+  applied: { outcome: "created" | "filled" | "enriched" | "unchanged"; finishId: string | null } | null;
 };
 
 export type StagedFinishSchedule = {
@@ -293,6 +299,15 @@ export function suggestEntryKind(
 //                confirm fills the EMPTY fields only — the edit-once rule.
 //   agrees     — the library holds the code and already says this. Nothing to
 //                write; ticking it closes the entry.
+//   enriches   — the library holds the code, still TBC, and its description
+//                is CONTAINED in the schedule's (folded by case and whitespace
+//                and nothing else): a bill wrote "Antique Bronze", the
+//                schedule says "ANTIQUE BRONZE; Finish: Antique". The detailed
+//                source is taken whole — Max, 2026-10-04: the finishes library
+//                comes first and a detailed source should be taken in whole.
+//                The confirm REPLACES the description. A CONFIRMED row never
+//                reaches this verdict: a person decided it, so a difference
+//                there stays a conflict.
 //   conflict   — the library holds the code and has COMMITTED to a different
 //                description. Nothing is written; a person decides which is
 //                out of date. The drawings' CONFLICT rule, unchanged.
@@ -310,12 +325,14 @@ export type ScheduleVerdict =
   | { status: "repeated"; code: string; firstEntryId: string }
   | { status: "fills"; code: string; finish: LibraryFinish; fills: FillField[] }
   | { status: "agrees"; code: string; finish: LibraryFinish }
+  | { status: "enriches"; code: string; finish: LibraryFinish; saysInstead: string }
   | { status: "conflict"; code: string; finish: LibraryFinish; saysInstead: string };
 
 export const VERDICT_LABELS: Record<ScheduleVerdict["status"], string> = {
   new: "new",
   fills: "already held, no description yet",
   agrees: "already held and agreeing",
+  enriches: "agrees and adds detail",
   conflict: "already held and DIFFERENT",
   repeated: "repeated in this document",
   no_code: "no code",
@@ -335,6 +352,20 @@ function fillsFor(finish: LibraryFinish, composed: ComposedScheduleFinish, kind:
   if (empty(finish.notes) && composed.notes) fills.push("notes");
   if (!finish.kind && kind) fills.push("kind");
   return fills;
+}
+
+/**
+ * Whether the schedule's description is the held one with more said: the
+ * held row is still TBC and its words, folded by case and whitespace ONLY,
+ * appear whole inside the schedule's. No other fuzziness — `normaliseFinishCode`'s
+ * rule applied to a description, because a looser fold is how two different
+ * finishes come to read as one.
+ */
+export function addsDetail(finish: Pick<LibraryFinish, "state" | "description">, says: string): boolean {
+  if (finish.state === "confirmed") return false;
+  const held = foldFinishDescription(finish.description ?? "");
+  if (!held) return false;
+  return foldFinishDescription(says).includes(held);
 }
 
 export type ScheduleReviewRow = {
@@ -371,7 +402,10 @@ export function reviewFinishSchedule(staged: StagedFinishSchedule, library: read
     let verdict: ScheduleVerdict;
     if (resolution.status === "new") verdict = { status: "new", code, codeNorm };
     else if (resolution.status === "conflict") {
-      verdict = { status: "conflict", code, finish: resolution.finish as LibraryFinish, saysInstead: resolution.saysInstead };
+      const finish = resolution.finish as LibraryFinish;
+      verdict = addsDetail(finish, resolution.saysInstead)
+        ? { status: "enriches", code, finish, saysInstead: resolution.saysInstead }
+        : { status: "conflict", code, finish, saysInstead: resolution.saysInstead };
     } else if (resolution.status === "matched") {
       const finish = resolution.finish as LibraryFinish;
       const fills = fillsFor(finish, composed, entry.kind);
