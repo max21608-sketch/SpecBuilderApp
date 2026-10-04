@@ -767,11 +767,32 @@ export function resolveStagedItem(
   });
 }
 
-/** Did the page mark this item as a mock-up drawing? Only an explicit yes counts. */
-export function isMockupDrawing(item: object): boolean {
+/**
+ * Did the page mark this item as a mock-up drawing? Only an explicit yes from
+ * the read counts, AND it must rest on the TITLE BLOCK or the DRAWING NUMBER.
+ *
+ * Found on the real Aman pack, 2026-10-04: nearly every PL (Ambassador and
+ * Presidential Suites) sheet carries a caption ending "(MUR)" — "DESK (MUR)",
+ * "STOOL DRESSER (MUR)" — left over from the mock-up sheet it was drawn from,
+ * while its title block reads "GUESTROOMS - L14" and its number AM-ID-PL-….
+ * The read called all of them mock-up on the caption, and they landed on the
+ * mock-up copies of the GR lines instead of their own PL lines. A caption is
+ * the weakest thing on the sheet; the drawing number (a `MUR` segment, as in
+ * AM-ID-MUR-FUR-05, never a bracketed "(MUR)") and the title block's drawing
+ * title ("MOCKUP ROOM", "MOCK-UP-ROOM") are what say which room a sheet is for.
+ */
+export function isMockupDrawing(item: object, filename?: string | null): boolean {
   const mockup = (item as { mockup?: unknown }).mockup;
-  return typeof mockup === "object" && mockup !== null && (mockup as { is?: unknown }).is === true;
+  if (typeof mockup !== "object" || mockup === null || (mockup as { is?: unknown }).is !== true) return false;
+  const evidence = String((mockup as { evidence?: unknown }).evidence ?? "");
+  if (/MOCK[\s-]*UP[\s-]*ROOM/i.test(evidence)) return true;
+  const codes = (item as { itemCodes?: unknown }).itemCodes;
+  const named = [...(Array.isArray(codes) ? codes : []), (item as { itemCodeRaw?: unknown }).itemCodeRaw, filename];
+  return named.some((code) => typeof code === "string" && MUR_SEGMENT.test(code));
 }
+
+/** A `MUR` segment of a drawing number (AM-ID-MUR-FUR-05) — never a bracketed caption "(MUR)". */
+const MUR_SEGMENT = /(^|[-_\s])MUR([-_\s.]|$)/i;
 
 /**
  * ONE STAGED ITEM, RESOLVED -- the function the review screen AND the confirm
@@ -805,7 +826,7 @@ export function resolveDrawingItem(
   item: Pick<DrawingItem, "itemCodeRaw">,
   records: RecordEntry[],
 ): DrawingResolution {
-  if (!isMockupDrawing(item)) return resolveStagedItem(staged, item, records);
+  if (!isMockupDrawing(item, staged.filename)) return notOntoMockup(resolveStagedItem(staged, item, records));
   const evidence = (item as Pick<DrawingItem, "mockup">).mockup?.evidence?.trim() || null;
   const resolution = resolveStagedItem(
     staged,
@@ -822,6 +843,32 @@ export function resolveDrawingItem(
         resolution.runs.length > 0
           ? `This is a mock-up drawing${why}, so it lands on the mock-up phase only.`
           : `This is a mock-up drawing${why}, and no mock-up record carries ${code} yet. On the phase table, tick the bill line it belongs to and press "Also in a mock-up phase", then reload.`,
+    },
+  };
+}
+
+/**
+ * A DRAWING NOT MARKED MOCK-UP DOES NOT WRITE TO A MOCK-UP ITEM UNLESS A PERSON
+ * TICKS IT (2026-10-04, reversing the first cut of brief E). On the Aman pack
+ * the mock-up copy of GR-FUR-05 ends with FUR-05 exactly as PL-FUR-05 does, so
+ * the PL desk fanned out onto the GR mock-up item and the real mock-up drawing
+ * then had to ask to replace what it wrote. The mock-up phase is still LISTED —
+ * where no mock-up drawing exists the main drawing may be the only one that
+ * will ever describe that item, and ticking it is one click — but it is never
+ * suggested, and the card says why.
+ */
+function notOntoMockup(resolution: DrawingResolution): DrawingResolution {
+  const onMockup = new Set(
+    resolution.runs.flatMap((run) => (run.status === "matched" && run.record.onMockupPhase === true ? [run.record.id] : [])),
+  );
+  if (onMockup.size === 0) return resolution;
+  return {
+    ...resolution,
+    suggested: resolution.suggested.filter((id) => !onMockup.has(id)),
+    mockup: {
+      evidence: null,
+      message:
+        "The mock-up phase is left unticked: this is not a mock-up drawing. Tick it only if the mock-up item is the same design.",
     },
   };
 }

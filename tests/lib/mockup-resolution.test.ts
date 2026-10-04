@@ -63,7 +63,9 @@ function item(code: string | null, mockup?: DrawingItem["mockup"]): DrawingItem 
 
 describe("isMockupDrawing", () => {
   it("is true only on an explicit yes from the page", () => {
-    expect(isMockupDrawing(item("GR-ZQ-08", { is: true, evidence: "MUR in the drawing number" }))).toBe(true);
+    expect(isMockupDrawing(item("GR-ZQ-08", { is: true, evidence: "MUR in the drawing number" }), "AB-CD-MUR-ZQ-08.pdf")).toBe(true);
+    // A yes resting on a caption alone is not enough (the Aman PL sheets, 2026-10-04).
+    expect(isMockupDrawing(item("GR-ZQ-08", { is: true, evidence: 'caption "STOOL (MUR)"' }), "AB-CD-PL-ZQ-08.pdf")).toBe(false);
     expect(isMockupDrawing(item("GR-ZQ-08", { is: false, evidence: null }))).toBe(false);
     expect(isMockupDrawing(item("GR-ZQ-08"))).toBe(false);
   });
@@ -135,19 +137,20 @@ describe("resolveDrawingItem — a mock-up drawing", () => {
 });
 
 describe("resolveDrawingItem — a drawing NOT marked mock-up", () => {
-  it("fans out by the per-phase rule, the mock-up phase included", () => {
-    // DECIDED: the mock-up phase is a phase and its record matches. Where no
-    // mock-up drawing exists the main drawing is the only document that will
-    // ever specify the mock-up item; where one does, the reviewer unticks it.
+  it("lists the mock-up phase but never suggests it (2026-10-04: a person ticks it)", () => {
+    // REVISED after the Aman pack: a PL drawing fanned out onto the GR mock-up
+    // copy (same code ending) and the real mock-up drawing then had to ask to
+    // replace it. The mock-up phase is still listed, so ticking it is one click.
     const resolution = resolveDrawingItem(STAGED, item("GR-ZQ-08"), [GR, PL, MOCK_GR]);
-    expect(new Set(resolution.suggested)).toEqual(new Set(["gr", "mu-gr"]));
-    expect(resolution.mockup).toBeUndefined();
+    expect(new Set(resolution.suggested)).toEqual(new Set(["gr"]));
+    expect(resolution.runs.some((run) => run.status === "matched" && run.record.id === "mu-gr")).toBe(true);
+    expect(resolution.mockup?.message).toMatch(/left unticked/);
   });
 
-  it("is unchanged by a page that said it is not mock-up", () => {
+  it("is the same for a page that said it is not mock-up", () => {
     const resolution = resolveDrawingItem(STAGED, item("GR-ZQ-08", { is: false, evidence: null }), [GR, MOCK_GR]);
-    expect(new Set(resolution.suggested)).toEqual(new Set(["gr", "mu-gr"]));
-    expect(resolution.mockup).toBeUndefined();
+    expect(new Set(resolution.suggested)).toEqual(new Set(["gr"]));
+    expect(resolution.mockup?.message).toMatch(/left unticked/);
   });
 });
 
