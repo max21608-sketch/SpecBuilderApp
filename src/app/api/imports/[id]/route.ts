@@ -41,8 +41,14 @@ import { billSpecsRequestId } from "@/lib/bill-specifications";
 import {
   billItemName,
   billReadsDescriptions,
+  isSlotOverride,
+  placedSizeOf,
   planSheetDescriptions,
+  readBillDescription,
+  resolveSlotOverrides,
   revisionDescriptionRefusal,
+  slotPartKey,
+  type SlotOverride,
 } from "@/lib/bill-description";
 import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
 // Pure: which rows on the OTHER tabs a decision reaches, and what lands on
@@ -935,12 +941,22 @@ async function patchBoqLine(
     replaces?: unknown;
     rowKind?: unknown;
     finishForRow?: unknown;
+    slotOverride?: unknown;
+    slotOverridesVersion?: unknown;
   },
   actor: string,
 ): Promise<Response> {
   const sheetIndex = typeof body.sheetIndex === "number" ? body.sheetIndex : null;
   if (sheetIndex === null) return json({ ok: false, error: "sheetIndex is required." }, 400);
   const index = typeof body.index === "number" ? body.index : null;
+
+  // A PART OF THE SIZE LINE, said by a person to be another slot. Its own
+  // shape, for the row kind's reason: it is checked against the LIVE line's
+  // plan under the lock, and against the version of the map the screen showed.
+  if (body.slotOverride !== undefined) {
+    if (index === null) return json({ ok: false, error: "A slot is changed on one line." }, 400);
+    return patchSlotOverride(id, sheetIndex, index, body.slotOverride, body.slotOverridesVersion, actor);
+  }
 
   // A LINE'S KIND, set by a person: its own shape, because a fabric line's
   // item is checked against the LIVE sheet, under its lock, before anything is
@@ -1408,6 +1424,82 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
     });
 
     return json({ ok: true, proposal: result.proposal, version: result.version });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
+// A SIZE PART'S SLOT, set by a person before the confirm (Matthew, 2026-10-01:
+// a round stool's "D" is its diameter). `{ key, slot }`, where `key` is the
+// part as the plan addressed it (`slotPartKey`) and `slot` one of the five, or
+// `note`, or null to put it back as printed. Refused, writing nothing, when the
+// part is no longer on the line's placed size (409), when the map moved since
+// the screen was drawn (409), and when the change would put two parts in one
+// slot (400, in `resolveSlotOverrides`' own sentence).
+async function patchSlotOverride(
+  id: string,
+  sheetIndex: number,
+  index: number,
+  change: unknown,
+  expectedVersion: unknown,
+  actor: string,
+): Promise<Response> {
+  const value = change as { key?: unknown; slot?: unknown } | null;
+  if (!value || typeof value.key !== "string" || value.key.trim() === "") {
+    return json({ ok: false, error: "Say which part of the size line this is." }, 400);
+  }
+  if (value.slot !== null && !isSlotOverride(value.slot)) {
+    return json({ ok: false, error: "A part is a width, depth, height, seat height, diameter or a note." }, 400);
+  }
+  if (typeof expectedVersion !== "number") {
+    return json({ ok: false, error: "Send the version of this line's slot changes you were shown." }, 400);
+  }
+  const key = value.key;
+  const slot = value.slot as SlotOverride | null;
+  try {
+    const result = await withTransaction(async (txn) => {
+      const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
+      if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
+      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+      const line = assertBoqDocument(rows[0].parsed).sheets[sheetIndex]?.lines[index];
+      if (!line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      const current = line.slotOverridesVersion ?? 0;
+      if (current !== expectedVersion) {
+        throw new DomainConflictError(
+          "slot_overrides_stale",
+          `The size on row ${line.lineNo} was changed in another tab. Reload and check it before changing it again.`,
+        );
+      }
+      const reading = line.rowKind === "finish_for" ? null : readBillDescription(line.itemDescriptionRaw);
+      const placed = reading ? placedSizeOf(reading.statements) : null;
+      if (!placed || !placed.reading.parts.some((part) => slotPartKey(part) === key)) {
+        throw new DomainConflictError(
+          "slot_part_gone",
+          `Row ${line.lineNo}'s size no longer prints “${key}”. Reload and look at it again.`,
+        );
+      }
+      const next: Record<string, SlotOverride> = { ...(line.slotOverrides ?? {}) };
+      if (slot === null) delete next[key];
+      else next[key] = slot;
+      const resolved = resolveSlotOverrides(placed, next);
+      if (resolved.problem) throw new DomainConflictError("slot_taken", resolved.problem, { status: 400 });
+      const version = current + 1;
+      const written = await txn`
+        update intake_runs
+        set parsed = jsonb_set(
+              parsed,
+              array['sheets', ${String(sheetIndex)}, 'lines', ${String(index)}],
+              coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
+                || ${JSON.stringify({ slotOverrides: next, slotOverridesVersion: version })}::jsonb
+            ),
+            updated_by = ${actor}
+        where id = ${id} and status = 'parsed'
+        returning version
+      `;
+      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      return { version: Number(written[0].version), slotOverridesVersion: version };
+    });
+    return json({ ok: true, ...result });
   } catch (cause) {
     return transactionErrorResponse(cause);
   }

@@ -4,10 +4,10 @@
 // pricing document's shape, invented figures and codes), so what this renders
 // is what the confirm writes — the component computes nothing.
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { BillDescriptionPanelRow, BillDescriptionSummary, type ReviewDescription } from "@/components/imports/BillDescription";
-import { planBillDescription } from "@/lib/bill-description";
+import { planBillDescription, type SlotOverride } from "@/lib/bill-description";
 import type { SpecFieldEntry } from "@/lib/drawing-document";
 
 const FIELDS: SpecFieldEntry[] = [
@@ -78,5 +78,66 @@ describe("a bill line's description on the review screen", () => {
     expect(screen.getByText("no size placed")).toBeInTheDocument();
     expect(screen.getByText(/feet and inches that could not be read completely/)).toHaveClass("text-amber-700");
     expect(screen.getByText(/already holds specifications from a bill/)).toHaveClass("text-amber-700");
+  });
+});
+
+describe("a size part's slot, set on the review", () => {
+  const STOOL = "Stool\r\nSpec size: D 400 X H 420 mm";
+  const planFor = (slotOverrides?: Record<string, SlotOverride>) =>
+    planBillDescription(STOOL, { fields: FIELDS, hasFabricLine: false, slotOverrides })!;
+
+  function Editable({ plan, onSetSlot }: { plan: ReviewDescription; onSetSlot?: (key: string, slot: SlotOverride | null) => void }) {
+    return (
+      <table>
+        <tbody>
+          <tr>
+            <td>
+              <BillDescriptionSummary plan={plan} open onToggle={() => {}} onSetSlot={onSetSlot} />
+            </td>
+          </tr>
+          <BillDescriptionPanelRow plan={plan} raw={STOOL} colSpan={10} onSetSlot={onSetSlot} />
+        </tbody>
+      </table>
+    );
+  }
+
+  it("answers the D-without-W caution with the part's own key", () => {
+    const onSetSlot = vi.fn();
+    render(<Editable plan={planFor()} onSetSlot={onSetSlot} />);
+    expect(screen.getByText(/gives a D and no W/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "It's the diameter" }));
+    expect(onSetSlot).toHaveBeenLastCalledWith("D 400", "DIA");
+    fireEvent.click(screen.getByRole("button", { name: "It's the width" }));
+    expect(onSetSlot).toHaveBeenLastCalledWith("D 400", "W");
+    fireEvent.click(screen.getByRole("button", { name: "It's a depth" }));
+    expect(onSetSlot).toHaveBeenLastCalledWith("D 400", "D");
+  });
+
+  it("offers each size part W · D · H · SH · Dia · note, with its current slot pressed", () => {
+    const onSetSlot = vi.fn();
+    render(<Editable plan={planFor()} onSetSlot={onSetSlot} />);
+    const height = screen.getByRole("group", { name: "What H 420 is" });
+    expect(within(height).getByRole("button", { name: "H" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(height).getAllByRole("button").map((button) => button.textContent)).toEqual(["W", "D", "H", "SH", "Dia", "note"]);
+    fireEvent.click(within(height).getByRole("button", { name: "note" }));
+    expect(onSetSlot).toHaveBeenLastCalledWith("H 420", "note");
+  });
+
+  it("says which parts a reviewer changed, recomposed, and puts one back as printed", () => {
+    const onSetSlot = vi.fn();
+    render(<Editable plan={planFor({ "D 400": "DIA" })} onSetSlot={onSetSlot} />);
+    expect(screen.getByText("Dia.400 x H420mm")).toBeInTheDocument();
+    expect(screen.queryByText(/gives a D and no W/)).toBeNull();
+    expect(screen.getByText("changed on review")).toBeInTheDocument();
+    const depth = screen.getByRole("group", { name: "What D 400 is" });
+    expect(within(depth).getByRole("button", { name: "Dia" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(depth).getByRole("button", { name: "As printed" }));
+    expect(onSetSlot).toHaveBeenLastCalledWith("D 400", null);
+  });
+
+  it("offers no control where the line cannot change", () => {
+    render(<Editable plan={planFor()} />);
+    expect(screen.queryByRole("group", { name: /What D 400 is/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "It's the diameter" })).toBeNull();
   });
 });

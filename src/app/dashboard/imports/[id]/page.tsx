@@ -47,6 +47,7 @@ import {
   BillDescriptionSummary,
   type ReviewDescription,
 } from "@/components/imports/BillDescription";
+import type { SlotOverride } from "@/lib/bill-description";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
 // function the confirm writes it with, so the table shows what will be written.
 import { effectiveArea } from "@/lib/boq-reconcile";
@@ -101,6 +102,9 @@ type Line = {
   // "This may not be furniture", asked at staging. ABSENT on a bill staged
   // before the question existed, which `nonFurnitureOf` answers at read time.
   nonFurnitureSuggested?: NonFurnitureGuess | null;
+  // A reviewer's slot changes on the size line, and the version of that map
+  // the screen was drawn with — sent back with every change.
+  slotOverridesVersion?: number;
 } & RowKindFields;
 
 /** "17 and 18", "17, 18 and 19" — a list a person reads rather than parses. */
@@ -685,6 +689,34 @@ export default function ReviewImportPage() {
   }, [otherTabReading, load]);
 
   /** A line's kind, set by a person. The route checks the item against the live sheet. */
+  /**
+   * WHAT A PART OF A LINE'S SIZE IS — a person's answer, before the confirm.
+   * The server checks it against the live line and the version of the line's
+   * slot changes this screen was drawn with; the plan it recomposes is what
+   * the reload shows. Reload first, then report.
+   */
+  async function setSlot(sheetIndex: number, line: Line, key: string, slot: SlotOverride | null) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch(`/api/imports/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sheetIndex,
+          index: line.index,
+          slotOverride: { key, slot },
+          slotOverridesVersion: line.slotOverridesVersion ?? 0,
+        }),
+      });
+      await load(true);
+      if (!res.ok) setError(res.error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function setLineKind(sheetIndex: number, index: number, rowKind: BoqRowKind, finishForRow: number | null) {
     setError(null);
     setNotice(null);
@@ -1536,6 +1568,12 @@ export default function ReviewImportPage() {
                                   plan={description}
                                   open={descriptionOpen}
                                   onToggle={() => toggleDescription(descriptionKey)}
+                                  busy={busy}
+                                  onSetSlot={
+                                    run.status === "parsed" && !line.ignored
+                                      ? (key, slot) => void setSlot(sheetIndex, line, key, slot)
+                                      : undefined
+                                  }
                                 />
                               )}
                             </Td>
@@ -1725,6 +1763,12 @@ export default function ReviewImportPage() {
                               plan={description}
                               raw={line.itemDescriptionRaw ?? line.itemDescription}
                               colSpan={columns}
+                              busy={busy}
+                              onSetSlot={
+                                run.status === "parsed" && !line.ignored
+                                  ? (key, slot) => void setSlot(sheetIndex, line, key, slot)
+                                  : undefined
+                              }
                             />
                           )}
                           </Fragment>
