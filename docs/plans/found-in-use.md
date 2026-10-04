@@ -33,6 +33,52 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-10-04
+
+Seen walking the real Aman pack on the local stack during the intake rebuild
+(`docs/plans/intake-items-2026-10-04.md`).
+
+### A read refused for no credit said only "The request was refused (400)" — FIXED 2026-10-04 (`06b5738`)
+
+The API account ran out mid-batch; Anthropic's sentence ("Your credit balance
+is too low…") was thrown away. Now named in words with what to do.
+
+### PL drawings read as mock-up from a "(MUR)" caption — FIXED 2026-10-04 (`a2734c6`)
+
+Nearly every PL sheet's caption ends "(MUR)", copied from the mock-up set,
+while its title block says GUESTROOMS and its number AM-ID-PL-…. They landed
+on the GR mock-up copies. Mock-up now rests on the title block or the drawing
+number only.
+
+### A main drawing fanned out onto a mock-up item — FIXED 2026-10-04 (`a2734c6`)
+
+The mock-up copy of GR-FUR-05 ends with FUR-05 like PL-FUR-05; the PL desk
+wrote onto it and the real mock-up drawing then asked to replace it. A main
+drawing now leaves the mock-up phase unticked, saying why.
+
+### "N items match no record yet. Confirm this pack's bill" over a code the bill prints twice — FIXED 2026-10-04 (`7016443`)
+
+PL-FUR-11 and PL-FUR-26 are each on the bill twice; the reviewer has to
+choose, and was told to confirm the bill again.
+
+### The ottoman's depth is the bill's, not the drawing's — OPEN
+
+PL-FUR-07: the record keeps the bill's D 482mm; the drawing (and the golden)
+say 1'-7 3/4" = 502mm. The drawing's read did not place a depth, so nothing
+offered to replace it. Seen on the confirmed record, not on the card.
+
+### A row's slot changed by autosave keeps its old replace tick — OPEN (reported by brief G's coder)
+
+If a row moves to a new, empty slot, the confirm could still retire the old
+slot's occupant. The new W/D retirement entries are guarded; the older
+per-row path is not.
+
+### Seat heights the read was unsure of stay empty after "Checked" — OPEN
+
+MUR-FUR-03/11/14 and PL-FUR-03B: Checked clears the hold but writes nothing;
+the person has to enter the figure. Correct, and it means a reviewer pressing
+Checked without reading leaves a gap the export then ships blank.
+
 ## 2026-10-01
 
 Seen on PILOT v1.4 (`a5065eb`) in the catch-up with Matthew, Sebastian, Claudia

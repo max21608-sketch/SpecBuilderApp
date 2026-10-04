@@ -21,6 +21,39 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-04 — Intake reads the document, not the page: built on `items-int`, not yet on staging
+
+Plan: `docs/plans/intake-items-2026-10-04.md` (GO from Max: "go run all
+phases"). Seven coders (A–G) in worktrees, each diff reviewed here, the four
+checks with the database tier green on the merged branch (2,961 tests).
+
+- **Opus 5.5 under every extraction**, as structured output (it refuses a
+  forced tool), effort explicit, refusal fallback on (`model-request.ts`).
+- **The drawing read asks for items** (staged v4; CLAUDE.md section).
+- **Finishes schedule before drawings**: a code-keyed read, a library review
+  and confirm, a pack stage, classify by content. The Aman "OMS and FF&E
+  Tracker": 23 entries read, 22 into the library on the local stack.
+- **Mock-up phase** (0043): "Also in a mock-up phase"; mock-up drawings land
+  only there.
+- **Review screen**: Use as W/D/H/SH/Dia, "printed in", Show in mm, Checked,
+  statements folded, the bill's values replaced in one click.
+- **Bill review**: a size slot corrected before confirm; a thumbnail per line
+  (100 of 101 Aman lines).
+- **A refused read says why** (the credit message), and a local read replay.
+
+**Measured** (unverified golden; ~$32 of API spend in all): today's read on
+Opus 5 failed 12 of 30 Aman drawings; v4 on Opus 5.5 grouped 30/30, 78 sizes
+right, 0 in the wrong slot. **End to end on the local stack** with the real
+pack (bill → schedule → 30 drawings, reads replayed): 25 cards confirmed, 70
+of 75 sizes right on the records, 1 wrong (the ottoman's depth, the bill's
+figure the drawing never replaced), 4 seat heights the read flagged and left
+for a person; 5 cards held for a person (3 bedhead panels with no bill line,
+PL-FUR-11 and PL-FUR-26 each printed twice on the bill).
+
+**Max's, before anything moves:** top up the API credit (it ran out mid-run);
+migration 0043 on the sandbox, then this branch is merged to staging; the
+golden checked at the local review page. **Not accepted by Max or Matthew.**
+
 ## 2026-10-01 — Catch-up: the Aman bill held, the drawing read did not
 
 Recap: `docs/plans/catchup-2026-10-01.md`. Defects:

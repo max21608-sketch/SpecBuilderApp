@@ -2339,6 +2339,75 @@ registered. Reload first and report afterwards (`reloadThen` on both drawings
 screens). The reload itself is still required: a refused request means the
 screen is out of date.
 
+### The drawing read asks for ITEMS, not pages (staged schemaVersion 4)
+
+`docs/plans/intake-items-2026-10-04.md`, `src/lib/drawing-items.ts`
+(`stageDrawingsV4`), `src/lib/extraction-schema.ts` (`DRAWINGS_ITEMS_TOOL`),
+`src/lib/model-request.ts`, `src/lib/bill-over-drawing.ts`,
+`src/lib/slot-swap.ts`, `tools/eval-drawings.ts`, `tools/drawings-golden.ts`
+
+Max, 2026-10-04: the page-centric read meant every nuance — an item over two
+pages, a codeless continuation sheet, a title block naming the item
+differently, configurations across pages — became glue code, "and there are
+endless issues that arise from it". Since that day every new drawings read asks
+the document once: **what are the things to be made, and what does it say about
+each**. One staged `DrawingItem` per item, `pages[]`, every observation carrying
+its own `page`, at most one figure per overall slot with its view and evidence,
+`candidates` for the figures it chose between, `uncertain[]` in its own words,
+`statements` (everything else a spec sheet states, folded), a swatch box per
+finish, and a `mockup` flag. v1–v3 runs read exactly as before — a
+byte-for-byte snapshot test (`drawings-v3-frozen`) holds it.
+
+**Measured, not argued** (unverified golden, 2026-10-04): the old read on Opus 5
+FAILED 12 of 30 Aman drawings outright (an inch mark broke the forced tool's
+JSON); on the 30 Aman drawings v4 on Opus 5.5 grouped 30/30, placed 78 overall
+sizes right with **0 in the wrong slot**, against 70 and 7 for the old read on
+the same model. Re-measure with `npm run eval:drawings` (charged) or
+`--rescore` (free) before changing the prompt, the schema or staging.
+
+Eight things are load-bearing:
+
+- **Structured outputs cap the schema.** No more than 16 nullable/union fields,
+  and the compiled grammar refuses somewhere between 43 and 47 fields (probed).
+  That is why the v4 tool is FLAT — overall sizes as a list of slot entries,
+  candidates and doubts as one line of text each — and Zod rebuilds the nested
+  shape. A new field must be measured against that limit, not assumed to fit.
+- **The unit vote is kept for v4** (the section below says why), narrowed to the
+  slots the model filled. Removing it left all 21 Panther shop-drawing figures
+  unitless and was the brief's mistake, corrected the same day.
+- **A combined line of three bare figures** is read W x D x H in printed order
+  and flagged amber with the reason; printed prefixes still win.
+- **A component drawn with an item is part of it** (scheduled cushions, a
+  mattress, a glass top): its codes are the item's finishes. The Aman bill has
+  no cushion lines.
+- **Mock-up rests on the title block or the drawing number, never a caption.**
+  Nearly every Aman PL sheet carries a caption ending "(MUR)" copied from the
+  mock-up sheet; read on the caption, PL drawings landed on the GR mock-up
+  copies. `isMockupDrawing` needs "MOCKUP ROOM" in the evidence or a `MUR`
+  segment in a drawing number (never a bracketed "(MUR)").
+- **A main drawing never writes to a mock-up item unless a person ticks it**
+  (`notOntoMockup`): the mock-up phase is listed and left unticked, with the
+  sentence why. Mock-up items are added by hand ("Also in a mock-up phase",
+  0043) and copy no specs.
+- **The bill's values give way in ONE click, never silently.** A bill's
+  description writes sizes and finish codes first; every drawing card then finds
+  the slots taken. "Use this drawing's values over the bill's (n)" sets exactly
+  the per-row replace acknowledgements, listing each replacement first; a drawn
+  diameter also retires the bill's W and D. A typed value or another drawing's
+  is never in that list.
+- **A doubt about a size holds the card** until a person touches that slot or
+  presses Checked (`uncertain_unchecked`); "Use as W · D · H · SH · Dia"
+  (`swapSlot`) points at any figure the read found, returning the previous
+  holder to a note in the same locked write.
+
+The golden lives OUTSIDE the repo (`~/dev/localstack/drawings-golden/`, real
+values), drafted by Claude from the rendered pages and checked by Max at the
+local review page (`~/dev/localstack/tools/golden-review/server.mjs`). On the
+local stack a read can be answered from a saved response
+(`src/lib/local-read-replay.ts`, `LOCAL_READ_REPLAY_DIR`, off unless
+LOCAL_STACK=1 and APP_ENV=development) — built when the API credit ran out,
+so screens are verified against reads already paid for.
+
 ### The model says which figure is the width; nothing sorts them by size
 
 `src/lib/extraction-schema.ts` (`DRAWINGS_TOOL`, `slotFromModel`, `RawCodeGroup`),
