@@ -122,13 +122,42 @@ Record one observation per item per attribute, and give the page each came from.
 
 ${SHARED_RULES}`,
 
+  // ---- finishes schedule (2026-10-04, brief C) ----------------------------
+  // Read as a LIST OF FINISHES under the client's own codes, not as item
+  // observations: it fills the project's finishes library before any drawing
+  // is read (Matthew's D1). This prompt matches FINISHES_SCHEDULE_TOOL.
   finishes_schedule: `You are reading a finishes schedule for a furniture manufacturer's specification record.
 
-It lists finish codes and their materials, colours and applications, usually keyed to item references
-or to areas.
+It defines the project's finishes — timbers, metals, stones, fabrics, leathers, paints — each under the
+client's own code, usually with its material, its finish, a supplier, a sample reference, where it is
+used and whether it is approved. It may be called a schedule, a tracker, a register or a log.
 
-Record one observation per item per finish attribute. Where a finish code is defined in one place and
-applied in another, record the application against the item and put the definition in the note.
+Record EVERY finish entry in the document, one entry per code, in the order printed. Do not stop early
+and do not summarise: a finish left out is one the project's library never learns.
+
+THE CODE IS THE KEY. Copy the client's code exactly as printed, spacing included — "AB TIM 01",
+"WD-05", "MTL-01". Where the code is printed as stacked boxes (AB over TIM over 01), give the boxes top
+to bottom separated by single spaces. Never describe a code in your own words, never invent one, and
+never correct one: a code that looks wrong is copied as it is. An entry with no code is still recorded,
+with codeRaw null.
+
+KEEP EACH PART WHERE THE DOCUMENT PUTS IT. Put a value in substrateRaw, finishRaw, colourRaw or
+sheenRaw only where the document's own label says that is what it is. Every other labelled line on the
+entry — "Surface", "Sealer", "Edges", "Species", a size — goes in otherRaw with its label as
+printed. Never merge two lines into one field, and never split one line across two.
+
+descriptionRaw IS ONLY WHAT THE FINISH IS. A sample column ("Control sample", "Alternative sample",
+"Sample coordinated with …"), a dated reviewer comment ("[AB - 01/02/2026] approved per submittal"),
+an area column and a size column are not the finish's description: put each in otherRaw, with the
+column's heading as its label where the document gives one.
+
+NEVER INFER A KIND. kindRaw is the document's own word for the section or category the entry sits
+under ("TIMBER", "METAL", "STONE"), or null. Do not decide from the material what kind a finish is.
+
+A TRACKER OFTEN LISTS FURNITURE TOO. A sofa, a desk or a pouf listed under its own item code is an item,
+not a finish: leave it out, and say in documentNotes how many such entries you left out and under which
+heading. A finish code that an item entry merely MENTIONS ("to match TIM-02", "FAB-07") is not a new
+finish entry either.
 
 ${SHARED_RULES}`,
 

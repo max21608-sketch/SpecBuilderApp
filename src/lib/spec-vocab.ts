@@ -151,7 +151,12 @@ export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
  * order of work, not an error, and re-resolving on read costs nothing whereas
  * re-extracting costs a model call.
  */
-export const REGISTER_FREE_DOCUMENT_KINDS: readonly DocumentKind[] = ["preamble", "shop_drawings"];
+//
+// A FINISHES SCHEDULE joined them on 2026-10-04: its entries become library
+// rows keyed on the client's code, and the verdict against the library (new,
+// held, conflict) is read at review time in `finish-schedule.ts`, because the
+// library moves between the paid read and the review.
+export const REGISTER_FREE_DOCUMENT_KINDS: readonly DocumentKind[] = ["preamble", "shop_drawings", "finishes_schedule"];
 
 export function isRegisterFreeKind(kind: DocumentKind): boolean {
   return REGISTER_FREE_DOCUMENT_KINDS.includes(kind);

@@ -1192,6 +1192,174 @@ export const PreambleOutput = z.object({
 export type PreambleOutput = z.infer<typeof PreambleOutput>;
 
 // ============================================================================
+// FINISHES SCHEDULE — a list of finishes, each under the client's own code.
+//
+// The finishes schedule used to share OBSERVATIONS, whose `RawProposal` has an
+// attribute and a value and NO field for a finish code — so the codes the
+// schedule exists to define could only be parsed back out of prose, which is
+// the inference house/conventions.md §6 puts on code's side of the line, and
+// nothing ever did it. Matthew's D1 (2026-10-01): the bill, then the finishes
+// schedule, then the drawings, so the drawings "hit all those" finishes.
+//
+// So this tool asks for ENTRIES, one per finish the document defines, every
+// field the document's own words or null. Nothing is composed here and nothing
+// is resolved: the library verdict (new / held / conflict / repeated) is read
+// against `project_finishes` at REVIEW time, in `finish-schedule.ts`, because
+// the library moves between the read and the review and the read is paid for.
+//
+// `kindRaw` is the document's own word for the section or the material
+// ("TIMBER", "STONE") — what the page printed, never the app's `FinishKind`.
+// A kind is SUGGESTED from it on screen and filed only by a person's click.
+// ============================================================================
+
+export const FINISHES_SCHEDULE_TOOL_NAME = "record_finish_entries";
+
+export const MAX_FINISH_ENTRIES = 600;
+/** Further labelled lines on ONE entry ("Sealer", "Edges"). */
+export const MAX_FINISH_OTHER_LINES = 30;
+
+const finishText = (description: string, max: number = MAX_SHORT) => ({
+  type: ["string", "null"],
+  maxLength: max,
+  description,
+});
+
+export const FINISHES_SCHEDULE_TOOL = {
+  name: FINISHES_SCHEDULE_TOOL_NAME,
+  description:
+    "Record every finish this schedule defines, one entry per finish code, each field in the document's own words or null.",
+  input_schema: {
+    type: "object" as const,
+    additionalProperties: false,
+    properties: {
+      entries: {
+        type: "array",
+        maxItems: MAX_FINISH_ENTRIES,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            codeRaw: finishText(
+              "The client's own code for this finish, EXACTLY as printed, spacing included ('AB TIM 01', 'WD-05', 'MTL-01'). Where the code is printed as stacked boxes, give the boxes top to bottom separated by single spaces. Null where the entry carries no code.",
+            ),
+            kindRaw: finishText(
+              "The document's own word for what kind of finish this is — its section heading or category column ('TIMBER', 'METAL', 'STONE', 'Fabric'). Null where the document does not say. Never your own classification.",
+            ),
+            nameRaw: finishText(
+              "The finish's name or material as the document gives it ('NATURAL OAK', 'BRUSHED BRASS', 'WHITE MARBLE').",
+            ),
+            descriptionRaw: finishText(
+              "Any further description of the finish the document gives, verbatim — a product line, a reference to another finish ('To match AB-TIM-01'). Null where there is none.",
+              MAX_VALUE,
+            ),
+            substrateRaw: finishText("The value the document labels as the substrate or base material. Null where no line is labelled so."),
+            finishRaw: finishText("The value the document labels 'Finish'. Null where no line is labelled so."),
+            colourRaw: finishText("The value the document labels as the colour or colour tone. Null where no line is labelled so."),
+            sheenRaw: finishText("The value the document labels as the sheen or gloss level. Null where no line is labelled so."),
+            supplierRaw: finishText("The supplier, manufacturer or contractor named for this finish, as written."),
+            referenceRaw: finishText(
+              "The supplier's own product or sample reference for this finish, as written ('QX-1234 NATURALE', 'SMP-0001').",
+            ),
+            appliesToRaw: finishText(
+              "Where or on what the document says this finish is used ('JOINERY', 'FLOOR AND WALL', 'BEDSIDE TABLE').",
+            ),
+            statusRaw: finishText("The document's own status or approval wording for this finish ('APPROVED', 'SAMPLE PENDING')."),
+            page: { type: ["integer", "null"], minimum: 1, description: "1-based page number the entry is printed on." },
+            otherRaw: {
+              type: "array",
+              maxItems: MAX_FINISH_OTHER_LINES,
+              description:
+                "Every further LABELLED line on the entry that none of the fields above holds ('Surface: Matte', 'Sealer: …', 'Edges: Eased', 'Species: Oak'), each with its label and value as printed.",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  labelRaw: finishText("The line's label as printed, without the colon."),
+                  valueRaw: finishText("The line's value as printed.", MAX_VALUE),
+                },
+                required: ["labelRaw", "valueRaw"],
+              },
+            },
+          },
+          required: [
+            "codeRaw",
+            "kindRaw",
+            "nameRaw",
+            "descriptionRaw",
+            "substrateRaw",
+            "finishRaw",
+            "colourRaw",
+            "sheenRaw",
+            "supplierRaw",
+            "referenceRaw",
+            "appliesToRaw",
+            "statusRaw",
+            "page",
+            "otherRaw",
+          ],
+        },
+      },
+      documentNotes: {
+        type: ["string", "null"],
+        maxLength: MAX_NOTE,
+        description:
+          "One note about the document as a whole: what else it lists that is not a finish and how many entries you left out for that reason, anything unreadable.",
+      },
+    },
+    required: ["entries", "documentNotes"],
+  },
+};
+
+export const RawFinishOtherLine = z.object({
+  labelRaw: nullableText(MAX_SHORT),
+  valueRaw: nullableText(MAX_VALUE),
+});
+
+export type RawFinishOtherLine = z.infer<typeof RawFinishOtherLine>;
+
+export const RawFinishEntry = z.object({
+  codeRaw: nullableText(MAX_SHORT),
+  kindRaw: nullableText(MAX_SHORT),
+  nameRaw: nullableText(MAX_SHORT),
+  descriptionRaw: nullableText(MAX_VALUE),
+  substrateRaw: nullableText(MAX_SHORT),
+  finishRaw: nullableText(MAX_SHORT),
+  colourRaw: nullableText(MAX_SHORT),
+  sheenRaw: nullableText(MAX_SHORT),
+  supplierRaw: nullableText(MAX_SHORT),
+  referenceRaw: nullableText(MAX_SHORT),
+  appliesToRaw: nullableText(MAX_SHORT),
+  statusRaw: nullableText(MAX_SHORT),
+  page: z.number().int().min(1).max(100_000).nullable().catch(null).default(null),
+  // A bare string is one UNLABELLED line, and a null line is dropped —
+  // `bareValuesAsList`, for the reason it exists: this is a hint inside a paid
+  // answer, and failing the read over it would charge again for one line.
+  otherRaw: z
+    .preprocess(
+      bareValuesAsList((scalar) => ({ labelRaw: null, valueRaw: scalar })),
+      z.array(RawFinishOtherLine).max(MAX_FINISH_OTHER_LINES),
+    )
+    .catch([])
+    .default([]),
+});
+
+export type RawFinishEntry = z.infer<typeof RawFinishEntry>;
+
+export const FinishesScheduleOutput = z.object({
+  // Required to be present, for the reason `proposals` is. A bare string is
+  // one entry carrying it as the DESCRIPTION with no code — which the review
+  // screen shows as "no code, nothing to file", a row nobody mistakes for a
+  // finish the library holds.
+  entries: z.preprocess(
+    bareValuesAsList((scalar) => ({ descriptionRaw: scalar })),
+    z.array(RawFinishEntry).max(MAX_FINISH_ENTRIES),
+  ),
+  documentNotes: nullableText(MAX_NOTE),
+});
+
+export type FinishesScheduleOutput = z.infer<typeof FinishesScheduleOutput>;
+
+// ============================================================================
 // ONE TOOL PER DOCUMENT KIND
 //
 // Keyed on DocumentKind so adding a kind to the vocabulary fails the typecheck
@@ -1205,7 +1373,8 @@ import type { DocumentKind } from "@/lib/spec-vocab";
 export type ExtractionToolSpec =
   | { outputKind: "observations"; tool: typeof SPEC_DOCUMENT_TOOL | typeof EMAIL_TOOL; schema: typeof ExtractionOutput }
   | { outputKind: "drawing_items"; tool: typeof DRAWINGS_TOOL; schema: typeof DrawingsOutput }
-  | { outputKind: "preamble_notes"; tool: typeof PREAMBLE_TOOL; schema: typeof PreambleOutput };
+  | { outputKind: "preamble_notes"; tool: typeof PREAMBLE_TOOL; schema: typeof PreambleOutput }
+  | { outputKind: "finish_entries"; tool: typeof FINISHES_SCHEDULE_TOOL; schema: typeof FinishesScheduleOutput };
 
 const OBSERVATIONS: ExtractionToolSpec = {
   outputKind: "observations",
@@ -1216,7 +1385,9 @@ const OBSERVATIONS: ExtractionToolSpec = {
 export const TOOLS: Record<DocumentKind, ExtractionToolSpec> = {
   ffe_schedule: OBSERVATIONS,
   spec_bible: OBSERVATIONS,
-  finishes_schedule: OBSERVATIONS,
+  // Its own shape since 2026-10-04 (schemaVersion 2 staging). A run read
+  // before that is still staged as observations and keeps its old screen.
+  finishes_schedule: { outputKind: "finish_entries", tool: FINISHES_SCHEDULE_TOOL, schema: FinishesScheduleOutput },
   fabric_schedule: OBSERVATIONS,
   other: OBSERVATIONS,
   email: { outputKind: "observations", tool: EMAIL_TOOL, schema: ExtractionOutput },
@@ -1228,4 +1399,5 @@ export const TOOLS: Record<DocumentKind, ExtractionToolSpec> = {
 export type ExtractionPayload =
   | { outputKind: "observations"; data: ExtractionOutput }
   | { outputKind: "drawing_items"; data: DrawingsOutput }
-  | { outputKind: "preamble_notes"; data: PreambleOutput };
+  | { outputKind: "preamble_notes"; data: PreambleOutput }
+  | { outputKind: "finish_entries"; data: FinishesScheduleOutput };

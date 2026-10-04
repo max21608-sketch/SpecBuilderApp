@@ -5,10 +5,13 @@
 //
 // The order is not cosmetic. The preamble gives the conditions the whole
 // package is built under; the bill of quantities creates the records; the
-// drawings attach specs to those records. A drawing extracted before its bill
-// is confirmed is FINE — its targets resolve at review time, not at extraction
-// — and this screen says so rather than blocking the button, because the post
-// does not always arrive in the right order.
+// finishes schedule sets out the project's finishes library (Matthew's D1,
+// 2026-10-01); the drawings attach specs to those records and land on finishes
+// the library already describes. A drawing extracted before its bill is
+// confirmed is FINE — its targets resolve at review time, not at extraction —
+// and this screen says so rather than blocking the button, because the post
+// does not always arrive in the right order. A pack with no finishes schedule
+// is normal, and blocks nothing either.
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
@@ -264,10 +267,11 @@ export default function IntakeBatchPage({
   const runs = batch?.runs ?? [];
   const drawingRuns = runs.filter((run) => run.documentKind === "shop_drawings");
 
-  /** The three stages, in reading order. A stage with no document says so. */
+  /** The four stages, in reading order. A stage with no document says so. */
   const packSteps = {
     preamble: runs.filter((run) => run.documentKind === "preamble"),
     bill: runs.filter((run) => run.sourceKind === "boq_xlsx"),
+    finishes: runs.filter((run) => run.documentKind === "finishes_schedule"),
   };
 
   // What the pack is waiting on, counted ONCE, by `packTally` — the same
@@ -288,14 +292,20 @@ export default function IntakeBatchPage({
   const stepDone = {
     preamble: packSteps.preamble.length > 0,
     bill: packSteps.bill.length > 0 && packSteps.bill.every(isReviewComplete),
+    finishes: packSteps.finishes.length > 0 && packSteps.finishes.every(isReviewComplete),
     drawings: drawingRuns.length > 0 && drawingRuns.every(isReviewComplete),
   };
   // The stage the pack is on: the first that has documents and is not finished.
+  // An absent schedule is never current, so a pack without one points from the
+  // bill straight at the drawings.
   const currentStep = !stepDone.bill && packSteps.bill.length > 0
     ? "bill"
-    : !stepDone.drawings && drawingRuns.length > 0
-      ? "drawings"
-      : null;
+    : !stepDone.finishes && packSteps.finishes.length > 0
+      ? "finishes"
+      : !stepDone.drawings && drawingRuns.length > 0
+        ? "drawings"
+        : null;
+  const finishesState = packTally(packSteps.finishes);
 
   const drawingsHref = `/dashboard/projects/${projectId}/intake/${batchId}/drawings`;
   const shown = showAll ? runs : runs.slice(0, SHOWN_BEFORE_FOLD);
@@ -404,12 +414,12 @@ export default function IntakeBatchPage({
         {/* THE ORDER THESE ARE READ IN, AS THE PAGE ITSELF.
             ==================================================================
             The order is not cosmetic: the preamble gives the conditions the
-            whole package is built under, the bill CREATES the records, and the
-            drawings attach specs to those records. It was a paragraph above a
-            flat list, which is where a sentence about sequence goes to be
-            skimmed.
+            whole package is built under, the bill CREATES the records, the
+            finishes schedule sets the library out, and the drawings attach
+            specs to those records. It was a paragraph above a flat list, which
+            is where a sentence about sequence goes to be skimmed.
 
-            As three steps it also makes an ABSENT preamble visible. The Panther
+            As steps it also makes an ABSENT preamble (or schedule) visible. The Panther
             pack has none — it was not in the curated folder on 15 Sept — and a
             flat list of eleven files cannot say that a twelfth is missing. */}
         <Card
@@ -419,7 +429,8 @@ export default function IntakeBatchPage({
               The order these are read in
               <Tip>
                 A drawing extracted before its bill is confirmed is fine — its targets resolve at review time, not
-                at extraction.
+                at extraction. A finishes schedule is read before the drawings so they land on finishes already
+                described; a pack without one is normal.
               </Tip>
             </>
           }
@@ -473,9 +484,29 @@ export default function IntakeBatchPage({
             )}
           </Step>
           <Step
+            done={stepDone.finishes}
+            current={currentStep === "finishes"}
+            n={3}
+            title="The finishes schedule"
+            meaning="sets out the project's finishes library, code by code"
+          >
+            {packSteps.finishes.length === 0 ? (
+              <span className="text-neutral-500">
+                Not in this pack. Nothing is blocked without one — a drawing&rsquo;s finish codes go into the library
+                as it is confirmed.
+              </span>
+            ) : (
+              <>
+                {packSteps.finishes.map((run) => run.filename ?? "Unnamed file").join(", ")} ·{" "}
+                {finishesState.reviewed} reviewed, {finishesState.toReview} waiting for you
+                {finishesState.reading > 0 && <>, {finishesState.reading} still reading</>}
+              </>
+            )}
+          </Step>
+          <Step
             done={stepDone.drawings}
             current={currentStep === "drawings"}
-            n={3}
+            n={4}
             title="The drawings"
             meaning="attach specs to those records"
             last
@@ -501,6 +532,15 @@ export default function IntakeBatchPage({
                 {drawingRuns.length} document{drawingRuns.length === 1 ? "" : "s"} · {drawingState.reviewed} reviewed,{" "}
                 {drawingState.toReview} waiting for you
                 {drawingState.reading > 0 && <>, {drawingState.reading} still reading</>}
+                {/* SAID, NEVER BLOCKING: a pack without a schedule is normal.
+                    What changes is only where the library's descriptions come
+                    from — the drawings' own words, one code at a time. */}
+                {packSteps.finishes.length === 0 && (
+                  <span className="mt-0.5 block text-neutral-500">
+                    No finishes schedule in this pack, so each finish code a drawing carries is filed with that
+                    drawing&rsquo;s words. Nothing waits for one.
+                  </span>
+                )}
               </>
             )}
           </Step>

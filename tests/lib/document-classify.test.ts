@@ -14,6 +14,8 @@ import {
   DOCUMENT_GENRES,
   KIND_FROM_GENRE,
   fileDocument,
+  CLASSIFY_PROMPT,
+  CLASSIFY_TOOL,
   type DocumentGenre,
 } from "@/lib/document-classify";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
@@ -71,7 +73,7 @@ describe("what comes back from the model", () => {
     // `.catch` on a controlled vocabulary has to land on the answer that asks a
     // person. Landing on `bill_of_quantities` would stage a project's worth of
     // wrong records from a value nobody typed.
-    expect(ClassifyOutput.parse({ genre: "a new genre", titleText: null, evidence: "", certain: true }).genre).toBe(
+    expect(ClassifyOutput.parse({ genre: "a new genre", certain: true }).genre).toBe(
       "unclear",
     );
   });
@@ -204,5 +206,34 @@ describe("a PDF with no text layer", () => {
     expect(SCANNED_PDF).not.toBe(BOQ_AS_PDF);
     expect(fileDocument({ genre: "unclear", certain: false }, "pdf").unsupported).toBeNull();
     expect(scannedPdfRefusal("pdf", true)).toBeNull();
+  });
+});
+
+// ============================================================================
+// A FINISHES SCHEDULE IS JUDGED BY ITS CONTENT (brief C, 2026-10-04).
+//
+// The real one in the Aman pack is called a "tracker" and its filename says
+// nothing about finishes; nobody opened it in the meeting for that reason. The
+// classify answer has to come from the page, and an unsure answer still fills
+// nothing in.
+// ============================================================================
+describe("a tracker listing finish codes", () => {
+  it("is named a finishes schedule in the genre's own description, whatever its filename", () => {
+    const genre = (CLASSIFY_TOOL.input_schema.properties.genre as { description: string }).description;
+    const line = genre.split("\n").find((text) => text.startsWith("- finishes_schedule"));
+    expect(line).toMatch(/tracker, register or log/);
+    expect(line).toMatch(/whatever its filename says/);
+  });
+
+  it("is said in the prompt, by content rather than by name", () => {
+    expect(CLASSIFY_PROMPT).toMatch(/FINISHES SCHEDULE whatever it is called/);
+    expect(CLASSIFY_PROMPT).toMatch(/by its content, not its filename/);
+  });
+
+  it("still fills nothing in when the model is unsure", () => {
+    const filed = fileDocument({ genre: "finishes_schedule", certain: false }, "pdf");
+    expect(filed.decision).toBeNull();
+    const sure = fileDocument({ genre: "finishes_schedule", certain: true }, "pdf");
+    expect(sure.decision).toEqual({ importType: "spec_document", documentKind: "finishes_schedule" });
   });
 });
