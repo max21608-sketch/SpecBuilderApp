@@ -419,6 +419,53 @@ zero or each one is explained.
 - Golden harness numbers before and after each gate.
 - Browser walk of the Aman pack on the local stack.
 
+## Added by Max, 2026-10-04 (after the go)
+
+1. **Assign items to a mock-up phase without taking them off the main one.**
+   - The Aman bill has no MUR (mock-up room) lines. Every MUR drawing's code
+     matches both a GR line (Guest Suites) and a PL line (Ambassador and
+     Presidential Suites).
+   - The MUR drawings can also be a different design: the mock-up dresser stool
+     has a handle and stands 1'-8 1/2"; the PL one has none and stands 1'-3".
+   - So: on the phase table, select records → **"Also in a mock-up phase"**.
+     - It creates the mock-up phase if there is none (a `spec_runs` row flagged
+       `is_mockup`, migration 0043).
+     - It adds a record there per selection, carrying the bill line's identity
+       (client refs, description, category, level). Quantity is left blank and
+       "not given", never 1. No specs are copied: the mock-up item gets its own
+       from the MUR drawings, which may differ.
+   - Resolution: a drawing whose number or title marks it as mock-up (a `MUR`
+     segment in the drawing number, or "MOCKUP ROOM" in the title block, read
+     by the model) resolves ONLY among records on a mock-up phase. Ambiguity
+     there is asked as now. A non-mock-up drawing never lands on a mock-up
+     phase by this rule; it fans out by the existing per-phase rule.
+   - Phase 3b, after Phase 3.
+2. **Rules for the golden and the prompt:**
+   - seat height = overall height where you sit on the top (bench, stool,
+     ottoman);
+   - a bedframe's height excludes the headboard;
+   - S-400 corrected to W570 D460 H493 (and the `CLAUDE.md` line that says
+     otherwise).
+3. **A detailed specification sheet is the first port of call, and EVERYTHING
+   on it is taken in.** "That information may not present itself again."
+   - When a spec sheet's labelled table and a shop drawing in the same document
+     disagree, the spec sheet fills the slot and the drawing's figure is kept
+     as a candidate.
+   - The v4 read gains `statements[]`: every labelled line of a specification
+     table (label, value, page, configurations) not already captured as a size
+     or a finish. They are kept as `record_attributes` notes, requirement-free,
+     which is what attributes were made for.
+   - The item's picture AND each finish's swatch are proposed as crops
+     (`pictures`, and a `swatch` box per finish). Swatches reach the finishes
+     library through the existing swatch path at confirm.
+4. **The finishes library comes before the drawings.** After the line items,
+   the next stage is the fabric and finishes library, sorted. Phase 4 runs
+   straight after Phase 1. In it the finishes library is filled from:
+   - the finishes schedule (the Aman "OMS and FF&E Tracker");
+   - the finishes stated on specification sheets.
+
+   The drawings then land on finishes already described.
+
 ## Decided with Max, 2026-10-04
 
 1. **Golden**: Claude drafts each entry from the rendered page, marked
