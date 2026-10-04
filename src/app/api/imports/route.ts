@@ -73,6 +73,7 @@
 // not be tested end to end without a tunnel.
 import { z } from "zod";
 import { readSpreadsheetSheets, pdfHasTextLayer } from "@/lib/intake-source";
+import { stageBillRowImages } from "@/lib/bill-images";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind, outlookMsgAdvice, spreadsheetRefusal } from "@/lib/intake-source-types";
@@ -521,6 +522,16 @@ async function parseBoqInto(
     const skippedRows = parsed.sheets.reduce((total, sheet) => total + sheet.skippedRows, 0);
     const needsColumns = stagedSheets.filter((sheet) => sheet.needsColumns && !sheet.ignored).length;
 
+    // THE PICTURES ON ITS ROWS, read and stored now so the review can show
+    // each line's and the confirm can give a record with none this one
+    // (`bill-images.ts`). Only from a workbook whose original is KEPT — a bill
+    // posted straight here has no stored source for a picture to sit beside —
+    // and never at the cost of the bill: a failure is a sentence, not a refusal.
+    const pictures =
+      sourcePreserved && intakeSourceKind(filename, options.contentType ?? "") === "xlsx"
+        ? await stageBillRowImages(bytes, { projectId, runId })
+        : null;
+
     await sql`
       update intake_runs
       set status = 'parsed',
@@ -529,6 +540,7 @@ async function parseBoqInto(
             filename,
             sourcePreserved,
             sheets: stagedSheets,
+            ...(pictures ? { rowImages: pictures.rowImages, rowImagesNote: pictures.rowImagesNote } : {}),
           })}::jsonb,
           updated_by = ${actor}
       where id = ${runId}

@@ -59,6 +59,7 @@
 import type { SheetData } from "read-excel-file/node";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
+import type { BoqRowImages } from "@/lib/bill-row-image";
 import {
   foldHeading,
   type BoqColumnRef,
@@ -308,6 +309,16 @@ export type BoqDocument = {
   filename: string | null;
   sourcePreserved: boolean;
   sheets: StagedBoqSheet[];
+  /**
+   * The pictures the workbook prints on its rows, by sheet name and row
+   * (`bill-images.ts`), stored at registration. On the DOCUMENT rather than on
+   * each staged line, so re-staging a sheet's lines keeps them. OPTIONAL:
+   * absent on a csv, on a bill posted without keeping its file, and on every
+   * bill staged before 2026-10-04.
+   */
+  rowImages?: BoqRowImages;
+  /** Why the workbook's pictures could not be read or stored, where they could not. */
+  rowImagesNote?: string | null;
 };
 
 /**

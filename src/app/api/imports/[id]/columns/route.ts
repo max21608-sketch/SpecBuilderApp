@@ -217,11 +217,15 @@ async function readAgain(run: BoqRunRow, expectedVersion: number, actor: string)
     }
     const suggest = await loadLineSuggester(txn);
     const sheets = parsed.sheets.map((sheet) => stageSheet(sheet, suggest));
+    // The pictures stored at registration are keyed by sheet and ROW, and a
+    // re-read moves no row, so they carry over rather than being read again.
+    const previous = (run.parsed ?? null) as Partial<BoqDocument> | null;
     const doc: BoqDocument = {
       schemaVersion: BOQ_SCHEMA_VERSION,
       filename: run.filename,
       sourcePreserved: true,
       sheets,
+      ...(previous?.rowImages ? { rowImages: previous.rowImages, rowImagesNote: previous.rowImagesNote ?? null } : {}),
     };
     return writeStagedBoq(txn, run, expectedVersion, doc, actor, { fromFailed: true });
   });
