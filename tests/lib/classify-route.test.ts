@@ -34,6 +34,9 @@ vi.mock("@anthropic-ai/sdk", async (importOriginal) => {
     constructor(options: ConstructorParameters<typeof Real>[0]) {
       super(options);
       (this as unknown as { messages: unknown }).messages = { create };
+      // The large-PDF look runs on Opus 5.5, whose structured-output request
+      // carries the refusal fallback: a beta, so the beta endpoint.
+      (this as unknown as { beta: unknown }).beta = { messages: { create } };
     }
   }
   return { ...actual, default: Stubbed };
@@ -174,16 +177,23 @@ describe("which model looks", () => {
 
   it("uses the reading model for a PDF over the fast model's page ceiling, counted off the bytes", async () => {
     stored.bytes = buildPdfOfPages(101);
-    answers({ genre: "shop_drawings", titleText: null, evidence: "x", certain: true });
+    // Opus 5.5 answers in the text, as structured output.
+    create.mockResolvedValue({
+      content: [{ type: "text", text: JSON.stringify({ genre: "shop_drawings", titleText: null, evidence: "x", certain: true }) }],
+      stop_reason: "end_turn",
+    });
     const { body } = await classify();
     const { EXTRACTION_MODEL } = await import("@/lib/anthropic");
     const params = create.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(params.model).toBe(EXTRACTION_MODEL);
-    // The forced tool is kept, at low effort, with the extraction call's
-    // thinking shape.
-    expect(params.tool_choice).toEqual({ type: "tool", name: "record_document_kind" });
-    expect(params.output_config).toEqual({ effort: "low" });
+    // No forced tool on Opus 5.5: the answer is asked for as structured output,
+    // at low effort, with the refusal fallback on.
+    expect(params).not.toHaveProperty("tool_choice");
+    expect(params.output_config).toMatchObject({ effort: "low", format: { type: "json_schema" } });
+    expect(params.fallbacks).toBe("default");
+    expect(params.betas).toEqual(["server-side-fallback-2026-07-01"]);
     expect(body.largeDocument).toBe(true);
+    expect(body).toMatchObject({ ok: true, decision: { importType: "spec_document", documentKind: "shop_drawings" } });
   });
 
   it("takes the browser's count where the server cannot read the page tree", async () => {

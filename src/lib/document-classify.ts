@@ -34,6 +34,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { DocumentSource } from "@/lib/intake-source";
 import { EXTRACTION_MODEL } from "@/lib/anthropic";
+import { answerRequest, readAnswer } from "@/lib/model-request";
 import type { ClassifyFailureCode } from "@/lib/classify-failure";
 import { CLASSIFY_MODEL_MAX_PDF_PAGES } from "@/lib/upload-limits";
 import { DOCUMENT_GENRES, KIND_FROM_GENRE, type DocumentGenre, type KindDecision } from "@/lib/document-kinds";
@@ -95,7 +96,7 @@ const MAX_EVIDENCE = 400;
 
 export const CLASSIFY_TOOL_NAME = "record_document_kind";
 
-const CLASSIFY_TOOL = {
+export const CLASSIFY_TOOL = {
   name: CLASSIFY_TOOL_NAME,
   description: "Say what kind of document this is, and what on it tells you.",
   input_schema: {
@@ -383,48 +384,50 @@ export async function classifyDocument(
   const deadline = AbortSignal.timeout(large ? LARGE_CLASSIFY_DEADLINE_MS : CLASSIFY_DEADLINE_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
 
-  let message;
+  let message: { content: unknown[] };
   try {
-    message = await anthropic.messages.create(
-      large
-        ? {
-            // THE READING MODEL, for a PDF the fast one cannot take. The same
-            // forced tool — Opus 5 accepts a forced `tool_choice`, which is why
-            // it is the extraction model (anthropic.ts) — and the extraction
-            // call's own thinking shape, at LOW effort: this answers one
-            // question off a cover page, and a high-effort look would cost
-            // about as much as the read it only decides the prompt for.
-            model,
-            max_tokens: LARGE_MAX_TOKENS,
-            thinking: { type: "adaptive" },
-            output_config: { effort: "low" },
-            tool_choice: { type: "tool", name: CLASSIFY_TOOL_NAME },
-            tools: [CLASSIFY_TOOL],
-            messages: [{ role: "user", content }],
-          }
-        : {
-            model,
-            max_tokens: MAX_TOKENS,
-            tool_choice: { type: "tool", name: CLASSIFY_TOOL_NAME },
-            tools: [CLASSIFY_TOOL],
-            messages: [{ role: "user", content }],
-          },
-      { signal },
-    );
+    if (large) {
+      // THE READING MODEL, for a PDF the fast one cannot take, at LOW effort:
+      // this answers one question off a cover page, and a high-effort look
+      // would cost about as much as the read it only decides the prompt for.
+      // How the answer is asked for — a forced tool, or structured output with
+      // the refusal fallback on a model that refuses one (Opus 5.5) — is
+      // model-request.ts's, the rule every extraction-model read follows.
+      const request = answerRequest({ model, tool: CLASSIFY_TOOL, effort: "low", thinking: true });
+      const body = { model, max_tokens: LARGE_MAX_TOKENS, ...request.body, messages: [{ role: "user", content }] };
+      // The SDK's types predate `fallbacks: "default"`; the body is cast once.
+      message = (
+        request.mode === "structured"
+          ? await anthropic.beta.messages.create(
+              { ...body, betas: request.betas } as unknown as Parameters<typeof anthropic.beta.messages.create>[0],
+              { signal },
+            )
+          : await anthropic.messages.create(body as unknown as Parameters<typeof anthropic.messages.create>[0], { signal })
+      ) as unknown as { content: unknown[] };
+    } else {
+      // The fast model keeps its forced tool: Haiku 4.5 accepts one.
+      message = await anthropic.messages.create(
+        {
+          model,
+          max_tokens: MAX_TOKENS,
+          tool_choice: { type: "tool", name: CLASSIFY_TOOL_NAME },
+          tools: [CLASSIFY_TOOL],
+          messages: [{ role: "user", content }],
+        },
+        { signal },
+      );
+    }
   } catch (cause) {
     return classifyFailureOf(cause, model, deadline.aborted);
   }
 
   // The model ANSWERED from here on, so every failure below was charged.
-  const toolUse = message.content.find(
-    (block): block is Extract<typeof block, { type: "tool_use" }> =>
-      block.type === "tool_use" && block.name === CLASSIFY_TOOL_NAME,
-  );
-  if (!toolUse) {
+  const answer = readAnswer(message, CLASSIFY_TOOL_NAME);
+  if (!answer.ok) {
     return { ok: false, code: "failed", error: "The model did not say what the document is.", charged: true, model };
   }
 
-  const parsed = ClassifyOutput.safeParse(toolUse.input);
+  const parsed = ClassifyOutput.safeParse(answer.value);
   if (!parsed.success) {
     return { ok: false, code: "failed", error: "The model's answer did not match the expected shape.", charged: true, model };
   }
