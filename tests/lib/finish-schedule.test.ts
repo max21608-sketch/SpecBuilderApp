@@ -14,6 +14,7 @@ import {
 import { PROMPTS } from "@/lib/anthropic";
 import { isRegisterFreeKind } from "@/lib/spec-vocab";
 import {
+  addsDetail,
   assertStagedFinishSchedule,
   composeScheduleFinish,
   isStagedFinishSchedule,
@@ -328,5 +329,42 @@ describe("the verdict per entry, against the library", () => {
       status: "fills",
       fills: ["description", "notes", "kind"],
     });
+  });
+});
+
+// ============================================================================
+// AGREES AND ADDS DETAIL (orchestrator, 2026-10-04, on the real pack): a bill
+// wrote the metal's name and the schedule wrote the name AND its finish, and
+// the review called that a conflict. Max: a detailed source is taken in whole.
+// Only over a TBC row, and only by case and whitespace.
+// ============================================================================
+describe("a held TBC description the schedule says more about", () => {
+  const schedule = stage([
+    raw({ codeRaw: "AB MTL 01", nameRaw: "BRUSHED  BRASS", finishRaw: "Antique" }),
+    raw({ codeRaw: "AB MTL 02", nameRaw: "BRONZE", finishRaw: "Oil rubbed" }),
+    raw({ codeRaw: "AB MTL 03", nameRaw: "BRUSHED BRASS", finishRaw: "Antique" }),
+  ]);
+
+  it("is 'agrees and adds detail' where the TBC row's words sit whole inside the schedule's", () => {
+    const [row] = reviewFinishSchedule(schedule, [held("AB-MTL-01", { description: "Brushed brass" })]);
+    expect(row!.verdict).toMatchObject({ status: "enriches", saysInstead: "BRUSHED BRASS; Finish: Antique" });
+    expect(verdictIsSkipped(row!.verdict!)).toBe(false);
+  });
+
+  it("stays a CONFLICT over a confirmed row, however much it agrees", () => {
+    const rows = reviewFinishSchedule(schedule, [
+      held("AB-MTL-02", { description: "Bronze", state: "confirmed" }),
+    ]);
+    expect(rows[1]!.verdict).toMatchObject({ status: "conflict" });
+  });
+
+  it("folds case and whitespace and NOTHING else", () => {
+    expect(addsDetail({ state: "tbc", description: "brushed   BRASS" }, "Brushed brass; Finish: Antique")).toBe(true);
+    // A hyphen is not whitespace, and a word missing is not a word present.
+    expect(addsDetail({ state: "tbc", description: "brushed-brass" }, "Brushed brass; Finish: Antique")).toBe(false);
+    expect(addsDetail({ state: "tbc", description: "Satin brass" }, "Brushed brass; Finish: Antique")).toBe(false);
+    expect(addsDetail({ state: "tbc", description: null }, "Brushed brass")).toBe(false);
+    const rows = reviewFinishSchedule(schedule, [held("AB-MTL-03", { description: "Satin brass" })]);
+    expect(rows[2]!.verdict).toMatchObject({ status: "conflict" });
   });
 });

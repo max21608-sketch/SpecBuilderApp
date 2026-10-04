@@ -45,21 +45,30 @@ const ENTRIES = [
   entry({ codeRaw: null, nameRaw: "Uncoded sample", page: 3 }),
 ];
 
+/** A held TBC name the schedule says more about, and a CONFIRMED one it differs from. */
+const DETAIL_ENTRIES = [
+  entry({ codeRaw: "QA MTL 01", nameRaw: "ANTIQUE BRASS", finishRaw: "Antique", page: 4 }),
+  entry({ codeRaw: "QA MTL 02", nameRaw: "OIL RUBBED BRONZE", finishRaw: "Oil rubbed", page: 4 }),
+];
+
 describeIfDb("a finishes schedule confirmed into the library", () => {
   const client = new pg.Client({ connectionString: databaseUrl });
   let projectId = "";
   let attachmentId = "";
 
-  const addFinish = (code: string, fields: { description?: string | null; supplier?: string | null }) =>
+  const addFinish = (
+    code: string,
+    fields: { description?: string | null; supplier?: string | null; state?: "tbc" | "confirmed" },
+  ) =>
     client.query(
       `insert into project_finishes (project_id, code, code_norm, description, supplier_raw, state, status, created_by, updated_by)
-       values ($1, $2, $3, $4, $5, 'tbc', 'active', 'qa', 'qa') returning id`,
-      [projectId, code, normaliseFinishCode(code), fields.description ?? null, fields.supplier ?? null],
+       values ($1, $2, $3, $4, $5, $6, 'active', 'qa', 'qa') returning id`,
+      [projectId, code, normaliseFinishCode(code), fields.description ?? null, fields.supplier ?? null, fields.state ?? "tbc"],
     );
 
-  async function stageRun(): Promise<{ runId: string; staged: StagedFinishSchedule }> {
+  async function stageRun(entries = ENTRIES): Promise<{ runId: string; staged: StagedFinishSchedule }> {
     let n = 0;
-    const staged = stageFinishSchedule(ENTRIES, FILENAME, null, () => `qa-entry-${(n += 1)}`);
+    const staged = stageFinishSchedule(entries, FILENAME, null, () => `qa-entry-${(n += 1)}`);
     const run = await client.query(
       `insert into intake_runs (project_id, source_kind, document_kind, status, parsed, attachment_id, created_by, updated_by)
        values ($1, 'spec_document', 'finishes_schedule', 'parsed', $2::jsonb, $3, 'qa', 'qa') returning id`,
@@ -210,7 +219,7 @@ describeIfDb("a finishes schedule confirmed into the library", () => {
     });
     // The conflict wrote nothing.
     expect(byCode.get("QA-STN-01")).toMatchObject({ description: "Grey limestone", version: 1 });
-    expect(rows).toHaveLength(3);
+    expect(rows.filter((row) => String(row.code).startsWith("QA-TIM") || String(row.code).startsWith("QA-STN"))).toHaveLength(3);
 
     // The conflict, the repeat and the uncoded entry wait for a person.
     const afterFirst = await stagedOf(runId);
@@ -259,6 +268,38 @@ describeIfDb("a finishes schedule confirmed into the library", () => {
     for (const row of await library()) expect(Number(row.version)).toBe(versions.get(String(row.code)));
     const closed = await stagedOf(second.runId);
     expect(closed.parsed.entries.slice(0, 2).map((row) => row.applied?.outcome)).toEqual(["unchanged", "unchanged"]);
+  });
+
+  it("REPLACES a held TBC description the schedule says more about, and leaves a confirmed one a conflict", async () => {
+    await addFinish("QA-MTL-01", { description: "Antique  brass", supplier: "Held supplier" });
+    await addFinish("QA-MTL-02", { description: "Bronze", state: "confirmed" });
+    const { runId, staged } = await stageRun(DETAIL_ENTRIES);
+    const got = await (await importGet(new Request("http://localhost/test"), params(runId))).json();
+    expect(got.review.map((row: { verdict: { status: string } | null }) => row.verdict?.status)).toEqual([
+      "enriches",
+      "conflict",
+    ]);
+
+    const before = (await changeSets()).length;
+    const response = await post(runId, {
+      action: "confirm",
+      entries: staged.entries.map((row) => ({ id: row.id, version: 1 })),
+    });
+    const result = await response.json();
+    expect(result).toMatchObject({ ok: true, created: 0, filled: 0, enriched: 1 });
+    expect(result.skipped.map((row: { entryId: string }) => row.entryId)).toEqual([staged.entries[1]!.id]);
+    // One change set for it, under the same rule as every other write here.
+    const after = await changeSets();
+    expect(after).toHaveLength(before + 1);
+    expect(after[after.length - 1]).toMatchObject({ kind: "finish_edit", source_intake_run_id: runId });
+
+    const byCode = new Map((await library()).map((row) => [String(row.code), row]));
+    expect(byCode.get("QA-MTL-01")).toMatchObject({
+      description: "ANTIQUE BRASS; Finish: Antique",
+      supplier_raw: "Held supplier",
+      state: "tbc",
+    });
+    expect(byCode.get("QA-MTL-02")).toMatchObject({ description: "Bronze", state: "confirmed", version: 1 });
   });
 
   it("refuses a confirm sent over a version the reviewer did not see", async () => {

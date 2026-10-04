@@ -69,6 +69,8 @@ export type EntryRef = { id: string; version: number };
 export type FinishScheduleConfirmResult = {
   created: number;
   filled: number;
+  /** Held TBC rows whose description the schedule's fuller one replaced. */
+  enriched: number;
   unchanged: number;
   ignored: number;
   restored: number;
@@ -206,6 +208,7 @@ export async function confirmFinishScheduleEntries(
 
   const toCreate: { entry: FinishScheduleEntry; code: string }[] = [];
   const toFill: { entry: FinishScheduleEntry; finish: LibraryFinish }[] = [];
+  const toEnrich: { entry: FinishScheduleEntry; finish: LibraryFinish }[] = [];
   const unchanged: FinishScheduleEntry[] = [];
   const skipped: FinishScheduleConfirmResult["skipped"] = [];
 
@@ -219,6 +222,8 @@ export async function confirmFinishScheduleEntries(
       toCreate.push({ entry, code: verdict.code });
     } else if (verdict.status === "fills") {
       toFill.push({ entry, finish: verdict.finish });
+    } else if (verdict.status === "enriches") {
+      toEnrich.push({ entry, finish: verdict.finish });
     } else if (verdict.status === "agrees") {
       unchanged.push(entry);
     }
@@ -228,10 +233,11 @@ export async function confirmFinishScheduleEntries(
   let changeSetId: string | null = null;
   const applied = new Map<string, NonNullable<FinishScheduleEntry["applied"]>>();
 
-  if (toCreate.length + toFill.length > 0) {
+  if (toCreate.length + toFill.length + toEnrich.length > 0) {
     const parts = [
       toCreate.length > 0 ? `${toCreate.length} added` : null,
       toFill.length > 0 ? `${toFill.length} filled in` : null,
+      toEnrich.length > 0 ? `${toEnrich.length} given the schedule's fuller description` : null,
     ].filter(Boolean);
     const reason = `Finishes library from ${filename}: ${parts.join(", ")}.`;
     changeSetId = await openChangeSet(txn, {
@@ -291,6 +297,35 @@ export async function confirmFinishScheduleEntries(
       });
       applied.set(entry.id, { outcome: "filled", finishId: finish.id });
     }
+
+    // AGREES AND ADDS DETAIL: the held TBC description is contained in the
+    // schedule's, so the schedule's REPLACES it. Every other field is still
+    // only filled where empty, and every field is sent (`editFinish` replaces
+    // the row). The verdict was recomputed above from the live row, so a row
+    // somebody confirmed since the screen loaded is a conflict by now.
+    for (const { entry, finish } of toEnrich) {
+      const composed = review.get(entry.id)!.composed;
+      const keep = (held: string | null, ours: string | null) => (held?.trim() ? held : ours);
+      await editFinish(txn, {
+        projectId: run.projectId,
+        finishId: finish.id,
+        expectedVersion: finish.version,
+        fields: {
+          code: finish.code,
+          kind: finish.kind ?? (entry.kind as FinishKind | null),
+          description: composed.description,
+          supplierRaw: keep(finish.supplierRaw, composed.supplierRaw),
+          reference: keep(finish.reference, composed.reference),
+          colour: finish.colour,
+          notes: keep(finish.notes, composed.notes),
+          state: finish.state,
+        },
+        reason,
+        actor,
+        changeSetId,
+      });
+      applied.set(entry.id, { outcome: "enriched", finishId: finish.id });
+    }
   }
 
   for (const entry of unchanged) {
@@ -307,6 +342,7 @@ export async function confirmFinishScheduleEntries(
     return {
       created: 0,
       filled: 0,
+      enriched: 0,
       unchanged: 0,
       ignored: 0,
       restored: 0,
@@ -335,15 +371,17 @@ export async function confirmFinishScheduleEntries(
   const status = await writeStaged(txn, run, actor, entries);
   const created = toCreate.length;
   const filled = toFill.length;
+  const enriched = toEnrich.length;
   await txn`
     insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
     values ('intake_run', ${runId}, 'parsed', ${status}, ${actor},
-            ${`Finishes schedule: ${created} added to the library, ${filled} filled in, ${unchanged.length} already held`})
+            ${`Finishes schedule: ${created} added to the library, ${filled} filled in, ${enriched} given more detail, ${unchanged.length} already held`})
   `;
 
   return {
     created,
     filled,
+    enriched,
     unchanged: unchanged.length,
     ignored: 0,
     restored: 0,
@@ -385,6 +423,7 @@ export async function reviewFinishScheduleEntries(
   return {
     created: 0,
     filled: 0,
+    enriched: 0,
     unchanged: 0,
     ignored: action === "ignore" ? taken.length : 0,
     restored: action === "restore" ? taken.length : 0,
