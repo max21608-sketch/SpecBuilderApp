@@ -53,7 +53,7 @@ import {
 } from "@/lib/spec-vocab";
 import { parseCombinedDimensions, parseDimensionFigure, sharesAScale, SCALE_BOUNDARY } from "@/lib/dimensions";
 import type { RawCodeGroup, RawDrawingItem, RawViewRegion } from "@/lib/extraction-schema";
-import { slotFromModel } from "@/lib/extraction-schema";
+import { OVERALL_SLOT, slotFromModel } from "@/lib/extraction-schema";
 import { guessSlotsFromViews } from "@/lib/dimension-guess";
 import { naturalConfigurationOrder, nextVariantLabel, normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
 
@@ -235,7 +235,27 @@ export type DrawingObservation = {
    * and page (schemaVersion 4). Shown under the row so the choice is checkable;
    * never written, never a second value in the slot.
    */
-  candidates?: { valueRaw: string; unitRaw: string | null; view: string | null; page: number | null }[];
+  candidates?: {
+    valueRaw: string;
+    unitRaw: string | null;
+    view: string | null;
+    page: number | null;
+    /**
+     * The MEASURED ROW on the same item that states this figure (brief F), so
+     * "Use this instead" points at a figure the read already found rather than
+     * retyping it. Set at staging; absent on a run staged before it, where
+     * `candidateRowFor` (slot-swap.ts) finds the row by page, view and figure.
+     */
+    observationId?: string;
+  }[];
+  /**
+   * A LABELLED LINE OF A SPECIFICATION SHEET that is neither a size nor a
+   * finish (schemaVersion 4 `statements`). The card folds these under
+   * "Everything else the sheet states" — display only: they are what the
+   * document said, and they confirm with the card like every other row.
+   * Absent on every other row, and on a run staged before brief F.
+   */
+  statement?: boolean;
   /**
    * Where the read saw this finish's printed swatch chip (schemaVersion 4).
    * The swatch picker renders it as its proposed crop; nothing is uploaded
@@ -363,6 +383,21 @@ export type DrawingItem = {
    * version 4 a doubt was silent.
    */
   uncertain?: { about: string; why: string }[];
+  /**
+   * The reviewer's "Checked" on an `uncertain` notice, by its index (brief F).
+   * A notice naming an overall slot holds the card until a person touches
+   * that slot or presses Checked; this is the second. Stored because it is a
+   * decision; the blocker it answers is computed (`uncertainBlockers`).
+   */
+  uncertainChecked?: number[];
+  /**
+   * The overall slots a person has TOUCHED on this item — a figure, a unit or
+   * a state changed on the row holding it, or a figure swapped into or out of
+   * it. Written by the autosave as a side effect of that edit (never sent by
+   * a client), and read only by `uncertainBlockers`: touching the slot a doubt
+   * names is how a reviewer says they looked.
+   */
+  slotsTouched?: DimensionSlot[];
   /**
    * Whether the PAGE says this is a mock-up drawing (schemaVersion 4), with
    * what printed it. `resolveDrawingItem` resolves such an item among records on
@@ -1500,6 +1535,7 @@ export type DrawingBlocker =
   | { code: "configuration_undecided"; message: string; observationId: string }
   | { code: "configuration_pair_twice"; message: string; recordId: string; label: string; observationId?: undefined }
   | { code: "field_conflict"; message: string; observationId: string; pairKey: string; clash: FieldClash }
+  | { code: "uncertain_unchecked"; message: string; index: number; observationId?: undefined }
   | {
       code: "configuration_new";
       message: string;
@@ -1795,6 +1831,10 @@ export function drawingItemBlockers(
 
   if (named) blockers.push(...namedConfigurationBlockers(item, resolution, targets, named));
 
+  // WHAT THE READ SAID IT WAS UNSURE OF, about an overall slot. Card-level:
+  // the doubt is about the item's size, whichever row ends up holding it.
+  blockers.push(...uncertainBlockers(item));
+
   for (const observation of pending) {
     // Only a row that REACHES something is asked — see `asksForState`. A
     // general-conditions block composes into nothing, so nothing reads the
@@ -1954,6 +1994,77 @@ export function drawingItemBlockers(
   }
 
   return blockers;
+}
+
+// ---- the read's own doubts, about a size (brief F) ---------------------------
+
+/** The overall slot an `uncertain` notice is about, or null for any other doubt. */
+export function uncertainSlotOf(about: unknown): DimensionSlot | null {
+  return typeof about === "string" && Object.prototype.hasOwnProperty.call(OVERALL_SLOT, about)
+    ? OVERALL_SLOT[about as keyof typeof OVERALL_SLOT]
+    : null;
+}
+
+/** One `uncertain` notice, read for the card: which slot, and whether a person has settled it. */
+export type UncertainNotice = {
+  index: number;
+  about: string;
+  why: string;
+  /** The overall slot it names, or null — a doubt about grouping or a finish never holds the card. */
+  slot: DimensionSlot | null;
+  /** How a slot notice was settled: a press of Checked, or the slot itself touched. Null: still open. */
+  settled: "checked" | "touched" | null;
+};
+
+/**
+ * The read's doubts on one item, each with its slot and whether it is settled.
+ *
+ * Tolerant of staged JSON from the past, like every reader of a staged field:
+ * a notice with no words is dropped here exactly as the card drops it, and
+ * its INDEX is still its position in `uncertain`, because that is what
+ * `uncertainChecked` stores.
+ */
+export function uncertainNotices(item: Pick<DrawingItem, "uncertain" | "uncertainChecked" | "slotsTouched">): UncertainNotice[] {
+  const list = Array.isArray(item.uncertain) ? item.uncertain : [];
+  const checked = new Set(Array.isArray(item.uncertainChecked) ? item.uncertainChecked : []);
+  const touched = new Set(Array.isArray(item.slotsTouched) ? item.slotsTouched : []);
+  const out: UncertainNotice[] = [];
+  list.forEach((entry, index) => {
+    if (!entry || typeof entry.why !== "string" || entry.why.trim() === "") return;
+    const slot = uncertainSlotOf(entry.about);
+    out.push({
+      index,
+      about: typeof entry.about === "string" ? entry.about : "other",
+      why: entry.why,
+      slot,
+      settled: !slot ? null : checked.has(index) ? "checked" : touched.has(slot) ? "touched" : null,
+    });
+  });
+  return out;
+}
+
+/**
+ * A DOUBT ABOUT AN OVERALL SLOT HOLDS THE CARD until a person touches that
+ * slot or presses Checked on the notice (brief F, 2026-10-04).
+ *
+ * The read says "width: the plan prints 5'-7\" and ELEVATION 2 prints
+ * 5'-6\"", and before this a card carrying that sentence confirmed exactly as
+ * readily as one that did not — amber that nothing ever has to answer. A doubt
+ * about which pages belong together, or about a finish, stays a notice: it is
+ * not a figure that ships in BWS field 3. Computed, never stored; the screen
+ * and the confirm route both reach it through `drawingItemBlockers`.
+ */
+export function uncertainBlockers(item: Pick<DrawingItem, "uncertain" | "uncertainChecked" | "slotsTouched">): DrawingBlocker[] {
+  return uncertainNotices(item)
+    .filter((notice) => notice.slot && notice.settled === null)
+    .map((notice) => {
+      const slot = DIMENSION_SLOT_LABELS[notice.slot!].toLowerCase();
+      return {
+        code: "uncertain_unchecked" as const,
+        index: notice.index,
+        message: `The read was unsure of the ${slot}: ${notice.why.trim()} Check the ${slot} against the drawing — correct it, or press Checked on the notice.`,
+      };
+    });
 }
 
 /**

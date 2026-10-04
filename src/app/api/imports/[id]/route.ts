@@ -34,6 +34,7 @@ import {
   ATTRIBUTE_UNITS,
   DIMENSION_SLOTS,
   isItemLevel,
+  type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { assertBoqDocument } from "@/lib/boq-import";
 import { fabricParentOptions, isBoqRowKind, kindChoicePatch } from "@/lib/boq-row-kinds";
@@ -61,9 +62,12 @@ import {
   specFieldEntries,
   isMeasuredRow,
   splitFigureAndUnit,
+  namedConfigurationPlans,
   type DrawingItem,
+  type DrawingObservation,
   type StagedDrawings,
 } from "@/lib/drawing-document";
+import { planSlotSwap, slotWords } from "@/lib/slot-swap";
 import { assertStagedPreamble, preambleNoteBlockers, type StagedPreamble } from "@/lib/preamble-document";
 import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { paletteOptionFor } from "@/lib/palettes";
@@ -225,6 +229,25 @@ const DrawingPatch = z
           .nullable()
           .optional(),
         relationshipByReviewer: z.enum(["one_item", "configurations"]).nullable().optional(),
+        // THE ITEM'S, brief F: the `uncertain` notices a reviewer pressed
+        // Checked on, by index. The whole list is sent, like
+        // `configurationAcks`; an index the item has no notice for is dropped.
+        uncertainChecked: z.array(z.number().int().nonnegative().max(500)).max(100).optional(),
+        // THE OBSERVATION'S, brief F: "Use as W" — this figure takes the slot,
+        // and the row that held it on the same item (and configuration scope)
+        // goes back to a note, in ONE locked write. `displaces` is every row
+        // the card saw holding that slot, at the version it saw; a row the
+        // swap would displace that is not in it, or has moved, is a 409.
+        // Sent ALONE, like `ignoreBecause`.
+        swapSlot: z
+          .object({
+            slot: z.enum(DIMENSION_SLOTS),
+            displaces: z
+              .array(z.object({ id: z.string().min(1), version: z.number().int().nonnegative() }).strict())
+              .max(50),
+          })
+          .strict()
+          .optional(),
         // THE OBSERVATION'S: which of the code's configurations this row
         // applies to, by label. `[]` is every one; null puts the model's
         // reading back.
@@ -393,6 +416,13 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
                 ...(changes.relationshipByReviewer !== undefined
                   ? { relationshipByReviewer: changes.relationshipByReviewer }
                   : {}),
+                ...(changes.uncertainChecked !== undefined
+                  ? {
+                      uncertainChecked: [...new Set(changes.uncertainChecked)]
+                        .filter((index) => Array.isArray(row.uncertain) && index < row.uncertain.length)
+                        .sort((a, b) => a - b),
+                    }
+                  : {}),
               }
             : row,
         );
@@ -426,6 +456,22 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
             reason: changes.ignoreBecause,
           });
           return { version: null, ignored: reviewed.ignored };
+        }
+        if (changes.swapSlot !== undefined) {
+          if (Object.keys(changes).length !== 1) {
+            throw new DomainConflictError("swap_alone", "A slot swap is sent on its own, not with other changes.", {
+              status: 400,
+            });
+          }
+          items = swapSlotIntoItem(staged, item, observation, changes.swapSlot);
+          const swapped = await txn`
+            update intake_runs
+            set parsed = ${JSON.stringify({ ...staged, items })}::jsonb, updated_by = ${actor}
+            where id = ${id} and status = 'parsed'
+            returning version
+          `;
+          if (!swapped[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
+          return { version: Number(swapped[0].version) };
         }
         if (changes.specFieldId) {
           const field = await txn`select id from spec_fields where id = ${changes.specFieldId}`;
@@ -572,10 +618,27 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
         if (next.attrGroup !== "dimension" && next.dimensionSlot) {
           next.dimensionSlot = null;
         }
+        // TOUCHING A SLOT IS LOOKING AT IT (brief F). A figure, unit, state or
+        // slot changed on a row that holds an overall slot — before or after —
+        // settles a doubt the read raised about that slot. Recorded on the
+        // item as a side effect of the edit, never sent by a client.
+        const touches =
+          changes.value !== undefined ||
+          changes.unit !== undefined ||
+          changes.state !== undefined ||
+          changes.dimensionSlot !== undefined ||
+          changes.attrGroup !== undefined;
+        const touched = touches
+          ? [observation.dimensionSlot, next.dimensionSlot].filter((slot): slot is DimensionSlot => Boolean(slot))
+          : [];
         items = staged.items.map((row) =>
           row.id !== itemId
             ? row
-            : { ...row, observations: row.observations.map((o) => (o.id === observationId ? next : o)) },
+            : {
+                ...row,
+                observations: row.observations.map((o) => (o.id === observationId ? next : o)),
+                ...(touched.length > 0 ? { slotsTouched: withSlotsTouched(row, touched) } : {}),
+              },
         );
       }
 
@@ -592,6 +655,86 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
   } catch (cause) {
     return transactionErrorResponse(cause);
   }
+}
+
+/** The item's touched slots with these added, in slot order, once each. */
+function withSlotsTouched(item: DrawingItem, slots: readonly DimensionSlot[]): DimensionSlot[] {
+  const set = new Set<DimensionSlot>([...(Array.isArray(item.slotsTouched) ? item.slotsTouched : []), ...slots]);
+  return DIMENSION_SLOTS.filter((slot) => set.has(slot));
+}
+
+/**
+ * "Use as W" — the swap, applied to the locked staged document (brief F).
+ *
+ * `planSlotSwap` decides which rows are displaced; this checks that every one
+ * of them is a row the card SAW, at the version it saw, and writes all of them
+ * and the mover in the one statement the caller issues. A refusal writes
+ * nothing.
+ */
+function swapSlotIntoItem(
+  staged: StagedDrawings,
+  item: DrawingItem,
+  mover: DrawingObservation,
+  swap: { slot: DimensionSlot; displaces: { id: string; version: number }[] },
+): DrawingItem[] {
+  const plan = namedConfigurationPlans(staged.items, staged).get(item.id) ?? null;
+  const planned = planSlotSwap(item, mover.id, swap.slot, plan);
+  if (!planned.ok) throw new DomainConflictError(planned.code, planned.message, { status: planned.status });
+  const seen = new Map(swap.displaces.map((entry) => [entry.id, entry.version]));
+  for (const displacement of planned.displaced) {
+    const live = item.observations.find((row) => row.id === displacement.observationId)!;
+    if (seen.get(live.id) !== live.version) {
+      throw new DomainConflictError(
+        "swap_stale",
+        `Another row now holds ${slotWords(swap.slot)} on this item, or it was edited in another tab. Reload and point at the figure again.`,
+      );
+    }
+  }
+  const byId = new Map(planned.displaced.map((entry) => [entry.observationId, entry]));
+  const observations = item.observations.map((row): DrawingObservation => {
+    if (row.id === mover.id) {
+      return {
+        ...row,
+        version: row.version + 1,
+        attrGroup: "dimension",
+        dimensionSlot: swap.slot,
+        // A PERSON POINTED AT IT. Not a guess any more, and not a reading the
+        // card should explain with the model's evidence for a different figure.
+        slotSuggested: false,
+        slotReason: null,
+        groupSuggested: false,
+        groupReason: null,
+        // Only where the run carries the answer at all: a version 1 row has
+        // no `isOverall`, and inventing one would switch its card's guessing
+        // off for every other row.
+        ...(row.isOverall !== undefined ? { isOverall: true } : {}),
+        // A replace acknowledgement names the occupant of the slot it was
+        // ticked for; moving to another slot leaves it describing nothing.
+        ...(row.dimensionSlot !== swap.slot ? { replaces: [] } : {}),
+      };
+    }
+    const displacement = byId.get(row.id);
+    if (!displacement) return row;
+    if (displacement.to === "narrowed") {
+      return { ...row, version: row.version + 1, configurationsByReviewer: displacement.configurations };
+    }
+    return {
+      ...row,
+      version: row.version + 1,
+      attrGroup: "note",
+      dimensionSlot: null,
+      slotSuggested: false,
+      // Folded with the other figures, where the mover came from. Kept, never
+      // dropped: it is still what the page printed.
+      ...(row.isOverall !== undefined ? { isOverall: false } : {}),
+      // A replace acknowledgement was about writing THIS row into the slot.
+      replaces: [],
+    };
+  });
+  const touched = [swap.slot, ...(mover.dimensionSlot ? [mover.dimensionSlot] : [])];
+  return staged.items.map((row) =>
+    row.id === item.id ? { ...row, observations, slotsTouched: withSlotsTouched(row, touched) } : row,
+  );
 }
 
 // ---- a preamble note's autosave --------------------------------------------

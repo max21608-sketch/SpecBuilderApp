@@ -125,4 +125,57 @@ describe("the swatch picker", () => {
     await settleCrops();
     expect(pagesAsked()).toEqual([7]);
   });
+
+  // ==========================================================================
+  // AN AUTOMATICALLY PROPOSED SWATCH NEVER BLOCKS A CARD (brief F).
+  //
+  // The read proposes a crop per finish. Where the finish's words conflict
+  // with the library the swatch has nothing to attach to, and the confirm
+  // would refuse the whole card over a picture nobody chose. So the proposal
+  // is shown UNTICKED with the reason and never handed to the screen; a tick
+  // makes it a person's, which keeps the old rule.
+  // ==========================================================================
+  it("hands an attachable proposal over as the read's own", async () => {
+    const handed: unknown[][] = [];
+    render(
+      <SwatchPicker
+        importId="import-1"
+        page={2}
+        code="UPH-07"
+        proposed={{ page: 2, bbox: [0.1, 0.1, 0.2, 0.2] }}
+        onCropped={(...args) => handed.push(args)}
+      />,
+    );
+    await settleCrops();
+    expect(handed).toHaveLength(1);
+    expect(handed[0]!.slice(1)).toEqual([2, "proposed"]);
+  });
+
+  it("shows a refused proposal unticked with the reason, and hands nothing over until a person ticks it", async () => {
+    const handed: unknown[][] = [];
+    render(
+      <SwatchPicker
+        importId="import-1"
+        page={2}
+        code="UPH-07"
+        proposed={{ page: 2, bbox: [0.1, 0.1, 0.2, 0.2] }}
+        proposalRefused="Not used: the finishes library describes UPH-07 differently."
+        onCropped={(...args) => handed.push(args)}
+      />,
+    );
+    await settleCrops();
+    expect(handed).toEqual([]);
+    expect(screen.getByText(/Not used: the finishes library describes UPH-07 differently/)).toBeInTheDocument();
+    const tick = screen.getByRole("checkbox", { name: "Use this swatch" });
+    expect(tick).not.toBeChecked();
+    expect(screen.queryByText(/Saved for UPH-07/)).toBeNull();
+
+    await userEvent.click(tick);
+    expect(handed).toHaveLength(1);
+    expect(handed[0]!.slice(1)).toEqual([2, "person"]);
+    expect(screen.getByText(/Saved for UPH-07/)).toBeInTheDocument();
+
+    await userEvent.click(tick);
+    expect(handed[1]).toEqual([null, null, "person"]);
+  });
 });

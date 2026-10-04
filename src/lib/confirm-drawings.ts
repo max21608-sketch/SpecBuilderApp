@@ -92,6 +92,14 @@ export type SwatchCrop = {
   width?: number | null;
   height?: number | null;
   size?: number | null;
+  /**
+   * WHO MADE IT (brief F). `proposed` is the read's own crop, shown on the
+   * card and never pressed: where it has no finish to attach to it is LEFT
+   * OUT, because a proposal nobody asked for is not a crop somebody made.
+   * `person` — or absent, every crop sent before this existed — is a crop or
+   * a tick by a reviewer, and keeps the old rule: refused with the reason.
+   */
+  origin?: "proposed" | "person";
 };
 
 import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
@@ -127,6 +135,8 @@ export type DrawingsConfirmResult = {
   answersFilled: number;
   /** Rows a revised drawing retired and took the place of. */
   replaced?: number;
+  /** Proposed swatches with no finish to attach to, left out rather than refused (brief F). */
+  swatchesLeftOut?: number;
   remainingPending: number;
   status: string;
 };
@@ -756,8 +766,18 @@ export async function confirmDrawingItem(
   // code in conflict with the library links nothing by design, and silently
   // discarding a picture somebody cropped is how they come to believe it is
   // stored. Inside the transaction, so the specs roll back with it.
+  let swatchesLeftOut = 0;
   for (const swatch of swatches) {
     const finishId = finishIdByObservation.get(swatch.observationId);
+    // A PROPOSAL NOBODY ASKED FOR NEVER BLOCKS A CARD (brief F). The read
+    // cropped it, the card showed it, nobody pressed anything: where its
+    // finish conflicts with the library there is nothing to attach it to, and
+    // refusing the card over it would hold a person's specs hostage to a
+    // picture they never chose. Left out, and counted.
+    if (finishId === null && swatch.origin === "proposed") {
+      swatchesLeftOut += 1;
+      continue;
+    }
     if (finishId === undefined) {
       throw new DomainConflictError(
         "swatch_not_on_this_card",
@@ -1075,6 +1095,7 @@ export async function confirmDrawingItem(
     restored: 0,
     records: writes.length,
     replaced: superseded.length,
+    ...(swatchesLeftOut > 0 ? { swatchesLeftOut } : {}),
     answersFilled,
     remainingPending: countPending(items),
     status,

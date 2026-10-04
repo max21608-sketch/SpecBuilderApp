@@ -355,7 +355,14 @@ describe("an imperial sheet whose plan and elevation disagree", () => {
     expect(width.value).toBe(`5'-7"`);
     expect(width.unit).toBe("in");
     expect(width.unitSource).toBe("printed");
-    expect(width.candidates).toEqual([{ valueRaw: `5'-6"`, unitRaw: null, view: "ELEVATION 2", page: 1 }]);
+    expect(width.candidates).toEqual([
+      { valueRaw: `5'-6"`, unitRaw: null, view: "ELEVATION 2", page: 1, observationId: expect.any(String) },
+    ]);
+    // Brief F: the rival figure is a MEASURED ROW too, folded with the other
+    // dimensions, so "Use this instead" can swap it into the slot.
+    const rival = staged.observations.find((o) => o.id === width.candidates![0]!.observationId)!;
+    expect(rival).toMatchObject({ attrGroup: "note", isOverall: false, value: `5'-6"`, unit: "in", view: "ELEVATION 2", page: 1 });
+    expect(rival.dimensionSlot ?? null).toBeNull();
     expect(staged.uncertain).toEqual([{ about: "width", why: expect.stringMatching(/ELEVATION 2/) }]);
   });
 
@@ -586,7 +593,20 @@ describe("the read's own tolerance", () => {
       ["550", "mm", "printed", ["Type 1"]],
       ["600", "mm", "printed", ["Type 2"]],
     ]);
-    expect(widths[0]!.candidates).toEqual([{ valueRaw: "560 (PLAN, page 2)", unitRaw: null, view: null, page: null }]);
+    expect(widths[0]!.candidates).toEqual([
+      { valueRaw: "560 (PLAN, page 2)", unitRaw: null, view: null, page: null, observationId: expect.any(String) },
+    ]);
+    // The one-line candidate is read apart into its figure, view and page, and
+    // lands on the configuration its slot row lands on (brief F).
+    expect(item.observations.find((o) => o.id === widths[0]!.candidates![0]!.observationId)).toMatchObject({
+      attrGroup: "note",
+      isOverall: false,
+      value: "560",
+      unit: "mm",
+      view: "PLAN",
+      page: 2,
+      configurations: ["Type 1"],
+    });
     // A size naming a configuration the item does not list reads as the item's own.
     expect(item.observations.find((o) => o.dimensionSlot === "H")).toMatchObject({ value: `1'-6"`, unit: "in" });
     expect(item.observations.find((o) => o.value === "Invented raffia")!.swatchProposal).toEqual({ page: 1, bbox: [0.6, 0.1, 0.7, 0.2] });

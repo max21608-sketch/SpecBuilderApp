@@ -81,6 +81,7 @@ export default function SwatchPicker({
   code,
   disabled,
   proposed = null,
+  proposalRefused = null,
   onCropped,
 }: {
   importId: string;
@@ -106,7 +107,19 @@ export default function SwatchPicker({
   disabled?: boolean;
   /** Where the read saw the chip (schemaVersion 4). Cropped on arrival as the proposed swatch. */
   proposed?: { page: number; bbox: [number, number, number, number] } | null;
-  onCropped: (image: CroppedImage | null, page: number | null) => void;
+  /**
+   * Why the proposed chip has no finish to attach to (brief F) — the row's
+   * words for its code disagree with the library. The proposal is then shown
+   * UNTICKED with this sentence and is not handed to the screen, so the
+   * confirm never sees it; ticking it makes it a person's choice, which keeps
+   * the old rule (refused with the reason, never dropped).
+   */
+  proposalRefused?: string | null;
+  /**
+   * `origin` is `proposed` for the read's own crop, handed over untouched,
+   * and `person` for anything a reviewer cropped or ticked.
+   */
+  onCropped: (image: CroppedImage | null, page: number | null, origin: "proposed" | "person") => void;
 }) {
   // The row's own page is always offered even where the item's page list does
   // not carry it: a staged run from before code groups existed knows the page
@@ -127,11 +140,16 @@ export default function SwatchPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fromProposal, setFromProposal] = useState(false);
+  // A REFUSED PROPOSAL, held here and not handed over until a person ticks it.
+  const [refusedCrop, setRefusedCrop] = useState<{ image: CroppedImage; page: number } | null>(null);
+  const [ticked, setTicked] = useState(false);
   const objectUrls = useRef<string[]>([]);
   // The callback in a ref, for `ItemImagePicker`'s reason: the card passes a
   // new arrow on every render, and the proposal must be cropped once.
   const report = useRef(onCropped);
   report.current = onCropped;
+  const refusedRef = useRef(proposalRefused);
+  refusedRef.current = proposalRefused;
 
   // A CROP THE SCREEN HOLDS FOR THIS ROW, shown. Only fills an empty preview:
   // one this picker made itself is already the screen's, under the same key.
@@ -175,7 +193,14 @@ export default function SwatchPicker({
         setPreview(track(image.blob));
         setFromProposal(true);
         setChosen(proposed.page);
-        report.current(image, proposed.page);
+        // AN AUTOMATICALLY PROPOSED SWATCH NEVER BLOCKS A CARD (brief F).
+        // Where it has no finish to attach to it is shown and kept here,
+        // unticked — the screen never holds it, so the confirm never sees it.
+        if (refusedRef.current) {
+          setRefusedCrop({ image, page: proposed.page });
+          return;
+        }
+        report.current(image, proposed.page, "proposed");
       })
       .catch((cause) => {
         // A cancelled crop is the card leaving the screen, not a failure; a
@@ -256,16 +281,34 @@ export default function SwatchPicker({
             onClick={() => {
               setPreview(null);
               setFromProposal(false);
-              onCropped(null, null);
+              setRefusedCrop(null);
+              setTicked(false);
+              onCropped(null, null, "person");
             }}
           >
             Remove
           </Button>
         )}
-        {preview && fromProposal && (
+        {preview && fromProposal && !refusedCrop && (
           <span className="text-[11px] text-amber-800">Proposed by the read — check it is the right chip.</span>
         )}
-        {preview && (
+        {preview && refusedCrop && (
+          <label className="flex items-center gap-1 text-[11px] text-neutral-700">
+            <input
+              type="checkbox"
+              checked={ticked}
+              disabled={disabled}
+              onChange={(event) => {
+                setTicked(event.target.checked);
+                // A TICK IS A PERSON'S CHOICE, and from here the old rule
+                // applies: the confirm refuses it with the reason.
+                onCropped(event.target.checked ? refusedCrop.image : null, event.target.checked ? refusedCrop.page : null, "person");
+              }}
+            />
+            Use this swatch
+          </label>
+        )}
+        {preview && (!refusedCrop || ticked) && (
           <span className="text-[11px] text-neutral-500">
             {code
               ? `Saved for ${code} across this project when you confirm.`
@@ -273,6 +316,9 @@ export default function SwatchPicker({
           </span>
         )}
       </div>
+      {preview && refusedCrop && proposalRefused && (
+        <p className="mt-0.5 text-[11px] text-neutral-600">{proposalRefused}</p>
+      )}
       {selector}
       {/* A version 1 run staged no page for this row. The card's first page is
           what gets rendered, and saying so is the difference between a default
@@ -298,10 +344,12 @@ export default function SwatchPicker({
                 const image = await cropPdfRegion(`/api/imports/${importId}/source`, croppedFrom ?? 1, bbox);
                 setPreview(track(image.blob));
                 setFromProposal(false);
-                onCropped(image, croppedFrom);
+                setRefusedCrop(null);
+                setTicked(false);
+                onCropped(image, croppedFrom, "person");
               } catch (cause) {
                 setError(cause instanceof Error ? cause.message : "That area could not be captured.");
-                onCropped(null, null);
+                onCropped(null, null, "person");
               } finally {
                 setBusy(false);
               }

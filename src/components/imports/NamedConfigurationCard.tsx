@@ -49,9 +49,12 @@ import {
   ReplacePanel,
   RowNotes,
   RunTargets,
+  ShowInMillimetres,
+  StatementsToggle,
   orderRows,
   type RowBlocker,
 } from "@/components/imports/ObservationRows";
+import { candidateRowFor, swapSlotRequest } from "@/lib/slot-swap";
 import { BulkUnit } from "@/components/imports/DrawingItemCard";
 import type { ConfigurationCardProps } from "@/components/imports/ConfigurationCard";
 import ConfigurationTabs from "@/components/imports/ConfigurationTabs";
@@ -104,6 +107,9 @@ export default function NamedConfigurationCard({
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [joinArmed, setJoinArmed] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  // The sheet's other statements, folded (brief F); and "Show in mm", display only.
+  const [showStatements, setShowStatements] = useState(false);
+  const [showMm, setShowMm] = useState(false);
 
   const pendingMembers = card.members.filter((member) => member.state === "pending");
   const busyHere = busy === card.id || pendingMembers.some((member) => busy === member.item.id);
@@ -341,13 +347,15 @@ export default function NamedConfigurationCard({
         )}
         <span className="flex-1" />
         {open && pendingMembers.length > 0 && (
-          <BulkUnit
-            label="All dimensions:"
-            disabled={busyHere}
-            onSet={(unit) => {
-              for (const member of pendingMembers) void onSetBulkUnit("item", unit, member.item.id);
-            }}
-          />
+          <>
+            <BulkUnit
+              disabled={busyHere}
+              onSet={(unit) => {
+                for (const member of pendingMembers) void onSetBulkUnit("item", unit, member.item.id);
+              }}
+            />
+            <ShowInMillimetres shown={showMm} onToggle={() => setShowMm((value) => !value)} />
+          </>
         )}
         <Button size="xs" variant="quiet" onClick={() => setOpen((value) => !value)}>
           {open ? "Collapse" : "Expand"}
@@ -422,7 +430,24 @@ export default function NamedConfigurationCard({
       )}
     </div>
     {/* What the read could not settle (schemaVersion 4), above the rows. */}
-    <ItemReadNotes items={card.members.map((member) => member.item)} />
+    <ItemReadNotes
+      items={card.members.map((member) => member.item)}
+      busy={busyHere}
+      onCheck={
+        onSaveItem
+          ? (noticeItem, index) => {
+              const member = memberOf(noticeItem.id);
+              if (!member) return;
+              void onSaveItem(member.item, {
+                uncertainChecked: [
+                  ...(Array.isArray(member.item.uncertainChecked) ? member.item.uncertainChecked : []),
+                  index,
+                ],
+              });
+            }
+          : undefined
+      }
+    />
     </>
   );
 
@@ -458,11 +483,24 @@ export default function NamedConfigurationCard({
   // S-301's tabs were ~5,300px tall, most of it the same twelve notes on all
   // five — project, title, supplier, remarks, the disclaimer. A note that
   // belongs to fewer than all of them stays in view: it is about this chair.
+  // A sheet's labelled STATEMENT folds under its own heading (brief F), shared
+  // or not, so it is not counted among the shared notes as well.
   const sharedNotes = visibleRows.filter(
-    (row) => total > 1 && row.lands.length === total && row.observation.attrGroup === "note" && !isMeasuredRow(row.observation),
+    (row) =>
+      total > 1 &&
+      row.lands.length === total &&
+      row.observation.attrGroup === "note" &&
+      !isMeasuredRow(row.observation) &&
+      row.observation.statement !== true,
   );
   const sharedNoteIds = new Set(sharedNotes.map((row) => row.observation.id));
-  const order = orderRows(visibleRows.filter((row) => !sharedNoteIds.has(row.observation.id)).map((row) => row.observation));
+  const order = orderRows(
+    visibleRows.filter((row) => !sharedNoteIds.has(row.observation.id)).map((row) => row.observation),
+    (observation) => {
+      const row = rowById.get(observation.id);
+      return row ? rowBlockers(row).length > 0 : false;
+    },
+  );
   const sequence = [...order.ordered, ...sharedNotes.map((row) => row.observation)];
   const dimensionCell = composeDimensionCell(
     visibleRows
@@ -674,13 +712,19 @@ export default function NamedConfigurationCard({
                       const sameOn = measurements.sameOn.get(observation.id) ?? [];
                       const isOther = order.otherIds.has(observation.id);
                       const isSharedNote = sharedNoteIds.has(observation.id);
-                      const folded = (isOther && !showOther) || (isSharedNote && !showNotes);
+                      const isStatement = order.statementIds.has(observation.id);
+                      const folded =
+                        (isOther && !showOther) || (isSharedNote && !showNotes) || (isStatement && !showStatements);
                       const shared = sharedWithSentence(row.lands, tab.label, total);
                       const callbacks = {
                         onChange: (target: DrawingObservation, changes: Record<string, unknown>) =>
                           void onSaveObservation(row.item, target, changes),
                         onIgnore: (target: DrawingObservation) => void onReview(row.item, [target], "ignore"),
                         onSwatch,
+                        // The swap is planned on the PAGE's item, where the
+                        // server reads the configuration scope off the plan.
+                        onSwapSlot: (target: DrawingObservation, slot: DimensionSlot) =>
+                          void onSaveObservation(row.item, target, swapSlotRequest(row.item, target, slot)),
                       };
                       return (
                         <Fragment key={observation.id}>
@@ -689,6 +733,13 @@ export default function NamedConfigurationCard({
                               count={order.otherDimensionRows.length}
                               shown={showOther}
                               onToggle={() => setShowOther((value) => !value)}
+                            />
+                          )}
+                          {observation.id === order.firstStatementId && (
+                            <StatementsToggle
+                              count={order.statementRows.length}
+                              shown={showStatements}
+                              onToggle={() => setShowStatements((value) => !value)}
                             />
                           )}
                           {observation.id === sharedNotes[0]?.observation.id && (
@@ -719,6 +770,11 @@ export default function NamedConfigurationCard({
                                 blocked={blockers.length > 0 || warnings.length > 0}
                                 guessWhy={undefined}
                                 finishFiling={member?.resolution?.finishFilings?.[observation.id]}
+                                swatchRefusal={member?.resolution?.swatchRefusals?.[observation.id] ?? null}
+                                showMm={showMm}
+                                candidateRows={observation.candidates?.map((candidate) =>
+                                  candidateRowFor(row.item, observation, candidate),
+                                )}
                                 callbacks={callbacks}
                               />
                               {/* WHERE ELSE THIS ROW LANDS, in words: an edit
