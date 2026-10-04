@@ -1192,7 +1192,31 @@ export const OVERALL_SLOT: Record<OverallKey, DimensionSlot> = {
 /** The picture kinds the read may report. `section` is new in version 4. */
 export const PICTURE_KINDS = ["photo", "render", "3d", "front", "side", "back", "plan", "section", "detail", "other"] as const;
 
-const nullableString = (max: number, description: string) => ({ type: ["string", "null"], maxLength: max, description });
+// ============================================================================
+// SIXTEEN UNIONS, AND NO MORE — WHY THE SHAPE IS NOT THE DRAFT'S.
+//
+// Structured outputs compiles the schema into a grammar and REFUSES one with
+// more than sixteen union-typed parameters (a nullable type or an `anyOf`),
+// counted per LOCATION: "Schemas contains too many parameters with union
+// types (62 parameters …) (limit: 16 parameters with unions)". The draft's
+// shape — five nullable slot objects, each with nullable fields, repeated for
+// every configuration — was 62, and the first live call was a 400 before a
+// token was read. The v3 tool sits at exactly 16.
+//
+// So this shape spends its unions where null carries meaning and nowhere else:
+//   * `overall` is a LIST of slot entries (`slot` an enum), at most one per
+//     slot, instead of five nullable objects. A slot the page does not print
+//     is simply absent, which says the same thing.
+//   * a finish's `part`, `spec` and `code` stay NULLABLE — "only a code is
+//     printed" (spec null) is the statement the library supplies words for.
+//   * every other optional text is a plain string, EMPTY where the page gives
+//     nothing; `blankText` reads "" back as null, so the staged shape is the
+//     same either way.
+//   * a finish's `swatch` is a list of at most one box.
+// `tests/lib/extraction-schema.test.ts` counts every tool's unions the way the
+// API does, so the next field cannot take the read back over the line.
+// ============================================================================
+const blankString = (max: number, description: string) => ({ type: "string", maxLength: max, description });
 const pageNumber = (description: string) => ({ type: "integer", minimum: 1, description });
 const pageBox = (description: string) => ({
   type: "array",
@@ -1204,56 +1228,47 @@ const pageBox = (description: string) => ({
 
 const candidateProperties = {
   valueRaw: { type: "string", maxLength: MAX_SHORT, description: "The figure exactly as printed, marks and all ('840', '5'-7\"')." },
-  unitRaw: nullableString(MAX_SHORT, "The unit only if the page prints it beside this figure ('mm', 'cm'). Null otherwise; never inferred."),
-  view: nullableString(MAX_SHORT, "The view it is printed on, in the page's own words ('ELEVATION 1', 'SECTION A', 'PLAN')."),
+  unitRaw: blankString(MAX_SHORT, "The unit only if the page prints it beside this figure ('mm', 'cm'). Empty otherwise; never inferred."),
+  view: blankString(MAX_SHORT, "The view it is printed on, in the page's own words ('ELEVATION 1', 'SECTION A', 'PLAN'). Empty if none."),
   page: pageNumber("1-based page it is printed on."),
 };
 
-/** One overall slot: the figure that measures the whole item, or null. */
-const figureSchema = (slotWords: string) => ({
-  anyOf: [
-    {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        ...candidateProperties,
-        evidence: {
-          type: "string",
-          maxLength: MAX_NOTE,
-          description:
-            "Which view it is on and what printed it, quoting the page — \"ELEVATION 1, the dimension spanning the full front\", " +
-            "\"labelled WIDTH 550MM on the specification table\". A reviewer checks this against the drawing.",
-        },
-        candidates: {
-          type: "array",
-          maxItems: MAX_SLOT_CANDIDATES,
-          description:
-            "Every OTHER figure that could be this slot and that you did not choose (a different view printing a different figure, " +
-            "a shop drawing disagreeing with the specification sheet). Empty when no other view disagrees.",
-          items: { type: "object", additionalProperties: false, properties: candidateProperties, required: ["valueRaw", "unitRaw", "view", "page"] },
-        },
-      },
-      required: ["valueRaw", "unitRaw", "view", "page", "evidence", "candidates"],
-    },
-    { type: "null" },
-  ],
-  description: `${slotWords} Null when the page does not print it — never added up from parts and never estimated.`,
-});
-
+/** The overall size: one entry per slot the page prints, at most one per slot. */
 const overallSchema = (description: string) => ({
-  type: "object",
-  additionalProperties: false,
+  type: "array",
+  maxItems: OVERALL_KEYS.length,
   description,
-  properties: {
-    width: figureSchema("The overall WIDTH: side to side as seen from the front. A plan or a front elevation shows it; a side elevation or a section never does."),
-    depth: figureSchema("The overall DEPTH: front to back. A plan, a side elevation or a section shows it."),
-    height: figureSchema("The overall HEIGHT: floor to the highest point of the item as drawn. Say in evidence what it is to (top of back, worktop)."),
-    seatHeight: figureSchema(
-      "The SEAT HEIGHT, seating only: a figure dimensioned floor-to-seat-top or labelled seat height / SH. On a bench, stool or ottoman you sit on the top of, it IS the overall height.",
-    ),
-    diameter: figureSchema("The DIAMETER, round items only, instead of width and depth."),
+  items: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      slot: {
+        type: "string",
+        enum: [...OVERALL_KEYS],
+        description:
+          "width: side to side as seen from the front (a plan or front elevation; never a side elevation or a section). " +
+          "depth: front to back. height: floor to the highest point as drawn. seatHeight: seating only, floor to seat top " +
+          "(on a bench, stool or ottoman you sit on the top of, the overall height). diameter: round items only, instead of width and depth.",
+      },
+      ...candidateProperties,
+      evidence: {
+        type: "string",
+        maxLength: MAX_NOTE,
+        description:
+          "Which view it is on and what printed it, quoting the page — \"ELEVATION 1, the dimension spanning the full front\", " +
+          "\"labelled WIDTH 550MM on the specification table\"; for height, what it is to. A reviewer checks this against the drawing.",
+      },
+      candidates: {
+        type: "array",
+        maxItems: MAX_SLOT_CANDIDATES,
+        description:
+          "Every OTHER figure that could be this slot and that you did not choose (a different view printing a different figure, " +
+          "a shop drawing disagreeing with the specification sheet). Empty when no other view disagrees.",
+        items: { type: "object", additionalProperties: false, properties: candidateProperties, required: ["valueRaw", "unitRaw", "view", "page"] },
+      },
+    },
+    required: ["slot", "valueRaw", "unitRaw", "view", "page", "evidence", "candidates"],
   },
-  required: [...OVERALL_KEYS],
 });
 
 const configurationNamesSchema = {
@@ -1269,9 +1284,9 @@ export const DRAWINGS_ITEMS_SCHEMA = {
   type: "object" as const,
   additionalProperties: false,
   properties: {
-    documentNotes: nullableString(
+    documentNotes: blankString(
       MAX_NOTE,
-      "One note about the document as a whole: what it covers, general notes printed on every sheet, units if they ARE stated anywhere, pages you could not read.",
+      "One note about the document as a whole: what it covers, general notes printed on every sheet, units if they ARE stated anywhere, pages you could not read. Empty if nothing.",
     ),
     nonItemPages: {
       type: "array",
@@ -1300,21 +1315,24 @@ export const DRAWINGS_ITEMS_SCHEMA = {
               "Every code the item is titled by: the item code as the title prints it FIRST ('FUR-33', 'S-200'), other titles after it " +
               "('MUR.2 ARMCHAIR'), and a drawing or sheet number ('AM-ID-PL-FUR-33') LAST. Empty only when nothing titles it.",
           },
-          name: nullableString(MAX_SHORT, "What the document calls the item ('Desk', 'Armchair'), from a title block or caption."),
+          name: blankString(MAX_SHORT, "What the document calls the item ('Desk', 'Armchair'), from a title block or caption. Empty if none."),
           pages: {
             type: "array",
             maxItems: MAX_ITEM_PAGES,
             items: { type: "integer", minimum: 1 },
             description: "Every 1-based page that describes this item.",
           },
-          whyOneItem: nullableString(
+          whyOneItem: blankString(
             MAX_NOTE,
-            "Where the item spans more than one page or carries more than one code: what tied them together, quoting the pages. Null otherwise.",
+            "Where the item spans more than one page or carries more than one code: what tied them together, quoting the pages. Empty otherwise.",
           ),
-          overall: overallSchema("The item's overall size, AT MOST ONE figure per slot, read off the page."),
-          combinedLine: nullableString(
+          overall: overallSchema(
+            "The item's overall size read off the page: AT MOST ONE entry per slot, the figure that measures the whole item. " +
+              "Leave a slot out when the page does not print it — never add parts together and never estimate.",
+          ),
+          combinedLine: blankString(
             MAX_VALUE,
-            "A size printed as ONE line ('80 x 70 x 90 cm', 'W1520 x D560 x H1005 mm'), copied verbatim. Null where there is none.",
+            "A size printed as ONE line ('80 x 70 x 90 cm', 'W1520 x D560 x H1005 mm'), copied verbatim. Empty where there is none.",
           ),
           configurations: {
             type: "array",
@@ -1336,7 +1354,7 @@ export const DRAWINGS_ITEMS_SCHEMA = {
                 nameRaw: { type: "string", maxLength: MAX_SHORT, description: "The exact printed text it came from ('Type 1 & 5 - <fabric>')." },
                 differsIn: { type: "string", maxLength: MAX_NOTE, description: "What differs between this configuration and the others." },
                 pages: { type: "array", maxItems: MAX_ITEM_PAGES, items: { type: "integer", minimum: 1 }, description: "The pages that show or name it." },
-                overall: overallSchema("Only the overall sizes that DIFFER for this configuration; every other slot null."),
+                overall: overallSchema("Only the overall sizes that DIFFER for this configuration; empty when none differ."),
               },
               required: ["name", "nameRaw", "differsIn", "pages", "overall"],
             },
@@ -1349,28 +1367,30 @@ export const DRAWINGS_ITEMS_SCHEMA = {
               type: "object",
               additionalProperties: false,
               properties: {
-                part: nullableString(MAX_SHORT, "The PART it names ('SOFA FEET', 'TOP'), or null where the page names none."),
-                spec: nullableString(
-                  MAX_VALUE,
-                  "The SPECIFICATION as printed ('Dark tinted wood', 'Antique bronze'), or null where only a code is printed. Never describe a code in your own words.",
-                ),
-                code: nullableString(MAX_SHORT, "The client's own finish code where one is printed ('GR TIM 04', 'UPH-07'). Null otherwise."),
+                part: { type: ["string", "null"], maxLength: MAX_SHORT, description: "The PART it names ('SOFA FEET', 'TOP'), or null where the page names none." },
+                spec: {
+                  type: ["string", "null"],
+                  maxLength: MAX_VALUE,
+                  description:
+                    "The SPECIFICATION as printed ('Dark tinted wood', 'Antique bronze'), or null where only a code is printed. Never describe a code in your own words.",
+                },
+                code: { type: ["string", "null"], maxLength: MAX_SHORT, description: "The client's own finish code where one is printed ('GR TIM 04', 'UPH-07'). Null otherwise." },
                 configurations: configurationNamesSchema,
                 page: pageNumber("1-based page the callout is on."),
                 swatch: {
-                  anyOf: [
-                    {
-                      type: "object",
-                      additionalProperties: false,
-                      properties: {
-                        page: pageNumber("1-based page the chip is printed on."),
-                        box: pageBox("The chip as [x0, y0, x1, y1], fractions of the page from 0 to 1, origin top-left. Approximate is fine."),
-                      },
-                      required: ["page", "box"],
+                  type: "array",
+                  maxItems: 1,
+                  description:
+                    "Where the finish is shown as a printed swatch chip or material photo, that chip's box — one entry. Empty otherwise.",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      page: pageNumber("1-based page the chip is printed on."),
+                      box: pageBox("The chip as [x0, y0, x1, y1], fractions of the page from 0 to 1, origin top-left. Approximate is fine."),
                     },
-                    { type: "null" },
-                  ],
-                  description: "Where the finish is shown as a printed swatch chip or material photo, that chip's box. Null otherwise.",
+                    required: ["page", "box"],
+                  },
                 },
               },
               required: ["part", "spec", "code", "configurations", "page", "swatch"],
@@ -1403,7 +1423,7 @@ export const DRAWINGS_ITEMS_SCHEMA = {
                 description:
                   "True only where the page itself says the drawing is for a mock-up: a title block reading MOCKUP ROOM, a drawing number with a MUR segment, '(MUR)' in the title.",
               },
-              evidence: nullableString(MAX_SHORT, "What printed it, quoted. Null when false."),
+              evidence: blankString(MAX_SHORT, "What printed it, quoted. Empty when false."),
             },
             required: ["is", "evidence"],
           },
@@ -1416,10 +1436,10 @@ export const DRAWINGS_ITEMS_SCHEMA = {
               type: "object",
               additionalProperties: false,
               properties: {
-                label: nullableString(MAX_SHORT, "The page's label for it ('ARM HEIGHT'), or null."),
+                label: blankString(MAX_SHORT, "The page's label for it ('ARM HEIGHT'), or empty."),
                 valueRaw: { type: "string", maxLength: MAX_SHORT, description: "The figure exactly as printed." },
-                unitRaw: nullableString(MAX_SHORT, "The unit only if printed beside it. Never inferred."),
-                view: nullableString(MAX_SHORT, "The view it is on, in the page's words."),
+                unitRaw: blankString(MAX_SHORT, "The unit only if printed beside it, else empty. Never inferred."),
+                view: blankString(MAX_SHORT, "The view it is on, in the page's words, or empty."),
                 page: pageNumber("1-based page."),
               },
               required: ["label", "valueRaw", "unitRaw", "view", "page"],
@@ -1509,6 +1529,10 @@ export const DRAWINGS_ITEMS_TOOL = {
 
 // ---- the check ---------------------------------------------------------------
 
+/** Text the schema asks for as a plain string, EMPTY for "none": read back as null, so staging sees one shape. */
+const blankText = (max: number) =>
+  z.preprocess((value) => (typeof value === "string" && value.trim() === "" ? null : value), nullableText(max));
+
 const pageOrNull = z.number().int().min(1).max(100_000).nullable().catch(null).default(null);
 
 /** A list of page numbers that survives a bare number and drops anything that is not one. */
@@ -1552,8 +1576,8 @@ function boundedList<T extends z.ZodTypeAny>(entry: T, max: number, wrap: ((scal
 
 const RawCandidate = z.object({
   valueRaw: z.preprocess((value) => (typeof value === "number" ? String(value) : value), z.string().trim().min(1).max(MAX_SHORT)),
-  unitRaw: nullableText(MAX_SHORT),
-  view: nullableText(MAX_SHORT),
+  unitRaw: blankText(MAX_SHORT),
+  view: blankText(MAX_SHORT),
   page: pageOrNull,
 });
 export type RawCandidate = z.infer<typeof RawCandidate>;
@@ -1569,10 +1593,10 @@ const RawOverallFigure = z
     (value) => (typeof value === "string" || typeof value === "number" ? { valueRaw: String(value) } : value),
     z.object({
       valueRaw: z.preprocess((value) => (typeof value === "number" ? String(value) : value), z.string().trim().min(1).max(MAX_SHORT)),
-      unitRaw: nullableText(MAX_SHORT),
-      view: nullableText(MAX_SHORT),
+      unitRaw: blankText(MAX_SHORT),
+      view: blankText(MAX_SHORT),
       page: pageOrNull,
-      evidence: nullableText(MAX_NOTE),
+      evidence: blankText(MAX_NOTE),
       candidates: boundedList(RawCandidate, MAX_SLOT_CANDIDATES, (scalar) => ({ valueRaw: scalar })).transform(
         (bounded) => bounded.kept,
       ),
@@ -1583,14 +1607,43 @@ const RawOverallFigure = z
   .default(null);
 export type RawOverallFigure = z.infer<typeof RawOverallFigure>;
 
+/**
+ * The overall size as a LIST of slot entries (the schema's shape), read into
+ * one figure per slot. The FIRST entry for a slot is the answer; a second entry
+ * for the same slot is the model breaking the one-per-slot rule, and it is kept
+ * as a CANDIDATE of the first rather than dropped or allowed to stand beside it
+ * — so the card shows it under the slot and "two of these are the width"
+ * cannot be produced. The draft's object-of-five-slots shape is read as well.
+ */
+function overallAsSlots(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const { slot, ...figure } = entry as Record<string, unknown>;
+    if (typeof slot !== "string" || !(OVERALL_KEYS as readonly string[]).includes(slot)) continue;
+    const kept = out[slot];
+    if (!kept) {
+      out[slot] = figure;
+      continue;
+    }
+    const candidates = Array.isArray(kept.candidates) ? kept.candidates : [];
+    out[slot] = {
+      ...kept,
+      candidates: [...candidates, { valueRaw: figure.valueRaw, unitRaw: figure.unitRaw, view: figure.view, page: figure.page }],
+    };
+  }
+  return out;
+}
+
 const RawOverall = z
-  .object({
+  .preprocess(overallAsSlots, z.object({
     width: RawOverallFigure,
     depth: RawOverallFigure,
     height: RawOverallFigure,
     seatHeight: RawOverallFigure,
     diameter: RawOverallFigure,
-  })
+  }))
   .catch({ width: null, depth: null, height: null, seatHeight: null, diameter: null })
   .default({ width: null, depth: null, height: null, seatHeight: null, diameter: null });
 export type RawOverall = z.infer<typeof RawOverall>;
@@ -1599,36 +1652,41 @@ const configurationNames = looseTextList(MAX_SHORT, MAX_CONFIGURATIONS).catch([]
 
 const RawItemConfiguration = z.object({
   name: z.string().trim().min(1).max(MAX_SHORT),
-  nameRaw: nullableText(MAX_SHORT),
-  differsIn: nullableText(MAX_NOTE),
+  nameRaw: blankText(MAX_SHORT),
+  differsIn: blankText(MAX_NOTE),
   pages: pageList,
   overall: RawOverall,
 });
 export type RawItemConfiguration = z.infer<typeof RawItemConfiguration>;
 
 const RawFinish = z.object({
-  part: nullableText(MAX_SHORT),
-  spec: nullableText(MAX_VALUE),
-  code: nullableText(MAX_SHORT),
+  part: blankText(MAX_SHORT),
+  spec: blankText(MAX_VALUE),
+  code: blankText(MAX_SHORT),
   configurations: configurationNames,
   page: pageOrNull,
-  swatch: z.object({ page: pageOrNull, box: boxOrNull }).nullable().catch(null).default(null),
+  // A list of at most one box in the schema (a nullable object would spend a
+  // union); the first box is the swatch, and a bare object is read too.
+  swatch: z
+    .preprocess((value) => (Array.isArray(value) ? (value[0] ?? null) : value), z.object({ page: pageOrNull, box: boxOrNull }).nullable())
+    .catch(null)
+    .default(null),
 });
 export type RawFinish = z.infer<typeof RawFinish>;
 
 const RawStatement = z.object({
-  label: nullableText(MAX_SHORT),
-  value: nullableText(MAX_VALUE),
+  label: blankText(MAX_SHORT),
+  value: blankText(MAX_VALUE),
   page: pageOrNull,
   configurations: configurationNames,
 });
 export type RawStatement = z.infer<typeof RawStatement>;
 
 const RawOtherDimension = z.object({
-  label: nullableText(MAX_SHORT),
+  label: blankText(MAX_SHORT),
   valueRaw: z.preprocess((value) => (typeof value === "number" ? String(value) : value), z.string().trim().min(1).max(MAX_SHORT)),
-  unitRaw: nullableText(MAX_SHORT),
-  view: nullableText(MAX_SHORT),
+  unitRaw: blankText(MAX_SHORT),
+  view: blankText(MAX_SHORT),
   page: pageOrNull,
 });
 export type RawOtherDimension = z.infer<typeof RawOtherDimension>;
@@ -1658,11 +1716,11 @@ const RawDrawingItemV4Shape = z.object({
         .map((entry) => entry.trim().slice(0, MAX_SHORT))
         .slice(0, MAX_ITEM_CODES),
     ),
-  name: nullableText(MAX_SHORT),
+  name: blankText(MAX_SHORT),
   pages: pageList,
-  whyOneItem: nullableText(MAX_NOTE),
+  whyOneItem: blankText(MAX_NOTE),
   overall: RawOverall,
-  combinedLine: nullableText(MAX_VALUE),
+  combinedLine: blankText(MAX_VALUE),
   configurations: boundedList(RawItemConfiguration, MAX_CONFIGURATIONS, (scalar) => ({
     name: scalar,
     nameRaw: scalar,
@@ -1672,7 +1730,7 @@ const RawDrawingItemV4Shape = z.object({
   finishes: boundedList(RawFinish, MAX_PER_ITEM, (scalar) => ({ part: null, spec: scalar, code: null })),
   statements: boundedList(RawStatement, MAX_STATEMENTS, (scalar) => ({ label: null, value: scalar })),
   mockup: z
-    .object({ is: z.boolean().catch(false).default(false), evidence: nullableText(MAX_SHORT) })
+    .object({ is: z.boolean().catch(false).default(false), evidence: blankText(MAX_SHORT) })
     .catch({ is: false, evidence: null })
     .default({ is: false, evidence: null }),
   otherDimensions: boundedList(RawOtherDimension, MAX_PER_ITEM, (scalar) => ({ valueRaw: scalar })),
@@ -1742,9 +1800,9 @@ export const RawDrawingItemV4 = RawDrawingItemV4Shape.transform((item) => {
 export type RawDrawingItemV4 = z.infer<typeof RawDrawingItemV4>;
 
 export const DrawingsItemsOutput = z.object({
-  documentNotes: nullableText(MAX_NOTE),
+  documentNotes: blankText(MAX_NOTE),
   nonItemPages: z
-    .preprocess(objectEntriesAsList, z.array(z.object({ page: pageOrNull, why: nullableText(MAX_SHORT) })))
+    .preprocess(objectEntriesAsList, z.array(z.object({ page: pageOrNull, why: blankText(MAX_SHORT) })))
     .catch([])
     .default([])
     .transform((pages) =>

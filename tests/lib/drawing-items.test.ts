@@ -426,6 +426,40 @@ describe("a finish printed as a code alone", () => {
   });
 });
 
+describe("a code-only finish against a library the schedule filled first", () => {
+  const described = (code: string): Finish => ({
+    id: `fin-${code}`,
+    code,
+    codeNorm: code,
+    codeOrigin: "client",
+    kind: "timber",
+    description: "Invented oak, natural",
+    supplierRaw: null,
+    reference: null,
+    colour: null,
+    state: "confirmed",
+  });
+
+  it("reads a stacked tag with a sub-code as the schedule's code, and links rather than conflicts", () => {
+    const item = one({ finishes: [{ part: null, spec: null, code: "GR TIM 08.1", configurations: [], page: 1, swatch: null }] });
+    const row = item.observations.find((o) => o.materialCodeRaw)!;
+    expect(row.materialCodeRaw).toBe("GR-TIM-08.1");
+    expect(row.value).toBe("GR TIM 08.1");
+    expect(resolveFinishCode(row.materialCodeRaw, row.value, [described("GR-TIM-08.1")])).toMatchObject({
+      status: "matched",
+      finish: { id: "fin-GR-TIM-08.1" },
+    });
+    // 08.1 is not 08: the sub-code is part of the code.
+    expect(resolveFinishCode(row.materialCodeRaw, row.value, [described("GR-TIM-08")])).toMatchObject({ status: "new" });
+  });
+
+  it("keeps the conflict for a callout whose OWN words differ from the described row", () => {
+    const item = one({ finishes: [{ part: "TOP", spec: "Invented walnut", code: "GR TIM 04", configurations: [], page: 1, swatch: null }] });
+    const row = item.observations.find((o) => o.materialCodeRaw)!;
+    expect(resolveFinishCode(row.materialCodeRaw, row.value, [described("GR-TIM-04")])).toMatchObject({ status: "conflict" });
+  });
+});
+
 describe("the read's own tolerance", () => {
   it("survives bare values and drops a configuration name the item does not list", () => {
     const parsed = DrawingsItemsOutput.parse({
@@ -459,6 +493,39 @@ describe("the read's own tolerance", () => {
     expect(item.pictures).toHaveLength(1);
     expect(item.mockup).toEqual({ is: false, evidence: null });
     expect(parsed.nonItemPages).toEqual([]);
+  });
+
+  it("reads the schema's list of slots, a second entry for one slot kept as a candidate of the first", () => {
+    const parsed = DrawingsItemsOutput.parse({
+      documentNotes: "",
+      nonItemPages: [],
+      items: [
+        {
+          ...rawItem(),
+          name: "",
+          whyOneItem: "",
+          combinedLine: "",
+          overall: [
+            { slot: "width", valueRaw: "840", unitRaw: "", view: "PLAN", page: 1, evidence: "spans the plan", candidates: [] },
+            { slot: "depth", valueRaw: "790", unitRaw: "mm", view: "", page: 2, evidence: "side", candidates: [] },
+            { slot: "width", valueRaw: "835", unitRaw: "", view: "FRONT", page: 2, evidence: "front", candidates: [] },
+            { slot: "length", valueRaw: "1", unitRaw: "", view: "", page: 1, evidence: "", candidates: [] },
+          ],
+          finishes: [{ part: "", spec: null, code: "WD-01", configurations: [], page: 1, swatch: [{ page: 1, box: [0.1, 0.1, 0.2, 0.2] }] }],
+          mockup: { is: false, evidence: "" },
+        },
+      ],
+    });
+    const item = parsed.items[0]!;
+    expect(parsed.documentNotes).toBeNull();
+    expect(item.name).toBeNull();
+    expect(item.combinedLine).toBeNull();
+    expect(item.overall.width).toMatchObject({ valueRaw: "840", unitRaw: null, view: "PLAN" });
+    expect(item.overall.width?.candidates).toEqual([{ valueRaw: "835", unitRaw: null, view: "FRONT", page: 2 }]);
+    expect(item.overall.depth).toMatchObject({ valueRaw: "790", unitRaw: "mm", view: null, page: 2 });
+    expect(item.overall.height).toBeNull();
+    expect(item.finishes[0]).toMatchObject({ part: null, spec: null, code: "WD-01", swatch: { page: 1, box: [0.1, 0.1, 0.2, 0.2] } });
+    expect(item.mockup.evidence).toBeNull();
   });
 
   it("refuses a read whose items are not a list: that is a failure to answer", () => {

@@ -4,6 +4,7 @@
 // the wrong instructions, or returns a shape no reviewer can display.
 import { describe, it, expect } from "vitest";
 import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/spec-vocab";
+import { toOutputSchema } from "@/lib/model-request";
 import { PROMPTS, PROMPT_VARIANTS } from "@/lib/anthropic";
 
 /** The page-centric v3 prompt, kept for the harness and for re-reading old raw. Its rules still hold for it. */
@@ -431,6 +432,27 @@ describe("configurations a page names", () => {
     expect(itemSchema.properties.materials?.items?.required).toContain("configurations");
     expect(V3_PROMPT).toMatch(/NEVER put the configuration into the label/);
     expect(V3_PROMPT).toMatch(/still describes the PAGES/);
+  });
+
+  it("keeps every tool within structured outputs' sixteen union-typed parameters", () => {
+    // The API counts a nullable type or an anyOf per LOCATION and refuses a
+    // schema with more than 16 — with a 400, before a token is read. The first
+    // v4 drawings schema was 62 and failed its first live call; v3 is exactly
+    // 16. Counted here the way the API counted it (62 and 16 respectively).
+    const unions = (node: unknown): number => {
+      if (Array.isArray(node)) return node.reduce((total: number, entry) => total + unions(entry), 0);
+      if (!node || typeof node !== "object") return 0;
+      const schema = node as Record<string, unknown>;
+      let count = (Array.isArray(schema.type) && schema.type.length > 1) || Array.isArray(schema.anyOf) ? 1 : 0;
+      for (const [key, value] of Object.entries(schema)) {
+        if (key === "enum" || key === "required" || key === "description") continue;
+        if (key === "properties") for (const sub of Object.values(value as object)) count += unions(sub);
+        else count += unions(value);
+      }
+      return count;
+    };
+    for (const kind of DOCUMENT_KINDS) expect(unions(toOutputSchema(TOOLS[kind].tool.input_schema)), kind).toBeLessThanOrEqual(16);
+    expect(unions(toOutputSchema(DRAWINGS_TOOL.input_schema))).toBe(16);
   });
 
   it("requires only properties each object declares", () => {
