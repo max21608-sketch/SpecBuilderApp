@@ -239,7 +239,10 @@ and a drawing or sheet number ("AM-ID-PL-FUR-33") LAST — and say in \`whyOneIt
 together.
 
 What is and is not an item:
-- something with its own code and its own quantity (a scheduled cushion "SFT-01") is its own item;
+- a COMPONENT drawn on or with an item — scheduled cushions, a mattress, a glass top, hardware — is
+  PART of that item: its codes go into the item's \`finishes\` and its sizes into \`otherDimensions\` or
+  \`statements\`. It is its own item only where the document draws it as a standalone piece on a
+  sheet of its own;
 - something supplied "by others", "by operator" or "by lighting designer" is a note on the item it
   belongs to, not an item;
 - an item drawn dashed or in outline inside another item's view, to show context, is not an item on
@@ -286,10 +289,12 @@ For each item:
    differs between them. One item drawn for two rooms with nothing different is ONE configuration-free
    item. A size that differs for a configuration is its own \`overall\` entry naming that configuration
    in its \`configurations\`, beside the item's own entry for the slot (which names none).
-3. ITS FINISHES AND MATERIALS, in \`finishes\` — each callout with the PART it names ("SOFA FEET",
-   "TOP") or null where the page does not name one, the SPECIFICATION as printed ("Dark tinted wood",
-   "Antique bronze") or null where only a code is printed, and the client's own finish code where one
-   is printed ("GR TIM 04", "UPH-07"). Never describe a code in your own words. Which configurations it
+3. ITS FINISHES AND MATERIALS, in \`finishes\` — EVERY tagged callout code on the item is an entry:
+   finishes, fabrics and materials, and hardware, electrical and soft-furnishing tags too ("GR HDW 49",
+   "GR ELE 02", "GR SFT 04"). Each with the PART it names, where the leader points ("SOFA FEET",
+   "TOP"), or null where the page does not name one; the SPECIFICATION as printed ("Dark tinted wood",
+   "Antique bronze") or null where only a code is printed; and the client's own code where one is
+   printed ("GR TIM 04", "UPH-07"). Never describe a code in your own words. Which configurations it
    applies to, if any. One entry per distinct callout, even if it is pointed to from several views.
 4. EVERY OTHER DIMENSION on the item, briefly, in \`otherDimensions\`: its label and view, and the
    figure with its unit as printed. These are kept for reference and folded away for the reviewer; on a dense sheet the list
@@ -326,8 +331,11 @@ FIGURES AND UNITS, EXACTLY AS PRINTED:
   and nothing is added. Inches alone likewise: 11 7/8". Write a fraction after a
   space: 2'-5 1/2", even where the page stacks it.
 - A size printed as one line ("80 x 70 x 90 cm", "W1520 x D560 x H1005 mm") is copied verbatim into
-  \`combinedLine\`, and its figures go into the slots only where the page tells you which is which (a
-  printed W/D/H prefix, or labels beside it); otherwise say so in \`uncertain\`.
+  \`combinedLine\`. Where the page tells you which figure is which (a printed W/D/H prefix, or labels
+  beside it), that decides the slots, exactly. Where it prints THREE BARE FIGURES, fill width, depth
+  and height in that printed order — the convention, not something the page prints — and add an
+  \`uncertain\` entry saying so ("width: '80 x 70 x 90 cm' carries no labels; read as W x D x H in
+  printed order"). Two bare figures, or four or more, fill no slot; say so in \`uncertain\`.
 - A text field the page gives nothing for is an empty string. Null is used in one place only: a
   finish's part, specification or code that the page does not print.
 
