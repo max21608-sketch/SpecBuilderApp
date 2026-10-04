@@ -272,9 +272,10 @@ For each item:
      SPECIFICATION SHEET fills the slot and the drawing's figure is listed as a candidate, with an
      \`uncertain\` entry about "conflict" (quote any precedence note the document prints).
    - \`seatHeight\` only from a figure dimensioned floor-to-seat-top, or labelled seat height / SH. Two
-     unlabelled candidates: leave it out, and say so. A bench, stool or ottoman you sit on the top of: its seat
-     height IS its overall height — repeat that figure — unless something (a handle, a back) rises above
-     the seat, in which case use the floor-to-seat figure if printed, else leave it out.
+     unlabelled candidates: leave it out, and say so. A bench, stool, footstool or ottoman you sit or
+     rest on the top of: its seat height IS its overall height — repeat that figure — unless something
+     (a handle, a back) rises above the seat, in which case use the floor-to-seat figure if printed,
+     else leave it out.
    - \`height\` is to the highest point of the item as drawn; say in \`evidence\` what it is to (top of
      back, top of loose cushions, worktop). If loose cushions sit above the dimensioned frame with no
      figure, give the frame figure and say so in \`uncertain\`. A bed frame's height is the frame alone:
