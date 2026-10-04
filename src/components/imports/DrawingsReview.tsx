@@ -762,7 +762,14 @@ export default function DrawingsReview({
   // will never match one however many bills are confirmed, so sending its
   // reviewer to the BOQ is advice that cannot work.
   const noTarget = pendingItems.filter((item) => (byItem.get(item.id)?.targets.length ?? 0) === 0);
-  const unresolved = noTarget.filter((item) => item.itemCodeRaw !== null);
+  // A code that matched TWO lines on a phase is not waiting for the bill — the
+  // bill is there, and a person chooses (the SX11A rule). Telling that reviewer
+  // to confirm the bill again was advice that could not work (seen on the Aman
+  // pack, 2026-10-04: PL-FUR-11 and PL-FUR-26 are each printed twice on the bill).
+  const toChoose = noTarget.filter((item) =>
+    (byItem.get(item.id)?.resolution.runs ?? []).some((run) => run.status === "ambiguous"),
+  );
+  const unresolved = noTarget.filter((item) => item.itemCodeRaw !== null && !toChoose.includes(item));
   const codeless = noTarget.filter((item) => item.itemCodeRaw === null);
   // Counted from the observations rather than from the blockers, so the offer
   // stands whether or not the card has other reasons it cannot commit.
@@ -809,6 +816,13 @@ export default function DrawingsReview({
       )}
 
       {staged.documentNotes && <Note tone="plain">The model noted: {staged.documentNotes}</Note>}
+
+      {toChoose.length > 0 && (
+        <Note tone="warn">
+          {toChoose.length} item{toChoose.length === 1 ? "" : "s"} match{toChoose.length === 1 ? "es" : ""} more than one
+          line on the bill. Open {toChoose.length === 1 ? "it" : "each"} below and choose which line the drawing is for.
+        </Note>
+      )}
 
       {unresolved.length > 0 && (
         <Note tone="warn">
