@@ -21,7 +21,7 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
-## 2026-10-04 — Intake reads the document, not the page: built on `items-int`, not yet on staging
+## 2026-10-04 — Intake reads the document, not the page: on staging at `f24d481`
 
 Plan: `docs/plans/intake-items-2026-10-04.md` (GO from Max: "go run all
 phases"). Seven coders (A–G) in worktrees, each diff reviewed here, the four
@@ -50,9 +50,11 @@ figure the drawing never replaced), 4 seat heights the read flagged and left
 for a person; 5 cards held for a person (3 bedhead panels with no bill line,
 PL-FUR-11 and PL-FUR-26 each printed twice on the bill).
 
-**Max's, before anything moves:** top up the API credit (it ran out mid-run);
-migration 0043 on the sandbox, then this branch is merged to staging; the
-golden checked at the local review page. **Not accepted by Max or Matthew.**
+**Sandbox migrated by Max the same day** (backup first): 0042 AND 0043 applied —
+0042 had never reached the sandbox. Then `items-int` fast-forwarded onto
+`staging` (`f24d481`, 38 commits). **Still Max's:** the seed on the sandbox
+(the Aman layout needs it), top up the API credit (it ran out mid-run), check
+the deployment, and check the golden at the local review page. **Not accepted by Max or Matthew.**
 
 ## 2026-10-01 — Catch-up: the Aman bill held, the drawing read did not
 
