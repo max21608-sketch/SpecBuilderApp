@@ -45,6 +45,7 @@
 // ============================================================================
 import {
   assertStagedDrawings,
+  readAsItems,
   readByModel,
   groupItemsByCode,
   variantLettersByItem,
@@ -111,6 +112,15 @@ const MAGNITUDE_MARK = "no view says so";
 type Counts = {
   runs: number;
   runsV2: number;
+  /**
+   * Version 4 (the item-centric read, 2026-10-04): runs, items spanning more
+   * than one page, the doubts the read stated, and the slots it chose between
+   * candidates. Counted so a v3 and a v4 pack can be read side by side.
+   */
+  runsV4: number;
+  itemsMultiPage: number;
+  uncertainNotes: number;
+  slotsWithCandidates: number;
   items: number;
   itemsNoCode: number;
   placedRows: number;
@@ -136,7 +146,7 @@ type Counts = {
 
 function blank(): Counts {
   return {
-    runs: 0, runsV2: 0, items: 0, itemsNoCode: 0, placedRows: 0, suggestedRows: 0,
+    runs: 0, runsV2: 0, runsV4: 0, itemsMultiPage: 0, uncertainNotes: 0, slotsWithCandidates: 0, items: 0, itemsNoCode: 0, placedRows: 0, suggestedRows: 0,
     magnitudeItems: 0, disputeItems: 0, labelContradictions: 0, unit: {},
     lettered: 0, letteredGroups: 0, falseSplitGroups: 0, unfoldableDimensionRows: 0, duplicateOverallRows: 0,
     regions: blankRegionCounts(),
@@ -203,6 +213,8 @@ function measure(staged: StagedDrawings, counts: Counts, label: string, notes: s
   // count a guess the app never made and never showed anybody.
   const guesses = !readByModel(staged);
   if (!guesses) counts.runsV2 += 1;
+  const asItems = readAsItems(staged);
+  if (asItems) counts.runsV4 += 1;
   const letters = variantLettersByItem(staged.items, staged);
   const groups = groupItemsByCode(staged.items, staged);
 
@@ -220,6 +232,9 @@ function measure(staged: StagedDrawings, counts: Counts, label: string, notes: s
   for (const item of staged.items) {
     counts.items += 1;
     if (!item.itemCodeRaw) counts.itemsNoCode += 1;
+    if (Array.isArray(item.pages) && item.pages.length > 1) counts.itemsMultiPage += 1;
+    counts.uncertainNotes += Array.isArray(item.uncertain) ? item.uncertain.length : 0;
+    counts.slotsWithCandidates += item.observations.filter((o) => o.dimensionSlot && (o.candidates?.length ?? 0) > 0).length;
     if (letters.get(item.id)) counts.lettered += 1;
 
     // WHAT THE PICTURE PANEL HAD TO WORK WITH. Read straight off the staged
@@ -242,7 +257,10 @@ function measure(staged: StagedDrawings, counts: Counts, label: string, notes: s
     // Version 2 only, exactly as the read-time pass is gated: a version 1 run
     // never had `isOverall` asked of it, and the combined line's parts were the
     // only reading of the overall size it had.
-    if (!guesses) {
+    // Not on version 4 either: the read-time pass does not run there (each slot
+    // is one figure by the shape of the read), so counting it would report a
+    // drop the card never makes.
+    if (!guesses && !asItems) {
       const duplicates = redundantOverallRows(item.observations);
       counts.duplicateOverallRows += duplicates.size;
       if (detail && duplicates.size > 0) {
@@ -296,7 +314,9 @@ function report(title: string, c: Counts): void {
   const pct = (n: number, d: number) => (d === 0 ? "—" : `${Math.round((n / d) * 100)}%`);
   console.log("");
   console.log(title);
-  console.log(`  runs read                  ${c.runs}   (${c.runsV2} read by the model, ${c.runs - c.runsV2} still guessed)`);
+  console.log(`  runs read                  ${c.runs}   (${c.runsV2} read by the model, ${c.runs - c.runsV2} still guessed; ${c.runsV4} read item by item)`);
+  console.log(`  items spanning >1 page     ${c.itemsMultiPage}   (version 4: one card for the whole item)`);
+  console.log(`  doubts the read stated     ${c.uncertainNotes}   slots chosen between candidates ${c.slotsWithCandidates}`);
   console.log(`  items staged               ${c.items}   (${c.itemsNoCode} carry no code)`);
   console.log(`  dimension rows placed      ${c.placedRows}   (${c.suggestedRows} suggested, ${pct(c.suggestedRows, c.placedRows)})`);
   console.log("");
