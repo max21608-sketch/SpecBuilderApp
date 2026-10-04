@@ -321,6 +321,55 @@ package as a whole.
 ${SHARED_RULES}`,
 };
 
+/** The effort levels the Messages API accepts. */
+export type ExtractionEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** The extraction's own effort, unless a caller (the eval harness) overrides it. */
+export const EXTRACTION_EFFORT: ExtractionEffort = "high";
+
+/**
+ * Prompt wordings kept beside the live one so the eval harness
+ * (`tools/eval-drawings.ts`) can re-ask a document exactly as an earlier
+ * pipeline asked it. `v3` IS `PROMPTS.shop_drawings` today; a later wording
+ * becomes the live prompt and this keeps the old text under its name, so a
+ * baseline stays reproducible. Nothing in the app passes a variant.
+ */
+export const PROMPT_VARIANTS: Partial<Record<DocumentKind, Record<string, string>>> = {
+  shop_drawings: { v3: PROMPTS.shop_drawings },
+};
+
+/** The prompt for a kind, or for one of its named variants; null for a variant that does not exist. */
+export function promptFor(documentKind: DocumentKind, variant?: string): string | null {
+  if (!variant) return PROMPTS[documentKind];
+  return PROMPT_VARIANTS[documentKind]?.[variant] ?? null;
+}
+
+/**
+ * What a call cost, read off the response's `usage` — the four token counts
+ * a price is computed from. Raw usage is still returned whole beside it; this
+ * is the part a harness adds up. Null where no response arrived.
+ */
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+};
+
+export function tokenUsage(usage: unknown): TokenUsage | null {
+  if (!usage || typeof usage !== "object") return null;
+  const read = (key: string) => {
+    const value = (usage as Record<string, unknown>)[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  };
+  return {
+    inputTokens: read("input_tokens"),
+    outputTokens: read("output_tokens"),
+    cacheCreationInputTokens: read("cache_creation_input_tokens"),
+    cacheReadInputTokens: read("cache_read_input_tokens"),
+  };
+}
+
 export type ExtractionSuccess = {
   ok: true;
   /**
@@ -329,6 +378,7 @@ export type ExtractionSuccess = {
    * fails the typecheck rather than reading `proposals` off a drawing.
    */
   output: ExtractionPayload;
+  /** The model that SERVED the response (`response.model`), not the one asked for. */
   model: string;
   rawResponse: unknown;
   usage: unknown;
@@ -354,6 +404,11 @@ export type ExtractionFailure = {
     | "no_tool_use"
     | "schema";
   error: string;
+  /**
+   * The model that answered, where a response arrived; otherwise the one that
+   * was asked. Absent only where no request was made at all.
+   */
+  model?: string;
   rawResponse?: unknown;
   usage?: unknown;
   requestId?: string | null;
@@ -362,25 +417,97 @@ export type ExtractionFailure = {
 
 export type ExtractionResult = ExtractionSuccess | ExtractionFailure;
 
+export type ExtractionOptions = {
+  signal?: AbortSignal;
+  /**
+   * The app's own words about HOW this source is given — a spreadsheet's
+   * numbered rows, one part of several. Sent after the kind's prompt, never
+   * inside the document's text.
+   */
+  instruction?: string;
+  /**
+   * EVAL HARNESS ONLY. Nothing in the app sets these; every default below is
+   * the app's own. They exist so `npm run eval:drawings` can ask the same
+   * document of another model, at another effort, or under an earlier prompt
+   * wording, through this one function rather than a copy of it.
+   */
+  model?: string;
+  effort?: ExtractionEffort;
+  promptVariant?: string;
+};
+
+/**
+ * What a model's finished response says, for one document kind: the validated
+ * payload, or the failure it amounts to.
+ *
+ * Exported so the eval harness can RE-STAGE a saved response with the current
+ * code (`--rescore`) through exactly the checks a live call goes through. Pure.
+ */
+export function readExtractionResponse(
+  response: { stop_reason?: string | null; content?: readonly unknown[] },
+  documentKind: DocumentKind,
+):
+  | { ok: true; output: ExtractionPayload }
+  | { ok: false; code: "truncated" | "refusal" | "no_tool_use" | "schema"; error: string } {
+  const spec = TOOLS[documentKind];
+  // Truncation is terminal. A tool call cut off mid-object is not a thin
+  // answer; it is an unparseable one, and the same document will truncate again.
+  if (response.stop_reason === "max_tokens") {
+    return {
+      ok: false,
+      code: "truncated",
+      error: "The document produced more output than one extraction can hold. Split it into smaller documents.",
+    };
+  }
+  if (response.stop_reason === "refusal") {
+    return { ok: false, code: "refusal", error: "The model declined to read this document. Check what was uploaded." };
+  }
+
+  const toolUse = (response.content ?? []).find(
+    (block): block is { type: "tool_use"; name: string; input: unknown } =>
+      Boolean(block) &&
+      typeof block === "object" &&
+      (block as { type?: unknown }).type === "tool_use" &&
+      (block as { name?: unknown }).name === spec.tool.name,
+  );
+  if (!toolUse) {
+    return { ok: false, code: "no_tool_use", error: "The model answered without recording any observations." };
+  }
+
+  const validated = spec.schema.safeParse(toolUse.input);
+  if (!validated.success) {
+    return {
+      ok: false,
+      code: "schema",
+      error: `The model's output did not match the expected shape: ${validated.error.issues[0]?.message ?? "unknown"}.`,
+    };
+  }
+  return { ok: true, output: { outputKind: spec.outputKind, data: validated.data } as ExtractionPayload };
+}
+
 export async function extractSpecDocument(
   source: DocumentSource,
   documentKind: DocumentKind,
-  options: {
-    signal?: AbortSignal;
-    /**
-     * The app's own words about HOW this source is given — a spreadsheet's
-     * numbered rows, one part of several. Sent after the kind's prompt, never
-     * inside the document's text.
-     */
-    instruction?: string;
-  } = {},
+  options: ExtractionOptions = {},
 ): Promise<ExtractionResult> {
   const startedAt = Date.now();
   const elapsed = () => Date.now() - startedAt;
+  const model = options.model ?? EXTRACTION_MODEL;
+  const effort = options.effort ?? EXTRACTION_EFFORT;
   // The kind selects the prompt, the tool AND the schema together. They are one
   // decision: a drawing read under the schedule tool returns a shape the
   // drawings reviewer cannot display.
   const spec = TOOLS[documentKind];
+  const prompt = promptFor(documentKind, options.promptVariant);
+  if (prompt === null) {
+    return {
+      ok: false,
+      retryable: false,
+      code: "invalid_request",
+      error: `There is no prompt variant "${options.promptVariant}" for ${documentKind}.`,
+      elapsedMs: elapsed(),
+    };
+  }
 
   // The document goes FIRST and the instructions after it. Anthropic's own
   // guidance for long documents, and it matters most on the biggest inputs,
@@ -392,11 +519,11 @@ export async function extractSpecDocument(
             type: "document" as const,
             source: { type: "base64" as const, media_type: "application/pdf" as const, data: source.base64 },
           },
-          { type: "text" as const, text: PROMPTS[documentKind] },
+          { type: "text" as const, text: prompt },
         ]
       : [
           { type: "text" as const, text: source.text },
-          { type: "text" as const, text: PROMPTS[documentKind] },
+          { type: "text" as const, text: prompt },
           ...(options.instruction ? [{ type: "text" as const, text: options.instruction }] : []),
         ];
 
@@ -435,10 +562,10 @@ export async function extractSpecDocument(
     // long document is exactly the shape of request that a non-streaming call
     // has no way to keep alive.
     const streamed = await anthropicStream(anthropic)({
-      model: EXTRACTION_MODEL,
+      model,
       max_tokens: MAX_TOKENS,
       thinking: { type: "adaptive" },
-      output_config: { effort: "high" },
+      output_config: { effort },
       tool_choice: { type: "tool", name: spec.tool.name },
       tools: [spec.tool],
       messages: [{ role: "user", content }],
@@ -447,51 +574,29 @@ export async function extractSpecDocument(
     response = streamed.message;
     requestId = streamed.requestId;
   } catch (cause) {
-    return classifyTransportFailure(cause, elapsed());
+    return { ...classifyTransportFailure(cause, elapsed()), model };
   }
 
-  // Truncation is terminal. A tool call cut off mid-object is not a thin
-  // answer; it is an unparseable one, and the same document will truncate again.
-  if (response.stop_reason === "max_tokens") {
+  const served = typeof response.model === "string" && response.model ? response.model : model;
+  const read = readExtractionResponse(response, documentKind);
+  if (!read.ok) {
     return {
-      ok: false, retryable: false, code: "truncated",
-      error: "The document produced more output than one extraction can hold. Split it into smaller documents.",
-      rawResponse: response, usage: response.usage, requestId, elapsedMs: elapsed(),
-    };
-  }
-  if (response.stop_reason === "refusal") {
-    return {
-      ok: false, retryable: false, code: "refusal",
-      error: "The model declined to read this document. Check what was uploaded.",
-      rawResponse: response, usage: response.usage, requestId, elapsedMs: elapsed(),
-    };
-  }
-
-  const toolUse = response.content.find(
-    (block): block is Extract<typeof block, { type: "tool_use" }> =>
-      block.type === "tool_use" && block.name === spec.tool.name,
-  );
-  if (!toolUse) {
-    return {
-      ok: false, retryable: false, code: "no_tool_use",
-      error: "The model answered without recording any observations.",
-      rawResponse: response, usage: response.usage, requestId, elapsedMs: elapsed(),
-    };
-  }
-
-  const validated = spec.schema.safeParse(toolUse.input);
-  if (!validated.success) {
-    return {
-      ok: false, retryable: false, code: "schema",
-      error: `The model's output did not match the expected shape: ${validated.error.issues[0]?.message ?? "unknown"}.`,
-      rawResponse: response, usage: response.usage, requestId, elapsedMs: elapsed(),
+      ok: false,
+      retryable: false,
+      code: read.code,
+      error: read.error,
+      model: served,
+      rawResponse: response,
+      usage: response.usage,
+      requestId,
+      elapsedMs: elapsed(),
     };
   }
 
   return {
     ok: true,
-    output: { outputKind: spec.outputKind, data: validated.data } as ExtractionPayload,
-    model: EXTRACTION_MODEL,
+    output: read.output,
+    model: served,
     rawResponse: response,
     usage: response.usage,
     requestId,

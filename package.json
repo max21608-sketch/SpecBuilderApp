@@ -39,7 +39,8 @@
     "measure:drawings": "tsx --env-file-if-exists=.env.local tools/measure-drawing-reading.ts",
     "measure:outstanding": "tsx --env-file-if-exists=.env.local tools/measure-outstanding.ts",
     "measure:screens": "tsx --env-file-if-exists=.env.local tools/measure-screens.ts",
-    "reread:drawings": "tsx --env-file-if-exists=.env.local tools/reread-drawings.ts"
+    "reread:drawings": "tsx --env-file-if-exists=.env.local tools/reread-drawings.ts",
+    "eval:drawings": "tsx --env-file-if-exists=.env.localstack.local tools/eval-drawings.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
