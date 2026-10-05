@@ -101,6 +101,39 @@ export function findRecordsByRef(refRaw: string | null, records: RecordEntry[]):
   return records.filter((record) => normaliseRef(record.label) === normalised);
 }
 
+// ---- a ref that names several zones ----------------------------------------
+
+/**
+ * A ref printed as a LIST OF ZONES and a number — the Aman tracker's
+ * `GR / MUR / PL` in one column and `FUR04` in the next, given back by the read
+ * as `"GR / MUR / PL FUR04"` — is the document naming THREE items, one per
+ * zone, and the bill carries them as three codes (`GR-FUR-04`, `PL-FUR-04`;
+ * the mock-up room has no line of its own). Each member is
+ * `<zone>-<number>`, matched afterwards through `findRecordsByRef` exactly as
+ * any printed ref is, so `GR-FUR04` meets `GR-FUR-04` by the same fold.
+ *
+ * EXACT, AND IT REFUSES EVERYTHING ELSE (null). The zones are upper-case
+ * words of one to four letters separated by a SPACED slash (` / `, the way
+ * the tracker prints the column), then whitespace — or, after a list of two
+ * or more, a hyphen — then the number, which must carry a digit. So
+ * `GR-FUR-04` is a code and not a one-zone list, `S-201` likewise, `FUR22.1`
+ * names no zone, `GR/PL FUR23` is not the printed shape and lower case is not
+ * a zone. A refusal costs nothing: the ref is still matched whole, as before.
+ */
+export function expandZoneList(refRaw: string | null): string[] | null {
+  if (!refRaw) return null;
+  const match = /^([A-Z]{1,4}(?:\s+\/\s+[A-Z]{1,4})*)(\s+|-)([A-Z0-9][A-Z0-9.\-]*)$/.exec(refRaw.trim());
+  if (!match) return null;
+  const zones = match[1]!.split(/\s+\/\s+/);
+  const separator = match[2]!;
+  const rest = match[3]!;
+  if (!/[0-9]/.test(rest)) return null;
+  // One zone joined by a hyphen is already a code, not a list.
+  if (zones.length === 1 && separator === "-") return null;
+  if (zones.length > 8) return null;
+  return [...new Set(zones.map((zone) => `${zone}-${rest}`))];
+}
+
 // ---- a code read off the END of a bill code --------------------------------
 
 /**

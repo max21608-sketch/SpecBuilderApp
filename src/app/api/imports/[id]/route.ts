@@ -22,8 +22,11 @@ import { loadDrawingContext, recordChoices, resolveStagedRun } from "@/lib/drawi
 import { reviewDrawingObservations } from "@/lib/confirm-drawings";
 import { normaliseFinishCode } from "@/lib/finishes";
 import {
+  annotateHeld,
+  asNoteProposal,
   buildTargetSnapshot,
   suggestState,
+  unmatchedBecomesNote,
   type Proposal,
   type StagedSpecDocument,
 } from "@/lib/spec-document";
@@ -989,9 +992,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
           `
         : [];
 
+    // WHAT EACH ROW WOULD LAND ON, AS IT IS NOW. Whether a value agrees with
+    // what the record holds, and whether what it holds is the BILL's, is read
+    // off the live registers on every look — the comparison the confirm makes
+    // again inside its transaction (`annotateHeld`). Not written back: the
+    // staged JSON stays what was resolved when the document was read.
+    const live = parsed && Array.isArray(parsed.lines)
+      ? { ...parsed, lines: annotateHeld(parsed.lines, registers.attributes ?? []) }
+      : parsed;
+
     return json({
       ok: true,
-      import: { ...run, parsed },
+      import: { ...run, parsed: live },
       message: messageRows[0] ?? null,
       registers: {
         records: registers.records,
@@ -1562,7 +1574,7 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
   try {
     const result = await withTransaction(async (txn) => {
       const rows = await txn`
-        select id, project_id, status, parsed, version, source_kind
+        select id, project_id, status, parsed, version, source_kind, document_kind
         from intake_runs where id = ${id}
         for update
       `;
@@ -1641,6 +1653,33 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
           // The old acknowledgement was about a different answer entirely.
           overwriteAcknowledged: false,
         };
+
+        // A NOTE OR AN ANSWER, decided by what the reviewer chose (A4). A
+        // statement on a schedule that answers no question is kept as a note
+        // on its record; choosing a question makes it that question's answer
+        // and drops the note; clearing the question, or moving it to another
+        // item, makes it a note again — on THAT item, compared with THAT
+        // item's bill note. Never on an email, and never on a dimension or a
+        // finish, which land by slot and by field.
+        if (!proposal.dimension && !proposal.finish) {
+          const asNote =
+            record && !requirement && unmatchedBecomesNote(run.document_kind ? (String(run.document_kind) as DocumentKind) : null)
+              ? asNoteProposal({ ...next, note: null, attributeTarget: null }, record, registers)
+              : null;
+          if (asNote) {
+            next = { ...asNote, overwriteAcknowledged: false };
+          } else {
+            next = { ...next, note: null, attributeTarget: null };
+            if (proposal.note) {
+              // It was a note, kept verbatim; as an answer it is read the way
+              // every answer is, so a "N/A" is not recorded as the words N/A.
+              const suggestion = suggestState(proposal.raw.valueRaw);
+              next.proposedState = suggestion.state;
+              next.proposedValue = suggestion.value;
+              next.stateReason = suggestion.reason;
+            }
+          }
+        }
 
         // A fresh suggestion for a newly reachable target, but only where the
         // reviewer has not already typed something of their own.

@@ -17,6 +17,7 @@
 // that moment on.
 import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { sql } from "@/lib/db";
+import { loadBillHeldIds } from "@/lib/attribute-from-bill";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { itemImageSource } from "@/lib/item-image";
 import {
@@ -284,16 +285,15 @@ function withBillReplacements(entries: BillReplacement[]): { billReplacements?: 
  * through to the database.
  */
 export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlots> {
-  const rows = await sql`
+  // WHAT THE BILL SAID, and only that (brief G): the bill's own run, no
+  // standard a person set beside it, and not the new row of a person's
+  // correction. Read by the ONE predicate a specification document's
+  // registers and confirm read too (attribute-from-bill.ts), so a drawing and
+  // a tracker cannot disagree about which value is the bill's.
+  const [rows, billHeld] = await Promise.all([
+    sql`
     select a.id, a.record_id, a.spec_field_id, a.dimension_slot, a.version, a.label, a.value, a.unit,
-           a.state, a.material_code, a.source_page, at.filename as source_filename,
-           -- WHAT THE BILL SAID, and only that (brief G): the bill's own run,
-           -- no standard a person set beside it, and not the new row of a
-           -- person's correction (a correction keeps the bill's run and page,
-           -- and points the row it retired at itself).
-           coalesce(ir.source_kind = 'boq_xlsx', false)
-             and a.standard_set_by is null
-             and not exists (select 1 from record_attributes p where p.superseded_by_id = a.id) as from_bill
+           a.state, a.material_code, a.source_page, at.filename as source_filename
     from record_attributes a
     join spec_records r on r.id = a.record_id
     left join intake_runs ir on ir.id = a.source_run_id
@@ -301,7 +301,9 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
     where r.project_id = ${projectId}
       and a.status = 'active'
       and (a.spec_field_id is not null or a.dimension_slot is not null)
-  `;
+  `,
+    loadBillHeldIds(sql, { projectId }),
+  ]);
   // The occupant itself, not just that there is one: a reviewer looking at a
   // revised drawing has to be told WHAT it would replace and off which page,
   // or "tick to replace" is a tick in the dark.
@@ -319,7 +321,7 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
       materialCode: row.material_code === null || row.material_code === undefined ? null : String(row.material_code),
       sourceFilename: row.source_filename === null || row.source_filename === undefined ? null : String(row.source_filename),
       sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
-      fromBill: row.from_bill === true,
+      fromBill: billHeld.has(String(row.id)),
     };
     if (row.spec_field_id) {
       const map = fields.get(recordId) ?? new Map<string, OccupiedSlot>();

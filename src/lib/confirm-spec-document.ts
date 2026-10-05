@@ -27,11 +27,17 @@ import { snapshotRecords } from "@/lib/record-snapshot";
 import { applyAnswerFills, applyAnswerRetractions, loadDimensionNote, planAnswerFills } from "@/lib/promote-answers";
 import { loadPromotable } from "@/lib/attribute-retire";
 import {
+  annotateHeld,
   hasPendingProposals,
+  heldReading,
   proposalBlockers,
+  type AttributeEntry,
   type Proposal,
   type StagedSpecDocument,
 } from "@/lib/spec-document";
+import { loadBillHeldIds } from "@/lib/attribute-from-bill";
+import { recordDisagreement, type DisagreementStatement } from "@/lib/disagreement-record";
+import { isDimensionSlot, normaliseUnit, type AttributeGroup, type AttributeState, type DimensionSlot } from "@/lib/spec-vocab";
 
 export type ProposalRef = { id: string; version: number };
 
@@ -187,6 +193,83 @@ async function writeStaged(txn: TxnSql, run: Omit<LoadedRun, "actor">, actor: st
   return status;
 }
 
+/**
+ * The values these proposals would land on, read LIVE inside the confirm's
+ * transaction and locked, with whether each is the BILL's — by the one
+ * predicate the review screen's registers and the drawings card read
+ * (`attribute-from-bill.ts`). Active rows only: a row retired since is not a
+ * value to compare with, and `annotateHeld` marks it moved.
+ */
+async function loadLiveHeld(txn: TxnSql, attributeIds: string[]): Promise<AttributeEntry[]> {
+  if (attributeIds.length === 0) return [];
+  const rows = await txn`
+    select a.id, a.record_id, a.attr_group, a.dimension_slot, a.spec_field_id, a.label, a.value, a.unit,
+           a.state, a.version, a.material_code, a.source_run_id, a.source_page
+    from record_attributes a
+    where a.id = any(${attributeIds}::uuid[]) and a.status = 'active'
+    order by a.id
+    for update
+  `;
+  const billHeld = await loadBillHeldIds(txn, { attributeIds });
+  return rows.map((row) => ({
+    id: String(row.id),
+    recordId: String(row.record_id),
+    attrGroup: String(row.attr_group) as AttributeGroup,
+    slot: isDimensionSlot(row.dimension_slot) ? (String(row.dimension_slot) as DimensionSlot) : null,
+    specFieldId: row.spec_field_id ? String(row.spec_field_id) : null,
+    label: String(row.label),
+    value: row.value === null || row.value === undefined ? null : String(row.value),
+    unit: normaliseUnit(row.unit),
+    state: String(row.state) as AttributeState,
+    version: Number(row.version),
+    materialCode: row.material_code ? String(row.material_code) : null,
+    fromBill: billHeld.has(String(row.id)),
+    sourceRunId: row.source_run_id ? String(row.source_run_id) : null,
+    sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
+  }));
+}
+
+/** What a dimension, finish or note proposal states, in the attribute's own shape. */
+function statementOf(proposal: Proposal): DisagreementStatement {
+  const dimension = proposal.dimension ?? null;
+  const finish = proposal.finish ?? null;
+  const note = proposal.note ?? null;
+  if (dimension) {
+    return {
+      attrGroup: "dimension",
+      label: (proposal.raw.attributeRaw ?? dimension.slot).trim() || dimension.slot,
+      value: dimension.tbc ? (proposal.raw.valueRaw ?? "TBC") : dimension.figure,
+      unit: dimension.unit,
+      dimensionSlot: dimension.slot,
+      specFieldId: null,
+      materialCode: null,
+      state: dimension.tbc ? "tbc" : "confirmed",
+    };
+  }
+  if (finish) {
+    return {
+      attrGroup: finish.group,
+      label: (proposal.raw.attributeRaw ?? finish.group).trim() || finish.group,
+      value: finish.value,
+      unit: null,
+      dimensionSlot: null,
+      specFieldId: finish.specFieldId,
+      materialCode: finish.codeRaw,
+      state: finish.tbc ? "tbc" : "confirmed",
+    };
+  }
+  return {
+    attrGroup: "note",
+    label: note?.label ?? ((proposal.raw.attributeRaw ?? "").trim() || "Note"),
+    value: (proposal.proposedValue ?? "").trim() ? proposal.proposedValue : proposal.raw.valueRaw,
+    unit: null,
+    dimensionSlot: null,
+    specFieldId: null,
+    materialCode: null,
+    state: note?.tbc ? "tbc" : "confirmed",
+  };
+}
+
 // ---- confirm ---------------------------------------------------------------
 
 export async function confirmSpecDocumentRecord(
@@ -204,7 +287,19 @@ export async function confirmSpecDocumentRecord(
   }
 
   const run = await loadRun(txn, runId, expectedVersion);
-  const chosen = takePending(run.staged, refs, ["pending"]);
+  const taken = takePending(run.staged, refs, ["pending"]);
+
+  // THE HELD VALUES, LIVE. Whether a row agrees with what the record holds,
+  // and whether what it holds is the BILL's, is read here from the rows as
+  // they are now — never from the request and never from the staged JSON,
+  // which was written when the document was read. The screen reads the same
+  // comparison off the registers (`annotateHeld` in the review GET).
+  const live = await loadLiveHeld(txn, [
+    ...new Set(taken.map((proposal) => proposal.attributeTarget?.attributeId).filter((id): id is string => Boolean(id))),
+  ]);
+  const annotated = new Map(annotateHeld(taken, live).map((proposal) => [proposal.id, proposal]));
+  const chosen = taken.map((proposal) => annotated.get(proposal.id) ?? proposal);
+  const lines = run.staged.lines.map((line) => annotated.get(line.id) ?? line);
 
   // The whole card, or nothing. If the live set of pending proposals for this
   // record is not exactly what was submitted, the reviewer is looking at a
@@ -226,8 +321,19 @@ export async function confirmSpecDocumentRecord(
   // Blockers, recomputed from the LIVE set. They are never stored: a retarget
   // clears an acknowledgement and a clash appears and disappears as other rows
   // move, so a blocker frozen at extraction time would be stale by the first edit.
+  // A value that moved since the reviewer looked is refused under its own
+  // code, ahead of the blockers: the value they compared with, or agreed to
+  // drop, is not the value that is there.
+  const moved = chosen.find((proposal) => proposal.attributeTarget?.moved);
+  if (moved) {
+    throw new DomainConflictError(
+      "occupant_changed",
+      `The ${moved.dimension?.slot ?? moved.finish?.specFieldName ?? moved.note?.label ?? "spec"} this would be compared with has changed since you looked at it. Nothing was written — re-match (free) and check what is there now.`,
+    );
+  }
+
   for (const proposal of chosen) {
-    const blockers = proposalBlockers(proposal, run.staged.lines);
+    const blockers = proposalBlockers(proposal, lines);
     if (blockers.length > 0) {
       throw new DomainConflictError("blocked", blockers[0]?.message ?? "That row cannot be confirmed yet.", {
         diff: { proposalId: proposal.id, blockers },
@@ -256,16 +362,29 @@ export async function confirmSpecDocumentRecord(
   // from the transaction, so one created afterwards would leave every row it
   // covers belonging to nothing.
   const source = await confirmSourceFor(txn, run, chosen.length);
-  const changeSetId = await openChangeSet(txn, {
-    projectId: run.projectId,
-    kind: source.changeKind,
-    actor,
-    reason: source.reason,
-    sourceIntakeRunId: run.runId,
-    evidenceAttachmentId: source.evidenceAttachmentId,
-  });
+  // OPENED AT THE FIRST WRITE, not before the card is read. A card whose every
+  // row agrees with what the record already holds writes nothing, and a change
+  // in the trail that changed nothing is a line a reader has to work out is
+  // empty. Still opened BEFORE that first write, which is the rule that
+  // matters: write_audit() reads the change from the transaction.
+  let changeSetId: string | null = null;
+  const changeSet = async (): Promise<string> => {
+    changeSetId ??= await openChangeSet(txn, {
+      projectId: run.projectId,
+      kind: source.changeKind,
+      actor,
+      reason: source.reason,
+      sourceIntakeRunId: run.runId,
+      evidenceAttachmentId: source.evidenceAttachmentId,
+    });
+    return changeSetId;
+  };
 
   const applied = new Map<string, Proposal["applied"]>();
+  // Whether anything a VERSION describes was written. A card whose every row
+  // agrees with the bill, or is recorded beside it, writes no spec content,
+  // and a version describing no change would be a version nobody made.
+  let wroteContent = false;
 
   // ---- dimensions ---------------------------------------------------------
   //
@@ -275,7 +394,8 @@ export async function confirmSpecDocumentRecord(
   // the answer directly would leave the record holding a Dimensions cell no
   // attribute backs, and the next drawing confirm recomposes from the
   // attributes alone and would silently wipe what this email contributed.
-  const attributeWrites = chosen.filter((proposal) => proposal.dimension || proposal.finish);
+  const attributeWrites = chosen.filter((proposal) => proposal.dimension || proposal.finish || proposal.note);
+  let wroteAttributes = false;
   if (attributeWrites.length > 0) {
     // Newest last, so `sort_order` reads in the order the reviewer saw.
     let sortOrder = Number(
@@ -285,7 +405,56 @@ export async function confirmSpecDocumentRecord(
     for (const proposal of attributeWrites) {
       const dimension = proposal.dimension ?? null;
       const finish = proposal.finish ?? null;
+      const note = proposal.note ?? null;
+      const reading = heldReading(proposal);
+      const statement = statementOf(proposal);
+      const held = proposal.attributeTarget ?? null;
+
+      // THE SAME VALUE: nothing to write. The row is still marked applied,
+      // naming the attribute that already says it, so the card can complete.
+      if (reading === "same" && held) {
+        applied.set(proposal.id, {
+          answerId: null,
+          answerVersion: null,
+          attributeId: held.attributeId,
+          value: statement.value,
+          state: statement.state,
+          outcome: "agrees",
+        });
+        continue;
+      }
+
+      // DIFFERENT FROM THE BILL, and the reviewer left the default: the bill's
+      // value stays live and this statement is recorded BESIDE it, in red,
+      // until a person decides (0046). Nothing that reads record_attributes
+      // moves. Ticking "use this document's instead" is the replace tick, and
+      // falls through to the retire-and-insert below.
+      if (reading === "bill_differs" && held && !proposal.overwriteAcknowledged) {
+        const disagreement = await recordDisagreement(txn, {
+          projectId: run.projectId,
+          recordId,
+          heldAttributeId: held.attributeId,
+          sourceRunId: run.runId,
+          sourcePage: proposal.raw.page ?? null,
+          statement,
+          changeSetId: changeSet,
+          actor,
+        });
+        applied.set(proposal.id, {
+          answerId: null,
+          answerVersion: null,
+          attributeId: null,
+          value: statement.value,
+          state: statement.state,
+          outcome: "recorded_beside",
+          disagreementId: disagreement.id,
+        });
+        continue;
+      }
+
       sortOrder += 1;
+      wroteAttributes = true;
+      await changeSet();
 
       // RETIRE BEFORE INSERT, and the database decides that order rather than
       // preference: 0016's partial unique index is `where status = 'active'`,
@@ -305,31 +474,33 @@ export async function confirmSpecDocumentRecord(
         if (!retired[0]) {
           throw new DomainConflictError(
             "occupant_changed",
-            `The ${dimension?.slot ?? finish?.specFieldName ?? "spec"} this would replace has changed since you looked at it. Nothing was written — reload and check what is there now.`,
+            `The ${dimension?.slot ?? finish?.specFieldName ?? note?.label ?? "spec"} this would replace has changed since you looked at it. Nothing was written — reload and check what is there now.`,
           );
         }
       }
 
-      const fallbackLabel = dimension ? dimension.slot : (finish?.group ?? "spec");
-      const label = (proposal.raw.attributeRaw ?? fallbackLabel).trim() || fallbackLabel;
-      const tbc = dimension ? dimension.tbc : (finish?.tbc ?? false);
+      const label = statement.label;
+      const tbc = statement.state === "tbc";
       // 0011's biconditional makes the pairing unrepresentable otherwise: a
       // dimension with no slot and a note carrying one are both refused at
       // insert. Only a dimension carries a slot; only a finish carries a field.
+      // A NOTE is the document's own heading and words, verbatim (A4).
+      // The PAGE goes with it: a statement off page 9 of the tracker is checked
+      // against page 9 (null for a spreadsheet, which has none).
       const inserted = await txn`
         insert into record_attributes
           (record_id, attr_group, dimension_slot, spec_field_id, material_code, label, value, unit, state,
-           source_run_id, sort_order, created_by, updated_by)
+           source_run_id, source_page, sort_order, created_by, updated_by)
         values
-          (${recordId}, ${dimension ? "dimension" : (finish?.group ?? "other")},
-           ${dimension ? dimension.slot : null},
-           ${dimension ? null : (finish?.specFieldId ?? null)},
-           ${dimension ? null : (finish?.codeRaw ?? null)},
+          (${recordId}, ${statement.attrGroup},
+           ${statement.dimensionSlot},
+           ${statement.specFieldId},
+           ${statement.materialCode},
            ${label},
-           ${dimension ? (dimension.tbc ? (proposal.raw.valueRaw ?? "TBC") : dimension.figure) : (finish?.value ?? null)},
-           ${dimension ? dimension.unit : null},
-           ${tbc ? "tbc" : "confirmed"},
-           ${run.runId}, ${sortOrder}, ${actor}, ${actor})
+           ${statement.value},
+           ${statement.unit},
+           ${statement.state},
+           ${run.runId}, ${proposal.raw.page ?? null}, ${sortOrder}, ${actor}, ${actor})
         returning id
       `;
       const attributeId = String(inserted[0]?.id ?? "");
@@ -355,10 +526,15 @@ export async function confirmSpecDocumentRecord(
         answerId: null,
         answerVersion: null,
         attributeId,
-        value: dimension ? dimension.figure : (finish?.value ?? null),
+        value: dimension ? dimension.figure : statement.value,
         state: tbc ? "tbc" : "confirmed",
+        outcome: "written",
       });
     }
+  }
+
+  if (wroteAttributes) {
+    wroteContent = true;
 
     // Recompose the WHOLE record, not just the slots this document supplied:
     // a message giving only the seat height still has to recompose the cell
@@ -375,7 +551,9 @@ export async function confirmSpecDocumentRecord(
   }
 
   for (const proposal of chosen) {
-    if (proposal.dimension || proposal.finish) continue;
+    if (proposal.dimension || proposal.finish || proposal.note) continue;
+    wroteContent = true;
+    await changeSet();
     const target = proposal.target;
     if (!target) throw new DomainConflictError("blocked", "That row has no target.");
 
@@ -462,15 +640,17 @@ export async function confirmSpecDocumentRecord(
   }
 
   const now = new Date().toISOString();
-  const lines = run.staged.lines.map((line) => {
+  // The STAGED lines, not the annotated ones: the live facts are read again on
+  // every look and are not the document's to keep.
+  const written = run.staged.lines.map((line) => {
     const result = applied.get(line.id);
     if (!result) return line;
     return { ...line, reviewStatus: "applied" as const, reviewedAt: now, reviewedBy: actor, applied: result, version: line.version + 1 };
   });
 
-  const status = await writeStaged(txn, run, actor, lines);
+  const status = await writeStaged(txn, run, actor, written);
 
-  await snapshotRecords(txn, [recordId], changeSetId);
+  if (wroteContent) await snapshotRecords(txn, [recordId], await changeSet());
 
   await txn`
     insert into status_history (entity_type, entity_id, from_status, to_status, changed_by, note)
@@ -482,7 +662,7 @@ export async function confirmSpecDocumentRecord(
     applied: applied.size,
     ignored: 0,
     restored: 0,
-    remainingPending: lines.filter((line) => line.reviewStatus === "pending").length,
+    remainingPending: written.filter((line) => line.reviewStatus === "pending").length,
     status,
   };
 }

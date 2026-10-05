@@ -17,7 +17,9 @@ import {
   type AttributeState,
   normaliseItemLevel,
   type DimensionSlot,
+  type DocumentKind,
 } from "@/lib/spec-vocab";
+import { loadBillHeldIds } from "@/lib/attribute-from-bill";
 import type { SpecFieldEntry } from "@/lib/drawing-document";
 import type { AnswerEntry, AttributeEntry, RecordEntry, Registers, RequirementEntry } from "@/lib/spec-document";
 // The same label the chase emails use. Two spellings of one record number would
@@ -156,12 +158,19 @@ export async function loadExtractionRegisters(
   const attributeRows = records.length
     ? await sql`
         select a.id, a.record_id, a.attr_group, a.dimension_slot, a.spec_field_id,
-               a.label, a.value, a.unit, a.state, a.version, a.material_code
+               a.label, a.value, a.unit, a.state, a.version, a.material_code,
+               a.source_run_id, a.source_page
         from record_attributes a
         join spec_records r on r.id = a.record_id
         where r.project_id = ${projectId} and a.status = 'active'
       `
     : [];
+
+  // WHICH OF THEM ARE THE BILL'S OWN STATEMENT, by the one predicate the
+  // drawings card and the confirm read (attribute-from-bill.ts). A document
+  // that disagrees with the bill is recorded beside it; one that disagrees
+  // with anything else keeps the replace tick.
+  const billHeld = records.length ? await loadBillHeldIds(sql, { projectId }) : new Set<string>();
 
   const attributes: AttributeEntry[] = attributeRows.map((row) => ({
       id: String(row.id),
@@ -175,6 +184,9 @@ export async function loadExtractionRegisters(
       state: String(row.state) as AttributeState,
       version: Number(row.version),
       materialCode: row.material_code ? String(row.material_code) : null,
+      fromBill: billHeld.has(String(row.id)),
+      sourceRunId: row.source_run_id ? String(row.source_run_id) : null,
+      sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
   }));
 
   // The BWS register, for placing a finish in the first free slot of its kind.
@@ -186,8 +198,15 @@ export async function loadExtractionRegisters(
   }));
 
   const billRows = options.intakeRunId ? await loadBillRowIndex(options.intakeRunId, projectId) : null;
+  // The document's own kind, where one is being resolved: an unmatched
+  // statement on a schedule is kept as a note, and on an email it is not
+  // (`unmatchedBecomesNote`). Read off the run, never from a request.
+  const kindRows = options.intakeRunId
+    ? await sql`select document_kind from intake_runs where id = ${options.intakeRunId}`
+    : [];
+  const documentKind = kindRows[0]?.document_kind ? (String(kindRows[0].document_kind) as DocumentKind) : null;
 
-  return { records, requirements, answers, attributes, specFields, billRows };
+  return { records, requirements, answers, attributes, specFields, billRows, documentKind };
 }
 
 /**

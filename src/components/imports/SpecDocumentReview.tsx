@@ -33,6 +33,7 @@ import EmailEnvelope, { type EmailMessage } from "@/components/imports/EmailHead
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import {
   classifyProposal,
+  heldReading,
   proposalBlockers,
   type Proposal,
   type RecordEntry,
@@ -50,7 +51,7 @@ import Note from "@/components/ui/Note";
 import DocumentState from "@/components/imports/DocumentState";
 import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
-import type { Tone } from "@/components/ui/tone";
+import { TONE, type Tone } from "@/components/ui/tone";
 import {
   ANSWER_STATES,
   ANSWER_STATE_LABELS,
@@ -775,9 +776,23 @@ export default function SpecDocumentReview({
           <ul>
             {sections.applied.map((proposal) => (
               <li key={proposal.id} className="border-b border-neutral-100 px-4 py-2 text-neutral-600">
-                {proposal.target?.recordLabel} · {proposal.target?.requirementPrompt} →{" "}
-                <span className="text-neutral-900">{proposal.applied?.value ?? "N/A"}</span>{" "}
+                {proposal.target?.recordLabel ?? proposal.recordLabel} ·{" "}
+                {proposal.target?.requirementPrompt ??
+                  proposal.dimension?.slot ??
+                  proposal.finish?.specFieldName ??
+                  (proposal.note ? `note “${proposal.note.label}”` : (proposal.raw.attributeRaw ?? ""))}{" "}
+                → <span className="text-neutral-900">{proposal.applied?.value ?? "N/A"}</span>{" "}
                 <span className="text-xs">({proposal.applied?.state})</span>
+                {/* What happened to a value the item already held, in words:
+                    nothing written, or kept beside the bill's in red. */}
+                {proposal.applied?.outcome === "agrees" && (
+                  <span className="ml-2 text-xs text-neutral-500">agrees with what the item holds — nothing written</span>
+                )}
+                {proposal.applied?.outcome === "recorded_beside" && (
+                  <Chip tone="danger" className="ml-2">
+                    kept beside the bill&rsquo;s value
+                  </Chip>
+                )}
               </li>
             ))}
           </ul>
@@ -998,6 +1013,12 @@ const CHANGE_TONE: Record<ChangeDescription["kind"], Tone> = {
   confirms: "good",
   changes: "warn",
   repeats: "plain",
+  // The bill was there first. Saying the same thing is nothing to look at; a
+  // DIFFERENT value is red — Max, 2026-10-05: "highlight them in red just to
+  // show that there's big disagreement". Red here is not a blocker: the row
+  // commits by default, keeping the bill's value and recording this beside it.
+  agrees: "plain",
+  disagrees: "danger",
   withdraws: "warn",
   not_applicable: "plain",
   no_question: "warn",
@@ -1129,6 +1150,18 @@ function LandsOn({ row, members }: { row: SpecRow; members: Proposal[] }) {
     );
   }
 
+  const note = members.find((proposal) => proposal.note)?.note;
+  if (note) {
+    return (
+      <span>
+        Kept as a note
+        <span className="mt-0.5 block text-[11px] text-neutral-500">
+          under “{note.label}” · {row.runs.length} {row.runs.length === 1 ? "proposal" : "proposals"}
+        </span>
+      </span>
+    );
+  }
+
   if (first?.target?.requirementPrompt) {
     return (
       <span>
@@ -1176,8 +1209,14 @@ function SpecRowView({
     .map((member) => all.find((proposal) => proposal.id === member.proposalId))
     .filter((proposal): proposal is Proposal => Boolean(proposal));
 
+  // RED WHERE THE DOCUMENT AND THE BILL DISAGREE, whatever else the row is.
+  // Amber still marks a row that cannot commit; a disagreement commits by
+  // default and is red for what it says, not for what it stops.
+  const disagrees = row.runs.some((member) => member.change.kind === "disagrees");
   return (
-    <div className={`border-b border-neutral-200 ${blocked ? "bg-amber-50/40" : ""}`.trim()}>
+    <div
+      className={`border-b border-neutral-200 ${disagrees ? TONE.danger.row : blocked ? "bg-amber-50/40" : ""}`.trim()}
+    >
       <div className={`${ROW_GRID} py-2.5`}>
         <div className="min-w-0">
           <button
@@ -1227,7 +1266,11 @@ function SpecRowView({
 
         <div className="min-w-0">
           <Chip tone={CHANGE_TONE[row.summary.kind]}>{row.summary.label}</Chip>
-          {row.summary.was && <span className="mt-0.5 block text-[11px] text-neutral-500">was {row.summary.was}</span>}
+          {row.summary.was && (
+            <span className="mt-0.5 block text-[11px] text-neutral-500">
+              {row.summary.kind === "disagrees" ? "the bill says" : "was"} {row.summary.was}
+            </span>
+          )}
         </div>
 
         <div className="text-right">
@@ -1273,13 +1316,32 @@ function SpecRowView({
                 <div key={proposal.id} className="rounded border border-neutral-200 bg-white">
                   <p className="px-3 pt-2 text-th uppercase tracking-wider text-neutral-500">
                     {proposal.runName ?? "No phase"}
-                    {proposal.target ? ` · ${proposal.target.recordLabel}` : ""}
+                    {proposal.target
+                      ? ` · ${proposal.target.recordLabel}`
+                      : proposal.recordLabel
+                        ? ` · ${proposal.recordLabel}`
+                        : ""}
                   </p>
                   {proposal.finish ? (
                     <FinishRow
                       proposal={proposal}
                       all={all}
                       busy={busy}
+                      onChange={onChange}
+                      onIgnore={async () => {
+                        await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
+                      }}
+                    />
+                  ) : proposal.note ? (
+                    <NoteRow
+                      proposal={proposal}
+                      all={all}
+                      registers={registers}
+                      record={record}
+                      dirtyValue={dirty[proposal.id]?.value}
+                      saveError={saveErrors[proposal.id]}
+                      busy={busy}
+                      onType={onType}
                       onChange={onChange}
                       onIgnore={async () => {
                         await onIgnoreRow({ ...row, runs: row.runs.filter((r) => r.proposalId === proposal.id) });
@@ -1425,6 +1487,8 @@ function DimensionRow({
         </label>
       )}
 
+      <HeldComparison proposal={proposal} busy={busy} onChange={onChange} />
+
       {blockers
         .filter((blocker) => blocker.code !== "replace")
         .map((blocker) => (
@@ -1524,6 +1588,8 @@ function FinishRow({
         </label>
       )}
 
+      <HeldComparison proposal={proposal} busy={busy} onChange={onChange} />
+
       {blockers
         .filter((blocker) => blocker.code !== "replace")
         .map((blocker) => (
@@ -1531,6 +1597,184 @@ function FinishRow({
             {blocker.message}
           </p>
         ))}
+    </div>
+  );
+}
+
+// ---- a value the record already holds --------------------------------------
+//
+// WHAT THE DOCUMENT SAYS BESIDE WHAT THE ITEM HOLDS, read off `heldReading` —
+// the comparison the blockers and the confirm read, so the screen cannot say
+// one thing and the confirm do another.
+//
+// THE BILL WAS THERE FIRST (Max, 2026-10-05, the Aman tracker against the
+// Aman bill): "keep whatever's in the BOQ to begin with ... it needs to take in
+// both ... highlight them in red". So where the held value is the BILL's and
+// this differs, both are shown side by side in red, each as written with its
+// own unit, and the default keeps the bill's and records this beside it — no
+// blocker. "Use this document's instead" is exactly the replace tick, with the
+// same version check behind it at confirm.
+function HeldComparison({
+  proposal,
+  busy,
+  onChange,
+}: {
+  proposal: Proposal;
+  busy: string | null;
+  onChange: (proposal: Proposal, changes: Record<string, unknown>) => void;
+}) {
+  const held = proposal.attributeTarget;
+  if (!held || held.moved) return null;
+  const reading = heldReading(proposal);
+
+  if (reading === "same") {
+    return (
+      <p className="mt-1 text-xs text-neutral-600">
+        {held.fromBill ? "Agrees with the bill" : "The item already holds this"}: “{held.value ?? "—"}
+        {held.unit && held.unit !== "in" ? held.unit : ""}”. Nothing is written for it.
+      </p>
+    );
+  }
+  if (reading !== "bill_differs") return null;
+
+  const mine = proposal.dimension
+    ? { value: proposal.dimension.tbc ? "TBC" : (proposal.dimension.figure ?? "—"), unit: proposal.dimension.unit }
+    : proposal.finish
+      ? { value: proposal.finish.value ?? "—", unit: null }
+      : { value: proposal.proposedValue ?? proposal.raw.valueRaw ?? "—", unit: null };
+  const name = `disagree-${proposal.id}`;
+
+  return (
+    <div className={`mt-2 rounded border px-2.5 py-2 text-sm ${TONE.danger.note}`}>
+      <p className="font-semibold">Disagrees with the bill</p>
+      <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="min-w-0">
+          <span className="block text-[11px] uppercase tracking-wider text-red-800">The bill</span>
+          <span className="break-words font-mono">{held.value ?? "—"}</span>
+          {held.unit && <span className="ml-1 text-xs">{held.unit}</span>}
+        </div>
+        <div className="min-w-0">
+          <span className="block text-[11px] uppercase tracking-wider text-red-800">
+            This document{proposal.raw.page ? `, page ${proposal.raw.page}` : ""}
+          </span>
+          <span className="break-words font-mono">{mine.value}</span>
+          {mine.unit && <span className="ml-1 text-xs">{mine.unit}</span>}
+        </div>
+      </div>
+      <div className="mt-2 flex flex-col gap-1">
+        <label className="flex items-start gap-2">
+          <input
+            type="radio"
+            name={name}
+            checked={!proposal.overwriteAcknowledged}
+            disabled={busy !== null}
+            onChange={() => onChange(proposal, { overwriteAcknowledged: false })}
+            className="mt-0.5"
+          />
+          <span>Keep the bill&rsquo;s, record this beside it</span>
+        </label>
+        <label className="flex items-start gap-2">
+          <input
+            type="radio"
+            name={name}
+            checked={proposal.overwriteAcknowledged}
+            disabled={busy !== null}
+            onChange={() => onChange(proposal, { overwriteAcknowledged: true })}
+            className="mt-0.5"
+          />
+          <span>Use this document&rsquo;s instead — the bill&rsquo;s is retired</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ---- a statement kept as a note --------------------------------------------
+//
+// A statement no checklist question matched, on a schedule: the tracker's
+// Model ref, Supplier, Link, Status and dated Comment. It is kept against the
+// item as a note, in the document's own words (Max: "the rest will just go in
+// relevant fields to fill out more details for each line item"). The reviewer
+// can still answer one of the item's questions with it instead, which turns
+// the row back into an answer, or ignore it.
+function NoteRow({
+  proposal,
+  all,
+  registers,
+  record,
+  dirtyValue,
+  saveError,
+  busy,
+  onType,
+  onChange,
+  onIgnore,
+}: {
+  proposal: Proposal;
+  all: Proposal[];
+  registers: Registers;
+  record: RecordEntry | undefined;
+  dirtyValue: string | undefined;
+  saveError: string | undefined;
+  busy: string | null;
+  onType: (proposal: Proposal, value: string) => void;
+  onChange: (proposal: Proposal, changes: Record<string, unknown>) => void;
+  onIgnore: () => Promise<void>;
+}) {
+  const note = proposal.note;
+  if (!note) return null;
+  const blockers = proposalBlockers(proposal, all);
+  const questions = record?.categoryId ? registers.requirements.filter((row) => row.categoryId === record.categoryId) : [];
+
+  return (
+    <div className="px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Chip>Note</Chip>
+        <span className="text-sm font-medium text-neutral-900">{note.label}</span>
+        <Button variant="quiet" size="xs" className="ml-auto" disabled={busy !== null} onClick={() => void onIgnore()}>
+          Ignore
+        </Button>
+      </div>
+      <label className="mt-1 block text-xs text-neutral-500">
+        Note to keep
+        <input
+          value={dirtyValue ?? proposal.proposedValue ?? ""}
+          disabled={busy !== null}
+          onChange={(event) => onType(proposal, event.target.value)}
+          className="mt-1 w-full rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900"
+        />
+      </label>
+      {saveError && (
+        <p className="mt-1 text-xs font-medium text-red-700">Your in-progress edits are not being saved: {saveError}</p>
+      )}
+      {questions.length > 0 && (
+        <label className="mt-2 block text-xs text-neutral-500">
+          Or answer one of this item&rsquo;s questions with it
+          <select
+            value=""
+            disabled={busy !== null}
+            onChange={(event) => {
+              if (event.target.value) onChange(proposal, { requirementId: event.target.value });
+            }}
+            className="mt-1 w-full rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900"
+          >
+            <option value="">Keep it as a note</option>
+            {questions.map((question) => (
+              <option key={question.id} value={question.id}>
+                {question.section ? `${question.section} · ` : ""}
+                {question.prompt}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      <HeldComparison proposal={proposal} busy={busy} onChange={onChange} />
+
+      {blockers.map((blocker) => (
+        <p key={blocker.code} className="mt-1 text-sm text-amber-800">
+          {blocker.message}
+        </p>
+      ))}
     </div>
   );
 }
