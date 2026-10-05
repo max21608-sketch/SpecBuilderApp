@@ -124,6 +124,29 @@ export default function ItemImagePicker({
   // A record that already has a picture keeps it unless somebody chooses
   // otherwise: the default is none, and nothing is cropped on mount.
   const [chosen, setChosen] = useState<ItemView | null>(held > 0 ? null : (proposal ?? fallback));
+  // UNTOUCHED, IT FOLLOWS THE RECORDS; TOUCHED, IT IS THE PERSON'S. Found in
+  // the browser on 2026-10-05: a code on two bill lines resolves to nobody
+  // until the reviewer picks one, so the panel mounted with nothing held and
+  // proposed the drawing -- and picking the line, whose bill picture is exactly
+  // what this rule protects, then left that proposal standing. So while nobody
+  // has pressed anything here, the default moves with what the ticked records
+  // hold; once somebody has, nothing the server says moves their choice.
+  const touched = useRef(false);
+  const choose = useCallback((view: ItemView | null) => {
+    touched.current = true;
+    setChosen(view);
+  }, []);
+  const hasHeld = held > 0;
+  const defaultView = useRef<ItemView | null>(proposal ?? fallback);
+  defaultView.current = proposal ?? fallback;
+  const lastHeld = useRef(hasHeld);
+  useEffect(() => {
+    // Only on a CHANGE: re-setting the mount value would be a second crop of
+    // the same page, the defect the ref around onCropped exists to prevent.
+    if (lastHeld.current === hasHeld) return;
+    lastHeld.current = hasHeld;
+    if (!touched.current) setChosen(hasHeld ? null : defaultView.current);
+  }, [hasHeld]);
   // What can be switched to. The proposal is normally the first of `views`;
   // it is added where it is not, so that starting at none — or pressing "No
   // picture" — can never lose the one view the read proposed.
@@ -307,7 +330,7 @@ export default function ItemImagePicker({
                 <Button
                   key={`${view.viewType}-${view.page}-${index}`}
                   size="xs"
-                  onClick={() => setChosen(view)}
+                  onClick={() => choose(view)}
                 >
                   {sameView(view, fallback) ? "Use the whole page" : `Use ${(VIEW_LABELS[view.viewType] ?? "view").toLowerCase()}`}
                 </Button>
@@ -318,7 +341,7 @@ export default function ItemImagePicker({
             {chosen && (
               // Quiet, because it clears rather than chooses — and it is not a
               // one-way door: the whole page is offered straight back above.
-              <Button size="xs" variant="quiet" onClick={() => setChosen(null)}>
+              <Button size="xs" variant="quiet" onClick={() => choose(null)}>
                 No picture
               </Button>
             )}
@@ -334,7 +357,7 @@ export default function ItemImagePicker({
           onCancel={() => setDragging(false)}
           onPicked={(bbox) => {
             setDragging(false);
-            setChosen({ viewType: "other", page: chosen?.page ?? itemPage ?? 1, bbox });
+            choose({ viewType: "other", page: chosen?.page ?? itemPage ?? 1, bbox });
           }}
         />
       )}

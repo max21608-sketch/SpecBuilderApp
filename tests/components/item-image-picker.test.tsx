@@ -194,3 +194,61 @@ describe("an item that already has a picture (Max, 2026-10-05)", () => {
     expect(screen.getByText("Confirming replaces the current picture on 2 of the 3 records.")).toBeTruthy();
   });
 });
+
+describe("the picture panel follows the ticked records until somebody touches it", () => {
+  beforeEach(() => {
+    crops.calls = [];
+    crops.pending = [];
+    URL.createObjectURL = () => "blob:test";
+    URL.revokeObjectURL = () => undefined;
+  });
+
+  // A code on two bill lines resolves to nobody until the reviewer picks one,
+  // so the panel mounts with nothing held; picking a line with a bill picture
+  // must then move the untouched default to none.
+  function Panel({ held, onImage }: { held: string[] | null; onImage: (image: unknown) => void }) {
+    return (
+      <ItemImagePicker
+        importId="import-1"
+        itemPage={3}
+        proposal={view}
+        views={[view]}
+        existingPicture={held ? { recordIds: held, of: held.length } : null}
+        onCropped={(image) => onImage(image)}
+      />
+    );
+  }
+
+  it("moves an untouched proposal to none when the ticked record turns out to have a picture", async () => {
+    const onImage = vi.fn();
+    const { rerender } = render(<Panel held={null} onImage={onImage} />);
+    await settleCrops();
+    expect(crops.calls).toHaveLength(1);
+    rerender(<Panel held={["r-1"]} onImage={onImage} />);
+    await act(async () => undefined);
+    expect(onImage).toHaveBeenLastCalledWith(null);
+    expect(screen.getByText("This item already has a picture, so none will be taken from this drawing.")).toBeTruthy();
+    expect(crops.calls).toHaveLength(1);
+  });
+
+  it("never moves a choice somebody made", async () => {
+    const onImage = vi.fn();
+    const { rerender } = render(<Panel held={null} onImage={onImage} />);
+    await settleCrops();
+    await userEvent.click(screen.getByRole("button", { name: "No picture" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Use / }));
+    await settleCrops();
+    const calls = crops.calls.length;
+    rerender(<Panel held={["r-1"]} onImage={onImage} />);
+    await act(async () => undefined);
+    expect(crops.calls).toHaveLength(calls);
+    expect(onImage).not.toHaveBeenLastCalledWith(null);
+    expect(screen.getByText("Confirming replaces the item's current picture.")).toBeTruthy();
+  });
+
+  it("does not crop twice on mount", async () => {
+    render(<Panel held={null} onImage={() => undefined} />);
+    await settleCrops();
+    expect(crops.calls).toHaveLength(1);
+  });
+});
