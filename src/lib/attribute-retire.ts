@@ -30,7 +30,7 @@
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { isFinishCodeOrigin, isFinishKind } from "@/lib/finishes";
-import { standardFromRow } from "@/lib/bw-standard";
+import { finishStandardFromRow, standardFromRow } from "@/lib/bw-standard";
 import { changeSetForEdit, type UploadedEvidence } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import {
@@ -58,7 +58,9 @@ export async function loadPromotable(txn: TxnSql, recordId: string): Promise<Pro
            a.finish_id, f.code as finish_code, f.code_norm as finish_code_norm,
            f.code_origin as finish_code_origin, f.kind as finish_kind,
            f.description as finish_description, f.supplier_raw as finish_supplier_raw,
-           f.reference as finish_reference, f.colour as finish_colour, f.state as finish_state
+           f.reference as finish_reference, f.colour as finish_colour, f.state as finish_state,
+           f.standard_value as finish_standard_value, f.standard_option_id as finish_standard_option_id,
+           f.standard_state as finish_standard_state
     from record_attributes a
     left join project_finishes f on f.id = a.finish_id
     where a.record_id = ${recordId} and a.status = 'active'
@@ -88,6 +90,9 @@ export async function loadPromotable(txn: TxnSql, recordId: string): Promise<Pro
           reference: row.finish_reference === null || row.finish_reference === undefined ? null : String(row.finish_reference),
           colour: row.finish_colour === null || row.finish_colour === undefined ? null : String(row.finish_colour),
           state: String(row.finish_state) as PromotableAttribute["state"],
+          // BW's own finish for the code (0045): the standard in force on a
+          // linked attribute, so the answer makes the cell's choice.
+          standard: finishStandardFromRow(row),
         }
       : null,
   }));

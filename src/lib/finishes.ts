@@ -160,6 +160,22 @@ export type Finish = {
   reference: string | null;
   colour: string | null;
   state: AttributeState;
+  /**
+   * BW's own finish for this code (0045), set once in the library and applying
+   * to every item carrying the code. `standardInForce` in `bw-standard.ts` is
+   * the one rule that reads it. The shape is `AttributeStandard`'s, declared
+   * here rather than imported because this file is a leaf. Optional so a
+   * caller that only resolves codes need not load it; every loader that
+   * COMPOSES a statement (`loadRecordAtoms`, `loadPromotable`) always sets it.
+   */
+  standard?: FinishStandard | null;
+};
+
+/** `AttributeStandard` (bw-standard.ts), as a finish carries it (0045). */
+export type FinishStandard = {
+  value: string | null;
+  optionId: string | null;
+  state: "proposed" | "agreed" | "tbc";
 };
 
 /**

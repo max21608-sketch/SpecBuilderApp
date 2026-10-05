@@ -27,7 +27,7 @@
 import { z } from "zod";
 import { composeRowCells, BWS_EXPORT_COLUMNS } from "@/lib/bws-export";
 import { composeFinishCell } from "@/lib/finishes";
-import { describeStandard } from "@/lib/bw-standard";
+import { describeStandard, standardInForce } from "@/lib/bw-standard";
 import { exportAnswers, scopeForAtoms, RECORD_ATOMS_SCHEMA_VERSION, type RecordAtoms } from "@/lib/record-atoms";
 
 // ---- validating a stored snapshot -----------------------------------------
@@ -59,6 +59,18 @@ const AtomAttribute = z.object({
       reference: z.string().nullable(),
       colour: z.string().nullable(),
       state: z.string(),
+      // Added at schema 8 (0045): BW's own finish for the code. NAMED, because
+      // Zod strips what it does not name and a version that lost it would
+      // recompose its cell from the client's words. Absent on an older
+      // version, where `parseAtoms` reads the item's own standard into it --
+      // that was the one in force that day.
+      standard: z
+        .object({
+          value: z.string().nullable(),
+          optionId: z.string().nullable(),
+          state: z.enum(["proposed", "agreed", "tbc"]),
+        })
+        .nullish(),
     })
     .nullish()
     .transform((value) => value ?? null),
@@ -169,6 +181,20 @@ export function parseAtoms(value: unknown): RecordAtoms {
       `This version was written by a newer build (schema ${parsed.schemaVersion}) than this one understands (${RECORD_ATOMS_SCHEMA_VERSION}).`,
     );
   }
+  // BEFORE 0045 THE ITEM'S OWN STANDARD SHIPPED, linked or not. A version
+  // written then holds no standard on its finish, and today's rule reads only
+  // the finish's on a linked attribute -- so without this, recomposing an old
+  // version would drop a standard the file really did ship, and a diff across
+  // the change would report the item's own choice vanishing as well as the
+  // library's arriving. The finish is read as carrying what was in force.
+  if (parsed.schemaVersion < 8) {
+    for (const attribute of parsed.attributes) {
+      if (attribute.finish) attribute.finish.standard = attribute.standard;
+    }
+  }
+  for (const attribute of parsed.attributes) {
+    if (attribute.finish) attribute.finish.standard = attribute.finish.standard ?? null;
+  }
   return parsed as RecordAtoms;
 }
 
@@ -263,7 +289,15 @@ function attributeFields(attribute: RecordAtoms["attributes"][number]): { field:
     // 0041. What BW proposed beside the client's words, and whether the client
     // agreed -- so a proposal and an agreement are each a visible change on the
     // version that made them, while `value` goes on saying what the page said.
-    { field: "standard", label: "BW standard", value: describeStandard(attribute.standard ?? null) },
+    //
+    // The standard IN FORCE (0045): on a linked spec, the code's own from the
+    // finishes library -- so setting it once shows on the version of every
+    // item carrying the code, named as the library's.
+    {
+      field: "standard",
+      label: attribute.finish ? `BW finish (set on ${attribute.finish.code})` : "BW standard",
+      value: describeStandard(standardInForce(attribute)),
+    },
     { field: "specFieldJsonId", label: "BWS field", value: attribute.specFieldJsonId },
     { field: "source", label: "Source", value: attribute.sourceFilename },
   ];

@@ -53,7 +53,12 @@ import { describeRetireEffect } from "@/lib/configuration-carry";
 import RecordHistory from "@/components/history/RecordHistory";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
-import { BwStandardPanel, BwStandardSummary, paletteForJsonId } from "@/components/records/BwStandardControl";
+import {
+  BwFinishFromLibrary,
+  BwStandardPanel,
+  BwStandardSummary,
+  paletteForJsonId,
+} from "@/components/records/BwStandardControl";
 import Button, { buttonClass } from "@/components/ui/Button";
 import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
@@ -146,6 +151,8 @@ type Attribute = {
   standard_value?: string | null; standard_state?: string | null;
   standard_set_by?: string | null; standard_set_at?: string | null;
   standard_evidence_filename?: string | null; standard_evidence_change_set_id?: string | null;
+  /** 0045: BW's own finish for the linked CODE -- the one in force on a linked spec. */
+  finish_standard_value?: string | null; finish_standard_state?: string | null;
 };
 
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
@@ -1192,13 +1199,21 @@ function RecordView() {
                                 {/* THE BW STANDARD, BESIDE THE CLIENT'S WORDS
                                     (0041). The value above is what the page
                                     said and stays so; this is what BW will
-                                    make, and what the BWS file ships. */}
-                                <BwStandardSummary
-                                  attribute={attribute}
-                                  palette={paletteForJsonId(data.palettes ?? [], data.paletteByQuestion ?? [], attribute.json_id)}
-                                  onSet={() => setStandardEditing({ id: attribute.id, mode: "set" })}
-                                  onAgree={() => setStandardEditing({ id: attribute.id, mode: "agree" })}
-                                />
+                                    make, and what the BWS file ships.
+                                    PER CODE ONLY (0045): a spec filed under a
+                                    library code takes BW's finish from the
+                                    code, so here it is a line and a link; an
+                                    unfiled one keeps the per-item control. */}
+                                {attribute.finish_id ? (
+                                  <BwFinishFromLibrary attribute={attribute} projectId={record.project_id} />
+                                ) : (
+                                  <BwStandardSummary
+                                    attribute={attribute}
+                                    palette={paletteForJsonId(data.palettes ?? [], data.paletteByQuestion ?? [], attribute.json_id)}
+                                    onSet={() => setStandardEditing({ id: attribute.id, mode: "set" })}
+                                    onAgree={() => setStandardEditing({ id: attribute.id, mode: "agree" })}
+                                  />
+                                )}
                                 {/* A LINKED finish is a link to the library,
                                     because the library is what the export
                                     renders and what a correction has to be made
@@ -1405,7 +1420,7 @@ function RecordView() {
                                 </td>
                               </tr>
                             )}
-                            {standardEditing?.id === attribute.id && (
+                            {standardEditing?.id === attribute.id && !attribute.finish_id && (
                               <BwStandardPanel
                                 attribute={attribute}
                                 palette={paletteForJsonId(data.palettes ?? [], data.paletteByQuestion ?? [], attribute.json_id)}

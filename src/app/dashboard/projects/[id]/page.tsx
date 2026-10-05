@@ -323,7 +323,11 @@ function ProjectOverview() {
    * table's own vocabulary so a hand-edited query cannot put it in a state no
    * tile can clear.
    */
-  const rawFocus = useSearchParams().get("focus");
+  const searchParams = useSearchParams();
+  const rawFocus = searchParams.get("focus");
+  // `?finish=<CODE>` lands the finishes tab on one code -- the record screen's
+  // "set on WD-05 in the finishes library" link (0045).
+  const finishQuery = searchParams.get("finish") ?? "";
   const initialFocus: Focus = ((): Focus => {
     const known: Focus[] = ["tgq", "waiting", "no_category", "no_level", "quotable"];
     return known.find((value) => value === rawFocus) ?? null;
@@ -1312,7 +1316,7 @@ function ProjectOverview() {
         {/* Mounted only when selected: it loads the whole library and every item
             each code is on, which is not a query the Overview should be paying
             for on every visit. */}
-        {tab === "finishes" && <FinishesLibrary projectId={project.id} />}
+        {tab === "finishes" && <FinishesLibrary projectId={project.id} initialQuery={finishQuery} />}
 
         {runs.map((run) =>
           tab === run.id ? (

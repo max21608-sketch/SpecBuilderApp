@@ -35,7 +35,7 @@ import {
   type RequirementKind,
 } from "@/lib/spec-vocab";
 import { isFinishCodeOrigin, isFinishKind } from "@/lib/finishes";
-import { standardFromRow } from "@/lib/bw-standard";
+import { finishStandardFromRow, standardFromRow } from "@/lib/bw-standard";
 import type { ExportAnswer, ExportAttribute, ExportRecord, ExportScope } from "@/lib/bws-export";
 
 /** Both drivers satisfy this: `sql` from db.ts and `TxnSql` from db-transaction.ts. */
@@ -96,12 +96,16 @@ export type RecordAtoms = {
  *     which is what orders a configuration under its line in every file.
  * 7 — each attribute carries the BW standard proposed beside the client's
  *     words (0041), and its qualifier (0029) is named on read at last.
+ * 8 — each attribute's FINISH carries BW's own finish for the code (0045),
+ *     which is the standard in force on a linked attribute. A version 7 or
+ *     older is upgraded on read (`parseAtoms`): the item's own standard was
+ *     the one in force that day, so it is what the finish is read as having.
  *
  * Bumped whenever a field is added, and every addition since 1 is optional on
  * read, so an older version still parses rather than reading as "everything
  * was deleted that day".
  */
-export const RECORD_ATOMS_SCHEMA_VERSION = 7;
+export const RECORD_ATOMS_SCHEMA_VERSION = 8;
 
 function text(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
@@ -139,6 +143,10 @@ export function toExportAttribute(row: Row): ExportAttribute {
           reference: text(row.finish_reference),
           colour: text(row.finish_colour),
           state: String(row.finish_state) as AttributeState,
+          // BW's own finish for the CODE (0045). In the atoms so a version of
+          // every item carrying the code shows the library's choice moving --
+          // and so the cell recomposed from a snapshot ships what the file did.
+          standard: finishStandardFromRow(row),
         }
       : null,
     // THE BW STANDARD (0041), beside `value` and never in it. In the atoms so a
@@ -304,7 +312,9 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
            a.finish_id, fin.code as finish_code, fin.code_norm as finish_code_norm,
            fin.code_origin as finish_code_origin, fin.kind as finish_kind,
            fin.description as finish_description, fin.supplier_raw as finish_supplier_raw,
-           fin.reference as finish_reference, fin.colour as finish_colour, fin.state as finish_state
+           fin.reference as finish_reference, fin.colour as finish_colour, fin.state as finish_state,
+           fin.standard_value as finish_standard_value, fin.standard_option_id as finish_standard_option_id,
+           fin.standard_state as finish_standard_state
     from record_attributes a
     left join spec_fields f on f.id = a.spec_field_id
     left join project_finishes fin on fin.id = a.finish_id
