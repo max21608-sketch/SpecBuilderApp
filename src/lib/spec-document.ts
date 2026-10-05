@@ -52,6 +52,7 @@ export { findRecordsByRef, normaliseRef, expandZoneList };
 export { deferredToSomebody };
 export type { RecordEntry };
 import { readDimension, sizeLineRefusal, type DimensionReading } from "@/lib/spec-dimensions";
+import { parseDimensionFigure } from "@/lib/dimensions";
 import { kindCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { billRowTarget, type BillRowIndex } from "@/lib/bill-rows";
 import { alreadyRecorded, suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
@@ -1436,6 +1437,16 @@ function agreesWithHeld(proposal: Proposal, held: HeldTarget): boolean {
   const occupant = { value: held.value, unit: held.unit, state: held.state ?? null, materialCode: held.materialCode ?? null };
   if (proposal.dimension) {
     const dimension = proposal.dimension;
+    // A figure this document printed with NO UNIT ("W: 660 X D:700", the
+    // Aman tracker) over a held 660: the two documents print one number, so it
+    // is not a disagreement. Nothing is converted and no unit is assumed, and
+    // the shared equality is left alone — on a drawing card a unitless figure
+    // must still stop for its unit. A different number stays different.
+    if (!dimension.unit && !dimension.tbc && held.state !== "tbc") {
+      const bare = parseDimensionFigure(dimension.figure).figure;
+      const kept = parseDimensionFigure(held.value).figure;
+      if (bare !== null && bare === kept) return true;
+    }
     return alreadyRecorded(
       {
         attrGroup: "dimension",

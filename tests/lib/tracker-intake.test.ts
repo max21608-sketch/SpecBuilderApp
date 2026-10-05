@@ -396,3 +396,13 @@ describe("the screen's commit groups hold a record's WHOLE pending set", () => {
     expect(groups[0]!.proposals.map((p) => p.id)).toEqual(["a", "b", "c"]);
   });
 });
+
+describe("a figure the tracker printed with no unit", () => {
+  it("agrees with the bill's same number and disagrees with a different one, converting nothing", () => {
+    const held = { attributeId: "a", attributeVersion: 1, label: "W", value: "660", unit: "mm" as const, state: "confirmed" as const, fromBill: true };
+    const proposal = (figure: string) =>
+      ({ id: "p", dimension: { slot: "W", figure, unit: null, tbc: false }, raw: { valueRaw: `W: ${figure}` }, attributeTarget: held }) as unknown as Proposal;
+    expect(heldReading(proposal("660"))).toBe("same");
+    expect(heldReading(proposal("540"))).toBe("bill_differs");
+  });
+});
