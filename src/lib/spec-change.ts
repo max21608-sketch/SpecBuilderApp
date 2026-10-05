@@ -27,13 +27,15 @@
 // says so beside the action.
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
-import type { Proposal } from "@/lib/spec-document";
+import { heldReading, type Proposal } from "@/lib/spec-document";
 
 export type ChangeKind =
   | "provides" // nobody had answered this
   | "confirms" // it was TBC, and now it is settled
   | "changes" // it was settled, and this is a different value
   | "repeats" // it was settled, and this says the same thing
+  | "agrees" // the BILL says this already: nothing is written
+  | "disagrees" // the BILL says something else: kept beside it, in red, until a person decides
   | "withdraws" // it was settled, and this puts it back to undecided
   | "not_applicable" // this says the question does not apply
   | "no_question" // the ITEM is known; which question this answers is not
@@ -66,7 +68,38 @@ function sameValue(a: string | null, b: string | null): boolean {
   return norm(a) === norm(b) && norm(a) !== "";
 }
 
+/**
+ * The two verbs a value the BILL already holds gets, ahead of everything else:
+ * the bill was there first and the screen says so in its own words. Null where
+ * the held value is not the bill's, or nothing is held.
+ *
+ * `disagrees` with the replace tick set is a CHANGE — the reviewer has chosen
+ * this document's value over the bill's, and the row says it replaces it.
+ */
+function overTheBill(proposal: Proposal, what: string): ChangeDescription | null {
+  const held = proposal.attributeTarget;
+  if (!held || held.fromBill !== true || held.moved) return null;
+  const reading = heldReading(proposal);
+  const was = [held.value, held.unit].filter(Boolean).join("");
+  if (reading === "same") return { kind: "agrees", label: "Agrees with the bill", was: null, notable: false };
+  if (reading !== "bill_differs") return null;
+  return proposal.overwriteAcknowledged
+    ? { kind: "changes", label: `Replaces the bill's ${what}`, was, notable: true }
+    : { kind: "disagrees", label: "Disagrees with the bill", was, notable: true };
+}
+
 export function describeChange(proposal: Proposal): ChangeDescription {
+  // A NOTE: a statement no question matched, kept against the item.
+  if (proposal.note) {
+    if (!proposal.recordId) return { kind: "unplaced", label: "Item not found", was: null, notable: true };
+    const bill = overTheBill(proposal, "note");
+    if (bill) return bill;
+    if (proposal.attributeTarget && heldReading(proposal) === "same") {
+      return { kind: "repeats", label: "Repeats the note", was: null, notable: false };
+    }
+    return { kind: "provides", label: "Kept as a note", was: null, notable: false };
+  }
+
   // A DIMENSION is compared against the attribute it would replace, not
   // against a checklist answer: the answer is composed from every slot the
   // record holds, so "what this says" is about this slot alone.
@@ -76,6 +109,8 @@ export function describeChange(proposal: Proposal): ChangeDescription {
     if (!proposal.recordId) {
       return { kind: "unplaced", label: "Item not found", was: null, notable: true };
     }
+    const bill = overTheBill(proposal, slot);
+    if (bill) return bill;
     if (proposal.dimension.tbc) {
       return held
         ? { kind: "withdraws", label: `${slot} back to TBC`, was: [held.value, held.unit].filter(Boolean).join(""), notable: true }
@@ -86,7 +121,9 @@ export function describeChange(proposal: Proposal): ChangeDescription {
     }
     const heldText = [held.value, held.unit].filter(Boolean).join("");
     const newText = [proposal.dimension.figure, proposal.dimension.unit].filter(Boolean).join("");
-    return sameValue(heldText, newText)
+    // The SAME measurement written differently (55cm over 550mm) repeats it:
+    // the comparison the blockers read, so the verb and the blocker agree.
+    return sameValue(heldText, newText) || heldReading(proposal) === "same"
       ? { kind: "repeats", label: `Repeats ${slot}`, was: null, notable: false }
       : { kind: "changes", label: `Changes ${slot}`, was: heldText, notable: true };
   }
@@ -94,6 +131,8 @@ export function describeChange(proposal: Proposal): ChangeDescription {
   if (proposal.finish) {
     const what = proposal.finish.specFieldName ?? "finish";
     if (!proposal.recordId) return { kind: "unplaced", label: "Item not found", was: null, notable: true };
+    const bill = overTheBill(proposal, what);
+    if (bill) return bill;
     const held = proposal.attributeTarget;
     if (proposal.finish.tbc) {
       return held
@@ -101,7 +140,7 @@ export function describeChange(proposal: Proposal): ChangeDescription {
         : { kind: "provides", label: `Records ${what} as TBC`, was: null, notable: false };
     }
     if (!held) return { kind: "provides", label: `Provides ${what}`, was: null, notable: false };
-    return sameValue(held.value, proposal.finish.value)
+    return sameValue(held.value, proposal.finish.value) || heldReading(proposal) === "same"
       ? { kind: "repeats", label: `Repeats ${what}`, was: null, notable: false }
       : { kind: "changes", label: `Changes ${what}`, was: held.value, notable: true };
   }

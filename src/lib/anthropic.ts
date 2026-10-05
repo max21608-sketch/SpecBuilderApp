@@ -372,6 +372,21 @@ description, a unit and a quantity. Read it the same way, and three things about
   to the ITEM: record them against the item's code, with the fabric's code in the note.
 Prices, rates, costs and quantities are not specification observations.
 
+THE SCHEDULE MAY BE A FURNITURE TRACKER — one entry per item, often beside a list of the project's
+finishes. Three things about it matter:
+- A tracker that ALSO defines finishes under finish codes (TIM-01, MTL-01, STN-02, FAB-07) as entries
+  of their own: those entries are not items. Leave them out; they are read as a finishes schedule. A
+  finish code that an item merely mentions ("to match TIM-09") is still recorded against the item.
+- Where an item's zones or areas are printed in one column and its number in another ("GR / MUR / PL"
+  and "FUR04"), give refRaw as the zones and the number together, exactly as printed: "GR / MUR / PL
+  FUR04". Never expand the zones, reorder them or join them to the number yourself.
+- Label each column the tracker carries with these labels where the document gives one: the maker and
+  the product → "Model ref" ("WEWOOD — bespoke design", "Minotti — Fynn outdoor armchair"); the
+  supplier's contact → "Supplier"; a product link → "Link"; an approval status → "Status"; a dated
+  reviewer comment → "Comment", verbatim with its date. A size keeps the document's own label ("Size",
+  "Overall") and its figures exactly as printed. Upholstery → "Fabric". A finish line keeps its own
+  label ("Finish", "Top", "Base").
+
 ${SHARED_RULES}`,
 
   spec_bible: `You are reading a specification bible for a furniture manufacturer's specification record.

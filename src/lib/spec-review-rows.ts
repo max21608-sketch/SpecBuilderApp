@@ -83,11 +83,13 @@ export type SpecRow = {
 const SEVERITY: ChangeDescription["kind"][] = [
   "unplaced",
   "changes",
+  "disagrees",
   "withdraws",
   "not_applicable",
   "confirms",
   "provides",
   "repeats",
+  "agrees",
 ];
 
 function rank(kind: ChangeDescription["kind"]): number {

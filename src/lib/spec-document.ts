@@ -38,21 +38,22 @@ import {
   type AttributeState,
   type AttributeUnit,
   type DimensionSlot,
+  type DocumentKind,
 } from "@/lib/spec-vocab";
 // Re-exported so every existing caller (drawing-document, the tests) is
 // untouched by the move that broke the spec-dimensions import cycle.
 export { TBC_TOKENS, containsPhrase };
 import type { RawProposal } from "@/lib/extraction-schema";
-import { findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
+import { expandZoneList, findRecordsByRef, normaliseRef, type RecordEntry } from "@/lib/record-refs";
 // Re-exported so every existing caller is untouched by the move that broke the
 // drawing-document import cycle.
-export { findRecordsByRef, normaliseRef };
+export { findRecordsByRef, normaliseRef, expandZoneList };
 export { deferredToSomebody };
 export type { RecordEntry };
 import { readDimension, sizeLineRefusal, type DimensionReading } from "@/lib/spec-dimensions";
 import { kindCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { billRowTarget, type BillRowIndex } from "@/lib/bill-rows";
-import { suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
+import { alreadyRecorded, suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
 
 export const PROPOSAL_SCHEMA_VERSION = 1;
 
@@ -105,6 +106,16 @@ export type AttributeEntry = {
    * at the field it is in rather than the next free one.
    */
   materialCode?: string | null;
+  /**
+   * The row is WHAT THE BILL SAID (`attribute-from-bill.ts`, the drawings'
+   * own definition). A document that disagrees with the bill is recorded
+   * beside it; one that disagrees with anything else asks to replace it.
+   * Optional: absent is "not known to be the bill's", the cautious reading.
+   */
+  fromBill?: boolean;
+  /** Where the row was read from, for saying so beside a disagreement. */
+  sourceRunId?: string | null;
+  sourcePage?: number | null;
 };
 
 export type Registers = {
@@ -121,6 +132,13 @@ export type Registers = {
    * sheet and a row it names resolves by it, exactly, ahead of the ref matcher.
    */
   billRows?: BillRowIndex | null;
+  /**
+   * The kind of the document being resolved, read off its run. Decides one
+   * thing: whether a statement no question matches is kept as a NOTE
+   * (`unmatchedBecomesNote`). Absent or null is "not known", which keeps
+   * today's behaviour — every older caller and every fixture.
+   */
+  documentKind?: DocumentKind | null;
 };
 
 // ---- the staged shape ------------------------------------------------------
@@ -245,13 +263,16 @@ export type Proposal = {
    */
   /** The record's label, for a dimension proposal, which carries no target. */
   recordLabel?: string | null;
-  attributeTarget?: {
-    attributeId: string;
-    attributeVersion: number;
-    label: string;
-    value: string | null;
-    unit: AttributeUnit | null;
-  } | null;
+  attributeTarget?: HeldTarget | null;
+  /**
+   * A statement no checklist question matched, KEPT AS A NOTE on the record
+   * (schedule kinds only — `unmatchedBecomesNote`). Writes a
+   * `record_attributes` row in the `note` group carrying the document's own
+   * label and words, and its run and page. The reviewer can still pick a
+   * question, which turns it back into an answer (the PATCH clears this), or
+   * ignore it. Optional: staged JSON written before it existed has none.
+   */
+  note?: { label: string; tbc: boolean } | null;
   version: number;
   raw: RawProposal;
   recordCandidates: Candidate[];
@@ -280,9 +301,66 @@ export type Proposal = {
         attributeId?: string | null;
         value: string | null;
         state: AnswerState;
+        /**
+         * What the confirm did about a value the record already held.
+         * `agrees`: the same value, so nothing was written and `attributeId`
+         * names the row that already says it. `recorded_beside`: it differs
+         * from the BILL's, which stays live, and the statement went into
+         * `attribute_disagreements` (`disagreementId`). Absent: written.
+         */
+        outcome?: "written" | "agrees" | "recorded_beside";
+        disagreementId?: string | null;
       }
     | null;
 };
+
+/**
+ * The ACTIVE attribute a dimension, a finish or a note would land on, as it
+ * was when resolved — and, read LIVE beside it (`annotateHeld`, at review and
+ * at confirm, never trusted from a request), the facts that say whether the
+ * document AGREES with it and whether it is the BILL's.
+ *
+ * The facts are optional on the stored shape: staged JSON written before they
+ * existed has none, and a missing state is never "the same value" and a
+ * missing `fromBill` is never the bill's — so an older run reads exactly as it
+ * did until it is looked at again.
+ */
+export type HeldTarget = {
+  attributeId: string;
+  attributeVersion: number;
+  label: string;
+  value: string | null;
+  unit: AttributeUnit | null;
+  attrGroup?: AttributeGroup;
+  state?: AttributeState | null;
+  materialCode?: string | null;
+  fromBill?: boolean;
+  sourceRunId?: string | null;
+  sourcePage?: number | null;
+  /**
+   * The row is no longer the active value at the version this was resolved
+   * against — retired, corrected or edited since. A blocker, because a
+   * comparison with a value that is not there any more decides nothing.
+   */
+  moved?: boolean;
+};
+
+/** The held target, with every live fact the comparison reads. */
+export function heldTargetOf(attribute: AttributeEntry): HeldTarget {
+  return {
+    attributeId: attribute.id,
+    attributeVersion: attribute.version,
+    label: attribute.label,
+    value: attribute.value,
+    unit: attribute.unit,
+    attrGroup: attribute.attrGroup,
+    state: attribute.state,
+    materialCode: attribute.materialCode ?? null,
+    fromBill: attribute.fromBill === true,
+    sourceRunId: attribute.sourceRunId ?? null,
+    sourcePage: attribute.sourcePage ?? null,
+  };
+}
 
 export type StagedSpecDocument = {
   schemaVersion: number;
@@ -507,7 +585,13 @@ export function seedTakenFields(registers: Registers): Map<string, Set<string>> 
 type Resolution =
   | { by: "row"; sheet: string; row: number; itemRow: number | null; record: RecordEntry }
   | { by: "row_conflict"; sheet: string; row: number; itemRow: number | null; record: RecordEntry; named: RecordEntry[] }
-  | { by: "ref"; matched: RecordEntry[] };
+  | { by: "ref"; matched: RecordEntry[] }
+  /**
+   * `zones` — the ref names several ZONES and one number (`GR / MUR / PL
+   * FUR04`), so it names several items, and each member was matched on its
+   * own (`expandZoneList`). Only reached where the whole ref matched nothing.
+   */
+  | { by: "zones"; members: { code: string; matched: RecordEntry[] }[] };
 
 /** Refs that name nothing: a bill writes these in its code column for a line with no code of its own. */
 const NON_REFS = new Set(["NA", "TBC", "TBA", "NONE", ""]);
@@ -526,7 +610,7 @@ function refPieces(codeRaw: string | null): Set<string> {
 function resolveRecords(observation: RawProposal, registers: Registers): Resolution {
   const hit = billRowTarget(registers.billRows, observation.sourceSheet, observation.sourceRow);
   const record = hit ? (registers.records.find((entry) => entry.id === hit.target.recordId) ?? null) : null;
-  if (!hit || !record) return { by: "ref", matched: findRecordsByRef(observation.refRaw, registers.records) };
+  if (!hit || !record) return byRef(observation.refRaw, registers.records);
 
   const placed = { sheet: hit.sheet, row: hit.row, itemRow: hit.target.itemRow, record };
   // THE REF STILL HAS TO AGREE WHERE IT CAN BE READ. A ref that is blank,
@@ -540,12 +624,66 @@ function resolveRecords(observation: RawProposal, registers: Registers): Resolut
   return { by: "row_conflict", ...placed, named };
 }
 
+/**
+ * A printed ref, matched whole first and only then — where the whole names
+ * nothing — read as a list of zones and one number.
+ *
+ * A ZONE LIST NAMES SEVERAL ITEMS, AND THAT IS NOT THE SX11A AMBIGUITY. The
+ * Aman tracker prints `GR / MUR / PL` in one column and `FUR04` in the next;
+ * the bill carries `GR-FUR-04` and `PL-FUR-04` as two lines of one phase. Read
+ * as one ref, those are two records on one run and the row would stay
+ * ambiguous over two items the document named separately. So each member is
+ * matched on its own, and what each member matches is grouped by run on its
+ * own: two lines of one phase carrying ONE member's code (`GR-FUR-22`, on five
+ * lines) is still ambiguous, exactly as before.
+ */
+function byRef(refRaw: string | null, records: RecordEntry[]): Resolution {
+  const whole = findRecordsByRef(refRaw, records);
+  if (whole.length > 0) return { by: "ref", matched: whole };
+  const zones = expandZoneList(refRaw);
+  if (!zones) return { by: "ref", matched: whole };
+  return { by: "zones", members: zones.map((code) => ({ code, matched: findRecordsByRef(code, records) })) };
+}
+
+type RunGroup = { runId: string; runName: string; records: RecordEntry[] };
+
+/**
+ * Every (run × records) group an observation lands on, member by member. A
+ * record two members both reach is landed on once, by the first.
+ */
+function landingRuns(resolution: Resolution): RunGroup[] {
+  if (resolution.by === "row") {
+    return [{ runId: resolution.record.runId, runName: resolution.record.runName, records: [resolution.record] }];
+  }
+  if (resolution.by === "row_conflict") return [];
+  if (resolution.by === "ref") return groupRecordsByRun(resolution.matched);
+  const seen = new Set<string>();
+  const runs: RunGroup[] = [];
+  for (const member of resolution.members) {
+    const fresh = member.matched.filter((record) => !seen.has(record.id));
+    for (const record of fresh) seen.add(record.id);
+    runs.push(...groupRecordsByRun(fresh));
+  }
+  return runs;
+}
+
+/** The zone members that match no line, said on the row in words — never a blocker on its own. */
+function unmatchedZonesNote(resolution: Resolution): string | null {
+  if (resolution.by !== "zones") return null;
+  const missing = resolution.members.filter((member) => member.matched.length === 0).map((member) => member.code);
+  if (missing.length === 0) return null;
+  const found = resolution.members.length - missing.length;
+  const listed = missing.map((code) => `${code} — no line on the bill`).join("; ");
+  return found > 0
+    ? `This names ${resolution.members.length} items by zone. ${listed}.`
+    : `This names ${resolution.members.length} items by zone, and none is a line on the bill: ${listed}.`;
+}
+
 /** The records an observation would be written to, one per run, for the document-wide pre-pass. */
 function landingRecords(observation: RawProposal, registers: Registers): { record: RecordEntry; fabricLine: boolean }[] {
   const resolution = resolveRecords(observation, registers);
   if (resolution.by === "row") return [{ record: resolution.record, fabricLine: resolution.itemRow !== null }];
-  if (resolution.by === "row_conflict") return [];
-  return groupRecordsByRun(resolution.matched)
+  return landingRuns(resolution)
     .filter((run) => run.records.length === 1)
     .map((run) => ({ record: run.records[0]!, fabricLine: false }));
 }
@@ -624,12 +762,16 @@ export function resolveProposals(
     // A ROW-PLACED observation is one record on one run, by construction: a
     // bill's row is one line of one tab, and it never fans out.
     // ------------------------------------------------------------------
-    const runs =
-      resolution.by === "row"
-        ? [{ runId: resolution.record.runId, runName: resolution.record.runName, records: [resolution.record] }]
-        : groupRecordsByRun(resolution.matched);
+    //
+    // A ZONE LIST is one fan-out per member: `GR / MUR / PL FUR04` lands on
+    // GR-FUR-04 and PL-FUR-04 as two proposals sharing this observation's
+    // ordinal, and MUR-FUR04, which the bill has no line for, is named on the
+    // row in words (`landingRuns`, `unmatchedZonesNote`).
+    const runs = landingRuns(resolution);
+    const zonesNote = unmatchedZonesNote(resolution);
     if (runs.length === 0) {
-      return [buildProposal(observation, index, null, [], registers, newId, null)];
+      const unplaced = buildProposal(observation, index, null, [], registers, newId, null);
+      return [zonesNote ? { ...unplaced, readingNote: zonesNote } : unplaced];
     }
     const rowMatch =
       resolution.by === "row" ? { sheet: resolution.sheet, row: resolution.row, itemRow: resolution.itemRow } : null;
@@ -645,11 +787,14 @@ export function resolveProposals(
       // attribute against, so picking it would only produce a second
       // unanswerable question.
       const record = run.records.length === 1 ? run.records[0] ?? null : null;
-      const placedBy = (proposal: Proposal, readingNote: string | null = null): Proposal => ({
-        ...proposal,
-        ...(rowMatch ? { rowMatch } : {}),
-        ...(readingNote ? { readingNote } : {}),
-      });
+      const placedBy = (proposal: Proposal, readingNote: string | null = null): Proposal => {
+        const said = [readingNote, zonesNote].filter((text): text is string => Boolean(text)).join(" ");
+        return {
+          ...proposal,
+          ...(rowMatch ? { rowMatch } : {}),
+          ...(said ? { readingNote: said } : {}),
+        };
+      };
 
       // A DIMENSION does not go through requirement matching at all. It
       // carries a slot, and one observation can state three of them.
@@ -682,13 +827,27 @@ export function resolveProposals(
         );
       }
 
+      // A STATEMENT NO QUESTION MATCHES IS KEPT AS A NOTE on a schedule (A4,
+      // 2026-10-05 — Max: "the rest will just go in relevant fields to fill
+      // out more details for each line item"). The tracker's Model ref,
+      // Supplier, Link, Status and dated Comment answer no checklist question
+      // and are worth keeping against the item; "Question not matched" asked a
+      // reviewer to find a home for each one by hand. Never on an email, where
+      // an unmatched sentence is far more often chat than specification. Not a
+      // size the reading already declined to place: that row says why.
+      const base = buildProposal(observation, index, record, candidates, registers, newId, run);
+      if (record && !base.requirementId && !note && !reading && unmatchedBecomesNote(registers.documentKind)) {
+        const kept = asNoteProposal(base, record, registers);
+        if (kept) return [placedBy(kept)];
+      }
+
       // A ROW-PLACED record with no category is still THE record — the bill
       // row says so — and it is kept, with the next step said: it has no
       // checklist until it has a category, and re-matching after one is set is
       // free. Offered-and-unchosen would read "Item not found" about an item
       // the row names exactly.
       if (rowMatch && record && !record.categoryId) {
-        const proposal = buildProposal(observation, index, record, candidates, registers, newId, run);
+        const proposal = base;
         return [
           placedBy(
             { ...proposal, recordId: record.id, recordLabel: record.label },
@@ -698,9 +857,87 @@ export function resolveProposals(
         ];
       }
 
-      return [placedBy(buildProposal(observation, index, record, candidates, registers, newId, run), note)];
+      return [placedBy(base, note)];
     });
   });
+}
+
+// ---- a statement kept as a note ---------------------------------------------
+
+/** The kinds on which a statement no question matches is kept as a note. Not an email. */
+const NOTE_FALLBACK_KINDS: readonly DocumentKind[] = ["ffe_schedule", "fabric_schedule", "spec_bible", "other"];
+
+export function unmatchedBecomesNote(kind: DocumentKind | null | undefined): boolean {
+  return Boolean(kind) && NOTE_FALLBACK_KINDS.includes(kind as DocumentKind);
+}
+
+/**
+ * A note's label folded for "is this the same heading": case, whitespace and
+ * punctuation, so the bill's "Model Ref:" and the tracker's "Model ref" are one
+ * heading. Only ever compares a LABEL — a value is compared by `sameNoteValue`.
+ */
+export function foldNoteLabel(label: string | null | undefined): string {
+  return (label ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Case and whitespace only: "WEWOOD — bespoke" and "wewood —  Bespoke" are one value; a changed dash is not. */
+export function sameNoteValue(a: string | null | undefined, b: string | null | undefined): boolean {
+  const fold = (raw: string | null | undefined) => (raw ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  return fold(a) !== "" && fold(a) === fold(b);
+}
+
+/**
+ * The BILL's own note on this record under the same heading, which a note
+ * from a later document agrees or disagrees with. Only the bill's: a drawing's
+ * note or a typed one under the same heading is simply another note, and two
+ * notes are never in each other's way. Where the bill states the heading twice
+ * and one of them says the same thing, that one.
+ */
+export function billNoteFor(
+  recordId: string,
+  label: string,
+  value: string | null,
+  attributes: readonly AttributeEntry[],
+): AttributeEntry | null {
+  const wanted = foldNoteLabel(label);
+  if (!wanted) return null;
+  const notes = attributes.filter(
+    (attribute) =>
+      attribute.recordId === recordId &&
+      attribute.attrGroup === "note" &&
+      attribute.fromBill === true &&
+      foldNoteLabel(attribute.label) === wanted,
+  );
+  return notes.find((attribute) => sameNoteValue(attribute.value, value)) ?? notes[0] ?? null;
+}
+
+/**
+ * A no-question proposal turned into a note on its record, or null where it
+ * says nothing worth keeping (no value). The question candidates stay, so the
+ * reviewer can still answer a question with it instead.
+ */
+export function asNoteProposal(proposal: Proposal, record: RecordEntry, registers: Registers): Proposal | null {
+  const value = proposal.raw.valueRaw;
+  if (!value || !value.trim()) return null;
+  const label = (proposal.raw.attributeRaw ?? "").trim() || "Note";
+  const held = billNoteFor(record.id, label, value, registers.attributes ?? []);
+  return {
+    ...proposal,
+    recordId: record.id,
+    recordLabel: record.label,
+    requirementId: null,
+    target: null,
+    note: { label, tbc: TBC_TOKENS.includes(normaliseName(value)) },
+    // VERBATIM: a note keeps what the document printed, including a value the
+    // answer path would have read as "not applicable" and blanked.
+    proposedValue: value,
+    proposedState: TBC_TOKENS.includes(normaliseName(value)) ? "tbc" : "confirmed",
+    stateReason: null,
+    attributeTarget: held ? heldTargetOf(held) : null,
+  };
 }
 
 /**
@@ -745,15 +982,7 @@ function buildDimensionProposal(
       qualifier: partIndex === 0 ? reading.qualifier : null,
       tbc: reading.tbc,
     },
-    attributeTarget: occupied
-      ? {
-          attributeId: occupied.id,
-          attributeVersion: occupied.version,
-          label: occupied.label,
-          value: occupied.value,
-          unit: occupied.unit,
-        }
-      : null,
+    attributeTarget: occupied ? heldTargetOf(occupied) : null,
     recordLabel: record.label,
     version: 1,
     raw: observation,
@@ -876,15 +1105,7 @@ function buildFinishProposal(
       : zoneHolding
         ? `This item already holds ${zoneHolding.materialCode} in ${specFieldName ?? "a field"}, and ${finish.codeRaw} reads as the same code under the bill's own zone, so it is aimed there rather than at the next free slot. Check they are one finish; ignore it unless these words should replace what ${specFieldName ?? "it"} holds.`
         : null,
-    attributeTarget: occupied
-      ? {
-          attributeId: occupied.id,
-          attributeVersion: occupied.version,
-          label: occupied.label,
-          value: occupied.value,
-          unit: occupied.unit,
-        }
-      : null,
+    attributeTarget: occupied ? heldTargetOf(occupied) : null,
     recordLabel: record.label,
     version: 1,
     raw: observation,
@@ -1069,7 +1290,23 @@ export function rematchProposals(
     // Nothing moved: hand back the ORIGINALS, so ids and versions hold and
     // running this twice is a genuine no-op.
     if (signature(resolved) === signature(group)) {
-      lines.push(...group);
+      // THE SAME LANDING OVER A DIFFERENT HELD VALUE is still something that
+      // moved: the bill was revised, a value was corrected, a drawing filled
+      // the slot. The original rows are kept, ids and all, with the held
+      // value they now compare against — or the row would go on comparing
+      // with a value the record no longer holds.
+      const fresh = new Map(resolved.map((next) => [targetKey(next), next]));
+      let refreshed = false;
+      for (const line of group) {
+        const next = fresh.get(targetKey(line));
+        if (next && heldKey(next) !== heldKey(line)) {
+          lines.push({ ...line, attributeTarget: next.attributeTarget ?? null });
+          refreshed = true;
+        } else {
+          lines.push(line);
+        }
+      }
+      if (refreshed) rematched += 1;
       continue;
     }
 
@@ -1109,7 +1346,17 @@ function targetKey(proposal: Proposal): string {
     // A finish with no field is told apart by its code: "STN-02, SPF-05" is
     // two statements, and one key for both would read as nothing having moved.
     proposal.finish ? (proposal.finish.specFieldId ?? `field?${proposal.finish.codeRaw ?? ""}`) : "-",
+    // A NOTE is a different landing from a question nobody matched, though
+    // both carry a record and no question: without this a run read before
+    // notes existed would re-match to "nothing moved" and never gain them.
+    proposal.note ? "note" : "-",
   ].join("|");
+}
+
+/** The held value a proposal is compared with, by id and version — what a re-match must notice moving. */
+function heldKey(proposal: Proposal): string {
+  const held = proposal.attributeTarget;
+  return held ? `${held.attributeId}@${held.attributeVersion}` : "-";
 }
 
 function signature(proposals: Proposal[]): string {
@@ -1120,6 +1367,96 @@ function promptFor(registers: Registers, requirementId: string): string {
   const requirement = registers.requirements.find((row) => row.id === requirementId);
   if (!requirement) return requirementId;
   return requirement.section ? `${requirement.section} · ${requirement.prompt}` : requirement.prompt;
+}
+
+// ---- what the document says about a value the record already holds --------
+
+/**
+ * `free`         — nothing held: the value is written.
+ * `same`         — the held value says the same thing (`alreadyRecorded`, the
+ *                  drawings' equality: whole millimetres through the one
+ *                  parser and the same state; a finish by its code or the same
+ *                  words; a note by its words). Nothing to write, no blocker.
+ * `bill_differs` — the held value is the BILL's and this differs. By default
+ *                  the bill's stays live and this is recorded BESIDE it
+ *                  (`attribute_disagreements`), red, with no blocker; ticking
+ *                  `overwriteAcknowledged` replaces it instead, exactly as the
+ *                  replace tick always has.
+ * `replace`      — anybody else's value, and this differs: today's replace
+ *                  tick, unchanged.
+ *
+ * Pure, and read off the HELD TARGET's live facts, which the review GET and
+ * the confirm both set from the database (`annotateHeld`). The client never
+ * says which of these a row is.
+ */
+export type HeldReading = "free" | "same" | "bill_differs" | "replace";
+
+export function heldReading(proposal: Proposal): HeldReading {
+  const held = proposal.attributeTarget;
+  if (!held) return "free";
+  if (agreesWithHeld(proposal, held)) return "same";
+  return held.fromBill === true ? "bill_differs" : "replace";
+}
+
+function agreesWithHeld(proposal: Proposal, held: HeldTarget): boolean {
+  if (held.moved) return false;
+  const occupant = { value: held.value, unit: held.unit, state: held.state ?? null, materialCode: held.materialCode ?? null };
+  if (proposal.dimension) {
+    const dimension = proposal.dimension;
+    return alreadyRecorded(
+      {
+        attrGroup: "dimension",
+        dimensionSlot: dimension.slot,
+        value: dimension.figure,
+        valueRaw: proposal.raw.valueRaw,
+        unit: dimension.unit,
+        state: dimension.tbc ? "tbc" : "confirmed",
+      },
+      occupant,
+    );
+  }
+  if (proposal.finish) {
+    const finish = proposal.finish;
+    return alreadyRecorded(
+      {
+        attrGroup: finish.group,
+        dimensionSlot: null,
+        value: finish.value,
+        valueRaw: proposal.raw.valueRaw,
+        unit: null,
+        state: finish.tbc ? "tbc" : "confirmed",
+        specFieldId: finish.specFieldId,
+        materialCodeRaw: finish.codeRaw,
+      },
+      occupant,
+    );
+  }
+  if (proposal.note) return sameNoteValue(proposal.proposedValue, held.value);
+  return false;
+}
+
+/**
+ * The held targets of these proposals, re-read from the LIVE attributes: the
+ * facts a comparison reads (state, code, whether it is the bill's) come from
+ * the row as it is now, and a row no longer active at the version the
+ * proposal was resolved against is marked `moved`. Called by the review GET
+ * over the registers and by the confirm over rows it read inside its own
+ * transaction, so the screen and the confirm read one comparison. Only a
+ * PENDING row is touched: an applied one is history.
+ */
+export function annotateHeld(lines: Proposal[], live: readonly AttributeEntry[]): Proposal[] {
+  const byId = new Map(live.map((attribute) => [attribute.id, attribute]));
+  return lines.map((line) => {
+    const held = line.attributeTarget;
+    if (!held || line.reviewStatus !== "pending") return line;
+    const now = byId.get(held.attributeId);
+    if (!now || now.version !== held.attributeVersion) {
+      return { ...line, attributeTarget: { ...held, fromBill: undefined, moved: true } };
+    }
+    const { moved: _moved, ...rest } = held;
+    void _moved;
+    return { ...line, attributeTarget: { ...rest, ...heldTargetOf(now) } };
+  });
 }
 
 // ---- blockers and sections -------------------------------------------------
@@ -1139,9 +1476,35 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
   // rules below apply to it: it has no requirement, no target snapshot and no
   // state to choose. Its own three rules are the slot being free, the slot
   // being claimed once, and `Dia.` not sitting beside a `W` or `D`.
-  if (proposal.dimension || proposal.finish) {
+  if (proposal.dimension || proposal.finish || proposal.note) {
     if (!proposal.recordId) {
       blockers.push({ code: "unassigned", message: "Choose which record this belongs to." });
+      return blockers;
+    }
+
+    // A comparison with a value that is not there any more decides nothing.
+    if (proposal.attributeTarget?.moved) {
+      blockers.push({
+        code: "held_changed",
+        message:
+          "What this item held when the document was read has changed since. Re-match (free) to compare it with what it holds now.",
+      });
+      return blockers;
+    }
+
+    // A NOTE has no field and no slot to clash over — two notes are never in
+    // each other's way. Its one question is the bill's own note under the
+    // same heading, which it agrees with or is kept beside.
+    if (proposal.note) {
+      if (!(proposal.proposedValue ?? "").trim()) {
+        blockers.push({ code: "empty_value", message: "A note needs some words. Type them, or ignore this." });
+      }
+      if (heldReading(proposal) === "replace" && !proposal.overwriteAcknowledged) {
+        blockers.push({
+          code: "replace",
+          message: `This item already notes “${proposal.attributeTarget?.value ?? "—"}” under this heading. Confirm you mean to replace it.`,
+        });
+      }
       return blockers;
     }
 
@@ -1166,10 +1529,13 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
           });
         }
       }
-      if (proposal.attributeTarget && !proposal.overwriteAcknowledged) {
+      // THE SAME FINISH is not a replacement, and the BILL'S finish is kept
+      // beside rather than replaced unless the reviewer says otherwise
+      // (`heldReading`). Only a different value over somebody else's asks.
+      if (heldReading(proposal) === "replace" && !proposal.overwriteAcknowledged) {
         blockers.push({
           code: "replace",
-          message: `This item already records ${proposal.finish.specFieldName ?? "this field"} as “${proposal.attributeTarget.value ?? "—"}”. Confirm you mean to replace it.`,
+          message: `This item already records ${proposal.finish.specFieldName ?? "this field"} as “${proposal.attributeTarget?.value ?? "—"}”. Confirm you mean to replace it.`,
         });
       }
       return blockers;
@@ -1208,7 +1574,11 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
     // Retiring what a document said is a decision. 0016's partial unique index
     // is `where status = 'active'`, so the insert cannot commit until the old
     // row is retired — and that must never happen because nobody looked.
-    if (proposal.attributeTarget && !proposal.overwriteAcknowledged) {
+    //
+    // Never for the SAME value (it reads "Repeats W" and writes nothing), and
+    // never by default over the BILL's — that is recorded beside it, red, and
+    // the reviewer may switch the row to replace it (`heldReading`).
+    if (proposal.attributeTarget && heldReading(proposal) === "replace" && !proposal.overwriteAcknowledged) {
       const held = [proposal.attributeTarget.value, proposal.attributeTarget.unit].filter(Boolean).join("");
       blockers.push({
         code: "replace",
@@ -1292,7 +1662,7 @@ export function classifyProposal(proposal: Proposal): ProposalSection {
   if (proposal.reviewStatus === "pending") {
     // A dimension is committable with a record alone: it has no question to
     // match, by construction.
-    if (proposal.dimension || proposal.finish) return proposal.recordId ? "pending" : "unassigned";
+    if (proposal.dimension || proposal.finish || proposal.note) return proposal.recordId ? "pending" : "unassigned";
     if (proposal.recordId && proposal.requirementId) return "pending";
     if (proposal.recordCandidates.length > 1 || proposal.requirementCandidates.length > 1) return "ambiguous";
     return "unassigned";

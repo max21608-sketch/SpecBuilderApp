@@ -94,9 +94,13 @@ export default function FinishScheduleReview({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showIgnored, setShowIgnored] = useState(false);
   const [showApplied, setShowApplied] = useState(false);
+  // The furniture half of the same file, once somebody has asked for it read.
+  const [furnitureRunId, setFurnitureRunId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await apiFetch<{ import: Run; review?: ScheduleReviewRow[] }>(`/api/imports/${importId}`);
+    const res = await apiFetch<{ import: Run; review?: ScheduleReviewRow[]; furnitureRunId?: string | null }>(
+      `/api/imports/${importId}`,
+    );
     if (!res.ok) {
       setError(res.error);
       return;
@@ -104,6 +108,7 @@ export default function FinishScheduleReview({
     setError(null);
     setRun(res.data.import);
     setReview(res.data.review ?? []);
+    setFurnitureRunId(res.data.furnitureRunId ?? null);
   }, [importId]);
 
   /** Reload first, report afterwards — `load()` clears the banner. */
@@ -151,6 +156,36 @@ export default function FinishScheduleReview({
       });
       const held = res.ok && res.data.waiting === true;
       await reloadThen(res.ok ? null : res.error, held ? (res.data.note ?? WAITING_FOR_SLOT_MESSAGE) : null);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * ONE CHARGED READ, and the button says so. A tracker that lists furniture
+   * beside its finishes (the Aman OMS & FF&E Tracker) is read a second time as
+   * an FF&E schedule, over the same stored file and in the same pack. A
+   * second press returns the run the first one made and charges nothing.
+   */
+  async function readFurniture() {
+    setBusy("furniture");
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch<{ importId: string; reused: boolean; autoRead?: { dispatched: boolean; note?: string; error?: string } }>(
+        `/api/imports/${importId}/read-furniture`,
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+      );
+      let info: string | null = null;
+      if (res.ok) {
+        const read = res.data.autoRead;
+        info = res.data.reused
+          ? "Its furniture was already being read — open it below."
+          : read && !read.dispatched
+            ? (read.note ?? read.error ?? "Registered; the read has not started yet.")
+            : "Its furniture is being read as an FF&E schedule.";
+      }
+      await reloadThen(res.ok ? null : res.error, info);
     } finally {
       setBusy(null);
     }
@@ -236,6 +271,17 @@ export default function FinishScheduleReview({
               the finishes library
             </Link>
           </>
+        }
+        actions={
+          furnitureRunId ? (
+            <Link href={`/dashboard/imports/${furnitureRunId}`} className="text-sm text-blue-700 no-underline hover:underline">
+              Its furniture, read as an FF&amp;E schedule →
+            </Link>
+          ) : (
+            <Button variant="secondary" disabled={busy !== null} onClick={() => void readFurniture()}>
+              {busy === "furniture" ? "Registering…" : "Also read its furniture as an FF&E schedule — one charged read"}
+            </Button>
+          )
         }
       />
       <PageBody>{children}</PageBody>
