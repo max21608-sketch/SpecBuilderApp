@@ -100,6 +100,40 @@ Decided by Max the same day, for the build after this one (not built):
   drawing crop (the drawings confirm no longer replaces the bill's picture on
   its own) — in the approved mock-up, deferred to that build.
 
+## 2026-10-05 (evening) — Promoted to pilot: no picture over a picture, the record's Documents tab, and the finishes build, at `2434dfc` (v1.7)
+
+At Max's instruction ("push it to pilot when it's done"). Two asks of his the
+same day, built by two Opus coders (`~/dev/briefs/recdocs/`), merged on
+`rec-int` with `origin/staging` (which by then carried the finishes build of
+the entry below):
+
+- **A drawings card whose item already has a picture starts at "No picture"**
+  and says why; the drawing's views and a drag stay one click away. Untouched,
+  the panel follows the ticked records (found in the browser: a code on two
+  bill lines resolved to nobody, so the default was decided before the line
+  was picked); a chosen crop over a BILL picture says the bill's stays and the
+  crop is kept beside it, matching `bd04f67`. (`21e4e0b`, the merge `974b984`)
+- **A Documents tab on the record**: one row per stored file — the bill row,
+  every drawing or schedule a spec came from with its pages, emails behind
+  answers, evidence on its changes — with Open (a PDF at its page; an email
+  only ever downloads) and Review. Staged-but-unconfirmed documents are not
+  listed, and the screen says so. (`6fec9ea`)
+
+Verified in the browser on the LOCAL stack (TEST project P99181): the
+PL-FUR-26 card moved to "This item already has a picture…" when its bill line
+was picked, and "Use front" then read "The bill's picture stays…"; record 049
+(PL-FUR-13) listed 3 documents — the bill (row 84, 8 specs, 3 answers), its
+shop drawing (23 specs, Open at page 1), the finishes schedule as evidence.
+`checks:local` green on the merged tree (3156 passed). Promotion by Claude:
+pilot backed up (`spec-builder-pilot-2026-10-05T17-14-03-275Z.sql`), ledger
+45 of 45 (0044 and 0045 were already applied on pilot at 17:00), no seed
+change, chip v1.7, `pilot` fast-forwarded `ba4983a` → `2434dfc`; the pilot
+sign-in page serves `[PILOT]` and v1.7. **Max's:** `db:backfill-bill-swatches`
+on pilot for bills confirmed before the finishes build (dry run first);
+signed-in `/api/auth/me` at `2434dfc`. Found and NOT fixed: the import source
+route serves an `.eml` inline with no nosniff (a task was raised). Not
+accepted by Max or Matthew.
+
 ## 2026-10-05 — Promoted to pilot: the record picker names the client's code, at `ba4983a` (v1.6)
 
 At Max's instruction ("push code to pilot"). By Claude: pilot backed up first
