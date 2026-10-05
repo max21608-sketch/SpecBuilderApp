@@ -8,6 +8,7 @@ Written to stand alone for someone who is not a developer.
 |---|---|---|---|---|
 | Branch | `staging` | `staging` | `pilot` | none yet |
 | Hosting project | your machine | Vercel `spec-builder-app` | Vercel `spec-builder-pilot` | not created |
+| URL | `localhost:3000` | `spec-builder-app-rho.vercel.app` | `spec-builder-app-4g38.vercel.app` (despite the name, this is the pilot project's alias — confirmed 2026-10-05 by `/api/auth/me` reporting `pilot`/`pilot`) | none |
 | Region | — | `lhr1` | `lhr1` | `lhr1` |
 | Database | sandbox | sandbox | its own Neon **project**, `SpecBuilder Pilot` | its own Neon project |
 | Blob store | sandbox | sandbox | its own, private | production |
