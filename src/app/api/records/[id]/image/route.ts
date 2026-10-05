@@ -18,23 +18,45 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { blobPathname, streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
+import { ITEM_IMAGE_ALTERNATIVE_KIND, ITEM_IMAGE_KIND } from "@/lib/item-image";
 
 export const dynamic = "force-dynamic";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
 
-  const rows = await sql`
-    select r.project_id, a.storage_path, a.content_type
-    from spec_records r
-    join attachments a
-      on a.entity_type = 'spec_records' and a.entity_id = r.id and a.kind = 'item_image'
-    where r.id = ${id}
-    order by a.created_at desc
-    limit 1
-  `;
+  // THE CURRENT PICTURE, unless the caller names one of the record's OTHER
+  // pictures by id — the drawing crop or the bill's picture the record screen
+  // offers to swap in (2026-10-05). Still never a pathname: the id is looked up
+  // among this record's own picture rows and nothing else, so it can only ever
+  // reach a file this record already points at.
+  const attachmentId = new URL(request.url).searchParams.get("attachment");
+  if (attachmentId !== null && !UUID.test(attachmentId)) {
+    return json({ ok: false, error: "That record has no such image." }, 404);
+  }
+  const rows = attachmentId
+    ? await sql`
+        select r.project_id, a.storage_path, a.content_type
+        from spec_records r
+        join attachments a
+          on a.entity_type = 'spec_records' and a.entity_id = r.id
+         and a.kind in (${ITEM_IMAGE_KIND}, ${ITEM_IMAGE_ALTERNATIVE_KIND})
+        where r.id = ${id} and a.id = ${attachmentId}
+      `
+    : await sql`
+        select r.project_id, a.storage_path, a.content_type
+        from spec_records r
+        join attachments a
+          on a.entity_type = 'spec_records' and a.entity_id = r.id and a.kind = ${ITEM_IMAGE_KIND}
+         and a.superseded_at is null
+        where r.id = ${id}
+        order by a.created_at desc, a.id desc
+        limit 1
+      `;
   const row = rows[0];
   // 404 rather than a placeholder: "this record has no picture" is a fact the
   // screen should render in words, not a broken image to interpret.

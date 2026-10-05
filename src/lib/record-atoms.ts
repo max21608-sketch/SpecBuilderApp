@@ -330,12 +330,17 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
     out.get(String(row.record_id))?.answers.push(toSnapshotAnswer(row));
   }
 
-  // The crop somebody confirmed off the drawings. Its storage_path is stored
-  // beside the id because an attachment can be superseded, and a version that
-  // pointed only at an id would lose the picture it was taken with.
+  // The record's CURRENT picture — a bill's, or a crop off the drawings. Its
+  // storage_path is stored beside the id because an attachment can be
+  // superseded, and a version that pointed only at an id would lose the
+  // picture it was taken with. Superseded rows are kept (nothing deletes an
+  // attachment since 0013), so the current one is the newest nobody
+  // superseded; an offered alternative is not the record's picture at all.
   const imageRows = await exec`
-    select entity_id, id, storage_path from attachments
+    select distinct on (entity_id) entity_id, id, storage_path from attachments
     where entity_type = 'spec_records' and entity_id = any(${found}::uuid[]) and kind = 'item_image'
+      and superseded_at is null
+    order by entity_id, created_at desc, id desc
   `;
   for (const row of imageRows) {
     const atoms = out.get(String(row.entity_id));
