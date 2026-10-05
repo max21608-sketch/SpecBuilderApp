@@ -63,6 +63,27 @@ function wholePage(page: number | null): ItemView {
   return { viewType: "other", page: page ?? 1, bbox: [0, 0, 1, 1] };
 }
 
+/**
+ * What confirming does with a CHOSEN picture over records that already hold
+ * one. A bill's picture is never displaced (confirm-drawings, placeDrawingCrop):
+ * the crop is stored beside it and the record offers the swap. Any other
+ * picture is superseded by the crop.
+ */
+export function whatConfirmingDoes(held: number, of: number, fromBill: number): string {
+  const others = held - fromBill;
+  if (others === 0) {
+    return held < of
+      ? `Where a record's picture came off the bill (${held} of the ${of}), the bill's stays and this is kept beside it on the record.`
+      : "The bill's picture stays; this is kept beside it on the record, where you can swap them.";
+  }
+  if (fromBill === 0) {
+    return held < of
+      ? `Confirming replaces the current picture on ${held} of the ${of} records.`
+      : "Confirming replaces the item's current picture.";
+  }
+  return `Confirming replaces the current picture on ${others} of the ${of} records; on the ${fromBill} whose picture came off the bill, the bill's stays and this is kept beside it.`;
+}
+
 const VIEW_LABELS: Record<string, string> = {
   photo: "Photograph",
   render: "Render",
@@ -111,7 +132,7 @@ export default function ItemImagePicker({
    * confirmed must not move a choice somebody made, or un-make one they had
    * not made yet by suddenly rendering a crop.
    */
-  existingPicture?: { recordIds: readonly string[]; of: number } | null;
+  existingPicture?: { recordIds: readonly string[]; of: number; fromBill?: number } | null;
   /** null means "this item gets no picture", which is a real answer. */
   onCropped: (image: CroppedImage | null) => void;
 }) {
@@ -121,6 +142,7 @@ export default function ItemImagePicker({
   const fallback = !proposal && views.length === 0 && !sharesItsPage ? wholePage(itemPage) : null;
   const held = existingPicture?.recordIds.length ?? 0;
   const of = Math.max(existingPicture?.of ?? 0, held);
+  const fromBill = Math.min(existingPicture?.fromBill ?? 0, held);
   // A record that already has a picture keeps it unless somebody chooses
   // otherwise: the default is none, and nothing is cropped on mount.
   const [chosen, setChosen] = useState<ItemView | null>(held > 0 ? null : (proposal ?? fallback));
@@ -211,11 +233,14 @@ export default function ItemImagePicker({
       setRendering(true);
       setError(null);
       try {
-        const image = await cropPdfRegion(sourceUrl, view.page ?? itemPage ?? 1, view.bbox, {
+        const page = view.page ?? itemPage ?? 1;
+        const image = await cropPdfRegion(sourceUrl, page, view.bbox, {
           signal: controller.signal,
         });
         setPreview(track(image.blob));
-        report.current(image);
+        // WITH THE PAGE IT CAME OFF, which names the stored file — the only
+        // place a picture's page survives (`itemImageFilename`).
+        report.current({ ...image, page });
       } catch (cause) {
         // A CANCELLED CROP IS NOT A FAILURE. It means this component asked for
         // a different one, and the newer call owns the panel now — reporting
@@ -302,11 +327,7 @@ export default function ItemImagePicker({
                 // Said once a picture is CHOSEN, never before: the replace is
                 // the consequence of the choice, and the confirm deletes the
                 // old row (confirm-drawings.ts) rather than keeping two.
-                <span className="block text-xs text-amber-800">
-                  {held < of
-                    ? `Confirming replaces the current picture on ${held} of the ${of} records.`
-                    : "Confirming replaces the item's current picture."}
-                </span>
+                <span className="block text-xs text-amber-800">{whatConfirmingDoes(held, of, fromBill)}</span>
               )}
             </p>
           ) : held > 0 ? (

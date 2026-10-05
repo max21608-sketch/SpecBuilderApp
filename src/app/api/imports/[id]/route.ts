@@ -37,6 +37,8 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { assertBoqDocument } from "@/lib/boq-import";
+import { billPicturePrefix, rowImageFor, type BillPictureCrop, type BillPictureOverride } from "@/lib/bill-row-image";
+import { assertProjectScopedPathname, headTrustedBlob } from "@/lib/blob-source";
 import { fabricParentOptions, isBoqRowKind, kindChoicePatch } from "@/lib/boq-row-kinds";
 import { billSpecsRequestId } from "@/lib/bill-specifications";
 import {
@@ -52,6 +54,13 @@ import {
   type SlotOverride,
 } from "@/lib/bill-description";
 import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
+import { descriptionFilesAFinish, planBillFabrics, type FabricLinePlan } from "@/lib/bill-fabric-filing";
+import {
+  loadCurrentSwatches,
+  loadFinishCodePrefix,
+  loadFinishLibrary,
+  loadHeldBillFabrics,
+} from "@/lib/bill-fabric-load";
 // Pure: which rows on the OTHER tabs a decision reaches, and what lands on
 // them. The screen reads the same module for its duplicate panel, so the rows
 // it calls ambiguous and the rows the carry refuses are one set.
@@ -1031,7 +1040,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                           where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as codes,
                (select count(*)::int from record_attributes a where a.record_id = r.id and a.status = 'active') as attribute_count,
                exists (select 1 from attachments at
-                        where at.entity_type = 'spec_records' and at.entity_id = r.id and at.kind = 'item_image') as has_image,
+                        where at.entity_type = 'spec_records' and at.entity_id = r.id and at.kind = 'item_image'
+                          and at.superseded_at is null) as has_image,
                (select count(*)::int from spec_answers a
                  where a.record_id = r.id and a.revision_no = 0 and a.state <> 'missing') as settled_answers
         from spec_records r
@@ -1086,6 +1096,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // confirm. A line a REVISION carries says, in the confirm's own words, when
   // its description will not be written.
   const descriptions: Record<number, Record<number, unknown>> = {};
+  /** The coded finishes each item line's description will file, for the fabric plan below. */
+  const descriptionCodes = new Map<string, { code: string; words: string | null }[]>();
   if (parsed) {
     const fields = await loadDescriptionFields(sql);
     for (const [sheetIndex, sheet] of parsed.sheets.entries()) {
@@ -1099,9 +1111,55 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       for (const [index, plan] of plans) {
         const line = sheet.lines.find((entry) => entry.index === index);
         const holding = line?.replaces ? held.get(line.replaces.recordId) : undefined;
-        bySheet[index] = { ...plan, revisionRefusal: holding ? revisionDescriptionRefusal(plan, holding) : null };
+        const revisionRefusal = holding ? revisionDescriptionRefusal(plan, holding) : null;
+        bySheet[index] = { ...plan, revisionRefusal };
+        if (!revisionRefusal) {
+          descriptionCodes.set(
+            `${sheetIndex}:${index}`,
+            plan.attributes.filter(descriptionFilesAFinish).map((attribute) => ({
+              code: attribute.materialCode as string,
+              words: attribute.finishWords,
+            })),
+          );
+        }
       }
       descriptions[sheetIndex] = bySheet;
+    }
+  }
+
+  // WHAT EACH FABRIC LINE DOES TO THE FINISHES LIBRARY, in one line per row:
+  // the code it is filed under (or minted, or not filed), and the swatch its
+  // picture becomes. Walked in the confirm's own order by the function the
+  // confirm decides with (`planBillFabrics` over `decideFabricFiling` and
+  // `planFinishSwatches`), against the same library — so this screen cannot
+  // promise a swatch or a code the confirm will not write. Computed on read:
+  // a line re-kinded, unticked or placed under another item changes it.
+  const fabricFilings: Record<number, Record<number, FabricLinePlan>> = {};
+  let finishCodePrefix: string | null = null;
+  if (parsed && parsed.sheets.some((sheet) => sheet.lines.some((line) => line.rowKind === "finish_for"))) {
+    const projectId = String(run.project_id);
+    const library = await loadFinishLibrary(sql, projectId);
+    finishCodePrefix = await loadFinishCodePrefix(sql, projectId);
+    const heldSwatches = await loadCurrentSwatches(
+      sql,
+      library.map((finish) => finish.id),
+    );
+    const carriedParents = parsed.sheets.flatMap((sheet) =>
+      sheet.lines.flatMap((line) => (line.replaces && line.rowKind !== "finish_for" ? [line.replaces.recordId] : [])),
+    );
+    const heldFabrics = await loadHeldBillFabrics(sql, carriedParents);
+    const plans = planBillFabrics({
+      sheets: parsed.sheets,
+      rowImages: parsed.rowImages,
+      library,
+      heldSwatches,
+      prefix: finishCodePrefix,
+      descriptionCodes: (sheetIndex, lineIndex) => descriptionCodes.get(`${sheetIndex}:${lineIndex}`) ?? [],
+      heldFabric: (recordId) => heldFabrics.get(recordId) ?? [],
+    });
+    for (const [key, plan] of plans) {
+      const [sheetIndex, lineIndex] = key.split(":").map(Number) as [number, number];
+      fabricFilings[sheetIndex] = { ...(fabricFilings[sheetIndex] ?? {}), [lineIndex]: plan };
     }
   }
 
@@ -1122,6 +1180,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     billSpecs,
     descriptions,
     descriptionsRead: parsed ? billReadsDescriptions(parsed.sheets) : false,
+    fabricFilings,
+    finishCodePrefix,
   });
 }
 
@@ -1144,6 +1204,8 @@ async function patchBoqLine(
     finishForRow?: unknown;
     slotOverride?: unknown;
     slotOverridesVersion?: unknown;
+    picture?: unknown;
+    pictureVersion?: unknown;
   },
   actor: string,
 ): Promise<Response> {
@@ -1157,6 +1219,14 @@ async function patchBoqLine(
   if (body.slotOverride !== undefined) {
     if (index === null) return json({ ok: false, error: "A slot is changed on one line." }, 400);
     return patchSlotOverride(id, sheetIndex, index, body.slotOverride, body.slotOverridesVersion, actor);
+  }
+
+  // THE ROW'S PICTURE, chosen by a person: a crop of the bill's picture, none,
+  // or the bill's own again. Its own shape and its own version, for the slot
+  // override's reason — and because the pathname is checked against the run.
+  if (body.picture !== undefined) {
+    if (index === null) return json({ ok: false, error: "A picture is chosen for one line." }, 400);
+    return patchLinePicture(id, sheetIndex, index, body.picture, body.pictureVersion, actor);
   }
 
   // A LINE'S KIND, set by a person: its own shape, because a fabric line's
@@ -1699,6 +1769,132 @@ async function patchSlotOverride(
       `;
       if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
       return { version: Number(written[0].version), slotOverridesVersion: version };
+    });
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
+// ---- a row's picture, chosen on the review ------------------------------------
+//
+// `null` puts the bill's own picture back; `{ none: true }` is no picture; a
+// crop names the PNG the browser cut out of the bill's picture and uploaded
+// through the token route. Staged only — the confirm gives what
+// `effectiveRowImage` answers, and nothing canonical is written here, so no
+// change set (the same as every other edit to a staged line).
+//
+// A CROP'S PATHNAME IS CHECKED, NOT TRUSTED. The token route scoped the upload
+// to the project; this re-checks it against the project AND against this
+// run's own picture prefix (`billPicturePrefix`), and asks the store whether
+// the file is there, taking its size and type from the store rather than from
+// the request. A pathname a client names is never fetched with the store's
+// credential before it has passed all three (`blob-source.ts`).
+//
+// A crop needs a picture to have been cut FROM: a row the bill printed no
+// single picture on (none, or two different ones — which registration does
+// not store) can only be given none.
+const PictureCrop = z
+  .object({
+    pathname: z.string().min(1).max(1024),
+    width: z.number().int().positive().max(20_000).nullable().optional(),
+    height: z.number().int().positive().max(20_000).nullable().optional(),
+  })
+  .strict();
+const PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/gif"]);
+
+async function patchLinePicture(
+  id: string,
+  sheetIndex: number,
+  index: number,
+  change: unknown,
+  expectedVersion: unknown,
+  actor: string,
+): Promise<Response> {
+  if (typeof expectedVersion !== "number") {
+    return json({ ok: false, error: "Send the version of this row's picture you were shown." }, 400);
+  }
+  let choice: "own" | "none" | z.infer<typeof PictureCrop>;
+  if (change === null) choice = "own";
+  else if (change && typeof change === "object" && "none" in change) {
+    if ((change as { none?: unknown }).none !== true || Object.keys(change).length !== 1) {
+      return json({ ok: false, error: "No picture is { none: true }." }, 400);
+    }
+    choice = "none";
+  } else {
+    const named = PictureCrop.safeParse(change);
+    if (!named.success) return json({ ok: false, error: "A crop names the file it was stored as." }, 400);
+    choice = named.data;
+  }
+
+  // THE STORE IS ASKED BEFORE THE ROW IS LOCKED: blob I/O inside a
+  // transaction holds a row lock across a network call (`assignMessage`'s
+  // rule). The project comes from the run, never from the request.
+  let crop: BillPictureCrop | null = null;
+  if (typeof choice === "object") {
+    const owner = await sql`select project_id from intake_runs where id = ${id}`;
+    if (!owner[0]) return json({ ok: false, error: "No such import." }, 404);
+    const projectId = String(owner[0].project_id);
+    let pathname: string;
+    try {
+      pathname = assertProjectScopedPathname(choice.pathname, projectId);
+    } catch {
+      return json({ ok: false, error: "That picture is not one of this project's files." }, 400);
+    }
+    if (!pathname.startsWith(billPicturePrefix(projectId, id))) {
+      return json({ ok: false, error: "That picture was not stored for this bill." }, 400);
+    }
+    const stored = await headTrustedBlob(pathname, projectId).catch(() => null);
+    if (!stored) return json({ ok: false, error: "That crop never reached the store. Crop it again." }, 400);
+    if (!PICTURE_TYPES.has(stored.contentType)) return json({ ok: false, error: "That file is not a picture." }, 400);
+    crop = {
+      pathname,
+      contentType: stored.contentType,
+      size: stored.size,
+      width: choice.width ?? null,
+      height: choice.height ?? null,
+    };
+  }
+
+  try {
+    const result = await withTransaction(async (txn) => {
+      const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
+      if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
+      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+      const doc = assertBoqDocument(rows[0].parsed);
+      const sheet = doc.sheets[sheetIndex];
+      const line = sheet?.lines[index];
+      if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      const current = line.pictureVersion ?? 0;
+      if (current !== expectedVersion) {
+        throw new DomainConflictError(
+          "picture_stale",
+          `The picture on row ${line.lineNo} was changed in another tab. Reload and look at it before changing it again.`,
+        );
+      }
+      if (crop && !rowImageFor(doc.rowImages, sheet.sheetName, line.lineNo)?.pathname) {
+        throw new DomainConflictError(
+          "nothing_to_crop",
+          `The bill printed no single picture on row ${line.lineNo}, so there is nothing to crop. Choose no picture instead.`,
+          { status: 400 },
+        );
+      }
+      const picture: BillPictureOverride | null = choice === "own" ? null : choice === "none" ? { none: true } : crop;
+      const version = current + 1;
+      const written = await txn`
+        update intake_runs
+        set parsed = jsonb_set(
+              parsed,
+              array['sheets', ${String(sheetIndex)}, 'lines', ${String(index)}],
+              coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
+                || ${JSON.stringify({ picture, pictureVersion: version })}::jsonb
+            ),
+            updated_by = ${actor}
+        where id = ${id} and status = 'parsed'
+        returning version
+      `;
+      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      return { version: Number(written[0].version), pictureVersion: version };
     });
     return json({ ok: true, ...result });
   } catch (cause) {

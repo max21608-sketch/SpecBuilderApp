@@ -142,7 +142,7 @@ export type ItemResolution = {
    * Absent where none does. The picture panel starts at "no picture" when it
    * is present — Max, 2026-10-05.
    */
-  pictureHeld?: { recordIds: string[]; of: number };
+  pictureHeld?: { recordIds: string[]; of: number; fromBill?: number };
 };
 
 /** The units the card-wide control offers. */

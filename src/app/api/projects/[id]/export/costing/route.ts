@@ -121,8 +121,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         from spec_records r
         join attachments a
           on a.entity_type = 'spec_records' and a.entity_id = r.id and a.kind = 'item_image'
+         and a.superseded_at is null
         where r.id = any(${ids}::uuid[])
-        order by r.id, a.created_at desc
+        order by r.id, a.created_at desc, a.id desc
       `
     : [];
   const imageRecordIds = new Set(imageRows.map((row) => String(row.id)));

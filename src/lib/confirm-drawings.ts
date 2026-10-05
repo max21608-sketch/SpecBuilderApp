@@ -76,6 +76,9 @@ import {
   type Finish,
 } from "@/lib/finishes";
 import { pagesInWords } from "@/lib/drawing-items";
+import { itemImageFilename } from "@/lib/item-image";
+import { placeDrawingCrop } from "@/lib/item-image-write";
+
 
 /** A swatch chip cropped off the page, keyed by the row it was cropped for. */
 export type SwatchCrop = {
@@ -125,6 +128,13 @@ function swatchFilename(swatch: SwatchCrop): string {
   return swatch.filename ?? "swatch.png";
 }
 
+/** What the confirm says where a bill's picture was kept over the crop. */
+export function picturesKeptNote(count: number): string {
+  return count === 1
+    ? "Kept the bill's picture; the drawing's crop is offered on the record."
+    : `Kept the bill's picture on ${count} records; the drawing's crop is offered on each record.`;
+}
+
 export type ObservationRef = { id: string; version: number };
 
 export type DrawingsConfirmResult = {
@@ -138,6 +148,13 @@ export type DrawingsConfirmResult = {
   replaced?: number;
   /** Proposed swatches with no finish to attach to, left out rather than refused (brief F). */
   swatchesLeftOut?: number;
+  /**
+   * Records whose picture was the BILL'S, which the crop therefore did not
+   * replace: it is offered on the record instead (2026-10-05). With the
+   * sentence that says so, so every screen reporting it uses the same words.
+   */
+  picturesKept?: number;
+  pictureNote?: string;
   remainingPending: number;
   status: string;
 };
@@ -341,6 +358,13 @@ function countPending(items: DrawingItem[]): number {
 export type ItemImage = {
   pathname: string;
   filename?: string | null;
+  /**
+   * The page the crop was TAKEN from, as the picker reports it. It names the
+   * stored file (`itemImageFilename`), which is the only place a picture's
+   * page survives — the swatch rule. Absent on a request from an older screen,
+   * and then nothing is invented.
+   */
+  page?: number | null;
   width?: number | null;
   height?: number | null;
   size?: number | null;
@@ -856,30 +880,34 @@ export async function confirmDrawingItem(
   // what the reviewer's replace acknowledgements are keyed on — the record the
   // card named. For a code drawn once the two are the same.
   let inserts = 0;
+  let picturesKept = 0;
   for (const { recordId, ackKey, observations: landing } of writes) {
-    // One image row per target record, the same fan-out the attributes get, and
+    // One picture per target record, the same fan-out the attributes get, and
     // correct for the same reason: it is ONE drawing of one item, and the runs
     // quoting it are quoting that item.
     //
-    // REPLACES rather than accumulates. Confirming a second card for the same
-    // record should leave one picture, not two with nothing to say which is
-    // current. The old row is deleted rather than kept, because unlike an
-    // attribute an image carries no observation anybody reasoned from -- the
-    // source PDF is preserved and the crop can always be re-made.
+    // SUPERSEDES, NEVER DELETES, AND NEVER DISPLACES THE BILL'S PICTURE
+    // (2026-10-05). This used to delete the record's picture and insert the
+    // crop, on the argument that a crop can always be re-made — true of a crop
+    // and false of the photograph a bill printed beside the item, which it was
+    // deleting too. "We always prefer a picture over a drawing": over a bill's
+    // picture the crop is stored as an alternative the record offers, and a
+    // person swaps it in there if they want it. `placeDrawingCrop` carries the
+    // rule; the records are already locked above.
     if (imagePath) {
-      await txn`
-        delete from attachments
-        where entity_type = 'spec_records' and entity_id = ${recordId} and kind = 'item_image'
-      `;
-      await txn`
-        insert into attachments
-          (entity_type, entity_id, kind, storage_path, filename, content_type, size,
-           image_width, image_height, uploaded_by)
-        values
-          ('spec_records', ${recordId}, 'item_image', ${imagePath},
-           ${image?.filename ?? "item.png"}, 'image/png', ${image?.size ?? null},
-           ${image?.width ?? null}, ${image?.height ?? null}, ${actor})
-      `;
+      const placed = await placeDrawingCrop(
+        txn,
+        recordId,
+        {
+          storagePath: imagePath,
+          filename: itemImageFilename(item.id, image?.page, image?.filename),
+          size: image?.size ?? null,
+          width: image?.width ?? null,
+          height: image?.height ?? null,
+        },
+        actor,
+      );
+      if (placed === "alternative") picturesKept += 1;
     }
 
     const sortRows = await txn`
@@ -1129,6 +1157,7 @@ export async function confirmDrawingItem(
     records: writes.length,
     replaced: superseded.length,
     ...(swatchesLeftOut > 0 ? { swatchesLeftOut } : {}),
+    ...(picturesKept > 0 ? { picturesKept, pictureNote: picturesKeptNote(picturesKept) } : {}),
     answersFilled,
     remainingPending: countPending(items),
     status,

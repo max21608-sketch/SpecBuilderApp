@@ -24,7 +24,13 @@ import Chip from "@/components/ui/Chip";
 import EvidenceUpload, { type UploadedEvidence } from "@/components/history/EvidenceUpload";
 import { apiFetch } from "@/lib/api-fetch";
 import { isOfferable, paletteFromRow, type Palette, type PaletteRow } from "@/lib/palettes";
-import { STANDARD_STATE_LABELS, isStandardState, type StandardState } from "@/lib/bw-standard";
+import Link from "next/link";
+import {
+  STANDARD_STATE_LABELS,
+  isStandardState,
+  replacedItemStandard,
+  type StandardState,
+} from "@/lib/bw-standard";
 
 /** The columns of an attribute this control reads, as `/api/records/[id]` sends them. */
 export type StandardAttribute = {
@@ -250,5 +256,81 @@ export function BwStandardPanel({
         </div>
       </td>
     </tr>
+  );
+}
+
+/** The columns a spec filed under a library code carries for its read-only line (0045). */
+export type LinkedStandardAttribute = {
+  finish_code: string | null;
+  material_code?: string | null;
+  finish_standard_value?: string | null;
+  finish_standard_state?: string | null;
+  standard_value?: string | null;
+  standard_state?: string | null;
+};
+
+/**
+ * "BW finish: BW Oak Grey (proposed) — set on WD-05 in the finishes library".
+ *
+ * PER CODE ONLY (Max, 2026-10-05; 0045). A spec filed under a library code
+ * takes BW's finish from the CODE, so on the record it is a statement and a
+ * link, never a control: a per-item editor here would be the override Max
+ * ruled out, and the server refuses it (`standard_on_finish`). The rule that
+ * decides which standard is in force is `standardInForce`; this line reads
+ * the same two halves it does.
+ *
+ * Where the item carries its OWN earlier choice from before the library held
+ * one, it is said once underneath -- the row keeps it as history and the file
+ * no longer ships it, and a reader comparing this item with an old export has
+ * to be told why.
+ */
+export function BwFinishFromLibrary({
+  attribute,
+  projectId,
+}: {
+  attribute: LinkedStandardAttribute;
+  projectId: string;
+}) {
+  const code = attribute.finish_code ?? attribute.material_code ?? "its code";
+  const library = isStandardState(attribute.finish_standard_state)
+    ? { state: attribute.finish_standard_state, value: attribute.finish_standard_value ?? null, optionId: null }
+    : null;
+  const own = isStandardState(attribute.standard_state)
+    ? { state: attribute.standard_state, value: attribute.standard_value ?? null }
+    : null;
+  // The one reading of "does the library's replace the item's own".
+  const replaced = replacedItemStandard({ standard: own, finish: { standard: library } });
+  const href = `/dashboard/projects/${encodeURIComponent(projectId)}?tab=finishes&finish=${encodeURIComponent(code)}`;
+
+  return (
+    <span className="mt-1 block text-xs" data-bw-finish-line>
+      <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+        <span className="text-neutral-500">BW finish:</span>
+        {library === null ? (
+          <span className="text-neutral-400">none set</span>
+        ) : library.state === "tbc" ? (
+          <Chip tone="warn">{STANDARD_STATE_LABELS.tbc}</Chip>
+        ) : (
+          <>
+            <span className="text-neutral-900">{library.value}</span>
+            <Chip tone={library.state === "agreed" ? "good" : "warn"}>{STANDARD_STATE_LABELS[library.state]}</Chip>
+          </>
+        )}
+        <span className="text-neutral-500">
+          — set on{" "}
+          <Link href={href} className="font-mono text-blue-700 underline">
+            {code}
+          </Link>{" "}
+          in the finishes library
+        </span>
+      </span>
+      {replaced && (
+        <span className="mt-0.5 block text-[11px] text-neutral-500">
+          The item&rsquo;s own earlier choice,{" "}
+          {replaced.state === "tbc" ? "“TBC — BW to propose one”" : `${replaced.value ?? "—"} (${STANDARD_STATE_LABELS[replaced.state]})`},
+          is replaced by the library&rsquo;s.
+        </span>
+      )}
+    </span>
   );
 }

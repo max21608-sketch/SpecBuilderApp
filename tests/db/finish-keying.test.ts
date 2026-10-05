@@ -375,6 +375,49 @@ describeIfDb("a finish the client gave no code for", () => {
       const next = await withTransaction((txn) => mintInternalFinishCode(txn, projectId));
       expect(next).toBe("BW-F-006");
     });
+
+    // ---- the project's short code (0044) ----------------------------------
+    const mintAs = (marker: string) =>
+      withTransaction(async (txn) => {
+        const code = await mintInternalFinishCode(txn, projectId);
+        await createFinish(txn, {
+          projectId,
+          fields: { code, codeOrigin: "internal", description: `__QA short code ${marker}`, state: "tbc" },
+          actor: "__qa@example.test",
+        });
+        return code;
+      });
+
+    it("mints BW-<short code>-001 once the project has a short code, and renames nothing", async () => {
+      await client.query(`update projects set finish_code_prefix = 'ZQA' where id = $1`, [projectId]);
+      expect(await mintAs("first")).toBe("BW-ZQA-001");
+      // The BW-F- codes minted before the short code was set are as they were.
+      const old = await libraryRows();
+      expect(old.rows.filter((row) => /^BW-F-/.test(String(row.code))).length).toBeGreaterThan(0);
+    });
+
+    it("gives two concurrent reviewers two different codes in the short code's series", async () => {
+      const [a, b] = await Promise.all([mintAs("a"), mintAs("b")]);
+      expect(new Set([a, b])).toEqual(new Set(["BW-ZQA-002", "BW-ZQA-003"]));
+    });
+
+    it("starts a new series at 001 when the short code changes, and the old codes stay", async () => {
+      await client.query(`update projects set finish_code_prefix = 'ZQB' where id = $1`, [projectId]);
+      expect(await mintAs("renamed")).toBe("BW-ZQB-001");
+      const codes = (await libraryRows()).rows.map((row) => String(row.code));
+      expect(codes).toEqual(expect.arrayContaining(["BW-ZQA-001", "BW-ZQA-002", "BW-ZQA-003", "BW-ZQB-001"]));
+      // Back to none: the default series carries on from its own highest.
+      await client.query(`update projects set finish_code_prefix = null where id = $1`, [projectId]);
+      expect(await withTransaction((txn) => mintInternalFinishCode(txn, projectId))).toBe("BW-F-006");
+    });
+
+    it("refuses a short code that is not two to six capitals or digits", async () => {
+      for (const bad of ["amb", "A", "TOOLONG", "A-B"]) {
+        await expect(
+          client.query(`update projects set finish_code_prefix = $2 where id = $1`, [projectId, bad]),
+        ).rejects.toThrow(/projects_finish_code_prefix_check/);
+      }
+    });
   });
 
   describe("the column itself", () => {

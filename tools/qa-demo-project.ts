@@ -931,6 +931,7 @@ say("drawings issue B", `${DRAWINGS_B.length} sheets staged, left on the reviewe
       and not exists (
         select 1 from attachments a
         where a.entity_type = 'spec_records' and a.entity_id = r.id and a.kind = 'item_image'
+          and a.superseded_at is null
       )
   `;
   const cached = new Map<string, string>();
@@ -1461,7 +1462,8 @@ const summary = await client.query(
      (select count(*) from email_messages where project_id = $1) emails_on_project,
      (select count(*) from email_drafts where project_id = $1) drafts,
      (select count(*) from attachments where entity_type = 'spec_records'
-        and entity_id in (select id from spec_records where project_id = $1) and kind = 'item_image') pictures`,
+        and entity_id in (select id from spec_records where project_id = $1) and kind = 'item_image'
+        and superseded_at is null) pictures`,
   [projectId],
 );
 const row = summary.rows[0] as Record<string, string>;

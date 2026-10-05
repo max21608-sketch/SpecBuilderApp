@@ -70,10 +70,11 @@ type LockedAttribute = {
 async function lockAttribute(txn: TxnSql, attributeId: string, expectedVersion: number): Promise<LockedAttribute> {
   const rows = await txn`
     select a.id, a.record_id, a.label, a.status, a.version, a.standard_state, a.standard_value,
-           f.json_id, r.project_id
+           f.json_id, r.project_id, fin.code as finish_code
     from record_attributes a
     join spec_records r on r.id = a.record_id
     left join spec_fields f on f.id = a.spec_field_id
+    left join project_finishes fin on fin.id = a.finish_id
     where a.id = ${attributeId}
     for update of a
   `;
@@ -83,6 +84,20 @@ async function lockAttribute(txn: TxnSql, attributeId: string, expectedVersion: 
     throw new DomainConflictError(
       "already_retired",
       "That spec has been taken off this item, so it has no BW standard to set. Reload.",
+    );
+  }
+  // PER CODE ONLY (Max, 2026-10-05; 0045). A spec filed under a library code
+  // takes BW's finish from the CODE, and a per-item standard written here
+  // would ship nowhere -- `standardInForce` reads the finish's on a linked
+  // spec -- while the row looked as if it had been set. Refused in words that
+  // say where to go instead.
+  if (row.finish_code !== null && row.finish_code !== undefined) {
+    throw new DomainConflictError(
+      "standard_on_finish",
+      `“${String(row.label)}” is filed under ${String(row.finish_code)}, so its BW finish is set once on ${String(
+        row.finish_code,
+      )} in the finishes library and applies to every item carrying it.`,
+      { status: 400 },
     );
   }
   if (Number(row.version) !== expectedVersion) {

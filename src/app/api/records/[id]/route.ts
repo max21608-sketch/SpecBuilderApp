@@ -20,6 +20,8 @@ import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-ca
 import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
 import { loadPalettes } from "@/lib/palette-load";
 import { loadConfigurationFamily } from "@/lib/configuration-family";
+import { currentPicture, itemImageSource, offeredPicture } from "@/lib/item-image";
+import { loadItemPictures } from "@/lib/item-image-write";
 import {
   designerKey,
   loadOutstanding,
@@ -58,6 +60,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            exists (
              select 1 from attachments a
              where a.entity_type = 'spec_records' and a.entity_id = r.id and a.kind = 'item_image'
+               and a.superseded_at is null
            ) as has_image
     from spec_records r
     join projects p on p.id = r.project_id
@@ -89,6 +92,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            f.name as field_name, f.json_id, f.field_category,
            a.finish_id, fin.code as finish_code, fin.description as finish_description, fin.state as finish_state,
            fin.code_origin as finish_code_origin,
+           -- 0045: BW's own finish for the CODE, which is the standard in
+           -- force on a linked spec. The spec's own columns above are then
+           -- history, and the screen says the library's replaces them.
+           fin.standard_value as finish_standard_value, fin.standard_state as finish_standard_state,
            src.filename as source_filename, src.document_kind as source_document_kind
     from record_attributes a
     left join spec_fields f on f.id = a.spec_field_id
@@ -412,9 +419,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     copies: mockupRows.filter((row) => row.role === "copy").map(mockupLink),
   };
 
+  // THE PICTURE AND WHERE IT CAME FROM (2026-10-05), and the one other
+  // picture a person may swap in. Derived from the rows by the same pure
+  // functions the swap route checks against, so the screen cannot offer a
+  // choice the route would read differently.
+  const pictureRows = await loadItemPictures(sql, id);
+  const currentRow = currentPicture(pictureRows);
+  const offeredRow = offeredPicture(pictureRows);
+  const picture = {
+    current: currentRow ? { id: currentRow.id, source: itemImageSource(currentRow) } : null,
+    offered: offeredRow ? { id: offeredRow.id, source: itemImageSource(offeredRow) } : null,
+  };
+
   return json({
     ok: true,
     record,
+    picture,
     mockup,
     refs,
     attributes,

@@ -114,6 +114,8 @@ export default function DrawingsReview({
   // changes on every re-render of a picker and nothing on this screen needs to
   // re-render when it does.
   const images = useRef<Map<string, CroppedImage | null>>(new Map());
+  // What the last confirm said about a bill's picture it kept (2026-10-05).
+  const pictureNote = useRef<string | null>(null);
   const rememberImage = useCallback((itemId: string, image: CroppedImage | null) => {
     images.current.set(itemId, image);
   }, []);
@@ -143,6 +145,8 @@ export default function DrawingsReview({
     return {
       pathname: blob.pathname,
       filename: `${itemId}.png`,
+      // The page it was cropped off; the confirm names the stored file by it.
+      page: image.page ?? null,
       width: image.width,
       height: image.height,
       size: image.blob.size,
@@ -463,7 +467,17 @@ export default function DrawingsReview({
         observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
       }),
     });
+    // A BILL'S PICTURE KEPT OVER THE CROP is not a failure and not silent:
+    // the confirm says so in its own words, and the screen passes them on.
+    if (res.ok && typeof res.data.pictureNote === "string") pictureNote.current = res.data.pictureNote;
     return res.ok ? null : res.error;
+  }
+
+  /** The confirm's picture sentence since the last press, taken once. */
+  function takePictureNote(): string | null {
+    const note = pictureNote.current;
+    pictureNote.current = null;
+    return note;
   }
 
   async function review(item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") {
@@ -473,7 +487,9 @@ export default function DrawingsReview({
     setBusy(item.id);
     setError(null);
     try {
-      await reloadThen(await confirmItem(item, observations, action));
+      pictureNote.current = null;
+      const failure = await confirmItem(item, observations, action);
+      await reloadThen(failure, failure ? null : takePictureNote());
     } finally {
       setBusy(null);
     }
@@ -496,6 +512,7 @@ export default function DrawingsReview({
     setError(null);
     try {
       const done: string[] = [];
+      pictureNote.current = null;
       for (const [index, entry] of entries.entries()) {
         const failure = await confirmItem(entry.item, entry.observations, "confirm");
         if (failure) {
@@ -512,7 +529,7 @@ export default function DrawingsReview({
         }
         done.push(entry.label);
       }
-      await reloadThen(null);
+      await reloadThen(null, takePictureNote());
     } finally {
       setBusy(null);
     }

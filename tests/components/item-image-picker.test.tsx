@@ -252,3 +252,13 @@ describe("the picture panel follows the ticked records until somebody touches it
     expect(crops.calls).toHaveLength(1);
   });
 });
+
+describe("what confirming does with a chosen picture", () => {
+  it("never says a crop replaces the bill's picture", async () => {
+    const { whatConfirmingDoes } = await import("@/components/imports/ItemImagePicker");
+    expect(whatConfirmingDoes(1, 1, 1)).toBe("The bill's picture stays; this is kept beside it on the record, where you can swap them.");
+    expect(whatConfirmingDoes(1, 1, 0)).toBe("Confirming replaces the item's current picture.");
+    expect(whatConfirmingDoes(2, 3, 0)).toBe("Confirming replaces the current picture on 2 of the 3 records.");
+    expect(whatConfirmingDoes(3, 3, 1)).toMatch(/replaces the current picture on 2 of the 3 records; on the 1 whose picture came off the bill/);
+  });
+});

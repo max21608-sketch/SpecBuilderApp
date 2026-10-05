@@ -10,7 +10,10 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { openChangeSet } from "@/lib/change-sets";
 import { createFinish } from "@/lib/finish-edit";
-import { FINISH_KINDS, loadUnlinkedFinishCodes } from "@/lib/finishes";
+import { FINISH_KINDS, isFinishKind, loadUnlinkedFinishCodes } from "@/lib/finishes";
+import { loadPalettes, palettesByFieldJsonId } from "@/lib/palette-load";
+import { paletteForFinish } from "@/lib/finish-standard-palette";
+import type { Palette } from "@/lib/palettes";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getSessionUser();
@@ -27,6 +30,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const finishes = await sql`
     select f.id, f.code, f.code_norm, f.code_origin, f.kind, f.description, f.supplier_raw, f.reference, f.colour,
            f.notes, f.state, f.status, f.version, f.retired_at, f.retired_by, f.updated_at, f.updated_by,
+           -- 0045: BW's own finish for the code, and the email that agreed it.
+           f.standard_value, f.standard_state, f.standard_set_by, f.standard_set_at,
+           ev.filename as standard_evidence_filename,
+           (select cs.id from change_sets cs where cs.evidence_attachment_id = f.standard_agreed_evidence_id
+             order by cs.created_at limit 1) as standard_evidence_change_set_id,
            (select at.id from attachments at
              where at.entity_type = 'project_finishes' and at.entity_id = f.id and at.kind = 'finish_swatch'
                and at.superseded_at is null
@@ -38,15 +46,25 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                       'itemDescription', r.item_description,
                       'runId', run.id,
                       'runName', run.name,
-                      'attributeLabel', a.label
+                      'attributeLabel', a.label,
+                      -- 0045: which BWS field the item carries the code in --
+                      -- what decides the list BW's finish is chosen from --
+                      -- and any per-item standard set before the library
+                      -- held one, which the library offers back.
+                      'jsonId', sf.json_id,
+                      'fieldName', sf.name,
+                      'itemStandardValue', a.standard_value,
+                      'itemStandardState', a.standard_state
                     ) order by r.record_no)
              from record_attributes a
              join spec_records r on r.id = a.record_id
              join spec_runs run on run.id = r.run_id
              join projects p on p.id = r.project_id
+             left join spec_fields sf on sf.id = a.spec_field_id
              where a.finish_id = f.id and a.status = 'active' and r.status = 'active'
            ), '[]'::json) as used_on
     from project_finishes f
+    left join attachments ev on ev.id = f.standard_agreed_evidence_id
     where f.project_id = ${id}
     order by f.status, f.code_norm
   `;
@@ -71,10 +89,29 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // shows three.
   const unlinked = await loadUnlinkedFinishCodes(sql, id);
 
+  // WHICH LIST EACH CODE'S BW FINISH COMES FROM (0045), read by the same pure
+  // function the write path re-runs against the live rows -- so the list the
+  // row offers is the list the server accepts. The palettes go once, keyed,
+  // rather than thirty-five timber options repeated under every timber code.
+  const byField = palettesByFieldJsonId(await loadPalettes(sql));
+  const palettes: Record<string, Palette> = {};
+  const withPalette = finishes.map((finish) => {
+    const uses = (finish.used_on as { jsonId: number | null; fieldName: string | null }[] | null) ?? [];
+    const reading = paletteForFinish({ kind: isFinishKind(finish.kind) ? finish.kind : null }, uses, byField);
+    if (reading.palette) palettes[reading.palette.key] = reading.palette;
+    return {
+      ...finish,
+      bw_palette_key: reading.palette?.key ?? null,
+      bw_palette_why: reading.why,
+      bw_palette_mixed: reading.mixed,
+    };
+  });
+
   return json({
     ok: true,
     project: { id, number: String(project.bws_project_number), name: String(project.name) },
-    finishes,
+    finishes: withPalette,
+    palettes,
     runs,
     unlinked,
     kinds: FINISH_KINDS,

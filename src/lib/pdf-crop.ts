@@ -1,4 +1,6 @@
-// Cropping a picture of an item out of the drawing it was found on.
+// Cropping a picture of an item out of the drawing it was found on — and, since
+// 2026-10-05, out of a picture a bill printed on its row (`cropImageRegion`),
+// through the same one-at-a-time queue.
 //
 // ============================================================================
 // WHY THIS RUNS IN THE BROWSER AND NOT IN THE WORKER.
@@ -40,6 +42,12 @@ export type CroppedImage = {
   blob: Blob;
   width: number;
   height: number;
+  /**
+   * The page it was cropped off, where the caller knows it. `cropPdfRegion`
+   * never sets it; the item picker adds it, so the review screen can send it
+   * and the stored picture can say which page it came from.
+   */
+  page?: number | null;
 };
 
 type PdfJs = typeof import("pdfjs-dist");
@@ -323,6 +331,77 @@ async function renderCrop(
   const finished = downscale(canvas, MAX_IMAGE_PX);
   const blob = await toPngBlob(finished);
   return { blob, width: finished.width, height: finished.height };
+}
+
+/**
+ * THE SAME CROP, OFF A PICTURE RATHER THAN A PAGE — a bill's row picture,
+ * which is already pixels (`bill-images.ts`), so nothing is rasterised: the
+ * region is drawn onto a canvas at the picture's own resolution and reduced to
+ * the thumbnail budget, as a page crop is.
+ *
+ * Through the SAME queue as `cropPdfRegion`: one crop at a time across the
+ * whole screen, whatever it is cut from. `bbox` is fractions of the picture as
+ * displayed, which is what `PageCropper` hands back. Same-origin and
+ * cookie-authenticated (`/api/imports/<run>/row-image`), so the canvas is never
+ * tainted and `toBlob` is allowed.
+ *
+ * An aborted crop rejects with an `AbortError`, before or after the picture
+ * loads, and the caller treats it as superseded rather than as a failure.
+ */
+export function cropImageRegion(
+  url: string,
+  bbox: CropBox,
+  options: { signal?: AbortSignal } = {},
+): Promise<CroppedImage> {
+  return enqueue(() => renderImageCrop(url, bbox, options));
+}
+
+const superseded = () => new DOMException("The crop was superseded.", "AbortError");
+
+async function renderImageCrop(url: string, bbox: CropBox, options: { signal?: AbortSignal }): Promise<CroppedImage> {
+  if (options.signal?.aborted) throw superseded();
+  const picture = await loadPicture(url, options.signal);
+  if (options.signal?.aborted) throw superseded();
+  const [x0, y0, x1, y1] = bbox;
+  const left = Math.max(0, Math.round(x0 * picture.naturalWidth));
+  const top = Math.max(0, Math.round(y0 * picture.naturalHeight));
+  const width = Math.min(picture.naturalWidth - left, Math.round((x1 - x0) * picture.naturalWidth));
+  const height = Math.min(picture.naturalHeight - top, Math.round((y1 - y0) * picture.naturalHeight));
+  if (width < 1 || height < 1) throw new Error("That area of the picture is too small to capture.");
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("This browser would not provide a canvas to draw on.");
+  // White first, as for a page: a transparent PNG turns black on a dark surface.
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(picture, left, top, width, height, 0, 0, width, height);
+
+  const finished = downscale(canvas, MAX_IMAGE_PX);
+  const blob = await toPngBlob(finished);
+  return { blob, width: finished.width, height: finished.height };
+}
+
+function loadPicture(url: string, signal?: AbortSignal): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const picture = new Image();
+    const abort = () => {
+      picture.src = "";
+      reject(superseded());
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    picture.onload = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve(picture);
+    };
+    picture.onerror = () => {
+      signal?.removeEventListener("abort", abort);
+      reject(new Error("The picture could not be loaded to crop."));
+    };
+    picture.src = url;
+  });
 }
 
 /** Reduce to the thumbnail budget, in one step. */

@@ -18,6 +18,7 @@
 import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { sql } from "@/lib/db";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
+import { itemImageSource } from "@/lib/item-image";
 import {
   assertStagedDrawings,
   specFieldEntries,
@@ -136,7 +137,7 @@ export type ResolvedItem = {
    * Absent where no target holds one, like `codeMatches`, so a card with
    * nothing to say resolves to exactly the bytes it did.
    */
-  pictureHeld?: { recordIds: string[]; of: number };
+  pictureHeld?: { recordIds: string[]; of: number; fromBill: number };
 };
 
 /** What the card is told about a page of named configurations. Compact: it crosses the wire. */
@@ -336,7 +337,7 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
 
 /** The registers a drawings screen needs, read once for any number of runs. */
 export async function loadDrawingContext(projectId: string) {
-  const [registers, occupied, variants, finishes, variantSources, recordsWithPicture] = await Promise.all([
+  const [registers, occupied, variants, finishes, variantSources, pictures] = await Promise.all([
     loadExtractionRegisters(projectId),
     loadOccupiedSlots(projectId),
     loadVariants(projectId),
@@ -344,7 +345,15 @@ export async function loadDrawingContext(projectId: string) {
     loadVariantSources(projectId),
     loadRecordsWithPicture(projectId),
   ]);
-  return { records: registers.records, occupied, variants, finishes, variantSources, recordsWithPicture };
+  return {
+    records: registers.records,
+    occupied,
+    variants,
+    finishes,
+    variantSources,
+    recordsWithPicture: pictures.all,
+    recordsWithBillPicture: pictures.fromBill,
+  };
 }
 
 /**
@@ -353,8 +362,12 @@ export async function loadDrawingContext(projectId: string) {
  * can leave it out and be read as "no record holds a picture", which is the
  * behaviour that existed before the question was asked.
  */
-export type DrawingContext = Omit<Awaited<ReturnType<typeof loadDrawingContext>>, "recordsWithPicture"> & {
+export type DrawingContext = Omit<
+  Awaited<ReturnType<typeof loadDrawingContext>>,
+  "recordsWithPicture" | "recordsWithBillPicture"
+> & {
   recordsWithPicture?: ReadonlySet<string>;
+  recordsWithBillPicture?: ReadonlySet<string>;
 };
 
 /**
@@ -363,20 +376,31 @@ export type DrawingContext = Omit<Awaited<ReturnType<typeof loadDrawingContext>>
  *
  * The same predicate every screen showing a record's picture uses -- the
  * record route's `has_image`, the image route, the bill confirm's "only where
- * the record has none" -- and NOT filtered on `superseded_at`: 0013 added it
- * for attachments in general, and nothing has ever set it on an item image
- * (the drawings confirm deletes the old row). A filter here that the record
- * screen does not apply would let the card say "no picture" over a record
- * whose own screen shows one. (No backticks in here: a tagged template.)
+ * the record has none" -- the CURRENT picture, newest with no
+ * superseded_at, since pictures are superseded and never deleted (bd04f67).
+ * Which ones came off the BILL is kept apart: over a bill's picture the
+ * drawings confirm keeps the bill's and stores a crop as an alternative, so
+ * the card must not say a crop "replaces" it. (No backticks: a tagged template.)
  */
-async function loadRecordsWithPicture(projectId: string): Promise<Set<string>> {
+async function loadRecordsWithPicture(projectId: string): Promise<{ all: Set<string>; fromBill: Set<string> }> {
   const rows = await sql`
-    select distinct a.entity_id
+    select distinct on (a.entity_id) a.entity_id, a.storage_path, a.filename
       from attachments a
       join spec_records r on r.id = a.entity_id
-     where a.entity_type = 'spec_records' and a.kind = 'item_image' and r.project_id = ${projectId}
+     where a.entity_type = 'spec_records' and a.kind = 'item_image' and a.superseded_at is null
+       and r.project_id = ${projectId}
+     order by a.entity_id, a.created_at desc
   `;
-  return new Set(rows.map((row) => String(row.entity_id)));
+  const all = new Set<string>();
+  const fromBill = new Set<string>();
+  for (const row of rows) {
+    const id = String(row.entity_id);
+    all.add(id);
+    if (itemImageSource({ storagePath: String(row.storage_path), filename: row.filename ? String(row.filename) : null }).kind === "bill") {
+      fromBill.add(id);
+    }
+  }
+  return { all, fromBill };
 }
 
 /**
@@ -413,11 +437,13 @@ function withPictureHeld(
   targets: readonly string[],
   named: NamedTargets | null,
   withPicture: ReadonlySet<string> | undefined,
-): { pictureHeld?: { recordIds: string[]; of: number } } {
+  withBillPicture?: ReadonlySet<string>,
+): { pictureHeld?: { recordIds: string[]; of: number; fromBill: number } } {
   if (!withPicture || withPicture.size === 0) return {};
   const { existing, created } = pictureWriteTargets(targets, named);
   const recordIds = existing.filter((id) => withPicture.has(id));
-  return recordIds.length > 0 ? { pictureHeld: { recordIds, of: existing.length + created } } : {};
+  const fromBill = recordIds.filter((id) => withBillPicture?.has(id) ?? false).length;
+  return recordIds.length > 0 ? { pictureHeld: { recordIds, of: existing.length + created, fromBill } } : {};
 }
 
 /**
@@ -557,7 +583,7 @@ export function resolveStagedRun(
       ...withBillReplacements(billReplacements(item, targets, occupied, named)),
       named: named ? namedResolution(targets, resolution, named) : null,
       ...withCodeMatches(resolution.runs.length === 0 ? codeMatchesOf(staged, item, context.records) : []),
-      ...withPictureHeld(targets, named, context.recordsWithPicture),
+      ...withPictureHeld(targets, named, context.recordsWithPicture, context.recordsWithBillPicture),
     };
   });
 }

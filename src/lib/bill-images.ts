@@ -38,8 +38,7 @@
 import { createHash } from "node:crypto";
 import ExcelJS from "exceljs";
 import { put } from "@vercel/blob";
-import { projectUploadPrefix } from "@/lib/blob-source";
-import type { BillRowImage, BoqRowImages } from "@/lib/bill-row-image";
+import { billPicturePrefix, type BillRowImage, type BoqRowImages } from "@/lib/bill-row-image";
 
 /** A single picture larger than this is left in the workbook: it is a thumbnail's source, not a document. */
 export const MAX_BILL_PICTURE_BYTES = 5 * 1024 * 1024;
@@ -135,7 +134,7 @@ export async function stageBillRowImages(
     return { rowImages: {}, rowImagesNote: `The pictures in this workbook could not be read (${why}), so no line shows one.` };
   }
 
-  const prefix = `${projectUploadPrefix(projectId)}bill-images/${runId}/`;
+  const prefix = billPicturePrefix(projectId, runId);
   const distinct = new Map<string, BillPicture>();
   for (const rows of pictures.values()) {
     for (const held of rows.values()) {

@@ -67,8 +67,9 @@ export const FINISH_CODE_ORIGINS = ["client", "internal"] as const;
  * WHOSE code this is.
  *
  * `client` — the code the client's own document carried. `internal` — one this
- * app minted (`BW-F-001` upward, per project) because the document stated a
- * finish and gave it no code. The distinction exists for exactly one reason
+ * app minted (`BW-F-001` upward, per project, or `BW-AMB-001` where the project
+ * has a short code — 0044) because the document stated a finish and gave it no
+ * code. The distinction exists for exactly one reason
  * and it is load-bearing: an internal code must never reach the BWS export,
  * the quote or the costing sheet, where it would read as a code the client
  * issued. `composeFinishCell` is where that is enforced.
@@ -83,20 +84,69 @@ export function isFinishCodeOrigin(value: unknown): value is FinishCodeOrigin {
   return value === "client" || value === "internal";
 }
 
-/** What this app's own finish codes are called. Never emitted to BWS. */
+/**
+ * What this app's own finish codes are called on a project with no short code.
+ * Never emitted to BWS.
+ */
 export const INTERNAL_FINISH_PREFIX = "BW-F-";
 
-/** The number inside `BW-F-007`, or null for anything that is not one. */
-export function internalFinishNumber(code: string): number | null {
-  const match = /^BW-F-(\d+)$/i.exec(code.trim());
-  if (!match) return null;
-  const n = Number(match[1]);
+// ===========================================================================
+// THE PROJECT'S SHORT CODE (0044, Max 2026-10-05): `BW-AMB-001` — "BW-", a
+// short code set once per project, a three-digit number. A project with none
+// keeps minting `BW-F-nnn`, and no code already minted is ever renamed.
+//
+// THE SERIES IS A SPELLING, NEVER AN ORIGIN. Everything below reads and
+// writes the SHAPE of a code so the mint can find the next number; whether a
+// code is ours is `code_origin` and nothing else (0036's rule), so a client
+// schedule printing `BW-AMB-002` is still the client's code and still reaches
+// BWS.
+// ===========================================================================
+
+/** Two to six letters or digits, upper-case — `projects_finish_code_prefix_check`. */
+export const FINISH_CODE_PREFIX_PATTERN = /^[A-Z0-9]{2,6}$/;
+
+/**
+ * A short code as typed, upper-cased and trimmed; null for blank. Does NOT
+ * validate — `finishCodePrefixProblem` says what is wrong in words.
+ */
+export function normaliseFinishCodePrefix(raw: string | null | undefined): string | null {
+  const text = (raw ?? "").trim().toUpperCase();
+  return text === "" ? null : text;
+}
+
+/** Why a typed short code cannot be used, or null when it can (or is blank). */
+export function finishCodePrefixProblem(raw: string | null | undefined): string | null {
+  const prefix = normaliseFinishCodePrefix(raw);
+  if (prefix === null || FINISH_CODE_PREFIX_PATTERN.test(prefix)) return null;
+  return `“${(raw ?? "").trim()}” cannot be a short code: use two to six letters or digits, such as AMB.`;
+}
+
+/**
+ * The series a project mints in: `BW-AMB-` with a short code, `BW-F-` without.
+ * A stored value that is somehow not a valid short code falls back to `BW-F-`
+ * rather than minting a code nobody could parse back.
+ */
+export function internalFinishSeries(prefix: string | null | undefined): string {
+  const normalised = normaliseFinishCodePrefix(prefix);
+  return normalised && FINISH_CODE_PREFIX_PATTERN.test(normalised) ? `BW-${normalised}-` : INTERNAL_FINISH_PREFIX;
+}
+
+/**
+ * The number inside `BW-F-007` (or, given its series, `BW-AMB-007`), or null
+ * for anything that is not a code of that series.
+ */
+export function internalFinishNumber(code: string, series: string = INTERNAL_FINISH_PREFIX): number | null {
+  const trimmed = code.trim();
+  if (trimmed.slice(0, series.length).toUpperCase() !== series.toUpperCase()) return null;
+  const digits = trimmed.slice(series.length);
+  if (!/^\d+$/.test(digits)) return null;
+  const n = Number(digits);
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-/** `1` → `BW-F-001`. Three digits, and wider than three when it has to be. */
-export function formatInternalFinishCode(n: number): string {
-  return `${INTERNAL_FINISH_PREFIX}${String(n).padStart(3, "0")}`;
+/** `1` → `BW-F-001` (or `BW-AMB-001`). Three digits, and wider than three when it has to be. */
+export function formatInternalFinishCode(n: number, series: string = INTERNAL_FINISH_PREFIX): string {
+  return `${series}${String(n).padStart(3, "0")}`;
 }
 
 export type Finish = {
@@ -110,6 +160,22 @@ export type Finish = {
   reference: string | null;
   colour: string | null;
   state: AttributeState;
+  /**
+   * BW's own finish for this code (0045), set once in the library and applying
+   * to every item carrying the code. `standardInForce` in `bw-standard.ts` is
+   * the one rule that reads it. The shape is `AttributeStandard`'s, declared
+   * here rather than imported because this file is a leaf. Optional so a
+   * caller that only resolves codes need not load it; every loader that
+   * COMPOSES a statement (`loadRecordAtoms`, `loadPromotable`) always sets it.
+   */
+  standard?: FinishStandard | null;
+};
+
+/** `AttributeStandard` (bw-standard.ts), as a finish carries it (0045). */
+export type FinishStandard = {
+  value: string | null;
+  optionId: string | null;
+  state: "proposed" | "agreed" | "tbc";
 };
 
 /**

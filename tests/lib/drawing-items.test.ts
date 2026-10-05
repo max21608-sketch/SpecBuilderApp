@@ -745,11 +745,21 @@ describe("a card whose records already have a picture (Max, 2026-10-05)", () => 
   });
   const plainDoc = () => stage({ documentNotes: null, nonItemPages: [], items: [rawItem({ codes: ["X-100"] })] });
 
+  it("counts apart the targets whose current picture came off the bill", () => {
+    const records = [record("r-main", "X-100", "run-main", "Main"), record("r-ve", "X-100", "run-ve", "VE")];
+    const resolved = resolveStagedRun(
+      plainDoc(),
+      { ...context(records, ["r-main", "r-ve"]), recordsWithBillPicture: new Set(["r-ve"]) },
+      FIELDS,
+    )[0]!;
+    expect(resolved.pictureHeld).toEqual({ recordIds: ["r-main", "r-ve"], of: 2, fromBill: 1 });
+  });
+
   it("names the target holding a picture, out of every record the picture would land on", () => {
     const records = [record("r-main", "X-100", "run-main", "Main"), record("r-ve", "X-100", "run-ve", "VE")];
     const resolved = resolveStagedRun(plainDoc(), context(records, ["r-main"]), FIELDS)[0]!;
     expect(resolved.targets.sort()).toEqual(["r-main", "r-ve"]);
-    expect(resolved.pictureHeld).toEqual({ recordIds: ["r-main"], of: 2 });
+    expect(resolved.pictureHeld).toEqual({ recordIds: ["r-main"], of: 2, fromBill: 0 });
   });
 
   it("sends nothing when no target holds one — not even a picture elsewhere in the project", () => {
@@ -802,7 +812,7 @@ describe("a card whose records already have a picture (Max, 2026-10-05)", () => 
     // The bill line's own picture is NOT one the page would replace.
     const resolved = resolveStagedRun(configured, context(records, ["r-301", "v-2"], sources), FIELDS, "intake-run")[0]!;
     expect(resolved.named?.labels).toEqual(["TYPE 1", "TYPE 2", "TYPE 3"]);
-    expect(resolved.pictureHeld).toEqual({ recordIds: ["v-2"], of: 3 });
+    expect(resolved.pictureHeld).toEqual({ recordIds: ["v-2"], of: 3, fromBill: 0 });
     expect(
       resolveStagedRun(configured, context(records, ["r-301"], sources), FIELDS, "intake-run")[0]!.pictureHeld,
     ).toBeUndefined();

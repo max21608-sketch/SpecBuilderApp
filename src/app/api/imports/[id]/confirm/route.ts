@@ -54,6 +54,10 @@ const ConfirmBody = z
       .object({
         pathname: z.string().min(1).max(1024),
         filename: z.string().max(300).nullable().optional(),
+        // The page the crop was taken from. It names the stored file, which is
+        // where a picture's page survives (`itemImageFilename`), so the record
+        // can say "Cropped off the drawings, page 4".
+        page: z.number().int().positive().max(10_000).nullable().optional(),
         width: z.number().int().positive().max(20_000).nullable().optional(),
         height: z.number().int().positive().max(20_000).nullable().optional(),
         size: z.number().int().nonnegative().max(32 * 1024 * 1024).nullable().optional(),
@@ -144,6 +148,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         descriptionSpecs: result.descriptionSpecs,
         descriptionsHeldBack: result.descriptionsHeldBack,
         billPictures: result.billPictures,
+        inHouseFinishes: result.inHouseFinishes,
+        fabricSwatches: result.fabricSwatches,
+        // A code whose fabric lines carry different pictures took no swatch,
+        // and is named — the review said so beforehand, in the same words.
+        swatchNotices: result.swatchNotices,
         projectId: result.projectId,
         runs: result.runIds.length,
       });
