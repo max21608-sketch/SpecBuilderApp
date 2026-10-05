@@ -52,6 +52,13 @@ import {
   type SlotOverride,
 } from "@/lib/bill-description";
 import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
+import { descriptionFilesAFinish, planBillFabrics, type FabricLinePlan } from "@/lib/bill-fabric-filing";
+import {
+  loadCurrentSwatches,
+  loadFinishCodePrefix,
+  loadFinishLibrary,
+  loadHeldBillFabrics,
+} from "@/lib/bill-fabric-load";
 // Pure: which rows on the OTHER tabs a decision reaches, and what lands on
 // them. The screen reads the same module for its duplicate panel, so the rows
 // it calls ambiguous and the rows the carry refuses are one set.
@@ -1086,6 +1093,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // confirm. A line a REVISION carries says, in the confirm's own words, when
   // its description will not be written.
   const descriptions: Record<number, Record<number, unknown>> = {};
+  /** The coded finishes each item line's description will file, for the fabric plan below. */
+  const descriptionCodes = new Map<string, { code: string; words: string | null }[]>();
   if (parsed) {
     const fields = await loadDescriptionFields(sql);
     for (const [sheetIndex, sheet] of parsed.sheets.entries()) {
@@ -1099,9 +1108,55 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       for (const [index, plan] of plans) {
         const line = sheet.lines.find((entry) => entry.index === index);
         const holding = line?.replaces ? held.get(line.replaces.recordId) : undefined;
-        bySheet[index] = { ...plan, revisionRefusal: holding ? revisionDescriptionRefusal(plan, holding) : null };
+        const revisionRefusal = holding ? revisionDescriptionRefusal(plan, holding) : null;
+        bySheet[index] = { ...plan, revisionRefusal };
+        if (!revisionRefusal) {
+          descriptionCodes.set(
+            `${sheetIndex}:${index}`,
+            plan.attributes.filter(descriptionFilesAFinish).map((attribute) => ({
+              code: attribute.materialCode as string,
+              words: attribute.finishWords,
+            })),
+          );
+        }
       }
       descriptions[sheetIndex] = bySheet;
+    }
+  }
+
+  // WHAT EACH FABRIC LINE DOES TO THE FINISHES LIBRARY, in one line per row:
+  // the code it is filed under (or minted, or not filed), and the swatch its
+  // picture becomes. Walked in the confirm's own order by the function the
+  // confirm decides with (`planBillFabrics` over `decideFabricFiling` and
+  // `planFinishSwatches`), against the same library — so this screen cannot
+  // promise a swatch or a code the confirm will not write. Computed on read:
+  // a line re-kinded, unticked or placed under another item changes it.
+  const fabricFilings: Record<number, Record<number, FabricLinePlan>> = {};
+  let finishCodePrefix: string | null = null;
+  if (parsed && parsed.sheets.some((sheet) => sheet.lines.some((line) => line.rowKind === "finish_for"))) {
+    const projectId = String(run.project_id);
+    const library = await loadFinishLibrary(sql, projectId);
+    finishCodePrefix = await loadFinishCodePrefix(sql, projectId);
+    const heldSwatches = await loadCurrentSwatches(
+      sql,
+      library.map((finish) => finish.id),
+    );
+    const carriedParents = parsed.sheets.flatMap((sheet) =>
+      sheet.lines.flatMap((line) => (line.replaces && line.rowKind !== "finish_for" ? [line.replaces.recordId] : [])),
+    );
+    const heldFabrics = await loadHeldBillFabrics(sql, carriedParents);
+    const plans = planBillFabrics({
+      sheets: parsed.sheets,
+      rowImages: parsed.rowImages,
+      library,
+      heldSwatches,
+      prefix: finishCodePrefix,
+      descriptionCodes: (sheetIndex, lineIndex) => descriptionCodes.get(`${sheetIndex}:${lineIndex}`) ?? [],
+      heldFabric: (recordId) => heldFabrics.get(recordId) ?? [],
+    });
+    for (const [key, plan] of plans) {
+      const [sheetIndex, lineIndex] = key.split(":").map(Number) as [number, number];
+      fabricFilings[sheetIndex] = { ...(fabricFilings[sheetIndex] ?? {}), [lineIndex]: plan };
     }
   }
 
@@ -1122,6 +1177,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     billSpecs,
     descriptions,
     descriptionsRead: parsed ? billReadsDescriptions(parsed.sheets) : false,
+    fabricFilings,
+    finishCodePrefix,
   });
 }
 
