@@ -382,3 +382,17 @@ describe("a note that points elsewhere, or says the bill's words and more", () =
     expect(containsWords("Supplier Own - Teddy 05/10 Beige", "TEDDY 05/10 Beige")).toBe(true);
   });
 });
+
+describe("the screen's commit groups hold a record's WHOLE pending set", () => {
+  it("keeps a row with no label in its record's group, borrowing a sibling's label", async () => {
+    const { commitGroups } = await import("@/lib/spec-review-rows");
+    const row = (id: string, recordLabel: string | null) =>
+      ({ id, reviewStatus: "pending", recordId: "rec-1", recordLabel, target: null }) as unknown as Proposal;
+    // The confirm counts all three; a group of two refused the item as
+    // "changed while you were reviewing" (the real tracker, 2026-10-05).
+    const groups = commitGroups([row("a", null), row("b", "T18192-013"), row("c", "T18192-013")]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.recordLabel).toBe("T18192-013");
+    expect(groups[0]!.proposals.map((p) => p.id)).toEqual(["a", "b", "c"]);
+  });
+});

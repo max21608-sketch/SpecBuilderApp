@@ -837,9 +837,15 @@ export function resolveProposals(
       // an unmatched sentence is far more often chat than specification. Not a
       // size the reading already declined to place: that row says why.
       const base = buildProposal(observation, index, record, candidates, registers, newId, run);
-      if (record && !base.requirementId && !note && !reading && unmatchedBecomesNote(registers.documentKind)) {
+      if (record && !base.requirementId && unmatchedBecomesNote(registers.documentKind)) {
+        // A size the reading declined to place is kept the same way, in the
+        // document's own words, with the reason it fills no slot beside it.
+        // Left as a row with an item and no home, it was skipped by the screen's
+        // commit grouping and counted by the confirm, so it refused its whole
+        // item as "changed while you were reviewing" (2026-10-05, the real
+        // tracker's "16\" H X 2'-7\" DIA").
         const kept = asNoteProposal(base, record, registers);
-        if (kept) return [placedBy(kept)];
+        if (kept) return [placedBy(kept, note)];
       }
 
       // A ROW-PLACED record with no category is still THE record — the bill

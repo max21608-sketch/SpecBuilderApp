@@ -334,8 +334,20 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
     // A colon after the prefix is still the page's own label: the Aman
     // tracker prints "W:540 X D:610 X SH :430 mm" (2026-10-05).
     const prefix = /^([A-Za-z.]+?)\s*(?::\s*)?([0-9].*)$/.exec(body);
-    const slot = prefix ? normaliseDimensionSlot(prefix[1] ?? "") : null;
-    const value = prefix && slot ? (prefix[2] ?? body) : body;
+    let slot = prefix ? normaliseDimensionSlot(prefix[1] ?? "") : null;
+    let value = prefix && slot ? (prefix[2] ?? body) : body;
+    // A label AFTER the figure is the page's own label too: the Aman tracker
+    // prints `16" H X 2'-7" DIA` and `6'-4" W` (2026-10-05). The same
+    // whole-label rule as the prefix — `L` is not a slot and stays unplaced —
+    // and only where what precedes it reads as one figure.
+    if (!slot) {
+      const suffix = /^(.*?[0-9"'\u2032\u2033])\s*([A-Za-z.]+)$/.exec(body);
+      const suffixSlot = suffix ? normaliseDimensionSlot(suffix[2] ?? "") : null;
+      if (suffix && suffixSlot && parseDimensionFigure((suffix[1] ?? "").trim()).figure !== null) {
+        slot = suffixSlot;
+        value = (suffix[1] ?? "").trim();
+      }
+    }
     const figure = parseDimensionFigure(value);
     return { slot, value: value.trim(), tbc: figure.tbcInline, slotSuggested: false };
   });

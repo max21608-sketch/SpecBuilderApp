@@ -124,6 +124,21 @@ describe("parseCombinedDimensions", () => {
     ]);
   });
 
+  it("reads a label printed AFTER the figure, and leaves a non-slot label unplaced", () => {
+    expect(parseCombinedDimensions(`16" H X 2'-7" DIA`).parts.map((p) => [p.slot, p.value])).toEqual([
+      ["H", '16"'],
+      ["DIA", `2'-7"`],
+    ]);
+    const bed = parseCombinedDimensions(`6'-8" L X 6'-4" W X 10" H`);
+    expect(bed.parts.map((p) => [p.slot, p.value])).toEqual([
+      [null, `6'-8" L`],
+      ["W", `6'-4"`],
+      ["H", '10"'],
+    ]);
+    // A word after a figure that is not a slot label is not read as one.
+    expect(parseCombinedDimensions("80 x 70 x 90 cm").parts.map((p) => p.slot)).toEqual(["W", "D", "H"]);
+  });
+
   it("refuses two bare figures, which could be W x H, W x D or Dia x H", () => {
     const parsed = parseCombinedDimensions("80 x 90");
     expect(parsed.parts.map((p) => p.slot)).toEqual([null, null]);
