@@ -49,6 +49,7 @@ one agent.
 | | every `db:*` script loads `.env.local` if present, prints the resolved host, and refuses production without `--yes-production` and PILOT without `--yes-pilot` — the flags are separate on purpose. Each names its own env file: `node --env-file=.env.production db/run-migrations.mjs --yes-production`, `node --env-file=.env.pilot.local db/run-migrations.mjs --yes-pilot` |
 | `npm run db:backfill-answers` | one-off: fills checklist answers from attributes confirmed before promotion existed. Dry run unless `--apply`; safe to re-run |
 | `npm run db:backfill-snapshots` | one-off: gives every record that predates 0012 a version 1 under a `history_begins` change. Dry run unless `--apply`; safe to re-run |
+| `npm run db:backfill-bill-swatches` | one-off: for bills confirmed before 2026-10-05, gives each fabric code the picture its bill lines printed as its swatch, and files uncoded real fabrics as in-house finishes — the same rule the bill confirm now runs (`src/lib/bill-fabric-filing.ts`). Dry run unless `--apply`; safe to re-run; `--yes-pilot` / `--yes-production` |
 | `npm run db:backfill-finishes` | one-off: builds each project's finishes library from the codes its drawings carry, and links them. Dry run unless `--apply`; safe to re-run. Leaves a code whose items disagree blank, and names it |
 | `npm run db:qa-clean` | sweeps what a failed database-tier test run left behind. Refuses production outright |
 | `npm run qa:fake-inbox` | invented correspondence for the inbox screen, recorded through the app's own `recordMessage` so the routing outcomes are real. Sandbox only, no production flag. Dry run unless `--apply`; `--clear --apply` sweeps it, keeping any message somebody has since assigned |
@@ -230,7 +231,7 @@ reasoning.
 
 | Table | Notes |
 |---|---|
-| `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox |
+| `projects` | BWS project (`P17231`), TOE key dates (nullable), shared inbox, `finish_code_prefix` (0044: the `AMB` in `BW-AMB-001`) |
 | `spec_runs` | A PHASE: a sub-quote, normally one BOQ tab. "Phase" is the word on screen (2026-09-19); the table keeps its name. Name (editable), `source_sheet`, `boq_revision`/`boq_date` (**text**), `header_notes`. Retired, never deleted; two phases may share a name |
 | `project_contacts` | Who to ask. `designer_code` joins `spec_records.designer`; `capsule_party_id` is the modelled person (0022), optional and flagged when absent |
 | `spec_records` | One per BOQ line. `level` (`simple`/`complex`/`hero`, nullable, a person's decision beside the category — nothing infers it, and `level_suggested` (0025) is where a guess goes instead, where no gate can read it). `run_id` **not null**. `record_no` is the human-facing identifier (`P17231-014`) and stays project-wide across runs; splits are `parent_id` + `depth` + `split_reason` **on this table**, capped at one level. `variant_ordinal` (0039) is a configuration's number under its line — the 3 in `12.3` — allocated by the `assign_variant_ordinal` insert trigger (max + 1 over every sibling, retired included, never reused); the label is `src/lib/record-label.ts` and nothing else. `qty_unit` (0040) is the bill's own unit, verbatim |
@@ -249,7 +250,7 @@ reasoning.
 | `record_snapshots` | A VERSION of one record (0012): `snapshot_no` per record, the export's own atoms, and the composed cells as they were that day |
 | `baseline_members` | A named point's exact membership (0013). Materialised under the project lock, because transaction start time does not order commits |
 | `boq_column_aliases` / `boq_layouts` | 0040: which bill heading means which column role (whole-heading match, seeded with the reader's original list — an EMPTY table fails every bill registration, so seed wherever 0040 is applied), and a person's saved column mapping for one specifier's layout. Layouts are GLOBAL, which is why db-tier fixtures use a per-run heading |
-| `project_finishes` | The project's finishes library (0018), keyed by the client's own code. Project-scoped: `MOR005` means different things on different projects |
+| `project_finishes` | The project's finishes library (0018), keyed by the client's own code. Project-scoped: `MOR005` means different things on different projects. Carries BW's own finish for the code (0045, the six `standard_*` columns 0041 put on attributes) |
 | `spec_matrix_categories` / `spec_matrix_category_map` | Matthew's nine seating categories (0026) and which of our seventeen cheat sheets each one is. Many-to-many both ways; an unmapped sheet gets no gate view, which is a real answer |
 | `spec_field_gates` | His decision matrix as a seeded overlay (0026): gate, capture, BWS field or `local_key`, `dimension_slot`, `applies_to`, palette, conditional. `matrix_row` is his own `#`, so a re-issued workbook diffs |
 | `bws_boilerplates` | The 45 BWS product codes (0031), 18 of them mapped to one of Matthew's nine seating categories as a Simple/with-Metalwork pair. BW's own codes, not client material — the `spec_fields` precedent |
@@ -2227,9 +2228,12 @@ words so a value stays checkable against its page; the CELL renders the library.
 - **`supplier_raw` does NOT satisfy "suppliers by modelled Capsule ID".** There
   is no supplier register in this app and no Capsule data in this repo; the
   `_raw` suffix marks it as what a document said. That invariant remains unmet.
-- **Swatches arrive by hand.** A person uploads one and must say which document
-  and page it came from. Asking the model for swatch regions is a tool-schema
-  change, which means re-reading and re-paying for every document already read.
+- **Swatches arrive by hand — EXCEPT from a bill** (2026-10-05). A person
+  uploads one and must say which document and page it came from. Asking the
+  model for swatch regions is a tool-schema change, which means re-reading and
+  re-paying for every document already read. A bill's fabric line is the
+  exception: its row picture becomes the code's swatch at confirm — see "The
+  bill fills the finishes library" below.
 - **It is a TAB on the project, beside the runs** (2026-09-17). It was a grey
   line on the Overview tab, so it disappeared the moment anybody clicked a run.
   `/dashboard/projects/[id]/finishes` still exists and REDIRECTS to
@@ -3074,6 +3078,81 @@ less than it does.
 **Which rows fold is the section above**: `isOverall`, as the model read it, not
 "does the value state a figure". That older test is why a page whose
 sub-dimensions were all `TBC` printed five rows of nothing inline.
+
+### The bill fills the finishes library, and BW's finish is set once per code
+
+`src/lib/bill-fabric-filing.ts`, `src/lib/bill-fabric-load.ts`,
+`src/lib/confirm-boq.ts` (`writeFabricLine`, `giveBillPicture`),
+`src/lib/boq-row-kinds.ts` (`fabricLineIsPlaceholder`),
+`src/lib/finish-edit.ts` (`mintInternalFinishCode`, `carryFinishToItems`),
+`src/lib/finish-standard.ts`, `src/lib/finish-standard-palette.ts`,
+`src/lib/bw-standard.ts` (`standardInForce`), `src/lib/item-image.ts`,
+`src/lib/item-image-write.ts`, `src/lib/bill-row-image.ts` (`effectiveRowImage`),
+`db/migrations/0044_finish_code_prefix.sql`, `db/migrations/0045_finish_standard.sql`,
+`db/backfill-bill-swatches.ts`
+
+Max, 2026-10-05, reviewing the Aman bill on pilot: the fabric's picture "should
+be assigned to that fabric code in the fabric library … it is the swatch …
+one and the same thing", so the library is there "as soon as the BOQ's in";
+"main timber finish is like a Ben Whistler standard finish … when someone
+actually looks at it in the finishes library they'll then apply it there"; "we
+always prefer a picture over a drawing … a 3D render over a drawing". Each
+rule below is a trap rather than a preference.
+
+- **ONE filing decision, three callers.** The confirm, the review's "what will
+  happen" line under each fabric row, and the backfill all call
+  `bill-fabric-filing.ts`. A review that predicted one filing and a confirm
+  that did another is the `proposalBlockers` disagreement again.
+- **A coded fabric files as it always did** (match / new TBC client finish /
+  conflict links nothing). **An uncoded fabric with real words is filed as an
+  IN-HOUSE finish by default** — linked to an internal finish worded EXACTLY
+  the same, otherwise a minted one, TBC. **A placeholder is never filed and
+  never matched**: `fabricLineIsPlaceholder` strips the bill's own lead
+  ("Fabric @ <item>") and TBC phrases, and a line with nothing left is a
+  placeholder. Matching "Technical details TBC" to "Technical details TBC"
+  would merge every undecided fabric on the bill into one. On the real Aman
+  bill all twelve uncoded fabric lines are placeholders — correct, and the
+  reason the backfill there plans swatches and no codes.
+- **In-house codes are `BW-<short code>-nnn`** (`projects.finish_code_prefix`,
+  set on the project's details; `BW-F-nnn` where none is set). Minted under the
+  project row lock as before. Changing the short code starts a new series and
+  renames NOTHING — a code somebody wrote down keeps its meaning (the variant
+  letter rule). Whether a code is ours is still `code_origin`, never the prefix:
+  a client schedule printing `BW-AMB-002` is a client code. Still never
+  exported (`composeFinishCell`).
+- **A fabric line's picture is its code's swatch, filed at confirm**, only
+  where every pictured line of that code carries the SAME picture (content-
+  addressed) and the code has no CURRENT swatch. Differing pictures file none
+  and the confirm names the code; an existing swatch is never replaced. The
+  filename `bill row N.<ext>` is where the source survives, the
+  `swatch-page-N.png` rule.
+- **"This row's picture" is ONE function**, `effectiveRowImage`: a person's
+  crop or "no picture" on the review (stored on the staged line, version-
+  checked) or else the bill's own. The thumbnail, the item picture at confirm,
+  the swatch rule and its review sentence all read it.
+- **An item picture is superseded, never deleted, and a drawing never
+  displaces a bill's picture on its own.** The drawings confirm used to DELETE
+  the record's `item_image` — against 0013 — which also threw away the photo a
+  bill printed beside the item. Over a bill picture the crop is stored as an
+  `item_image_alternative` and the record offers it ("Use the drawing's
+  picture"), and the reverse; the swap (`/api/records/[id]/image/choose`) is a
+  `manual_edit` change set and a version. Every reader takes the CURRENT row
+  (`superseded_at is null`). Where a picture came from is DERIVED from its path
+  and filename (`itemImageSource`), and the record's caption says it.
+- **BW's own finish is set ONCE PER CODE in the library**, never per item.
+  `standardInForce` is the one answer to "what ships": a spec linked to a
+  finish takes the FINISH's standard — and ships none if the finish has none,
+  because falling back to an older per-item choice would be the override Max
+  ruled out; an unlinked spec keeps 0041's per-item standard. The per-item
+  route refuses a linked spec (`standard_on_finish`). The list a code offers is
+  read from the BWS fields its items sit in, then its kind, else none in words
+  (a COM field has no BWS palette); never an "Other…" — it is BW's own range.
+  One act recomposes and versions every record carrying the code
+  (`carryFinishToItems`, shared with `editFinish`). Snapshots carry it (atoms
+  schema 8); versions from before 0045 show the item's own standard, because
+  that is what shipped then.
+- **Slots are unchanged**: two timber or metal codes on one item fill Main,
+  then 2, then 3, in the order the bill lists them (Max, same day).
 
 ### A swatch is cropped off the page it is printed on
 
