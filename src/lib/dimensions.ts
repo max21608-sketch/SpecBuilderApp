@@ -331,7 +331,9 @@ export function parseCombinedDimensions(raw: string): CombinedDimensions {
         body = trailing[1].trim();
       }
     }
-    const prefix = /^([A-Za-z.]+?)\s*([0-9].*)$/.exec(body);
+    // A colon after the prefix is still the page's own label: the Aman
+    // tracker prints "W:540 X D:610 X SH :430 mm" (2026-10-05).
+    const prefix = /^([A-Za-z.]+?)\s*(?::\s*)?([0-9].*)$/.exec(body);
     const slot = prefix ? normaliseDimensionSlot(prefix[1] ?? "") : null;
     const value = prefix && slot ? (prefix[2] ?? body) : body;
     const figure = parseDimensionFigure(value);

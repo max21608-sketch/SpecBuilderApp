@@ -305,4 +305,14 @@ describe("alreadyRecorded — a converted figure and the bill's millimetres", ()
     expect(alreadyRecorded({ ...base, value: "6'-4\"", unit: "in" }, occupant)).toBe(true);
     expect(alreadyRecorded({ ...base, value: "6'-5\"", unit: "in" }, occupant)).toBe(false);
   });
+
+  it("reads a truncated conversion as the same figure: 2'-5\" (736.6mm) and the bill's 736mm", () => {
+    const base = { attrGroup: "dimension" as const, dimensionSlot: "H" as const, valueRaw: null, state: "confirmed" as const };
+    expect(alreadyRecorded({ ...base, value: "2'-5\"", unit: "in" }, { value: "736", unit: "mm", state: "confirmed" })).toBe(true);
+    expect(alreadyRecorded({ ...base, value: "2'-5\"", unit: "in" }, { value: "735", unit: "mm", state: "confirmed" })).toBe(false);
+    // Both metric: still whole millimetres, no tolerance.
+    expect(alreadyRecorded({ ...base, value: "736.6", unit: "mm" }, { value: "736", unit: "mm", state: "confirmed" })).toBe(false);
+    // A real disagreement stays one: 2'11 1/2" is 901.7mm, the bill says 889mm.
+    expect(alreadyRecorded({ ...base, value: "2'11 1/2\"", unit: "in" }, { value: "889", unit: "mm", state: "confirmed" })).toBe(false);
+  });
 });

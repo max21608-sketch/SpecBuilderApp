@@ -114,6 +114,16 @@ describe("parseCombinedDimensions", () => {
     ]);
   });
 
+  it("reads a prefix followed by a colon as the page's own label", () => {
+    const parsed = parseCombinedDimensions("W:540  X  D:610  X SH :430 mm");
+    expect(parsed.unitRaw).toBe("mm");
+    expect(parsed.parts.map((p) => [p.slot, p.value])).toEqual([
+      ["W", "540"],
+      ["D", "610"],
+      ["SH", "430"],
+    ]);
+  });
+
   it("refuses two bare figures, which could be W x H, W x D or Dia x H", () => {
     const parsed = parseCombinedDimensions("80 x 90");
     expect(parsed.parts.map((p) => p.slot)).toEqual([null, null]);

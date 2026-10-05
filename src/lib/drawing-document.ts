@@ -1692,7 +1692,13 @@ export function alreadyRecorded(
   // (`toMillimetres` rounds): a drawing's 6'-4" is 1930.4mm and the bill's
   // "Sizes (mm): W 1930" is the same width in the same cell. Compared
   // unrounded, the card asked the reviewer to "replace" 1930 with 1930.
-  if (Math.round(mine) !== Math.round(theirs)) return false;
+  //
+  // ONE SIDE IN INCHES, THE OTHER METRIC, is a person's conversion: the Aman
+  // bill prints 736mm for the tracker's 2'-5" (736.6mm), truncated rather than
+  // rounded. Under a millimetre apart, unrounded, is the same measurement;
+  // flagging it red would bury the real disagreements under arithmetic.
+  const crossSystem = (normaliseUnit(observation.unit) === "in") !== (normaliseUnit(occupant.unit) === "in");
+  if (crossSystem ? Math.abs(mine - theirs) >= 1 : Math.round(mine) !== Math.round(theirs)) return false;
   return (occupant.state ?? null) !== null && occupant.state === stateToWrite(observation as DrawingObservation);
 }
 
