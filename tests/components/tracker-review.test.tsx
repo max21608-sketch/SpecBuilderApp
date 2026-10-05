@@ -114,13 +114,13 @@ describe("a value that disagrees with the bill", () => {
     );
 
     expect(screen.getByText("Disagrees with the bill")).toBeTruthy();
-    expect(screen.getByText(/the bill says 21"in/)).toBeTruthy();
+    expect(screen.getByText(/the bill says W 21" \(533mm\)/)).toBeTruthy();
     expect(screen.getAllByText("Kept as a note").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: "Size" }));
     const panel = screen.getByText("Disagrees with the bill", { selector: "p" }).closest("div")!;
-    expect(within(panel).getByText('21"')).toBeTruthy();
-    expect(within(panel).getByText("540")).toBeTruthy();
+    expect(within(panel).getByText('W 21" (533mm)')).toBeTruthy();
+    expect(within(panel).getByText("W540mm")).toBeTruthy();
     const keep = within(panel).getByRole("radio", { name: /Keep the bill’s, record this beside it/ }) as HTMLInputElement;
     const use = within(panel).getByRole("radio", { name: /Use this document’s instead/ }) as HTMLInputElement;
     expect(keep.checked).toBe(true);

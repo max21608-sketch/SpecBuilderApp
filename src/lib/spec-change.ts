@@ -27,7 +27,24 @@
 // says so beside the action.
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
-import { heldReading, type Proposal } from "@/lib/spec-document";
+import { heldReading, type HeldTarget, type Proposal } from "@/lib/spec-document";
+import { composeDimensionCell } from "@/lib/dimensions";
+
+/**
+ * The value an item already holds, as a person reads it. A dimension goes
+ * through the one composer's SCREEN mode, so the bill's `21"` reads
+ * `W 21" (533mm)` rather than `21"in`; anything else is its value and unit.
+ */
+function heldText(proposal: Proposal, held: HeldTarget): string {
+  if (proposal.dimension) {
+    return composeDimensionCell(
+      [{ slot: proposal.dimension.slot, value: held.value, unit: held.unit, state: held.state === "tbc" ? "tbc" : "confirmed", sortOrder: 0 }],
+      null,
+      { mode: "screen" },
+    ).text;
+  }
+  return [held.value, held.unit].filter(Boolean).join(" ");
+}
 
 export type ChangeKind =
   | "provides" // nobody had answered this
@@ -80,7 +97,7 @@ function overTheBill(proposal: Proposal, what: string): ChangeDescription | null
   const held = proposal.attributeTarget;
   if (!held || held.fromBill !== true || held.moved) return null;
   const reading = heldReading(proposal);
-  const was = [held.value, held.unit].filter(Boolean).join("");
+  const was = heldText(proposal, held);
   if (reading === "same") return { kind: "agrees", label: "Agrees with the bill", was: null, notable: false };
   if (reading !== "bill_differs") return null;
   return proposal.overwriteAcknowledged
@@ -113,19 +130,19 @@ export function describeChange(proposal: Proposal): ChangeDescription {
     if (bill) return bill;
     if (proposal.dimension.tbc) {
       return held
-        ? { kind: "withdraws", label: `${slot} back to TBC`, was: [held.value, held.unit].filter(Boolean).join(""), notable: true }
+        ? { kind: "withdraws", label: `${slot} back to TBC`, was: heldText(proposal, held), notable: true }
         : { kind: "provides", label: `Records ${slot} as TBC`, was: null, notable: false };
     }
     if (!held) {
       return { kind: "provides", label: `Provides ${slot}`, was: null, notable: false };
     }
-    const heldText = [held.value, held.unit].filter(Boolean).join("");
+    const heldRaw = [held.value, held.unit].filter(Boolean).join("");
     const newText = [proposal.dimension.figure, proposal.dimension.unit].filter(Boolean).join("");
     // The SAME measurement written differently (55cm over 550mm) repeats it:
     // the comparison the blockers read, so the verb and the blocker agree.
-    return sameValue(heldText, newText) || heldReading(proposal) === "same"
+    return sameValue(heldRaw, newText) || heldReading(proposal) === "same"
       ? { kind: "repeats", label: `Repeats ${slot}`, was: null, notable: false }
-      : { kind: "changes", label: `Changes ${slot}`, was: heldText, notable: true };
+      : { kind: "changes", label: `Changes ${slot}`, was: heldText(proposal, held), notable: true };
   }
 
   if (proposal.finish) {

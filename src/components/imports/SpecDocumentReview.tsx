@@ -52,6 +52,8 @@ import DocumentState from "@/components/imports/DocumentState";
 import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import Button from "@/components/ui/Button";
 import { TONE, type Tone } from "@/components/ui/tone";
+import { composeDimensionCell } from "@/lib/dimensions";
+import type { AttributeUnit } from "@/lib/spec-vocab";
 import {
   ANSWER_STATES,
   ANSWER_STATE_LABELS,
@@ -1637,11 +1639,52 @@ function HeldComparison({
   }
   if (reading !== "bill_differs") return null;
 
-  const mine = proposal.dimension
-    ? { value: proposal.dimension.tbc ? "TBC" : (proposal.dimension.figure ?? "—"), unit: proposal.dimension.unit }
-    : proposal.finish
+  // A dimension on either side reads through the one composer's SCREEN mode,
+  // so the bill's `21"` shows as `W 21" (533mm)` beside this document's
+  // `W540mm` — the same figures the record screen will show, never a second
+  // way of writing them.
+  if (proposal.dimension) {
+    const slot = proposal.dimension.slot;
+    const cell = (value: string | null, unit: AttributeUnit | null, tbc: boolean) =>
+      composeDimensionCell([{ slot, value, unit, state: tbc ? "tbc" : "confirmed", sortOrder: 0 }], null, { mode: "screen" }).text || "—";
+    return (
+      <DisagreeBox
+        proposal={proposal}
+        busy={busy}
+        onChange={onChange}
+        held={cell(held.value ?? null, held.unit ?? null, held.state === "tbc")}
+        mine={cell(proposal.dimension.figure ?? null, proposal.dimension.unit ?? null, proposal.dimension.tbc)}
+      />
+    );
+  }
+
+  const mine = proposal.finish
       ? { value: proposal.finish.value ?? "—", unit: null }
       : { value: proposal.proposedValue ?? proposal.raw.valueRaw ?? "—", unit: null };
+  return (
+    <DisagreeBox
+      proposal={proposal}
+      busy={busy}
+      onChange={onChange}
+      held={`${held.value ?? "—"}${held.unit ? ` ${held.unit}` : ""}`}
+      mine={`${mine.value}${mine.unit ? ` ${mine.unit}` : ""}`}
+    />
+  );
+}
+
+function DisagreeBox({
+  proposal,
+  busy,
+  onChange,
+  held,
+  mine,
+}: {
+  proposal: Proposal;
+  busy: string | null;
+  onChange: (proposal: Proposal, changes: Record<string, unknown>) => void;
+  held: string;
+  mine: string;
+}) {
   const name = `disagree-${proposal.id}`;
 
   return (
@@ -1650,15 +1693,13 @@ function HeldComparison({
       <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="min-w-0">
           <span className="block text-[11px] uppercase tracking-wider text-red-800">The bill</span>
-          <span className="break-words font-mono">{held.value ?? "—"}</span>
-          {held.unit && <span className="ml-1 text-xs">{held.unit}</span>}
+          <span className="break-words font-mono">{held}</span>
         </div>
         <div className="min-w-0">
           <span className="block text-[11px] uppercase tracking-wider text-red-800">
             This document{proposal.raw.page ? `, page ${proposal.raw.page}` : ""}
           </span>
-          <span className="break-words font-mono">{mine.value}</span>
-          {mine.unit && <span className="ml-1 text-xs">{mine.unit}</span>}
+          <span className="break-words font-mono">{mine}</span>
         </div>
       </div>
       <div className="mt-2 flex flex-col gap-1">

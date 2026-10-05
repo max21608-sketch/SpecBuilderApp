@@ -210,7 +210,7 @@ describe("agrees or disagrees with the BILL", () => {
     expect(width?.attributeTarget?.fromBill).toBe(true);
     expect(heldReading(width!)).toBe("bill_differs");
     expect(proposalBlockers(width!, [width!])).toEqual([]);
-    expect(describeChange(width!)).toMatchObject({ kind: "disagrees", label: "Disagrees with the bill", was: '21"in' });
+    expect(describeChange(width!)).toMatchObject({ kind: "disagrees", label: "Disagrees with the bill", was: 'W 21" (533mm)' });
     // "Use this document's instead" is the replace tick, read as a change.
     const replacing = { ...width!, overwriteAcknowledged: true };
     expect(proposalBlockers(replacing, [replacing])).toEqual([]);
