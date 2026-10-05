@@ -3387,7 +3387,7 @@ no reason.
   records"). The card's confirm request never carries a level, so the two
   writes cannot be confused, and a level never blocks a card.
 
-### The record is four jobs, and a tab each
+### The record is four jobs, and a tab each (five since 2026-10-05)
 
 `src/app/dashboard/records/[id]/page.tsx`, `src/components/records/RecordDetails.tsx`
 
@@ -3432,6 +3432,25 @@ tabs. Five things about it.
   that matters most about it: it saves as ONE act rather than on blur, because
   typing the quote description, tabbing to Internal notes and typing there used
   to lose the second box.
+
+**A fifth tab, Documents, lists only what a confirm LINKED**
+(`src/lib/record-documents.ts`, `GET /api/records/[id]/documents`,
+`RecordDocuments.tsx`, Max 2026-10-05: *"all the documents relating to that line
+item"*). Five links, each read off the schema: the bill row (a configuration
+reads its parent's through `parent_id`); `record_attributes.source_run_id`,
+active and retired counted apart; `spec_answers.source_id`, which is the intake
+run for both `document` and `email`, not counting `missing`;
+`change_sets.evidence_attachment_id` on changes that made a version of this
+record; and those changes' `source_intake_run_id`, the only path to a bill a
+revision replaced, because `confirm-boq.ts` overwrites `source_import_id`. A
+document whose proposals are still staged is not listed, and the screen says
+so. **One row per stored FILE**, not per intake run: a bill's own specification
+read reuses its attachment and an email's change carries the run's own `.eml`
+as evidence. Every query is scoped to the record's project. **An email never
+links to `/api/imports/[id]/source`**, which serves inline — it downloads
+through the mime or evidence route, or offers no Open at all. The count is the
+loaded list's length, null until the tab opens like Versions, so there is no
+second count in the record route to drift from the table.
 
 ### A link goes somewhere; a button does something
 
@@ -3513,6 +3532,26 @@ It does not contradict the card's rule that nothing is pre-selected where the
 answer is unknown: that rule is about spec VALUES, which get exported and quoted
 against. A picture is an aid to recognising an item, and the reviewer is looking
 straight at it.
+
+**A card whose item ALREADY HAS A PICTURE proposes none** (Max, 2026-10-05, the
+Aman pack: *"if there's already an image, by default it needs to go to no
+image"*). A bill that prints a picture per row gives it to the record
+(`giveBillPicture`), and the drawings confirm REPLACES whatever `item_image` it
+finds, so confirming a card for its specs silently swapped the bill's picture
+for a drawing crop. `resolveStagedRun` sends `pictureHeld: { recordIds, of }` —
+the WRITE targets already holding a picture, read once per project in
+`loadDrawingContext` and walked by `pictureWriteTargets` over the confirm's own
+fan-out, so a page of configurations is judged by its variants, never the bill
+line; absent when empty, so other payloads are byte-identical.
+`ItemImagePicker` then starts at none — no crop on mount, `onCropped(null)`, the
+reason in words — with the proposal, the whole page and a drag one click away,
+and a chosen picture says confirming replaces the current one. **Untouched, the
+panel FOLLOWS the ticked records; touched, it is the person's**: a code on two
+bill lines resolves to nobody until a line is picked, so a mount-time default
+would keep proposing the drawing over exactly the picture this protects (found
+in the browser the same day). Re-set only on a CHANGE, so mount is still one
+crop. The confirm route is unchanged: no picture sent, nothing written or
+deleted.
 
 ### Every screen is three bands, and the primitives are the language
 
