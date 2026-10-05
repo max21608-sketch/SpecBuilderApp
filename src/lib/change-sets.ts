@@ -84,6 +84,9 @@ export const CHANGE_SET_KINDS = [
   // their identity only, never their specs. No reason: it overrides nothing,
   // and retiring the record it made (which does need one) undoes it.
   "mockup_add",
+  // 0046: a person settling a disagreement between two documents -- keeping
+  // the held value, or using the other document's instead. Always says why.
+  "disagreement_resolve",
 ] as const;
 export type ChangeSetKind = (typeof CHANGE_SET_KINDS)[number];
 
@@ -105,6 +108,8 @@ export const REASON_REQUIRED_KINDS: readonly ChangeSetKind[] = [
   "record_retire",
   // 0041: it overrides a standard the client agreed to.
   "standard_change",
+  // 0046: it decides which of two documents is right.
+  "disagreement_resolve",
 ];
 
 export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
@@ -134,6 +139,7 @@ export const CHANGE_SET_KIND_LABELS: Record<ChangeSetKind, string> = {
   standard_agreed: "BW standard agreed by the client",
   standard_change: "Agreed BW standard changed",
   mockup_add: "Added to the mock-up phase",
+  disagreement_resolve: "Disagreement between documents settled",
 };
 
 export type OpenChangeSet = {

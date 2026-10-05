@@ -39,6 +39,7 @@ import { CHANGE_SET_KINDS, REASON_REQUIRED_KINDS } from "@/lib/change-sets";
 import { FINISH_CODE_ORIGINS, FINISH_KINDS } from "@/lib/finishes";
 import { BOQ_ROLES } from "@/lib/boq-roles";
 import { STANDARD_STATES } from "@/lib/bw-standard";
+import { DISAGREEMENT_STATUSES } from "@/lib/disagreements";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -85,6 +86,16 @@ const VOCABULARIES: {
   { name: "STANDARD_STATES", constraint: "record_attributes_standard_state_check", values: STANDARD_STATES },
   // 0045: the same states, for BW's own finish set once on a library code.
   { name: "STANDARD_STATES (finishes)", constraint: "project_finishes_standard_state_check", values: STANDARD_STATES },
+  // 0046: a later document's statement beside a held value, and how it was settled.
+  { name: "DISAGREEMENT_STATUSES", constraint: "attribute_disagreements_status_check", values: DISAGREEMENT_STATUSES },
+  // The statement is copied in the attribute's own shape, so its vocabularies are the attribute's.
+  { name: "ATTRIBUTE_GROUPS (disagreements)", constraint: "attribute_disagreements_group_check", values: ATTRIBUTE_GROUPS },
+  { name: "ATTRIBUTE_UNITS (disagreements)", constraint: "attribute_disagreements_unit_check", values: ATTRIBUTE_UNITS },
+  {
+    name: "DIMENSION_SLOTS (disagreements)",
+    constraint: "attribute_disagreements_dimension_slot_check",
+    values: DIMENSION_SLOTS,
+  },
 ];
 
 /** Every single-quoted literal in a constraint definition. */

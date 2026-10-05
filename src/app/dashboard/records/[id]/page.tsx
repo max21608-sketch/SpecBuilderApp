@@ -46,6 +46,8 @@ import {
 import { isFinishGroup } from "@/lib/finishes";
 import { composeDimensionCell, toMillimetres, valueCarriesItsUnit } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
+import { OpenDisagreementRow, SettledDisagreementItem } from "@/components/records/DisagreementRows";
+import type { Disagreement } from "@/lib/disagreements";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
@@ -198,6 +200,11 @@ export type Payload = {
   refs: { ref_system: string; ref_value: string }[];
   attributes: Attribute[];
   retiredAttributes: RetiredAttribute[];
+  /**
+   * What a later document said that disagrees with a value this record holds
+   * (0046) — open and settled. Optional: an older payload carries none.
+   */
+  disagreements?: Disagreement[];
   answers: Answer[];
   categories: Category[];
   specFields: { id: string; name: string; json_id: number }[];
@@ -373,6 +380,10 @@ function RecordView() {
     await load();
     if (message) setError(message);
     setHistoryKey((key) => key + 1);
+  }
+  /** A reload for a row that reports its own refusal (a disagreement row). */
+  async function reloadQuietly() {
+    await reloadThen(null);
   }
   // Moving from a record with no picture to one with a picture reuses this
   // component, so a sticky `true` would hide every image after the first miss.
@@ -768,6 +779,20 @@ function RecordView() {
   // Older responses have no `retiredAttributes`; a screen that assumed the key
   // exists would crash on the first record loaded from a cached payload.
   const retiredAttributes = data.retiredAttributes ?? [];
+  // ---- disagreements between documents (0046) ------------------------------
+  // An OPEN one sits under the live row it is about — the held row, or the row
+  // that has since replaced it (`currentAttributeId`). One whose value has
+  // gone with nothing in its place is listed on its own, never dropped. A
+  // SETTLED one goes under "show retired", with the decision.
+  const disagreements = data.disagreements ?? [];
+  const openDisagreements = disagreements.filter((entry) => entry.status === "open");
+  const liveIds = new Set(attributes.map((attribute) => attribute.id));
+  const openUnder = (attributeId: string) =>
+    openDisagreements.filter((entry) => entry.currentAttributeId === attributeId);
+  const strandedDisagreements = openDisagreements.filter(
+    (entry) => !entry.currentAttributeId || !liveIds.has(entry.currentAttributeId),
+  );
+  const settledDisagreements = disagreements.filter((entry) => entry.status !== "open");
   const slotted = attributes.filter(
     (attribute) => attribute.attr_group === "dimension" && attribute.dimension_slot,
   );
@@ -1127,6 +1152,17 @@ function RecordView() {
                   </Button>
                 </div>
               )}
+              {/* TWO DOCUMENTS DISAGREE (0046). Said once at the top in red —
+                  the phase table's "n disagree" chip lands here — and each one
+                  is in red under the value it is about, where it is decided. */}
+              {openDisagreements.length > 0 && (
+                <div id="disagreements" className="mb-4 scroll-mt-24">
+                  <Note tone="danger" title={`${openDisagreements.length} value${openDisagreements.length === 1 ? "" : "s"} disagree between documents.`}>
+                    — the held value stands until somebody decides. Each is in red under the spec it is about: keep
+                    the held value, or use the other document&rsquo;s instead, and say why.
+                  </Note>
+                </div>
+              )}
               {(!splitLine || lineOwnOpen) && (
               <>
               {/* What BWS field 3 will receive, composed by the same function
@@ -1191,7 +1227,7 @@ function RecordView() {
                           </GroupRow>
                           {rows.map((attribute) => (
                             <Fragment key={attribute.id}>
-                            <Tr>
+                            <Tr tone={openUnder(attribute.id).length > 0 ? "danger" : "plain"}>
                               <Td>{attribute.label}</Td>
                               <Td>
                                 {attribute.state === "tbc" && !attribute.value ? (
@@ -1368,6 +1404,11 @@ function RecordView() {
                                 </span>
                               </Td>
                             </Tr>
+                            {/* EVERY OPEN DISAGREEMENT DIRECTLY BENEATH THE
+                                VALUE IT IS ABOUT, red, each its own `tr`. */}
+                            {openUnder(attribute.id).map((entry) => (
+                              <OpenDisagreementRow key={entry.id} disagreement={entry} span={5} onReload={reloadQuietly} />
+                            ))}
                             {/* A SPANNING PANEL IS ITS OWN `tr`, never an extra
                                 `td colSpan` beside the data cells — that makes
                                 the row ten column slots wide and the browser
@@ -1580,16 +1621,51 @@ function RecordView() {
                 </Note>
               )}
 
+              {/* AN OPEN DISAGREEMENT WHOSE VALUE HAS GONE, with nothing live
+                  in its place (retired, not replaced). Still undecided, so it
+                  is listed — in red, on its own — and never dropped. */}
+              {strandedDisagreements.length > 0 && (
+                <Card title="Disagreements about specs no longer on this item" flush>
+                  <Table>
+                    <tbody>
+                      {strandedDisagreements.map((entry) => (
+                        <OpenDisagreementRow key={entry.id} disagreement={entry} span={1} onReload={reloadQuietly} />
+                      ))}
+                    </tbody>
+                  </Table>
+                </Card>
+              )}
+
               {/* Kept, never deleted, and never silently. A retired spec that
                   could not be seen would make "retire" a delete with extra
-                  steps. */}
-              {retiredAttributes.length > 0 && (
+                  steps. A SETTLED disagreement goes here too: both values
+                  stay on record whichever won, with who decided and why. */}
+              {(retiredAttributes.length > 0 || settledDisagreements.length > 0) && (
                 <div className="mt-3">
                   <Button variant="quiet" size="xs" onClick={() => setShowRetired((value) => !value)}>
-                    {showRetired ? "▾" : "▸"} {retiredAttributes.length} retired spec
-                    {retiredAttributes.length === 1 ? "" : "s"}
+                    {showRetired ? "▾" : "▸"}{" "}
+                    {[
+                      retiredAttributes.length > 0
+                        ? `${retiredAttributes.length} retired spec${retiredAttributes.length === 1 ? "" : "s"}`
+                        : null,
+                      settledDisagreements.length > 0
+                        ? `${settledDisagreements.length} settled disagreement${settledDisagreements.length === 1 ? "" : "s"}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </Button>
-                  {showRetired && (
+                  {showRetired && settledDisagreements.length > 0 && (
+                    <ul
+                      aria-label="Settled disagreements"
+                      className="mt-1 divide-y divide-neutral-200 rounded-[10px] border border-neutral-200 bg-neutral-50"
+                    >
+                      {settledDisagreements.map((entry) => (
+                        <SettledDisagreementItem key={entry.id} disagreement={entry} />
+                      ))}
+                    </ul>
+                  )}
+                  {showRetired && retiredAttributes.length > 0 && (
                     <ul className="mt-1 divide-y divide-neutral-200 rounded-[10px] border border-neutral-200 bg-neutral-50">
                       {retiredAttributes.map((attribute) => (
                         <li key={attribute.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm">
