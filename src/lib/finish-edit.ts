@@ -36,6 +36,7 @@ import {
   isFinishKind,
   formatInternalFinishCode,
   internalFinishNumber,
+  internalFinishSeries,
   type FinishCodeOrigin,
   type FinishKind,
 } from "@/lib/finishes";
@@ -68,31 +69,42 @@ function clean(value: string | null | undefined): string | null {
 }
 
 /**
- * The next `BW-F-nnn` for this project, allocated under the PROJECT ROW LOCK.
+ * The next in-house code for this project, allocated under the PROJECT ROW
+ * LOCK: `BW-<short code>-nnn` where the project has a short code (0044),
+ * `BW-F-nnn` where it has none.
  *
  * The `record_no` rule (`variant-create.ts`), for the reason that defect was
  * found: two reviewers confirming two cards at once read the same maximum and
  * both take `BW-F-001`, and one of them dies on `project_finishes_code_key`
  * (0018's partial unique index on `(project_id, code_norm)`) with a violation
- * the screen reports as "nothing was written". The lock serialises the read.
+ * the screen reports as "nothing was written". The lock serialises the read —
+ * and the short code is read UNDER that same lock, so a short code changed
+ * mid-confirm cannot split one confirm across two series.
  *
  * It counts RETIRED rows and CLIENT-origin ones too. A retired code is a code
  * somebody may have quoted in an email and must go on meaning that — the
  * variant-letter rule — and a client schedule that happens to print `BW-F-002`
  * would otherwise collide with the next mint.
+ *
+ * A NEW SHORT CODE IS A NEW SERIES. Changing AMB to AMX mints `BW-AMX-001`
+ * next and renames nothing: the AMB codes keep their meaning, and the scan
+ * looks only at the series being minted in.
  */
 export async function mintInternalFinishCode(txn: TxnSql, projectId: string): Promise<string> {
-  await txn`select id from projects where id = ${projectId} for update`;
+  const project = await txn`select finish_code_prefix from projects where id = ${projectId} for update`;
+  const series = internalFinishSeries((project[0]?.finish_code_prefix as string | null | undefined) ?? null);
+  // The series is `BW-` plus letters and digits plus `-`: nothing in it is a
+  // regular-expression character, so it is a literal prefix in the pattern.
   const rows = await txn`
     select code from project_finishes
-     where project_id = ${projectId} and code ~* '^BW-F-[0-9]+$'
+     where project_id = ${projectId} and code ~* ${`^${series}[0-9]+$`}
   `;
   let highest = 0;
   for (const row of rows) {
-    const n = internalFinishNumber(String(row.code));
+    const n = internalFinishNumber(String(row.code), series);
     if (n !== null && n > highest) highest = n;
   }
-  return formatInternalFinishCode(highest + 1);
+  return formatInternalFinishCode(highest + 1, series);
 }
 
 /** Creates a finish. Used by the library screen and by the drawings confirm. */

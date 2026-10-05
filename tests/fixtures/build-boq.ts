@@ -234,6 +234,73 @@ export async function picturedBillWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/** The swatches `fabricSwatchBillWorkbook` anchors on its fabric lines. */
+export const FABRIC_SWATCHES = {
+  velvet: flatPng(3, 3, [150, 30, 60]),
+  linenA: flatPng(3, 2, [200, 190, 160]),
+  linenB: flatPng(2, 3, [180, 170, 150]),
+  boucle: flatPng(4, 4, [240, 235, 220]),
+  placeholder: flatPng(2, 2, [10, 200, 10]),
+  mohair: flatPng(5, 2, [90, 60, 40]),
+} as const;
+
+/** The words of the uncoded, real fabric `fabricSwatchBillWorkbook` prints twice. */
+export const FABRIC_SWATCH_BOUCLE =
+  "Fabric @ Sofa Collection: Example Boucle, Colour: Ivory, Composition: 100% wool";
+
+/**
+ * A BILL WHOSE FABRIC LINES CARRY THEIR SWATCHES (2026-10-05) — invented, in
+ * the pricing document's shape: each fabric on its own line under its item,
+ * naming it in brackets, a picture on the row. One sheet, a title row, the
+ * header on row 2:
+ *
+ *   3  ZZ-FUR-10 Stool          4  ZZ-FAB-13 (ZZ-FUR-10)   velvet, picture A
+ *   5  ZZ-FUR-26 Drawers        6  ZZ-FAB-13 (ZZ-FUR-26)   velvet, picture A again
+ *   7  ZZ-FUR-04 Armchair       8  ZZ-FAB-14 (ZZ-FUR-04)   linen, picture B
+ *   9  ZZ-FUR-05 Side chair    10  ZZ-FAB-14 (ZZ-FUR-05)   linen, picture C — differs
+ *  11  ZZ-FUR-06 Sofa          12  (ZZ-FUR-06)            boucle, NO CODE, picture D
+ *  13  ZZ-FUR-07 Bench         14  (ZZ-FUR-07)            the same boucle words, no picture
+ *  15  ZZ-FUR-08 Ottoman       16  (ZZ-FUR-08)            a PLACEHOLDER, picture E
+ *  17  ZZ-FUR-09 Pouf          18  ZZ-FAB-15 (ZZ-FUR-09)   mohair, picture F
+ */
+export async function fabricSwatchBillWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  const velvet = "Fabric @ Stool Collection: Example Velvet, Colour: Claret";
+  const linen = "Fabric @ Armchair Collection: Example Linen, Colour: Sand";
+  const sheet = addSheet(book, "Bill", [
+    ["Example pricing document", null, null, null, null],
+    ["Area", "FF&E code", "Item description", "TOTAL Q-ty", "Image"],
+    ["Example Lounge", "ZZ-FUR-10", "Stool", 2, null],
+    ["Example Lounge", "ZZ-FAB-13 (ZZ-FUR-10)", velvet, null, null],
+    ["Example Lounge", "ZZ-FUR-26", "Drawers", 1, null],
+    ["Example Lounge", "ZZ-FAB-13 (ZZ-FUR-26)", velvet, null, null],
+    ["Example Lounge", "ZZ-FUR-04", "Armchair", 4, null],
+    ["Example Lounge", "ZZ-FAB-14 (ZZ-FUR-04)", linen, null, null],
+    ["Example Lounge", "ZZ-FUR-05", "Side chair", 2, null],
+    ["Example Lounge", "ZZ-FAB-14 (ZZ-FUR-05)", linen, null, null],
+    ["Example Lounge", "ZZ-FUR-06", "Sofa", 1, null],
+    ["Example Lounge", "(ZZ-FUR-06)", FABRIC_SWATCH_BOUCLE, null, null],
+    ["Example Lounge", "ZZ-FUR-07", "Bench", 1, null],
+    ["Example Lounge", "(ZZ-FUR-07)", FABRIC_SWATCH_BOUCLE, null, null],
+    ["Example Lounge", "ZZ-FUR-08", "Ottoman", 2, null],
+    ["Example Lounge", "(ZZ-FUR-08)", "Fabric @ Ottoman (Option 1) Technical details TBC", null, null],
+    ["Example Lounge", "ZZ-FUR-09", "Pouf", 1, null],
+    ["Example Lounge", "ZZ-FAB-15 (ZZ-FUR-09)", "Fabric @ Pouf Collection: Example Mohair", null, null],
+  ]);
+  const id = (bytes: Buffer) => book.addImage({ buffer: bytes as unknown as ExcelJS.Buffer, extension: "png" });
+  const at = (imageId: number, row: number) =>
+    sheet.addImage(imageId, { tl: { col: 4.1, row: row - 1 + 0.1 }, ext: { width: 40, height: 40 } });
+  const velvetId = id(FABRIC_SWATCHES.velvet);
+  at(velvetId, 4);
+  at(velvetId, 6);
+  at(id(FABRIC_SWATCHES.linenA), 8);
+  at(id(FABRIC_SWATCHES.linenB), 10);
+  at(id(FABRIC_SWATCHES.boucle), 12);
+  at(id(FABRIC_SWATCHES.placeholder), 16);
+  at(id(FABRIC_SWATCHES.mohair), 18);
+  return bytes(book);
+}
+
 /** Every workbook this module can build, by the filename the CLI gives it. */
 export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-two-row-header.xlsx": twoRowHeaderWorkbook,
@@ -242,6 +309,7 @@ export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-pricing-document-untitled.xlsx": () => pricingDocWorkbook({ titled: false, sharedFormulaGap: true }),
   "programme-dates.xlsx": programmeDatesWorkbook,
   "bill-with-pictures.xlsx": picturedBillWorkbook,
+  "bill-fabric-swatches.xlsx": fabricSwatchBillWorkbook,
 };
 
 async function main(): Promise<void> {

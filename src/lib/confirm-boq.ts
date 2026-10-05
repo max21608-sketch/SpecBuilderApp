@@ -39,17 +39,21 @@ import {
 import { effectiveArea } from "@/lib/boq-reconcile";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
-import { fabricCodeOf, fabricLineState, rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
+import { fabricLineState, rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
 import { FABRIC_SLOTS } from "@/lib/drawing-document";
+import { normaliseFinishCode, resolveFinishCode, type Finish, type FinishCodeOrigin } from "@/lib/finishes";
+import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
 import {
-  isFinishCodeOrigin,
-  isFinishKind,
-  normaliseFinishCode,
-  readUncodedFinish,
-  resolveFinishCode,
-  type Finish,
-} from "@/lib/finishes";
-import { createFinish } from "@/lib/finish-edit";
+  decideFabricFiling,
+  descriptionFilesAFinish,
+  fabricLineValue,
+  fabricMaterialCode,
+  planFinishSwatches,
+  swatchDifferNotice,
+  type FabricFiling,
+  type SwatchCandidate,
+} from "@/lib/bill-fabric-filing";
+import { loadCurrentSwatches, loadFinishLibrary, loadHeldBillFabrics } from "@/lib/bill-fabric-load";
 import { recomposeAnswers } from "@/lib/attribute-retire";
 import {
   billItemName,
@@ -127,6 +131,12 @@ export type ConfirmBoqResult = {
   descriptionsHeldBack: number;
   /** Records given the picture their bill row prints, having had none. */
   billPictures: number;
+  /** In-house codes minted for fabric lines the bill gave no code (`BW-AMB-001`). */
+  inHouseFinishes: number;
+  /** Library finishes given their fabric line's picture as a swatch, having had none. */
+  fabricSwatches: number;
+  /** Codes whose fabric lines carry different pictures, named — none of them took a swatch. */
+  swatchNotices: string[];
 };
 
 export async function confirmBoqImport(
@@ -301,7 +311,7 @@ export async function confirmBoqImport(
   // THE PROJECT'S FINISHES LIBRARY, read once, for the fabric lines' codes —
   // the same library, the same resolution and the same CONFLICT rule as a
   // drawing's confirm (src/lib/confirm-drawings.ts).
-  const library = await loadLibrary(txn, projectId);
+  const library = await loadFinishLibrary(txn, projectId);
   const fabricFields = await txn`
     select id, json_id from spec_fields where json_id = any(${[...FABRIC_SLOTS]}::int[])
   `;
@@ -317,6 +327,13 @@ export async function confirmBoqImport(
   let descriptionSpecs = 0;
   let descriptionsHeldBack = 0;
   let billPictures = 0;
+  let inHouseFinishes = 0;
+  /**
+   * Every fabric line that ended up linked to a finish, with its row's
+   * picture, BY FINISH — the swatch rule reads a code across the whole bill,
+   * so it runs once, after every sheet has filed (`planFinishSwatches`).
+   */
+  const swatchGroups = new Map<string, SwatchCandidate[]>();
 
   for (const sheet of sheets as StagedBoqSheet[]) {
     const live = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
@@ -566,10 +583,12 @@ export async function confirmBoqImport(
           `Row ${line.lineNo}'s fabric belongs to a row that is not being imported. Reload the review.`,
         );
       }
+      const parentLine = (sheet.lines as StagedLine[]).find((entry) => entry.lineNo === line.finishFor?.row);
       const written = await writeFabricLine(txn, {
         recordId: parent.recordId,
         carried: parent.carried,
         line,
+        parentName: parentLine ? billItemName(parentLine) : null,
         runId,
         projectId,
         actor,
@@ -577,9 +596,17 @@ export async function confirmBoqImport(
         fabricFieldIds,
         sortOrder: order,
       });
-      if (written) {
+      if (written.written) {
         fabricSpecs += 1;
         recomposeIds.add(parent.recordId);
+      }
+      if (written.minted) inHouseFinishes += 1;
+      // A PLACEHOLDER'S PICTURE IS FILED NOWHERE: it has no finish to belong to.
+      if (written.finishId) {
+        swatchGroups.set(written.finishId, [
+          ...(swatchGroups.get(written.finishId) ?? []),
+          { sheetName: sheet.sheetName, rowNo: line.lineNo, image: rowImageFor(parsed.rowImages, sheet.sheetName, line.lineNo) },
+        ]);
       }
     }
 
@@ -602,6 +629,17 @@ export async function confirmBoqImport(
       retired += gone.length;
     }
   }
+
+  // ---- the fabric lines' pictures, as their codes' swatches ---------------
+  // After every sheet has filed, because a code's swatch is decided across
+  // the whole bill: the same picture on every line of it, and none where two
+  // lines disagree. Never over a swatch the library already has.
+  const { taken: fabricSwatches, notices: swatchNotices } = await giveFabricSwatches(txn, {
+    projectId,
+    groups: swatchGroups,
+    library,
+    actor,
+  });
 
   // 5. Predicated on 'parsed' still holding. Zero rows here is a guard result,
   //    not a driver failure, and it must abort the whole import.
@@ -637,6 +675,9 @@ export async function confirmBoqImport(
     descriptionSpecs,
     descriptionsHeldBack,
     billPictures,
+    inHouseFinishes,
+    fabricSwatches,
+    swatchNotices,
   };
 }
 
@@ -645,8 +686,10 @@ export async function confirmBoqImport(
  * the record has NONE — the same `attachments` row a drawing crop writes
  * (`confirm-drawings.ts`), so every screen showing a record's picture shows
  * this one. A bill picture never replaces a picture somebody already has: a
- * crop off the drawings is the reviewed one. A later drawing crop replaces
- * this, because that confirm deletes whatever `item_image` it finds.
+ * crop off the drawings is the reviewed one. A LATER drawing crop does not
+ * replace this either: it is stored as an `item_image_alternative`, and a
+ * person swaps it in on the record (`/api/records/[id]/image/choose`), which
+ * supersedes rather than deletes. Only a CURRENT picture counts as having one.
  *
  * The pathname was written by `bill-images.ts` at registration; it is
  * re-checked against the project's prefix here anyway, because it is about
@@ -680,30 +723,11 @@ async function giveBillPicture(
     where not exists (
       select 1 from attachments
       where entity_type = 'spec_records' and entity_id = ${recordId} and kind = 'item_image'
+        and superseded_at is null
     )
     returning id
   `;
   return given.length;
-}
-
-async function loadLibrary(txn: TxnSql, projectId: string): Promise<Finish[]> {
-  const rows = await txn`
-    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state
-    from project_finishes where project_id = ${projectId} and status = 'active'
-  `;
-  const text = (value: unknown) => (value === null || value === undefined ? null : String(value));
-  return rows.map((row) => ({
-    id: String(row.id),
-    code: String(row.code),
-    codeNorm: String(row.code_norm),
-    codeOrigin: isFinishCodeOrigin(row.code_origin) ? row.code_origin : "client",
-    kind: isFinishKind(row.kind) ? row.kind : null,
-    description: text(row.description),
-    supplierRaw: text(row.supplier_raw),
-    reference: text(row.reference),
-    colour: text(row.colour),
-    state: String(row.state) as Finish["state"],
-  }));
 }
 
 /**
@@ -713,16 +737,24 @@ async function loadLibrary(txn: TxnSql, projectId: string): Promise<Finish[]> {
  * the value is the line's description VERBATIM, the source is this bill's
  * intake run, and there is no page, because a spreadsheet has none. The COM
  * slot is the next one free on THAT record — COM 1, COM 2, COM 3 — which is
- * how two fabrics under one item land as COM 1 and COM 2. The fabric's code
- * (the bracket removed; `N/A` and blank as none) is filed in the project's
- * finishes library by the drawings path's own resolution, and a code the
- * library has already described DIFFERENTLY links nothing: the CONFLICT rule.
+ * how two fabrics under one item land as COM 1 and COM 2.
+ *
+ * WHERE IT IS FILED is `decideFabricFiling` (`bill-fabric-filing.ts`), the
+ * one decision the review's sentence also reads, against the library as it
+ * stands at this line. A coded line files as it always has — a code the
+ * library has already described DIFFERENTLY links nothing (the CONFLICT
+ * rule). An uncoded line with real words is filed as an IN-HOUSE fabric by
+ * default (Max, 2026-10-05): linked to an in-house finish worded exactly the
+ * same, or given a newly minted code (`BW-AMB-001`), TBC, with its words as
+ * the description. A placeholder is never filed. Whatever is created joins
+ * `library` here, so the same words on a later line join the same code.
  *
  * A REVISION writes nothing where the record already holds that exact fabric
  * from a bill, and REFUSES — with a sentence — where the record holds a
  * different one from a bill: replacing a fabric is a decision the review has
  * no control for yet, and a revision that quietly kept or quietly replaced
- * one would be the wrong answer either way. Returns whether a row was written.
+ * one would be the wrong answer either way. Returns whether a row was written,
+ * the finish it links (for the swatch), and whether a code was minted.
  */
 async function writeFabricLine(
   txn: TxnSql,
@@ -730,6 +762,8 @@ async function writeFabricLine(
     recordId: string;
     carried: boolean;
     line: StagedLine;
+    /** The item line's name — what the bill's "Fabric @ …" lead repeats. */
+    parentName: string | null;
     runId: string;
     projectId: string;
     actor: string;
@@ -737,24 +771,15 @@ async function writeFabricLine(
     fabricFieldIds: string[];
     sortOrder: number;
   },
-): Promise<boolean> {
+): Promise<{ written: boolean; finishId: string | null; minted: boolean }> {
   const { recordId, line, runId, projectId, actor, library } = input;
-  const value = line.itemDescription.trim() || (line.code ?? "").trim();
-  const parentCode = line.finishFor?.code ?? null;
-  const ownCode = fabricCodeOf(line.code);
-  // A fabric line whose own code IS its item's code names no fabric at all.
-  const materialCode =
-    ownCode && parentCode && normaliseRef(ownCode) === normaliseRef(parentCode) ? null : ownCode;
+  const value = fabricLineValue(line);
+  const materialCode = fabricMaterialCode(line);
+  const nothing = { written: false, finishId: null, minted: false };
 
   if (input.carried) {
-    const held = await txn`
-      select a.value, a.material_code
-      from record_attributes a
-      join intake_runs r on r.id = a.source_run_id
-      where a.record_id = ${recordId} and a.status = 'active' and r.source_kind = 'boq_xlsx'
-        and a.attr_group = 'material'
-    `;
-    if (held.some((row) => String(row.value ?? "") === value)) return false;
+    const held = (await loadHeldBillFabrics(txn, [recordId])).get(recordId) ?? [];
+    if (held.includes(value)) return nothing;
     if (held.length > 0) {
       throw new DomainConflictError(
         "fabric_changed",
@@ -778,7 +803,14 @@ async function writeFabricLine(
     );
   }
 
-  const finishId = await fileFinishCode(txn, { projectId, code: materialCode, says: value, library, actor });
+  const filing = decideFabricFiling({
+    materialCode,
+    says: value,
+    words: line.itemDescription,
+    parentName: input.parentName,
+    library,
+  });
+  const finishId = await fileFinish(txn, { projectId, filing, says: value, library, actor });
 
   await txn`
     insert into record_attributes
@@ -788,21 +820,69 @@ async function writeFabricLine(
       (${recordId}, 'material', null, 'Fabric', ${value}, null, ${materialCode}, ${finishId}, ${fieldId},
        ${fabricLineState(value)}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
   `;
-  return true;
+  return { written: true, finishId, minted: filing.outcome === "mint" };
 }
 
 /**
- * A code a bill line names, filed in the project's finishes library — the
- * drawings path's resolution and its CONFLICT rule, shared by the fabric lines
- * and the description cells so the two cannot file one code two ways.
- *
- * `says` is what the bill says the code IS: a new code is created TBC with it
- * as its description (a bill naming a code is not somebody confirming what it
- * is); a code the library already describes the same way is linked; one it
- * describes DIFFERENTLY links nothing and shows on the finishes page as a code
- * needing a person. No code: linked only to an internal finish worded exactly
- * the same, which is the one filing that needs nobody. Returns the finish id,
- * or null.
+ * A filing decision, carried out: the finish id it links, or null. A NEW
+ * code (client or minted) is created TBC with the bill's words as its
+ * description — a bill naming a fabric is not somebody confirming what it is —
+ * and pushed onto `library`, so the next line that names it finds it.
+ */
+async function fileFinish(
+  txn: TxnSql,
+  input: { projectId: string; filing: FabricFiling; says: string | null; library: Finish[]; actor: string },
+): Promise<string | null> {
+  const { projectId, filing, says, library, actor } = input;
+  switch (filing.outcome) {
+    case "matched":
+    case "same_words":
+      return filing.finish.id;
+    case "new":
+      return createAndRemember(txn, { projectId, code: filing.code, origin: "client", says, library, actor });
+    case "mint": {
+      // Under the project row lock, which this confirm already holds; the
+      // short code is read under it too (`mintInternalFinishCode`).
+      const code = await mintInternalFinishCode(txn, projectId);
+      return createAndRemember(txn, { projectId, code, origin: "internal", says, library, actor });
+    }
+    case "conflict":
+    case "placeholder":
+      return null;
+  }
+}
+
+async function createAndRemember(
+  txn: TxnSql,
+  input: { projectId: string; code: string; origin: FinishCodeOrigin; says: string | null; library: Finish[]; actor: string },
+): Promise<string> {
+  const { projectId, code, origin, says, library, actor } = input;
+  const finishId = await createFinish(txn, {
+    projectId,
+    fields: { code, codeOrigin: origin, description: says, state: "tbc" },
+    actor,
+  });
+  library.push({
+    id: finishId,
+    code,
+    codeNorm: normaliseFinishCode(code),
+    codeOrigin: origin,
+    kind: null,
+    description: says,
+    supplierRaw: null,
+    reference: null,
+    colour: null,
+    state: "tbc",
+  });
+  return finishId;
+}
+
+/**
+ * A code a bill's DESCRIPTION CELL names, filed in the project's finishes
+ * library — the drawings path's resolution and its CONFLICT rule. `says` is
+ * what the bill says the code IS: a new code is created TBC with it as its
+ * description; a code the library already describes the same way is linked;
+ * one it describes DIFFERENTLY links nothing. Returns the finish id, or null.
  */
 async function fileFinishCode(
   txn: TxnSql,
@@ -812,30 +892,97 @@ async function fileFinishCode(
   const resolution = resolveFinishCode(code, says, library);
   if (resolution.status === "matched") return resolution.finish.id;
   if (resolution.status === "new") {
-    const finishId = await createFinish(txn, {
-      projectId,
-      fields: { code: resolution.code, description: says, state: "tbc" },
-      actor,
-    });
-    library.push({
-      id: finishId,
-      code: resolution.code,
-      codeNorm: normaliseFinishCode(resolution.code),
-      codeOrigin: "client",
-      kind: null,
-      description: says,
-      supplierRaw: null,
-      reference: null,
-      colour: null,
-      state: "tbc",
-    });
-    return finishId;
-  }
-  if (resolution.status === "none" && says) {
-    const reading = readUncodedFinish(says, library, null);
-    return reading.outcome === "link" && reading.finish ? reading.finish.id : null;
+    return createAndRemember(txn, { projectId, code: resolution.code, origin: "client", says, library, actor });
   }
   return null;
+}
+
+/**
+ * THE FABRIC LINES' PICTURES, AS THEIR CODES' SWATCHES (Max, 2026-10-05: "it
+ * is the swatch for the fabric code … one and the same thing").
+ *
+ * `planFinishSwatches` decides, per finish across the whole bill, and this
+ * writes what it decided: a `finish_swatch` attachment on the finish — the
+ * same row the library's upload and the drawings' crop write, so every screen
+ * showing a code's swatch shows this one. The filename keeps the row
+ * (`bill row 10.png`), the way `swatch-page-3.png` keeps a drawing's page,
+ * because nothing else records where the picture came from.
+ *
+ *   * NEVER over a current swatch. Re-checked in the insert itself, under the
+ *     project lock this confirm holds, not only by the plan's read.
+ *   * Two different pictures on one code take NONE, and the code is named in
+ *     the confirm's result.
+ *   * The pathname was written by `bill-images.ts` under this project; it is
+ *     re-checked here, because it is about to become the finish's.
+ *
+ * Inside the confirm's change set. A swatch is not record content — no
+ * version is taken for it, and `change-history.test.ts`'s coverage reads only
+ * the spec-content tables.
+ */
+async function giveFabricSwatches(
+  txn: TxnSql,
+  input: { projectId: string; groups: Map<string, SwatchCandidate[]>; library: Finish[]; actor: string },
+): Promise<{ taken: number; notices: string[] }> {
+  const { projectId, groups, library, actor } = input;
+  const held = await loadCurrentSwatches(txn, [...groups.keys()]);
+  const decisions = planFinishSwatches(groups, held);
+  const codeOf = (finishId: string) => library.find((finish) => finish.id === finishId)?.code ?? "A fabric";
+  let taken = 0;
+  const notices: string[] = [];
+  for (const [finishId, decision] of decisions) {
+    if ("none" in decision) {
+      if (decision.none === "differ") notices.push(swatchDifferNotice(codeOf(finishId), decision.rows));
+      continue;
+    }
+    const { image, rowNo } = decision.take;
+    taken += await giveBillSwatch(txn, { projectId, finishId, rowNo, image, actor });
+  }
+  return { taken, notices };
+}
+
+/**
+ * ONE swatch off a bill row, onto a finish that has none — the insert the
+ * confirm and `db:backfill-bill-swatches` both make, so the two cannot file a
+ * swatch differently. Re-checks the pathname against the project, and the
+ * absence of a current swatch in the insert itself. Returns 1 or 0.
+ */
+export async function giveBillSwatch(
+  txn: TxnSql,
+  input: {
+    projectId: string;
+    finishId: string;
+    rowNo: number;
+    image: BillRowImage & { pathname: string };
+    actor: string;
+  },
+): Promise<number> {
+  const { projectId, finishId, rowNo, image, actor } = input;
+  let pathname: string;
+  try {
+    pathname = assertProjectScopedPathname(image.pathname, projectId);
+  } catch {
+    throw new DomainConflictError(
+      "picture_elsewhere",
+      `Row ${rowNo}'s picture is not stored under this project. Read the bill again from its file.`,
+      { status: 400 },
+    );
+  }
+  const extension = image.contentType === "image/jpeg" ? "jpg" : image.contentType === "image/gif" ? "gif" : "png";
+  const given = await txn`
+    insert into attachments
+      (entity_type, entity_id, kind, storage_path, filename, content_type, size,
+       image_width, image_height, uploaded_by)
+    select 'project_finishes', ${finishId}, 'finish_swatch', ${pathname},
+           ${`bill row ${rowNo}.${extension}`}, ${image.contentType ?? "image/png"}, ${image.size},
+           ${image.width}, ${image.height}, ${actor}
+    where not exists (
+      select 1 from attachments
+      where entity_type = 'project_finishes' and entity_id = ${finishId} and kind = 'finish_swatch'
+        and superseded_at is null
+    )
+    returning id
+  `;
+  return given.length;
 }
 
 /**
@@ -856,7 +1003,7 @@ async function writeDescriptionAttributes(
   let written = 0;
   for (const [order, attribute] of plan.attributes.entries()) {
     const finishId =
-      attribute.materialCode && attribute.attrGroup !== "note" && attribute.attrGroup !== "dimension"
+      descriptionFilesAFinish(attribute)
         ? await fileFinishCode(txn, { projectId, code: attribute.materialCode, says: attribute.finishWords, library, actor })
         : null;
     await txn`

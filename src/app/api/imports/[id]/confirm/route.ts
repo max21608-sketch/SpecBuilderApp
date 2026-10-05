@@ -148,6 +148,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         descriptionSpecs: result.descriptionSpecs,
         descriptionsHeldBack: result.descriptionsHeldBack,
         billPictures: result.billPictures,
+        inHouseFinishes: result.inHouseFinishes,
+        fabricSwatches: result.fabricSwatches,
+        // A code whose fabric lines carry different pictures took no swatch,
+        // and is named — the review said so beforehand, in the same words.
+        swatchNotices: result.swatchNotices,
         projectId: result.projectId,
         runs: result.runIds.length,
       });

@@ -55,6 +55,8 @@ import {
 } from "@/components/imports/BillDescription";
 import type { SlotOverride } from "@/lib/bill-description";
 import { rowImageFor, type BillRowImage, type BoqRowImages } from "@/lib/bill-row-image";
+// Type only: the plan is computed on the server (`planBillFabrics`).
+import type { FabricLinePlan } from "@/lib/bill-fabric-filing";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
 // function the confirm writes it with, so the table shows what will be written.
 import { effectiveArea } from "@/lib/boq-reconcile";
@@ -114,6 +116,35 @@ type Line = {
   // the screen was drawn with — sent back with every change.
   slotOverridesVersion?: number;
 } & RowKindFields;
+
+/**
+ * WHAT A FABRIC LINE DOES TO THE FINISHES LIBRARY — "new library entry
+ * GR-FAB-13 · swatch: this row's picture" — one quiet line under the chip,
+ * the layout's density rule. Where the line mints in the default `BW-F-`
+ * series because the project has no short code, the way to set one is a link
+ * to the project's details: setting it changes what is minted, not what is
+ * already there.
+ */
+function FabricFilingLine({ plan, projectId }: { plan: FabricLinePlan; projectId: string }) {
+  return (
+    <span className="mt-0.5 block text-[11px] leading-4 text-neutral-500">
+      {plan.filing}
+      {plan.askForShortCode && (
+        <>
+          {" ("}
+          <a
+            href={`/dashboard/projects/${encodeURIComponent(projectId)}#project-details`}
+            className="text-blue-700 no-underline hover:underline"
+          >
+            set a short code on the project
+          </a>
+          {")"}
+        </>
+      )}
+      {plan.swatch && <> · {plan.swatch}</>}
+    </span>
+  );
+}
 
 /**
  * THE PICTURE THE BILL PRINTS ON THIS ROW, at a FIXED size beside the item's
@@ -520,6 +551,8 @@ export default function ReviewImportPage() {
     descriptions: Record<number, Record<number, ReviewDescription>>;
     /** The confirm reads (or read) this bill's descriptions, so there is no charged read to offer. */
     descriptionsRead: boolean;
+    /** Per sheet, per staged line index: what a fabric line does to the finishes library, in words. */
+    fabricFilings: Record<number, Record<number, FabricLinePlan>>;
   } | null>(null);
   /**
    * WHETHER A RELOAD IS IN FLIGHT, and it is now RENDERED.
@@ -611,6 +644,7 @@ export default function ReviewImportPage() {
       billSpecs?: { id: string; status: string } | null;
       descriptions?: Record<number, Record<number, ReviewDescription>>;
       descriptionsRead?: boolean;
+      fabricFilings?: Record<number, Record<number, FabricLinePlan>>;
     }>(`/api/imports/${id}`);
     if (!quiet) setLoading(false);
     if (!res.ok) { setError(res.error); return; }
@@ -624,6 +658,7 @@ export default function ReviewImportPage() {
       billSpecs: res.data.billSpecs ?? null,
       descriptions: res.data.descriptions ?? {},
       descriptionsRead: res.data.descriptionsRead ?? false,
+      fabricFilings: res.data.fabricFilings ?? {},
     });
   }, [id]);
 
@@ -1440,6 +1475,7 @@ export default function ReviewImportPage() {
           const columns = reconciliation ? 11 : 10;
           const descriptions = data.descriptions[sheetIndex] ?? {};
           const described = Object.keys(descriptions).length;
+          const fabricFilings = data.fabricFilings[sheetIndex] ?? {};
           /**
            * THE COLUMNS PANEL IS OPEN when nobody has mapped this sheet yet
            * (unless it is dropped, when it waits to be asked for), when a
@@ -1887,6 +1923,17 @@ export default function ReviewImportPage() {
                                       </Button>
                                     </span>
                                   </span>
+                                  {/* WHAT IT DOES TO THE FINISHES LIBRARY, in
+                                      one quiet line: the code it is filed
+                                      under and the swatch its picture becomes
+                                      — computed on the server by the function
+                                      the confirm decides with. */}
+                                  {fabricFilings[line.index] && (
+                                    <FabricFilingLine
+                                      plan={fabricFilings[line.index] as FabricLinePlan}
+                                      projectId={run.project_id}
+                                    />
+                                  )}
                                   {/* A FLAGGED READING IS SAID HERE, in amber,
                                       never behind the why?: it asks a person to
                                       check which item this is, and the Item

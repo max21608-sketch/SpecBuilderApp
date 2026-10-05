@@ -3,9 +3,12 @@ import { describe, it, expect } from "vitest";
 import {
   combineFinishState,
   composeFinishCell,
+  finishCodePrefixProblem,
   formatInternalFinishCode,
   internalFinishNumber,
+  internalFinishSeries,
   normaliseFinishCode,
+  normaliseFinishCodePrefix,
   readUncodedFinish,
   resolveFinishCode,
   type Finish,
@@ -112,6 +115,54 @@ describe("internal finish codes", () => {
     expect(internalFinishNumber("CH-01.1")).toBeNull();
     expect(internalFinishNumber("BW-F-")).toBeNull();
     expect(internalFinishNumber("BW-F-001A")).toBeNull();
+  });
+});
+
+describe("a project's short code (0044)", () => {
+  it("mints BW-<short code>-nnn with one, and BW-F-nnn without", () => {
+    expect(internalFinishSeries("AMB")).toBe("BW-AMB-");
+    expect(internalFinishSeries("amb")).toBe("BW-AMB-");
+    expect(internalFinishSeries(null)).toBe("BW-F-");
+    expect(internalFinishSeries("")).toBe("BW-F-");
+    expect(formatInternalFinishCode(1, internalFinishSeries("AMB"))).toBe("BW-AMB-001");
+    expect(formatInternalFinishCode(1234, "BW-AMB-")).toBe("BW-AMB-1234");
+  });
+
+  it("falls back to BW-F- for a stored value that is not a short code", () => {
+    // Unreachable past the CHECK; a code nobody could parse back is worse.
+    expect(internalFinishSeries("A-B")).toBe("BW-F-");
+    expect(internalFinishSeries("TOOLONGX")).toBe("BW-F-");
+  });
+
+  it("reads a number only out of its own series", () => {
+    expect(internalFinishNumber("BW-AMB-007", "BW-AMB-")).toBe(7);
+    expect(internalFinishNumber("bw-amb-012", "BW-AMB-")).toBe(12);
+    // Another series, the default one, and a longer short code that starts the same.
+    expect(internalFinishNumber("BW-AMX-007", "BW-AMB-")).toBeNull();
+    expect(internalFinishNumber("BW-F-007", "BW-AMB-")).toBeNull();
+    expect(internalFinishNumber("BW-AMBX-007", "BW-AMB-")).toBeNull();
+    expect(internalFinishNumber("BW-AMB-007", "BW-F-")).toBeNull();
+    // The default series is what it always was.
+    expect(internalFinishNumber("BW-F-007")).toBe(7);
+  });
+
+  it("upper-cases a typed short code and refuses one that is not two to six letters or digits, in words", () => {
+    expect(normaliseFinishCodePrefix(" amb ")).toBe("AMB");
+    expect(normaliseFinishCodePrefix("  ")).toBeNull();
+    expect(finishCodePrefixProblem("amb")).toBeNull();
+    expect(finishCodePrefixProblem("")).toBeNull();
+    expect(finishCodePrefixProblem(null)).toBeNull();
+    expect(finishCodePrefixProblem("A")).toMatch(/two to six letters or digits/);
+    expect(finishCodePrefixProblem("AM-B")).toMatch(/“AM-B” cannot be a short code/);
+    expect(finishCodePrefixProblem("TOOLONG")).toMatch(/two to six/);
+  });
+
+  it("is never the origin: an in-house code of either series stays out of the file only by its column", () => {
+    const ours = finish({ code: "BW-AMB-001", codeNorm: "BW-AMB-001", codeOrigin: "internal", description: "Ivory boucle", reference: null });
+    expect(composeFinishCell(ours)).toBe("Ivory boucle");
+    // A client schedule that prints the same shape is still the client's code.
+    const theirs = finish({ code: "BW-AMB-002", codeNorm: "BW-AMB-002", codeOrigin: "client", description: "Ivory boucle", reference: null });
+    expect(composeFinishCell(theirs)).toMatch(/^BW-AMB-002; /);
   });
 });
 

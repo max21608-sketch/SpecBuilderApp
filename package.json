@@ -27,6 +27,8 @@
     "db:qa-clean": "node --env-file-if-exists=.env.local tools/qa-clean.mjs",
     "db:backfill-finishes": "tsx --env-file-if-exists=.env.local db/backfill-finishes.ts",
     "db:backfill-standards": "tsx --env-file-if-exists=.env.local db/backfill-standards.ts",
+    "db:backfill-bill-swatches": "tsx --env-file-if-exists=.env.local db/backfill-bill-swatches.ts",
+    "db:backfill-bill-swatches:local": "tsx --env-file=.env.localstack.local db/backfill-bill-swatches.ts",
     "dump:drawings": "tsx --env-file-if-exists=.env.local tools/dump-drawing-run.ts",
     "vocab:gap": "tsx --env-file-if-exists=.env.local tools/vocab-gap.ts",
     "palette:gap": "tsx --env-file-if-exists=.env.local tools/palette-gap.ts",

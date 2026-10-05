@@ -9,6 +9,7 @@ import {
   boqConfirmCounts,
   boqConfirmLabel,
   fabricCodeOf,
+  fabricLineIsPlaceholder,
   fabricLineState,
   fabricParentOptions,
   kindChoicePatch,
@@ -222,5 +223,51 @@ describe("a fabric line's state", () => {
     expect(fabricLineState("Fabric @ Stool Collection: Example weave Colour: T.B.C.")).toBe("tbc");
     expect(fabricLineState("Fabric @ Stool Collection & Pattern: Example weave")).toBe("confirmed");
     expect(fabricLineState("   ")).toBe("tbc");
+  });
+});
+
+// Synthetic wordings in the SHAPE of a fabric line ("Fabric @ <item> …"), never
+// a real bill's values.
+describe("fabricLineIsPlaceholder", () => {
+  it("reads the bill's lead, the item's name, an option number and TBC as nothing", () => {
+    expect(fabricLineIsPlaceholder("Fabric @ Armchair (Option 1) Technical details TBC", "Armchair")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric Main Upholstery @ Lounge Chair - Option 2 - Technical Details: TBC", "Lounge Chair")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric @ Stool TBC", "Stool")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric @ Sofa: to be confirmed", "Sofa")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric for Bench — details to follow", "Bench")).toBe(true);
+    expect(fabricLineIsPlaceholder("", "Stool")).toBe(true);
+    expect(fabricLineIsPlaceholder(null, "Stool")).toBe(true);
+  });
+
+  it("reads field labels whose values are all TBC as nothing", () => {
+    expect(
+      fabricLineIsPlaceholder("Fabric @ Armchair Collection & Pattern Ref: TBC Colour Ref: TBC Composition: TBC", "Armchair"),
+    ).toBe(true);
+  });
+
+  it("matches the item's name written as two words where the item is one", () => {
+    expect(fabricLineIsPlaceholder("Fabric @ Arm Chair Technical details TBC", "Armchair")).toBe(true);
+  });
+
+  it("is NOT a placeholder where the line names a collection, a colour, a composition or a supplier", () => {
+    expect(
+      fabricLineIsPlaceholder(
+        "Fabric @ Armchair (Option 1) Collection & Pattern Ref: Example Weave 104 Pattern Repeat: TBC",
+        "Armchair",
+      ),
+    ).toBe(false);
+    expect(fabricLineIsPlaceholder("Fabric @ Stool Colour Ref: Ivory", "Stool")).toBe(false);
+    expect(fabricLineIsPlaceholder("Fabric @ Stool Composition: 100% linen", "Stool")).toBe(false);
+    expect(fabricLineIsPlaceholder("Fabric @ Stool Supplier: Example Mills, TBC", "Stool")).toBe(false);
+    expect(fabricLineIsPlaceholder("Example boucle, ivory", "Stool")).toBe(false);
+  });
+
+  it("strips the item's name only where it OPENS the line, never later", () => {
+    // The parent is called after its fabric; the fabric's own name later is substance.
+    expect(fabricLineIsPlaceholder("Fabric @ Sofa Collection: Sofa Weave", "Sofa")).toBe(false);
+  });
+
+  it("does not strip a lead before the @ that is not the bill's own lead words", () => {
+    expect(fabricLineIsPlaceholder("Example Mills velvet @ seat", "Armchair")).toBe(false);
   });
 });

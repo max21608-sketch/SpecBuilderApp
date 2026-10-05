@@ -88,6 +88,8 @@ type Project = {
   specs_agreed_by: string | null;
   delivery_date: string | null;
   default_dimension_unit: string | null;
+  /** The short code in in-house finish codes (0044): AMB → BW-AMB-001. */
+  finish_code_prefix: string | null;
   status: string;
   archived_at: string | null;
   archived_by: string | null;
@@ -288,6 +290,7 @@ type Form = {
   specsAgreedBy: string;
   deliveryDate: string;
   defaultDimensionUnit: string;
+  finishCodePrefix: string;
 };
 
 function formOf(project: Project): Form {
@@ -299,6 +302,7 @@ function formOf(project: Project): Form {
     specsAgreedBy: project.specs_agreed_by ?? "",
     deliveryDate: project.delivery_date ?? "",
     defaultDimensionUnit: project.default_dimension_unit ?? "",
+    finishCodePrefix: project.finish_code_prefix ?? "",
   };
 }
 
@@ -774,6 +778,7 @@ function ProjectOverview() {
           specsAgreedBy: form.specsAgreedBy.trim() || null,
           deliveryDate: form.deliveryDate.trim() || null,
           defaultDimensionUnit: form.defaultDimensionUnit.trim() || null,
+          finishCodePrefix: form.finishCodePrefix.trim().toUpperCase() || null,
         }),
       });
       if (!res.ok) {
@@ -1457,6 +1462,16 @@ function ProjectOverview() {
                     <Unset>not set — asked per dimension</Unset>
                   )}
                 </Detail>
+                <Detail
+                  label="In-house finish codes"
+                  tip="The code this app gives a finish the client gave none. Set once; changing it later starts a new series and renames nothing."
+                >
+                  {project.finish_code_prefix ? (
+                    <span className="font-mono">BW-{project.finish_code_prefix}-001…</span>
+                  ) : (
+                    <Unset>no short code — BW-F-001…</Unset>
+                  )}
+                </Detail>
                 <Detail label="Order date">{day(project.order_date)}</Detail>
                 <Detail
                   label={SPECS_AGREED_LABEL}
@@ -1561,6 +1576,25 @@ function ProjectOverview() {
                 confirmable — this setting trades a check for speed.
               </p>
             )}
+
+            {/* THE SHORT CODE (0044). Upper-cased as it is typed, so what is on
+                screen is what is stored; refused in words by the route if it
+                is not two to six letters or digits. */}
+            <h2 className="mt-6 font-medium text-neutral-900">In-house finish codes</h2>
+            <label className="mt-1 block text-sm text-neutral-600">
+              Short code for in-house finish codes (e.g. AMB → BW-AMB-001)
+              <input
+                value={form.finishCodePrefix}
+                onChange={(event) => setForm({ ...form, finishCodePrefix: event.target.value.toUpperCase() })}
+                placeholder="AMB"
+                maxLength={6}
+                className="mt-1 block w-32 rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
+              />
+            </label>
+            <p className="mt-1 text-xs text-neutral-500">
+              Used for a finish the client gave no code. Changing it later never renames a code already given — the
+              next one starts at 001 under the new short code. Leave it blank and codes read BW-F-001.
+            </p>
 
             <h2 className="mt-6 font-medium text-neutral-900">TOE key dates</h2>
             <p className="mt-1 text-xs text-neutral-500">

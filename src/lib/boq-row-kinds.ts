@@ -432,3 +432,108 @@ export function fabricLineState(value: string): "tbc" | "confirmed" {
   if (folded === "") return "tbc";
   return TBC_TOKENS.some((token) => containsPhrase(folded, token)) ? "tbc" : "confirmed";
 }
+
+// ---- a fabric line that names no fabric ------------------------------------------
+
+/**
+ * Words a fabric line uses to SAY WHERE a fabric goes or WHAT a field is,
+ * which name no fabric. Folded (lower case, punctuation as spaces).
+ *
+ *   * The bill's own lead and its position words — "Fabric Main Upholstery @
+ *     Armchair (Option 1)": the item's name is taken off separately, and
+ *     these are the rest of it.
+ *   * Field labels — "Collection & Pattern Ref:", "Colour Ref:". A label with
+ *     a VALUE after it is substance and stays; a label whose value is TBC
+ *     leaves nothing, which is the point.
+ *   * Filler — "technical details", "information".
+ *
+ * Deliberately a closed list of words that carry nothing, never a list of
+ * words that DO: a fabric line that says anything this list does not know is
+ * read as real, filed as an in-house fabric, and shown on the review before
+ * anything is written. Missing a placeholder costs a TBC library row a person
+ * can see; reading a real fabric as a placeholder loses it silently.
+ */
+const PLACEHOLDER_FILLER = new Set([
+  // the lead, and where on the item
+  "fabric", "fabrics", "main", "upholstery", "upholstered", "seat", "seats", "back", "backs", "inner", "outer",
+  "arm", "arms", "cushion", "cushions", "piping", "contrast", "body", "base", "option", "options", "opt",
+  // field labels
+  "collection", "pattern", "ref", "refs", "reference", "colour", "colours", "color", "colors", "composition",
+  "supplier", "width", "repeat", "code", "name", "no", "number", "weight", "quality", "design", "manufacturer",
+  "brand", "type",
+  // filler
+  "technical", "details", "detail", "specification", "specifications", "spec", "specs", "information", "info",
+  "to", "be", "the", "of", "for", "and", "as", "per", "see", "n", "a", "na", "tbd",
+]);
+
+function foldTokens(value: string): string[] {
+  const folded = fold(value);
+  return folded === "" ? [] : folded.split(" ");
+}
+
+/**
+ * WHETHER A FABRIC LINE IS A PLACEHOLDER — "Fabric @ Armchair (Option 1)
+ * Technical details TBC" — rather than a fabric (Max, 2026-10-05: "if they
+ * haven't given it a code … it's probably bespoke", and a placeholder is never
+ * filed and never matched).
+ *
+ * The bill's own lead is taken off first: everything up to an `@` (where
+ * that is only lead words), then the item's NAME where it opens what is left
+ * (`parentName`, the item line's first line — matched word by word, and "Arm
+ * Chair" against "Armchair" as one word), then position words and the option
+ * number. What is left is a placeholder when it
+ * is nothing but TBC tokens (`TBC_TOKENS`, the one list) and the filler above.
+ *
+ * "Collection & Pattern Ref: <a collection> … Pattern Repeat: TBC" is NOT a
+ * placeholder: it names a collection, and a TBC on one field does not undo
+ * that. Pure, so the review's sentence and the confirm read one answer.
+ */
+export function fabricLineIsPlaceholder(text: string | null | undefined, parentName: string | null | undefined): boolean {
+  const raw = (text ?? "").trim();
+  if (raw === "") return true;
+
+  // 1. The lead: "Fabric … @" — everything before the first `@` is the bill
+  //    saying this is a fabric line, and where it goes.
+  const at = raw.indexOf("@");
+  const leadBefore = at >= 0 ? raw.slice(0, at) : "";
+  const leadIsTheBills =
+    at >= 0 && foldTokens(leadBefore).every((token) => PLACEHOLDER_FILLER.has(token) || /^\d+$/.test(token));
+  let tokens = foldTokens(leadIsTheBills ? raw.slice(at + 1) : raw);
+
+  // 2. The item's name, where it OPENS what is left ("Fabric for Armchair …"
+  //    as much as "Fabric @ Armchair …"). Only at the start: the same word
+  //    later in the line may be the fabric's own name.
+  const parent = new Set(foldTokens(parentName ?? ""));
+  const phrases = TBC_TOKENS.map((token) => token.split(" ")).sort((a, b) => b.length - a.length);
+  const phraseAt = (at: number) => phrases.find((words) => words.every((word, k) => tokens[at + k] === word));
+  let start = 0;
+  while (start < tokens.length) {
+    const token = tokens[start] as string;
+    const next = tokens[start + 1];
+    // A TBC phrase ends the lead: "to" and "be" are filler words on their own,
+    // and stripping them would leave "confirmed" to read as a fabric.
+    if (phraseAt(start)) break;
+    // Two words that make the item's one ("Arm Chair" for "Armchair") first:
+    // `arm` alone is a position word and would leave `chair` behind.
+    if (next !== undefined && parent.has(`${token}${next}`)) start += 2;
+    else if (parent.has(token) || PLACEHOLDER_FILLER.has(token) || /^\d+$/.test(token)) start += 1;
+    else break;
+  }
+  tokens = tokens.slice(start);
+
+  // 3. The TBC phrases, as whole words, then the option number and filler.
+  const left: string[] = [];
+  for (let i = 0; i < tokens.length; ) {
+    const phrase = phraseAt(i);
+    if (phrase) {
+      i += phrase.length;
+      continue;
+    }
+    const token = tokens[i] as string;
+    const previous = tokens[i - 1];
+    const optionNumber = /^\d+$/.test(token) && (previous === "option" || previous === "opt" || previous === "no");
+    if (!optionNumber && !PLACEHOLDER_FILLER.has(token)) left.push(token);
+    i += 1;
+  }
+  return left.length === 0;
+}

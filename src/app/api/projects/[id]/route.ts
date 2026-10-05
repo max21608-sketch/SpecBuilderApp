@@ -20,7 +20,7 @@ import { loadProjectSummary } from "@/lib/project-summary";
 import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
 import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
-import { loadUnlinkedFinishCodes } from "@/lib/finishes";
+import { finishCodePrefixProblem, loadUnlinkedFinishCodes, normaliseFinishCodePrefix } from "@/lib/finishes";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -57,6 +57,10 @@ const ProjectPatch = z
     // anything unrecognised is refused below with a sentence naming the four
     // that work. z.enum here would reject "CM" as "invalid enum value".
     defaultDimensionUnit: z.string().trim().max(20).nullable().optional(),
+    // The short code in this project's in-house finish codes (0044): AMB mints
+    // `BW-AMB-001`. A plain string, refused below IN WORDS rather than by a
+    // regex message nobody reads; upper-cased on save, blank clears it.
+    finishCodePrefix: z.string().trim().max(20).nullable().optional(),
     // Archived, never deleted. This does NOT make a project read-only -- nothing
     // here revokes a write, and the screen says so, because a control that
     // reads as a lock and is not one is worse than no lock at all.
@@ -73,6 +77,7 @@ const EDITABLE = [
   "specsAgreedBy",
   "deliveryDate",
   "defaultDimensionUnit",
+  "finishCodePrefix",
   "status",
 ] as const;
 
@@ -92,7 +97,7 @@ function asDate(value: unknown): string | null {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await context.params;
   const rows = await sql`
-    select id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
+    select id, bws_project_number, name, client, shared_inbox, default_dimension_unit, finish_code_prefix,
            status, archived_at::text, archived_by,
            order_date::text, specs_agreed_by::text, delivery_date::text, version
     from projects where id = ${id}
@@ -327,7 +332,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (changed.length === 0) return json({ ok: false, error: "Nothing to change." }, 400);
 
   const current = await sql`
-    select id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
+    select id, bws_project_number, name, client, shared_inbox, default_dimension_unit, finish_code_prefix,
            status, archived_at::text, archived_by,
            order_date::text, specs_agreed_by::text, delivery_date::text, version
     from projects where id = ${id}
@@ -400,6 +405,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     );
   }
 
+  // THE SHORT CODE, upper-cased and checked in words. Changing it later
+  // renames NOTHING: codes already minted keep their meaning, and the next one
+  // starts a new series at 001 (`mintInternalFinishCode`).
+  if ("finishCodePrefix" in parsed.data) {
+    const problem = finishCodePrefixProblem(parsed.data.finishCodePrefix);
+    if (problem) return json({ ok: false, error: problem }, 400);
+  }
+  const finishCodePrefix = pick(
+    "finishCodePrefix",
+    (row.finish_code_prefix as string | null) ?? null,
+    normaliseFinishCodePrefix(parsed.data.finishCodePrefix),
+  );
+
   const rows = await sql`
     update projects
     set name = ${name},
@@ -409,12 +427,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         specs_agreed_by = ${dates.specsAgreedBy},
         delivery_date = ${dates.deliveryDate},
         default_dimension_unit = ${defaultDimensionUnit},
+        finish_code_prefix = ${finishCodePrefix},
         status = ${status},
         archived_at = ${archivedAt},
         archived_by = ${archivedBy},
         updated_by = ${user.email}
     where id = ${id} and version = ${parsed.data.version}
-    returning id, bws_project_number, name, client, shared_inbox, default_dimension_unit,
+    returning id, bws_project_number, name, client, shared_inbox, default_dimension_unit, finish_code_prefix,
               status, archived_at::text, archived_by,
               order_date::text, specs_agreed_by::text, delivery_date::text, version
   `;
