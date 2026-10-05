@@ -1410,9 +1410,15 @@ export function heldReading(proposal: Proposal): HeldReading {
   // written beside the bill's, never red:
   //  - it only says where the answer is ("REFER DRAWING"), which disagrees
   //    with nothing because it states nothing;
-  //  - it CONTAINS the bill's words whole ("WEWOOD — BESPOKE DESIGN" over the
-  //    bill's "BESPOKE DESIGN"): the same statement with more detail.
-  if (proposal.note && (pointsElsewhere(proposal.proposedValue) || containsWords(proposal.proposedValue, held.value))) {
+  //  - one CONTAINS the other's words whole ("WEWOOD — BESPOKE DESIGN" over
+  //    the bill's "BESPOKE DESIGN", or "TEDDY 05/10 Beige" under the bill's
+  //    "Supplier Own - Teddy 05/10 Beige"): one statement, one side fuller.
+  if (
+    proposal.note &&
+    (pointsElsewhere(proposal.proposedValue) ||
+      containsWords(proposal.proposedValue, held.value) ||
+      containsWords(held.value, proposal.proposedValue))
+  ) {
     return "free";
   }
   if (agreesWithHeld(proposal, held)) return "same";

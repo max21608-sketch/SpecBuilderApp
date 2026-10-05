@@ -378,5 +378,7 @@ describe("a note that points elsewhere, or says the bill's words and more", () =
     expect(containsWords("BESPOKE DESIGN", "BESPOKE DESIGN")).toBe(false); // equal is "same", not "contains"
     expect(containsWords("WEWOOD Caravela", "BESPOKE DESIGN")).toBe(false);
     expect(containsWords("Oakley", "Oak")).toBe(false); // whole words only
+    // The other way round is read by heldReading too: the bill's fuller fabric line.
+    expect(containsWords("Supplier Own - Teddy 05/10 Beige", "TEDDY 05/10 Beige")).toBe(true);
   });
 });
