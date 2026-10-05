@@ -143,6 +143,10 @@ describe("expandZoneList", () => {
     expect(expandZoneList("GR / PL FUR23")).toEqual(["GR-FUR23", "PL-FUR23"]);
     expect(expandZoneList("GR / MUR / PL FUR22.1")).toEqual(["GR-FUR22.1", "MUR-FUR22.1", "PL-FUR22.1"]);
     expect(expandZoneList("GR FUR03A")).toEqual(["GR-FUR03A"]);
+    // The real read of 2026-10-05 spaced the tracker's boxes: "FUR 04".
+    expect(expandZoneList("GR / MUR / PL FUR 04")).toEqual(["GR-FUR 04", "MUR-FUR 04", "PL-FUR 04"]);
+    expect(expandZoneList("GR / MUR / PL FUR 22.1")).toEqual(["GR-FUR 22.1", "MUR-FUR 22.1", "PL-FUR 22.1"]);
+    expect(expandZoneList("GR / PL FUR ")).toBeNull();
     expect(expandZoneList("  GR / PL-FUR23 ")).toEqual(["GR-FUR23", "PL-FUR23"]);
   });
 

@@ -115,14 +115,16 @@ export function findRecordsByRef(refRaw: string | null, records: RecordEntry[]):
  * EXACT, AND IT REFUSES EVERYTHING ELSE (null). The zones are upper-case
  * words of one to four letters separated by a SPACED slash (` / `, the way
  * the tracker prints the column), then whitespace — or, after a list of two
- * or more, a hyphen — then the number, which must carry a digit. So
+ * or more, a hyphen — then the number, which must carry a digit (its parts may be spaced, `FUR 04`). So
  * `GR-FUR-04` is a code and not a one-zone list, `S-201` likewise, `FUR22.1`
  * names no zone, `GR/PL FUR23` is not the printed shape and lower case is not
  * a zone. A refusal costs nothing: the ref is still matched whole, as before.
  */
 export function expandZoneList(refRaw: string | null): string[] | null {
   if (!refRaw) return null;
-  const match = /^([A-Z]{1,4}(?:\s+\/\s+[A-Z]{1,4})*)(\s+|-)([A-Z0-9][A-Z0-9.\-]*)$/.exec(refRaw.trim());
+  // The number may carry single spaces between its parts: the tracker prints
+  // its boxes side by side and the real read came back `FUR 04` (2026-10-05).
+  const match = /^([A-Z]{1,4}(?:\s+\/\s+[A-Z]{1,4})*)(\s+|-)([A-Z0-9](?:[A-Z0-9.\-]|\s(?=[A-Z0-9]))*)$/.exec(refRaw.trim());
   if (!match) return null;
   const zones = match[1]!.split(/\s+\/\s+/);
   const separator = match[2]!;
