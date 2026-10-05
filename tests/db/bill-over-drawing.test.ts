@@ -377,11 +377,11 @@ describeIfDb("a drawing's values over the bill's, one press per card", () => {
       await client.query(
         `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, uploaded_by)
          values ('spec_records', $1, 'item_image', $2, 'bill row 1.png', 'image/png', 'qa') returning id`,
-        [recordId, `projects/${projectId}/qa/bill-row-1.png`],
+        [recordId, `projects/${projectId}/bill-images/qa/bill-row-1.png`],
       )
     ).rows[0].id;
     try {
-      expect((await resolved(runId)).pictureHeld).toEqual({ recordIds: [recordId], of: 1 });
+      expect((await resolved(runId)).pictureHeld).toEqual({ recordIds: [recordId], of: 1, fromBill: 1 });
       const { item } = await staged(runId);
       const response = await confirmRoute(
         request("POST", {
