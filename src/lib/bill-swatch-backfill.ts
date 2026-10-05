@@ -42,7 +42,7 @@ import type { TxnSql } from "@/lib/db-transaction";
 import type { SqlLike } from "@/lib/record-atoms";
 import { assertBoqDocument } from "@/lib/boq-import";
 import { billItemName } from "@/lib/bill-description";
-import { rowImageFor, type BillRowImage } from "@/lib/bill-row-image";
+import { effectiveRowImage, type BillRowImage } from "@/lib/bill-row-image";
 import {
   decideFabricFiling,
   fabricLineValue,
@@ -246,7 +246,7 @@ export async function planBillSwatchBackfill(
         codeOfKey.set(finishKey, project.library.find((finish) => finish.id === finishKey)?.code ?? "A fabric");
         groups.set(finishKey, [
           ...(groups.get(finishKey) ?? []),
-          { sheetName: sheet.sheetName, rowNo: line.lineNo, image: rowImageFor(parsed.rowImages, sheet.sheetName, line.lineNo) },
+          { sheetName: sheet.sheetName, rowNo: line.lineNo, image: effectiveRowImage(parsed, sheet.sheetName, line) },
         ]);
       }
     }

@@ -59,7 +59,7 @@
 import type { SheetData } from "read-excel-file/node";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
-import type { BoqRowImages } from "@/lib/bill-row-image";
+import type { BillPictureOverride, BoqRowImages } from "@/lib/bill-row-image";
 import {
   foldHeading,
   type BoqColumnRef,
@@ -201,6 +201,21 @@ export type StagedBoqLine = BoqLine & {
    */
   slotOverrides?: Record<string, DimensionSlot | "note">;
   slotOverridesVersion?: number;
+  /**
+   * THE PICTURE A PERSON CHOSE FOR THIS ROW on the review: a crop of the
+   * bill's picture, or none. Absent or null is the bill's own picture, as read
+   * (`rowImages`). Read ONLY through `effectiveRowImage`
+   * (`src/lib/bill-row-image.ts`), which every reader of a row's picture asks.
+   *
+   * `pictureVersion` is its own optimistic lock, for `slotOverridesVersion`'s
+   * reason: absent is 0, and every accepted change bumps it.
+   *
+   * On the LINE, unlike `rowImages`: it is a reviewer's decision, like the
+   * category and the level, and a re-read of the columns re-stages the lines
+   * and forgets it along with them. OPTIONAL, absent before 2026-10-05.
+   */
+  picture?: BillPictureOverride | null;
+  pictureVersion?: number;
   /** The record this line continues, at the version the reviewer was shown. */
   replaces?: { recordId: string; recordVersion: number } | null;
 };

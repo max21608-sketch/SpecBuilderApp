@@ -62,7 +62,7 @@ import {
   type BillDescriptionPlan,
 } from "@/lib/bill-description";
 import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
-import { rowImageFor, type BillRowImage } from "@/lib/bill-row-image";
+import { effectiveRowImage, type BillRowImage } from "@/lib/bill-row-image";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 
 type StagedLine = {
@@ -473,7 +473,7 @@ export async function confirmBoqImport(
           recordId: target.recordId,
           projectId,
           lineNo: line.lineNo,
-          picture: rowImageFor(parsed.rowImages, sheet.sheetName, line.lineNo),
+          picture: effectiveRowImage(parsed, sheet.sheetName, line),
           actor,
         });
 
@@ -544,7 +544,7 @@ export async function confirmBoqImport(
         recordId,
         projectId,
         lineNo: line.lineNo,
-        picture: rowImageFor(parsed.rowImages, sheet.sheetName, line.lineNo),
+        picture: effectiveRowImage(parsed, sheet.sheetName, line),
         actor,
       });
       // A line new to a REVISION is on the run from this moment, and must not
@@ -605,7 +605,7 @@ export async function confirmBoqImport(
       if (written.finishId) {
         swatchGroups.set(written.finishId, [
           ...(swatchGroups.get(written.finishId) ?? []),
-          { sheetName: sheet.sheetName, rowNo: line.lineNo, image: rowImageFor(parsed.rowImages, sheet.sheetName, line.lineNo) },
+          { sheetName: sheet.sheetName, rowNo: line.lineNo, image: effectiveRowImage(parsed, sheet.sheetName, line) },
         ]);
       }
     }
@@ -691,8 +691,11 @@ export async function confirmBoqImport(
  * person swaps it in on the record (`/api/records/[id]/image/choose`), which
  * supersedes rather than deletes. Only a CURRENT picture counts as having one.
  *
- * The pathname was written by `bill-images.ts` at registration; it is
- * re-checked against the project's prefix here anyway, because it is about
+ * The picture is the row's EFFECTIVE one (`effectiveRowImage`): a crop a
+ * person made on the review, none where they chose none, the bill's own
+ * otherwise. Its pathname was written by `bill-images.ts` at registration or
+ * checked against this run by the line PATCH; it is re-checked against the
+ * project's prefix here anyway, because it is about
  * to become the record's and a check in only one place is a check the others
  * skipped. Returns 1 where a picture was given, 0 otherwise.
  */

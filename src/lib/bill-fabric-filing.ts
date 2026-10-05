@@ -42,7 +42,14 @@
 import { fabricCodeOf, fabricLineIsPlaceholder, type RowKindFields } from "@/lib/boq-row-kinds";
 import { normaliseRef } from "@/lib/boq-import";
 import { billItemName } from "@/lib/bill-description";
-import { rowImageFor, type BillRowImage, type BoqRowImages } from "@/lib/bill-row-image";
+import {
+  effectiveRowImage,
+  isNoPicture,
+  isPictureCrop,
+  type BillPictureOverride,
+  type BillRowImage,
+  type BoqRowImages,
+} from "@/lib/bill-row-image";
 import {
   internalFinishSeries,
   normaliseFinishCode,
@@ -191,6 +198,8 @@ type PlanLine = FabricLine & {
   index: number;
   lineNo: number;
   ignored: boolean;
+  /** A person's choice of picture for the row (`effectiveRowImage`). */
+  picture?: BillPictureOverride | null;
   itemDescriptionRaw?: string | null;
   replaces?: { recordId: string; recordVersion: number } | null;
 };
@@ -235,7 +244,10 @@ export function planBillFabrics(input: {
   const series = internalFinishSeries(input.prefix);
   const groups = new Map<string, SwatchCandidate[]>();
   /** Per line: what it files (null where a carried record already holds it), and under which finish. */
-  const filings = new Map<string, { filing: FabricFiling | null; candidate: SwatchCandidate; key: string | null }>();
+  const filings = new Map<
+    string,
+    { filing: FabricFiling | null; candidate: SwatchCandidate; key: string | null; chosen: ChosenPicture }
+  >();
   const plan = (finish: Finish, rowNo: number, minted: boolean) => {
     library.push(finish);
     planned.set(finish.id, { finish, rowNo, minted });
@@ -262,10 +274,12 @@ export function planBillFabrics(input: {
       const candidate: SwatchCandidate = {
         sheetName: sheet.sheetName,
         rowNo: line.lineNo,
-        image: rowImageFor(input.rowImages, sheet.sheetName, line.lineNo),
+        // THE PICTURE THE CONFIRM WILL FILE: a person's crop or "no picture"
+        // where they chose one, the bill's own otherwise.
+        image: effectiveRowImage({ rowImages: input.rowImages }, sheet.sheetName, line),
       };
       if (parent?.replaces && input.heldFabric(parent.replaces.recordId).includes(says)) {
-        filings.set(key, { filing: null, candidate, key: null });
+        filings.set(key, { filing: null, candidate, key: null, chosen: chosenPicture(line.picture) });
         continue;
       }
       const filing = decideFabricFiling({
@@ -285,20 +299,20 @@ export function planBillFabrics(input: {
         plan(pendingFinish(finishKey, `${series}…`, "internal", says), line.lineNo, true);
       }
       if (finishKey) groups.set(finishKey, [...(groups.get(finishKey) ?? []), candidate]);
-      filings.set(key, { filing, candidate, key: finishKey });
+      filings.set(key, { filing, candidate, key: finishKey, chosen: chosenPicture(line.picture) });
     }
   }
 
   const swatches = planFinishSwatches(groups, input.heldSwatches);
   const out = new Map<string, FabricLinePlan>();
-  for (const [key, { filing, candidate, key: finishKey }] of filings) {
+  for (const [key, { filing, candidate, key: finishKey, chosen }] of filings) {
     if (filing === null) {
       out.set(key, { filing: "already on the record from the bill — nothing filed", swatch: null, askForShortCode: false });
       continue;
     }
     out.set(key, {
       filing: describeFiling(filing, planned, series, candidate.rowNo),
-      swatch: finishKey ? describeSwatch(swatches.get(finishKey), candidate) : null,
+      swatch: finishKey ? describeSwatch(swatches.get(finishKey), candidate, chosen) : null,
       askForShortCode: filing.outcome === "mint" && series === INTERNAL_FINISH_PREFIX,
     });
   }
@@ -349,15 +363,29 @@ export function describeFiling(
   }
 }
 
+/** What a person chose for a row's picture on the review, as the swatch sentence needs it. */
+export type ChosenPicture = "crop" | "none" | null;
+
+function chosenPicture(picture: BillPictureOverride | null | undefined): ChosenPicture {
+  return isNoPicture(picture) ? "none" : isPictureCrop(picture) ? "crop" : null;
+}
+
 /** The swatch half of a fabric row's line on the review. */
-export function describeSwatch(decision: SwatchDecision | undefined, line: SwatchCandidate): string | null {
+export function describeSwatch(
+  decision: SwatchDecision | undefined,
+  line: SwatchCandidate,
+  chosen: ChosenPicture = null,
+): string | null {
   if (!decision) return null;
   if ("take" in decision) {
-    if (line.image?.pathname === decision.take.image.pathname) return "swatch: this row's picture";
+    if (line.image?.pathname === decision.take.image.pathname) {
+      return chosen === "crop" ? "swatch: this row's crop" : "swatch: this row's picture";
+    }
     return `swatch: row ${decision.take.rowNo}'s picture`;
   }
   if (decision.none === "held") return "swatch: none (the library already has one)";
   if (decision.none === "differ") return `swatch: none — rows ${listRows(decision.rows)} differ`;
+  if (chosen === "none") return "swatch: none — no picture chosen for this row";
   if (line.image && !line.image.pathname && line.image.pictures > 1) {
     return `swatch: none — ${line.image.pictures} pictures on this row`;
   }

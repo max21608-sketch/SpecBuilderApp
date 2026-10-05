@@ -37,6 +37,8 @@ import {
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { assertBoqDocument } from "@/lib/boq-import";
+import { billPicturePrefix, rowImageFor, type BillPictureCrop, type BillPictureOverride } from "@/lib/bill-row-image";
+import { assertProjectScopedPathname, headTrustedBlob } from "@/lib/blob-source";
 import { fabricParentOptions, isBoqRowKind, kindChoicePatch } from "@/lib/boq-row-kinds";
 import { billSpecsRequestId } from "@/lib/bill-specifications";
 import {
@@ -1202,6 +1204,8 @@ async function patchBoqLine(
     finishForRow?: unknown;
     slotOverride?: unknown;
     slotOverridesVersion?: unknown;
+    picture?: unknown;
+    pictureVersion?: unknown;
   },
   actor: string,
 ): Promise<Response> {
@@ -1215,6 +1219,14 @@ async function patchBoqLine(
   if (body.slotOverride !== undefined) {
     if (index === null) return json({ ok: false, error: "A slot is changed on one line." }, 400);
     return patchSlotOverride(id, sheetIndex, index, body.slotOverride, body.slotOverridesVersion, actor);
+  }
+
+  // THE ROW'S PICTURE, chosen by a person: a crop of the bill's picture, none,
+  // or the bill's own again. Its own shape and its own version, for the slot
+  // override's reason — and because the pathname is checked against the run.
+  if (body.picture !== undefined) {
+    if (index === null) return json({ ok: false, error: "A picture is chosen for one line." }, 400);
+    return patchLinePicture(id, sheetIndex, index, body.picture, body.pictureVersion, actor);
   }
 
   // A LINE'S KIND, set by a person: its own shape, because a fabric line's
@@ -1757,6 +1769,132 @@ async function patchSlotOverride(
       `;
       if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
       return { version: Number(written[0].version), slotOverridesVersion: version };
+    });
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
+// ---- a row's picture, chosen on the review ------------------------------------
+//
+// `null` puts the bill's own picture back; `{ none: true }` is no picture; a
+// crop names the PNG the browser cut out of the bill's picture and uploaded
+// through the token route. Staged only — the confirm gives what
+// `effectiveRowImage` answers, and nothing canonical is written here, so no
+// change set (the same as every other edit to a staged line).
+//
+// A CROP'S PATHNAME IS CHECKED, NOT TRUSTED. The token route scoped the upload
+// to the project; this re-checks it against the project AND against this
+// run's own picture prefix (`billPicturePrefix`), and asks the store whether
+// the file is there, taking its size and type from the store rather than from
+// the request. A pathname a client names is never fetched with the store's
+// credential before it has passed all three (`blob-source.ts`).
+//
+// A crop needs a picture to have been cut FROM: a row the bill printed no
+// single picture on (none, or two different ones — which registration does
+// not store) can only be given none.
+const PictureCrop = z
+  .object({
+    pathname: z.string().min(1).max(1024),
+    width: z.number().int().positive().max(20_000).nullable().optional(),
+    height: z.number().int().positive().max(20_000).nullable().optional(),
+  })
+  .strict();
+const PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/gif"]);
+
+async function patchLinePicture(
+  id: string,
+  sheetIndex: number,
+  index: number,
+  change: unknown,
+  expectedVersion: unknown,
+  actor: string,
+): Promise<Response> {
+  if (typeof expectedVersion !== "number") {
+    return json({ ok: false, error: "Send the version of this row's picture you were shown." }, 400);
+  }
+  let choice: "own" | "none" | z.infer<typeof PictureCrop>;
+  if (change === null) choice = "own";
+  else if (change && typeof change === "object" && "none" in change) {
+    if ((change as { none?: unknown }).none !== true || Object.keys(change).length !== 1) {
+      return json({ ok: false, error: "No picture is { none: true }." }, 400);
+    }
+    choice = "none";
+  } else {
+    const named = PictureCrop.safeParse(change);
+    if (!named.success) return json({ ok: false, error: "A crop names the file it was stored as." }, 400);
+    choice = named.data;
+  }
+
+  // THE STORE IS ASKED BEFORE THE ROW IS LOCKED: blob I/O inside a
+  // transaction holds a row lock across a network call (`assignMessage`'s
+  // rule). The project comes from the run, never from the request.
+  let crop: BillPictureCrop | null = null;
+  if (typeof choice === "object") {
+    const owner = await sql`select project_id from intake_runs where id = ${id}`;
+    if (!owner[0]) return json({ ok: false, error: "No such import." }, 404);
+    const projectId = String(owner[0].project_id);
+    let pathname: string;
+    try {
+      pathname = assertProjectScopedPathname(choice.pathname, projectId);
+    } catch {
+      return json({ ok: false, error: "That picture is not one of this project's files." }, 400);
+    }
+    if (!pathname.startsWith(billPicturePrefix(projectId, id))) {
+      return json({ ok: false, error: "That picture was not stored for this bill." }, 400);
+    }
+    const stored = await headTrustedBlob(pathname, projectId).catch(() => null);
+    if (!stored) return json({ ok: false, error: "That crop never reached the store. Crop it again." }, 400);
+    if (!PICTURE_TYPES.has(stored.contentType)) return json({ ok: false, error: "That file is not a picture." }, 400);
+    crop = {
+      pathname,
+      contentType: stored.contentType,
+      size: stored.size,
+      width: choice.width ?? null,
+      height: choice.height ?? null,
+    };
+  }
+
+  try {
+    const result = await withTransaction(async (txn) => {
+      const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
+      if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
+      if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+      const doc = assertBoqDocument(rows[0].parsed);
+      const sheet = doc.sheets[sheetIndex];
+      const line = sheet?.lines[index];
+      if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      const current = line.pictureVersion ?? 0;
+      if (current !== expectedVersion) {
+        throw new DomainConflictError(
+          "picture_stale",
+          `The picture on row ${line.lineNo} was changed in another tab. Reload and look at it before changing it again.`,
+        );
+      }
+      if (crop && !rowImageFor(doc.rowImages, sheet.sheetName, line.lineNo)?.pathname) {
+        throw new DomainConflictError(
+          "nothing_to_crop",
+          `The bill printed no single picture on row ${line.lineNo}, so there is nothing to crop. Choose no picture instead.`,
+          { status: 400 },
+        );
+      }
+      const picture: BillPictureOverride | null = choice === "own" ? null : choice === "none" ? { none: true } : crop;
+      const version = current + 1;
+      const written = await txn`
+        update intake_runs
+        set parsed = jsonb_set(
+              parsed,
+              array['sheets', ${String(sheetIndex)}, 'lines', ${String(index)}],
+              coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb)
+                || ${JSON.stringify({ picture, pictureVersion: version })}::jsonb
+            ),
+            updated_by = ${actor}
+        where id = ${id} and status = 'parsed'
+        returning version
+      `;
+      if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+      return { version: Number(written[0].version), pictureVersion: version };
     });
     return json({ ok: true, ...result });
   } catch (cause) {

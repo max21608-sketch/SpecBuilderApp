@@ -1,6 +1,13 @@
 // The picture a bill prints on one of its rows, for the review's thumbnail.
 //
-//   GET /api/imports/<run>/row-image?sheet=<sheet index>&row=<1-based row>
+//   GET /api/imports/<run>/row-image?sheet=<sheet index>&row=<1-based row>[&original=1]
+//
+// The picture the row will GIVE — a person's crop where they made one, none
+// where they chose none — through `effectiveRowImage`, the one answer every
+// reader of a row's picture asks, so the thumbnail and the swatch show what
+// the confirm will file. `original=1` is the bill's own picture, which is
+// what the crop panel crops FROM: cropping a crop would lose the rest of the
+// picture for good.
 //
 // THE PATHNAME IS NEVER ACCEPTED FROM THE CLIENT. The caller names a run, a
 // sheet and a row; the pathname is read from that run's OWN staged document
@@ -11,7 +18,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { streamTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
 import { assertBoqDocument } from "@/lib/boq-import";
-import { rowImageFor } from "@/lib/bill-row-image";
+import { effectiveRowImage, rowImageFor } from "@/lib/bill-row-image";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +29,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const url = new URL(request.url);
   const sheetIndex = Number(url.searchParams.get("sheet"));
   const row = Number(url.searchParams.get("row"));
+  const original = url.searchParams.get("original") === "1";
   if (!Number.isInteger(sheetIndex) || sheetIndex < 0 || !Number.isInteger(row) || row < 1) {
     return json({ ok: false, error: "Name a sheet and a row." }, 400);
   }
@@ -35,7 +43,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const doc = assertBoqDocument(run.parsed);
     const sheet = doc.sheets[sheetIndex];
-    image = sheet ? rowImageFor(doc.rowImages, sheet.sheetName, row) : null;
+    const line = sheet?.lines.find((entry) => entry.lineNo === row);
+    image = !sheet
+      ? null
+      : original || !line
+        ? rowImageFor(doc.rowImages, sheet.sheetName, row)
+        : effectiveRowImage(doc, sheet.sheetName, line);
   } catch {
     image = null;
   }
