@@ -1547,6 +1547,93 @@ dropped and the `#q-` deep link rendered — the route now coalesces to
 `missing` and the tone lookup falls back to plain (`found-in-use.md`,
 2026-09-20).
 
+### A second document never silently beats the bill: it is kept beside it, in red
+
+`db/migrations/0046_attribute_disagreements.sql`, `src/lib/attribute-from-bill.ts`,
+`src/lib/spec-document.ts` (`heldReading`, `annotateHeld`, `asNoteProposal`),
+`src/lib/disagreement-record.ts`, `src/lib/disagreements.ts`,
+`src/lib/disagreement-resolve.ts`, `src/lib/record-refs.ts` (`expandZoneList`),
+`src/lib/tracker-furniture.ts`, `src/components/records/DisagreementRows.tsx`
+
+The Aman pack's `260824 - OMS and FF&E Tracker.pdf` is a finishes schedule
+(pages 1-7) AND a furniture schedule (pages 8-14), dated 24 Aug, and in places
+it says something different from the bill: GR-FUR-04 is bespoke at W21" x D24" x
+SH16" on the bill and a WEWOOD Caravela at W540 x D610 x SH430 mm in the
+tracker. Max, 2026-10-05: *"it needs to take in both ... keep them separate ...
+highlight them in red ... flag it up somewhere ... keep whatever's in the BOQ to
+begin with."* A spec document over a held value used to have two outcomes,
+replace or ignore; neither keeps both.
+
+- **A SIDE TABLE, never a third status on `record_attributes`.** Fifty files
+  read that table assuming a row that is not retired is THE value; the one that
+  forgot a third status would ship the tracker's width to BWS beside the
+  bill's. `attribute_disagreements` holds the statement in the attribute's own
+  shape beside `held_attribute_id`, invisible to the export, the composed cells,
+  the gates and the library. Recording one takes no record version, so it is
+  not in `SPEC_CONTENT_TABLES`; one OPEN row per (held value, document).
+- **"The bill's value" is ONE predicate** (`loadBillHeldIds`), read by the
+  drawings card, the spec-document registers and the confirm. `heldReading`
+  answers `free` / `same` / `bill_differs` / `replace` and is re-read LIVE at
+  review (`annotateHeld`) and inside the confirm, never trusted from the
+  request or the staged JSON. `same` writes nothing; `bill_differs` keeps the
+  bill's live and records the disagreement unless the reviewer chooses "Use
+  this document's instead" (the old replace tick). Anybody else's value keeps
+  the replace tick, unchanged. **An email follows the same rule.**
+- **Red must mean a real disagreement, or nobody reads red.** The first real
+  read put 32 rows in red. Three readings take a statement OUT of the
+  comparison, each measured on that read: a note that only says where the
+  answer is (`pointsElsewhere`: "REFER DRAWING" against the bill's "Stained"),
+  a note whose words contain the bill's or are contained by them
+  (`containsWords`: "WEWOOD — BESPOKE DESIGN" over "BESPOKE DESIGN"), and a
+  figure printed with NO unit whose number equals the held one ("W: 660" over
+  660mm — in `heldReading` only; the shared `alreadyRecorded` still refuses a
+  unitless figure, because a drawing card must stop for its unit). One side in
+  inches and the other metric agree within a millimetre unrounded: the bill's
+  736mm is a person truncating the tracker's 2'-5" (736.6mm). **A free note is
+  written BESIDE the bill's, never over it** — the confirm's retire step is
+  guarded on `reading !== "free"`, and a db test fails without the guard.
+- **A zone list names several items.** The tracker prints `GR / MUR / PL` and
+  `FUR 04`; the bill has `GR-FUR-04` and `PL-FUR-04` and no MUR line.
+  `expandZoneList` is exact (spaced slashes, 1-4 letter zones, a number with a
+  digit, its parts may be spaced), runs only when the whole ref matched
+  nothing, and matches each member on its own: two codes the document names
+  separately are a fan-out, one code on two lines of a phase is still SX11A,
+  and a member with no line is named in words, never a blocker.
+- **Every pending row on a record is in its commit group.** A size the reader
+  could not place staged as a row with an item and no label; the screen's
+  `commitGroups` skipped it, the confirm counted it, and the whole item was
+  refused as "changed while you were reviewing" with nothing changed. On a
+  schedule such a size is now a note, verbatim, with the reason beside it.
+- **The tracker is read TWICE, deliberately.** Its finishes go to the library
+  through the finishes-schedule read; "Also read its furniture as an FF&E
+  schedule — one charged read" on that review registers the same stored file
+  again (`ffe-of:<runId>`, idempotent). The ffe prompt leaves the finish
+  entries out and gives the maker, supplier, link, status and dated comment
+  fixed labels; a statement no question matches is kept as a NOTE on schedule
+  kinds, never on an email.
+- **Settling one needs a reason, either way** (`disagreement_resolve`).
+  "Keep the bill's" changes only the disagreement's status. "Use this instead"
+  is a supersession that keeps the OTHER document's run and page, recomposes
+  the checklist, and takes one version. A disagreement that outlives its held
+  value can only be kept.
+
+**Feet and inches read as printed on every SCREEN, the millimetres in
+brackets** (`composeDimensionCell(rows, note, { mode: "screen" })`, an option
+on the one composer, never a second one): `W 3'7" (1092mm)` with an amber
+"converted from ft-in" chip. Every FILE keeps the millimetre cell — BWS field 3
+is `W***mm` — and any box promising what BWS receives prints the file cell
+under the screen cell. A size labelled AFTER its figure (`16" H X 2'-7" DIA`)
+or with a colon (`W:540`) is read by the page's own label, the whole-label rule
+unchanged (`L` is no slot).
+
+**Measured on the real tracker, local stack, 2026-10-05** (TEST project
+T18192): 399 statements, 315 applied to 40 of the bill's 67 items, 35 open
+disagreements on 25 items. **STILL OPEN:** a code on two lines of one phase
+(PL-FUR-04, GR-FUR-22, GR-FUR-26) waits for a person to choose a line, one
+statement at a time; `46CM D , 48CM H` (comma-separated) is still a note; the
+bill's `W` on a bed is its LENGTH where the tracker's `W` is its width, so
+GR-FUR-08A disagrees red over a convention, which is a person's call.
+
 ### An attribute carries through to the checklist automatically
 
 `src/lib/promote-answers.ts`, `src/lib/confirm-drawings.ts`,

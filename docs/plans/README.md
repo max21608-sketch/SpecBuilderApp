@@ -21,6 +21,55 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-05 (night) — BUILT on `tracker-int`: the tracker beside the bill, in red; feet and inches as printed with millimetres beside
+
+Max, reading the Aman pack: the OMS & FF&E Tracker's furniture pages disagree
+with the bill in places — *"it needs to take in both ... keep them separate ...
+highlight them in red ... flag it up somewhere ... keep whatever's in the BOQ to
+begin with"*; feet and inches *"converted in app ... always keep the original
+measurement, but have in brackets beside it the one in millimeters"*; and run
+the document in and check it appears on the line items. On the integration
+branch `tracker-int` (origin), NOT on staging: it carries migration **0046**
+(`attribute_disagreements`, plus the `disagreement_resolve` change-set kind),
+and `/api/records` reads that table, so the phase table would 500 on the
+sandbox before it is applied. Sandbox and pilot migrations are Max's. Two
+coder briefs (`~/dev/briefs/tracker/`), reviewed and merged, then eight fixes
+found by reading the real document.
+
+- The tracker's finishes schedule review offers "Also read its furniture as an
+  FF&E schedule — one charged read"; the furniture rows reach the bill's lines,
+  a zone list (`GR / MUR / PL FUR 04`) landing on each line it names.
+- A value that disagrees with the BILL keeps the bill's live and is recorded
+  beside it: red on the review, a red "n disagree" chip and a Disagree filter
+  on the phase table, red rows under the value on the record with "Keep the
+  bill's" / "Use this instead" (reason required), a red tile on the overview.
+- Maker, supplier, link, approval status and dated comments are kept as notes.
+- Feet and inches on every screen as printed with the millimetres beside them;
+  every file output unchanged.
+- Found by the real read and fixed: a spaced number (`FUR 04`), `W:540`,
+  `16" H X 2'-7" DIA`, a 1mm conversion read as a disagreement, "REFER
+  DRAWING" and fuller wording read as disagreements (32 red rows → the real
+  ones), a unitless `660` over 660mm, a size row with no label refusing its
+  whole item, a product link widening the specs table.
+
+**Verified on the LOCAL stack, not staging** (the sandbox is read-only to
+Claude), TEST project **T18192 "TEST: tracker beside the bill (2026-10-05)"**:
+the real Aman bill (67 items), the real tracker read twice for real (finishes:
+13 added to the library, 2 filled, 7 fuller; furniture: 399 statements, 315
+applied to 40 items, 35 open disagreements on 25 items), "Keep the bill's" on
+PL-FUR-24 and "Use this instead" on PL-FUR-05's height driven in the browser —
+the answer recomposed to `W1092 x D575 x H787mm`. GR-FUR-04's three
+disagreements are left open to look at. `checks:local` green at the tip (see
+the commit that adds this entry). **Not accepted by Max.**
+
+**Max's, in order:** (1) `npm run db:migrate` on the sandbox (0046); (2) the
+branch fast-forwards onto staging; (3) upload the tracker on staging — as a
+finishes schedule, then press "Also read its furniture". **Open:** a code on two
+lines of one phase (PL-FUR-04, GR-FUR-22, GR-FUR-26) waits for a person to pick
+the line; the bill's `W` on a bed is its length (GR-FUR-08A reads red over a
+convention); FUR-21/22.1/22.2/23/27 have no bill line; an email that disagrees
+with the bill now also keeps the bill's by default.
+
 ## 2026-10-05 (evening) — BUILT on `finishes-int`: the bill fills the finishes library, BW's finish per code, crop on the bill, a photo beats a drawing
 
 Max: "Build the rest and don't stop till you're done." Every decision recorded
