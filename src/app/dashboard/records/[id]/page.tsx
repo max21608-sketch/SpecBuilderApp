@@ -1233,13 +1233,16 @@ function RecordView() {
                                 {attribute.state === "tbc" && !attribute.value ? (
                                   <Chip tone="warn">TBC</Chip>
                                 ) : (
-                                  <span className="text-neutral-900">
+                                  <span className="text-neutral-900 [overflow-wrap:anywhere]">
                                     {/* A note is routinely a page of general
                                         conditions in one row: clamped, and read
                                         back out of the drawing's capitals. Both
                                         are display only — see src/lib/shout.ts. */}
                                     {attribute.value && <SpecValue text={attribute.value} />}
-                                    {attribute.unit && !valueCarriesItsUnit(attribute.value) && <span className="text-neutral-500">{attribute.unit}</span>}
+                                    {/* An inch figure reads as the page printed it, 24", not "24in". */}
+                                    {attribute.unit && !valueCarriesItsUnit(attribute.value) && (
+                                      <span className="text-neutral-500">{attribute.unit === "in" ? '"' : attribute.unit}</span>
+                                    )}
                                     <ImperialMillimetres attribute={attribute} />
                                     {attribute.state === "tbc" && (
                                       <span className="ml-1.5 align-middle"><Chip tone="warn">TBC</Chip></span>
