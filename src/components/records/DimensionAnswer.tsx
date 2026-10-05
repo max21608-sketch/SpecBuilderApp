@@ -55,7 +55,8 @@
 import { useState } from "react";
 import Button from "@/components/ui/Button";
 import { TONE } from "@/components/ui/tone";
-import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
+import { composeDimensionCell, valueCarriesItsUnit, type DimensionRow } from "@/lib/dimensions";
+import { ConvertedChip } from "@/components/records/ItemSpecChips";
 import {
   DIMENSION_SLOTS,
   DIMENSION_SLOT_LABELS,
@@ -141,7 +142,11 @@ export default function DimensionAnswer({
       state: row.state as AttributeState,
       sortOrder: index,
     }));
-  const cell = rows.length > 0 || note ? composeDimensionCell(rows, note).text : null;
+  // SCREEN mode: a feet-and-inches slot reads as printed, its millimetres in
+  // brackets, and the chip says so. The checklist answer this control's write
+  // recomposes is still the file's millimetre cell.
+  const composed = rows.length > 0 || note ? composeDimensionCell(rows, note, { mode: "screen" }) : null;
+  const cell = composed?.text ?? null;
 
   const onRecordCount = required ? required.filter((option) => taken.has(option)).length : 0;
 
@@ -210,6 +215,7 @@ export default function DimensionAnswer({
       {cell && (
         <p className="mt-1 text-[11px] text-neutral-600">
           Dimensions now read <span className="font-mono text-neutral-900">{cell}</span>
+          {composed?.fromImperial && <ConvertedChip className="ml-1.5 align-middle" />}
         </p>
       )}
 
@@ -236,7 +242,7 @@ export default function DimensionAnswer({
                   {row ? (
                     <span className="font-mono text-neutral-900">
                       {row.value ?? "—"}
-                      {row.unit ?? ""}
+                      {valueCarriesItsUnit(row.value) ? "" : (row.unit ?? "")}
                       {row.state === "tbc" ? " (TBC)" : ""}
                     </span>
                   ) : needed ? (

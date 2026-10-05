@@ -33,7 +33,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import ContactsPanel, { type Contact, type ContactsOutstanding } from "@/components/projects/ContactsPanel";
 import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
-import SpecTable, { type Focus, type RunTally } from "@/components/records/SpecTable";
+import SpecTable, { FOCUSES, type Focus, type RunTally } from "@/components/records/SpecTable";
 import ExportMenu from "@/components/records/ExportMenu";
 import ProjectHistory from "@/components/history/ProjectHistory";
 import OpenChangeBar from "@/components/history/OpenChangeBar";
@@ -329,8 +329,8 @@ function ProjectOverview() {
   // "set on WD-05 in the finishes library" link (0045).
   const finishQuery = searchParams.get("finish") ?? "";
   const initialFocus: Focus = ((): Focus => {
-    const known: Focus[] = ["tgq", "waiting", "no_category", "no_level", "quotable"];
-    return known.find((value) => value === rawFocus) ?? null;
+    // The table's own list, so a focus it learns is one a link can carry.
+    return FOCUSES.find((value) => value === rawFocus) ?? null;
   })();
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<DocumentRun[] | null>(null);
@@ -1678,7 +1678,9 @@ function ProjectOverview() {
               ================================================================== */}
           {completion.records > 0 && (
             <>
-              <div className="mt-4 grid grid-cols-2 gap-2.5 lg:grid-cols-5">
+              <div
+                className={`mt-4 grid grid-cols-2 gap-2.5 ${summary.disagreements > 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}
+              >
                 <StatTile
                   label="Line items"
                   value={summary.records}
@@ -1746,6 +1748,34 @@ function ProjectOverview() {
                   }
                   href={finishesHref}
                 />
+                {/* ======================================================
+                    TWO DOCUMENTS DISAGREE, AND NOBODY HAS DECIDED (0046).
+
+                    Max, 2026-10-05: "highlight them in red just to show that
+                    there's big disagreement and flag it up somewhere". The
+                    bill's value stands until a person decides; this is the
+                    somewhere. Red, and ABSENT at zero — a tile reading 0 on
+                    every project is a red box people learn to read past. It
+                    lands on the phase holding the first one, already filtered
+                    to the items that disagree, the way every other tile here
+                    lands on the table. Counted by src/lib/disagreements.ts,
+                    the loader the table and the record read.
+                    ====================================================== */}
+                {summary.disagreements > 0 && (
+                  <StatTile
+                    label="Documents disagree"
+                    tone="danger"
+                    value={summary.disagreements}
+                    meaning={`disagreement${summary.disagreements === 1 ? "" : "s"} between documents`}
+                    href={
+                      summary.disagreementRunId
+                        ? `/dashboard/projects/${project.id}?tab=${summary.disagreementRunId}&focus=disagree`
+                        : firstRunHref
+                          ? `${firstRunHref}&focus=disagree`
+                          : null
+                    }
+                  />
+                )}
               </div>
               <p className="mt-1.5 text-xs text-neutral-500">
                 Pressing a tile opens the spec table already filtered to it. TGQ, Also outstanding and Settled count

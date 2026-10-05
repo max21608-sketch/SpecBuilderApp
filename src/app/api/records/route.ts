@@ -13,6 +13,8 @@ import { createRecord } from "@/lib/manual-capture";
 import { REF_SYSTEMS } from "@/lib/spec-vocab";
 import { loadOutstanding, loadSentCoverage, questionKey, waitingByQuestion } from "@/lib/chase-drafts";
 import { gateSummary, gatesForRecord, loadGateContext } from "@/lib/gate-load";
+import { EMPTY_SPEC_SUMMARY, loadSpecSummaries } from "@/lib/record-spec-summary";
+import { countOpenDisagreementsByRecord } from "@/lib/disagreements";
 
 export const dynamic = "force-dynamic";
 
@@ -107,6 +109,8 @@ export async function GET(request: Request): Promise<Response> {
       -- decision about one item; a control that quietly filed the other
       -- twenty-one would be the opposite of the rule it exists to serve.
       r.version,
+      -- 0034's one qualifier, composed into the item's size line below.
+      r.dimension_note,
       r.retired_at,
       r.retired_by,
       r.run_id,
@@ -256,6 +260,25 @@ export async function GET(request: Request): Promise<Response> {
     rows.map((row) => String(row.id)),
   );
 
+  // ---- what each item IS, and where the documents disagree ----------------
+  //
+  // BULK, one statement each, never per record: the size and finishes line
+  // under each item's name (the composer in SCREEN mode, so a feet-and-inches
+  // size reads as printed with its millimetres beside it), and the count of
+  // OPEN disagreements between documents (0046) — the same loader the record
+  // screen lists them from and the overview counts them with.
+  const recordIds = rows.map((row) => String(row.id));
+  const [specSummaries, disagreementCounts] = await Promise.all([
+    loadSpecSummaries(
+      sql,
+      rows.map((row) => ({
+        id: String(row.id),
+        dimensionNote: row.dimension_note === null || row.dimension_note === undefined ? null : String(row.dimension_note),
+      })),
+    ),
+    countOpenDisagreementsByRecord(sql, recordIds),
+  ]);
+
   const perRecord = new Map<
     string,
     { waiting: number; toQuote: number; toQuoteWaiting: number; questions: ToQuoteQuestion[] }
@@ -334,6 +357,8 @@ export async function GET(request: Request): Promise<Response> {
         // the two apart so a row it has never fetched does not render as a row
         // with nothing outstanding.
         to_quote_questions: withToQuote ? (counts?.questions ?? []) : undefined,
+        spec_summary: specSummaries.get(String(row.id)) ?? EMPTY_SPEC_SUMMARY,
+        open_disagreements: disagreementCounts.get(String(row.id)) ?? 0,
       };
     }),
     retiredCount: Number(retiredRows[0]?.n ?? 0),

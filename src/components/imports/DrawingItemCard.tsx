@@ -36,6 +36,7 @@
 import { Fragment, useEffect, useState } from "react";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
+import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { isMeasuredRow, measuredRows, wasReadByModel } from "@/lib/drawing-document";
 import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
@@ -331,17 +332,19 @@ export default function ItemCard({
   // it is what makes the positional W x D x H assumption on a combined line
   // acceptable: a transposed order is obvious here in a second, where ticking a
   // per-row confirmation a hundred times would catch nothing.
-  const dimensionCell = composeDimensionCell(
-    pending
-      .filter((o) => o.attrGroup === "dimension" && o.dimensionSlot)
-      .map((o, index) => ({
-        slot: o.dimensionSlot as DimensionSlot,
-        value: drafts[o.id]?.value !== undefined ? (drafts[o.id]?.value ?? null) : o.value,
-        unit: o.unit,
-        state: o.state ?? "confirmed",
-        sortOrder: index,
-      })),
-  );
+  const dimensionRows = pending
+    .filter((o) => o.attrGroup === "dimension" && o.dimensionSlot)
+    .map((o, index) => ({
+      slot: o.dimensionSlot as DimensionSlot,
+      value: drafts[o.id]?.value !== undefined ? (drafts[o.id]?.value ?? null) : o.value,
+      unit: o.unit,
+      state: o.state ?? "confirmed",
+      sortOrder: index,
+    }));
+  const dimensionCell = composeDimensionCell(dimensionRows);
+  // The same rows as a person reads them: feet and inches as printed, with the
+  // millimetres beside them. `dimensionCell` stays what BWS receives.
+  const dimensionShown = composeDimensionCell(dimensionRows, null, { mode: "screen" });
 
   const toggleRun = (recordId: string, on: boolean) => {
     const ticked = new Set(item.targets?.ticked ?? resolution?.resolution.suggested ?? []);
@@ -648,7 +651,7 @@ export default function ItemCard({
               <Tip>Exactly what BWS field 3 will receive, composed the way the export composes it.</Tip>
             </p>
             {dimensionCell.text ? (
-              <p className="font-mono text-[13px] text-neutral-900">{dimensionCell.text}</p>
+              <ComposedDimensionText shown={dimensionShown} fileText={dimensionCell.text} />
             ) : (
               <p className="text-neutral-500">
                 No width, depth or height placed yet. Give a figure below its slot, or leave them as notes — they stay

@@ -50,6 +50,8 @@ import { unallocatedQty } from "@/lib/record-variants";
 import { GATE_SHORT_LABELS, NO_MATRIX_CATEGORY_EXPLANATION, type Gate } from "@/lib/gates";
 import type { GateSummaryEntry } from "@/lib/gate-load";
 import AddItem from "@/components/records/AddItem";
+import ItemSpecChips from "@/components/records/ItemSpecChips";
+import type { SpecSummary } from "@/lib/record-spec-summary";
 import AddConfiguration from "@/components/records/AddConfiguration";
 import AreaSelect from "@/components/ui/AreaSelect";
 import { areaOptions, matchesArea } from "@/lib/area-filter";
@@ -155,6 +157,19 @@ export type SpecRecord = {
   mockup_of_run_name?: string | null;
   mockup_copy_id?: string | null;
   mockup_copy_run_name?: string | null;
+  /**
+   * What the item IS — its size and finish codes — in one line under its name,
+   * the bill review's look (2026-10-05). The size is `composeDimensionCell` in
+   * SCREEN mode, so feet and inches read as printed with millimetres beside
+   * them. Optional, so a payload from before it still renders.
+   */
+  spec_summary?: SpecSummary;
+  /**
+   * OPEN disagreements between documents on this item (0046) — a later
+   * document said something different from a value it holds, and nobody has
+   * decided. Red, and a link to where it is decided.
+   */
+  open_disagreements?: number;
 };
 
 /** The phase this table is showing, as `/api/records` reads it off the phase row. */
@@ -320,7 +335,17 @@ function OtherRefs({ clientCode, refs }: { clientCode: string | null; refs: stri
 }
 
 /** What the tiles above the table can narrow it to. Null lists everything. */
-export type Focus = null | "tgq" | "waiting" | "no_category" | "no_level" | "quotable";
+export type Focus = null | "tgq" | "waiting" | "no_category" | "no_level" | "quotable" | "disagree";
+
+/** Every focus a link may arrive with — the overview resolves `?focus=` against this, never a copy of it. */
+export const FOCUSES: readonly Exclude<Focus, null>[] = [
+  "tgq",
+  "waiting",
+  "no_category",
+  "no_level",
+  "quotable",
+  "disagree",
+];
 
 /** The word beside the removable chip in the filter row, per tile. */
 const FOCUS_LABELS: Record<Exclude<Focus, null>, string> = {
@@ -329,6 +354,7 @@ const FOCUS_LABELS: Record<Exclude<Focus, null>, string> = {
   no_category: "No category",
   no_level: "No level",
   quotable: "Ready to quote",
+  disagree: "Documents disagree",
 };
 
 export default function SpecTable({
@@ -595,6 +621,9 @@ export default function SpecTable({
     // on it is tiered under the fallback half of TGQ, so calling it ready would
     // be a reading of silence.
     readyToQuote: records.filter((record) => record.to_quote_outstanding === 0).length,
+    // ITEMS on which two documents disagree, and the disagreements behind them.
+    disagreeItems: records.filter((record) => (record.open_disagreements ?? 0) > 0).length,
+    disagreements: records.reduce((sum, record) => sum + (record.open_disagreements ?? 0), 0),
   };
 
   /** What the table lists. The tiles and the filter row narrow this, nothing else. */
@@ -627,6 +656,8 @@ export default function SpecTable({
         return !record.level;
       case "quotable":
         return record.to_quote_outstanding === 0;
+      case "disagree":
+        return (record.open_disagreements ?? 0) > 0;
       default:
         return true;
     }
@@ -707,7 +738,7 @@ export default function SpecTable({
           The counts NEVER change with the filter. They are the run's own, so
           narrowing the screen can never make a run look finished. */}
       {records.length > 0 && (
-        <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-5">
+        <div className={`grid grid-cols-2 gap-2.5 ${tally.disagreements > 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
           {/* ==================================================================
               EVERY TILE ON THIS STRIP COUNTS ITEMS, BECAUSE THAT IS WHAT
               PRESSING ONE LISTS.
@@ -776,6 +807,20 @@ export default function SpecTable({
             onPress={() => setFocus(focus === "quotable" ? null : "quotable")}
             active={focus === "quotable"}
           />
+          {/* TWO DOCUMENTS DISAGREE (0046). Red, and ABSENT at zero: a tile
+              reading 0 on every phase of every project teaches people to read
+              past the one place red has to be read. Counts ITEMS, like every
+              tile on this strip, because that is what pressing it lists. */}
+          {tally.disagreements > 0 && (
+            <StatTile
+              label="Disagree"
+              tone="danger"
+              value={tally.disagreeItems}
+              meaning={`item${tally.disagreeItems === 1 ? "" : "s"} · ${tally.disagreements} between documents`}
+              onPress={() => setFocus(focus === "disagree" ? null : "disagree")}
+              active={focus === "disagree"}
+            />
+          )}
         </div>
       )}
 
@@ -856,7 +901,7 @@ export default function SpecTable({
             <AreaSelect options={areas} value={area} onChange={setArea} />
             {focus !== null && (
               <button type="button" onClick={() => setFocus(null)} className="inline-flex">
-                <Chip tone={focus === "quotable" ? "good" : focus === "tgq" ? "danger" : "warn"}>
+                <Chip tone={focus === "quotable" ? "good" : focus === "tgq" || focus === "disagree" ? "danger" : "warn"}>
                   {FOCUS_LABELS[focus]} <span aria-hidden>✕</span>
                   <span className="sr-only">remove this filter</span>
                 </Chip>
@@ -1093,6 +1138,42 @@ export default function SpecTable({
                         </Link>
                         {record.product_reference && (
                           <span className="text-neutral-500"> · {record.product_reference}</span>
+                        )}
+                        {/* WHAT THE ITEM IS, the bill review's own line: the
+                            size (screen mode — feet and inches as printed, the
+                            millimetres beside them) and each finish code. And
+                            where two documents disagree about it, red, with a
+                            link to the place it is decided. */}
+                        {/* Only where there is something to say: every row
+                            carries a summary, and an empty line under each
+                            name would make a 300-line phase taller for
+                            nothing. */}
+                        {(Boolean(record.spec_summary?.dimensions) ||
+                          (record.spec_summary?.finishes.length ?? 0) > 0 ||
+                          (record.open_disagreements ?? 0) > 0) && (
+                          <div className="mt-1">
+                            <ItemSpecChips
+                              dimensionCell={record.spec_summary?.dimensions ?? ""}
+                              fromImperial={record.spec_summary?.fromImperial === true}
+                              emptySize={null}
+                              chipClassName="!whitespace-normal max-w-full [overflow-wrap:anywhere]"
+                              finishes={(record.spec_summary?.finishes ?? []).map((finish) => ({
+                                key: finish.code,
+                                label: finish.code,
+                                title: [finish.field ?? "in no BWS field", finish.value].filter(Boolean).join(" — "),
+                              }))}
+                            >
+                              {(record.open_disagreements ?? 0) > 0 && (
+                                <Link
+                                  href={`/dashboard/records/${record.id}?tab=specs#disagreements`}
+                                  className="no-underline"
+                                  title="Another document says something different from a value this item holds. Open it to decide which stands."
+                                >
+                                  <Chip tone="danger">{record.open_disagreements} disagree</Chip>
+                                </Link>
+                              )}
+                            </ItemSpecChips>
+                          </div>
                         )}
                         {/* A HEADING, not an item. Its configurations are what
                             the export ships — and a row that stayed silent

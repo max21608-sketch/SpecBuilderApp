@@ -27,8 +27,10 @@
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import { TONE } from "@/components/ui/tone";
+import ItemSpecChips from "@/components/records/ItemSpecChips";
 import type { BillDescriptionPlan, PlannedAttribute, SlotOverride } from "@/lib/bill-description";
 import { DIMENSION_SLOT_LABELS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
+import { toMillimetres, valueCarriesItsUnit } from "@/lib/dimensions";
 
 /** Set a size part's slot (`null` puts it back as printed). Absent where the line cannot change. */
 export type SetSlot = (key: string, slot: SlotOverride | null) => void;
@@ -49,7 +51,17 @@ const isFinish = (attribute: PlannedAttribute) => attribute.attrGroup !== "note"
 
 /** What one planned attribute IS, in the reviewer's words. */
 function becomes(attribute: PlannedAttribute): string {
-  if (attribute.slot) return `${DIMENSION_SLOT_LABELS[attribute.slot]} ${attribute.value}${attribute.unit ?? ""}`;
+  if (attribute.slot) {
+    // A feet-and-inches figure prints its own unit and gets its millimetres
+    // beside it — `toMillimetres`, the conversion the composer uses.
+    if (valueCarriesItsUnit(attribute.value) || attribute.unit === "in") {
+      const mm = attribute.unit === "in" || attribute.unit === null ? toMillimetres(attribute.value, "in") : null;
+      // (A marked value beside a metric unit is a conflict the cautions name; no conversion is shown.)
+      const printed = valueCarriesItsUnit(attribute.value) ? attribute.value : `${attribute.value}"`;
+      return `${DIMENSION_SLOT_LABELS[attribute.slot]} ${printed}${mm?.ok ? ` (${mm.mm}mm)` : ""}`;
+    }
+    return `${DIMENSION_SLOT_LABELS[attribute.slot]} ${attribute.value}${attribute.unit ?? ""}`;
+  }
   if (isFinish(attribute)) return attribute.specFieldName ? `${attribute.specFieldName}` : "a finish in no BWS field";
   return attribute.state === "tbc" ? "a note, TBC" : "a note";
 }
@@ -79,36 +91,33 @@ export function BillDescriptionSummary({
   const notes = plan.attributes.filter((attribute) => attribute.attrGroup === "note");
   return (
     <div className="mt-1 space-y-1">
-      <div className="flex flex-wrap items-center gap-1 text-xs text-neutral-600">
-        {plan.dimensionCell ? (
-          <Chip
-            mono
-            className={chipClassName}
-            title="The Dimensions cell this item will carry, composed as the export writes it"
-          >
-            {plan.dimensionCell}
-          </Chip>
-        ) : (
-          <span className="text-neutral-500">no size placed</span>
-        )}
-        {finishes.map((attribute, index) => (
-          <Chip
-            key={`${attribute.materialCode ?? "finish"}-${index}`}
-            mono
-            tone={attribute.specFieldId ? "plain" : "blocked"}
-            className={chipClassName}
-            title={attribute.value}
-          >
-            {attribute.materialCode ?? "—"} → {attribute.specFieldName ?? "no field"}
-          </Chip>
-        ))}
+      {/* THE SIZE AS THE BILL PRINTED IT. A feet-and-inches slot reads as
+          printed with its millimetres beside it — the composer's screen mode —
+          and the chip says it was converted. What BWS receives is the plan's
+          millimetre cell, which the panel row below still prints. */}
+      <ItemSpecChips
+        dimensionCell={plan.dimensionCellShown ?? plan.dimensionCell}
+        fromImperial={plan.dimensionFromImperial === true}
+        chipClassName={chipClassName}
+        dimensionTitle={
+          plan.dimensionFromImperial
+            ? `The Dimensions cell this item will carry. BWS receives it in millimetres: ${plan.dimensionCell}`
+            : "The Dimensions cell this item will carry, composed as the export writes it"
+        }
+        finishes={finishes.map((attribute, index) => ({
+          key: `${attribute.materialCode ?? "finish"}-${index}`,
+          label: `${attribute.materialCode ?? "—"} → ${attribute.specFieldName ?? "no field"}`,
+          tone: attribute.specFieldId ? "plain" : "blocked",
+          title: attribute.value,
+        }))}
+      >
         <span>
           {notes.length} note{notes.length === 1 ? "" : "s"}
         </span>
         <Button variant="quiet" size="xs" aria-expanded={open} onClick={onToggle}>
           {open ? "Hide" : "Show"} all {plan.statements.length} statement{plan.statements.length === 1 ? "" : "s"}
         </Button>
-      </div>
+      </ItemSpecChips>
       {plan.cautions.map((caution) => (
         <p key={caution} className={`text-xs ${TONE.warn.text}`}>
           {caution}

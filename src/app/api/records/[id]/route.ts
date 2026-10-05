@@ -22,6 +22,7 @@ import { loadPalettes } from "@/lib/palette-load";
 import { loadConfigurationFamily } from "@/lib/configuration-family";
 import { currentPicture, itemImageSource, offeredPicture } from "@/lib/item-image";
 import { loadItemPictures } from "@/lib/item-image-write";
+import { loadDisagreements } from "@/lib/disagreements";
 import {
   designerKey,
   loadOutstanding,
@@ -431,6 +432,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     offered: offeredRow ? { id: offeredRow.id, source: itemImageSource(offeredRow) } : null,
   };
 
+  // ---- what a later document said that disagrees (0046) --------------------
+  //
+  // Open AND settled: the open ones sit under the value they disagree with, in
+  // red; the settled ones go under "show retired" with the decision, who and
+  // when. One loader for every screen that counts or lists them.
+  const disagreements = await loadDisagreements(sql, [id]);
+
   return json({
     ok: true,
     record,
@@ -439,6 +447,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     refs,
     attributes,
     retiredAttributes: retired,
+    disagreements,
     answers,
     categories,
     specFields,
