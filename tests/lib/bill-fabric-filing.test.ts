@@ -289,3 +289,66 @@ describe("planBillFabrics — the review's line per fabric row", () => {
     expect(out.get("0:1")?.filing).toBe("already on the record from the bill — nothing filed");
   });
 });
+
+describe("the review's swatch sentence reads the row's EFFECTIVE picture", () => {
+  type Line = Parameters<typeof planBillFabrics>[0]["sheets"][number]["lines"][number];
+  const item = (index: number, lineNo: number, code: string, words: string): Line => ({
+    index,
+    lineNo,
+    code,
+    itemDescription: words,
+    ignored: false,
+    rowKind: "item",
+  });
+  const fabric = (index: number, lineNo: number, code: string, words: string, parentRow: number, parentCode: string, over: Partial<Line> = {}): Line => ({
+    index,
+    lineNo,
+    code,
+    itemDescription: words,
+    ignored: false,
+    rowKind: "finish_for",
+    finishFor: { row: parentRow, code: parentCode },
+    ...over,
+  });
+  const crop = { pathname: "p/crop-3.png", contentType: "image/png", size: 5, width: 2, height: 2 };
+  const plan = (lines: Line[]) =>
+    planBillFabrics({
+      sheets: [{ sheetName: "Bill", ignored: false, lines }],
+      rowImages: { Bill: { "3": picture("p/a.png"), "5": picture("p/a.png") } },
+      library: [],
+      heldSwatches: new Set(),
+      prefix: "ZZA",
+      descriptionCodes: () => [],
+      heldFabric: () => [],
+    });
+
+  it("says a crop is the swatch, and that one cropped line now differs from its uncropped twin", () => {
+    const out = plan([
+      item(0, 2, "ZZ-FUR-10", "Stool"),
+      fabric(1, 3, "ZZ-FAB-13 (ZZ-FUR-10)", "Example velvet", 2, "ZZ-FUR-10", { picture: crop }),
+      item(2, 4, "ZZ-FUR-26", "Drawers"),
+      fabric(3, 5, "ZZ-FAB-13 (ZZ-FUR-26)", "Example velvet", 4, "ZZ-FUR-26"),
+    ]);
+    expect(out.get("0:1")?.swatch).toBe("swatch: none — rows 3 and 5 differ");
+    expect(out.get("0:3")?.swatch).toBe("swatch: none — rows 3 and 5 differ");
+  });
+
+  it("takes a crop as the swatch where it is the code's only picture", () => {
+    const out = plan([
+      item(0, 2, "ZZ-FUR-10", "Stool"),
+      fabric(1, 3, "ZZ-FAB-13 (ZZ-FUR-10)", "Example velvet", 2, "ZZ-FUR-10", { picture: crop }),
+      item(2, 4, "ZZ-FUR-26", "Drawers"),
+      fabric(3, 5, "ZZ-FAB-13 (ZZ-FUR-26)", "Example velvet", 4, "ZZ-FUR-26", { picture: { none: true } }),
+    ]);
+    expect(out.get("0:1")?.swatch).toBe("swatch: this row's crop");
+    expect(out.get("0:3")?.swatch).toBe("swatch: row 3's picture");
+  });
+
+  it("says no picture was chosen where every line of the code refused one", () => {
+    const out = plan([
+      item(0, 2, "ZZ-FUR-10", "Stool"),
+      fabric(1, 3, "ZZ-FAB-13 (ZZ-FUR-10)", "Example velvet", 2, "ZZ-FUR-10", { picture: { none: true } }),
+    ]);
+    expect(out.get("0:1")?.swatch).toBe("swatch: none — no picture chosen for this row");
+  });
+});

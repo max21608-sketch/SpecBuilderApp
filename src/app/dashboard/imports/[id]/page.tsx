@@ -7,7 +7,7 @@
 // and an ambiguous match offers candidates rather than picking one. A line the
 // matcher could not resolve stays blank — a plausible guess in a field a human
 // skims past is worse than an obvious gap.
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -54,7 +54,17 @@ import {
   type ReviewDescription,
 } from "@/components/imports/BillDescription";
 import type { SlotOverride } from "@/lib/bill-description";
-import { rowImageFor, type BillRowImage, type BoqRowImages } from "@/lib/bill-row-image";
+import {
+  effectiveRowImage,
+  isNoPicture,
+  isPictureCrop,
+  rowImageFor,
+  type BillPictureOverride,
+  type BillRowImage,
+  type BoqRowImages,
+} from "@/lib/bill-row-image";
+// A row's picture opened under it: crop it, take it whole, or take none.
+import BillPicturePanelRow, { type PictureChoice } from "@/components/imports/BillPicturePanel";
 // Type only: the plan is computed on the server (`planBillFabrics`).
 import type { FabricLinePlan } from "@/lib/bill-fabric-filing";
 // Pure: the area a record will carry (a Sub-Area composed in), the same
@@ -115,6 +125,10 @@ type Line = {
   // A reviewer's slot changes on the size line, and the version of that map
   // the screen was drawn with — sent back with every change.
   slotOverridesVersion?: number;
+  // The picture a person chose for the row — a crop, or none — and its own
+  // version, sent back with every change (`effectiveRowImage`).
+  picture?: BillPictureOverride | null;
+  pictureVersion?: number;
 } & RowKindFields;
 
 /**
@@ -166,36 +180,78 @@ function BillRowPicture({
   lineNo,
   image,
   size,
+  version = 0,
+  chosenNone = false,
+  open = false,
+  onOpen,
 }: {
   importId: string;
   sheetIndex: number;
   lineNo: number;
+  /** What the row will give — `effectiveRowImage`, the confirm's own answer. */
   image: BillRowImage | null;
   size: "thumb" | "swatch";
+  /** The row's picture version: a new one is a new URL, so a crop is not hidden behind the cache. */
+  version?: number;
+  /** A person chose no picture for the row. */
+  chosenNone?: boolean;
+  open?: boolean;
+  /** Opens the row's picture panel. Absent where nothing about the picture can change. */
+  onOpen?: () => void;
 }) {
+  const swatch = size === "swatch";
+  const what = swatch ? "swatch" : "picture";
+  const wrap = (content: ReactNode) =>
+    onOpen ? (
+      // A BUTTON, not a link: it opens a panel in place and goes nowhere.
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-expanded={open}
+        aria-label={`Change the ${what} on row ${lineNo}`}
+        title={`Crop the ${what}, take it whole, or take none`}
+        className="block shrink-0 cursor-pointer rounded hover:ring-2 hover:ring-sky-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+      >
+        {content}
+      </button>
+    ) : (
+      content
+    );
   if (!image?.pathname) {
-    if (size === "thumb") return null;
-    return (
+    // An item with nothing to show draws nothing — unless there is something
+    // to change: a "no picture" somebody chose, or two pictures nobody took.
+    if (!swatch && !(onOpen && (chosenNone || image))) return null;
+    return wrap(
       <span
-        className="block h-9 w-9 shrink-0 rounded border border-dashed border-neutral-300 bg-white"
-        title={
-          image
-            ? `${image.pictures} pictures on this row — none is taken as the swatch`
-            : "The bill has no picture on this row"
+        className={
+          swatch
+            ? "block h-9 w-9 shrink-0 rounded border border-dashed border-neutral-300 bg-white"
+            : "flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded border border-dashed border-neutral-300 bg-white text-center text-[10px] leading-tight text-neutral-500"
         }
-      />
+        title={
+          chosenNone
+            ? `No ${what} — chosen on this review`
+            : image
+              ? `${image.pictures} pictures on this row — none is taken as the swatch`
+              : "The bill has no picture on this row"
+        }
+      >
+        {!swatch && (chosenNone || !image ? "no picture" : `${image.pictures} pictures`)}
+      </span>,
     );
   }
-  const swatch = size === "swatch";
-  return (
+  const versioned = version > 0 ? `&v=${version}` : "";
+  return wrap(
     // eslint-disable-next-line @next/next/no-img-element -- a private, session-scoped stream; next/image would proxy it
     <img
-      src={`/api/imports/${importId}/row-image?sheet=${sheetIndex}&row=${lineNo}`}
+      src={`/api/imports/${importId}/row-image?sheet=${sheetIndex}&row=${lineNo}${versioned}`}
       alt={swatch ? `The swatch on row ${lineNo} of the bill` : `The picture on row ${lineNo} of the bill`}
       title={
-        swatch
-          ? "The bill's picture for this fabric line"
-          : "The bill's picture for this line — the record's picture until a drawing crop replaces it"
+        onOpen
+          ? undefined
+          : swatch
+            ? "The bill's picture for this fabric line"
+            : "The bill's picture for this line — the record's picture until a drawing crop replaces it"
       }
       loading="lazy"
       width={swatch ? 36 : 52}
@@ -205,7 +261,7 @@ function BillRowPicture({
           ? "block h-9 w-9 shrink-0 rounded border border-neutral-200 bg-white object-cover"
           : "block h-[52px] w-[52px] shrink-0 rounded border border-neutral-200 bg-white object-contain"
       }
-    />
+    />,
   );
 }
 
@@ -619,6 +675,13 @@ export default function ReviewImportPage() {
       return next;
     });
 
+  /**
+   * THE ONE ROW WHOSE PICTURE IS OPEN, as `sheet:index` — one at a time, like
+   * the crops it makes: a second panel would be a second crop competing for
+   * the same queue, and a second place to lose track of which row is which.
+   */
+  const [openPicture, setOpenPicture] = useState<string | null>(null);
+
   /** Fabric lines whose "why?" is open, as `sheet:index`. */
   const [openWhy, setOpenWhy] = useState<Set<string>>(() => new Set());
   const toggleWhy = (key: string) =>
@@ -722,6 +785,29 @@ export default function ReviewImportPage() {
       );
     }
     await load();
+  }
+
+  /**
+   * A ROW'S PICTURE, as a person chose it: a crop, the bill's own, or none.
+   * Sent with the version of the choice the screen was drawn with, so a
+   * choice made in another tab refuses this one rather than being quietly
+   * replaced — the refusal is reported AFTER the reload, or the reload would
+   * clear it (`reloadThen`'s rule). Resolves true where it was recorded.
+   */
+  async function setPicture(sheetIndex: number, line: Line, picture: PictureChoice): Promise<boolean> {
+    setError(null);
+    setNotice(null);
+    const res = await apiFetch(`/api/imports/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sheetIndex, index: line.index, picture, pictureVersion: line.pictureVersion ?? 0 }),
+    });
+    await load(true);
+    if (!res.ok) {
+      setError(res.error);
+      return false;
+    }
+    return true;
   }
 
   /** A sheet's run name, or dropping the tab. Addressed the same way. */
@@ -1814,7 +1900,18 @@ export default function ReviewImportPage() {
                         // own members are not listed and the row is not amber.
                         const alsoOn = place.hanging ? [] : place.member.alsoOn;
                         const duplicated = !fabric && alsoOn.length > 0;
-                        const image = rowImageFor(run.parsed?.rowImages, sheet.sheetName, line.lineNo);
+                        // WHAT THE ROW WILL GIVE — the confirm's own answer
+                        // (`effectiveRowImage`) — and what the bill printed,
+                        // which the panel crops from.
+                        const image = effectiveRowImage(run.parsed, sheet.sheetName, line);
+                        const printed = rowImageFor(run.parsed?.rowImages, sheet.sheetName, line.lineNo);
+                        const pictureKey = `${sheetIndex}:${line.index}`;
+                        const pictureOpen = openPicture === pictureKey;
+                        const canChangePicture = run.status === "parsed" && Boolean(printed || line.picture);
+                        const togglePicture = canChangePicture
+                          ? () => setOpenPicture((current) => (current === pictureKey ? null : pictureKey))
+                          : undefined;
+                        const chosenNone = isNoPicture(line.picture);
                         const whyKey = `${sheetIndex}:${line.index}`;
                         const whyOpen = openWhy.has(whyKey);
                         const description = fabric ? undefined : descriptions[line.index];
@@ -1885,6 +1982,10 @@ export default function ReviewImportPage() {
                                   lineNo={line.lineNo}
                                   image={image}
                                   size="swatch"
+                                  version={line.pictureVersion ?? 0}
+                                  chosenNone={chosenNone}
+                                  open={pictureOpen}
+                                  onOpen={togglePicture}
                                 />
                                 <div className="min-w-0">
                                   <span className="block text-[12.5px] text-neutral-800">
@@ -1956,11 +2057,20 @@ export default function ReviewImportPage() {
                                   lineNo={line.lineNo}
                                   image={image}
                                   size="thumb"
+                                  version={line.pictureVersion ?? 0}
+                                  chosenNone={chosenNone}
+                                  open={pictureOpen}
+                                  onOpen={togglePicture}
                                 />
                                 <div className="min-w-0 flex-1">
                                   {image && !image.pathname && (
                                     <span className="mb-0.5 block text-[10.5px] text-neutral-500">
                                       {image.pictures} pictures on this row — none is taken as the item&apos;s
+                                    </span>
+                                  )}
+                                  {isPictureCrop(line.picture) && (
+                                    <span className="mb-0.5 block text-[10.5px] text-neutral-500">
+                                      cropped on this review
                                     </span>
                                   )}
                                   {description ? (
@@ -2185,6 +2295,25 @@ export default function ReviewImportPage() {
                               })()}
                             </Td>
                           </Tr>
+                          {/* THE ROW'S PICTURE, opened under it as its OWN
+                              row — never a cell beside the data — and before
+                              the description panel, nearest the thumbnail
+                              that opened it. */}
+                          {pictureOpen && canChangePicture && (
+                            <BillPicturePanelRow
+                              importId={id}
+                              projectId={run.project_id}
+                              sheetIndex={sheetIndex}
+                              lineNo={line.lineNo}
+                              kind={fabric ? "swatch" : "item"}
+                              original={printed}
+                              now={chosenNone ? "none" : isPictureCrop(line.picture) ? "crop" : "own"}
+                              colSpan={columns}
+                              busy={busy}
+                              onChoose={(choice) => setPicture(sheetIndex, line, choice)}
+                              onClose={() => setOpenPicture(null)}
+                            />
+                          )}
                           {description && descriptionOpen && (
                             <BillDescriptionPanelRow
                               plan={description}
