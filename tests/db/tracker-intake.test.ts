@@ -488,4 +488,31 @@ describeIfDb("the tracker's furniture against the bill", () => {
     expect(await openDisagreements()).toEqual(before);
     expect((await active(gr04)).filter((row) => row.attr_group === "note" && /model/i.test(String(row.label)))).toHaveLength(1);
   });
+  it("a pointer to the drawing, or the bill's words with more, is written BESIDE the bill's note: never red, never over it", async () => {
+    // Found on the real Aman tracker (2026-10-05): "REFER DRAWING" against
+    // the bill's "Sanded", and "WEWOOD — BESPOKE DESIGN" against the bill's
+    // "BESPOKE DESIGN", read as thirty red rows. Neither disagrees.
+    const gr09 = await line("GR-FUR-09", 9463);
+    const billSurface = await billAttribute(gr09, { group: "note", label: "Surface:", value: "Sanded" });
+    const billMaker = await billAttribute(gr09, { group: "note", label: "Model Ref:", value: "BESPOKE DESIGN" });
+    const runId = await stagedRun([
+      observation({ refRaw: "GR-FUR-09", attributeRaw: "Surface", valueRaw: "REFER DRAWING" }),
+      observation({ refRaw: "GR-FUR-09", attributeRaw: "Model ref", valueRaw: "WEWOOD — BESPOKE DESIGN" }),
+    ]);
+    const lines = (await staged(runId)).lines;
+    expect(lines.map((l) => l.note?.label).sort()).toEqual(["Model ref", "Surface"]);
+    const before = (await openDisagreements()).length;
+
+    const res = await confirm(runId, gr09);
+    expect(res.status, await res.clone().text()).toBe(200);
+
+    const held = await active(gr09);
+    // The bill's two notes are still live, and the tracker's two sit beside them.
+    expect(held.map((row) => row.id)).toEqual(expect.arrayContaining([billSurface, billMaker]));
+    expect(held.filter((row) => row.source_run_id === runId).map((row) => row.value).sort()).toEqual([
+      "REFER DRAWING",
+      "WEWOOD — BESPOKE DESIGN",
+    ]);
+    expect((await openDisagreements()).length).toBe(before);
+  });
 });

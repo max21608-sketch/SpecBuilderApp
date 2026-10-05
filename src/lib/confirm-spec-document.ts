@@ -461,7 +461,10 @@ export async function confirmSpecDocumentRecord(
       // so insert-then-retire cannot commit. Re-checked against the version
       // the reviewer saw — an occupant that moved since is refused, because
       // the value they agreed to drop is not the value that is there.
-      if (proposal.attributeTarget) {
+      // A note read as FREE (it only points at a drawing, or it holds the
+      // bill's words and more) is written BESIDE the bill's note, never over
+      // it: nothing is retired.
+      if (proposal.attributeTarget && reading !== "free") {
         const retired = await txn`
           update record_attributes
           set status = 'retired', retired_at = now(), retired_by = ${actor}, updated_by = ${actor}

@@ -32,6 +32,7 @@ import { matchName, normaliseName, type MatchCandidate } from "@/lib/matching";
 import {
   containsPhrase,
   deferredToSomebody,
+  pointsElsewhere,
   TBC_TOKENS,
   type AnswerState,
   type AttributeGroup,
@@ -884,6 +885,16 @@ export function foldNoteLabel(label: string | null | undefined): string {
 }
 
 /** Case and whitespace only: "WEWOOD — bespoke" and "wewood —  Bespoke" are one value; a changed dash is not. */
+/** Does `outer` contain `inner`'s words, whole and in order? Case, spacing and punctuation folded. */
+export function containsWords(outer: string | null | undefined, inner: string | null | undefined): boolean {
+  const fold = (raw: string | null | undefined) =>
+    (raw ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const a = fold(outer);
+  const b = fold(inner);
+  if (a === "" || b === "" || a === b) return false;
+  return ` ${a} `.includes(` ${b} `);
+}
+
 export function sameNoteValue(a: string | null | undefined, b: string | null | undefined): boolean {
   const fold = (raw: string | null | undefined) => (raw ?? "").trim().toLowerCase().replace(/\s+/g, " ");
   return fold(a) !== "" && fold(a) === fold(b);
@@ -1394,6 +1405,16 @@ export type HeldReading = "free" | "same" | "bill_differs" | "replace";
 export function heldReading(proposal: Proposal): HeldReading {
   const held = proposal.attributeTarget;
   if (!held) return "free";
+  // A NOTE is never in another note's way (they share no slot), so two
+  // readings take it out of the comparison and leave it an ordinary note
+  // written beside the bill's, never red:
+  //  - it only says where the answer is ("REFER DRAWING"), which disagrees
+  //    with nothing because it states nothing;
+  //  - it CONTAINS the bill's words whole ("WEWOOD — BESPOKE DESIGN" over the
+  //    bill's "BESPOKE DESIGN"): the same statement with more detail.
+  if (proposal.note && (pointsElsewhere(proposal.proposedValue) || containsWords(proposal.proposedValue, held.value))) {
+    return "free";
+  }
   if (agreesWithHeld(proposal, held)) return "same";
   return held.fromBill === true ? "bill_differs" : "replace";
 }

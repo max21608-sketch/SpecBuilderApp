@@ -530,6 +530,22 @@ const DEFERRED_TO_SOMEBODY = /\bto confirm$/;
  * written in the past tense — does not match.
  */
 
+/**
+ * "REFER DRAWING", "As per Drawing (To be confirmed on site)", "see drawings":
+ * a statement that says WHERE the answer is rather than what it is. The Aman
+ * tracker writes it in the finish column of every bespoke piece, beside a bill
+ * that says "Stained". It is not a disagreement with anything, because it does
+ * not state a finish; read as one, it buried the tracker's real disagreements
+ * under thirty red rows (2026-10-05). Anchored at the START, so "oak, refer
+ * drawing for grain direction" still states its oak.
+ */
+const POINTS_ELSEWHERE = /^(?:refer(?:red)?(?: to)?|as per|see|per)(?: the)? (?:drawings?|dwgs?|drg|detail drawings?)\b/;
+
+export function pointsElsewhere(value: string | null | undefined): boolean {
+  const folded = (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  return POINTS_ELSEWHERE.test(folded);
+}
+
 /** Shared with `suggestAttributeState`, so the two pipelines read it alike. */
 export function deferredToSomebody(normalised: string): boolean {
   return DEFERRED_TO_SOMEBODY.test(normalised);

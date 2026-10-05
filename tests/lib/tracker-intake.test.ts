@@ -359,3 +359,24 @@ describe("a statement no question matches is kept as a note", () => {
     expect(again.rematched).toBe(0);
   });
 });
+
+describe("a note that points elsewhere, or says the bill's words and more", () => {
+  it("reads a pointer to the drawing as no statement, anchored at the start", async () => {
+    const { pointsElsewhere } = await import("@/lib/spec-vocab");
+    for (const value of ["REFER DRAWING", "Refer to drawings", "As per Drawing (To be confirmed on site)", "see the drawing", "As per dwg"]) {
+      expect(pointsElsewhere(value), value).toBe(true);
+    }
+    for (const value of ["Oak, refer drawing for grain", "Stained", "Drawing room", "", null]) {
+      expect(pointsElsewhere(value), String(value)).toBe(false);
+    }
+  });
+
+  it("finds the bill's words whole inside a fuller statement, and nowhere else", async () => {
+    const { containsWords } = await import("@/lib/spec-document");
+    expect(containsWords("WEWOOD — BESPOKE DESIGN", "BESPOKE DESIGN")).toBe(true);
+    expect(containsWords("WEWOOD — BESPOKE DESIGN", "bespoke")).toBe(true);
+    expect(containsWords("BESPOKE DESIGN", "BESPOKE DESIGN")).toBe(false); // equal is "same", not "contains"
+    expect(containsWords("WEWOOD Caravela", "BESPOKE DESIGN")).toBe(false);
+    expect(containsWords("Oakley", "Oak")).toBe(false); // whole words only
+  });
+});
