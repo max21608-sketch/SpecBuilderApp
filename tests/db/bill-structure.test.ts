@@ -334,9 +334,18 @@ describeIfDb("a bill's structure, read; its fabric lines, written onto their ite
     ]);
 
     // The code is filed in the project's library, and the stool's fabric links to it.
-    const finishes = await client.query(`select id, code, state from project_finishes where project_id = $1`, [projectId]);
-    expect(finishes.rows.map((row) => row.code)).toEqual(["ZZ-FAB-13"]);
+    // The sofa's uncoded fabric with real words is filed too, as an IN-HOUSE
+    // fabric (2026-10-05); its piping line names no fabric and files nothing.
+    const finishes = await client.query(
+      `select id, code, code_origin, state from project_finishes where project_id = $1 order by code_origin, code`,
+      [projectId],
+    );
+    expect(finishes.rows.map((row) => [row.code, row.code_origin])).toEqual([
+      ["ZZ-FAB-13", "client"],
+      ["BW-F-001", "internal"],
+    ]);
     expect(stoolFabric[0]!.finish_id).toBe(finishes.rows[0]!.id);
+    expect(sofaFabrics.map((row) => row.finish_id)).toEqual([finishes.rows[1]!.id, null]);
 
     // The checklist follows: COM 1 answered on the stool, COM 2 TBC on the sofa.
     const answers = await client.query(
