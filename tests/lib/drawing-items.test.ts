@@ -730,3 +730,81 @@ describe("a mock-up drawing on a project with no mock-up phase (pilot, AM-ID-MUR
     expect(resolved.codeMatches).toBeUndefined();
   });
 });
+
+describe("a card whose records already have a picture (Max, 2026-10-05)", () => {
+  // The bill printed a picture on each row and the record took it; confirming
+  // the drawings card used to replace it with a crop. The resolution now says
+  // which of the records the picture would land on already hold one.
+  const context = (records: RecordEntry[], withPicture: string[] = [], variantSources = new Map<string, Set<string>>()) => ({
+    records,
+    occupied: NO_OCCUPANCY,
+    variants: new Map(),
+    finishes: [],
+    variantSources,
+    recordsWithPicture: new Set(withPicture),
+  });
+  const plainDoc = () => stage({ documentNotes: null, nonItemPages: [], items: [rawItem({ codes: ["X-100"] })] });
+
+  it("names the target holding a picture, out of every record the picture would land on", () => {
+    const records = [record("r-main", "X-100", "run-main", "Main"), record("r-ve", "X-100", "run-ve", "VE")];
+    const resolved = resolveStagedRun(plainDoc(), context(records, ["r-main"]), FIELDS)[0]!;
+    expect(resolved.targets.sort()).toEqual(["r-main", "r-ve"]);
+    expect(resolved.pictureHeld).toEqual({ recordIds: ["r-main"], of: 2 });
+  });
+
+  it("sends nothing when no target holds one — not even a picture elsewhere in the project", () => {
+    const records = [record("r-main", "X-100"), record("r-other", "X-999", "run-other", "Other")];
+    expect(resolveStagedRun(plainDoc(), context(records), FIELDS)[0]!.pictureHeld).toBeUndefined();
+    expect(resolveStagedRun(plainDoc(), context(records, ["r-other"]), FIELDS)[0]!.pictureHeld).toBeUndefined();
+    // A pure caller that never loaded the pictures reads as "none", the old behaviour.
+    const { recordsWithPicture: _omitted, ...withoutPictures } = context(records, ["r-main"]);
+    void _omitted;
+    expect(resolveStagedRun(plainDoc(), withoutPictures, FIELDS)[0]!.pictureHeld).toBeUndefined();
+  });
+
+  it("reads a page of configurations off the VARIANTS it writes to, never the bill line", () => {
+    const configured = stage({
+      documentNotes: null,
+      nonItemPages: [],
+      items: [
+        rawItem({
+          codes: ["X-301"],
+          name: "Desk chair",
+          configurations: [1, 2, 3].map((n) => ({
+            name: `Type ${n}`,
+            nameRaw: `Type ${n}`,
+            differsIn: "fabric",
+            pages: [1],
+            overall: noOverall,
+          })),
+          finishes: [
+            { part: "FABRIC REFERENCE", spec: "Invented Raffia", code: null, configurations: ["Type 1"], page: 1, swatch: null },
+            { part: "FABRIC REFERENCE", spec: "Invented Velvet", code: null, configurations: ["Type 2"], page: 1, swatch: null },
+            { part: "FABRIC REFERENCE", spec: "Invented Linen", code: null, configurations: ["Type 3"], page: 1, swatch: null },
+          ],
+        }),
+      ],
+    });
+    const variant = (id: string, label: string): RecordEntry => ({
+      ...record(id, "X-301"),
+      refs: [],
+      boqCodes: [],
+      parentId: "r-301",
+      variantLabel: label,
+    });
+    // Types 1 and 2 exist already, both written by THIS document (so neither
+    // is a question); Type 3 is one the confirm would create.
+    const sources = new Map([
+      ["v-1", new Set(["intake-run"])],
+      ["v-2", new Set(["intake-run"])],
+    ]);
+    const records = [record("r-301", "X-301"), variant("v-1", "TYPE 1"), variant("v-2", "TYPE 2")];
+    // The bill line's own picture is NOT one the page would replace.
+    const resolved = resolveStagedRun(configured, context(records, ["r-301", "v-2"], sources), FIELDS, "intake-run")[0]!;
+    expect(resolved.named?.labels).toEqual(["TYPE 1", "TYPE 2", "TYPE 3"]);
+    expect(resolved.pictureHeld).toEqual({ recordIds: ["v-2"], of: 3 });
+    expect(
+      resolveStagedRun(configured, context(records, ["r-301"], sources), FIELDS, "intake-run")[0]!.pictureHeld,
+    ).toBeUndefined();
+  });
+});

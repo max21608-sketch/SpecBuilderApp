@@ -113,3 +113,84 @@ describe("the picture panel", () => {
     expect(options?.signal?.aborted).toBe(true);
   });
 });
+
+describe("an item that already has a picture (Max, 2026-10-05)", () => {
+  beforeEach(() => {
+    crops.calls = [];
+    crops.pending = [];
+    URL.createObjectURL = () => "blob:test";
+    URL.revokeObjectURL = () => undefined;
+  });
+
+  function Held({ onImage, held = ["r-1"], of = 1 }: { onImage: (image: unknown) => void; held?: string[]; of?: number }) {
+    return (
+      <ItemImagePicker
+        importId="import-1"
+        itemPage={3}
+        proposal={view}
+        views={[view]}
+        existingPicture={{ recordIds: held, of }}
+        onCropped={(image) => onImage(image)}
+      />
+    );
+  }
+
+  it("starts at no picture: nothing is cropped on mount and the card holds null", async () => {
+    const onImage = vi.fn();
+    render(<Held onImage={onImage} />);
+    await settleCrops();
+    expect(crops.calls).toHaveLength(0);
+    expect(onImage).toHaveBeenCalledTimes(1);
+    expect(onImage).toHaveBeenLastCalledWith(null);
+    expect(screen.getByText("This item already has a picture, so none will be taken from this drawing.")).toBeTruthy();
+    expect(screen.queryByText(/Confirming replaces/)).toBeNull();
+  });
+
+  it("offers the proposal back, and choosing it crops it and says it replaces the picture", async () => {
+    const onImage = vi.fn();
+    render(<Held onImage={onImage} />);
+    await settleCrops();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Use 3d view" }));
+    await settleCrops();
+    expect(crops.calls).toHaveLength(1);
+    expect(crops.calls[0]?.[1]).toBe(3);
+    expect(onImage).toHaveBeenLastCalledWith(expect.objectContaining({ width: 10, height: 10 }));
+    expect(screen.getByText("Confirming replaces the item's current picture.")).toBeTruthy();
+    // And back again is one click.
+    await user.click(screen.getByRole("button", { name: "No picture" }));
+    expect(onImage).toHaveBeenLastCalledWith(null);
+  });
+
+  it("offers the whole page where nothing was reported, still starting at none", async () => {
+    const onImage = vi.fn();
+    render(
+      <ItemImagePicker
+        importId="import-1"
+        itemPage={2}
+        proposal={null}
+        views={[]}
+        existingPicture={{ recordIds: ["r-1"], of: 1 }}
+        onCropped={(image) => onImage(image)}
+      />,
+    );
+    await settleCrops();
+    expect(crops.calls).toHaveLength(0);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Use the whole page" }));
+    await settleCrops();
+    expect(crops.calls).toHaveLength(1);
+    expect(crops.calls[0]?.[2]).toEqual([0, 0, 1, 1]);
+  });
+
+  it("says how many where only some of the records have one, and still defaults to none", async () => {
+    render(<Held onImage={() => undefined} held={["r-1", "r-2"]} of={3} />);
+    await settleCrops();
+    expect(crops.calls).toHaveLength(0);
+    expect(screen.getByText("2 of 3 records already have a picture, so none will be taken from this drawing.")).toBeTruthy();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Use 3d view" }));
+    await settleCrops();
+    expect(screen.getByText("Confirming replaces the current picture on 2 of the 3 records.")).toBeTruthy();
+  });
+});
