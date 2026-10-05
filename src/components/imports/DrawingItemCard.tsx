@@ -136,6 +136,13 @@ export type ItemResolution = {
   named?: NamedResolution | null;
   /** Records carrying the page's code on any phase, where nothing resolved. The picker lists them first. */
   codeMatches?: string[];
+  /**
+   * The records this card's picture would land on that already have one, of
+   * how many in all (`pictureWriteTargets`, over the confirm's fan-out).
+   * Absent where none does. The picture panel starts at "no picture" when it
+   * is present — Max, 2026-10-05.
+   */
+  pictureHeld?: { recordIds: string[]; of: number };
 };
 
 /** The units the card-wide control offers. */
@@ -687,6 +694,7 @@ export default function ItemCard({
               itemPage={item.page}
               proposal={item.imageProposal ?? null}
               views={item.viewRegions ?? []}
+              existingPicture={resolution?.pictureHeld ?? null}
               onCropped={(image) => onImage(item.id, image)}
             />
           </div>

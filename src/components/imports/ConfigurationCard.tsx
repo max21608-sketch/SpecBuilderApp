@@ -1018,6 +1018,9 @@ function ConfigurationSection({
         itemPage={member.item.page}
         proposal={member.item.imageProposal ?? null}
         views={member.item.viewRegions ?? []}
+        // Per PAGE: the records THIS page writes its picture to, which on a
+        // configuration card are this member's variants — never its sisters'.
+        existingPicture={member.resolution?.pictureHeld ?? null}
         onCropped={(image) => onImage(member.item.id, image)}
       />
 

@@ -365,6 +365,46 @@ describeIfDb("a drawing's values over the bill's, one press per card", () => {
     expect(dims.value).not.toMatch(/D460/);
   });
 
+  it("says the record already has a picture, and a confirm sent no picture keeps it (Max, 2026-10-05)", async () => {
+    // The bill's picture, as giveBillPicture leaves it. The card's panel then
+    // starts at "no picture", the review screens send `image: null`, and the
+    // confirm must leave this row exactly where it is.
+    const code = `__QA-PIC-${Date.now()}`;
+    const recordId = await billRecord(code);
+    const runId = await stage(code, { height: fig("425") });
+    expect((await resolved(runId)).pictureHeld).toBeUndefined();
+    const pictureId = (
+      await client.query(
+        `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, uploaded_by)
+         values ('spec_records', $1, 'item_image', $2, 'bill row 1.png', 'image/png', 'qa') returning id`,
+        [recordId, `projects/${projectId}/qa/bill-row-1.png`],
+      )
+    ).rows[0].id;
+    try {
+      expect((await resolved(runId)).pictureHeld).toEqual({ recordIds: [recordId], of: 1 });
+      const { item } = await staged(runId);
+      const response = await confirmRoute(
+        request("POST", {
+          action: "confirm",
+          itemId: item.id,
+          itemVersion: item.version,
+          image: null,
+          observations: item.observations.filter((o) => o.reviewStatus === "pending").map((o) => ({ id: o.id, version: o.version })),
+        }),
+        params(runId),
+      );
+      expect(response.ok, await response.clone().text()).toBe(true);
+      const pictures = await client.query(
+        `select id from attachments where entity_type = 'spec_records' and entity_id = $1 and kind = 'item_image'`,
+        [recordId],
+      );
+      expect(pictures.rows.map((row: { id: string }) => row.id)).toEqual([pictureId]);
+    } finally {
+      // Polymorphic, so the project's cascade does not reach it.
+      await client.query(`delete from attachments where entity_type = 'spec_records' and entity_id = $1`, [recordId]);
+    }
+  });
+
   it("refuses an occupant that moved after the press, and writes nothing", async () => {
     const code = `__QA-STL-B-${Date.now()}`;
     const recordId = await billRecord(code);

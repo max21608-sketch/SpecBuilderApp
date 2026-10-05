@@ -11,7 +11,7 @@
 // symptoms Max kept reporting all lived in that gap: the rows were right in
 // the staged JSON and wrong on the screen.
 // ============================================================================
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ItemCard from "@/components/imports/DrawingItemCard";
@@ -291,6 +291,43 @@ describe("confirming", () => {
     resetIds();
     renderCard([figure("FRONT", "640", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm" })]);
     expect(screen.getByRole("button", { name: /Confirm 1 spec/ })).toBeEnabled();
+  });
+});
+
+describe("the picture panel, when the item already has a picture (Max, 2026-10-05)", () => {
+  it("passes the server's answer through, so the panel starts at none and says why", () => {
+    resetIds();
+    const onImage = vi.fn();
+    const spies = callbacks();
+    render(
+      <ItemCard
+        item={item({ observations: [figure("FRONT", "640", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm" })] })}
+        importId="import-1"
+        resolution={resolution({ pictureHeld: { recordIds: ["rec-main"], of: 2 } })}
+        specFields={specFields}
+        records={records}
+        drafts={{}}
+        setDrafts={() => undefined}
+        busy={false}
+        onSaveObservation={spies.onSaveObservation}
+        onSaveTargets={spies.onSaveTargets}
+        onSetBulkUnit={spies.onSetBulkUnit}
+        onReview={spies.onReview}
+        onImage={onImage}
+        onSwatch={spies.onSwatch}
+        onSetLevel={spies.onSetLevel}
+      />,
+    );
+    expect(screen.getByText("1 of 2 records already have a picture, so none will be taken from this drawing.")).toBeInTheDocument();
+    // What the card holds is "no picture", which is what the confirm then
+    // sends -- and the confirm writes no picture when it is sent none.
+    expect(onImage).toHaveBeenLastCalledWith("item-1", null);
+  });
+
+  it("leaves the panel as it was where no record has one", () => {
+    resetIds();
+    renderCard([figure("FRONT", "640", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm" })]);
+    expect(screen.queryByText(/already ha(s|ve) a picture/)).toBeNull();
   });
 });
 

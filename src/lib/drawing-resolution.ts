@@ -119,6 +119,24 @@ export type ResolvedItem = {
    * mock-up drawing still lands on a main line only by a person's pick.
    */
   codeMatches?: string[];
+  /**
+   * THE RECORDS THIS CARD'S PICTURE WOULD LAND ON THAT ALREADY HAVE ONE (Max,
+   * 2026-10-05, on the Aman pack: "if there's already an image, by default it
+   * needs to go to no image"). The bill printed a picture on each row and
+   * `giveBillPicture` gave it to the record; confirming a drawing card then
+   * REPLACED it with a crop of the drawing, because every card proposes one.
+   *
+   * `recordIds` are the WRITE targets holding a live `item_image` -- the
+   * variant, on a page of configurations, never the bill line it hangs off,
+   * because the confirm writes the picture to the variant. `of` is how many
+   * records the picture would land on in all, a configuration the confirm
+   * would create counted as one holding none. From `pictureWriteTargets`,
+   * which walks the confirm's own fan-out.
+   *
+   * Absent where no target holds one, like `codeMatches`, so a card with
+   * nothing to say resolves to exactly the bytes it did.
+   */
+  pictureHeld?: { recordIds: string[]; of: number };
 };
 
 /** What the card is told about a page of named configurations. Compact: it crosses the wire. */
@@ -318,14 +336,88 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
 
 /** The registers a drawings screen needs, read once for any number of runs. */
 export async function loadDrawingContext(projectId: string) {
-  const [registers, occupied, variants, finishes, variantSources] = await Promise.all([
+  const [registers, occupied, variants, finishes, variantSources, recordsWithPicture] = await Promise.all([
     loadExtractionRegisters(projectId),
     loadOccupiedSlots(projectId),
     loadVariants(projectId),
     loadFinishLibrary(projectId),
     loadVariantSources(projectId),
+    loadRecordsWithPicture(projectId),
   ]);
-  return { records: registers.records, occupied, variants, finishes, variantSources };
+  return { records: registers.records, occupied, variants, finishes, variantSources, recordsWithPicture };
+}
+
+/**
+ * What `resolveStagedRun` reads. `recordsWithPicture` is optional so a pure
+ * caller -- every test, and anything resolving with no project behind it --
+ * can leave it out and be read as "no record holds a picture", which is the
+ * behaviour that existed before the question was asked.
+ */
+export type DrawingContext = Omit<Awaited<ReturnType<typeof loadDrawingContext>>, "recordsWithPicture"> & {
+  recordsWithPicture?: ReadonlySet<string>;
+};
+
+/**
+ * Every record in the project holding an item picture, in ONE read for the
+ * whole pack rather than one per card.
+ *
+ * The same predicate every screen showing a record's picture uses -- the
+ * record route's `has_image`, the image route, the bill confirm's "only where
+ * the record has none" -- and NOT filtered on `superseded_at`: 0013 added it
+ * for attachments in general, and nothing has ever set it on an item image
+ * (the drawings confirm deletes the old row). A filter here that the record
+ * screen does not apply would let the card say "no picture" over a record
+ * whose own screen shows one. (No backticks in here: a tagged template.)
+ */
+async function loadRecordsWithPicture(projectId: string): Promise<Set<string>> {
+  const rows = await sql`
+    select distinct a.entity_id
+      from attachments a
+      join spec_records r on r.id = a.entity_id
+     where a.entity_type = 'spec_records' and a.kind = 'item_image' and r.project_id = ${projectId}
+  `;
+  return new Set(rows.map((row) => String(row.entity_id)));
+}
+
+/**
+ * The records the confirm would write this card's PICTURE to: the existing
+ * ones by id, and how many it would CREATE.
+ *
+ * The confirm's own fan-out, read through the function it reads
+ * (`configurationTarget`): a plain card writes to the records ticked; a page
+ * of configurations writes to each ticked bill line's configuration for every
+ * label on the page -- an existing variant, or one the confirm creates. A
+ * label still to be ASKED about is a blocker and writes nothing until it is
+ * answered, so it is counted nowhere.
+ */
+export function pictureWriteTargets(
+  targets: readonly string[],
+  named: NamedTargets | null,
+): { existing: string[]; created: number } {
+  if (!named) return { existing: [...new Set(targets)], created: 0 };
+  const existing: string[] = [];
+  let created = 0;
+  for (const parentId of targets) {
+    for (const label of named.plan.labels) {
+      const target = configurationTarget(parentId, label, named);
+      if (target.kind === "create") created += 1;
+      if (target.kind !== "existing") continue;
+      for (const variantId of target.variantIds) if (!existing.includes(variantId)) existing.push(variantId);
+    }
+  }
+  return { existing, created };
+}
+
+/** Present only when a target holds a picture, so every other card's payload is unchanged. */
+function withPictureHeld(
+  targets: readonly string[],
+  named: NamedTargets | null,
+  withPicture: ReadonlySet<string> | undefined,
+): { pictureHeld?: { recordIds: string[]; of: number } } {
+  if (!withPicture || withPicture.size === 0) return {};
+  const { existing, created } = pictureWriteTargets(targets, named);
+  const recordIds = existing.filter((id) => withPicture.has(id));
+  return recordIds.length > 0 ? { pictureHeld: { recordIds, of: existing.length + created } } : {};
 }
 
 /**
@@ -377,7 +469,7 @@ async function loadVariants(projectId: string): Promise<Map<string, string>> {
 export function occupantsFor(
   item: StagedDrawings["items"][number],
   targets: string[],
-  occupied: Awaited<ReturnType<typeof loadDrawingContext>>["occupied"],
+  occupied: DrawingContext["occupied"],
   // A named page: each row's own configurations' live variants, by the same
   // function the blockers and the confirm use.
   named: NamedTargets | null = null,
@@ -405,7 +497,7 @@ export function occupantsFor(
 /** Every item of one staged run, resolved against the context. */
 export function resolveStagedRun(
   staged: StagedDrawings,
-  context: Awaited<ReturnType<typeof loadDrawingContext>>,
+  context: DrawingContext,
   // The field register, for the NAME in a cross-page clash sentence ("both give
   // COM 1"). Optional: without it the sentence says "the same BWS field".
   fields: readonly SpecFieldEntry[] = [],
@@ -465,6 +557,7 @@ export function resolveStagedRun(
       ...withBillReplacements(billReplacements(item, targets, occupied, named)),
       named: named ? namedResolution(targets, resolution, named) : null,
       ...withCodeMatches(resolution.runs.length === 0 ? codeMatchesOf(staged, item, context.records) : []),
+      ...withPictureHeld(targets, named, context.recordsWithPicture),
     };
   });
 }
@@ -488,7 +581,7 @@ function withCodeMatches(ids: string[]): { codeMatches?: string[] } {
 function codeMatchesOf(
   staged: StagedDrawings,
   item: StagedDrawings["items"][number],
-  records: Awaited<ReturnType<typeof loadDrawingContext>>["records"],
+  records: DrawingContext["records"],
 ): string[] {
   const { runs } = resolveStagedItem(staged, item, records);
   return runs.flatMap((run) => (run.status === "matched" ? [run.record.id] : run.candidates.map((c) => c.id)));
@@ -583,7 +676,7 @@ function namedResolution(targets: string[], resolution: DrawingResolution, named
  * Trimmed, because the full register carries refs and category data no screen
  * needs and every one of them would cross the wire per request.
  */
-export function recordChoices(context: Awaited<ReturnType<typeof loadDrawingContext>>) {
+export function recordChoices(context: DrawingContext) {
   // The client's own code leads and orders the list: it is what the drawings
   // and the bill call the item, where the record number is ours.
   return context.records

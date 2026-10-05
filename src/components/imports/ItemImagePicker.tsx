@@ -24,6 +24,17 @@
 // which get exported and quoted against. A picture is an aid to recognising
 // the item, and the reviewer is looking at it.
 //
+// UNLESS THE ITEM ALREADY HAS A PICTURE (Max, 2026-10-05, on the Aman pack:
+// "if there's already an image, by default it needs to go to no image"). A
+// bill that prints a picture on each row gives it to the record at confirm,
+// and the drawings confirm REPLACES whatever item picture it finds — so a
+// proposal here, accepted by confirming the card for its specs, silently
+// swapped the bill's picture for a crop of a drawing. Where the server says a
+// record this card writes to already holds one, the panel starts at "no
+// picture" and says why in words; the proposal, the whole page and a dragged
+// box are each still one click, and choosing one says it will replace the
+// current picture. Nothing is rasterised until somebody chooses.
+//
 // It renders on mount and re-renders whenever the chosen region changes, and it
 // hands the encoded PNG up through `onCropped` so the card can upload it as
 // part of confirming. Nothing is uploaded until then: a card that is never
@@ -70,6 +81,7 @@ export default function ItemImagePicker({
   proposal,
   views,
   sharesItsPage,
+  existingPicture,
   onCropped,
 }: {
   importId: string;
@@ -90,6 +102,16 @@ export default function ItemImagePicker({
    * per page, and this is the caller that knows.
    */
   sharesItsPage?: boolean;
+  /**
+   * The records this card's picture would land on that ALREADY have one, and
+   * how many it would land on in all — the server's `pictureHeld`, computed
+   * over the confirm's own fan-out. Present means the panel starts at none.
+   *
+   * Read ONCE, at mount, like the proposal: a reload after a sibling card is
+   * confirmed must not move a choice somebody made, or un-make one they had
+   * not made yet by suddenly rendering a crop.
+   */
+  existingPicture?: { recordIds: readonly string[]; of: number } | null;
   /** null means "this item gets no picture", which is a real answer. */
   onCropped: (image: CroppedImage | null) => void;
 }) {
@@ -97,7 +119,19 @@ export default function ItemImagePicker({
   // A reported view is always preferred to the page. The fallback only stands
   // in where the model gave us nothing to prefer AND the page is this item's.
   const fallback = !proposal && views.length === 0 && !sharesItsPage ? wholePage(itemPage) : null;
-  const [chosen, setChosen] = useState<ItemView | null>(proposal ?? fallback);
+  const held = existingPicture?.recordIds.length ?? 0;
+  const of = Math.max(existingPicture?.of ?? 0, held);
+  // A record that already has a picture keeps it unless somebody chooses
+  // otherwise: the default is none, and nothing is cropped on mount.
+  const [chosen, setChosen] = useState<ItemView | null>(held > 0 ? null : (proposal ?? fallback));
+  // What can be switched to. The proposal is normally the first of `views`;
+  // it is added where it is not, so that starting at none — or pressing "No
+  // picture" — can never lose the one view the read proposed.
+  const offered = [
+    ...(proposal && !views.some((view) => sameView(view, proposal)) ? [proposal] : []),
+    ...views,
+    ...(fallback ? [fallback] : []),
+  ];
   const [preview, setPreview] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,7 +256,7 @@ export default function ItemImagePicker({
               <img src={preview} alt="" className="max-w-full max-h-full object-contain" />
             ) : (
               <span className="px-2 text-center text-xs text-neutral-500">
-                {error ? "Could not render" : "No picture"}
+                {error ? "Could not render" : held > 0 ? "None from this drawing" : "No picture"}
               </span>
             )}
           </div>
@@ -241,6 +275,22 @@ export default function ItemImagePicker({
                   closer.
                 </span>
               )}
+              {held > 0 && (
+                // Said once a picture is CHOSEN, never before: the replace is
+                // the consequence of the choice, and the confirm deletes the
+                // old row (confirm-drawings.ts) rather than keeping two.
+                <span className="block text-xs text-amber-800">
+                  {held < of
+                    ? `Confirming replaces the current picture on ${held} of the ${of} records.`
+                    : "Confirming replaces the item's current picture."}
+                </span>
+              )}
+            </p>
+          ) : held > 0 ? (
+            <p className="text-sm text-neutral-600">
+              {held < of
+                ? `${held} of ${of} records already have a picture, so none will be taken from this drawing.`
+                : "This item already has a picture, so none will be taken from this drawing."}
             </p>
           ) : (
             <p className="text-sm text-neutral-600">No picture will be saved for this item.</p>
@@ -251,7 +301,7 @@ export default function ItemImagePicker({
                 rather than a drag. The proposal is just the first of these.
                 The whole page joins the list where it is the fallback, so
                 "No picture" is not a one-way door. */}
-            {[...views, ...(fallback ? [fallback] : [])]
+            {offered
               .filter((view) => !sameView(view, chosen))
               .map((view, index) => (
                 <Button
