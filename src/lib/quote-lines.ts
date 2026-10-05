@@ -44,7 +44,7 @@
 import { compareRecordOrder } from "@/lib/record-label";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import { renderAttributeValue, type ExportAttribute, type ExportRecord, type ExportScope } from "@/lib/bws-export";
-import { shippedStandardValue } from "@/lib/bw-standard";
+import { shippedStandardValue, standardInForce } from "@/lib/bw-standard";
 import type { AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
 
 /** The column order of Matthew's own file, unchanged. */
@@ -136,8 +136,9 @@ export function hasMetalFinish(attributes: ExportAttribute[]): boolean {
     if (attribute.specFieldJsonId !== 5 && attribute.specFieldJsonId !== 35) return false;
     // A BW standard metal proposed beside a client's "TBC" makes it a
     // metalwork item (0041): the standard is what ships. Otherwise the page's
-    // own words, exactly as before.
-    const value = (shippedStandardValue(attribute.standard) ?? attribute.value ?? "").trim().toLowerCase();
+    // own words, exactly as before. The standard IN FORCE, so a metal code's
+    // BW finish set in the library (0045) counts on every item carrying it.
+    const value = (shippedStandardValue(standardInForce(attribute)) ?? attribute.value ?? "").trim().toLowerCase();
     return !NON_ANSWERS.has(value);
   });
 }

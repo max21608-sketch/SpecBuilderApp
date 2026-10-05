@@ -68,6 +68,62 @@ export function standardFromRow(row: Record<string, unknown>): AttributeStandard
   return { value, optionId, state: row.standard_state };
 }
 
+/** A finish's own columns (0045), as `loadRecordAtoms` and `loadPromotable` alias them. */
+export function finishStandardFromRow(row: Record<string, unknown>): AttributeStandard | null {
+  return standardFromRow({
+    standard_value: row.finish_standard_value,
+    standard_option_id: row.finish_standard_option_id,
+    standard_state: row.finish_standard_state,
+  });
+}
+
+/**
+ * WHICH BW STANDARD IS IN FORCE ON AN ATTRIBUTE — the one rule (0045).
+ *
+ * Max, 2026-10-05: "BW own finishes should be set once per code in the
+ * finishes library." Per code only, no per-item override. So:
+ *
+ *   * LINKED to a finish: the FINISH's standard, and nothing else -- it wins
+ *     over any standard the attribute carries from before 0045, and where the
+ *     library has set none, none is in force. Falling back to the item's own
+ *     there would be the per-item override Max ruled out, arriving by the
+ *     back door the day somebody clears the library's.
+ *   * UNLINKED: the attribute's own (0041), exactly as before. There is no
+ *     code to set it on.
+ *
+ * Every reader calls this -- the cell (`composeAttributeStatement`), the
+ * checklist answer, the check sheet's BW standard column, the quote's
+ * metalwork test and a version diff -- so none of them can be the one place
+ * the library's choice does not reach. A second precedence rule beside this
+ * one is the `composeDimensionCell` failure, one layer up.
+ */
+export function standardInForce(attribute: {
+  standard?: AttributeStandard | Pick<AttributeStandard, "value" | "state"> | null;
+  finish?: { standard?: AttributeStandard | null } | null;
+}): Pick<AttributeStandard, "value" | "state"> | null {
+  if (attribute.finish) return attribute.finish.standard ?? null;
+  return attribute.standard ?? null;
+}
+
+/**
+ * The item's OWN earlier standard that the library now overrides, or null.
+ *
+ * For the record screen's one sentence under a linked spec: a per-item choice
+ * made before 0045 is kept on the row as history and no longer ships, and a
+ * reader comparing the item with its old export has to be told why rather
+ * than left to find it.
+ */
+export function replacedItemStandard(attribute: {
+  standard?: Pick<AttributeStandard, "value" | "state"> | null;
+  finish?: { standard?: AttributeStandard | null } | null;
+}): Pick<AttributeStandard, "value" | "state"> | null {
+  const own = attribute.standard ?? null;
+  if (!attribute.finish || !own) return null;
+  const library = attribute.finish.standard ?? null;
+  if (library && library.state === own.state && (library.value ?? null) === (own.value ?? null)) return null;
+  return own;
+}
+
 /** The option a standard names, where it names one that ships. */
 export function shippedStandardValue(standard: Pick<AttributeStandard, "value" | "state"> | null | undefined): string | null {
   if (!standard) return null;
@@ -123,8 +179,10 @@ export function standardHoldReason(standard: Pick<AttributeStandard, "state"> | 
  *
  * In order, stopping at the first that says something:
  *
- *   1. A BW standard that ships (proposed or agreed). It is what we will
- *      make, and a BWS import is the instruction to make it.
+ *   1. A BW standard that ships (proposed or agreed) -- the one IN FORCE,
+ *      which for a linked attribute is the finish's (`standardInForce`,
+ *      0045). It is what we will make, and a BWS import is the instruction
+ *      to make it.
  *   2. A linked finish, rendered as the LIBRARY says it is -- the finishes
  *      library is the truth and the attribute is the evidence (0018).
  *   3. The page's own words.
@@ -142,8 +200,9 @@ export function composeAttributeStatement(attribute: {
 }): { value: string; state: AttributeState; fromStandard: boolean } {
   const finish = attribute.finish ?? null;
   const ownState = finish ? combineFinishState(attribute.state, finish) : attribute.state;
-  const state = stateUnderStandard(ownState, attribute.standard ?? null);
-  const standardValue = shippedStandardValue(attribute.standard ?? null);
+  const standard = standardInForce(attribute);
+  const state = stateUnderStandard(ownState, standard);
+  const standardValue = shippedStandardValue(standard);
   if (standardValue) return { value: standardValue, state, fromStandard: true };
   // An INTERNAL finish composes to its description alone, so where somebody
   // has cleared that description there is nothing to say -- and this page's

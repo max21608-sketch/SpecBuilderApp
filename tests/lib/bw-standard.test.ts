@@ -94,12 +94,19 @@ describe("which half ships — composeAttributeStatement and the BWS cell", () =
       colour: null,
       state: "confirmed" as const,
     };
-    expect(composeAttributeStatement({ value: "30% oak", state: "confirmed", finish, standard: AGREED }).value).toBe(
-      "BW Oak Grey - Open grain 10%",
-    );
+    // Since 0045 the standard on a LINKED spec is the FINISH's: the library's
+    // BW finish ships, and wins over the finish's own words.
+    expect(
+      composeAttributeStatement({ value: "30% oak", state: "confirmed", finish: { ...finish, standard: AGREED }, standard: null })
+        .value,
+    ).toBe("BW Oak Grey - Open grain 10%");
     const withoutStandard = composeAttributeStatement({ value: "30% oak", state: "confirmed", finish, standard: null });
     expect(withoutStandard.value).toContain("Dark tinted oak");
     expect(withoutStandard.fromStandard).toBe(false);
+    // An UNLINKED spec's own standard still wins over the page's words (0041).
+    expect(composeAttributeStatement({ value: "30% oak", state: "confirmed", standard: AGREED }).value).toBe(
+      "BW Oak Grey - Open grain 10%",
+    );
   });
 
   it("says each state in the reviewer's words", () => {

@@ -32,7 +32,7 @@
 // no importer would accept.
 // ============================================================================
 import { compareRecordOrder } from "@/lib/record-label";
-import { describeStandard } from "@/lib/bw-standard";
+import { describeStandard, standardInForce } from "@/lib/bw-standard";
 import {
   BWS_EXPORT_COLUMNS,
   composeRowCells,
@@ -137,7 +137,9 @@ function clientAndStandard(source: CellSource): [string, string] {
   const attribute = source.attribute;
   const said = attribute.value?.trim() ?? "";
   const withUnit = said && attribute.unit ? `${said}${attribute.unit}` : said;
-  return [withUnit, describeStandard(attribute.standard ?? null) ?? ""];
+  // The standard IN FORCE: on a linked spec, the code's own from the finishes
+  // library (0045) -- the one the cell beside this column shipped.
+  return [withUnit, describeStandard(standardInForce(attribute)) ?? ""];
 }
 
 export type CheckSheet = { header: string[]; rows: string[][] };

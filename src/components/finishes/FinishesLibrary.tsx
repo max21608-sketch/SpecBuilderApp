@@ -52,6 +52,8 @@ import Spinner from "@/components/ui/Spinner";
 import { FINISH_KINDS, FINISH_KIND_LABELS, type FinishKind } from "@/lib/finishes";
 import { suggestKindsFor } from "@/lib/finish-kind-guess";
 import FinishSwatch from "@/components/finishes/FinishSwatch";
+import { FinishStandardCell, FinishStandardPanel } from "@/components/finishes/FinishStandard";
+import type { Palette } from "@/lib/palettes";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
@@ -66,6 +68,11 @@ type UsedOn = {
   runId: string;
   runName: string;
   attributeLabel: string;
+  /** 0045: the BWS field the item carries the code in, and any per-item standard from before. */
+  jsonId?: number | null;
+  fieldName?: string | null;
+  itemStandardValue?: string | null;
+  itemStandardState?: string | null;
 };
 type Finish = {
   id: string; code: string; code_norm: string; code_origin: string; kind: FinishKind | null;
@@ -75,6 +82,19 @@ type Finish = {
   updated_at: string; updated_by: string | null;
   swatch_attachment_id: string | null;
   used_on: UsedOn[];
+  /**
+   * 0045: BW's own finish for the code, and which list it is chosen from --
+   * the server's reading (`paletteForFinish`), with why in words. Optional so
+   * an older payload still renders.
+   */
+  standard_value?: string | null;
+  standard_state?: string | null;
+  standard_set_by?: string | null;
+  standard_evidence_filename?: string | null;
+  standard_evidence_change_set_id?: string | null;
+  bw_palette_key?: string | null;
+  bw_palette_why?: string | null;
+  bw_palette_mixed?: boolean | null;
 };
 type Run = { id: string; name: string };
 type Payload = {
@@ -82,6 +102,8 @@ type Payload = {
   finishes: Finish[];
   runs: Run[];
   unlinked: { code: string; records: number }[];
+  /** The lists BW finishes are chosen from, keyed, sent once (0045). */
+  palettes?: Record<string, Palette>;
 };
 
 type Draft = {
@@ -104,8 +126,8 @@ const draftOf = (finish: Finish): Draft => ({
 /** "Not said" is a real answer and gets its own option, not an absence. */
 const NO_KIND = "__none__";
 
-/** Swatch, code, kind, description, state, used on, edit. */
-const COLUMNS = 7;
+/** Swatch, code, kind, description, state, BW finish, used on, edit. */
+const COLUMNS = 8;
 
 /**
  * Everything about a finish a person might type to find it: the code, what the
@@ -143,7 +165,19 @@ function whyNoSuggestion(finish: Finish): string {
   return "the code says nothing this app reads";
 }
 
-export default function FinishesLibrary({ projectId }: { projectId: string }) {
+export default function FinishesLibrary({
+  projectId,
+  initialQuery = "",
+}: {
+  projectId: string;
+  /**
+   * `?finish=<CODE>` on the project's finishes tab: the record screen's "set on
+   * WD-05 in the finishes library" link lands on that code. It fills the
+   * search box rather than a hidden filter, so it is visible and one Clear
+   * undoes it.
+   */
+  initialQuery?: string;
+}) {
   const id = projectId;
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +187,8 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [newCode, setNewCode] = useState("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
+  const [standardEditing, setStandardEditing] = useState<{ id: string; mode: "set" | "agree" } | null>(null);
   const [kindFilter, setKindFilter] = useState("");
   const [runFilter, setRunFilter] = useState("");
 
@@ -310,6 +345,33 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
     }
   }
 
+  /**
+   * BW'S OWN FINISH, FROM AN EARLIER PER-ITEM CHOICE, in one click (0045).
+   *
+   * The items carrying this code all chose the same BW option before the
+   * library held one; now that the code's choice wins, theirs no longer ships.
+   * Offered back as a suggestion with that evidence and proposed for the code
+   * only when pressed -- never copied on its own.
+   */
+  async function adoptStandard(finish: Finish, value: string) {
+    setBusy(true);
+    try {
+      const res = await apiFetch<{ recordsTouched: number }>(`/api/projects/${id}/finishes/${finish.id}/standard`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "set", version: finish.version, standard: { state: "proposed", value } }),
+      });
+      await reloadThen(
+        res.ok
+          ? `BW finish for ${finish.code} proposed — on ${res.data.recordsTouched} item${res.data.recordsTouched === 1 ? "" : "s"}.`
+          : res.error,
+        res.ok,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function create() {
     if (!newCode.trim()) return;
     setBusy(true);
@@ -439,6 +501,7 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
     // second-guessing a person's decision.
     const suggestion = suggestions.get(finish.id);
     const uses = finish.used_on.length;
+    const bwPalette = finish.bw_palette_key ? (data?.palettes?.[finish.bw_palette_key] ?? null) : null;
     return (
       <Fragment key={finish.id}>
         <Tr data-finish={finish.code}>
@@ -525,6 +588,18 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
               {finish.state === "confirmed" ? "Confirmed" : "TBC"}
             </Chip>
           </Td>
+          {/* BW'S OWN FINISH FOR THE CODE (0045), set once here and shipped on
+              every item carrying it. */}
+          <Td>
+            <FinishStandardCell
+              finish={finish}
+              palette={bwPalette}
+              busy={busy}
+              onSet={() => setStandardEditing({ id: finish.id, mode: "set" })}
+              onAgree={() => setStandardEditing({ id: finish.id, mode: "agree" })}
+              onAdopt={(value) => void adoptStandard(finish, value)}
+            />
+          </Td>
           {/* THE TOTAL, always. The run filter adds to it; it never replaces
               it — this number is what an edit reaches. */}
           <Td num>
@@ -555,6 +630,21 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
             </Button>
           </Td>
         </Tr>
+
+        {standardEditing?.id === finish.id && (
+          <FinishStandardPanel
+            finish={finish}
+            palette={bwPalette}
+            projectId={id}
+            mode={standardEditing.mode}
+            span={COLUMNS}
+            onClose={() => setStandardEditing(null)}
+            onSaved={async (message, ok) => {
+              await reloadThen(message, ok);
+              if (ok) setStandardEditing(null);
+            }}
+          />
+        )}
 
         {/* A PANEL SPANNING THE ROW IS ITS OWN `<tr>`, never an extra colSpan
             cell beside the data cells. */}
@@ -862,11 +952,12 @@ export default function FinishesLibrary({ projectId }: { projectId: string }) {
             <thead>
               <tr>
                 <Th className="w-[54px]" />
-                <Th className="w-[13%]">Code</Th>
-                <Th className="w-[15%]">Kind</Th>
-                <Th className="w-[34%]">Description</Th>
-                <Th className="w-[10%]">State</Th>
-                <Th num className="w-[11%]">Used on</Th>
+                <Th className="w-[11%]">Code</Th>
+                <Th className="w-[13%]">Kind</Th>
+                <Th className="w-[24%]">Description</Th>
+                <Th className="w-[8%]">State</Th>
+                <Th className="w-[20%]">BW finish</Th>
+                <Th num className="w-[9%]">Used on</Th>
                 <Th className="w-[70px]" />
               </tr>
             </thead>

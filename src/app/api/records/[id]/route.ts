@@ -92,6 +92,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            f.name as field_name, f.json_id, f.field_category,
            a.finish_id, fin.code as finish_code, fin.description as finish_description, fin.state as finish_state,
            fin.code_origin as finish_code_origin,
+           -- 0045: BW's own finish for the CODE, which is the standard in
+           -- force on a linked spec. The spec's own columns above are then
+           -- history, and the screen says the library's replaces them.
+           fin.standard_value as finish_standard_value, fin.standard_state as finish_standard_state,
            src.filename as source_filename, src.document_kind as source_document_kind
     from record_attributes a
     left join spec_fields f on f.id = a.spec_field_id

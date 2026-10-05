@@ -219,6 +219,33 @@ export async function editFinish(
     throw new DomainConflictError("finish_version_stale", "That finish changed as you saved. Nothing was written — reload.");
   }
 
+  const carried = await carryFinishToItems(txn, { finishId, changeSetId, actor });
+  return {
+    finishId,
+    recordsTouched: carried.recordsTouched,
+    answersFilled: carried.answersFilled,
+    recordsWithManualAnswers: carried.recordsWithManualAnswers,
+    changeSetId,
+  };
+}
+
+/**
+ * CARRY A FINISH'S CHANGE TO EVERY ITEM: recompose each linked record's
+ * checklist and take ONE version of each, under the caller's change set.
+ *
+ * Its own function so that every write to a library row shares it -- an edit
+ * (`editFinish`) and BW's own finish for the code (`finish-standard.ts`, 0045)
+ * both change what every linked item ships, and a second copy of this loop is
+ * how one of them would come to skip the version, or the manual-answer report.
+ */
+export async function carryFinishToItems(
+  txn: TxnSql,
+  { finishId, changeSetId, actor }: { finishId: string; changeSetId: string; actor: string },
+): Promise<{
+  recordsTouched: number;
+  answersFilled: number;
+  recordsWithManualAnswers: { recordId: string; label: string }[];
+}> {
   // ---- carry it to every item -------------------------------------------
   const linked = await txn`
     select distinct r.id, r.record_no, p.bws_project_number, r.variant_ordinal,
@@ -266,11 +293,9 @@ export async function editFinish(
   );
 
   return {
-    finishId,
     recordsTouched: linked.length,
     answersFilled,
     recordsWithManualAnswers: manual,
-    changeSetId,
   };
 }
 

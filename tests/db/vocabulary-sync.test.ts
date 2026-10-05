@@ -83,6 +83,8 @@ const VOCABULARIES: {
   { name: "BOQ_ROLES", constraint: "boq_column_aliases_role_check", values: BOQ_ROLES },
   // 0041: what state a BW standard beside the client's words is in.
   { name: "STANDARD_STATES", constraint: "record_attributes_standard_state_check", values: STANDARD_STATES },
+  // 0045: the same states, for BW's own finish set once on a library code.
+  { name: "STANDARD_STATES (finishes)", constraint: "project_finishes_standard_state_check", values: STANDARD_STATES },
 ];
 
 /** Every single-quoted literal in a constraint definition. */
