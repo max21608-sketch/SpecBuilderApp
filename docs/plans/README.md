@@ -100,6 +100,27 @@ Decided by Max the same day, for the build after this one (not built):
   drawing crop (the drawings confirm no longer replaces the bill's picture on
   its own) — in the approved mock-up, deferred to that build.
 
+## 2026-10-05 — Promoted to pilot: the record picker names the client's code, at `ba4983a` (v1.6)
+
+At Max's instruction ("push code to pilot"). By Claude: pilot backed up first
+(`spec-builder-pilot-2026-10-05T16-14-14-373Z.sql`, outside the repo,
+read-only); pilot's migration ledger checked read-only (43 of 43, and no
+`db/` change between `e8456f0` and staging, so no migration and no seed); the
+chip bumped to v1.6 on staging; then `pilot` fast-forwarded `e8456f0` →
+`ba4983a` (7 commits: the record picker of `32b4d8e`, the bill review layout of
+`a77d4bc`/`4c1f699`, three plans commits, the chip). The pilot sign-in page
+serves `[PILOT]` and the v1.6 chip, which places the new build there; signed
+in, `/api/auth/me` at `ba4983a` and the first-session script are Max's.
+
+Why `32b4d8e`: on pilot P18181 v3, `AM-ID-MUR-FUR-13` is a mock-up drawing on a
+project with no mock-up phase, so it resolved to nothing and the hand picker
+listed 67 records by our number — "13" read as record 13 (`GR-FUR-02`, a
+coffee table) where FUR-13 is `GR-FUR-13` / `PL-FUR-13`. The picker now leads
+with the client's code, lists the code's own records first, and shows a hand
+pick once made. **Open, Max's:** whether a mock-up drawing on a project with
+NO mock-up phase should fall back to the main lines carrying its code (it
+would reverse part of the 2026-10-04 rule). Not accepted by Max or Matthew.
+
 ## 2026-10-04 — Promoted to pilot: intake reads the document, at `e8456f0` (v1.5)
 
 At Max's instruction ("promote"). Run by Max: pilot migration 0043 ("Applied 1
