@@ -40,7 +40,12 @@ import {
   type BoqRowKind,
   type RowKindFields,
 } from "@/lib/boq-row-kinds";
-import BoqRowKindCell from "@/components/imports/BoqRowKindCell";
+import BoqRowKindCell, { RowKindReasoning } from "@/components/imports/BoqRowKindCell";
+import { fabricCodeOf } from "@/lib/boq-row-kinds";
+// Pure: where the review draws its lines — an item and the fabrics under it as
+// one group, a gap between groups, consecutive items of one code bracketed.
+// Layout only; nothing the confirm writes reads it.
+import { groupBillLines, type BillFamily, type BillGroupMember } from "@/lib/bill-review-groups";
 // What each item's description cell becomes — the plan the confirm writes,
 // computed on the server by `planSheetDescriptions` and only rendered here.
 import {
@@ -70,7 +75,7 @@ import { linesToIgnore, nonFurnitureOf, type NonFurnitureGuess } from "@/lib/non
 // duplicate panel used to compute its own fold here; the carry must use
 // `normaliseRef`, and two folds is how the amber panel and the carry come to
 // disagree about which rows are ambiguous.
-import { duplicateGroups, isDuplicated } from "@/lib/boq-carry";
+import { duplicateGroups } from "@/lib/boq-carry";
 import { formatDay } from "@/lib/format-day";
 import PageBody from "@/components/ui/PageBody";
 import Tabs from "@/components/ui/Tabs";
@@ -110,44 +115,146 @@ type Line = {
 } & RowKindFields;
 
 /**
- * THE PICTURE THE BILL PRINTS ON THIS ROW, as a thumbnail at a FIXED size
- * floated beside the item's name — never a column of its own and never wider
- * than 40px, so a bill of three hundred pictures cannot push the table past
- * its box (the overflow rule). It is what the confirm gives the record where
- * the record has no picture; a drawing crop later replaces it. Several
- * different pictures on one row are said in words, and none is taken.
+ * THE PICTURE THE BILL PRINTS ON THIS ROW, at a FIXED size beside the item's
+ * name — never a column of its own and never wider than 52px, so a bill of
+ * three hundred pictures cannot push the table past its box (the overflow
+ * rule). It is what the confirm gives the record where the record has no
+ * picture; a drawing crop later replaces it. Several different pictures on one
+ * row are said in words by the caller, and none is taken.
+ *
+ * A FABRIC LINE'S picture is its SWATCH, 36px, from the same route. It used to
+ * be suppressed altogether, so a bill that prints a swatch on every fabric line
+ * stored them all and showed none. A fabric line with no single picture shows
+ * an empty dashed frame that says so, so a missing swatch reads as the bill's
+ * and not the app's.
  */
 function BillRowPicture({
   importId,
   sheetIndex,
   lineNo,
   image,
+  size,
 }: {
   importId: string;
   sheetIndex: number;
   lineNo: number;
   image: BillRowImage | null;
+  size: "thumb" | "swatch";
 }) {
-  if (!image) return null;
-  if (!image.pathname) {
+  if (!image?.pathname) {
+    if (size === "thumb") return null;
     return (
-      <span className="mb-0.5 block text-[10.5px] text-neutral-500">
-        {image.pictures} pictures on this row — none is taken as the item&apos;s
-      </span>
+      <span
+        className="block h-9 w-9 shrink-0 rounded border border-dashed border-neutral-300 bg-white"
+        title={
+          image
+            ? `${image.pictures} pictures on this row — none is taken as the swatch`
+            : "The bill has no picture on this row"
+        }
+      />
     );
   }
+  const swatch = size === "swatch";
   return (
     // eslint-disable-next-line @next/next/no-img-element -- a private, session-scoped stream; next/image would proxy it
     <img
       src={`/api/imports/${importId}/row-image?sheet=${sheetIndex}&row=${lineNo}`}
-      alt={`The picture on row ${lineNo} of the bill`}
-      title="The bill's picture for this line — the record's picture until a drawing crop replaces it"
+      alt={swatch ? `The swatch on row ${lineNo} of the bill` : `The picture on row ${lineNo} of the bill`}
+      title={
+        swatch
+          ? "The bill's picture for this fabric line"
+          : "The bill's picture for this line — the record's picture until a drawing crop replaces it"
+      }
       loading="lazy"
-      width={40}
-      height={40}
-      className="float-left mr-2 h-10 w-10 rounded border border-neutral-200 bg-white object-contain"
+      width={swatch ? 36 : 52}
+      height={swatch ? 36 : 52}
+      className={
+        swatch
+          ? "block h-9 w-9 shrink-0 rounded border border-neutral-200 bg-white object-cover"
+          : "block h-[52px] w-[52px] shrink-0 rounded border border-neutral-200 bg-white object-contain"
+      }
     />
   );
+}
+
+// ---- how the bill's groups are drawn (`groupBillLines`) ----------------------
+//
+// Every class below is a complete literal: Tailwind purges anything it cannot
+// read in source. The row variants (`[&>td]:…`) out-rank `Td`'s own bottom
+// border, which is the point — inside a group the GAP separates, not a rule.
+
+/** No rule under any data row: the gap between groups does the separating. */
+const ROW_NO_RULE = "[&>td]:border-b-0";
+/** A fabric line's band. */
+const ROW_FABRIC = "[&>td]:bg-neutral-50";
+/** The sky bar down the left of every row a family of one code owns. */
+const ROW_FAMILY_BAR = "[&>td:first-child]:shadow-[inset_4px_0_0_#7dd3fc]";
+const CELL_FAMILY_BAR = "shadow-[inset_4px_0_0_#7dd3fc]";
+/** The light rule between two members of one family, in place of a gap. */
+const ROW_FAMILY_RULE = "[&>td]:border-t [&>td]:border-dashed [&>td]:border-sky-200";
+/** The L-shaped connector from a fabric line up to its item. */
+const RAIL =
+  "relative pl-7 before:absolute before:-top-2.5 before:bottom-1/2 before:left-2.5 before:w-3 before:rounded-bl-md before:border-b-2 before:border-l-2 before:border-neutral-300 before:content-['']";
+/** …and its continuation down to the next fabric line of the same item. */
+const RAIL_MORE =
+  "after:absolute after:-bottom-2.5 after:left-2.5 after:top-1/2 after:border-l-2 after:border-neutral-300 after:content-['']";
+/** A chip that wraps inside the Item column instead of running across Area. */
+const CHIP_WRAPS = "!whitespace-normal max-w-full [overflow-wrap:anywhere]";
+
+/** The grey gutter between two groups. The one legitimate full-width cell. */
+function GroupGap({ columns }: { columns: number }) {
+  return (
+    <tr aria-hidden="true" data-bill-gap="">
+      <td colSpan={columns} className="h-[18px] border-y border-neutral-200 bg-neutral-100 p-0" />
+    </tr>
+  );
+}
+
+/**
+ * The heading over consecutive lines of one code. A bracket, never a merge:
+ * each line under it is still its own record. "N options" only where every
+ * line's own words say option — otherwise the bill has not said why it repeats
+ * the code, and the heading says only that it does.
+ */
+function FamilyHeading({ family, columns }: { family: BillFamily; columns: number }) {
+  return (
+    <tr data-bill-family={family.code}>
+      <td colSpan={columns} className={`px-3 pb-1 pt-3 ${CELL_FAMILY_BAR}`}>
+        <span className="flex flex-wrap items-baseline gap-2">
+          <span className="font-mono text-[12.5px] font-semibold text-neutral-900">{family.code}</span>
+          {family.options ? (
+            <Chip tone="live">{family.lines} options</Chip>
+          ) : (
+            <span className="text-xs text-neutral-700">{family.lines} lines share this code</span>
+          )}
+          <span className="text-xs text-neutral-500">
+            {family.options
+              ? "each option is its own item, with its own size, quantity and fabric"
+              : "each line becomes its own record"}
+          </span>
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * The area on its own lines: the area, then the sub-area muted under it. The
+ * stored value is `effectiveArea`'s composition, so the slash it writes stays
+ * at the end of the first line and the whole string is the cell's title.
+ */
+function AreaLines({ line }: { line: Pick<Line, "area" | "subArea" | "boqCategory"> }) {
+  const area = line.area?.trim() || null;
+  const subArea = line.subArea?.trim() || null;
+  if (area && subArea) {
+    return (
+      <>
+        {area} <span className="text-neutral-400">/</span>
+        <span className="block text-neutral-500">{subArea}</span>
+      </>
+    );
+  }
+  return <>{effectiveArea(line) ?? "—"}</>;
 }
 
 /** "17 and 18", "17, 18 and 19" — a list a person reads rather than parses. */
@@ -436,6 +543,16 @@ export default function ReviewImportPage() {
   const [openDescriptions, setOpenDescriptions] = useState<Set<string>>(() => new Set());
   const toggleDescription = (key: string) =>
     setOpenDescriptions((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  /** Fabric lines whose "why?" is open, as `sheet:index`. */
+  const [openWhy, setOpenWhy] = useState<Set<string>>(() => new Set());
+  const toggleWhy = (key: string) =>
+    setOpenWhy((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -1591,9 +1708,34 @@ export default function ReviewImportPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sheet.lines.map((line) => {
+                      {(() => {
+                      /**
+                       * One bill line's row, and its description panel.
+                       * `place` is where `groupBillLines` put it: a fabric
+                       * HANGING off the item above is drawn on a rail, a member
+                       * of a family carries the sky bar, and every member of a
+                       * family after the first opens with a dashed rule rather
+                       * than a gap.
+                       */
+                      const lineRows = (
+                        line: Line,
+                        place: {
+                          member: BillGroupMember<Line>;
+                          hanging: boolean;
+                          more: boolean;
+                          family: boolean;
+                          familyRule: boolean;
+                        },
+                      ) => {
                         const fabric = line.rowKind === "finish_for";
-                        const duplicated = !fabric && isDuplicated(sheet, line);
+                        // The SAME code on a line that is not beside this one.
+                        // Inside a family the heading says it, so the family's
+                        // own members are not listed and the row is not amber.
+                        const alsoOn = place.hanging ? [] : place.member.alsoOn;
+                        const duplicated = !fabric && alsoOn.length > 0;
+                        const image = rowImageFor(run.parsed?.rowImages, sheet.sheetName, line.lineNo);
+                        const whyKey = `${sheetIndex}:${line.index}`;
+                        const whyOpen = openWhy.has(whyKey);
                         const description = fabric ? undefined : descriptions[line.index];
                         const descriptionKey = `${sheetIndex}:${line.index}`;
                         const descriptionOpen = openDescriptions.has(descriptionKey);
@@ -1601,16 +1743,27 @@ export default function ReviewImportPage() {
                           <Fragment key={line.index}>
                           <Tr
                             tone={duplicated ? "warn" : "plain"}
-                            className={line.ignored ? "opacity-40" : undefined}
+                            className={[
+                              ROW_NO_RULE,
+                              fabric ? ROW_FABRIC : "",
+                              place.family ? ROW_FAMILY_BAR : "",
+                              place.familyRule ? ROW_FAMILY_RULE : "",
+                              line.ignored ? "opacity-40" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
                           >
-                            <Td muted>
+                            {/* ONE NUMBER: the spreadsheet row, the one you
+                                scroll to in Excel. The bill's OWN line number,
+                                where it has a column for one, is the hover —
+                                two near-identical columns of digits in the
+                                margin read as one too many. */}
+                            <Td
+                              muted={!fabric}
+                              className={fabric ? "text-[11.5px] text-neutral-400" : undefined}
+                              title={line.sourceLine ? `line ${line.sourceLine} on the bill` : undefined}
+                            >
                               {line.lineNo}
-                              {/* The bill's OWN line number, where it has a
-                                  column for one. Shown, never written: the row
-                                  is what "go and look" needs. */}
-                              {line.sourceLine && (
-                                <span className="block text-[10.5px] text-neutral-400">line {line.sourceLine}</span>
-                              )}
                             </Td>
                             <Td>
                               <BoqRowKindCell
@@ -1622,45 +1775,137 @@ export default function ReviewImportPage() {
                                 onSet={(kind, finishForRow) => void setLineKind(sheetIndex, line.index, kind, finishForRow)}
                               />
                             </Td>
-                            <Td mono>{line.code ? <ClientRefs code={line.code} /> : "—"}</Td>
+                            <Td mono className={fabric ? "text-neutral-500" : undefined}>
+                              {line.code ? <ClientRefs code={line.code} /> : "—"}
+                              {alsoOn.length > 0 && (
+                                <span className="mt-0.5 block font-sans text-[10.5px] text-amber-800">
+                                  also on row{alsoOn.length === 1 ? "" : "s"} {listOf(alsoOn)}
+                                </span>
+                              )}
+                            </Td>
+                            {fabric ? (
                             <Td>
-                              {!fabric && (
+                              {/* A FABRIC HANGS OFF ITS ITEM: its swatch on a
+                                  rail, its words, and one chip saying where it
+                                  goes. Why it is a fabric line is one press
+                                  away rather than three lines on every row. A
+                                  fabric the bill printed elsewhere stays where
+                                  the bill put it, off the rail, naming its row. */}
+                              <div
+                                className={
+                                  place.hanging
+                                    ? `flex items-center gap-2.5 ${RAIL} ${place.more ? RAIL_MORE : ""}`
+                                    : "flex items-center gap-2.5"
+                                }
+                              >
                                 <BillRowPicture
                                   importId={id}
                                   sheetIndex={sheetIndex}
                                   lineNo={line.lineNo}
-                                  image={rowImageFor(run.parsed?.rowImages, sheet.sheetName, line.lineNo)}
+                                  image={image}
+                                  size="swatch"
                                 />
-                              )}
-                              {description ? (
-                                <span className="font-medium text-neutral-900">{description.name}</span>
-                              ) : (
-                                line.itemDescription
-                              )}
-                              {line.productReference && (
-                                <span className="text-neutral-500"> · {line.productReference}</span>
-                              )}
-                              {line.notes && (
-                                <span className="mt-0.5 block text-xs text-neutral-500">Notes: {line.notes}</span>
-                              )}
-                              {description && (
-                                <BillDescriptionSummary
-                                  plan={description}
-                                  open={descriptionOpen}
-                                  onToggle={() => toggleDescription(descriptionKey)}
-                                  busy={busy}
-                                  onSetSlot={
-                                    run.status === "parsed" && !line.ignored
-                                      ? (key, slot) => void setSlot(sheetIndex, line, key, slot)
-                                      : undefined
-                                  }
-                                />
-                              )}
+                                <div className="min-w-0">
+                                  <span className="block text-[12.5px] text-neutral-800">
+                                    {line.itemDescription}
+                                    {line.productReference && (
+                                      <span className="text-neutral-500"> · {line.productReference}</span>
+                                    )}
+                                  </span>
+                                  {line.notes && (
+                                    <span className="block text-xs text-neutral-500">Notes: {line.notes}</span>
+                                  )}
+                                  <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                    {line.finishFor && (
+                                      <Chip mono className={CHIP_WRAPS}>
+                                        {fabricCodeOf(line.code) ?? "no code"} → next free COM
+                                      </Chip>
+                                    )}
+                                    <span className="text-[11px] text-neutral-500">
+                                      {line.finishFor
+                                        ? place.hanging
+                                          ? `on ${line.finishFor.code ?? `row ${line.finishFor.row}`}`
+                                          : `for row ${line.finishFor.row}${
+                                              line.finishFor.code ? ` (${line.finishFor.code})` : ""
+                                            } — not the line above`
+                                        : "no item chosen yet"}
+                                      {" · "}
+                                      <Button
+                                        variant="quiet"
+                                        size="xs"
+                                        className="-my-0.5 px-1 py-0 text-[11px]"
+                                        aria-expanded={whyOpen}
+                                        aria-label={`Why row ${line.lineNo} is a fabric line`}
+                                        onClick={() => toggleWhy(whyKey)}
+                                      >
+                                        why?
+                                      </Button>
+                                    </span>
+                                  </span>
+                                  {whyOpen && <RowKindReasoning line={line} />}
+                                </div>
+                              </div>
                             </Td>
+                            ) : (
+                            <Td>
+                              <div className="flex gap-3">
+                                <BillRowPicture
+                                  importId={id}
+                                  sheetIndex={sheetIndex}
+                                  lineNo={line.lineNo}
+                                  image={image}
+                                  size="thumb"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  {image && !image.pathname && (
+                                    <span className="mb-0.5 block text-[10.5px] text-neutral-500">
+                                      {image.pictures} pictures on this row — none is taken as the item&apos;s
+                                    </span>
+                                  )}
+                                  {description ? (
+                                    <span className="font-medium text-neutral-900">{description.name}</span>
+                                  ) : (
+                                    line.itemDescription
+                                  )}
+                                  {line.productReference && (
+                                    <span className="text-neutral-500"> · {line.productReference}</span>
+                                  )}
+                                  {line.notes && (
+                                    <span className="mt-0.5 block text-xs text-neutral-500">Notes: {line.notes}</span>
+                                  )}
+                                  {description && (
+                                    <BillDescriptionSummary
+                                      plan={description}
+                                      open={descriptionOpen}
+                                      onToggle={() => toggleDescription(descriptionKey)}
+                                      busy={busy}
+                                      chipClassName={CHIP_WRAPS}
+                                      onSetSlot={
+                                        run.status === "parsed" && !line.ignored
+                                          ? (key, slot) => void setSlot(sheetIndex, line, key, slot)
+                                          : undefined
+                                      }
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            </Td>
+                            )}
+                            {/* A FABRIC LINE IS NOT A RECORD: no area to
+                                carry, no quantity to ask for, no designer. One
+                                empty cell, rather than the item's area again
+                                and an amber "not given" nobody has to answer. */}
+                            {fabric ? (
+                              <Td colSpan={3} />
+                            ) : (
+                            <>
                             {/* What the record will carry: `effectiveArea` is
                                 the function the confirm writes it with, so a
-                                Sub-Area shows here composed exactly as stored. */}
-                            <Td>{effectiveArea(line) ?? "—"}</Td>
+                                Sub-Area shows here as stored — the area, then
+                                the sub-area under it, the whole as the title. */}
+                            <Td className="text-[12.5px] leading-5" title={effectiveArea(line) ?? undefined}>
+                              <AreaLines line={line} />
+                            </Td>
                             {/* NO QUANTITY IS NOT A DASH AND IT IS NEVER A 1.
                                 A bill with no `TOTAL Q-ty` column gives every
                                 line a null quantity (variance matrix row 2),
@@ -1687,6 +1932,8 @@ export default function ReviewImportPage() {
                             <Td mono muted>
                               {line.designer ?? "—"}
                             </Td>
+                            </>
+                            )}
                             {reconciliation && (
                               <Td>
                                 {(() => {
@@ -1752,12 +1999,11 @@ export default function ReviewImportPage() {
                                 })()}
                               </Td>
                             )}
+                            {/* Category and level: a record's, so a fabric
+                                line's are empty — what it is instead sits
+                                behind its "why?". */}
                             {fabric ? (
-                              <Td colSpan={2} className="text-xs text-neutral-600">
-                                Not a record — its description is written as a fabric spec on row{" "}
-                                {line.finishFor?.row ?? "—"}
-                                {line.finishFor?.code ? ` (${line.finishFor.code})` : ""}.
-                              </Td>
+                              <Td colSpan={2} />
                             ) : (
                             <Td>
                               <select
@@ -1853,7 +2099,34 @@ export default function ReviewImportPage() {
                           )}
                           </Fragment>
                         );
-                      })}
+                      };
+                      return groupBillLines(sheet.lines).map((group, groupIndex) => (
+                        <Fragment key={`group-${group.members[0]?.line.index ?? groupIndex}`}>
+                          {groupIndex > 0 && <GroupGap columns={columns} />}
+                          {group.family && <FamilyHeading family={group.family} columns={columns} />}
+                          {group.members.map((member, memberIndex) => (
+                            <Fragment key={`member-${member.line.index}`}>
+                              {lineRows(member.line, {
+                                member,
+                                hanging: false,
+                                more: false,
+                                family: group.family !== null,
+                                familyRule: group.family !== null && memberIndex > 0,
+                              })}
+                              {member.fabrics.map((fabricLine, fabricIndex) =>
+                                lineRows(fabricLine, {
+                                  member,
+                                  hanging: true,
+                                  more: fabricIndex < member.fabrics.length - 1,
+                                  family: group.family !== null,
+                                  familyRule: false,
+                                }),
+                              )}
+                            </Fragment>
+                          ))}
+                        </Fragment>
+                      ));
+                      })()}
                       {/* THE SAME CLIENT REF ON TWO LINES IS NORMAL, AND IS THE
                           MOST CONFUSING THING IN THE REAL PILOT BILL. `SX11A`
                           appears twice in the P17231 BOQ at different

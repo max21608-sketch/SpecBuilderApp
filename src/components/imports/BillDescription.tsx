@@ -60,12 +60,19 @@ export function BillDescriptionSummary({
   onToggle,
   onSetSlot,
   busy = false,
+  chipClassName = "",
 }: {
   plan: ReviewDescription;
   open: boolean;
   onToggle: () => void;
   onSetSlot?: SetSlot;
   busy?: boolean;
+  /**
+   * Layout for the size and finish chips. The bill review passes a class that
+   * lets them wrap inside its Item column — `Chip` stays no-wrap everywhere
+   * else, where a code broken over two lines reads as two codes.
+   */
+  chipClassName?: string;
 }) {
   const depthKey = plan.depthWithoutWidth ?? null;
   const finishes = plan.attributes.filter(isFinish);
@@ -74,7 +81,11 @@ export function BillDescriptionSummary({
     <div className="mt-1 space-y-1">
       <div className="flex flex-wrap items-center gap-1 text-xs text-neutral-600">
         {plan.dimensionCell ? (
-          <Chip mono title="The Dimensions cell this item will carry, composed as the export writes it">
+          <Chip
+            mono
+            className={chipClassName}
+            title="The Dimensions cell this item will carry, composed as the export writes it"
+          >
             {plan.dimensionCell}
           </Chip>
         ) : (
@@ -85,6 +96,7 @@ export function BillDescriptionSummary({
             key={`${attribute.materialCode ?? "finish"}-${index}`}
             mono
             tone={attribute.specFieldId ? "plain" : "blocked"}
+            className={chipClassName}
             title={attribute.value}
           >
             {attribute.materialCode ?? "—"} → {attribute.specFieldName ?? "no field"}

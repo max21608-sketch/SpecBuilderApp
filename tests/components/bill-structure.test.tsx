@@ -248,6 +248,9 @@ describe("a line's kind", () => {
     const user = userEvent.setup();
     const onSet = vi.fn();
     render(<BoqRowKindCell line={lines[3]!} lines={lines} editable busy={false} onSet={onSet} />);
+    // Quiet until clicked: plain "Item ▾", and the same select behind it.
+    expect(screen.queryByRole("combobox", { name: "Row 12 is" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Row 12 is Item — change" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Row 12 is" }), "section");
     expect(onSet).toHaveBeenCalledWith("section", null);
   });
@@ -256,6 +259,7 @@ describe("a line's kind", () => {
     const user = userEvent.setup();
     const onSet = vi.fn();
     render(<BoqRowKindCell line={lines[3]!} lines={lines} editable busy={false} onSet={onSet} />);
+    await user.click(screen.getByRole("button", { name: "Row 12 is Item — change" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Row 12 is" }), "finish_for");
     expect(onSet).not.toHaveBeenCalled();
     const parent = screen.getByRole("combobox", { name: "Row 12 is the fabric of" });
@@ -280,11 +284,17 @@ describe("a line's kind", () => {
     expect((screen.getByRole("combobox", { name: "Row 12 is the fabric of" }) as HTMLSelectElement).value).toBe("11");
   });
 
-  it("puts a Kind select on every line of the review, and a fabric line's category is its item", async () => {
+  it("puts a quiet Kind on every line of the review, the select one press behind it, and a fabric's why behind a why?", async () => {
+    const user = userEvent.setup();
     mountReview({}, [{ ...modelReadSheet(), columnsChecked: true }]);
-    expect(await screen.findByRole("combobox", { name: "Row 14 is" })).toHaveValue("finish_for");
-    expect(screen.getByRole("combobox", { name: "Row 9 is" })).toHaveValue("item");
-    expect(screen.getByText(/Not a record — its description is written as a fabric spec on row 13/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Row 14 is Fabric — change" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Row 9 is Item — change" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Row 14 is" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Row 14 is Fabric — change" }));
+    expect(screen.getByRole("combobox", { name: "Row 14 is" })).toHaveValue("finish_for");
+    expect(screen.queryByText(/Not a record — its description is written as the next free COM spec on row 13/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Why row 14 is a fabric line" }));
+    expect(screen.getByText(/Not a record — its description is written as the next free COM spec on row 13/)).toBeInTheDocument();
   });
 });
 
