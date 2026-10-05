@@ -51,6 +51,7 @@ import { unallocatedQty, variantName } from "@/lib/record-variants";
 import { recordLabel as formatRecordLabel, recordShortLabel } from "@/lib/record-label";
 import { describeRetireEffect } from "@/lib/configuration-carry";
 import RecordHistory from "@/components/history/RecordHistory";
+import RecordDocuments from "@/components/records/RecordDocuments";
 import ReasonPrompt, { type PendingReason } from "@/components/history/ReasonPrompt";
 import type { UploadedEvidence } from "@/components/history/EvidenceUpload";
 import { BwStandardPanel, BwStandardSummary, paletteForJsonId } from "@/components/records/BwStandardControl";
@@ -157,8 +158,12 @@ type RetiredAttribute = Attribute & {
 /** Who owes us the unanswered questions, resolved from the BOQ's designer code. */
 export type DesignerContact = { id: string; name: string; email: string | null; role: string | null; designer_code: string };
 
-/** The four jobs this screen does, one tab each. */
-const RECORD_TABS = ["specs", "checklist", "gates", "versions"] as const;
+/**
+ * The jobs this screen does, one tab each. Documents joined on 2026-10-05
+ * ("all the documents relating to that line item"), before Versions: which
+ * documents the item is built from is read far more often than its trail.
+ */
+const RECORD_TABS = ["specs", "checklist", "gates", "documents", "versions"] as const;
 type RecordTab = (typeof RECORD_TABS)[number];
 
 /** One end of a mock-up link (0043): a record, its number and its phase. */
@@ -272,6 +277,11 @@ function RecordView() {
   // Bumped after every successful write, so the history list below reloads
   // under the edit that caused it instead of going stale until a page reload.
   const [historyKey, setHistoryKey] = useState(0);
+  // NULL UNTIL THE TAB HAS LOADED ITS LIST. The count is the length of that
+  // list rather than a second query in the record route: one loader decides
+  // which documents count, and a tab number computed elsewhere is how the
+  // count and the table come to disagree. Versions makes the same choice.
+  const [documentCount, setDocumentCount] = useState<number | null>(null);
   // Set when the server refuses an edit for want of a reason. Holds everything
   // needed to replay the same edit once the reviewer has said why.
   const [pendingReason, setPendingReason] = useState<PendingReason | null>(null);
@@ -349,6 +359,8 @@ function RecordView() {
   // Moving from a record with no picture to one with a picture reuses this
   // component, so a sticky `true` would hide every image after the first miss.
   useEffect(() => { setImageFailed(false); }, [id]);
+  // Another record's count must not stand on this one's tab.
+  useEffect(() => { setDocumentCount(null); }, [id]);
 
   async function save(
     answer: Answer,
@@ -1004,6 +1016,7 @@ function RecordView() {
                 tone: outstandingCount > 0 ? "warn" : "good",
               },
               { id: "gates", label: "Gates", count: gateSummaryLabel, tone: gateTone },
+              { id: "documents", label: "Documents", count: documentCount },
               { id: "versions", label: "Versions", count: null },
             ]}
           />
@@ -1984,6 +1997,11 @@ function RecordView() {
 
         {/* NOT COLLAPSED ANY MORE. It was behind a toggle because it sat under
             four screens of checklist; on its own tab it can simply be the page. */}
+        {/* Loaded when opened, like Versions; the count appears once it has. */}
+        {tab === "documents" && (
+          <RecordDocuments recordId={record.id} reloadKey={historyKey} onCount={setDocumentCount} />
+        )}
+
         {tab === "versions" && (
           <RecordHistory recordId={record.id} projectId={record.project_id} reloadKey={historyKey} />
         )}
