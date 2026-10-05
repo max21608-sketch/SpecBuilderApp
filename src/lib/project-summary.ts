@@ -50,6 +50,7 @@
 // worse than no figure.
 // ============================================================================
 import { sql } from "@/lib/db";
+import { countOpenDisagreementsByProject, type ProjectDisagreements } from "@/lib/disagreements";
 
 export type ProjectSummary = {
   /** Records in the export's scope. */
@@ -122,6 +123,16 @@ export type ProjectSummary = {
    */
   tgqFromMatrix: number;
   tgqFromFallback: number;
+  /**
+   * OPEN DISAGREEMENTS BETWEEN DOCUMENTS (0046), on live items on live phases:
+   * a later document said something different from a value the record holds,
+   * and nobody has decided which stands. Counted by `src/lib/disagreements.ts`,
+   * the loader the phase table and the record screen read, never here in SQL —
+   * a second expression is how a red tile comes to say four over three rows.
+   */
+  disagreements: number;
+  /** The first live phase holding one, so the overview's tile lands on it. Null at zero. */
+  disagreementRunId: string | null;
 };
 
 export const EMPTY_SUMMARY: ProjectSummary = {
@@ -143,6 +154,8 @@ export const EMPTY_SUMMARY: ProjectSummary = {
   documentsFailed: 0,
   tgqFromMatrix: 0,
   tgqFromFallback: 0,
+  disagreements: 0,
+  disagreementRunId: null,
 };
 
 /**
@@ -161,16 +174,28 @@ export const EMPTY_SUMMARY: ProjectSummary = {
 export async function loadProjectSummaries(projectIds: string[]): Promise<Map<string, ProjectSummary>> {
   const out = new Map<string, ProjectSummary>();
   if (projectIds.length === 0) return out;
-  for (const row of await summaryRows(projectIds)) {
-    out.set(String(row.project_id), toSummary(row));
+  const [rows, disagreements] = await Promise.all([
+    summaryRows(projectIds),
+    countOpenDisagreementsByProject(sql, projectIds),
+  ]);
+  for (const row of rows) {
+    const projectId = String(row.project_id);
+    out.set(projectId, withDisagreements(toSummary(row), disagreements.get(projectId)));
   }
   return out;
 }
 
 export async function loadProjectSummary(projectId: string): Promise<ProjectSummary> {
-  const rows = await summaryRows([projectId]);
+  const [rows, disagreements] = await Promise.all([
+    summaryRows([projectId]),
+    countOpenDisagreementsByProject(sql, [projectId]),
+  ]);
   const row = rows[0];
-  return row ? toSummary(row) : EMPTY_SUMMARY;
+  return row ? withDisagreements(toSummary(row), disagreements.get(projectId)) : EMPTY_SUMMARY;
+}
+
+function withDisagreements(summary: ProjectSummary, found: ProjectDisagreements | undefined): ProjectSummary {
+  return found ? { ...summary, disagreements: found.open, disagreementRunId: found.firstRunId } : summary;
 }
 
 type SummaryRow = Record<string, unknown>;
@@ -408,5 +433,7 @@ function toSummary(row: SummaryRow): ProjectSummary {
     documentsFailed: Number(row.documents_failed ?? 0),
     tgqFromMatrix: Number(row.tgq_from_matrix ?? 0),
     tgqFromFallback: Number(row.tgq_from_fallback ?? 0),
+    disagreements: 0,
+    disagreementRunId: null,
   };
 }
