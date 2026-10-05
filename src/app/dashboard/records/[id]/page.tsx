@@ -44,7 +44,8 @@ import {
   normaliseItemLevel,
 } from "@/lib/spec-vocab";
 import { isFinishGroup } from "@/lib/finishes";
-import { composeDimensionCell, valueCarriesItsUnit } from "@/lib/dimensions";
+import { composeDimensionCell, toMillimetres, valueCarriesItsUnit } from "@/lib/dimensions";
+import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { NO_LEVEL_EXPLANATION } from "@/lib/tgq";
 import SpecValue from "@/components/records/SpecValue";
 import { unallocatedQty, variantName } from "@/lib/record-variants";
@@ -770,19 +771,21 @@ function RecordView() {
   const slotted = attributes.filter(
     (attribute) => attribute.attr_group === "dimension" && attribute.dimension_slot,
   );
-  const dimensionCell = composeDimensionCell(
-    slotted.map((attribute) => ({
-      slot: attribute.dimension_slot as DimensionSlot,
-      value: attribute.value,
-      unit: (attribute.unit ?? null) as AttributeUnit | null,
-      state: attribute.state,
-      sortOrder: attribute.sort_order,
-    })),
-    // The note IS part of the cell, not a caption beside it (0034). Rendering
-    // it separately here would show a reviewer something the file does not
-    // say, which is the whole reason there is one composer.
-    record.dimension_note,
-  );
+  const dimensionRows = slotted.map((attribute) => ({
+    slot: attribute.dimension_slot as DimensionSlot,
+    value: attribute.value,
+    unit: (attribute.unit ?? null) as AttributeUnit | null,
+    state: attribute.state,
+    sortOrder: attribute.sort_order,
+  }));
+  // The note IS part of the cell, not a caption beside it (0034). Rendering
+  // it separately here would show a reviewer something the file does not
+  // say, which is the whole reason there is one composer.
+  const dimensionCell = composeDimensionCell(dimensionRows, record.dimension_note);
+  // THE SAME ROWS AS A PERSON READS THEM (2026-10-05): a feet-and-inches slot
+  // as the page printed it, its millimetres in brackets. `dimensionCell` is
+  // still what BWS receives, and is printed under it whenever they differ.
+  const dimensionShown = composeDimensionCell(dimensionRows, record.dimension_note, { mode: "screen" });
   const provenance = dimensionProvenance(
     slotted.map((attribute) => ({
       unit: attribute.unit,
@@ -1131,10 +1134,15 @@ function RecordView() {
                   value and unit, which is what makes a converted W1900
                   checkable against a page that says 190. */}
               {dimensionCell.text && (
-                <Card title="Dimensions, as BWS will receive them" className="mt-0">
-                  <p className="font-mono text-base leading-6 tracking-[0.01em] text-neutral-900">
-                    {dimensionCell.text}
-                  </p>
+                <Card
+                  title={dimensionShown.fromImperial ? "Dimensions" : "Dimensions, as BWS will receive them"}
+                  className="mt-0"
+                >
+                  <ComposedDimensionText
+                    shown={dimensionShown}
+                    fileText={dimensionCell.text}
+                    className="font-mono text-base leading-6 tracking-[0.01em] text-neutral-900"
+                  />
                   {provenance && <p className="mt-1.5 text-xs text-neutral-500">{provenance}</p>}
                   {dimensionCell.problems.map((problem, index) => (
                     <Note key={index} tone="warn">
@@ -1196,6 +1204,7 @@ function RecordView() {
                                         are display only — see src/lib/shout.ts. */}
                                     {attribute.value && <SpecValue text={attribute.value} />}
                                     {attribute.unit && !valueCarriesItsUnit(attribute.value) && <span className="text-neutral-500">{attribute.unit}</span>}
+                                    <ImperialMillimetres attribute={attribute} />
                                     {attribute.state === "tbc" && (
                                       <span className="ml-1.5 align-middle"><Chip tone="warn">TBC</Chip></span>
                                     )}
@@ -2032,4 +2041,24 @@ export default function RecordPage() {
       <RecordView />
     </Suspense>
   );
+}
+
+/**
+ * The millimetres beside a dimension the page printed in feet and inches —
+ * "always keep the original measurement, but have in brackets beside it the
+ * one in millimeters" (Max, 2026-10-05). `toMillimetres` is the conversion the
+ * composer uses, so this bracket and the composed cell above cannot differ.
+ * Nothing for a metric row, a note, or a figure that does not read completely.
+ */
+function ImperialMillimetres({
+  attribute,
+}: {
+  attribute: { attr_group: string; value: string | null; unit: string | null };
+}) {
+  if (attribute.attr_group !== "dimension" || !attribute.value) return null;
+  const imperial = attribute.unit === "in" || (attribute.unit === null && valueCarriesItsUnit(attribute.value));
+  if (!imperial) return null;
+  const result = toMillimetres(attribute.value, "in");
+  if (!result.ok) return null;
+  return <span className="ml-1 font-mono text-neutral-500">({result.mm}mm)</span>;
 }

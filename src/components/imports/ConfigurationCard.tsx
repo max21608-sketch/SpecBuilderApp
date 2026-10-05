@@ -53,6 +53,7 @@
 // ============================================================================
 import { Fragment, useEffect, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
+import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { measuredRows, wasReadByModel, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
 import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import { sharedTargets, type ConfigurationMember, type ReviewCard } from "@/lib/configuration-cards";
@@ -426,19 +427,24 @@ function PageConfigurationCard({
     : EMPTY_GUESS;
   const guessWhy = new Map(guess.guesses.map((entry) => [entry.observationId, entry.why]));
 
-  const dimensionCell = leader
-    ? composeDimensionCell(
-        leader.pending
-          .filter((o) => o.attrGroup === "dimension" && o.dimensionSlot)
-          .map((o, index) => ({
-            slot: o.dimensionSlot as DimensionSlot,
-            value: drafts[o.id]?.value !== undefined ? (drafts[o.id]?.value ?? null) : o.value,
-            unit: o.unit,
-            state: o.state ?? "confirmed",
-            sortOrder: index,
-          })),
-      )
+  const dimensionRows = leader
+    ? leader.pending
+        .filter((o) => o.attrGroup === "dimension" && o.dimensionSlot)
+        .map((o, index) => ({
+          slot: o.dimensionSlot as DimensionSlot,
+          value: drafts[o.id]?.value !== undefined ? (drafts[o.id]?.value ?? null) : o.value,
+          unit: o.unit,
+          state: o.state ?? "confirmed",
+          sortOrder: index,
+        }))
+    : null;
+  const dimensionCell = dimensionRows
+    ? composeDimensionCell(dimensionRows)
     : { text: "", problems: [] as { message: string }[] };
+  // As a person reads it: feet and inches as printed, millimetres beside them.
+  const dimensionShown = dimensionRows
+    ? composeDimensionCell(dimensionRows, null, { mode: "screen" })
+    : { text: "", fromImperial: false };
 
   /**
    * One edit, written to the matching row on every configuration.
@@ -703,7 +709,7 @@ function PageConfigurationCard({
                   <Tip>Exactly what BWS field 3 will receive, composed the way the export composes it.</Tip>
                 </p>
                 {dimensionCell.text ? (
-                  <p className="font-mono text-[13px] text-neutral-900">{dimensionCell.text}</p>
+                  <ComposedDimensionText shown={dimensionShown} fileText={dimensionCell.text} />
                 ) : (
                   <p className="text-neutral-500">
                     No width, depth or height placed yet. Give a figure below its slot, or leave them as notes — they

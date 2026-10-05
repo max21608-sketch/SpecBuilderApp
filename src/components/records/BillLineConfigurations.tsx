@@ -42,6 +42,7 @@ import Tabs from "@/components/ui/Tabs";
 import { Table, Th, Td, Tr, GroupRow } from "@/components/ui/Table";
 import SpecValue from "@/components/records/SpecValue";
 import { composeDimensionCell, parseDimensionFigure, valueCarriesItsUnit } from "@/lib/dimensions";
+import { ConvertedChip } from "@/components/records/ItemSpecChips";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
@@ -245,6 +246,8 @@ export default function BillLineConfigurations({
         sortOrder: group.members[0]?.rows[0]?.sortOrder ?? 0,
       })),
     null,
+    // A screen: feet and inches as printed, the millimetres beside them.
+    { mode: "screen" },
   );
 
   const sections = (groups: CommonGroup<FamilyAttribute>[]) =>
@@ -281,6 +284,7 @@ export default function BillLineConfigurations({
         {commonDimensions.text && (
           <p className="px-4 pt-2 font-mono text-[15px] text-neutral-900" title="Composed from the common slots only">
             {commonDimensions.text}
+            {commonDimensions.fromImperial && <ConvertedChip className="ml-2 align-middle font-sans" />}
           </p>
         )}
         {common.length === 0 ? (

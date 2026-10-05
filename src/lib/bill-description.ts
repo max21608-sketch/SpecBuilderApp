@@ -318,6 +318,15 @@ export type BillDescriptionPlan = {
   attributes: PlannedAttribute[];
   /** `composeDimensionCell` over the planned slots — the one composer. Empty where no slot is planned. */
   dimensionCell: string;
+  /**
+   * The SAME cell in the composer's screen mode, for the review screen: a
+   * feet-and-inches slot as the bill printed it with its millimetres beside it
+   * (`W 3'-7" (1092mm)`). `dimensionCell` stays the file's millimetre cell —
+   * the one the confirm writes into the checklist answer and BWS receives.
+   */
+  dimensionCellShown: string;
+  /** The screen cell converted at least one slot from feet and inches — the chip says so. */
+  dimensionFromImperial: boolean;
   /** Things a person must look at: an unconverted imperial size, a TBC size, a cell the composer flags. */
   cautions: string[];
   /**
@@ -574,12 +583,17 @@ export function planBillDescription(
     }));
   const cell = rows.length > 0 ? composeDimensionCell(rows) : { text: "", problems: [] };
   for (const problem of cell.problems) cautions.push(problem.message);
+  // One composer, two renderings of the same rows; the problems are the same
+  // list in both modes, so they are read once, above.
+  const shown = rows.length > 0 ? composeDimensionCell(rows, null, { mode: "screen" }) : null;
 
   return {
     name: reading.name,
     statements,
     attributes,
     dimensionCell: cell.text,
+    dimensionCellShown: shown?.text ?? "",
+    dimensionFromImperial: shown?.fromImperial === true,
     cautions: [...new Set(cautions)],
     depthWithoutWidth,
   };

@@ -245,7 +245,7 @@ export function parseDimensionFigure(value: string | null): DimensionFigure {
   // A leading or trailing TBC is an annotation on the figure, not part of it:
   // the Panther sheets write "1520 TBC" where the dimension is stated but not
   // yet settled. A TBC in the MIDDLE of something is a sentence, not a figure.
-  const stripped = text.replace(/^tbc\b[\s:.-]*/i, "").replace(/[\s:.-]*\btbc\.?$/i, "").trim();
+  const stripped = withoutTbc(text);
   const tbcInline = stripped !== text;
 
   if (!/^[0-9]+(?:[.,][0-9]+)?$/.test(stripped)) {
@@ -256,6 +256,11 @@ export function parseDimensionFigure(value: string | null): DimensionFigure {
   }
   const figure = Number(stripped.replace(",", "."));
   return { figure: Number.isFinite(figure) && figure > 0 ? figure : null, tbcInline };
+}
+
+/** The value without a leading or trailing TBC annotation — the figure as printed. */
+function withoutTbc(text: string): string {
+  return text.replace(/^tbc\b[\s:.-]*/i, "").replace(/[\s:.-]*\btbc\.?$/i, "").trim();
 }
 
 /** A feet mark after a figure, anywhere in a segment: `3'`, `H 2'-5"`, `4 ft`. */
@@ -363,7 +368,42 @@ export type DimensionProblem =
   /** A note with nothing to qualify: the cell is the bracket and nothing else. */
   | { code: "note_only"; message: string };
 
-export type DimensionCell = { text: string; problems: DimensionProblem[] };
+export type DimensionCell = {
+  text: string;
+  problems: DimensionProblem[];
+  /**
+   * SCREEN MODE ONLY, and present only there: true where at least one slot was
+   * printed in feet and inches and is shown as printed with its millimetres in
+   * brackets. A screen renders the "converted from ft-in" chip off this, so the
+   * chip and the brackets can never disagree. Absent in file mode, where the
+   * cell is millimetres only and there is nothing to flag.
+   */
+  fromImperial?: boolean;
+};
+
+/**
+ * WHO THE CELL IS FOR.
+ *
+ * `file` — what BWS field 3 receives, and what the export, the check sheet,
+ * the quote, the costing sheet and the checklist answer carry: `W1092 x
+ * D575mm`, millimetres only, the grid's rule. The default, so every caller
+ * that predates this option is unchanged byte for byte.
+ *
+ * `screen` — what a PERSON reads. Max, 2026-10-05: "Always keep the original
+ * measurement, but have in brackets beside it the one in millimeters." A slot
+ * the page printed in feet and inches (`3'-7"`, `18"`, or a bare figure
+ * recorded at `in`) reads as printed with the conversion beside it — `W
+ * 3'-7" (1092mm)` — so the figure a reviewer checks against the page is the
+ * figure the page says, and the millimetres are visibly this app's
+ * arithmetic. A metric slot reads exactly as in the file.
+ *
+ * It is an OPTION ON THIS FUNCTION and never a second composer: the slot
+ * order, the Dia. rule, the TBC placement, the refusals and the note are the
+ * same code for both, and only how one converted imperial part is WRITTEN
+ * differs. A screen composing its own cell is how it starts promising what the
+ * file does not deliver.
+ */
+export type DimensionCellMode = "file" | "screen";
 
 /** Rendered order. A diameter replaces width and depth rather than joining them. */
 const ORDER_ROUND: DimensionSlot[] = ["DIA", "H", "SH"];
@@ -384,7 +424,12 @@ const ORDER_SQUARE: DimensionSlot[] = ["W", "D", "H", "SH"];
  * costing sheet all call this function, and a bracket added beside one of them
  * is a second composer — a screen promising what the file does not deliver.
  */
-export function composeDimensionCell(rows: DimensionRow[], note?: string | null): DimensionCell {
+export function composeDimensionCell(
+  rows: DimensionRow[],
+  note?: string | null,
+  options: { mode?: DimensionCellMode } = {},
+): DimensionCell {
+  const screen = options.mode === "screen";
   const problems: DimensionProblem[] = [];
 
   // One row per slot. A second active row in a slot cannot arrive through
@@ -426,9 +471,13 @@ export function composeDimensionCell(rows: DimensionRow[], note?: string | null)
   // between them. Appending "mm" to the finished string produced "SH440 TBCmm"
   // whenever the LAST slot was the unsettled one — found in the browser, not by
   // a test, because every fixture happened to put the TBC first.
-  const inline: { text: string; hasFigure: boolean; tbc: boolean }[] = [];
+  // `ownUnit` marks a part that already carries its unit — a screen-mode
+  // imperial part, written `3'-7" (1092mm)` — so the cell's single trailing
+  // `mm` goes on the last part that does NOT, or on none.
+  const inline: { text: string; hasFigure: boolean; tbc: boolean; ownUnit?: boolean }[] = [];
   const trailing: string[] = [];
   let converted = false;
+  let fromImperial = false;
 
   for (const slot of round ? ORDER_ROUND : ORDER_SQUARE) {
     const row = bySlot.get(slot);
@@ -492,6 +541,20 @@ export function composeDimensionCell(rows: DimensionRow[], note?: string | null)
 
     const result = toMillimetres(row.value, row.unit ?? "in");
     if (!result.ok) continue; // unreachable: figure is non-null, so the parse agreed
+
+    // THE SCREEN SHOWS WHAT THE PAGE SAID, AND THE ARITHMETIC BESIDE IT. An
+    // inch figure — marked on the value, or a bare figure recorded at `in` —
+    // is written as printed with its millimetres in brackets. A bare figure
+    // gets its inch mark back so `18` at `in` reads `18"`, never a bare 18
+    // beside a millimetre group. Same conversion, same rounding, one place.
+    if (screen && (imperial || row.unit === "in")) {
+      const printed = withoutTbc((row.value ?? "").trim());
+      const shown = imperial ? printed : `${printed}"`;
+      fromImperial = true;
+      inline.push({ text: `${prefix} ${shown} (${result.mm}mm)`, hasFigure: true, tbc, ownUnit: true });
+      continue;
+    }
+
     converted = true;
     inline.push({ text: `${prefix}${result.mm}`, hasFigure: true, tbc });
   }
@@ -500,7 +563,7 @@ export function composeDimensionCell(rows: DimensionRow[], note?: string | null)
   // the string — otherwise a TBC on the final slot reads "SH440 TBCmm". And
   // only when something was actually converted, so a cell of nothing but TBCs
   // never claims a measurement it does not have.
-  const lastFigure = inline.reduce((last, part, index) => (part.hasFigure ? index : last), -1);
+  const lastFigure = inline.reduce((last, part, index) => (part.hasFigure && !part.ownUnit ? index : last), -1);
   const group = inline
     .map((part, index) => `${part.text}${converted && index === lastFigure ? "mm" : ""}${part.tbc ? " TBC" : ""}`)
     .join(" x ");
@@ -528,7 +591,7 @@ export function composeDimensionCell(rows: DimensionRow[], note?: string | null)
     parts.push(`(${typed})`);
   }
 
-  return { text: parts.join(" "), problems };
+  return screen ? { text: parts.join(" "), problems, fromImperial } : { text: parts.join(" "), problems };
 }
 
 /** A phrase is quoted so it reads as something the document said; a bare figure is not. */

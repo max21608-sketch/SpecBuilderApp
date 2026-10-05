@@ -32,6 +32,7 @@
 // ============================================================================
 import { Fragment, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
+import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { isMeasuredRow, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
 import { fieldSlotGaps, naturalConfigurationOrder, tabMeasurements, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
@@ -504,20 +505,21 @@ export default function NamedConfigurationCard({
     },
   );
   const sequence = [...order.ordered, ...sharedNotes.map((row) => row.observation)];
-  const dimensionCell = composeDimensionCell(
-    visibleRows
-      .filter((row) => row.observation.attrGroup === "dimension" && row.observation.dimensionSlot)
-      .map((row, index) => ({
-        slot: row.observation.dimensionSlot as DimensionSlot,
-        value:
-          drafts[row.observation.id]?.value !== undefined
-            ? (drafts[row.observation.id]?.value ?? null)
-            : row.observation.value,
-        unit: row.observation.unit,
-        state: row.observation.state ?? "confirmed",
-        sortOrder: index,
-      })),
-  );
+  const dimensionRows = visibleRows
+    .filter((row) => row.observation.attrGroup === "dimension" && row.observation.dimensionSlot)
+    .map((row, index) => ({
+      slot: row.observation.dimensionSlot as DimensionSlot,
+      value:
+        drafts[row.observation.id]?.value !== undefined
+          ? (drafts[row.observation.id]?.value ?? null)
+          : row.observation.value,
+      unit: row.observation.unit,
+      state: row.observation.state ?? "confirmed",
+      sortOrder: index,
+    }));
+  const dimensionCell = composeDimensionCell(dimensionRows);
+  // As a person reads it: feet and inches as printed, millimetres beside them.
+  const dimensionShown = composeDimensionCell(dimensionRows, null, { mode: "screen" });
 
   const pages = card.pages.length > 0 ? card.pages : card.members.map((m) => m.item.page).filter((p): p is number => Boolean(p));
   const shownPage = pages.includes(previewPage ?? -1) ? previewPage : (tab.rows[0]?.item.page ?? pages[0] ?? null);
@@ -846,7 +848,7 @@ export default function NamedConfigurationCard({
                 <Tip>Exactly what BWS field 3 will receive for this configuration, composed the way the export composes it.</Tip>
               </p>
               {dimensionCell.text ? (
-                <p className="font-mono text-[13px] text-neutral-900">{dimensionCell.text}</p>
+                <ComposedDimensionText shown={dimensionShown} fileText={dimensionCell.text} />
               ) : (
                 <p className="text-neutral-500">No width, depth or height lands on this configuration yet.</p>
               )}
