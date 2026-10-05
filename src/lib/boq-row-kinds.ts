@@ -488,6 +488,31 @@ function foldTokens(value: string): string[] {
  * placeholder: it names a collection, and a TBC on one field does not undo
  * that. Pure, so the review's sentence and the confirm read one answer.
  */
+/**
+ * The fabric's OWN code: the bracket removed, `N/A` and blank as none, and NONE
+ * where it is the item's own code — a fabric line whose code is its item's
+ * names no fabric at all. The confirm files by it and the review's chip prints
+ * it, so the two cannot disagree (2026-10-05: the chip printed `GR-FUR-22 →
+ * next free COM` on a line the confirm filed as uncoded).
+ */
+export function fabricOwnCode(line: { code: string | null; finishFor?: { code: string | null } | null }): string | null {
+  let ownCode = fabricCodeOf(line.code);
+  const parentCode = line.finishFor?.code ?? null;
+  if (!ownCode || !parentCode) return ownCode;
+  if (normaliseRef(ownCode) === normaliseRef(parentCode)) return null;
+  // THE ITEM'S CODE WRITTEN AFTER THE FABRIC'S, WITHOUT THE BRACKET. The Aman
+  // bill writes `GR-FAB-13 (PL-FUR-10)` on most fabric lines and
+  // `GR-FAB-13 PL-FUR-04` on one, which filed a second library entry called
+  // "GR-FAB-13 PL-FUR-04" beside GR-FAB-13. Only the item's OWN code is taken
+  // off, matched whole on the last word — never "a second word that looks
+  // like a code", which would cut a client code that genuinely has a space.
+  const words = ownCode.split(/\s+/);
+  if (words.length > 1 && normaliseRef(words[words.length - 1] as string) === normaliseRef(parentCode)) {
+    ownCode = words.slice(0, -1).join(" ");
+  }
+  return ownCode;
+}
+
 export function fabricLineIsPlaceholder(text: string | null | undefined, parentName: string | null | undefined): boolean {
   const raw = (text ?? "").trim();
   if (raw === "") return true;

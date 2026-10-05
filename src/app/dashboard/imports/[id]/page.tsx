@@ -41,7 +41,7 @@ import {
   type RowKindFields,
 } from "@/lib/boq-row-kinds";
 import BoqRowKindCell, { RowKindReasoning } from "@/components/imports/BoqRowKindCell";
-import { fabricCodeOf } from "@/lib/boq-row-kinds";
+import { fabricOwnCode } from "@/lib/boq-row-kinds";
 // Pure: where the review draws its lines — an item and the fabrics under it as
 // one group, a gap between groups, consecutive items of one code bracketed.
 // Layout only; nothing the confirm writes reads it.
@@ -2000,7 +2000,7 @@ export default function ReviewImportPage() {
                                   <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                     {line.finishFor && (
                                       <Chip mono className={CHIP_WRAPS}>
-                                        {fabricCodeOf(line.code) ?? "no code"} → next free COM
+                                        {fabricOwnCode(line) ?? "no code"} → next free COM
                                       </Chip>
                                     )}
                                     <span className="text-[11px] text-neutral-500">

@@ -3112,7 +3112,16 @@ rule below is a trap rather than a preference.
   placeholder. Matching "Technical details TBC" to "Technical details TBC"
   would merge every undecided fabric on the bill into one. On the real Aman
   bill all twelve uncoded fabric lines are placeholders — correct, and the
-  reason the backfill there plans swatches and no codes.
+  reason the backfill there plans swatches and no codes. **A CODED line whose
+  words are only a placeholder LINKS BY ITS CODE** — the Aman bill names
+  GR-FAB-13 in full under a stool and again under a desk chair as "Technical
+  Details TBC"; words that say nothing are not offered to the CONFLICT rule, and
+  a new code created from one gets no description. **The fabric's own code is
+  `fabricOwnCode`** (the review's chip and the confirm ask it): the bracket off,
+  `N/A` as none, the item's own code as none, and the item's own code written
+  after the fabric's without a bracket (`GR-FAB-13 PL-FUR-04`) taken off — the
+  last whole word only, matched against that item's code, never "a word that
+  looks like a code".
 - **In-house codes are `BW-<short code>-nnn`** (`projects.finish_code_prefix`,
   set on the project's details; `BW-F-nnn` where none is set). Minted under the
   project row lock as before. Changing the short code starts a new series and

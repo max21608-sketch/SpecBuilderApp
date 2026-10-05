@@ -39,8 +39,7 @@
 //     that gives one.
 //   * A placeholder's picture is filed nowhere: it has no finish to belong to.
 // ============================================================================
-import { fabricCodeOf, fabricLineIsPlaceholder, type RowKindFields } from "@/lib/boq-row-kinds";
-import { normaliseRef } from "@/lib/boq-import";
+import { fabricOwnCode, fabricLineIsPlaceholder, type RowKindFields } from "@/lib/boq-row-kinds";
 import { billItemName } from "@/lib/bill-description";
 import {
   effectiveRowImage,
@@ -63,8 +62,13 @@ import {
 export type FabricFiling =
   /** Coded, and the library holds the code saying the same (or nothing yet). Linked. */
   | { outcome: "matched"; finish: Finish }
-  /** Coded, and the library has no such code: a new CLIENT finish, TBC, the line's words. */
-  | { outcome: "new"; code: string }
+  /**
+   * Coded, and the library has no such code: a new CLIENT finish, TBC, with the
+   * line's words as its description — or with NONE where the words are only a
+   * placeholder (`describe: false`), so "Technical details TBC" never becomes
+   * what the library says the code is.
+   */
+  | { outcome: "new"; code: string; describe: boolean }
   /** Coded, and the library describes the code differently: linked to nothing (the CONFLICT rule). */
   | { outcome: "conflict"; finish: Finish; saysInstead: string }
   /** No code, and an in-house finish is worded exactly the same. Linked. */
@@ -87,9 +91,7 @@ export function fabricLineValue(line: FabricLine): string {
  * item's names no fabric at all.
  */
 export function fabricMaterialCode(line: FabricLine): string | null {
-  const ownCode = fabricCodeOf(line.code);
-  const parentCode = line.finishFor?.code ?? null;
-  return ownCode && parentCode && normaliseRef(ownCode) === normaliseRef(parentCode) ? null : ownCode;
+  return fabricOwnCode(line);
 }
 
 /**
@@ -113,12 +115,18 @@ export function decideFabricFiling(input: {
   library: readonly Finish[];
 }): FabricFiling {
   const { materialCode, says, words, parentName, library } = input;
-  const coded = resolveFinishCode(materialCode, says, [...library]);
+  const placeholder = fabricLineIsPlaceholder(words, parentName);
+  // A CODED PLACEHOLDER LINKS BY ITS CODE. The Aman bill names GR-FAB-13 under
+  // the stool with its collection and colour, and again under the desk chair
+  // as "Technical Details TBC": the client is naming the same fabric and not
+  // repeating it. Words that say nothing cannot disagree with the library, so
+  // they are not offered to the CONFLICT rule (found 2026-10-05, the local walk).
+  const coded = resolveFinishCode(materialCode, placeholder ? null : says, [...library]);
   if (coded.status === "matched") return { outcome: "matched", finish: coded.finish };
-  if (coded.status === "new") return { outcome: "new", code: coded.code };
+  if (coded.status === "new") return { outcome: "new", code: coded.code, describe: !placeholder };
   if (coded.status === "conflict") return { outcome: "conflict", finish: coded.finish, saysInstead: coded.saysInstead };
 
-  if (fabricLineIsPlaceholder(words, parentName)) return { outcome: "placeholder" };
+  if (placeholder) return { outcome: "placeholder" };
   const reading = readUncodedFinish(says, library, null);
   if (reading.outcome === "link" && reading.finish) return { outcome: "same_words", finish: reading.finish };
   return { outcome: "mint" };
@@ -293,7 +301,7 @@ export function planBillFabrics(input: {
       if (filing.outcome === "matched" || filing.outcome === "same_words") finishKey = filing.finish.id;
       else if (filing.outcome === "new") {
         finishKey = `planned:${sheetIndex}:${line.lineNo}`;
-        plan(pendingFinish(finishKey, filing.code, "client", says), line.lineNo, false);
+        plan(pendingFinish(finishKey, filing.code, "client", filing.describe ? says : null), line.lineNo, false);
       } else if (filing.outcome === "mint") {
         finishKey = `planned:${sheetIndex}:${line.lineNo}`;
         plan(pendingFinish(finishKey, `${series}…`, "internal", says), line.lineNo, true);

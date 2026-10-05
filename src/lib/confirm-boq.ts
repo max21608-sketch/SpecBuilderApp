@@ -842,7 +842,14 @@ async function fileFinish(
     case "same_words":
       return filing.finish.id;
     case "new":
-      return createAndRemember(txn, { projectId, code: filing.code, origin: "client", says, library, actor });
+      return createAndRemember(txn, {
+        projectId,
+        code: filing.code,
+        origin: "client",
+        says: filing.describe ? says : null,
+        library,
+        actor,
+      });
     case "mint": {
       // Under the project row lock, which this confirm already holds; the
       // short code is read under it too (`mintInternalFinishCode`).

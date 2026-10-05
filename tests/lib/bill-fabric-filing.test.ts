@@ -46,6 +46,7 @@ describe("decideFabricFiling", () => {
     expect(decideFabricFiling({ ...base, materialCode: "ZZ-FAB-13", library: [] })).toEqual({
       outcome: "new",
       code: "ZZ-FAB-13",
+      describe: true,
     });
     const held = finish({ description: "Example velvet, ivory" });
     expect(decideFabricFiling({ ...base, materialCode: "zz-fab-13", library: [held] })).toMatchObject({
@@ -84,6 +85,51 @@ describe("decideFabricFiling", () => {
     expect(
       decideFabricFiling({ materialCode: null, says: "(ZZ-FUR-10)", words: "", parentName: "Stool", library: [] }),
     ).toEqual({ outcome: "placeholder" });
+  });
+});
+
+describe("the fabric's own code when the bill writes its item's code after it", () => {
+  const under = (code: string) => ({ code, itemDescription: "x", rowKind: "finish_for" as const, finishFor: { row: 4, code: "ZZ-FUR-04" } });
+  it("takes the item's code off the end, bracketed or not", () => {
+    expect(fabricMaterialCode(under("ZZ-FAB-13 (ZZ-FUR-04)"))).toBe("ZZ-FAB-13");
+    expect(fabricMaterialCode(under("ZZ-FAB-13 ZZ-FUR-04"))).toBe("ZZ-FAB-13");
+    expect(fabricMaterialCode(under("ZZ-FAB-13  zz-fur-04"))).toBe("ZZ-FAB-13");
+  });
+  it("leaves a second word that is not the item's own code alone", () => {
+    expect(fabricMaterialCode(under("ZZ-FAB-13 ZZ-FUR-05"))).toBe("ZZ-FAB-13 ZZ-FUR-05");
+    expect(fabricMaterialCode(under("ZZ FAB 13"))).toBe("ZZ FAB 13");
+  });
+});
+
+describe("a CODED line whose words are only a placeholder", () => {
+  // The bill names ZZ-FAB-13 in full under one item and again under another
+  // as "Technical Details TBC": the same fabric, not repeated. Found on the
+  // local walk of a real bill, 2026-10-05 — it read as a conflict.
+  const words = "Fabric @ Desk Chair Technical Details TBC";
+  const line = { says: words, words, parentName: "Desk Chair" };
+
+  it("links to the code the library already describes, rather than conflicting with it", () => {
+    const held = finish({ description: "Collection: Example plain, colour 0085" });
+    expect(decideFabricFiling({ ...line, materialCode: "ZZ-FAB-13", library: [held] })).toMatchObject({
+      outcome: "matched",
+      finish: { id: "fin-1" },
+    });
+  });
+
+  it("creates a new code with NO description, so the placeholder never becomes what the code is", () => {
+    expect(decideFabricFiling({ ...line, materialCode: "ZZ-FAB-13", library: [] })).toEqual({
+      outcome: "new",
+      code: "ZZ-FAB-13",
+      describe: false,
+    });
+  });
+
+  it("still conflicts where the words are real and differ", () => {
+    const held = finish({ description: "Collection: Example plain, colour 0085" });
+    const real = "Fabric @ Desk Chair Collection: Another weave, colour 12";
+    expect(
+      decideFabricFiling({ says: real, words: real, parentName: "Desk Chair", materialCode: "ZZ-FAB-13", library: [held] }),
+    ).toMatchObject({ outcome: "conflict" });
   });
 });
 

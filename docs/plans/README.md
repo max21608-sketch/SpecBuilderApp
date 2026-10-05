@@ -21,6 +21,46 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-05 (evening) — BUILT on `finishes-int`: the bill fills the finishes library, BW's finish per code, crop on the bill, a photo beats a drawing
+
+Max: "Build the rest and don't stop till you're done." Every decision recorded
+in the entry below is built, on the integration branch `finishes-int` (origin),
+NOT on staging: it carries migrations 0044 (`projects.finish_code_prefix`) and
+0045 (BW standard columns on `project_finishes`), and code reading them would
+500 on the sandbox before they are applied — sandbox and pilot migrations are
+Max's. Four coder briefs (`~/dev/briefs/bill-review/`), each reviewed and
+merged; `checks:local` green on the merged branch (3120 passed).
+
+- The bill confirm files every fabric line in the library and gives each code
+  its bill picture as its swatch; uncoded real fabrics become `BW-<short
+  code>-nnn`; placeholders file nothing; `db:backfill-bill-swatches` for bills
+  confirmed earlier. (`6540276`)
+- A drawing crop never replaces a bill's picture; item pictures are superseded,
+  never deleted (the drawings confirm used to DELETE them, against 0013); the
+  record says where its picture came from and swaps either way. (`bd04f67`)
+- BW's own finish is set once per code in the library and ships on every item
+  carrying the code (`standardInForce`). (`e77489d`)
+- Crop / whole / no picture per row on the bill review, items and fabric
+  swatches, read by every picture reader through `effectiveRowImage`. (`1bffa79`)
+- Found on the orchestrator's walk and fixed: a coded fabric whose words are a
+  placeholder conflicted with its own code (GR-FAB-13 under a desk chair); the
+  chip printed the item's code as a fabric's; `GR-FAB-13 PL-FUR-04` filed as a
+  second library entry.
+
+Verified in the browser on the LOCAL stack against a copy of the real Aman
+bill (TEST project T18191): short code AMB set; the review's filing line per
+fabric row; the coffee table's render cropped off its drawing; confirm → 67
+records, 8 fabric swatches, GR-FAB-13 named (rows 10 and 21 print different
+pictures); BW Oak Natural set on GR-TIM-07 → 5 items; the record shows "From
+the bill, row 26" and the BW finish set on the code. Photo-over-drawing was
+verified by its db-tier tests, not by a drawings confirm in the browser. Not
+accepted by Max.
+
+To reach staging: Max runs 0044 and 0045 on the sandbox (`npm run
+db:migrate`), then `finishes-int` fast-forwards onto `staging`. For pilot, the
+same pair with `--yes-pilot` after a backup, then the promotion; on bills
+already confirmed there, `db:backfill-bill-swatches` (dry run first).
+
 ## 2026-10-05 — The bill review reads as line items; finishes decisions for the next build
 
 Asked for by Max on pilot while reviewing the Miami Beach bill: "it's very hard
