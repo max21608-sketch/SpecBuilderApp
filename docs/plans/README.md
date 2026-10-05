@@ -21,6 +21,45 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-05 — The bill review reads as line items; finishes decisions for the next build
+
+Asked for by Max on pilot while reviewing the Miami Beach bill: "it's very hard
+to distinguish between items and the fabric … just a bit more separation". A
+mock-up was drawn on the real rows and APPROVED ("approved, build the layout
+first"). Layout only — nothing the confirm writes changed (`a77d4bc`,
+`4c1f699`): one row number (the bill's own line is the hover); an item and the
+fabric lines under it are one group with a grey gap before each group; a fabric
+row hangs off its item on a rail with its own swatch (33 of the bill's 34
+fabric lines carry a picture that was stored at upload and never shown), its
+description clamped, its area/qty/category/level empty, its reasoning behind
+"why?"; consecutive lines of one client ref are one family under a heading
+("2 options" where the bill says option) — Max: "if the specifier is using the
+same code for both, then it's best to keep them grouped"; the Item column holds
+340px so finish chips no longer run into Area; the Kind column is quiet until
+pressed, and a real problem still opens it. Verified in the browser on the
+LOCAL stack against a copy of the real Aman bill at 1920, 1440 and 900 wide;
+checks:local green (2980 passed). Not accepted by Max.
+
+Decided by Max the same day, for the build after this one (not built):
+
+- A fabric line's picture IS the swatch of its code in the finishes library,
+  filed automatically at confirm. One swatch per code; differing pictures on
+  one code file none and say so; an existing swatch is never replaced.
+- Two timber (or metal) codes on one item fill the slots in the bill's order —
+  first is Main. Unchanged from today.
+- BW's own finish (the BWS palette option) is set ONCE PER CODE in the
+  finishes library and applies to every item carrying the code. Today 0041
+  sets it per item.
+- A fabric with real words and no code is filed as an in-house fabric BY
+  DEFAULT (shown on the review, written at confirm); a placeholder ("Technical
+  details TBC") is never filed or matched.
+- In-house codes become `BW-AMB-001`: "BW-", a short code set once per
+  project, a number. Existing `BW-F-nnn` codes are not renamed; a project with
+  no short code keeps `BW-F-`. Still never exported.
+- Cropping a bill picture on the review, and a photo or render beating a
+  drawing crop (the drawings confirm no longer replaces the bill's picture on
+  its own) — in the approved mock-up, deferred to that build.
+
 ## 2026-10-04 — Promoted to pilot: intake reads the document, at `e8456f0` (v1.5)
 
 At Max's instruction ("promote"). Run by Max: pilot migration 0043 ("Applied 1
