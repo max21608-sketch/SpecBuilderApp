@@ -57,6 +57,7 @@ import { BwStandardPanel, BwStandardSummary, paletteForJsonId } from "@/componen
 import Button, { buttonClass } from "@/components/ui/Button";
 import GatePanel, { type MatrixFieldRow } from "@/components/records/GatePanel";
 import RecordDetails from "@/components/records/RecordDetails";
+import RecordPicture, { type RecordPictureState } from "@/components/records/RecordPicture";
 import AddSpec from "@/components/records/AddSpec";
 import AddConfiguration from "@/components/records/AddConfiguration";
 import BillLineConfigurations from "@/components/records/BillLineConfigurations";
@@ -110,8 +111,9 @@ type SpecRecord = {
   variant_ordinal?: number | null; parent_record_no?: number | null;
   /** `retired` for a configuration somebody took out of the export (0038). */
   status: string;
-  /** Whether a crop was confirmed off the drawings, so the screen can decide
-   *  without asking `/image` and being refused. */
+  /** Whether the record has a CURRENT picture — a bill's or a crop off the
+   *  drawings — so the screen can decide without asking `/image` and being
+   *  refused. */
   has_image: boolean;
 };
 
@@ -164,8 +166,16 @@ type RecordTab = (typeof RECORD_TABS)[number];
 /** One end of a mock-up link (0043): a record, its number and its phase. */
 type MockupLink = { id: string; recordNo: number; runName: string; status: string };
 
+const NO_PICTURE: RecordPictureState = { current: null, offered: null };
+
 export type Payload = {
   record: SpecRecord;
+  /**
+   * The current picture and where it came from, and the one a person may swap
+   * in (2026-10-05). Optional: a payload built before it carries none, and the
+   * panel then shows nothing rather than a picture it cannot caption.
+   */
+  picture?: RecordPictureState;
   /**
    * The mock-up phase, in both directions (0043). `of` is the record a mock-up
    * item was added from; `copies` are this record's copies on the mock-up
@@ -348,7 +358,9 @@ function RecordView() {
   }
   // Moving from a record with no picture to one with a picture reuses this
   // component, so a sticky `true` would hide every image after the first miss.
-  useEffect(() => { setImageFailed(false); }, [id]);
+  // A swap is a different picture too, so the flag goes with the current id.
+  const currentPictureId = data?.picture?.current?.id ?? null;
+  useEffect(() => { setImageFailed(false); }, [id, currentPictureId]);
 
   async function save(
     answer: Answer,
@@ -662,9 +674,10 @@ function RecordView() {
 
   const { record, refs, answers, attributes, categories } = data;
 
-  // The payload says whether a crop exists; `imageFailed` covers the one case
-  // it cannot — a row that names a blob the store no longer holds.
-  const hasImage = record.has_image && !imageFailed;
+  // The payload says whether a picture exists; `imageFailed` covers the one
+  // case it cannot — a row that names a blob the store no longer holds. An
+  // offered picture alone still puts the panel above the readiness card.
+  const hasImage = (record.has_image && !imageFailed) || Boolean(data.picture?.offered);
 
   // ---- the fabric split, from whichever end this record is ------------------
   //
@@ -1612,32 +1625,18 @@ function RecordView() {
                 table scrolls. It heads its own column, which is what makes the
                 two columns start on the same line. */}
             <div className="min-[820px]:sticky min-[820px]:top-4">
-              {hasImage && (
-                <div className="rounded-[10px] border border-neutral-200 bg-white p-2.5">
-                  {/* eslint-disable-next-line @next/next/no-img-element --
-                      an authenticated same-origin route that streams from
-                      private blob storage; next/image cannot fetch it with the
-                      session cookie. */}
-                  <img
-                    src={`/api/records/${record.id}/image`}
-                    alt={record.item_description}
-                    onError={() => setImageFailed(true)}
-                    className="h-auto w-full rounded"
-                  />
-                  <p className="mt-1.5 text-center text-[11.5px] text-neutral-500">
-                    Cropped off the drawings
-                  </p>
-                  {drawingRunId && (
-                    <Link
-                      href={`/dashboard/imports/${drawingRunId}`}
-                      title="Opens the drawing set this item's specs came off, where the crop is chosen"
-                      className={buttonClass("quiet", "xs", "mt-1.5 w-full")}
-                    >
-                      Change crop
-                    </Link>
-                  )}
-                </div>
-              )}
+              {/* WHERE THE PICTURE CAME FROM, and the one other picture a
+                  person may swap in — a drawing never displaces a bill's
+                  photograph on its own (2026-10-05). */}
+              <RecordPicture
+                recordId={record.id}
+                alt={record.item_description}
+                picture={data.picture ?? NO_PICTURE}
+                failed={imageFailed}
+                onFailed={() => setImageFailed(true)}
+                drawingRunId={drawingRunId}
+                onChosen={(failure) => void reloadThen(failure)}
+              />
 
               <Card title="Quote readiness" className={hasImage ? "" : "mt-0"}>
                 <div className="flex items-baseline gap-2">

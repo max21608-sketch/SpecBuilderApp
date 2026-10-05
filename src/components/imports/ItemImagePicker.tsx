@@ -154,11 +154,14 @@ export default function ItemImagePicker({
       setRendering(true);
       setError(null);
       try {
-        const image = await cropPdfRegion(sourceUrl, view.page ?? itemPage ?? 1, view.bbox, {
+        const page = view.page ?? itemPage ?? 1;
+        const image = await cropPdfRegion(sourceUrl, page, view.bbox, {
           signal: controller.signal,
         });
         setPreview(track(image.blob));
-        report.current(image);
+        // WITH THE PAGE IT CAME OFF, which names the stored file — the only
+        // place a picture's page survives (`itemImageFilename`).
+        report.current({ ...image, page });
       } catch (cause) {
         // A CANCELLED CROP IS NOT A FAILURE. It means this component asked for
         // a different one, and the newer call owns the panel now — reporting

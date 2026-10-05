@@ -40,6 +40,12 @@ export type CroppedImage = {
   blob: Blob;
   width: number;
   height: number;
+  /**
+   * The page it was cropped off, where the caller knows it. `cropPdfRegion`
+   * never sets it; the item picker adds it, so the review screen can send it
+   * and the stored picture can say which page it came from.
+   */
+  page?: number | null;
 };
 
 type PdfJs = typeof import("pdfjs-dist");

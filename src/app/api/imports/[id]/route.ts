@@ -1031,7 +1031,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
                           where x.record_id = r.id and x.ref_system = 'boq_code'), '{}') as codes,
                (select count(*)::int from record_attributes a where a.record_id = r.id and a.status = 'active') as attribute_count,
                exists (select 1 from attachments at
-                        where at.entity_type = 'spec_records' and at.entity_id = r.id and at.kind = 'item_image') as has_image,
+                        where at.entity_type = 'spec_records' and at.entity_id = r.id and at.kind = 'item_image'
+                          and at.superseded_at is null) as has_image,
                (select count(*)::int from spec_answers a
                  where a.record_id = r.id and a.revision_no = 0 and a.state <> 'missing') as settled_answers
         from spec_records r
