@@ -113,7 +113,21 @@ export type SpecField = {
 };
 
 /** The project's records, for the card that matched none of them. */
-export type RecordChoice = { id: string; label: string; itemDescription: string; runName: string };
+export type RecordChoice = {
+  id: string;
+  label: string;
+  /** The client's own codes off the bill. What the drawings call the item; the label is ours. */
+  codes?: string[];
+  itemDescription: string;
+  runName: string;
+};
+
+/** A record as the client would name it: their code first, our number last. */
+export function recordChoiceText(record: RecordChoice, { withPhase = true }: { withPhase?: boolean } = {}): string {
+  const code = record.codes?.join(", ");
+  const item = withPhase ? `${record.itemDescription} (${record.runName})` : record.itemDescription;
+  return code ? `${code} · ${item} · ${record.label}` : `${record.label} · ${item}`;
+}
 
 export type RowBlocker = {
   code: string;
@@ -1399,6 +1413,7 @@ export function RunTargets({
   onPick,
   note,
   mockup,
+  codeMatches,
   className,
 }: {
   runs: RunResolution[];
@@ -1416,9 +1431,18 @@ export function RunTargets({
    * runs, that no mock-up record carries its code yet and what to press.
    */
   mockup?: { message: string } | null;
+  /** Records carrying the page's code, offered first in the hand picker. Never ticked. */
+  codeMatches?: readonly string[];
   /** Layout only. The card decides whether this is a band or a sidebar box. */
   className?: string;
 }) {
+  // A record picked by hand is on no resolved phase, so nothing below would
+  // show it: the select resets and the pick looks as though it never happened.
+  const shown = new Set(runs.flatMap((run) => (run.status === "matched" ? [run.record.id] : run.candidates.map((c) => c.id))));
+  const pickedByHand = records.filter((record) => ticked.has(record.id) && !shown.has(record.id));
+  const matching = new Set(codeMatches ?? []);
+  const firstChoices = records.filter((record) => matching.has(record.id));
+  const otherChoices = records.filter((record) => !matching.has(record.id));
   return (
     <div className={className ?? "px-4 py-3 border-b border-neutral-100"}>
       <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">Applies to</p>
@@ -1455,13 +1479,38 @@ export function RunTargets({
                   className="ml-2 w-[26rem] max-w-full border border-neutral-300 rounded px-2 py-1 text-xs disabled:opacity-50"
                 >
                   <option value="">— choose a record —</option>
-                  {records.map((record) => (
-                    <option key={record.id} value={record.id}>
-                      {record.label} · {record.itemDescription} ({record.runName})
-                    </option>
-                  ))}
+                  {firstChoices.length > 0 ? (
+                    <>
+                      <optgroup label={`Carrying ${itemCodeRaw ?? "this code"}`}>
+                        {firstChoices.map((record) => (
+                          <option key={record.id} value={record.id}>
+                            {recordChoiceText(record)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Every other record">
+                        {otherChoices.map((record) => (
+                          <option key={record.id} value={record.id}>
+                            {recordChoiceText(record)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </>
+                  ) : (
+                    records.map((record) => (
+                      <option key={record.id} value={record.id}>
+                        {recordChoiceText(record)}
+                      </option>
+                    ))
+                  )}
                 </select>
               </label>
+              {firstChoices.length > 0 && (
+                <p className="mt-1 text-xs text-neutral-600">
+                  {firstChoices.length === 1 ? "One record carries" : `${firstChoices.length} records carry`}{" "}
+                  {itemCodeRaw ?? "this code"}; {firstChoices.length === 1 ? "it is" : "they are"} at the top of the list.
+                </p>
+              )}
               <p className="mt-1 text-xs text-neutral-500">
                 This picks one record only. A code that genuinely belongs to several phases is better fixed by
                 correcting the bill&rsquo;s code, so the fan-out happens on its own.
@@ -1471,6 +1520,21 @@ export function RunTargets({
         </div>
       )}
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+        {pickedByHand.map((record) => (
+          <label key={record.id} className="flex items-center gap-2 text-sm text-neutral-800">
+            <PartialCheckbox
+              checked
+              indeterminate={mixed?.has(record.id) ?? false}
+              onChange={(on) => onToggle(record.id, on)}
+            />
+            <span>
+              {record.runName}
+              <span className="ml-1 text-xs text-neutral-500">
+                {recordChoiceText(record, { withPhase: false })} · picked by hand
+              </span>
+            </span>
+          </label>
+        ))}
         {runs.map((run) =>
           run.status === "matched" ? (
             <label key={run.runId} className="flex items-center gap-2 text-sm text-neutral-800">

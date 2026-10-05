@@ -783,6 +783,7 @@ function PageConfigurationCard({
               for (const member of pendingMembers) void onSaveTargets(member.item, [recordId], []);
             }}
             className="rounded-lg border border-neutral-200 px-3 py-2.5"
+            codeMatches={pendingMembers[0]?.resolution?.codeMatches ?? card.members[0]?.resolution?.codeMatches ?? []}
             mockup={
               pendingMembers[0]?.resolution?.resolution.mockup ?? card.members[0]?.resolution?.resolution.mockup ?? null
             }

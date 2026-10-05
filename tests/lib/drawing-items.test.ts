@@ -693,3 +693,40 @@ describe("the page-gluing does not run on version 4", () => {
     expect(differs.observations.filter((o) => o.dimensionSlot === "W").map((o) => [o.value, o.slotSuggested])).toEqual([["70", false]]);
   });
 });
+
+describe("a mock-up drawing on a project with no mock-up phase (pilot, AM-ID-MUR-FUR-13)", () => {
+  const context = (records: RecordEntry[]) => ({
+    records,
+    occupied: NO_OCCUPANCY,
+    variants: new Map(),
+    finishes: [],
+    variantSources: new Map(),
+  });
+  const mockupDoc = () =>
+    stage(
+      {
+        items: [
+          rawItem({
+            codes: ["FUR-13"],
+            name: "Side table",
+            mockup: { is: true, evidence: "Drawing title 'MOCKUP ROOM FURNITURE DETAILS'" },
+          }),
+        ],
+      },
+      null,
+      "AM-ID-MUR-FUR-13.pdf",
+    );
+
+  it("lands nowhere, and offers the records carrying the client's code first", () => {
+    const records = [record("r-02", "GR-FUR-02"), record("r-46", "GR-FUR-13"), record("r-49", "PL-FUR-13")];
+    const resolved = resolveStagedRun(mockupDoc(), context(records), FIELDS)[0]!;
+    expect(resolved.resolution.runs).toEqual([]);
+    expect(resolved.targets).toEqual([]);
+    expect(resolved.codeMatches).toEqual(["r-46", "r-49"]);
+  });
+
+  it("sends no code matches where the code names nothing", () => {
+    const resolved = resolveStagedRun(mockupDoc(), context([record("r-02", "GR-FUR-02")]), FIELDS)[0]!;
+    expect(resolved.codeMatches).toBeUndefined();
+  });
+});

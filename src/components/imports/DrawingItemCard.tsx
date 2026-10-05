@@ -134,6 +134,8 @@ export type ItemResolution = {
    * `NamedConfigurationCard`, never by this card.
    */
   named?: NamedResolution | null;
+  /** Records carrying the page's code on any phase, where nothing resolved. The picker lists them first. */
+  codeMatches?: string[];
 };
 
 /** The units the card-wide control offers. */
@@ -699,6 +701,7 @@ export default function ItemCard({
             onToggle={toggleRun}
             onPick={(recordId) => void onSaveTargets(item, [recordId], [])}
             mockup={resolution?.resolution.mockup ?? null}
+            codeMatches={resolution?.codeMatches ?? []}
             // Amber whether or not it settled on one: a code read off the end
             // of a bill code is a reading a person checks, like a guessed slot.
             note={

@@ -25,6 +25,7 @@ import {
   drawingItemWarnings,
   occupancyThrough,
   resolveDrawingItem,
+  resolveStagedItem,
   targetRecordIds,
   variantLettersByItem,
   alreadyRecorded,
@@ -111,6 +112,13 @@ export type ResolvedItem = {
    * confirm calls. Null for every other page, which is most of them.
    */
   named: NamedResolution | null;
+  /**
+   * The records whose CLIENT code the page's code names, read across EVERY
+   * phase and ignoring the mock-up rule -- filled only where the card resolved
+   * to nothing, so the hand picker can offer them first. Never ticked: a
+   * mock-up drawing still lands on a main line only by a person's pick.
+   */
+  codeMatches?: string[];
 };
 
 /** What the card is told about a page of named configurations. Compact: it crosses the wire. */
@@ -456,8 +464,34 @@ export function resolveStagedRun(
       ...withSwatchRefusals(swatchRefusalsFor(item, context.finishes)),
       ...withBillReplacements(billReplacements(item, targets, occupied, named)),
       named: named ? namedResolution(targets, resolution, named) : null,
+      ...withCodeMatches(resolution.runs.length === 0 ? codeMatchesOf(staged, item, context.records) : []),
     };
   });
+}
+
+/**
+ * THE CLIENT'S CODE, OFFERED FIRST WHEN NOTHING RESOLVED (Max, 2026-10-05:
+ * "try and match by their code ... that would be the first port of call").
+ *
+ * On pilot, AM-ID-MUR-FUR-13 is a mock-up drawing and the project has no
+ * mock-up phase, so the card resolved to nothing and the hand picker listed
+ * all 67 records by OUR number -- and "13" read as record 13, a coffee table,
+ * where FUR-13 is the bathroom side table on GR-FUR-13 and PL-FUR-13. The
+ * same resolver, run without the mock-up filter, says which records carry the
+ * code; the picker lists those first. It suggests nothing and ticks nothing.
+ */
+/** Present only when there is something to offer, so a resolved card's payload is unchanged. */
+function withCodeMatches(ids: string[]): { codeMatches?: string[] } {
+  return ids.length > 0 ? { codeMatches: ids } : {};
+}
+
+function codeMatchesOf(
+  staged: StagedDrawings,
+  item: StagedDrawings["items"][number],
+  records: Awaited<ReturnType<typeof loadDrawingContext>>["records"],
+): string[] {
+  const { runs } = resolveStagedItem(staged, item, records);
+  return runs.flatMap((run) => (run.status === "matched" ? [run.record.id] : run.candidates.map((c) => c.id)));
 }
 
 /**
@@ -550,12 +584,22 @@ function namedResolution(targets: string[], resolution: DrawingResolution, named
  * needs and every one of them would cross the wire per request.
  */
 export function recordChoices(context: Awaited<ReturnType<typeof loadDrawingContext>>) {
-  return context.records.map((record) => ({
-    id: record.id,
-    label: record.label,
-    itemDescription: record.itemDescription,
-    runName: record.runName,
-  }));
+  // The client's own code leads and orders the list: it is what the drawings
+  // and the bill call the item, where the record number is ours.
+  return context.records
+    .map((record) => ({
+      id: record.id,
+      label: record.label,
+      codes: record.boqCodes.map((code) => code.trim()).filter((code) => code !== ""),
+      itemDescription: record.itemDescription,
+      runName: record.runName,
+    }))
+    .sort(
+      (a, b) =>
+        Number(a.codes.length === 0) - Number(b.codes.length === 0) ||
+        (a.codes[0] ?? "").localeCompare(b.codes[0] ?? "", undefined, { numeric: true }) ||
+        a.label.localeCompare(b.label, undefined, { numeric: true }),
+    );
 }
 
 /** One run's staged JSON and its resolved items, for a screen that shows many. */
