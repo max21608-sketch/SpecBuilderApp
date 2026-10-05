@@ -77,6 +77,7 @@ import { linesToIgnore, nonFurnitureOf, type NonFurnitureGuess } from "@/lib/non
 // disagree about which rows are ambiguous.
 import { duplicateGroups } from "@/lib/boq-carry";
 import { formatDay } from "@/lib/format-day";
+import { clampText } from "@/lib/shout";
 import PageBody from "@/components/ui/PageBody";
 import Tabs from "@/components/ui/Tabs";
 
@@ -198,8 +199,44 @@ const RAIL =
 /** …and its continuation down to the next fabric line of the same item. */
 const RAIL_MORE =
   "after:absolute after:-bottom-2.5 after:left-2.5 after:top-1/2 after:border-l-2 after:border-neutral-300 after:content-['']";
+/**
+ * The Item column's floor, on a block INSIDE the cell. A `min-width` on a th
+ * or td is only a hint under table-layout auto — the column came out at 200px
+ * beside a 280px Category, and `GR-TIM-13 → Main timber finish` broke over two
+ * lines. A block's min-width is honoured, so the column cannot shrink below it.
+ */
+const ITEM_CELL = "min-w-[340px]";
 /** A chip that wraps inside the Item column instead of running across Area. */
 const CHIP_WRAPS = "!whitespace-normal max-w-full [overflow-wrap:anywhere]";
+
+/**
+ * A FABRIC LINE'S WORDS, CUT TO ABOUT TWO LINES. The bill writes the whole
+ * fabric specification in one cell — collection, colour, width, composition,
+ * certifications — and printed whole it ran a dozen lines under a 36px swatch.
+ * `clampText` cuts the STRING (CSS `line-clamp` does nothing here, the rule
+ * `shout.ts` records), and the rest is one quiet press away. Display only:
+ * the staged value is untouched.
+ */
+function ClampedText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const { clamped, wasClamped } = clampText(text, 2, 110);
+  return (
+    <>
+      {open || !wasClamped ? text : clamped}
+      {wasClamped && (
+        <Button
+          variant="quiet"
+          size="xs"
+          className="-my-0.5 ml-1 px-1 py-0 text-[11px]"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? "less" : "more"}
+        </Button>
+      )}
+    </>
+  );
+}
 
 /** The grey gutter between two groups. The one legitimate full-width cell. */
 function GroupGap({ columns }: { columns: number }) {
@@ -1683,7 +1720,9 @@ export default function ReviewImportPage() {
                     <thead>
                       <tr>
                         <Th>Row</Th>
-                        <Th className="w-[170px]">
+                        {/* Narrower than it was: the kind is quiet text until
+                            clicked, and the select opens in place. */}
+                        <Th className="w-[120px]">
                           Kind
                           <Tip>
                             A fabric line is not a record: it is written as the next free COM spec on its item. A section,
@@ -1691,12 +1730,18 @@ export default function ReviewImportPage() {
                           </Tip>
                         </Th>
                         <Th>Client ref</Th>
+                        {/* The floor is on a BLOCK inside each Item cell
+                            (`ITEM_CELL`): under table-layout auto a min-width on
+                            a th or td is only a hint. */}
                         <Th>Item</Th>
                         <Th>Area</Th>
                         <Th num>Qty</Th>
                         <Th>Designer</Th>
                         {reconciliation && <Th>Against the phase</Th>}
-                        <Th>
+                        {/* Capped, so the select does not take the slack the
+                            Item column needs: a select is as wide as its
+                            longest option, and a category name is long. */}
+                        <Th className="w-[180px]">
                           Category
                           <Tip>A line with no category still imports — it simply has no checklist yet.</Tip>
                         </Th>
@@ -1794,8 +1839,8 @@ export default function ReviewImportPage() {
                               <div
                                 className={
                                   place.hanging
-                                    ? `flex items-center gap-2.5 ${RAIL} ${place.more ? RAIL_MORE : ""}`
-                                    : "flex items-center gap-2.5"
+                                    ? `${ITEM_CELL} flex items-center gap-2.5 ${RAIL} ${place.more ? RAIL_MORE : ""}`
+                                    : `${ITEM_CELL} flex items-center gap-2.5`
                                 }
                               >
                                 <BillRowPicture
@@ -1807,7 +1852,7 @@ export default function ReviewImportPage() {
                                 />
                                 <div className="min-w-0">
                                   <span className="block text-[12.5px] text-neutral-800">
-                                    {line.itemDescription}
+                                    <ClampedText text={line.itemDescription} />
                                     {line.productReference && (
                                       <span className="text-neutral-500"> · {line.productReference}</span>
                                     )}
@@ -1842,13 +1887,22 @@ export default function ReviewImportPage() {
                                       </Button>
                                     </span>
                                   </span>
+                                  {/* A FLAGGED READING IS SAID HERE, in amber,
+                                      never behind the why?: it asks a person to
+                                      check which item this is, and the Item
+                                      column is wide enough to read it. */}
+                                  {line.rowKindFlag && (
+                                    <span className="mt-0.5 block text-[11px] text-amber-800" role="note">
+                                      {line.rowKindFlag}
+                                    </span>
+                                  )}
                                   {whyOpen && <RowKindReasoning line={line} />}
                                 </div>
                               </div>
                             </Td>
                             ) : (
                             <Td>
-                              <div className="flex gap-3">
+                              <div className={`${ITEM_CELL} flex gap-3`}>
                                 <BillRowPicture
                                   importId={id}
                                   sheetIndex={sheetIndex}
@@ -2012,7 +2066,7 @@ export default function ReviewImportPage() {
                                 onChange={(e) =>
                                   setLine(sheetIndex, line.index, { categoryId: e.target.value || null })
                                 }
-                                className="max-w-xs rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50"
+                                className="w-full max-w-[11rem] rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50"
                               >
                                 <option value="">— not yet —</option>
                                 {data.categories.map((category) => (

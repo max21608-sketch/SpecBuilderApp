@@ -173,6 +173,32 @@ describe("the bill review's groups", () => {
     // Nothing between an item and its fabrics either.
     expect(rowOf(10, "Fabric").previousElementSibling).toBe(rowOf(9, "Item"));
   });
+
+  it("prints a flagged fabric reading in the Item cell, without opening the Kind", async () => {
+    const sheet = settledSheet();
+    sheet.lines = sheet.lines.map((line) =>
+      line.lineNo === 10 ? { ...line, rowKindFlag: "2 lines carry ZZ-FUR-10 — this is the nearer one above (row 9); check it." } : line,
+    );
+    mountReview([sheet]);
+    await screen.findByRole("button", { name: "Row 10 is Fabric — change" });
+    expect(within(rowOf(10, "Fabric")).getByText(/this is the nearer one above \(row 9\); check it/)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Row 10 is" })).toBeNull();
+  });
+
+  it("cuts a long fabric description to about two lines, with more and less beside it", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    const long = "Fabric @ Sofa Collection & Pattern Ref.: Example weave Colour Ref: 000-000 Width: 140cm Composition: 100% example fibre Certifications: example standard";
+    const sheet = settledSheet();
+    sheet.lines = sheet.lines.map((line) => (line.lineNo === 10 ? { ...line, itemDescription: long } : line));
+    mountReview([sheet]);
+    await screen.findByRole("button", { name: "Row 10 is Fabric — change" });
+    const row = rowOf(10, "Fabric");
+    expect(within(row).queryByText(/Certifications/)).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "more" }));
+    expect(within(row).getByText(/Certifications: example standard/)).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "less" })).toBeInTheDocument();
+  });
 });
 
 describe("the quiet kind", () => {

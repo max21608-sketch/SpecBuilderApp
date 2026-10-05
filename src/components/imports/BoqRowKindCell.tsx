@@ -18,10 +18,15 @@
 // belongs to and a "change" beside it. Either press opens the cell exactly as
 // it always was: the same selects, the same options, the same validation. What
 // moves is only what is shown BEFORE a click — and never a problem: a line the
-// confirm would refuse (`problem`), a flagged reading (`rowKindFlag`) or a
-// fabric still waiting for its item opens on its own, so nothing that needs a
-// person sits behind a press. Who said so and why moves behind the Item cell's
-// "why?" (`RowKindReasoning`, below) on a fabric line.
+// confirm would refuse (`problem`) or a fabric still waiting for its item opens
+// on its own, so nothing the confirm would refuse sits behind a press. Who said
+// so and why moves behind the Item cell's "why?" (`RowKindReasoning`, below).
+//
+// A FLAG DOES NOT OPEN IT. A flagged reading ("two lines carry the code the
+// bracket names — this is the nearer one above; check it") is printed in amber
+// in the ITEM cell instead, where the column is wide enough to read it: on the
+// real pricing document every bracketed fabric is flagged, and opened in a
+// 120px column each one stood 340px tall. Here the "for N" turns amber.
 //
 // WHO SAID IT IS SHOWN. The bracket rule (the bill naming its item) is plain;
 // a model's reading is a yellow chip with its evidence; a flagged reading — two
@@ -89,8 +94,7 @@ export default function BoqRowKindCell({
     if (opened === "parent") parentRef.current?.focus();
   }, [opened]);
   // A fabric line that names no item is itself a problem, whatever `problem` says.
-  const needsAPerson =
-    Boolean(problem) || Boolean(line.rowKindFlag) || choosingParent || (kind === "finish_for" && !line.finishFor);
+  const needsAPerson = Boolean(problem) || choosingParent || (kind === "finish_for" && !line.finishFor);
   const open = needsAPerson || (editable && opened !== null);
   /** Set the kind, and fold the cell back to its quiet state. */
   const set = (next: BoqRowKind, finishForRow: number | null) => {
@@ -122,7 +126,7 @@ export default function BoqRowKindCell({
           <span className="text-xs text-neutral-700">{label}</span>
         )}
         {kind === "finish_for" && line.finishFor && (
-          <span className="block text-[11px] text-neutral-500">
+          <span className={`block text-[11px] ${line.rowKindFlag ? "text-amber-800" : "text-neutral-500"}`}>
             for {line.finishFor.row}
             {editable && (
               <>

@@ -269,7 +269,8 @@ describe("a line's kind", () => {
     expect(onSet).toHaveBeenCalledWith("finish_for", 9);
   });
 
-  it("shows who said so, and a flagged reading in amber words", () => {
+  it("shows who said so, and a flagged reading in amber words, once opened", async () => {
+    const user = userEvent.setup();
     const flagged: KindCellLine = {
       ...lines[3]!,
       rowKind: "finish_for",
@@ -278,6 +279,9 @@ describe("a line's kind", () => {
       finishFor: { row: 11, code: "ZZ-FUR-03" },
     };
     render(<BoqRowKindCell line={flagged} lines={lines} editable busy={false} onSet={vi.fn()} />);
+    // A flag does not open the cell: the Item cell prints it, and "for 11" is amber.
+    expect(screen.getByText(/for 11/).className).toContain("text-amber-800");
+    await user.click(screen.getByRole("button", { name: "Row 12 is Fabric — change" }));
     expect(screen.getByText("the bill's bracket")).toBeInTheDocument();
     expect(screen.getByText(/this is the nearer one above \(row 11\); check it/)).toBeInTheDocument();
     expect(screen.getByText("written as the next free COM on row 11")).toBeInTheDocument();
