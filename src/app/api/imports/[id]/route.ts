@@ -38,12 +38,14 @@ import {
   DIMENSION_SLOTS,
   isItemLevel,
   type DimensionSlot,
+  type DocumentKind,
 } from "@/lib/spec-vocab";
 import { assertBoqDocument } from "@/lib/boq-import";
 import { billPicturePrefix, rowImageFor, type BillPictureCrop, type BillPictureOverride } from "@/lib/bill-row-image";
 import { assertProjectScopedPathname, headTrustedBlob } from "@/lib/blob-source";
 import { fabricParentOptions, isBoqRowKind, kindChoicePatch } from "@/lib/boq-row-kinds";
 import { billSpecsRequestId } from "@/lib/bill-specifications";
+import { furnitureReadRequestId } from "@/lib/tracker-furniture";
 import {
   billItemName,
   billReadsDescriptions,
@@ -950,11 +952,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     run.document_kind === "finishes_schedule" &&
     (!run.parsed || isStagedFinishSchedule(run.parsed))
   ) {
-    if (!run.parsed) return json({ ok: true, import: { ...run, parsed: null }, review: [] });
+    // The FURNITURE half of the same file, if somebody has asked for it to be
+    // read (`tracker-furniture.ts`) — so the button becomes a link to that run.
+    const furnitureRows = await sql`
+      select id from intake_runs where registration_request_id = ${furnitureReadRequestId(String(run.id))}
+    `;
+    const furnitureRunId = furnitureRows[0] ? String(furnitureRows[0].id) : null;
+    if (!run.parsed) return json({ ok: true, import: { ...run, parsed: null }, review: [], furnitureRunId });
     // The verdict against the LIVE library, by the function the confirm calls.
     const staged = assertStagedFinishSchedule(run.parsed);
     const library = await loadScheduleLibrary(sql, String(run.project_id));
-    return json({ ok: true, import: { ...run, parsed: staged }, review: reviewFinishSchedule(staged, library) });
+    return json({
+      ok: true,
+      import: { ...run, parsed: staged },
+      review: reviewFinishSchedule(staged, library),
+      furnitureRunId,
+    });
   }
 
   if (run.source_kind === "spec_document" && run.document_kind === "preamble") {
