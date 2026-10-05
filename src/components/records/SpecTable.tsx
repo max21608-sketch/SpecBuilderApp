@@ -1144,7 +1144,13 @@ export default function SpecTable({
                             millimetres beside them) and each finish code. And
                             where two documents disagree about it, red, with a
                             link to the place it is decided. */}
-                        {(record.spec_summary || (record.open_disagreements ?? 0) > 0) && (
+                        {/* Only where there is something to say: every row
+                            carries a summary, and an empty line under each
+                            name would make a 300-line phase taller for
+                            nothing. */}
+                        {(Boolean(record.spec_summary?.dimensions) ||
+                          (record.spec_summary?.finishes.length ?? 0) > 0 ||
+                          (record.open_disagreements ?? 0) > 0) && (
                           <div className="mt-1">
                             <ItemSpecChips
                               dimensionCell={record.spec_summary?.dimensions ?? ""}
