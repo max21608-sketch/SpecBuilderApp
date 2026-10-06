@@ -301,6 +301,49 @@ export async function fabricSwatchBillWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/** The words of `finishLinesBillWorkbook`'s finish lines, by row — invented, every one. */
+export const FINISH_LINES = {
+  4: { code: "F-FA-05", words: "EXAMPLE MILL | ZX-1 / ALPHA | MOHAIR | IVORY" },
+  5: { code: "F-FA-07", words: "EXAMPLE TANNERY | ZX-2 | LEATHER | OXBLOOD" },
+  6: { code: "F-FA-08", words: "EXAMPLE TANNERY | ZX-3 | LEATHER | SAND" },
+  7: { code: "F-FA-18", words: "EXAMPLE MILL | ZX-4 / BETA | FABRIC | STONE" },
+  8: { code: "F-MT-03", words: "TO ELECT | POLISHED NICKEL | CLEAR LACQUERED" },
+  9: { code: "F-WD-02", words: "EXAMPLE SAPELE, SATIN" },
+  10: { code: "F-TR-01", words: "EXAMPLE TRIMS | ZX-9 CORD WITH TAPE | CORD" },
+  12: { code: null, words: "BED - LEATHER BW" },
+} as const;
+
+/**
+ * A BILL WHOSE ITEM CARRIES SEVEN FINISH LINES (2026-10-06) — invented, in a
+ * specifier's shape: the item, then one coded finish per line under it, no
+ * unit and no quantity. Four fabrics, a metal, a timber and a trim; then a
+ * second item with a contractor's UNCODED fabric line. Which item each finish
+ * belongs to is said by the test (the structure read's `finish_for`), as a
+ * person or the model would say it:
+ *
+ *   3  ZZ-SE-03.A  Banquette     4–10  its finishes (`FINISH_LINES`)
+ *  11  ZZ-FUR-30   Bed             12  BED - LEATHER BW, no code
+ */
+export async function finishLinesBillWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  const finish = (row: keyof typeof FINISH_LINES) => ["Example Bar", FINISH_LINES[row].code, FINISH_LINES[row].words, null];
+  addSheet(book, "Bill", [
+    ["Example specification bill", null, null, null],
+    ["Area", "FF&E code", "Item description", "TOTAL Q-ty"],
+    ["Example Bar", "ZZ-SE-03.A", "Banquette", 1],
+    finish(4),
+    finish(5),
+    finish(6),
+    finish(7),
+    finish(8),
+    finish(9),
+    finish(10),
+    ["Example Bar", "ZZ-FUR-30", "Bed", 2],
+    finish(12),
+  ]);
+  return bytes(book);
+}
+
 /** Every workbook this module can build, by the filename the CLI gives it. */
 export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-two-row-header.xlsx": twoRowHeaderWorkbook,
@@ -310,6 +353,7 @@ export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "programme-dates.xlsx": programmeDatesWorkbook,
   "bill-with-pictures.xlsx": picturedBillWorkbook,
   "bill-fabric-swatches.xlsx": fabricSwatchBillWorkbook,
+  "bill-finish-lines.xlsx": finishLinesBillWorkbook,
 };
 
 async function main(): Promise<void> {

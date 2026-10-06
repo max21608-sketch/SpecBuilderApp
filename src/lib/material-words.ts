@@ -178,3 +178,51 @@ export function projectCodeKind(raw: string | null | undefined): (typeof CODE_PR
   const middle = match[1]!.toLowerCase();
   return CODE_PREFIXES.find((entry) => entry.prefix === middle)?.kind ?? null;
 }
+
+// ---- a BILL's finish line: its own code shape, and one word ---------------------
+//
+// ADDITIVE AND BILL-ONLY, used by `readBillFinishKind` (bill-finish-kind.ts)
+// and by nothing on the drawings path — deliberately NOT folded into
+// `CODE_PREFIXES` or the `*_CALLOUT_WORDS` above, because `classifyCallout`
+// runs again at READ time over every pack already staged
+// (`upgradeCalloutGuesses`) and a widened reading there would re-classify rows
+// nobody is looking at, with nothing saying so.
+//
+// A specifier's bill (2026-10-06) lists an item, then each of its finishes on
+// a line of its own, coded `F-FA-05`, `F-MT-03`, `F-WD-02`, `F-TR-01`: a
+// leading `F-` that says "finish" and the KIND in the SECOND group. The
+// letters-only prefix test reads `ffa`, `fmt`, `fwd` and finds nothing, and
+// the three-part project code wants a first group of two to four letters, so
+// neither existing reading sees the kind the code states.
+
+/**
+ * What a bill finish code of the `F-<KIND>-<n>` shape says it is, by its
+ * second group, matched EXACTLY: the drawings path's own prefixes
+ * (`F-FAB-01`, `F-WD-02`, `F-MTL-01`) plus the two this shape adds — `FA`
+ * (fabric, leather included: the bill files both under it) and `TR` (trim:
+ * cord, gimp, bullion, rosette — a finish with no BWS field). Null for any
+ * other shape, and for a group nothing here knows (`F-ST-01` says nothing).
+ */
+const BILL_FINISH_CODE = /^\s*F-([A-Za-z]{2,4})-\d{1,4}[A-Za-z]?(?:\.\d{1,3})?\s*$/i;
+
+export const BILL_FINISH_CODE_GROUPS: { group: string; kind: "fabric" | "timber" | "metal" | "trim" }[] = [
+  ...CODE_PREFIXES.map((entry) => ({ group: entry.prefix, kind: entry.kind })),
+  { group: "fa", kind: "fabric" },
+  { group: "tr", kind: "trim" },
+];
+
+export function billFinishCodeKind(raw: string | null | undefined): "fabric" | "timber" | "metal" | "trim" | null {
+  const match = BILL_FINISH_CODE.exec(raw ?? "");
+  if (!match) return null;
+  const group = match[1]!.toLowerCase();
+  return BILL_FINISH_CODE_GROUPS.find((entry) => entry.group === group)?.kind ?? null;
+}
+
+/**
+ * The trade's own word for a client-supplied hide, read on a bill's UNCODED
+ * finish line only. `COM` (customer's own material) has always been a fabric
+ * word; `COL` is customer's own LEATHER, which a bill writes as "DESK - COL"
+ * under the item. Not added to `FABRIC_CALLOUT_WORDS`: on a drawing, "col"
+ * is as likely to be a column or a colour, and that list is frozen.
+ */
+export const BILL_FABRIC_WORDS = ["col"] as const;

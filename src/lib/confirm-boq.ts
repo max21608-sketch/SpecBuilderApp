@@ -40,10 +40,15 @@ import { effectiveArea } from "@/lib/boq-reconcile";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { fabricLineState, rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
-import { FABRIC_SLOTS } from "@/lib/drawing-document";
+import {
+  BILL_FINISH_SLOT_IDS,
+  billFinishNoun,
+  decideBillFinishSlot,
+} from "@/lib/bill-finish-kind";
 import { normaliseFinishCode, resolveFinishCode, type Finish, type FinishCodeOrigin } from "@/lib/finishes";
 import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
 import {
+  billFinishLineKind,
   decideFabricFiling,
   descriptionFilesAFinish,
   fabricLineValue,
@@ -53,7 +58,7 @@ import {
   type FabricFiling,
   type SwatchCandidate,
 } from "@/lib/bill-fabric-filing";
-import { loadCurrentSwatches, loadFinishLibrary, loadHeldBillFabrics } from "@/lib/bill-fabric-load";
+import { loadCurrentSwatches, loadFinishLibrary, loadHeldBillFinishes } from "@/lib/bill-fabric-load";
 import { recomposeAnswers } from "@/lib/attribute-retire";
 import {
   billItemName,
@@ -312,13 +317,16 @@ export async function confirmBoqImport(
   // the same library, the same resolution and the same CONFLICT rule as a
   // drawing's confirm (src/lib/confirm-drawings.ts).
   const library = await loadFinishLibrary(txn, projectId);
-  const fabricFields = await txn`
-    select id, json_id from spec_fields where json_id = any(${[...FABRIC_SLOTS]}::int[])
+  // EVERY SLOT A FINISH LINE CAN FILL — COM 1–3, the three timber finishes,
+  // the two metal finishes — by json id, so the slot is decided by the pure
+  // `decideBillFinishSlot` the review also calls, and only then resolved to a
+  // field id here.
+  const finishFields = await txn`
+    select id, json_id from spec_fields where json_id = any(${[...BILL_FINISH_SLOT_IDS]}::int[])
   `;
-  const fabricFieldIds = [...FABRIC_SLOTS]
-    .map((jsonId) => fabricFields.find((row) => Number(row.json_id) === jsonId)?.id)
-    .filter((fieldId): fieldId is string => typeof fieldId === "string" || typeof fieldId === "number")
-    .map(String);
+  const finishSlotFields = new Map<number, string>(
+    finishFields.map((row) => [Number(row.json_id), String(row.id)] as const),
+  );
   const recomposeIds = new Set<string>();
   let fabricSpecs = 0;
   // THE DESCRIPTION CELLS, planned by the function the review screen showed
@@ -593,7 +601,7 @@ export async function confirmBoqImport(
         projectId,
         actor,
         library,
-        fabricFieldIds,
+        finishSlotFields,
         sortOrder: order,
       });
       if (written.written) {
@@ -734,30 +742,42 @@ async function giveBillPicture(
 }
 
 /**
- * ONE FABRIC LINE, WRITTEN AS A COM SPEC ON ITS ITEM (Max, 2026-09-23).
+ * ONE FINISH LINE, WRITTEN ONTO ITS ITEM (Max, 2026-09-23; by KIND since
+ * 2026-10-06).
  *
  * `record_attributes` is what a document SAID, and the bill is the document:
- * the value is the line's description VERBATIM, the source is this bill's
- * intake run, and there is no page, because a spreadsheet has none. The COM
- * slot is the next one free on THAT record — COM 1, COM 2, COM 3 — which is
- * how two fabrics under one item land as COM 1 and COM 2.
+ * the value is the line's words VERBATIM, the source is this bill's intake
+ * run, and there is no page, because a spreadsheet has none.
+ *
+ * WHICH FIELD is `decideBillFinishSlot` (`bill-finish-kind.ts`), the one
+ * decision the review's "→ COM 3" also reads: the line's KIND, read off its
+ * own code and words (`billFinishLineKind`), then the next slot of that kind
+ * free on THAT record — COM 1–3 for a fabric or a leather, the three timber
+ * finishes, the two metal finishes — which is how two fabrics under one item
+ * land as COM 1 and COM 2 and a metal under them as Main metal finish. A line
+ * whose kind is full, or has no BWS field (a trim, hardware, a line that does
+ * not say), is STILL WRITTEN with no field: what the bill said is kept, and
+ * an item carrying six finishes never refuses the bill. It used to:
+ * `no_free_com` refused the whole confirm on an item's fourth fabric line.
  *
  * WHERE IT IS FILED is `decideFabricFiling` (`bill-fabric-filing.ts`), the
  * one decision the review's sentence also reads, against the library as it
- * stands at this line. A coded line files as it always has — a code the
+ * stands at this line — for every kind, because the library is the client's
+ * codes, not BWS's fields. A coded line files as it always has — a code the
  * library has already described DIFFERENTLY links nothing (the CONFLICT
- * rule). An uncoded line with real words is filed as an IN-HOUSE fabric by
- * default (Max, 2026-10-05): linked to an in-house finish worded exactly the
- * same, or given a newly minted code (`BW-AMB-001`), TBC, with its words as
- * the description. A placeholder is never filed. Whatever is created joins
- * `library` here, so the same words on a later line join the same code.
+ * rule). An uncoded line with real words is filed IN-HOUSE by default (Max,
+ * 2026-10-05): linked to an in-house finish worded exactly the same, or given
+ * a newly minted code (`BW-AMB-001`), TBC, with its words as the description.
+ * A placeholder is never filed. Whatever is created joins `library` here, so
+ * the same words on a later line join the same code.
  *
- * A REVISION writes nothing where the record already holds that exact fabric
- * from a bill, and REFUSES — with a sentence — where the record holds a
- * different one from a bill: replacing a fabric is a decision the review has
- * no control for yet, and a revision that quietly kept or quietly replaced
- * one would be the wrong answer either way. Returns whether a row was written,
- * the finish it links (for the swatch), and whether a code was minted.
+ * A REVISION writes nothing where the record already holds that exact finish
+ * OF THIS KIND from a bill, and REFUSES — with a sentence — where it holds a
+ * different one of this kind from a bill: replacing a fabric is a decision
+ * the review has no control for yet, and a revision that quietly kept or
+ * quietly replaced one would be the wrong answer either way. Returns whether
+ * a row was written, the finish it links (for the swatch), and whether a code
+ * was minted.
  */
 async function writeFabricLine(
   txn: TxnSql,
@@ -771,40 +791,49 @@ async function writeFabricLine(
     projectId: string;
     actor: string;
     library: Finish[];
-    fabricFieldIds: string[];
+    /** Every slot a finish line can fill: json id → field id. */
+    finishSlotFields: ReadonlyMap<number, string>;
     sortOrder: number;
   },
 ): Promise<{ written: boolean; finishId: string | null; minted: boolean }> {
   const { recordId, line, runId, projectId, actor, library } = input;
   const value = fabricLineValue(line);
   const materialCode = fabricMaterialCode(line);
+  const { kind } = billFinishLineKind(line);
   const nothing = { written: false, finishId: null, minted: false };
 
   if (input.carried) {
-    const held = (await loadHeldBillFabrics(txn, [recordId])).get(recordId) ?? [];
+    const held = ((await loadHeldBillFinishes(txn, [recordId])).get(recordId) ?? [])
+      .filter((entry) => entry.kind === kind)
+      .map((entry) => entry.value);
     if (held.includes(value)) return nothing;
     if (held.length > 0) {
+      const noun = billFinishNoun(kind);
       throw new DomainConflictError(
         "fabric_changed",
-        `Row ${line.lineNo}'s fabric is not the one this item's record already holds from the bill. A revision that ` +
-          "changes a fabric line is not supported yet — correct the fabric on the record's Specs tab, then confirm " +
+        `Row ${line.lineNo}'s ${noun} is not the one this item's record already holds from the bill. A revision that ` +
+          `changes a ${noun} line is not supported yet — correct the ${noun} on the record's Specs tab, then confirm ` +
           "the revision with the line as the record now reads.",
       );
     }
   }
 
+  // What the record holds NOW, from any document and from the finish lines
+  // above this one — read under the lock, as json ids, for the pure decision.
+  const jsonIdOf = new Map([...input.finishSlotFields].map(([jsonId, fieldId]) => [fieldId, jsonId] as const));
   const occupied = await txn`
     select spec_field_id from record_attributes
-    where record_id = ${recordId} and status = 'active' and spec_field_id = any(${input.fabricFieldIds}::uuid[])
+    where record_id = ${recordId} and status = 'active'
+      and spec_field_id = any(${[...input.finishSlotFields.values()]}::uuid[])
   `;
-  const taken = new Set(occupied.map((row) => String(row.spec_field_id)));
-  const fieldId = input.fabricFieldIds.find((candidate) => !taken.has(candidate)) ?? null;
-  if (!fieldId) {
-    throw new DomainConflictError(
-      "no_free_com",
-      `Row ${line.lineNo}'s fabric has nowhere to go: its item already holds COM 1, COM 2 and COM 3.`,
-    );
-  }
+  const taken = new Set(
+    occupied.flatMap((row) => {
+      const jsonId = jsonIdOf.get(String(row.spec_field_id));
+      return jsonId === undefined ? [] : [jsonId];
+    }),
+  );
+  const placement = decideBillFinishSlot(kind, taken);
+  const fieldId = placement.jsonId === null ? null : (input.finishSlotFields.get(placement.jsonId) ?? null);
 
   const filing = decideFabricFiling({
     materialCode,
@@ -820,8 +849,8 @@ async function writeFabricLine(
       (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
        source_run_id, source_page, sort_order, created_by, updated_by)
     values
-      (${recordId}, 'material', null, 'Fabric', ${value}, null, ${materialCode}, ${finishId}, ${fieldId},
-       ${fabricLineState(value)}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
+      (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${value}, null, ${materialCode}, ${finishId},
+       ${fieldId}, ${fabricLineState(value)}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
   `;
   return { written: true, finishId, minted: filing.outcome === "mint" };
 }

@@ -55,6 +55,7 @@ import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import { readDimension, sizeLabel, sizeLineRefusal, type DimensionReading } from "@/lib/spec-dimensions";
 import { leadingFinishCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
+import { billFinishLineKind } from "@/lib/bill-finish-kind";
 import {
   DIMENSION_SLOT_LABELS,
   TBC_TOKENS,
@@ -388,8 +389,10 @@ function innerLabel(value: string): { label: string; value: string } | null {
 /**
  * The plan for ONE description cell, or null where it is a single line.
  *
- * `hasFabricLine`: the bill has a fabric line under this item (a `finish_for`
- * row naming it), which will be written as its COM. `fields` is the BWS
+ * `hasFabricLine`: the bill has a FABRIC line under this item (a `finish_for`
+ * row naming it, read as a fabric by `readBillFinishKind`), which will be
+ * written as its COM. A metal or timber line under the item does not count:
+ * it claims no COM. `fields` is the BWS
  * register the finish slots are resolved against.
  */
 export function planBillDescription(
@@ -604,10 +607,12 @@ export function planBillDescription(
 type PlanLine = {
   index: number;
   lineNo: number;
+  code?: string | null;
+  itemDescription?: string;
   itemDescriptionRaw?: string | null;
   ignored?: boolean;
   rowKind?: string;
-  finishFor?: { row: number } | null;
+  finishFor?: { row: number; code?: string | null } | null;
   slotOverrides?: Readonly<Record<string, unknown>> | null;
 };
 
@@ -621,9 +626,14 @@ export function planSheetDescriptions(
   lines: readonly PlanLine[],
   fields: SpecFieldEntry[],
 ): Map<number, BillDescriptionPlan> {
+  // Only a finish line READ AS A FABRIC is a fabric line here — the same
+  // reading, over the same code and words, the confirm slots it by
+  // (`billFinishLineKind`), so a description's fabric is a note exactly when
+  // a fabric line will take the COM.
   const withFabric = new Set(
     lines
       .filter((line) => line.rowKind === "finish_for" && !line.ignored && line.finishFor)
+      .filter((line) => billFinishLineKind({ ...line, code: line.code ?? null }).kind === "fabric")
       .map((line) => line.finishFor!.row),
   );
   const plans = new Map<number, BillDescriptionPlan>();

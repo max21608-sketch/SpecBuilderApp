@@ -132,8 +132,9 @@ type Line = {
 } & RowKindFields;
 
 /**
- * WHAT A FABRIC LINE DOES TO THE FINISHES LIBRARY — "new library entry
- * GR-FAB-13 · swatch: this row's picture" — one quiet line under the chip,
+ * WHERE A FINISH LINE GOES AND WHAT IT DOES TO THE FINISHES LIBRARY — "→ COM 2
+ * · new library entry GR-FAB-13 · swatch: this row's picture", "→ kept, no BWS
+ * field (trim) · …" — one quiet line under the chip,
  * the layout's density rule. Where the line mints in the default `BW-F-`
  * series because the project has no short code, the way to set one is a link
  * to the project's details: setting it changes what is minted, not what is
@@ -142,6 +143,9 @@ type Line = {
 function FabricFilingLine({ plan, projectId }: { plan: FabricLinePlan; projectId: string }) {
   return (
     <span className="mt-0.5 block text-[11px] leading-4 text-neutral-500">
+      {/* The field, first: the same decision the confirm writes with. */}
+      {plan.goesTo}
+      {" · "}
       {plan.filing}
       {plan.askForShortCode && (
         <>

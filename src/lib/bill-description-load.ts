@@ -10,6 +10,7 @@ import { specFieldEntries, type SpecFieldEntry } from "@/lib/drawing-document";
 import { BILL_SPECS_REQUEST_PREFIX } from "@/lib/bill-rows";
 import { isDimensionSlot } from "@/lib/spec-vocab";
 import type { HeldAttributes } from "@/lib/bill-description";
+import { heldBillFinishKind } from "@/lib/bill-finish-kind";
 
 /** The BWS field register, as the finish slots are resolved against it. */
 export async function loadDescriptionFields(exec: SqlLike): Promise<SpecFieldEntry[]> {
@@ -21,9 +22,11 @@ export async function loadDescriptionFields(exec: SqlLike): Promise<SpecFieldEnt
  * `revisionDescriptionRefusal`.
  *
  * `fromBill` is a specification a bill's DESCRIPTION wrote before — any active
- * attribute sourced to a bill of quantities other than a fabric line's COM
- * (a fabric line writes only `material` rows, a description always writes
- * something else too), or one from a charged read of a bill's own file. The
+ * attribute sourced to a bill of quantities other than a row a FINISH LINE
+ * writes (a `material` row, or one shaped as `billFinishShape` writes a
+ * timber, metal, hardware, trim or unsaid finish — a description always
+ * writes something else too), or one from a charged read of a bill's own
+ * file. The
  * slots and fields are every active one, from any document, because writing
  * over any of them would be a replace nobody chose.
  */
@@ -32,7 +35,7 @@ export async function loadHeldAttributes(exec: SqlLike, recordIds: string[]): Pr
   for (const id of recordIds) held.set(id, { fromBill: false, slots: [], fieldIds: [] });
   if (recordIds.length === 0) return held;
   const rows = await exec`
-    select a.record_id, a.attr_group, a.dimension_slot, a.spec_field_id,
+    select a.record_id, a.attr_group, a.label, a.dimension_slot, a.spec_field_id,
            r.source_kind, r.registration_request_id
     from record_attributes a
     left join intake_runs r on r.id = a.source_run_id
@@ -41,7 +44,9 @@ export async function loadHeldAttributes(exec: SqlLike, recordIds: string[]): Pr
   for (const row of rows) {
     const entry = held.get(String(row.record_id));
     if (!entry) continue;
-    const fromBillDescription = row.source_kind === "boq_xlsx" && row.attr_group !== "material";
+    const fromBillDescription =
+      row.source_kind === "boq_xlsx" &&
+      heldBillFinishKind({ attrGroup: String(row.attr_group), label: String(row.label ?? "") }) === undefined;
     const fromBillRead = String(row.registration_request_id ?? "").startsWith(BILL_SPECS_REQUEST_PREFIX);
     if (fromBillDescription || fromBillRead) entry.fromBill = true;
     const slot = row.dimension_slot === null || row.dimension_slot === undefined ? null : String(row.dimension_slot);

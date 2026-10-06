@@ -213,26 +213,37 @@ describeIfDb("the bill fills the finishes library", () => {
     const { GET } = await import("@/app/api/imports/[id]/route");
     const response = await GET(new Request("http://localhost/test"), params(billRunId));
     const body = (await response.json()) as {
-      fabricFilings: Record<number, Record<number, { filing: string; swatch: string | null; askForShortCode: boolean }>>;
+      fabricFilings: Record<
+        number,
+        Record<number, { goesTo: string; filing: string; swatch: string | null; askForShortCode: boolean }>
+      >;
       import: { parsed: { sheets: { lines: { index: number; lineNo: number; rowKind?: string }[] }[] } };
     };
     const indexOf = (row: number) => body.import.parsed.sheets[0]!.lines.find((line) => line.lineNo === row)!.index;
     const line = (row: number) => body.fabricFilings[0]?.[indexOf(row)];
-    expect(line(4)).toEqual({ filing: "new library entry ZZ-FAB-13", swatch: "swatch: this row's picture", askForShortCode: false });
+    expect(line(4)).toEqual({
+      goesTo: "→ COM 1",
+      filing: "new library entry ZZ-FAB-13",
+      swatch: "swatch: this row's picture",
+      askForShortCode: false,
+    });
     expect(line(6)?.filing).toBe("new library entry ZZ-FAB-13, with row 4");
     expect(line(8)?.swatch).toBe("swatch: none — rows 8 and 10 differ");
     expect(line(12)).toEqual({
+      goesTo: "→ COM 1",
       filing: "new in-house fabric — numbered BW-ZZA-… at confirm",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
     });
     expect(line(14)).toEqual({
+      goesTo: "→ COM 1",
       filing: "same words as row 12 — one in-house code",
       swatch: "swatch: row 12's picture",
       askForShortCode: false,
     });
-    expect(line(16)).toEqual({ filing: "placeholder — not filed", swatch: null, askForShortCode: false });
+    expect(line(16)).toEqual({ goesTo: "→ COM 1", filing: "placeholder — not filed", swatch: null, askForShortCode: false });
     expect(line(18)).toEqual({
+      goesTo: "→ COM 1",
       filing: "matches ZZ-FAB-15 in the library",
       swatch: "swatch: none (the library already has one)",
       askForShortCode: false,
