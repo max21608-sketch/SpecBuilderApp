@@ -34,10 +34,20 @@
 //   A picture is an aid to recognising an item; the bill is the data.
 // - Only what a browser shows: png, jpeg, gif. Anything else is left in the
 //   workbook.
+// - A PICTURE PLACED IN A CELL IS THE ROW'S PICTURE TOO (2026-10-06). Excel's
+//   "Place in Cell" is not an anchor and `getImages()` never sees it; the
+//   Butler Arms bedrooms bill carries 14 of them beside 3 floating ones.
+//   `bill-cell-pictures.ts` reads them off the workbook's own parts and they
+//   join the SAME per-row list, so every rule above holds for both kinds with
+//   no second set: the same bytes floating and in a cell is one picture, and
+//   a floating picture beside a DIFFERENT in-cell one is two, so none. A sheet
+//   whose in-cell parts cannot be read keeps its floating pictures and says
+//   so in a sentence.
 // ============================================================================
 import { createHash } from "node:crypto";
 import ExcelJS from "exceljs";
 import { put } from "@vercel/blob";
+import { readCellPictures } from "@/lib/bill-cell-pictures";
 import { billPicturePrefix, type BillRowImage, type BoqRowImages } from "@/lib/bill-row-image";
 
 /** A single picture larger than this is left in the workbook: it is a thumbnail's source, not a document. */
@@ -47,35 +57,72 @@ const CONTENT_TYPES: Record<string, string> = { png: "image/png", jpeg: "image/j
 
 export type BillPicture = { bytes: Buffer; extension: string; contentType: string; sha: string };
 
+/** One picture's bytes under the rules both kinds share, or null where the rules leave it in the workbook. */
+function pictureOf(raw: Uint8Array | undefined, rawExtension: string): BillPicture | null {
+  const extension = rawExtension.toLowerCase();
+  const contentType = CONTENT_TYPES[extension];
+  if (!contentType || !raw) return null;
+  const bytes = Buffer.from(raw);
+  if (bytes.length === 0 || bytes.length > MAX_BILL_PICTURE_BYTES) return null;
+  const sha = createHash("sha256").update(bytes).digest("hex").slice(0, 24);
+  return { bytes, extension: extension === "jpg" ? "jpeg" : extension, contentType, sha };
+}
+
+/** Put a picture on its row, once: the same bytes twice is one picture, whichever kind each was. */
+function hold(rows: Map<number, BillPicture[]>, row: number, picture: BillPicture): void {
+  const held = rows.get(row) ?? [];
+  if (!held.some((each) => each.sha === picture.sha)) held.push(picture);
+  rows.set(row, held);
+}
+
 /**
- * Every picture anchored on a row, by sheet name and 1-based row, distinct by
- * bytes. Pure apart from parsing the workbook: nothing is stored.
+ * Every picture on a row, by sheet name and 1-based row, distinct by bytes —
+ * FLOATING pictures (anchored over the sheet, read by `exceljs`) and pictures
+ * PLACED IN A CELL (`bill-cell-pictures.ts`) alike, into the one per-row list
+ * the rules below read. Pure apart from parsing the workbook: nothing is
+ * stored. Where a sheet's in-cell pictures could not be read, a sentence is
+ * pushed onto `notes` and that sheet keeps its floating pictures only; a
+ * workbook `exceljs` cannot open at all still throws, as it always has.
  */
-export async function readBillPictures(workbookBytes: Buffer): Promise<Map<string, Map<number, BillPicture[]>>> {
+export async function readBillPictures(
+  workbookBytes: Buffer,
+  notes: string[] = [],
+): Promise<Map<string, Map<number, BillPicture[]>>> {
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(workbookBytes as unknown as ArrayBuffer);
   const out = new Map<string, Map<number, BillPicture[]>>();
+  const rowsOf = (sheetName: string) => {
+    const rows = out.get(sheetName) ?? new Map<number, BillPicture[]>();
+    out.set(sheetName, rows);
+    return rows;
+  };
   for (const sheet of book.worksheets) {
-    const rows = new Map<number, BillPicture[]>();
     for (const anchor of sheet.getImages()) {
       const nativeRow = anchor.range?.tl?.nativeRow;
       if (typeof nativeRow !== "number" || !Number.isInteger(nativeRow) || nativeRow < 0) continue;
       const media = book.getImage(Number(anchor.imageId));
-      const extension = String(media?.extension ?? "").toLowerCase();
-      const contentType = CONTENT_TYPES[extension];
       // exceljs types its buffer as its own interface; at run time it is a Node Buffer.
-      const raw = media?.buffer as unknown as Uint8Array | undefined;
-      if (!contentType || !raw) continue;
-      const bytes = Buffer.from(raw);
-      if (bytes.length === 0 || bytes.length > MAX_BILL_PICTURE_BYTES) continue;
-      const sha = createHash("sha256").update(bytes).digest("hex").slice(0, 24);
-      const row = nativeRow + 1;
-      const held = rows.get(row) ?? [];
-      if (!held.some((picture) => picture.sha === sha)) held.push({ bytes, extension: extension === "jpg" ? "jpeg" : extension, contentType, sha });
-      rows.set(row, held);
+      const picture = pictureOf(media?.buffer as unknown as Uint8Array | undefined, String(media?.extension ?? ""));
+      if (picture) hold(rowsOf(sheet.name), nativeRow + 1, picture);
     }
-    if (rows.size > 0) out.set(sheet.name, rows);
   }
+
+  const inCell = await readCellPictures(workbookBytes);
+  if (inCell.workbookError) {
+    notes.push(`The pictures placed in cells in this workbook could not be read (${inCell.workbookError}), so no line shows one of those.`);
+  }
+  for (const [sheetName, found] of inCell.bySheet) {
+    if ("error" in found) {
+      notes.push(`The pictures placed in cells on "${sheetName}" could not be read (${found.error}), so no line shows one of those.`);
+      continue;
+    }
+    for (const cell of found.pictures) {
+      const picture = pictureOf(cell.bytes, cell.extension);
+      if (picture) hold(rowsOf(sheetName), cell.row, picture);
+    }
+  }
+
+  for (const [sheetName, rows] of out) if (rows.size === 0) out.delete(sheetName);
   return out;
 }
 
@@ -127,8 +174,9 @@ export async function stageBillRowImages(
   store: PictureStore = blobPictureStore,
 ): Promise<{ rowImages: BoqRowImages; rowImagesNote: string | null }> {
   let pictures: Map<string, Map<number, BillPicture[]>>;
+  const notes: string[] = [];
   try {
-    pictures = await readBillPictures(workbookBytes);
+    pictures = await readBillPictures(workbookBytes, notes);
   } catch (cause) {
     const why = cause instanceof Error ? cause.message : String(cause);
     return { rowImages: {}, rowImagesNote: `The pictures in this workbook could not be read (${why}), so no line shows one.` };
@@ -177,5 +225,5 @@ export async function stageBillRowImages(
     }
     rowImages[sheetName] = bySheet;
   }
-  return { rowImages, rowImagesNote: null };
+  return { rowImages, rowImagesNote: notes.length > 0 ? notes.join(" ") : null };
 }

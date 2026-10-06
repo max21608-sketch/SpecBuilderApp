@@ -7,7 +7,9 @@
 // The Aman pricing document carries an "Image" column with a picture anchored
 // on each item's row (measured 2026-10-04 on the real copy: 107 anchors on 100
 // of its 101 lines, 45 distinct pictures). `read-excel-file` cannot see them;
-// `exceljs` can, and that is all `bill-images.ts` uses it for.
+// `exceljs` can, and that is all `bill-images.ts` uses it for. A picture Excel
+// PLACES IN A CELL is invisible to both and is read off the workbook's own
+// parts (`bill-cell-pictures.ts`, 2026-10-06) into the same per-row shape.
 
 /** One row's picture, as stored at staging. */
 export type BillRowImage = {
