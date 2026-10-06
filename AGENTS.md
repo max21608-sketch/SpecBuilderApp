@@ -2691,9 +2691,11 @@ columns are plainly there was a dead end because of the words above them. Max:
   the nearer one ABOVE, flagged; otherwise only the model or a person places
   it. **The bracket alone placed 5 of 34** on the real bill (brackets such as
   `GR / MUR-FUR--04` name no item code); the model's reading placed all 34.
-  The confirm writes the description verbatim into the next free COM slot on
-  that record, files the code through `resolveFinishCode` (CONFLICT rule), and
-  refuses a REVISION that changes a fabric line rather than guessing.
+  The confirm writes the description verbatim into the next free slot OF ITS
+  KIND on that record (since 2026-10-06 — see the next section; it was "the
+  next free COM slot" for every line), files the code through
+  `resolveFinishCode` (CONFLICT rule), and refuses a REVISION that changes a
+  finish line rather than guessing.
 - **Measured on the real bill, local stack:** 101 lines, 67 items, 34 fabric
   lines, quantity total 1,241 — `boq:gap --golden` 100% on lines, codes,
   quantities and fabric parents; the structure read took 25 s; a layout saved
@@ -2709,6 +2711,65 @@ columns are plainly there was a dead end because of the words above them. Max:
 128K ceiling and two thirds of the model deadline — so a longer bill is read
 in ROW WINDOWS, which is not the excluded "splitting an oversize drawing set":
 a spreadsheet has rows, and a row window loses nothing a page split would.
+
+### Four new bills: what a specifier's own layout broke, and the rules that hold it
+
+`src/lib/boq-structure.ts` (`STRUCTURE_TOOL`), `src/lib/model-request.ts`,
+`src/lib/bill-finish-kind.ts`, `src/lib/confirm-boq.ts` (`writeFabricLine`),
+`src/lib/bill-description.ts` (Dims / Finish columns, `unitOverride`),
+`src/lib/gates.ts` (a slot's unit), `src/lib/bill-cell-pictures.ts`,
+`src/lib/document-classify.ts` (`PROMPT`), `src/lib/boq-import.ts`
+(`proposePhaseNames`), `db/migrations/0047_boq_dimensions_finish_roles.sql`,
+`docs/plans/README.md` 2026-10-06
+
+Matthew sent four bills on 2026-10-06 — Annabel's NY (MBDS), two Butler Arms
+RFQs (Creation Luxury) and Panther. The model's structure read scored 100%
+against hand-written goldens on all three new layouts. Everything that broke
+was AROUND it, and each is a trap:
+
+- **A nullable enum in a model schema is `anyOf`, never `type: [T, "null"]`
+  beside an `enum`.** Structured output (every Opus 5.5 read) refuses the
+  second with a 400, and for two days every bill in an unknown layout failed
+  its column read while every test was green. `tests/lib/model-request.test.ts`
+  now walks every tool for it. `extraction-schema.ts` had always said so.
+- **A bill's finish line is filed by KIND, and many never refuse the bill.**
+  `billFinishLineKind` reads the bill's own code (`F-FA` fabric, `F-MT` metal,
+  `F-WD` timber, `F-TR` trim — bills only; the drawings path still reads those
+  as nothing, so packs already staged do not move), then `classifyCallout`'s
+  words, never the item's name. Fabric → COM 1–3, timber → the three timber
+  finishes, metal → the two metal finishes; a trim, hardware, an unreadable
+  line, or a kind whose fields are full is WRITTEN with no BWS field — what
+  the document said is kept. The confirm and the review GET call one
+  decision (`decideBillFinishSlot`), so the arrow on the row is the write.
+- **A bill's own Dims and Finish COLUMNS are read by the description reader**
+  — the one that reads "Sizes (mm): …" inside a description — never a second
+  parser. The unit is printed in the cell, in the column's heading, or set by
+  a person on the review (`unitOverride`, per line or "set them all"), and
+  NEVER from the figures: the Butler public-areas sheet prints `W47.2 x D27.5`
+  (inches) one row above `W2000 x D1000` (mm), neither marked. A size with no
+  unit is placed in its slots UNCONVERTED and bracketed, and **a slot with no
+  unit does not satisfy a gate** (`gateStatus`). A finish cell is one
+  attribute, classified whole; two kinds in one cell is a note.
+- **What decides bill against FF&E schedule is PRICING, not the title.** Both
+  Butler RFQs call themselves "FF&E SCHEDULE … ITEM LIST / RFQ" and were filed
+  as schedules — a full charged read, no records. A quantity and a price per
+  line, or "RFQ", is a bill. Re-checked on the Aman bill, its OMS tracker,
+  Panther's preamble, a spec sheet and a shop drawing before it shipped.
+- **Max's decisions on these bills:** a "Prototype Quantity" column
+  (`mockupQty`) also puts its items on the Mock-up phase through
+  `addToMockupPhase`, with the bill's figure as the quantity (text → none,
+  with a note); `keep` is the ONE role several columns may share, each cell
+  into the new record's notes under its heading, and never a price; a sheet
+  with no codes says on the review and on its phase that a coded revision
+  must be paired by hand. NO seeded layout per specifier yet — a model read
+  and a person's tick, until a specifier sends two bills in one layout (and
+  Creation Luxury's fabric rows cannot be a code rule: a `CGF` MATTRESS line
+  is an item).
+- **A picture placed IN a cell is the row's picture** (`bill-cell-pictures.ts`,
+  every rich-value hop resolved through its relationship; malformed → none,
+  with a sentence, never a failed bill).
+- **A tab still called "Sheet1" proposes the file's name** as its phase name,
+  or two single-tab bills make two phases nobody can tell apart.
 
 ### A bill's own specification read resolves by ROW, and a long sheet is read in windows
 

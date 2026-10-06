@@ -21,6 +21,74 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-06 — Matthew's four bills: the structure read works again, finish lines by kind, Dims/Finish columns, prototype → mock-up
+
+Max handed over four bills from Matthew to train intake on (any-bill plan
+Step 8, per specifier): Annabel's NY (MBDS), Butler Arms bedrooms and Butler
+Arms public areas (Creation Luxury, both BW-priced RFQs), and Panther. Copies,
+goldens and the saved model readings live OUTSIDE the repo
+(`~/dev/localstack/bills-1006/`, `~/dev/localstack/boq-golden/bills-1006/`).
+Four Opus coders (`~/dev/briefs/bills-1006/`), integrated on `bills-int`.
+
+**The model's structure read scored 100% against the hand-written goldens on
+all three new layouts** (lines, codes, quantities, row kinds, every finish
+line under the right item) — once it could run at all. What was wrong:
+
+- **Every bill in an unknown layout failed its column read** since the Opus
+  5.5 switch (2026-10-04): the structure tool's `role` was an enum beside a
+  type list, which structured output refuses with a 400. Now `anyOf`, and
+  `tests/lib/model-request.test.ts` holds every tool to it. ON STAGING
+  (`25614d2`) the same morning.
+- **Panther's MUR tab reads "Q-ty"**: every mock-up quantity was blank. Seeded
+  synonym. On staging (`25614d2`); needs `db:seed`.
+- **An RFQ titled "FF&E schedule" was classified as an FF&E schedule**: both
+  Butler bills went to a full charged spec-document read and made no records.
+  The classifier now decides on PRICING (a quantity and a price per line, or
+  "RFQ") rather than the title; re-checked against the Aman bill, its OMS
+  tracker, Panther's preamble, a spec sheet and a shop drawing — unchanged.
+- **A finish line under an item was always a fabric, and a 4th refused the
+  bill** (`no_free_com`) — Annabel's could not be confirmed (9 of 11 items
+  carry 4–6). Filed by KIND now (`bill-finish-kind.ts`: the bill's own
+  `F-FA/F-MT/F-WD/F-TR` code, then `classifyCallout`'s words): fabric → COM
+  1–3, timber → the timber finishes, metal → the metal finishes; a trim, or a
+  kind whose fields are full, is kept with no BWS field. Never refuses.
+- **No role for a bill's own Dims and Finish columns** (both Butler bills):
+  `dimensions` and `finish`, read by `bill-description.ts` — the one reader —
+  so a size never borrows a unit. A size printing none is placed UNCONVERTED
+  and **a unitless slot no longer satisfies a gate**; the reviewer sets the
+  unit per line or "set them all" (the public-areas sheet mixes inch and mm
+  rows unmarked: set all to mm, then nine rows to inches).
+- **Max's decisions, built:** a "Prototype Quantity" column (`mockupQty`)
+  also puts its items on the Mock-up phase at confirm, with the bill's figure
+  as quantity ("PARTIAL" → none, with a note); any number of columns can be
+  "Kept in notes" (`keep` — the Butler public `PHASE`); a sheet with no codes
+  says on the review and the phase that a coded revision must be paired by
+  hand. Seeded layouts per specifier: NOT built (Max: model read + tick for
+  all, until a specifier sends two bills in one layout).
+- **Pictures placed IN a cell** (Excel "Place in cell") are read: Butler
+  bedrooms 2 → 16 rows with a picture.
+- A finish line's Kind reads Fabric / Timber / Metal / Trim, not "Fabric" for
+  all; a tab still called "Sheet1" proposes the file's name as its phase; the
+  Columns panel's spreadsheet preview carries the overflow exception.
+
+Migration **0047** re-lists the `boq_column_aliases` role CHECK
+(`dimensions`, `finish`, `mockupQty`, `keep`). The code does NOT need it to
+run; `db:seed` does (the seed inserts the new synonyms). Sandbox: `npm run
+db:migrate && npm run db:seed` — Max's step.
+
+Verified in the browser on the LOCAL stack, every bill uploaded with its kind
+undeclared, read, and confirmed: TEST projects T18193 (Annabel's — 11 records,
+qty 30, 54 finish lines in their fields, 5 on a Mock-up phase), T18194 (Butler
+Arms — 14 + 27 records, sizes in mm and converted inches, 16 pictures) and
+T18195 (Panther — MUR 7 lines with quantities). checks:local green. Not
+accepted by Max or Matthew.
+
+Recorded, not fixed: Butler bills have no codes, so a coded revision cannot
+pair (flagged in words, per Max); the model "keeps in notes" more columns than
+asked on the public-areas bill (attic stock, shipping, delivery — a person
+unticks them on the panel); "converted from ft-in" is the chip on plain
+inches too.
+
 ## 2026-10-05 (night) — BUILT on `tracker-int`: the tracker beside the bill, in red; feet and inches as printed with millimetres beside
 
 Max, reading the Aman pack: the OMS & FF&E Tracker's furniture pages disagree
