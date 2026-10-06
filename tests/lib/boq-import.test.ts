@@ -14,6 +14,8 @@ import {
   activeSheets,
   countLines,
   describeHeader,
+  isDefaultSheetName,
+  proposePhaseNames,
 } from "@/lib/boq-import";
 import type { BoqParseResult, ParsedBoqSheet } from "@/lib/boq-import";
 // Synthetic, built by `tests/fixtures/build-boq.ts`. Modelled on the shape of a
@@ -782,5 +784,25 @@ describe("normaliseRef", () => {
 
   it("keeps genuinely different references different", () => {
     expect(normaliseRef("SX11A")).not.toBe(normaliseRef("SX11B"));
+  });
+});
+
+
+describe("a sheet the spreadsheet named proposes the file's name as its phase", () => {
+  const sheet = (sheetName: string) => ({ sheetName, proposedRunName: sheetName });
+  it("knows a program's default tab names, and only those", () => {
+    for (const name of ["Sheet1", "Sheet 2", "Feuil1", "Tabelle3", "Hoja1"]) expect(isDefaultSheetName(name)).toBe(true);
+    for (const name of ["MUR", "MAIN RUN", "Sheet", "BOQ - Casegoods", "Sheet1 copy"]) expect(isDefaultSheetName(name)).toBe(false);
+  });
+  it("names a lone default tab after the file, and leaves a named tab alone", () => {
+    expect(proposePhaseNames([sheet("Sheet1")], "Example Hotel - Bedrooms - RFQ.xlsx")[0]?.proposedRunName).toBe(
+      "Example Hotel - Bedrooms - RFQ",
+    );
+    expect(proposePhaseNames([sheet("MAIN RUN")], "x.xlsx")[0]?.proposedRunName).toBe("MAIN RUN");
+  });
+  it("keeps several default tabs apart, and never overrides a name somebody changed", () => {
+    const named = proposePhaseNames([sheet("Sheet1"), sheet("Sheet2"), { sheetName: "Sheet3", proposedRunName: "Lobby" }], "Bill.xlsx");
+    expect(named.map((s) => s.proposedRunName)).toEqual(["Bill — Sheet1", "Bill — Sheet2", "Lobby"]);
+    expect(proposePhaseNames([sheet("Sheet1")], null)[0]?.proposedRunName).toBe("Sheet1");
   });
 });

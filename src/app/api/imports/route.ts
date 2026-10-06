@@ -78,7 +78,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind, outlookMsgAdvice, spreadsheetRefusal } from "@/lib/intake-source-types";
 import { scannedPdfRefusal } from "@/lib/document-classify";
-import { parseBoqSheets, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
+import { parseBoqSheets, proposePhaseNames, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
 import { loadBoqReadingRegisters, loadLineSuggester, stageSheet } from "@/lib/boq-stage";
 import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
@@ -517,7 +517,10 @@ async function parseBoqInto(
     // time, and STORE them — see src/lib/boq-stage.ts for why, and for why the
     // re-read from the stored source runs the same function.
     const suggest = await loadLineSuggester(sql);
-    const stagedSheets = parsed.sheets.map((sheet) => stageSheet(sheet, suggest));
+    const stagedSheets = proposePhaseNames(
+      parsed.sheets.map((sheet) => stageSheet(sheet, suggest)),
+      filename,
+    );
     const lineCount = stagedSheets.reduce((total, sheet) => total + (sheet.ignored ? 0 : sheet.lines.length), 0);
     const skippedRows = parsed.sheets.reduce((total, sheet) => total + sheet.skippedRows, 0);
     const needsColumns = stagedSheets.filter((sheet) => sheet.needsColumns && !sheet.ignored).length;

@@ -921,6 +921,37 @@ function readMetadata(data: SheetData, headerIndex: number): BoqSheetMetadata {
  * `registers` defaults to the reference aliases and no layouts, which is what
  * the pure tests parse with; the routes always pass what the database holds.
  */
+/**
+ * A SHEET NAMED BY THE SPREADSHEET, NOT BY A PERSON, PROPOSES THE FILE'S NAME.
+ *
+ * A tab is a phase and its name is the phase's name. "MUR" and "MAIN RUN" say
+ * which sub-quote they are; "Sheet1" says nothing, and two single-tab bills
+ * of one project became two phases both called "Sheet1" (Butler Arms,
+ * 2026-10-06). So a sheet still carrying a spreadsheet program's default name
+ * proposes the file's name instead — with the sheet's own name beside it where
+ * the workbook has several such tabs. Only the PROPOSAL: the reviewer edits it
+ * on the review, and the sheet itself is still read by its own name.
+ */
+const DEFAULT_SHEET_NAME = /^(sheet|feuil|tabelle|hoja|foglio|blad|planilha|arkusz|munkalap)\s*\d+$/i;
+
+export function isDefaultSheetName(name: string): boolean {
+  return DEFAULT_SHEET_NAME.test(name.trim());
+}
+
+export function proposePhaseNames<T extends { sheetName: string; proposedRunName: string }>(
+  sheets: readonly T[],
+  filename: string | null | undefined,
+): T[] {
+  const base = (filename ?? "").replace(/\.[a-z0-9]{2,5}$/i, "").replace(/\s+/g, " ").trim();
+  if (!base) return [...sheets];
+  const defaults = sheets.filter((sheet) => isDefaultSheetName(sheet.sheetName)).length;
+  return sheets.map((sheet) =>
+    isDefaultSheetName(sheet.sheetName) && sheet.proposedRunName === sheet.sheetName
+      ? { ...sheet, proposedRunName: defaults > 1 ? `${base} — ${sheet.sheetName}` : base }
+      : sheet,
+  );
+}
+
 export function parseBoqSheets(
   sheets: { sheet: string; data: SheetData }[],
   registers: Partial<BoqReadingRegisters> = {},

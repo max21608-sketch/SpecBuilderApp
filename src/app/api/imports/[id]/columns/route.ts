@@ -48,6 +48,7 @@ import { loadBoqRun, readBoqSource, writeStagedBoq, type BoqRunRow } from "@/lib
 import {
   assertBoqDocument,
   parseBoqSheets,
+  proposePhaseNames,
   readSheetWithColumns,
   sheetWidth,
   BOQ_SCHEMA_VERSION,
@@ -221,7 +222,10 @@ async function readAgain(run: BoqRunRow, expectedVersion: number, actor: string)
       });
     }
     const suggest = await loadLineSuggester(txn);
-    const sheets = parsed.sheets.map((sheet) => stageSheet(sheet, suggest));
+    const sheets = proposePhaseNames(
+      parsed.sheets.map((sheet) => stageSheet(sheet, suggest)),
+      run.filename,
+    );
     // The pictures stored at registration are keyed by sheet and ROW, and a
     // re-read moves no row, so they carry over rather than being read again.
     const previous = (run.parsed ?? null) as Partial<BoqDocument> | null;
