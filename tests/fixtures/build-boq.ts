@@ -344,6 +344,44 @@ export async function finishLinesBillWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/**
+ * A BILL WITH A PROTOTYPE QUANTITY AND TWO COLUMNS TO KEEP (2026-10-06) —
+ * invented, in the shape of a specifier's bill that quotes a rollout and a
+ * prototype quantity side by side and phases its items itself. "Rollout
+ * Quantity" is no synonym, so the test says which column is the quantity, as
+ * a person would on the Columns panel; "Prototype Quantity" is.
+ *
+ *   3  ZZ-PR-01  Armchair     rollout 40, prototype 1        PHASE 2, Zone note
+ *   4  FAB-01 (ZZ-PR-01)      its fabric — prototype 1, never a mock-up item
+ *   5  ZZ-PR-02  Side table   rollout 20, prototype PARTIAL  PHASE 3
+ *   6  ZZ-PR-03  Bed          rollout 12, prototype N/A
+ *   7  ZZ-PR-04  Desk         rollout 12, prototype blank    PHASE 5, Zone note
+ */
+export async function prototypeBillWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  addSheet(book, "Bill", [
+    ["Example Hotel — FF&E", null, null, null, null, null],
+    ["Code", "Description", "Rollout Quantity", "Prototype Quantity", "PHASE", "Zone note"],
+    ["ZZ-PR-01", "Armchair", 40, 1, 2, "near the window"],
+    ["FAB-01 (ZZ-PR-01)", "EXAMPLE MILL | BOUCLE | IVORY", null, 1, null, null],
+    ["ZZ-PR-02", "Side table", 20, "PARTIAL", 3, null],
+    ["ZZ-PR-03", "Bed", 12, "N/A", null, null],
+    ["ZZ-PR-04", "Desk", 12, null, 5, "by the door"],
+  ]);
+  return bytes(book);
+}
+
+/** A BILL WITH NO CODES AT ALL — invented: a description, a quantity and the client's own phasing. */
+export async function codelessBillWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  addSheet(book, "Public areas", [
+    ["Description", "Qty", "PHASE"],
+    ["Example lounge chair", 6, 2],
+    ["Example coffee table", 2, 3],
+  ]);
+  return bytes(book);
+}
+
 /** Every workbook this module can build, by the filename the CLI gives it. */
 export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-two-row-header.xlsx": twoRowHeaderWorkbook,
@@ -354,6 +392,8 @@ export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-with-pictures.xlsx": picturedBillWorkbook,
   "bill-fabric-swatches.xlsx": fabricSwatchBillWorkbook,
   "bill-finish-lines.xlsx": finishLinesBillWorkbook,
+  "bill-prototype-quantity.xlsx": prototypeBillWorkbook,
+  "bill-codeless.xlsx": codelessBillWorkbook,
 };
 
 async function main(): Promise<void> {

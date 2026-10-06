@@ -205,7 +205,7 @@ export default function BoqRowKindCell({
 
       {kind === "finish_for" && line.finishFor && !choosingParent && (
         <span className="mt-1 block text-[10.5px] text-neutral-600">
-          written as the next free COM on row {line.finishFor.row}
+          written as a spec on row {line.finishFor.row}
         </span>
       )}
       {chip && line.rowKind && (
@@ -252,8 +252,8 @@ export function RowKindReasoning({ line }: { line: KindCellLine }) {
       )}
       {line.rowKind === "finish_for" && line.finishFor && (
         <span className="block">
-          Not a record — its description is written as the next free COM spec on row {line.finishFor.row}
-          {line.finishFor.code ? ` (${line.finishFor.code})` : ""}.
+          Not a record — its description is written as a spec on row {line.finishFor.row}
+          {line.finishFor.code ? ` (${line.finishFor.code})` : ""}, in the next free field of its kind.
         </span>
       )}
     </span>

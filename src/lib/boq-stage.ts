@@ -29,7 +29,7 @@ import type {
   StagedBoqLine,
   StagedBoqSheet,
 } from "@/lib/boq-import";
-import { SEED_ACTOR, isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
+import { BOQ_KEEP_ROLE, SEED_ACTOR, isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
 import { parseRowRules } from "@/lib/boq-row-kinds";
 
 /**
@@ -74,6 +74,12 @@ export async function loadBoqReadingRegisters(exec: TxnSql): Promise<BoqReadingR
     for (const [role, heading] of Object.entries((row.mapping ?? {}) as Record<string, unknown>)) {
       if (isBoqReadRole(role) && typeof heading === "string" && heading.trim() !== "") mapping[role] = heading;
     }
+    // THE COLUMNS KEPT IN NOTES, a LIST under `keep` — the one role several
+    // columns share. Anything in it that is not a heading is dropped.
+    const keepRaw = (row.mapping as Record<string, unknown> | null)?.[BOQ_KEEP_ROLE];
+    const keep = Array.isArray(keepRaw)
+      ? keepRaw.filter((heading): heading is string => typeof heading === "string" && heading.trim() !== "")
+      : [];
     // A row that decodes to nothing would apply to every sheet; 0040's CHECK
     // refuses an empty object, and this refuses one that is empty after the
     // unknown roles are dropped.
@@ -84,6 +90,7 @@ export async function loadBoqReadingRegisters(exec: TxnSql): Promise<BoqReadingR
         name: String(row.name),
         headerRows: Number(row.header_rows) === 2 ? (2 as const) : (1 as const),
         mapping,
+        ...(keep.length > 0 ? { keep } : {}),
         origin: row.created_by === SEED_ACTOR ? ("seed" as const) : ("person" as const),
         // What the bill's own words license on this layout's rows (0042).
         // Null on every layout a person saved: the route never writes it.
@@ -223,6 +230,7 @@ export function stageStructureReading(
     proposedRunName: current.proposedRunName,
     replacesRunId: current.replacesRunId ?? null,
     mappingEvidence: reading.evidence,
+    ...(Object.keys(reading.keptEvidence).length > 0 ? { keptEvidence: reading.keptEvidence } : {}),
     columnsChecked: false,
     structure,
   };

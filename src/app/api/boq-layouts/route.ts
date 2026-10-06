@@ -12,7 +12,8 @@
 // the client sends: the sheet's `columns` are what the reader actually read the
 // bill with, so the layout cannot claim a mapping that never produced a line.
 // Each role is stored as the FOLDED heading of its column, and the match is
-// exact on every one of them. A column whose heading is blank cannot be found
+// exact on every one of them. The columns KEPT IN NOTES — the one role several
+// columns share — are a list under `mapping.keep`, held to the same exact match. A column whose heading is blank cannot be found
 // on the next bill, so a layout that needs one is refused in words rather than
 // saved as a layout that will silently never apply.
 //
@@ -119,6 +120,38 @@ export async function POST(request: Request): Promise<Response> {
     byHeading.set(heading, role);
     mapping[role] = heading;
   }
+  // THE COLUMNS KEPT IN NOTES, as a list under `keep` — the one role several
+  // columns share. Held to the same rules: a heading the next bill can find,
+  // and never one another role is read from.
+  const keep: string[] = [];
+  for (const ref of sheet.kept ?? []) {
+    const heading = foldHeading(ref.heading ?? "");
+    if (heading === "") {
+      return json(
+        {
+          ok: false,
+          error:
+            `Column ${columnLetter(ref.index)} (kept in notes) has no heading, so a saved layout could not find it on ` +
+            "the next bill. Remember the columns from a header row that names it.",
+        },
+        400,
+      );
+    }
+    const clash = byHeading.get(heading);
+    if (clash || keep.includes(heading)) {
+      return json(
+        {
+          ok: false,
+          error:
+            `Two columns headed “${ref.heading}” are read (${clash ? BOQ_ROLE_LABELS[clash].toLowerCase() : "kept in notes"} and ` +
+            "kept in notes), so a layout could not tell them apart on the next bill.",
+        },
+        400,
+      );
+    }
+    keep.push(heading);
+  }
+
   if (Object.keys(mapping).length === 0) {
     return json({ ok: false, error: "This sheet's mapping reads no column, so there is nothing to remember." }, 400);
   }
@@ -129,7 +162,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const inserted = await sql`
       insert into boq_layouts (name, headings, mapping, header_rows, created_by)
-      values (${name}, ${headings}::text[], ${JSON.stringify(mapping)}::jsonb, ${headerRows}, ${user.email})
+      values (${name}, ${headings}::text[], ${JSON.stringify(keep.length > 0 ? { ...mapping, keep } : mapping)}::jsonb, ${headerRows}, ${user.email})
       returning id, name
     `;
     return json({ ok: true, layout: { id: String(inserted[0]?.id), name: String(inserted[0]?.name) } }, 201);

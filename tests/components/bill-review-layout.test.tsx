@@ -131,7 +131,7 @@ describe("the bill review's groups", () => {
     const swatch = within(fabric).getByRole("img", { name: "The swatch on row 10 of the bill" });
     expect(swatch.getAttribute("src")).toBe(`/api/imports/${IMPORT}/row-image?sheet=0&row=10`);
     expect(swatch.getAttribute("width")).toBe("36");
-    expect(within(fabric).getByText("ZZ-FAB-13 → next free COM")).toBeInTheDocument();
+    expect(within(fabric).getByText("ZZ-FAB-13 → a spec on its item")).toBeInTheDocument();
     expect(within(fabric).queryByText("not given")).toBeNull();
     expect(within(fabric).queryByText(/Example Suites/)).toBeNull();
     expect(within(fabric).queryByText(/Not a record/)).toBeNull();

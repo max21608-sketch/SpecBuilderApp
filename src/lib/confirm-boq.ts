@@ -69,6 +69,9 @@ import {
 } from "@/lib/bill-description";
 import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
 import { effectiveRowImage, type BillRowImage } from "@/lib/bill-row-image";
+import { composeBillNotes, type BoqKeptCell } from "@/lib/boq-roles";
+import { readMockupQty } from "@/lib/bill-sheet-notices";
+import { addToMockupPhase, MOCKUP_PHASE_NAME } from "@/lib/mockup-phase";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 
 type StagedLine = {
@@ -85,6 +88,10 @@ type StagedLine = {
   /** Present only where the bill has the column (v4). See `BoqLine`. */
   subArea?: string | null;
   notes?: string | null;
+  /** The bill's mock-up figure as printed, where the sheet has the column (`readMockupQty`). */
+  mockupQtyRaw?: string | null;
+  /** The cells of the columns kept in notes, where the sheet keeps any (`composeBillNotes`). */
+  kept?: BoqKeptCell[];
   categoryId: string | null;
   /**
    * The level, and whether a person chose it.
@@ -126,7 +133,11 @@ export type ConfirmBoqResult = {
   projectId: string;
   runIds: string[];
   changeSetId: string;
-  /** Fabric lines written as a COM spec on their item, rather than as records. */
+  /**
+   * Finish lines — fabric, leather, timber, metal, trim, hardware — written as
+   * a spec on their item rather than as records (`writeFabricLine`). The name
+   * predates the kinds; the count is every finish line.
+   */
   fabricSpecs: number;
   /** Specifications read out of the lines' description cells and written as attributes. */
   descriptionSpecs: number;
@@ -143,6 +154,26 @@ export type ConfirmBoqResult = {
   fabricSwatches: number;
   /** Codes whose fabric lines carry different pictures, named — none of them took a swatch. */
   swatchNotices: string[];
+  /**
+   * WHAT THE BILL'S PROTOTYPE QUANTITY DID: the items also put on the mock-up
+   * phase, those already there, and — on a revision — those left there though
+   * the bill no longer gives them a mock-up figure. Null where no line of the
+   * bill put an item on the mock-up phase and none was left.
+   */
+  mockup: ConfirmMockupResult | null;
+};
+
+export type ConfirmMockupResult = {
+  runId: string | null;
+  phaseCreated: boolean;
+  added: number;
+  already: number;
+  /** Lines `addToMockupPhase` did not add and said why (retired there, a configuration). */
+  skipped: number;
+  /** Mock-up records a revision's bill no longer gives a figure for, LEFT live — never retired here. */
+  left: number;
+  /** The whole result in words. */
+  message: string;
 };
 
 export async function confirmBoqImport(
@@ -343,6 +374,22 @@ export async function confirmBoqImport(
    * so it runs once, after every sheet has filed (`planFinishSwatches`).
    */
   const swatchGroups = new Map<string, SwatchCandidate[]>();
+  /**
+   * THE ITEMS THE BILL'S PROTOTYPE QUANTITY PUTS ON THE MOCK-UP PHASE, by the
+   * record each line became or continues, with what the bill said
+   * (`readMockupQty`). Added after every sheet, in this transaction, under this
+   * change set (`addToMockupPhase` with `within`).
+   */
+  const mockupQuantities = new Map<string, { qty: number | null; internalNote: string | null }>();
+  /** Carried records whose line now says "not in the mock-up", for the `left` count. */
+  const mockupDropped: string[] = [];
+  /** An ITEM line's mock-up cell, read. Only where the sheet has the column. */
+  const noteMockup = (recordId: string, line: StagedLine) => {
+    if (line.mockupQtyRaw === undefined) return;
+    const reading = readMockupQty(line.mockupQtyRaw);
+    if (reading.on) mockupQuantities.set(recordId, { qty: reading.qty, internalNote: reading.note });
+    else if (line.replaces) mockupDropped.push(recordId);
+  };
 
   for (const sheet of sheets as StagedBoqSheet[]) {
     const live = (sheet.lines as StagedLine[]).filter((line) => !line.ignored);
@@ -478,6 +525,7 @@ export async function confirmBoqImport(
         carriedForward.add(target.recordId);
         recordIds.push(target.recordId);
         recordByRow.set(line.lineNo, { recordId: target.recordId, carried: true });
+        noteMockup(target.recordId, line);
         billPictures += await giveBillPicture(txn, {
           recordId: target.recordId,
           projectId,
@@ -542,13 +590,14 @@ export async function confirmBoqImport(
            ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${line.designer},
            ${effectiveArea(line)}, ${line.boqCategory ?? null},
            ${decided.level}, ${decided.suggested}, ${decided.reason},
-           ${line.notes ?? null}, ${runId}, ${line.lineNo}, ${actor}, ${actor})
+           ${composeBillNotes(line.notes, line.kept)}, ${runId}, ${line.lineNo}, ${actor}, ${actor})
         returning id
       `;
       const recordId = String(inserted[0]?.id ?? "");
       if (!recordId) throw new Error(`line ${line.lineNo} was not inserted`);
       recordIds.push(recordId);
       recordByRow.set(line.lineNo, { recordId, carried: false });
+      noteMockup(recordId, line);
       billPictures += await giveBillPicture(txn, {
         recordId,
         projectId,
@@ -650,6 +699,14 @@ export async function confirmBoqImport(
     actor,
   });
 
+  const mockup = await putOnMockupPhase(txn, {
+    projectId,
+    quantities: mockupQuantities,
+    dropped: mockupDropped,
+    changeSetId,
+    actor,
+  });
+
   // 5. Predicated on 'parsed' still holding. Zero rows here is a guard result,
   //    not a driver failure, and it must abort the whole import.
   const closed = await txn`
@@ -687,6 +744,72 @@ export async function confirmBoqImport(
     inHouseFinishes,
     fabricSwatches,
     swatchNotices,
+    mockup,
+  };
+}
+
+/**
+ * THE BILL'S PROTOTYPE QUANTITY, ACTED ON: every item line that said it is in
+ * the mock-up is ALSO put on the project's mock-up phase, through
+ * `addToMockupPhase` — the one implementation of "add to mock-up", so the
+ * identity copied, the refs, the checklist and the idempotence are the
+ * selection bar's exactly. `within` makes it this confirm's change and skips
+ * the project lock this confirm already holds.
+ *
+ * A REVISION: a line whose record is already on the mock-up phase is reported
+ * as already there, never duplicated, and its mock-up record is not touched.
+ * A line that USED to be on the mock-up and now says it is not is LEFT there:
+ * retiring a record takes a reason and a person, and the result says how many
+ * were left so somebody can.
+ */
+async function putOnMockupPhase(
+  txn: TxnSql,
+  input: {
+    projectId: string;
+    quantities: ReadonlyMap<string, { qty: number | null; internalNote: string | null }>;
+    dropped: readonly string[];
+    changeSetId: string;
+    actor: string;
+  },
+): Promise<ConfirmMockupResult | null> {
+  const { projectId, quantities, dropped, changeSetId, actor } = input;
+  let left = 0;
+  if (dropped.length > 0) {
+    const held = await txn`
+      select count(*)::int as n from spec_records m
+        join spec_runs run on run.id = m.run_id
+       where m.mockup_of = any(${[...dropped]}::uuid[])
+         and m.status = 'active' and run.is_mockup and run.status = 'active'
+    `;
+    left = Number(held[0]?.n ?? 0);
+  }
+  if (quantities.size === 0 && left === 0) return null;
+
+  const leftSentence =
+    left > 0
+      ? ` ${left} item${left === 1 ? " stays" : "s stay"} on the ${MOCKUP_PHASE_NAME} phase though the bill no longer ` +
+        `gives ${left === 1 ? "it" : "them"} a prototype quantity — retire ${left === 1 ? "it" : "them"} there if ` +
+        `${left === 1 ? "it" : "they"} should go.`
+      : "";
+  if (quantities.size === 0) {
+    return { runId: null, phaseCreated: false, added: 0, already: 0, skipped: 0, left, message: leftSentence.trim() };
+  }
+
+  const result = await addToMockupPhase(txn, {
+    projectId,
+    recordIds: [...quantities.keys()],
+    actor,
+    within: { changeSetId },
+    quantities,
+  });
+  return {
+    runId: result.runId,
+    phaseCreated: result.phaseCreated,
+    added: result.added.length,
+    already: result.already.length,
+    skipped: result.skipped.length,
+    left,
+    message: `${result.message}${leftSentence}`,
   };
 }
 

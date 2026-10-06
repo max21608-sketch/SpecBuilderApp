@@ -191,7 +191,7 @@ describe("the Confirm label", () => {
   it("counts records AND fabric specs, never a fabric line as a record", () => {
     expect(boqConfirmCounts([sheet, { ignored: true, lines: [line(1, "X")] }])).toEqual({ records: 2, fabricSpecs: 2, phases: 1 });
     expect(boqConfirmLabel({ counts: boqConfirmCounts([sheet]), revising: false, unmapped: 0, busy: false })).toBe(
-      "Confirm · creates 2 records and 2 fabric specs on 1 phase",
+      "Confirm · creates 2 records and 2 fabric and finish specs on 1 phase",
     );
   });
 
@@ -209,7 +209,7 @@ describe("the Confirm label", () => {
 
   it("says a revision updates, and what it is doing while it does", () => {
     expect(boqConfirmLabel({ counts: { records: 1, fabricSpecs: 1, phases: 1 }, revising: true, unmapped: 0, busy: false })).toBe(
-      "Confirm · updates this phase from 1 line and 1 fabric spec",
+      "Confirm · updates this phase from 1 line and 1 fabric or finish spec",
     );
     expect(boqConfirmLabel({ counts: { records: 1, fabricSpecs: 0, phases: 1 }, revising: false, unmapped: 0, busy: true })).toBe(
       "Importing…",
