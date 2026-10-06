@@ -31,7 +31,7 @@ import path from "node:path";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { parseBoqSheets, type BoqAlias, type BoqLayout, type ParsedBoqSheet } from "@/lib/boq-import";
 import { isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
-import { planSheetDescriptions, type BillDescriptionPlan } from "@/lib/bill-description";
+import { planSheetDescriptions, sheetColumnHeadings, type BillDescriptionPlan } from "@/lib/bill-description";
 import type { SpecFieldEntry } from "@/lib/drawing-document";
 
 function usage(): never {
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
     const applied = await applyKinds(sheet, option("--kinds"));
     if (applied > 0) report.push(`  ${applied} fabric line(s) placed from the golden's kinds, as a reviewer would`);
     const staged = sheet.lines.map((line, index) => ({ ...line, index, ignored: false }));
-    const plans = planSheetDescriptions(staged, fields);
+    const plans = planSheetDescriptions(staged, fields, sheetColumnHeadings(sheet));
     const items = staged.filter((line) => line.rowKind !== "finish_for");
 
     const counts = { items: items.length, read: 0, withDimensions: 0, slots: 0, finishes: 0, placed: 0, noField: 0, notes: 0, tbcNotes: 0, cautioned: 0 };
