@@ -63,7 +63,7 @@ describe("the tool", () => {
   it("offers the CLOSED role list and the row kinds, and nothing else", () => {
     const props = STRUCTURE_TOOL.input_schema.properties;
     expect(STRUCTURE_TOOL.name).toBe(STRUCTURE_TOOL_NAME);
-    expect(props.columns.items.properties.role.enum).toEqual([...BOQ_ROLES, null]);
+    expect(props.columns.items.properties.role.anyOf).toEqual([{ type: "string", enum: [...BOQ_ROLES] }, { type: "null" }]);
     expect(props.rows.items.properties.kind.enum).toEqual([...BOQ_ROW_KINDS]);
     expect(STRUCTURE_TOOL.input_schema.required).toEqual(["notABill", "notABillEvidence", "headerRow", "headerRows", "columns", "rows"]);
     expect(STRUCTURE_TOOL.input_schema.additionalProperties).toBe(false);

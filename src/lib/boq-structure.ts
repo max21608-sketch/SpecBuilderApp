@@ -207,9 +207,13 @@ export const STRUCTURE_TOOL = {
           additionalProperties: false,
           properties: {
             column: { type: "string", description: "The column letter, as shown before each cell (A, B, … AA)." },
+            // A nullable ENUM is `anyOf`, never `type: ["string", "null"]` beside
+            // an `enum`: structured outputs refuses that shape with a 400, so
+            // every bill in an unknown layout failed its read from the switch to
+            // Opus 5.5 (2026-10-04) until 2026-10-06. extraction-schema.ts has
+            // the same rule; tests/lib/model-request.test.ts holds every tool to it.
             role: {
-              type: ["string", "null"],
-              enum: [...BOQ_ROLES, null],
+              anyOf: [{ type: "string", enum: [...BOQ_ROLES] }, { type: "null" }],
               description:
                 "What the column is, from this list, or null when none fits. Each role at most once per sheet.\n" +
                 BOQ_ROLES.map((role) => `- ${role}: ${ROLE_HELP[role]}`).join("\n"),

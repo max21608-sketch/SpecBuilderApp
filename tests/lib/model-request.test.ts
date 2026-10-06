@@ -105,6 +105,10 @@ describe("toOutputSchema over every tool that is sent to the extraction model", 
       for (const keyword of UNSUPPORTED_SCHEMA_KEYWORDS) if (keyword in node) problems.push(`${path}.${keyword}`);
       const isObject = node.type === "object" || "properties" in node;
       if (isObject && node.additionalProperties !== false) problems.push(`${path} allows extra keys`);
+      // The API refuses an enum beside a type LIST with a 400 ("Enum value
+      // 'code' does not match declared type"): the bill structure read failed
+      // on every unknown layout for two days on exactly this. Nullable enum = anyOf.
+      if ("enum" in node && Array.isArray(node.type)) problems.push(`${path} is an enum with a type list; use anyOf`);
     });
     expect(problems).toEqual([]);
     // The tool itself is untouched: the Opus 5 path still sends it whole.
