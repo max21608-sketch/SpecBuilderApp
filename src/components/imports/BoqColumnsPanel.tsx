@@ -408,8 +408,10 @@ export default function BoqColumnsPanel({
       {/* THE GRID. Its own bounded scroll box in both directions, so the
           column row can stick to the top of it: this wrapper is MEANT to be
           the scroll container, which is the opposite of the chase table's
-          trap, where a wrapper became one by accident. */}
-      <div className="mx-4 mt-3 max-h-[440px] overflow-auto rounded border border-neutral-200">
+          trap, where a wrapper became one by accident. A sheet wider than
+          the screen scrolls sideways HERE by design — it is the spreadsheet,
+          previewed — so it carries overflow.ts's one exception. */}
+      <div data-overflow-ok className="mx-4 mt-3 max-h-[440px] overflow-auto rounded border border-neutral-200">
         <Table>
           <thead>
             <tr>

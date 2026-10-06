@@ -5,9 +5,9 @@
 // ============================================================================
 // ONE SMALL SELECT, AND A SECOND ONE ONLY FOR A FABRIC LINE.
 //
-// Item / Fabric for… / Section heading / Subtotal / Blank. A fabric line is not
+// Item / Finish for… / Section heading / Subtotal / Blank. A fabric line is not
 // a record: the confirm writes it as the next free COM spec on its item, so
-// "Fabric for…" opens a second select offering the item lines ABOVE it,
+// "Finish for…" opens a second select offering the item lines ABOVE it,
 // nearest first (`fabricParentOptions`) — the layout that asked for this puts a
 // fabric directly under its item, and a select listing all three hundred lines
 // is one nobody can use. Nothing is written until an item is chosen.
@@ -45,6 +45,7 @@ import {
   type BoqRowKind,
   type RowKindFields,
 } from "@/lib/boq-row-kinds";
+import { billFinishLineKind } from "@/lib/bill-finish-kind";
 
 export type KindCellLine = RowKindFields & {
   index: number;
@@ -53,6 +54,16 @@ export type KindCellLine = RowKindFields & {
   itemDescription: string;
   ignored: boolean;
 };
+
+/** "Fabric", "Timber", "Metal", "Trim", "Hardware" — or "Finish" where the line does not say. */
+function finishLineLabel(line: KindCellLine): string {
+  const kind = billFinishLineKind({
+    code: line.code,
+    itemDescription: line.itemDescription,
+    finishFor: line.finishFor ? { code: line.finishFor.code ?? null } : null,
+  }).kind;
+  return kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : "Finish";
+}
 
 const SOURCE_CHIP: Record<string, { label: string; tone: "plain" | "guess" | "info" }> = {
   bill: { label: "the bill's bracket", tone: "plain" },
@@ -83,7 +94,7 @@ export default function BoqRowKindCell({
   onSet: (kind: BoqRowKind, finishForRow: number | null) => void;
 }) {
   const kind: BoqRowKind = line.rowKind ?? "item";
-  // "Fabric for…" chosen and no item yet: held here, nothing written.
+  // "Finish for…" chosen and no item yet: held here, nothing written.
   const [choosingParent, setChoosingParent] = useState(false);
   // Opened by a press; which select the press was for gets the focus.
   const [opened, setOpened] = useState<null | "kind" | "parent">(null);
@@ -108,7 +119,10 @@ export default function BoqRowKindCell({
   const chip = line.rowKindSource ? SOURCE_CHIP[line.rowKindSource] : null;
 
   if (!open) {
-    const label = kind === "finish_for" ? "Fabric" : BOQ_ROW_KIND_LABELS[kind];
+    // A finish line says WHAT it is — the one reading the confirm slots it by
+    // (`billFinishLineKind`) — or a timber line reads "Fabric" beside its own
+    // "→ Main timber finish" (Matthew's MBDS bill, 2026-10-06).
+    const label = kind === "finish_for" ? finishLineLabel(line) : BOQ_ROW_KIND_LABELS[kind];
     return (
       <div>
         {editable ? (

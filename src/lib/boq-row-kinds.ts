@@ -54,7 +54,7 @@ export function isBoqRowKind(value: unknown): value is BoqRowKind {
 
 export const BOQ_ROW_KIND_LABELS: Record<BoqRowKind, string> = {
   item: "Item",
-  finish_for: "Fabric for…",
+  finish_for: "Finish for…",
   section: "Section heading",
   subtotal: "Subtotal",
   blank: "Blank",
