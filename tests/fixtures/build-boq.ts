@@ -42,6 +42,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import type { SheetData } from "read-excel-file/node";
 import { bill300, pricingDoc, programmeDatesSheet, tenderSummarySheet, twoRowHeader } from "./boq-shapes";
 
@@ -344,6 +345,121 @@ export async function finishLinesBillWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/**
+ * A BILL WITH PICTURES PLACED IN ITS CELLS (2026-10-06) — Excel's "Place in
+ * Cell", which is not an anchor: the cell holds the picture and reads
+ * `#VALUE!`. The Butler Arms bedrooms bill's shape, invented: one sheet, a
+ * title row, the header on row 2, the pictures in the Image column (E):
+ *
+ *   row 3  ZZ-FUR-10 Stool        in-cell stool
+ *   row 4  ZZ-FUR-11 Ottoman      nothing
+ *   row 5  ZZ-FUR-26 Drawers      in-cell stool again — the SAME rich value
+ *   row 6  ZZ-FUR-12 Pouffe       nothing
+ *   row 7  ZZ-FUR-04 Armchair     a FLOATING alternative
+ *   row 8  ZZ-FUR-13 Bench        nothing
+ *   row 9  ZZ-FUR-05 Side table   in-cell drawers AND a floating alternative — two, so none
+ *
+ * Written by hand on top of what `exceljs` writes, because nothing in this
+ * repo can write an in-cell picture. EVERY INDIRECTION IS DELIBERATELY NOT
+ * THE IDENTITY, so a reader that assumes one reads the wrong picture or none:
+ * the cell's `vm` is 1-based; the picture's metadata type is the SECOND one
+ * declared (a decoy first); the future-metadata blocks point at the rich
+ * values crossed over; the structure puts `CalcOrigin` BEFORE the image key,
+ * so the picture is the value's second `<v>`; and the relationship list is in
+ * the opposite order from the pictures.
+ *
+ * `brokenMetadata` writes a `metadata.xml` that is not well formed — the
+ * lines must stage, the floating picture must stand, and the in-cell ones
+ * must be reported unread rather than guessed.
+ */
+export async function inCellPictureBillWorkbook({ brokenMetadata = false }: { brokenMetadata?: boolean } = {}): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  const sheet = addSheet(book, "Bill", [
+    ["Example bedroom schedule", null, null, null, null],
+    ["Area", "FF&E code", "Item description", "TOTAL Q-ty", "Image"],
+    ["Example Bedroom", "ZZ-FUR-10", "Stool", 2, null],
+    ["Example Bedroom", "ZZ-FUR-11", "Ottoman", 1, null],
+    ["Example Bedroom", "ZZ-FUR-26", "Drawers", 1, null],
+    ["Example Bedroom", "ZZ-FUR-12", "Pouffe", 2, null],
+    ["Example Suite", "ZZ-FUR-04", "Armchair", 4, null],
+    ["Example Suite", "ZZ-FUR-13", "Bench", 1, null],
+    ["Example Suite", "ZZ-FUR-05", "Side table", 2, null],
+  ]);
+  // What every older reader sees in a cell holding a picture.
+  for (const row of [3, 5, 9]) sheet.getCell(`E${row}`).value = { error: "#VALUE!" } as ExcelJS.CellErrorValue;
+  const alternative = book.addImage({ buffer: BILL_PICTURES.alternative as unknown as ExcelJS.Buffer, extension: "png" });
+  for (const row of [7, 9]) sheet.addImage(alternative, { tl: { col: 4.1, row: row - 1 + 0.1 }, ext: { width: 40, height: 40 } });
+
+  const zip = await JSZip.loadAsync(await bytes(book));
+  const workbookRels = (await zip.file("xl/_rels/workbook.xml.rels")?.async("string")) ?? "";
+  // exceljs writes its first sheet here; the READER finds it through the
+  // workbook's relationships, which is what the test is about.
+  const sheetPath = "xl/worksheets/sheet1.xml";
+  let sheetXml = (await zip.file(sheetPath)?.async("string")) ?? "";
+  // rows 3 and 5 share vm 1 (the stool); row 9 is vm 2 (the drawers).
+  for (const [cell, vm] of [["E3", 1], ["E5", 1], ["E9", 2]] as const) {
+    if (!sheetXml.includes(`<c r="${cell}"`)) throw new Error(`exceljs wrote no ${cell}`);
+    sheetXml = sheetXml.replace(`<c r="${cell}"`, `<c r="${cell}" vm="${vm}"`);
+  }
+  zip.file(sheetPath, sheetXml);
+
+  const RD = "http://schemas.microsoft.com/office/spreadsheetml/2017/richdata";
+  zip.file("xl/media/cellpicture-drawers.png", BILL_PICTURES.drawers);
+  zip.file("xl/media/cellpicture-stool.png", BILL_PICTURES.stool);
+  zip.file(
+    "xl/metadata.xml",
+    brokenMetadata
+      ? `<?xml version="1.0" encoding="UTF-8"?><metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><metadataTypes><metadataType name="XLRICHVALUE"/></metadataTypes><valueMetadata><bk><rc t="1" v="0"/></valueMetadata>`
+      : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:xlrd="${RD}">
+<metadataTypes count="2"><metadataType name="XLDAPR" minSupportedVersion="120000"/><metadataType name="XLRICHVALUE" minSupportedVersion="120000"/></metadataTypes>
+<futureMetadata name="XLDAPR" count="1"><bk><extLst><ext uri="{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}"/></extLst></bk></futureMetadata>
+<futureMetadata name="XLRICHVALUE" count="2">
+<bk><extLst><ext uri="{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}"><xlrd:rvb i="1"/></ext></extLst></bk>
+<bk><extLst><ext uri="{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}"><xlrd:rvb i="0"/></ext></extLst></bk>
+</futureMetadata>
+<valueMetadata count="2"><bk><rc t="2" v="1"/></bk><bk><rc t="2" v="0"/></bk></valueMetadata>
+</metadata>`,
+  );
+  // rv 0 is the stool (relationship 1), rv 1 the drawers (relationship 0).
+  zip.file(
+    "xl/richData/rdrichvalue.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><rvData xmlns="${RD}" count="2"><rv s="0"><v>5</v><v>1</v></rv><rv s="0"><v>5</v><v>0</v></rv></rvData>`,
+  );
+  zip.file(
+    "xl/richData/rdrichvaluestructure.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><rvStructures xmlns="${RD}" count="1"><s t="_localImage"><k n="CalcOrigin" t="i"/><k n="_rvRel:LocalImageIdentifier" t="i"/></s></rvStructures>`,
+  );
+  zip.file(
+    "xl/richData/richValueRel.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><rel r:id="rIdPic2"/><rel r:id="rIdPic1"/></richValueRels>`,
+  );
+  zip.file(
+    "xl/richData/_rels/richValueRel.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdPic1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/cellpicture-stool.png"/><Relationship Id="rIdPic2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/cellpicture-drawers.png"/></Relationships>`,
+  );
+  const extraRels = [
+    ["rIdMeta", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata", "metadata.xml"],
+    ["rIdRv", "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue", "richData/rdrichvalue.xml"],
+    ["rIdRvs", "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure", "richData/rdrichvaluestructure.xml"],
+    ["rIdRvRel", "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel", "richData/richValueRel.xml"],
+  ]
+    .map(([id, type, target]) => `<Relationship Id="${id}" Type="${type}" Target="${target}"/>`)
+    .join("");
+  zip.file("xl/_rels/workbook.xml.rels", workbookRels.replace("</Relationships>", `${extraRels}</Relationships>`));
+  const types = (await zip.file("[Content_Types].xml")?.async("string")) ?? "";
+  const overrides = [
+    ["/xl/metadata.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"],
+    ["/xl/richData/rdrichvalue.xml", "application/vnd.ms-excel.rdrichvalue+xml"],
+    ["/xl/richData/rdrichvaluestructure.xml", "application/vnd.ms-excel.rdrichvaluestructure+xml"],
+    ["/xl/richData/richValueRel.xml", "application/vnd.ms-excel.richvaluerel+xml"],
+  ]
+    .map(([part, type]) => `<Override PartName="${part}" ContentType="${type}"/>`)
+    .join("");
+  zip.file("[Content_Types].xml", types.replace("</Types>", `${overrides}</Types>`));
+  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
 /** Every workbook this module can build, by the filename the CLI gives it. */
 export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-two-row-header.xlsx": twoRowHeaderWorkbook,
@@ -354,6 +470,7 @@ export const WORKBOOKS: Record<string, () => Promise<Buffer>> = {
   "bill-with-pictures.xlsx": picturedBillWorkbook,
   "bill-fabric-swatches.xlsx": fabricSwatchBillWorkbook,
   "bill-finish-lines.xlsx": finishLinesBillWorkbook,
+  "bill-in-cell-pictures.xlsx": inCellPictureBillWorkbook,
 };
 
 async function main(): Promise<void> {

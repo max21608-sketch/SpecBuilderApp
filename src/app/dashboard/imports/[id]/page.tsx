@@ -1464,7 +1464,15 @@ export default function ReviewImportPage() {
         )}
 
         {run.parsed?.rowImagesNote && run.status === "parsed" && (
-          <Note tone="warn" title="No pictures from this workbook.">
+          <Note
+            tone="warn"
+            title={
+              // A sheet whose in-cell pictures could not be read keeps its floating ones.
+              Object.keys(run.parsed.rowImages ?? {}).length > 0
+                ? "Some pictures in this workbook were not read."
+                : "No pictures from this workbook."
+            }
+          >
             {run.parsed.rowImagesNote} The bill itself is read as normal.
           </Note>
         )}
