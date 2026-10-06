@@ -73,8 +73,10 @@ line under the right item) — once it could run at all. What was wrong:
 
 Migration **0047** re-lists the `boq_column_aliases` role CHECK
 (`dimensions`, `finish`, `mockupQty`, `keep`). The code does NOT need it to
-run; `db:seed` does (the seed inserts the new synonyms). Sandbox: `npm run
-db:migrate && npm run db:seed` — Max's step.
+run; `db:seed` does (the seed inserts the new synonyms). **Applied to the
+sandbox by Max the same day** (from the `bills-int` worktree with the main
+checkout's `.env.local` — the main checkout is ~220 commits stale and its own
+`db:migrate` applied nothing). Pilot untouched.
 
 Verified in the browser on the LOCAL stack, every bill uploaded with its kind
 undeclared, read, and confirmed: TEST projects T18193 (Annabel's — 11 records,
