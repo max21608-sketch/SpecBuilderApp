@@ -230,6 +230,15 @@ describe("a tracker listing finish codes", () => {
     expect(CLASSIFY_PROMPT).toMatch(/by its content, not its filename/);
   });
 
+  it("settles bill against FF&E schedule on PRICING, not the title", () => {
+    // Two real RFQs titled "FF&E SCHEDULE … ITEM LIST / RFQ", one priced line
+    // per item, were read as FF&E schedules — a full charged read and no
+    // records — until 2026-10-06.
+    expect(CLASSIFY_PROMPT).toMatch(/What settles it is PRICING, not the title/);
+    expect(CLASSIFY_PROMPT).toMatch(/request for quotation\s+\(RFQ\)/);
+    expect(CLASSIFY_PROMPT).toMatch(/whatever its title says, "FF&E schedule"/);
+  });
+
   it("still fills nothing in when the model is unsure", () => {
     const filed = fileDocument({ genre: "finishes_schedule", certain: false }, "pdf");
     expect(filed.decision).toBeNull();

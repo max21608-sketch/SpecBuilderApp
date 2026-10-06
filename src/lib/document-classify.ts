@@ -108,7 +108,7 @@ export const CLASSIFY_TOOL = {
         enum: DOCUMENT_GENRES,
         description:
           "What somebody in furniture manufacturing would call this document.\n" +
-          "- bill_of_quantities: a schedule of LINE ITEMS a client wants priced or made — a code, a description and a quantity per row, often per area or per floor.\n" +
+          "- bill_of_quantities: a schedule of LINE ITEMS a client wants priced or made — a code (sometimes not yet given), a description and a quantity per row, often per area or per floor, usually with price columns. An RFQ or priced item list is one, whatever its title.\n" +
           "- shop_drawings: dimensioned drawings of items to manufacture, with elevations, plans or sections.\n" +
           "- specification_sheets: one sheet per item, each giving that item's size, materials and finishes, usually with a photograph.\n" +
           "- ffe_schedule: a schedule of furniture, fixtures and equipment by room or area, naming products rather than dimensioning them.\n" +
@@ -322,6 +322,12 @@ Two of these are easy to confuse and the cost is not symmetric. A BILL OF QUANTI
 be priced or made, one row each, with quantities — and this app builds a project's records from it. An
 FF&E SCHEDULE lists what goes in each room, naming products. If a spreadsheet could be either, answer
 unclear: a person settles it in seconds and a wrong bill is a project's worth of wrong records.
+
+What settles it is PRICING, not the title. A spreadsheet with a quantity on each line AND a column for
+its price (unit cost, price per unit, total price) — or one that calls itself a request for quotation
+(RFQ), tender or pricing document — is a BILL OF QUANTITIES whatever its title says, "FF&E schedule",
+"item list" and "budget" included: asking for a price per counted line is what a bill is for, and the
+price cells may already be filled in by the supplier.
 
 A document that lists finish codes with the material each one is — timbers, metals, stones, fabrics —
 is a FINISHES SCHEDULE whatever it is called — a tracker, a register, a log — and even where it also lists some furniture. Judge
