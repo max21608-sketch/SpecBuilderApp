@@ -48,22 +48,54 @@
 // - NOTHING IS LOST. Every line after the name becomes an attribute, and a
 //   line the readers cannot place is a note carrying its label and value
 //   exactly as printed. The cell as printed stays on the staged line.
+// - A SIZE WITH NO UNIT IS PLACED, UNCONVERTED, ONLY WHERE NOTHING ELSE IS.
+//   The first metric line, else the first inch line, else the first line
+//   stating no unit at all (2026-10-06). Its slots carry no unit and
+//   `composeDimensionCell` brackets each one, "no unit" — a truthful cell, and
+//   the checklist answer it composes goes in as TBC (`promote-answers.ts`).
+//   The unit is never read from a figure's size, a project default or the row
+//   next door: `W47.2 x D27.5 x H16.5` beside `W2000 x D1000 x H700` is inches
+//   beside millimetres, and a magnitude vote would make one of them wrong.
+//
+// ============================================================================
+// A BILL'S OWN DIMS AND FINISH COLUMNS (2026-10-06)
+//
+// The Butler Arms bills print each item's size and finish in COLUMNS of their
+// own beside a one-line description ("BED - WAVERTON KING" | "W1200 x D500 x
+// H750 mm" | "SMOKED OILED OAK"). Each cell is read HERE, as one more
+// statement of the line, after the description's own: a size in a column and
+// a size in a description go through the same `placedSizeOf`, compose through
+// the same `composeDimensionCell`, show on the same panel and are written by
+// the same confirm. There is no second size parser.
+//
+// - THE DIMS CELL is a size line labelled with its column's heading. The unit
+//   is the cell's own (`mm`, `cm`, `"`, `in`) or the heading's bracket
+//   (`Dims (mm)`), else none. Slots are the cell's prefixes, as on a
+//   description's size line; `AH640`, two bare figures, `Which size?` get no
+//   slot and are kept as printed.
+// - THE FINISH CELL is kept WHOLE, as one attribute, and read as a whole by
+//   `classifyCallout`'s words: one kind of fabric, timber or metal takes that
+//   kind's first free field (COM, timber, metal); several kinds, or none, is a
+//   note labelled with the heading. It is never split on " / " — "SUEDE /
+//   NUBUCK" is one leather — and it files nothing in the finishes library:
+//   a column of words is not the client's code.
 //
 // PURE. No database; the BWS field register is passed in.
 // ============================================================================
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import { readDimension, sizeLabel, sizeLineRefusal, type DimensionReading } from "@/lib/spec-dimensions";
-import { leadingFinishCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
-import { suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
+import { kindCode, leadingFinishCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
+import { calloutKindsNamed, classifyCallout, suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
 import {
   DIMENSION_SLOT_LABELS,
   TBC_TOKENS,
+  containsPhrase,
   isDimensionSlot,
   type AttributeGroup,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
-import { WELDED_LABELS } from "@/lib/spec-reading-vocab";
+import { COM_ONLY_VALUES, WELDED_LABELS } from "@/lib/spec-reading-vocab";
 
 // ---- the shape of the cell ---------------------------------------------------
 
@@ -80,8 +112,79 @@ export type BillStatement = {
   /** What follows the label, trimmed; the whole line where there is no label. */
   value: string;
   /** Where the label came from, when it was not this line's own. */
-  labelFrom: "heading" | "above" | null;
+  labelFrom: "heading" | "above" | "column" | null;
+  /**
+   * A bill COLUMN of its own this statement is, rather than a line of the
+   * description cell: its `label` is the column's heading. Absent on every
+   * description statement.
+   */
+  column?: BillColumnRole;
 };
+
+/** The two columns a bill line's specifications can arrive in beside its description. */
+export type BillColumnRole = "dimensions" | "finish";
+
+/** The headings those columns were printed under, from the staged sheet's `columns`. */
+export type BillColumnHeadings = Partial<Record<BillColumnRole, string | null>>;
+
+/** A line's own column cells, as staged (`BoqLine.dimensionsRaw` / `finishRaw`). */
+export type BillColumnCells = { dimensionsRaw?: string | null; finishRaw?: string | null };
+
+const COLUMN_FALLBACK_LABEL: Record<BillColumnRole, string> = { dimensions: "Dimensions", finish: "Finish" };
+
+/**
+ * A line's Dims and Finish cells as statements, in that order — the column's
+ * heading as the label, the cell's whitespace folded as the value (a BWS cell
+ * carries no line break), the cell as printed as the line. A blank cell, or a
+ * sheet with no such column, is no statement.
+ */
+export function columnStatements(cells: BillColumnCells, headings: BillColumnHeadings = {}): BillStatement[] {
+  const out: BillStatement[] = [];
+  const add = (column: BillColumnRole, raw: string | null | undefined) => {
+    if (typeof raw !== "string") return;
+    const line = raw.replace(/\r\n?/g, "\n").trim();
+    const value = line.replace(/\s+/g, " ");
+    if (value === "") return;
+    const heading = headings[column]?.trim() || COLUMN_FALLBACK_LABEL[column];
+    out.push({ line, label: heading, value, labelFrom: "column", column });
+  };
+  add("dimensions", cells.dimensionsRaw);
+  add("finish", cells.finishRaw);
+  return out;
+}
+
+/**
+ * Every statement a bill line makes — its description cell's, then its own
+ * Dims and Finish cells' — or null where it makes none. The one list the plan
+ * and the route that accepts a slot change both read, so the parts a reviewer
+ * is offered are the parts the confirm writes.
+ */
+export function lineStatements(
+  line: BillColumnCells & { itemDescriptionRaw?: string | null },
+  headings: BillColumnHeadings = {},
+): BillStatement[] | null {
+  const statements = [...(readBillDescription(line.itemDescriptionRaw)?.statements ?? []), ...columnStatements(line, headings)];
+  return statements.length > 0 ? statements : null;
+}
+
+/**
+ * THE LABEL A STATEMENT IS READ AS A SIZE WITH, or null where it is not a size
+ * line. A description line is one where its own label is an overall-size label
+ * (`sizeLabel`). A Dims COLUMN always is: its heading where that is itself a
+ * size label ("Dims", "DIMENSIONS", "Dims (mm)"), otherwise "Dimensions" with
+ * the heading's bracket carried over — so a heading's printed unit is read and
+ * nothing else about it is guessed at.
+ */
+export function sizeReadLabel(statement: BillStatement): string | null {
+  if (statement.column === "finish") return null;
+  if (statement.column === "dimensions") {
+    const heading = statement.label ?? "";
+    if (sizeLabel(heading)) return heading;
+    const bracket = /\(([^)]*)\)/.exec(heading)?.[1]?.trim();
+    return bracket ? `Dimensions (${bracket})` : "Dimensions";
+  }
+  return statement.label && sizeLabel(statement.label) ? statement.label : null;
+}
 
 export type BillDescriptionReading = { name: string; statements: BillStatement[] };
 
@@ -233,25 +336,40 @@ export function slotPartKey(part: { slot: DimensionSlot; figure: string | null }
 }
 
 /** The size line the plan places: its statement and its reading, or null. */
-export type PlacedSize = { index: number; statement: BillStatement; reading: DimensionReading; metric: boolean };
+export type PlacedSize = {
+  index: number;
+  statement: BillStatement;
+  reading: DimensionReading;
+  metric: boolean;
+  /** The line states no unit at all, in its figures or its label: placed unconverted. */
+  unitless?: boolean;
+};
 
 /**
  * WHICH SIZE LINE IS PLACED — the one rule, shared by the plan and by the
  * route that accepts a slot change, so the parts a reviewer is offered are
  * the parts the confirm writes. The first metric line, else the first inch
- * line; every other size line is a note.
+ * line, else the first line stating no unit; every other size line is a note.
  */
 export function placedSizeOf(statements: readonly BillStatement[]): PlacedSize | null {
   const sizes: PlacedSize[] = [];
   statements.forEach((statement, index) => {
-    if (!statement.label || !sizeLabel(statement.label)) return;
-    const dimension = readDimension(statement.label, statement.value);
+    const readLabel = sizeReadLabel(statement);
+    if (!readLabel) return;
+    const dimension = readDimension(readLabel, statement.value);
     if (!dimension || dimension.parts.length === 0) return;
     const metric = !dimension.imperial && (dimension.unit === "mm" || dimension.unit === "cm");
     const inches = dimension.unit === "in";
+    const unitless = dimension.unit === null && !dimension.imperial;
     if (metric || inches) sizes.push({ index, statement, reading: dimension, metric });
+    else if (unitless) sizes.push({ index, statement, reading: dimension, metric: false, unitless: true });
   });
-  return sizes.find((candidate) => candidate.metric) ?? sizes.find((candidate) => !candidate.metric) ?? null;
+  return (
+    sizes.find((candidate) => candidate.metric) ??
+    sizes.find((candidate) => !candidate.metric && !candidate.unitless) ??
+    sizes.find((candidate) => candidate.unitless) ??
+    null
+  );
 }
 
 export type ResolvedSlotOverrides = {
@@ -314,7 +432,14 @@ export function resolveSlotOverrides(
 
 export type BillDescriptionPlan = {
   name: string;
+  /** The description's statements, then the line's own Dims and Finish cells' (`column` set on those). */
   statements: BillStatement[];
+  /**
+   * The line's own Dims and Finish cells as printed, with their headings — for
+   * the panel's "As printed", beside the description cell. Empty where the
+   * sheet has no such column or the cells are blank.
+   */
+  columnCells: { column: BillColumnRole; heading: string; value: string }[];
   attributes: PlannedAttribute[];
   /** `composeDimensionCell` over the planned slots — the one composer. Empty where no slot is planned. */
   dimensionCell: string;
@@ -386,11 +511,15 @@ function innerLabel(value: string): { label: string; value: string } | null {
 }
 
 /**
- * The plan for ONE description cell, or null where it is a single line.
+ * The plan for ONE bill line's description cell and its own Dims and Finish
+ * cells, or null where the description is a single line and there are no such
+ * cells — every bill without either reads exactly as it always did.
  *
  * `hasFabricLine`: the bill has a fabric line under this item (a `finish_for`
  * row naming it), which will be written as its COM. `fields` is the BWS
- * register the finish slots are resolved against.
+ * register the finish slots are resolved against. `columns` is the line's own
+ * Dims / Finish cells with their headings, and `name` the record's name where
+ * the description is one line (it is then its own name).
  */
 export function planBillDescription(
   raw: string | null | undefined,
@@ -398,16 +527,22 @@ export function planBillDescription(
     fields,
     hasFabricLine,
     slotOverrides,
+    columns,
+    name: singleLineName,
   }: {
     fields: SpecFieldEntry[];
     hasFabricLine: boolean;
     /** A reviewer's slot changes, by part key (`StagedBoqLine.slotOverrides`). */
     slotOverrides?: Readonly<Record<string, unknown>> | null;
+    columns?: (BillColumnCells & { headings?: BillColumnHeadings }) | null;
+    name?: string | null;
   },
 ): BillDescriptionPlan | null {
   const reading = readBillDescription(raw);
-  if (!reading) return null;
-  const { statements } = reading;
+  const fromColumns = columns ? columnStatements(columns, columns.headings ?? {}) : [];
+  if (!reading && fromColumns.length === 0) return null;
+  const statements = [...(reading?.statements ?? []), ...fromColumns];
+  const name = reading?.name ?? singleLineName?.trim() ?? (typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "");
   const cautions: string[] = [];
   let depthWithoutWidth: string | null = null;
 
@@ -424,9 +559,10 @@ export function planBillDescription(
 
   statements.forEach((statement, index) => {
     const label = statement.label;
+    const readLabel = sizeReadLabel(statement);
 
     // ---- a size line ------------------------------------------------------
-    if (label && sizeLabel(label)) {
+    if (label && readLabel) {
       if (isTbcValue(statement.value)) {
         cautions.push("The bill gives the size as TBC: no slot is filled.");
         attributes.push(note(statement, "The size is to be confirmed: kept as a TBC note, filling no slot.", "tbc"));
@@ -434,7 +570,11 @@ export function planBillDescription(
       }
       if (placed && placed.index === index) {
         const unit = placed.reading.unit;
-        const converted = placed.metric ? null : "Converted from inches, exactly: the bill gives no metric size.";
+        const converted = placed.unitless
+          ? "No unit is printed on this size or its label, so it is kept as printed and not converted — correct the unit on the record's Specs tab."
+          : placed.metric
+            ? null
+            : "Converted from inches, exactly: the bill gives no metric size.";
         for (const part of placed.reading.parts) {
           const key = slotPartKey(part);
           const slot = resolved.effective.get(key) ?? part.slot;
@@ -502,12 +642,21 @@ export function planBillDescription(
         }
         return;
       }
-      const refusal = sizeLineRefusal(label, statement.value);
-      const why = placed
-        ? `Not placed: “${placed.statement.label}” is the size line placed, and this states the same size again.`
-        : (refusal ?? "Not read as a size: no stated unit this app converts.");
+      const refusal = sizeLineRefusal(readLabel, statement.value);
+      const reads = (readDimension(readLabel, statement.value)?.parts.length ?? 0) > 0;
+      const why =
+        placed && reads
+          ? `Not placed: “${placed.statement.label}” is the size line placed, and this states the same size again.`
+          : (refusal ??
+            "Not read as a size: no W, D, H, SH or diameter this app can place, or two statements of it that disagree — kept as printed.");
       if (!placed) cautions.push(`“${statement.line}”: ${refusal ?? "a size this app could not place."}`);
       attributes.push(note(statement, why));
+      return;
+    }
+
+    // ---- a bill's own Finish column ----------------------------------------
+    if (statement.column === "finish") {
+      attributes.push(planColumnFinish(statement, { fields, taken, hasFabricLine }));
       return;
     }
 
@@ -588,8 +737,13 @@ export function planBillDescription(
   const shown = rows.length > 0 ? composeDimensionCell(rows, null, { mode: "screen" }) : null;
 
   return {
-    name: reading.name,
+    name,
     statements,
+    columnCells: fromColumns.map((statement) => ({
+      column: statement.column as BillColumnRole,
+      heading: statement.label ?? "",
+      value: statement.line,
+    })),
     attributes,
     dimensionCell: cell.text,
     dimensionCellShown: shown?.text ?? "",
@@ -599,12 +753,94 @@ export function planBillDescription(
   };
 }
 
+/** The value says, somewhere in it, that it is not decided: "TBC", "TBC - velvet". */
+function mentionsTbc(value: string): boolean {
+  const norm = normaliseName(value);
+  return norm !== "" && (TBC_TOKENS.includes(norm) || TBC_TOKENS.some((token) => containsPhrase(norm, token)));
+}
+
+const KIND_WORDS: Record<"fabric" | "timber" | "metal", string> = { fabric: "fabric", timber: "timber", metal: "metal" };
+
+/**
+ * A BILL'S OWN FINISH CELL, kept whole as ONE attribute and read as a whole.
+ *
+ * `classifyCallout`'s words are the reading (with the cell's own leading
+ * code, where it has one, as its evidence — the page speaking). One kind of
+ * fabric, timber or metal takes that kind's first free field, through
+ * `suggestSpecField`, the drawings path's own slot rule. Several kinds — "OAK
+ * / BRUSHED BRASS" — or none — "Ral colour" — is a note under the column's
+ * heading: which half goes where is a person's call, and a whole cell filed
+ * under one kind would put the other's words in a field that is not theirs.
+ * Hardware is a part, not a material, so "BRASS HARDWARE" is the brass.
+ *
+ * Never split on " / ": "SUEDE / NUBUCK" is one leather. Never filed in the
+ * finishes library: the library is keyed by the client's code, and a column of
+ * words carries none.
+ */
+function planColumnFinish(
+  statement: BillStatement,
+  { fields, taken, hasFabricLine }: { fields: SpecFieldEntry[]; taken: Set<string>; hasFabricLine: boolean },
+): PlannedAttribute {
+  const value = statement.value;
+  if (isTbcValue(value)) return note(statement, "The finish is to be confirmed: kept as a TBC note, filling no field.", "tbc");
+  if (COM_ONLY_VALUES.includes(value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim())) {
+    return note(statement, "COM is customer's own material: the client supplies the fabric, and this names none. It fills no COM slot.");
+  }
+  const code = leadingFinishCode(value);
+  const kinds = calloutKindsNamed(value).filter((kind): kind is "fabric" | "timber" | "metal" => kind !== "hardware");
+  if (kinds.length > 1) {
+    return note(
+      statement,
+      `Names more than one kind of finish (${kinds.map((kind) => KIND_WORDS[kind]).join(" and ")}), so it is kept whole as a note and fills no BWS field — which part goes where is a person's call.`,
+    );
+  }
+  // One kind by its words, or — where the words name none — by the cell's own
+  // leading code, read exactly as a drawing's callout code is.
+  const callout = classifyCallout({ labelRaw: null, valueRaw: value, materialCodeRaw: code ? kindCode(code) : null });
+  const kind = kinds[0] ?? (callout.kind === "hardware" ? null : callout.kind);
+  if (!kind) {
+    return note(statement, "Names no fabric, timber or metal this app recognises, so it is kept as a note and fills no BWS field.");
+  }
+  if (kind === "fabric" && hasFabricLine) {
+    return note(
+      statement,
+      "This item has its own fabric line, which is written as its COM: this names the same cloth, so it is kept as a note and claims no COM slot.",
+    );
+  }
+  const group: AttributeGroup = kind === "fabric" ? "material" : "finish";
+  const specFieldId = suggestSpecField(
+    { attrGroup: group, labelRaw: null, valueRaw: value, materialCodeRaw: code ? kindCode(code) : null },
+    fields,
+    taken,
+  );
+  if (specFieldId) taken.add(specFieldId);
+  return {
+    attrGroup: group,
+    label: statement.label ?? COLUMN_FALLBACK_LABEL.finish,
+    value,
+    unit: null,
+    slot: null,
+    materialCode: null,
+    finishWords: null,
+    specFieldId,
+    specFieldName: fields.find((field) => field.id === specFieldId)?.name ?? null,
+    state: mentionsTbc(value) ? "tbc" : "confirmed",
+    line: statement.line,
+    why: specFieldId
+      ? `Read as a ${KIND_WORDS[kind]} from the bill's ${statement.label ?? "Finish"} column, kept whole.`
+      : "Every BWS field of this kind is already taken on this item, so it is kept against the item in none.",
+  };
+}
+
 // ---- over a sheet ------------------------------------------------------------
 
 type PlanLine = {
   index: number;
   lineNo: number;
+  itemDescription?: string;
   itemDescriptionRaw?: string | null;
+  dimensionsRaw?: string | null;
+  finishRaw?: string | null;
   ignored?: boolean;
   rowKind?: string;
   finishFor?: { row: number } | null;
@@ -620,6 +856,8 @@ type PlanLine = {
 export function planSheetDescriptions(
   lines: readonly PlanLine[],
   fields: SpecFieldEntry[],
+  /** The sheet's Dims / Finish headings (`sheetColumnHeadings`), for a heading's printed unit. */
+  headings: BillColumnHeadings = {},
 ): Map<number, BillDescriptionPlan> {
   const withFabric = new Set(
     lines
@@ -633,6 +871,8 @@ export function planSheetDescriptions(
       fields,
       hasFabricLine: withFabric.has(line.lineNo),
       slotOverrides: line.slotOverrides ?? null,
+      columns: { dimensionsRaw: line.dimensionsRaw, finishRaw: line.finishRaw, headings },
+      name: line.itemDescription ?? null,
     });
     if (plan) plans.set(line.index, plan);
   }
@@ -644,14 +884,35 @@ export function billItemName(line: { itemDescription: string; itemDescriptionRaw
   return readBillDescription(line.itemDescriptionRaw)?.name ?? line.itemDescription;
 }
 
-/** Whether any live item line of these sheets has its description read at confirm. */
+/**
+ * The Dims and Finish headings of a staged sheet, from its `columns` — the
+ * one place a heading's printed unit (`Dims (mm)`) is kept. Empty for a sheet
+ * staged before the roles existed, or with neither column.
+ */
+export function sheetColumnHeadings(sheet: {
+  columns?: Partial<Record<string, { heading?: string | null } | undefined>> | null;
+}): BillColumnHeadings {
+  const headings: BillColumnHeadings = {};
+  const dims = sheet.columns?.dimensions?.heading;
+  const finish = sheet.columns?.finish?.heading;
+  if (typeof dims === "string") headings.dimensions = dims;
+  if (typeof finish === "string") headings.finish = finish;
+  return headings;
+}
+
+/** Whether any live item line of these sheets has its description, or its own Dims / Finish cell, read at confirm. */
 export function billReadsDescriptions(
   sheets: readonly { ignored?: boolean; lines: readonly PlanLine[] }[],
 ): boolean {
   return sheets.some(
     (sheet) =>
       !sheet.ignored &&
-      sheet.lines.some((line) => !line.ignored && line.rowKind !== "finish_for" && readBillDescription(line.itemDescriptionRaw) !== null),
+      sheet.lines.some(
+        (line) =>
+          !line.ignored &&
+          line.rowKind !== "finish_for" &&
+          (readBillDescription(line.itemDescriptionRaw) !== null || columnStatements(line).length > 0),
+      ),
   );
 }
 

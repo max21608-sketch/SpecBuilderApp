@@ -52,7 +52,8 @@ import {
   isSlotOverride,
   placedSizeOf,
   planSheetDescriptions,
-  readBillDescription,
+  lineStatements,
+  sheetColumnHeadings,
   resolveSlotOverrides,
   revisionDescriptionRefusal,
   slotPartKey,
@@ -1126,7 +1127,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (parsed) {
     const fields = await loadDescriptionFields(sql);
     for (const [sheetIndex, sheet] of parsed.sheets.entries()) {
-      const plans = planSheetDescriptions(sheet.lines, fields);
+      const plans = planSheetDescriptions(sheet.lines, fields, sheetColumnHeadings(sheet));
       if (plans.size === 0) continue;
       const carried = sheet.lines.flatMap((line) =>
         line.replaces && plans.has(line.index) ? [line.replaces.recordId] : [],
@@ -1784,7 +1785,8 @@ async function patchSlotOverride(
       const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
       if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
       if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
-      const line = assertBoqDocument(rows[0].parsed).sheets[sheetIndex]?.lines[index];
+      const sheet = assertBoqDocument(rows[0].parsed).sheets[sheetIndex];
+      const line = sheet?.lines[index];
       if (!line) throw new DomainConflictError("gone", "That line is no longer in this import.");
       const current = line.slotOverridesVersion ?? 0;
       if (current !== expectedVersion) {
@@ -1793,8 +1795,10 @@ async function patchSlotOverride(
           `The size on row ${line.lineNo} was changed in another tab. Reload and check it before changing it again.`,
         );
       }
-      const reading = line.rowKind === "finish_for" ? null : readBillDescription(line.itemDescriptionRaw);
-      const placed = reading ? placedSizeOf(reading.statements) : null;
+      // The description's statements AND the line's own Dims cell — the list
+      // the plan places from, so a part offered on the screen is a part here.
+      const statements = line.rowKind === "finish_for" ? null : lineStatements(line, sheetColumnHeadings(sheet!));
+      const placed = statements ? placedSizeOf(statements) : null;
       if (!placed || !placed.reading.parts.some((part) => slotPartKey(part) === key)) {
         throw new DomainConflictError(
           "slot_part_gone",

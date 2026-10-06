@@ -58,6 +58,7 @@ import { recomposeAnswers } from "@/lib/attribute-retire";
 import {
   billItemName,
   planSheetDescriptions,
+  sheetColumnHeadings,
   revisionDescriptionRefusal,
   type BillDescriptionPlan,
 } from "@/lib/bill-description";
@@ -343,7 +344,7 @@ export async function confirmBoqImport(
     if (lines.length === 0) continue;
     /** The record each item line became or continues, by its row on the sheet. */
     const recordByRow = new Map<number, { recordId: string; carried: boolean }>();
-    const plans = planSheetDescriptions(sheet.lines as StagedLine[], descriptionFields);
+    const plans = planSheetDescriptions(sheet.lines as StagedLine[], descriptionFields, sheetColumnHeadings(sheet));
     // What each record this revision carries already holds, read under the
     // lock, so the refusal is decided against what is there now.
     const held = await loadHeldAttributes(

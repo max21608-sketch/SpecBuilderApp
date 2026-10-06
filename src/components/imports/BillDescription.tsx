@@ -207,8 +207,22 @@ export function BillDescriptionPanelRow({
             <p className="whitespace-pre-line rounded border border-neutral-200 bg-white p-2 font-mono text-xs text-neutral-800">
               {raw.replace(/\r\n?/g, "\n")}
             </p>
+            {/* A BILL'S OWN DIMS AND FINISH COLUMNS, as printed under their
+                headings — read by the same reader as the description's lines. */}
+            {(plan.columnCells ?? []).map((cell) => (
+              <div key={cell.column} className="mt-2">
+                <p className="mb-1 text-xs text-neutral-500">The bill&apos;s {cell.heading} column</p>
+                <p className="whitespace-pre-line rounded border border-neutral-200 bg-white p-2 font-mono text-xs text-neutral-800">
+                  {cell.value}
+                </p>
+              </div>
+            ))}
             <p className="mt-1 text-xs text-neutral-500">
-              Every line after the first is written to the record, sourced to this bill with no page.
+              {(plan.columnCells ?? []).length === plan.statements.length
+                ? "Each column cell is written to the record, sourced to this bill with no page."
+                : (plan.columnCells ?? []).length > 0
+                  ? "Every line after the first, and each column cell, is written to the record, sourced to this bill with no page."
+                  : "Every line after the first is written to the record, sourced to this bill with no page."}
             </p>
           </div>
         </div>

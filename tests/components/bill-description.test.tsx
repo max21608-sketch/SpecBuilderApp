@@ -140,4 +140,35 @@ describe("a size part's slot, set on the review", () => {
     expect(screen.queryByRole("group", { name: /What D 400 is/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "It's the diameter" })).toBeNull();
   });
+
+  it("shows a bill's own Dims and Finish cells under their headings, read by the same plan", () => {
+    // The Butler Arms shape (2026-10-06): a one-line description, the size and
+    // finish in columns of their own. Invented figures and words.
+    const columns = planBillDescription("LOUNGE CHAIR", {
+      fields: FIELDS,
+      hasFabricLine: false,
+      columns: { dimensionsRaw: "W800 X D950 X H790", finishRaw: "Natural oak", headings: { dimensions: "Dims", finish: "Finish" } },
+      name: "LOUNGE CHAIR",
+    })!;
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <td>
+              <BillDescriptionSummary plan={columns} open onToggle={() => undefined} />
+            </td>
+          </tr>
+          <BillDescriptionPanelRow plan={columns} raw="LOUNGE CHAIR" colSpan={10} />
+        </tbody>
+      </table>,
+    );
+    // A size with no unit reads in the composer's own words, as a description's would.
+    expect(screen.getByText("[W 800 — no unit] [D 950 — no unit] [H 790 — no unit]")).toBeInTheDocument();
+    expect(screen.getByText("W800 has no unit, so it cannot be converted to millimetres.")).toHaveClass("text-amber-700");
+    expect(screen.getByText("The bill's Dims column")).toBeInTheDocument();
+    expect(screen.getByText("The bill's Finish column")).toBeInTheDocument();
+    expect(screen.getByText("Finish: Natural oak")).toBeInTheDocument();
+    expect(screen.getByText("Main timber finish")).toBeInTheDocument();
+    expect(screen.getByText(/Each column cell is written to the record/)).toBeInTheDocument();
+  });
 });

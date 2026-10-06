@@ -1561,6 +1561,10 @@ export default function ReviewImportPage() {
           const columns = reconciliation ? 11 : 10;
           const descriptions = data.descriptions[sheetIndex] ?? {};
           const described = Object.keys(descriptions).length;
+          // Lines whose plan reads the bill's own Dims / Finish columns, so the
+          // note below says so rather than only describing a multi-line cell.
+          const fromColumns = Object.values(descriptions).filter((plan) => (plan.columnCells ?? []).length > 0).length;
+          const fromCells = Object.values(descriptions).filter((plan) => plan.statements.some((statement) => !statement.column)).length;
           const fabricFilings = data.fabricFilings[sheetIndex] ?? {};
           /**
            * THE COLUMNS PANEL IS OPEN when nobody has mapped this sheet yet
@@ -1779,10 +1783,22 @@ export default function ReviewImportPage() {
                   confirm writes exactly what is shown under each line. */}
               {!sheet.ignored && !sheet.needsColumns && described > 0 && run.status === "parsed" && (
                 <Note tone="info" title="Each item's description is read as you confirm.">
-                  {described} line{described === 1 ? "'s" : "s'"} description cell{described === 1 ? " is" : "s are"}{" "}
-                  more than a name: the first line becomes the item&rsquo;s name, and the rest is written to its record —
-                  sizes in their slots, finish codes in their BWS fields and the finishes library, every other line as a
-                  note. Check what is shown under each line; amber is what needs a look.
+                  {fromCells > 0 && (
+                    <>
+                      {fromCells} line{fromCells === 1 ? "'s" : "s'"} description cell
+                      {fromCells === 1 ? " is" : "s are"} more than a name: the first line becomes the
+                      item&rsquo;s name, and the rest is written to its record — sizes in their slots, finish codes in
+                      their BWS fields and the finishes library, every other line as a note.{" "}
+                    </>
+                  )}
+                  {fromColumns > 0 && (
+                    <>
+                      {fromColumns} line{fromColumns === 1 ? "" : "s"} carr{fromColumns === 1 ? "ies" : "y"} a size or a
+                      finish in the bill&rsquo;s own Dims or Finish column, read the same way: a size into its slots, a
+                      finish into the BWS field of its one kind, or kept whole as a note.{" "}
+                    </>
+                  )}
+                  Check what is shown under each line; amber is what needs a look.
                 </Note>
               )}
               {!sheet.ignored && !sheet.needsColumns && (

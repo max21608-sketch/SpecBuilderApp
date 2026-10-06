@@ -1465,10 +1465,8 @@ export function classifyCallout(input: {
   // 1. The words. Fabric first, then metal, then timber -- the order
   //    `suggestSpecField` has always used, so a "metal frame" is metal rather
   //    than timber on the strength of "frame".
-  if (mentions(text, FABRIC_WORDS)) return reading("fabric", false, null);
-  if (mentions(text, METAL_WORDS)) return reading("metal", false, null);
-  if (mentions(text, TIMBER_WORDS)) return reading("timber", false, null);
-  if (mentions(text, HARDWARE_WORDS)) return reading("hardware", false, null);
+  const named = calloutKindsNamed(text)[0];
+  if (named) return reading(named, false, null);
 
   // 2. The client's own finish code, normalised to its letters.
   const code = normaliseName(input.materialCodeRaw ?? "").replace(/[^a-z]/g, "");
@@ -1496,6 +1494,25 @@ export function classifyCallout(input: {
   }
 
   return { kind: null, group: "other", guessed: false, reason: null };
+}
+
+/**
+ * EVERY kind whose WORDS a callout names, in `classifyCallout`'s order —
+ * fabric, metal, timber, hardware. `classifyCallout`'s first step IS this
+ * list's first entry, so the two cannot disagree about what a word means.
+ *
+ * For a caller that must know when a text names MORE than one kind — a bill's
+ * Finish column printing `SMOKED OILED OAK / BRUSHED BRASS HARDWARE` states a
+ * timber and a metal, and filing it whole under either would put the other's
+ * words in a field that is not theirs (`bill-description.ts`).
+ */
+export function calloutKindsNamed(text: string): Exclude<CalloutKind, null>[] {
+  const kinds: Exclude<CalloutKind, null>[] = [];
+  if (mentions(text, FABRIC_WORDS)) kinds.push("fabric");
+  if (mentions(text, METAL_WORDS)) kinds.push("metal");
+  if (mentions(text, TIMBER_WORDS)) kinds.push("timber");
+  if (mentions(text, HARDWARE_WORDS)) kinds.push("hardware");
+  return kinds;
 }
 
 function reading(kind: Exclude<CalloutKind, null>, guessed: boolean, reason: string | null): CalloutReading {
