@@ -10,6 +10,14 @@
 // IN-HOUSE fabric by default; a placeholder ("Fabric @ Armchair (Option 1)
 // Technical details TBC") is never filed and never matched.
 //
+// EVERY FINISH LINE, NOT ONLY A FABRIC (2026-10-06). A bill's `finish_for`
+// line may be a timber, a metal or a trim; WHICH BWS FIELD it fills is
+// `bill-finish-kind.ts` (`decideBillFinishSlot`), and the review's plan below
+// carries that sentence ("→ Main metal finish") beside the filing. Every kind
+// is filed in the library the same way: the library is the client's codes,
+// not BWS's fields. The names here still say "fabric" — they are the words
+// every caller and the review screen already use for a `finish_for` line.
+//
 // PURE, and called by BOTH the confirm (`confirm-boq.ts`) and the review GET,
 // which shows one line per fabric row saying what the confirm will do. Two
 // rules — one deciding and one describing — is how a review promises a swatch
@@ -41,6 +49,14 @@
 // ============================================================================
 import { fabricOwnCode, fabricLineIsPlaceholder, type RowKindFields } from "@/lib/boq-row-kinds";
 import { billItemName } from "@/lib/bill-description";
+import {
+  billFinishLineKind,
+  billFinishLineWords,
+  billFinishNoun,
+  decideBillFinishSlot,
+  describeBillFinishSlot,
+  type BillFinishKind,
+} from "@/lib/bill-finish-kind";
 import {
   effectiveRowImage,
   isNoPicture,
@@ -82,7 +98,7 @@ type FabricLine = { code: string | null; itemDescription: string } & RowKindFiel
 
 /** The words a fabric line writes as its spec — the description verbatim, or its code where it has none. */
 export function fabricLineValue(line: FabricLine): string {
-  return line.itemDescription.trim() || (line.code ?? "").trim();
+  return billFinishLineWords(line);
 }
 
 /**
@@ -93,6 +109,9 @@ export function fabricLineValue(line: FabricLine): string {
 export function fabricMaterialCode(line: FabricLine): string | null {
   return fabricOwnCode(line);
 }
+
+/** WHAT A FINISH LINE IS (`bill-finish-kind.ts`), re-exported for the confirm. */
+export { billFinishLineKind };
 
 /**
  * THE ONE DECISION for one fabric line, against the library as it stands.
@@ -218,6 +237,11 @@ type Planned = { finish: Finish; rowNo: number; minted: boolean };
 
 /** What one fabric line will do, as the review says it. */
 export type FabricLinePlan = {
+  /**
+   * The BWS field the line fills, or why it is kept with none, in words —
+   * "→ Main metal finish", "→ kept, COM 1–3 are full" (`decideBillFinishSlot`).
+   */
+  goesTo: string;
   /** The filing, in words. */
   filing: string;
   /** The swatch, in words; null where the line files no finish. */
@@ -235,8 +259,13 @@ export type FabricLinePlan = {
  * `descriptionCodes(sheetIndex, lineIndex)` is the coded finishes an item
  * line's description cell will file (`descriptionFilesAFinish` over its plan),
  * or none where a revision holds it back. `heldFabric(recordId)` is the bill
- * fabrics a carried record already holds: a carried line holding the same
- * words files nothing, as at confirm.
+ * finishes OF THAT KIND a carried record already holds: a carried line holding
+ * the same words files nothing, as at confirm. `heldSlots(sheetIndex,
+ * lineIndex)` is the BWS slots (json ids) the item line's record will hold
+ * before its finish lines are written — what a carried record holds from any
+ * document, and what its description cell is planned to write — so each
+ * finish line's slot is decided against what the confirm's own read will
+ * find (`decideBillFinishSlot`).
  */
 export function planBillFabrics(input: {
   sheets: readonly PlanSheet[];
@@ -245,7 +274,8 @@ export function planBillFabrics(input: {
   heldSwatches: ReadonlySet<string>;
   prefix: string | null;
   descriptionCodes: (sheetIndex: number, lineIndex: number) => readonly { code: string; words: string | null }[];
-  heldFabric: (recordId: string) => readonly string[];
+  heldFabric: (recordId: string, kind: BillFinishKind) => readonly string[];
+  heldSlots: (sheetIndex: number, lineIndex: number) => readonly number[];
 }): Map<string, FabricLinePlan> {
   const library: Finish[] = [...input.library];
   const planned = new Map<string, Planned>();
@@ -254,8 +284,17 @@ export function planBillFabrics(input: {
   /** Per line: what it files (null where a carried record already holds it), and under which finish. */
   const filings = new Map<
     string,
-    { filing: FabricFiling | null; candidate: SwatchCandidate; key: string | null; chosen: ChosenPicture }
+    {
+      filing: FabricFiling | null;
+      candidate: SwatchCandidate;
+      key: string | null;
+      chosen: ChosenPicture;
+      goesTo: string;
+      kind: BillFinishKind;
+    }
   >();
+  /** The slots each item holds as its finish lines are walked, by the item's row on the sheet. */
+  const slotsByItem = new Map<number, Set<number>>();
   const plan = (finish: Finish, rowNo: number, minted: boolean) => {
     library.push(finish);
     planned.set(finish.id, { finish, rowNo, minted });
@@ -275,10 +314,15 @@ export function planBillFabrics(input: {
       }
     }
 
+    for (const line of items) {
+      slotsByItem.set(line.lineNo, new Set(input.heldSlots(sheetIndex, line.index)));
+    }
+
     for (const line of live.filter((entry) => entry.rowKind === "finish_for")) {
       const key = `${sheetIndex}:${line.index}`;
       const parent = line.finishFor ? sheet.lines.find((entry) => entry.lineNo === line.finishFor?.row) : undefined;
       const says = fabricLineValue(line);
+      const { kind } = billFinishLineKind(line);
       const candidate: SwatchCandidate = {
         sheetName: sheet.sheetName,
         rowNo: line.lineNo,
@@ -286,10 +330,22 @@ export function planBillFabrics(input: {
         // where they chose one, the bill's own otherwise.
         image: effectiveRowImage({ rowImages: input.rowImages }, sheet.sheetName, line),
       };
-      if (parent?.replaces && input.heldFabric(parent.replaces.recordId).includes(says)) {
-        filings.set(key, { filing: null, candidate, key: null, chosen: chosenPicture(line.picture) });
+      if (parent?.replaces && input.heldFabric(parent.replaces.recordId, kind).includes(says)) {
+        filings.set(key, {
+          filing: null,
+          candidate,
+          key: null,
+          chosen: chosenPicture(line.picture),
+          goesTo: "→ nothing written",
+          kind,
+        });
         continue;
       }
+      // THE SLOT, decided as the confirm decides it: against what the item
+      // holds, then each finish line above this one under the same item.
+      const taken = (parent && slotsByItem.get(parent.lineNo)) || new Set<number>();
+      const placement = decideBillFinishSlot(kind, taken);
+      if (placement.jsonId !== null) taken.add(placement.jsonId);
       const filing = decideFabricFiling({
         materialCode: fabricMaterialCode(line),
         says,
@@ -307,19 +363,32 @@ export function planBillFabrics(input: {
         plan(pendingFinish(finishKey, `${series}…`, "internal", says), line.lineNo, true);
       }
       if (finishKey) groups.set(finishKey, [...(groups.get(finishKey) ?? []), candidate]);
-      filings.set(key, { filing, candidate, key: finishKey, chosen: chosenPicture(line.picture) });
+      filings.set(key, {
+        filing,
+        candidate,
+        key: finishKey,
+        chosen: chosenPicture(line.picture),
+        goesTo: describeBillFinishSlot(placement),
+        kind,
+      });
     }
   }
 
   const swatches = planFinishSwatches(groups, input.heldSwatches);
   const out = new Map<string, FabricLinePlan>();
-  for (const [key, { filing, candidate, key: finishKey, chosen }] of filings) {
+  for (const [key, { filing, candidate, key: finishKey, chosen, goesTo, kind }] of filings) {
     if (filing === null) {
-      out.set(key, { filing: "already on the record from the bill — nothing filed", swatch: null, askForShortCode: false });
+      out.set(key, {
+        goesTo,
+        filing: "already on the record from the bill — nothing filed",
+        swatch: null,
+        askForShortCode: false,
+      });
       continue;
     }
     out.set(key, {
-      filing: describeFiling(filing, planned, series, candidate.rowNo),
+      goesTo,
+      filing: describeFiling(filing, planned, series, candidate.rowNo, kind),
       swatch: finishKey ? describeSwatch(swatches.get(finishKey), candidate, chosen) : null,
       askForShortCode: filing.outcome === "mint" && series === INTERNAL_FINISH_PREFIX,
     });
@@ -342,12 +411,13 @@ function pendingFinish(id: string, code: string, origin: Finish["codeOrigin"], d
   };
 }
 
-/** The filing half of a fabric row's line on the review. */
+/** The filing half of a finish line's sentence on the review; `kind` names what a minted code is. */
 export function describeFiling(
   filing: FabricFiling,
   planned: ReadonlyMap<string, { finish: Finish; rowNo: number; minted: boolean }>,
   series: string,
   rowNo: number,
+  kind: BillFinishKind = "fabric",
 ): string {
   switch (filing.outcome) {
     case "new":
@@ -365,7 +435,7 @@ export function describeFiling(
       return `matches ${filing.finish.code} (same words)`;
     }
     case "mint":
-      return `new in-house fabric — numbered ${series}… at confirm`;
+      return `new in-house ${billFinishNoun(kind)} — numbered ${series}… at confirm`;
     case "placeholder":
       return "placeholder — not filed";
   }

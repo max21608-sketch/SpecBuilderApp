@@ -64,7 +64,7 @@ import {
   loadCurrentSwatches,
   loadFinishCodePrefix,
   loadFinishLibrary,
-  loadHeldBillFabrics,
+  loadHeldBillFinishes,
 } from "@/lib/bill-fabric-load";
 // Pure: which rows on the OTHER tabs a decision reaches, and what lands on
 // them. The screen reads the same module for its duplicate panel, so the rows
@@ -1123,8 +1123,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const descriptions: Record<number, Record<number, unknown>> = {};
   /** The coded finishes each item line's description will file, for the fabric plan below. */
   const descriptionCodes = new Map<string, { code: string; words: string | null }[]>();
+  /** The BWS slots (json ids) each item line's description will write, for the finish lines' slots below. */
+  const descriptionSlots = new Map<string, number[]>();
+  /** The register the descriptions were planned against: field id → json id. */
+  const jsonIdOfField = new Map<string, number>();
   if (parsed) {
     const fields = await loadDescriptionFields(sql);
+    for (const field of fields) jsonIdOfField.set(field.id, field.jsonId);
     for (const [sheetIndex, sheet] of parsed.sheets.entries()) {
       const plans = planSheetDescriptions(sheet.lines, fields);
       if (plans.size === 0) continue;
@@ -1139,6 +1144,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         const revisionRefusal = holding ? revisionDescriptionRefusal(plan, holding) : null;
         bySheet[index] = { ...plan, revisionRefusal };
         if (!revisionRefusal) {
+          descriptionSlots.set(
+            `${sheetIndex}:${index}`,
+            plan.attributes.flatMap((attribute) => {
+              const jsonId = attribute.specFieldId ? jsonIdOfField.get(attribute.specFieldId) : undefined;
+              return jsonId === undefined ? [] : [jsonId];
+            }),
+          );
           descriptionCodes.set(
             `${sheetIndex}:${index}`,
             plan.attributes.filter(descriptionFilesAFinish).map((attribute) => ({
@@ -1172,7 +1184,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const carriedParents = parsed.sheets.flatMap((sheet) =>
       sheet.lines.flatMap((line) => (line.replaces && line.rowKind !== "finish_for" ? [line.replaces.recordId] : [])),
     );
-    const heldFabrics = await loadHeldBillFabrics(sql, carriedParents);
+    const heldFinishes = await loadHeldBillFinishes(sql, carriedParents);
+    // WHAT EACH CARRIED RECORD ALREADY HOLDS, from any document — the slots
+    // the confirm's own read will find taken before its finish lines.
+    const heldOnCarried = await loadHeldAttributes(sql, carriedParents);
     const plans = planBillFabrics({
       sheets: parsed.sheets,
       rowImages: parsed.rowImages,
@@ -1180,7 +1195,19 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       heldSwatches,
       prefix: finishCodePrefix,
       descriptionCodes: (sheetIndex, lineIndex) => descriptionCodes.get(`${sheetIndex}:${lineIndex}`) ?? [],
-      heldFabric: (recordId) => heldFabrics.get(recordId) ?? [],
+      heldFabric: (recordId, kind) =>
+        (heldFinishes.get(recordId) ?? []).filter((entry) => entry.kind === kind).map((entry) => entry.value),
+      heldSlots: (sheetIndex, lineIndex) => {
+        const line = parsed.sheets[sheetIndex]?.lines.find((entry) => entry.index === lineIndex);
+        const carried = line?.replaces ? (heldOnCarried.get(line.replaces.recordId)?.fieldIds ?? []) : [];
+        return [
+          ...carried.flatMap((fieldId) => {
+            const jsonId = jsonIdOfField.get(fieldId);
+            return jsonId === undefined ? [] : [jsonId];
+          }),
+          ...(descriptionSlots.get(`${sheetIndex}:${lineIndex}`) ?? []),
+        ];
+      },
     });
     for (const [key, plan] of plans) {
       const [sheetIndex, lineIndex] = key.split(":").map(Number) as [number, number];

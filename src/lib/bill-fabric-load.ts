@@ -8,6 +8,7 @@
 // for the screen, the locked transaction for the confirm.
 import type { SqlLike } from "@/lib/record-atoms";
 import { isFinishCodeOrigin, isFinishKind, type Finish } from "@/lib/finishes";
+import { heldBillFinishKind, type BillFinishKind } from "@/lib/bill-finish-kind";
 
 const text = (value: unknown) => (value === null || value === undefined ? null : String(value));
 
@@ -53,23 +54,33 @@ export async function loadFinishCodePrefix(exec: SqlLike, projectId: string): Pr
 }
 
 /**
- * The fabric each carried record already holds FROM A BILL, by its words — a
- * revision writes nothing where the record holds that exact fabric, and
- * refuses where it holds a different one (`writeFabricLine`).
+ * The finishes each carried record already holds FROM A BILL, with their kind
+ * and words — a revision writes nothing where the record holds that exact
+ * finish of the line's kind, and refuses where it holds a different one of
+ * that kind (`writeFabricLine`). The kind is read back off the row's group and
+ * label (`heldBillFinishKind`); a `material` row is a fabric whatever its
+ * label, which is what this read before finish lines had kinds. A row no
+ * finish line could have written (a description's "Timber: …" row, labelled
+ * as printed) is not returned.
  */
-export async function loadHeldBillFabrics(exec: SqlLike, recordIds: readonly string[]): Promise<Map<string, string[]>> {
-  const held = new Map<string, string[]>();
+export async function loadHeldBillFinishes(
+  exec: SqlLike,
+  recordIds: readonly string[],
+): Promise<Map<string, { kind: BillFinishKind; value: string }[]>> {
+  const held = new Map<string, { kind: BillFinishKind; value: string }[]>();
   if (recordIds.length === 0) return held;
   const rows = await exec`
-    select a.record_id, a.value
+    select a.record_id, a.value, a.attr_group, a.label
     from record_attributes a
     join intake_runs r on r.id = a.source_run_id
     where a.record_id = any(${[...recordIds]}::uuid[]) and a.status = 'active' and r.source_kind = 'boq_xlsx'
-      and a.attr_group = 'material'
+      and a.attr_group in ('material', 'finish', 'hardware', 'other')
   `;
   for (const row of rows) {
+    const kind = heldBillFinishKind({ attrGroup: String(row.attr_group), label: String(row.label ?? "") });
+    if (kind === undefined) continue;
     const id = String(row.record_id);
-    held.set(id, [...(held.get(id) ?? []), String(row.value ?? "")]);
+    held.set(id, [...(held.get(id) ?? []), { kind, value: String(row.value ?? "") }]);
   }
   return held;
 }

@@ -215,6 +215,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       prefix: "ZZA",
       descriptionCodes: () => [],
       heldFabric: () => [],
+      heldSlots: () => [],
       ...over,
     });
 
@@ -229,6 +230,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { rowImages: images({ 3: picture("p/a.png"), 5: picture("p/a.png") }) },
     );
     expect(out.get("0:1")).toEqual({
+      goesTo: "→ COM 1",
       filing: "new library entry ZZ-FAB-13",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
@@ -244,6 +246,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { library: [held], heldSwatches: new Set(["fin-7"]), rowImages: images({ 3: picture("p/a.png") }) },
     );
     expect(out.get("0:1")).toEqual({
+      goesTo: "→ COM 1",
       filing: "matches ZZ-FAB-13 in the library",
       swatch: "swatch: none (the library already has one)",
       askForShortCode: false,
@@ -276,11 +279,13 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { rowImages: images({ 3: picture("p/c.png") }) },
     );
     expect(out.get("0:1")).toEqual({
+      goesTo: "→ COM 1",
       filing: "new in-house fabric — numbered BW-ZZA-… at confirm",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
     });
     expect(out.get("0:3")).toEqual({
+      goesTo: "→ COM 1",
       filing: "same words as row 3 — one in-house code",
       swatch: "swatch: row 3's picture",
       askForShortCode: false,
@@ -293,6 +298,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       { prefix: null },
     );
     expect(out.get("0:1")).toEqual({
+      goesTo: "→ COM 1",
       filing: "new in-house fabric — numbered BW-F-… at confirm",
       swatch: "swatch: none in the bill",
       askForShortCode: true,
@@ -316,7 +322,12 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       ],
       { rowImages: images({ 3: picture("p/e.png") }) },
     );
-    expect(out.get("0:1")).toEqual({ filing: "placeholder — not filed", swatch: null, askForShortCode: false });
+    expect(out.get("0:1")).toEqual({
+      goesTo: "→ COM 1",
+      filing: "placeholder — not filed",
+      swatch: null,
+      askForShortCode: false,
+    });
   });
 
   it("sees a code the item's own DESCRIPTION files first, in the confirm's order", () => {
@@ -366,6 +377,7 @@ describe("the review's swatch sentence reads the row's EFFECTIVE picture", () =>
       prefix: "ZZA",
       descriptionCodes: () => [],
       heldFabric: () => [],
+      heldSlots: () => [],
     });
 
   it("says a crop is the swatch, and that one cropped line now differs from its uncropped twin", () => {
