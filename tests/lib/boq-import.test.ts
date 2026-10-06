@@ -112,6 +112,18 @@ describe("parseBoqSheets", () => {
     });
   });
 
+  it("reads a mock-up tab's bare “Q-ty” as the quantity", () => {
+    // A mock-up tab of a real bill heads its quantity "Q-ty" with no TOTAL,
+    // and every mock-up quantity read blank until 2026-10-06.
+    const mockup: SheetData = [
+      ["Area", "FF&E code", "Item description", "unit", "Q-ty", "Unit cost - EUR"],
+      ["Rooms", "X-100", "Sofa", "pcs", 1, null],
+      ["Rooms", "X-200", "Armchair", "pcs", 2, null],
+    ];
+    const staged = one(parseBoqSheets(sheet(mockup)));
+    expect(staged.lines.map((line) => line.qty)).toEqual([1, 2]);
+  });
+
   it("keeps a repeated client code as two separate lines", () => {
     // The case that killed the original schema: a BOQ code is not unique, so
     // nothing here may deduplicate. Two rows in, two lines out, different qty.

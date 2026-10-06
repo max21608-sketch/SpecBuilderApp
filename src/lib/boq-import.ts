@@ -383,7 +383,7 @@ const COLUMNS = {
   code: ["code", "ff&e code", "ffe code", "ff&e ref", "client ref", "client reference", "ref"],
   itemDescription: ["item description", "description", "item"],
   productReference: ["product reference", "product ref", "reference"],
-  qty: ["total q-ty", "total qty updated", "total qty", "total quantity", "qty", "quantity"],
+  qty: ["total q-ty", "q-ty", "total qty updated", "total qty", "total quantity", "qty", "quantity"],
   qtyUnit: ["unit", "uom", "unit of measure"],
 } as const;
 

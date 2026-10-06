@@ -44,6 +44,7 @@ from (values
   ('productReference', 'product ref'),
   ('productReference', 'reference'),
   ('qty', 'total q-ty'),
+  ('qty', 'q-ty'),
   ('qty', 'total qty updated'),
   ('qty', 'total qty'),
   ('qty', 'total quantity'),
