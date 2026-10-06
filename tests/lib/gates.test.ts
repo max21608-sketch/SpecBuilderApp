@@ -108,17 +108,34 @@ describe("gateStatus — a dimension slot is settled by an attribute, not an ans
   it("a confirmed slot satisfies", () => {
     const s = gateStatus("TGQ", [sh], {
       answers: [],
-      slots: [{ dimensionSlot: "SH", state: "confirmed", value: "440" }],
+      slots: [{ dimensionSlot: "SH", state: "confirmed", value: "440", unit: "mm" }],
       askedFieldIds: asked(3),
     });
     expect(only(s).outcome).toBe("satisfied");
     expect(only(s).value).toBe("440");
   });
 
+  it("a confirmed slot with NO unit blocks, saying so — 800 is not a measurement until somebody says 800 what", () => {
+    const s = gateStatus("TGQ", [sh], {
+      answers: [],
+      slots: [{ dimensionSlot: "SH", state: "confirmed", value: "440", unit: null }],
+      askedFieldIds: asked(3),
+    });
+    expect(only(s)).toMatchObject({ outcome: "blocking", reason: "SH has no unit.", value: "440" });
+    expect(s.ownSatisfied).toBe(false);
+    // A figure printing its own inch marks has stated its unit.
+    const marked = gateStatus("TGQ", [sh], {
+      answers: [],
+      slots: [{ dimensionSlot: "SH", state: "confirmed", value: `1'-6"`, unit: null }],
+      askedFieldIds: asked(3),
+    });
+    expect(only(marked).outcome).toBe("satisfied");
+  });
+
   it("a TBC slot blocks", () => {
     const s = gateStatus("TGQ", [sh], {
       answers: [],
-      slots: [{ dimensionSlot: "SH", state: "tbc", value: null }],
+      slots: [{ dimensionSlot: "SH", state: "tbc", value: null, unit: null }],
       askedFieldIds: asked(3),
     });
     expect(only(s).outcome).toBe("blocking");
@@ -127,7 +144,7 @@ describe("gateStatus — a dimension slot is settled by an attribute, not an ans
   it("a different slot does not stand in for it", () => {
     const s = gateStatus("TGQ", [sh], {
       answers: [],
-      slots: [{ dimensionSlot: "H", state: "confirmed", value: "720" }],
+      slots: [{ dimensionSlot: "H", state: "confirmed", value: "720", unit: "mm" }],
       askedFieldIds: asked(3),
     });
     expect(only(s).outcome).toBe("blocking");

@@ -62,7 +62,7 @@ import Note from "@/components/ui/Note";
 import Button, { buttonClass } from "@/components/ui/Button";
 import { gateRowRole, questionForField } from "@/lib/chase-counts";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
-import type { Tone } from "@/components/ui/tone";
+import { TONE, type Tone } from "@/components/ui/tone";
 
 const OUTCOME_TONE: Record<GateOutcome, Tone> = {
   satisfied: "good",
@@ -235,6 +235,12 @@ export default function GatePanel({
     }
     if (row.outcome === "not_applicable") {
       return <p className="mt-0.5 text-[11px] text-neutral-500">{row.reason}</p>;
+    }
+    // A CONFIRMED value that still blocks — a slot recorded with no unit
+    // (`gateStatus`: "W has no unit."). Without the reason the row reads as
+    // "Outstanding" beside a figure, which looks like the gate is wrong.
+    if (row.outcome === "blocking" && row.state === "confirmed") {
+      return <p className={`mt-0.5 text-[11px] ${TONE.danger.text}`}>{row.reason}</p>;
     }
     return null;
   };

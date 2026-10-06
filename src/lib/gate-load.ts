@@ -134,7 +134,7 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
   // composed cell: "W840 x D790 x H720mm" is confirmed as a whole and says
   // nothing about whether a seat height was ever measured.
   const slotRows = await exec`
-    select record_id, dimension_slot, state, value
+    select record_id, dimension_slot, state, value, unit
       from record_attributes
      where record_id = any(${recordIds}::uuid[]) and status = 'active' and dimension_slot is not null
   `;
@@ -146,6 +146,7 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
       dimensionSlot: String(row.dimension_slot) as GateSlotInput["dimensionSlot"],
       state: String(row.state) as GateSlotInput["state"],
       value: (row.value ?? null) as string | null,
+      unit: (row.unit ?? null) as string | null,
     });
     slotsByRecord.set(key, list);
   }

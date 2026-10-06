@@ -101,6 +101,14 @@ const renderPanel = (over: Partial<Parameters<typeof GatePanel>[0]> = {}) =>
   );
 
 describe("the gate panel", () => {
+  it("says why a recorded figure still blocks: a slot with no unit", () => {
+    const sh = field({ matrixRow: 9, gate: "TGQ", fieldName: "Seat height - SH", specFieldJsonId: 3, dimensionSlot: "SH" });
+    const unitless: GateFieldStatus = { field: sh, outcome: "blocking", reason: "SH has no unit.", value: "440", state: "confirmed" };
+    renderPanel({ gates: statuses({ TGQ: [unitless], TG0: [], TG1: [] }) });
+    expect(screen.getByText("SH has no unit.")).toBeInTheDocument();
+    expect(screen.getByText("440")).toBeInTheDocument();
+  });
+
   it("never folds 'nowhere to record it' into the number a person can act on", () => {
     // TGQ holds one blocking row and one unanswerable one. `2 outstanding`
     // sends a reviewer looking for two questions and they find one.
