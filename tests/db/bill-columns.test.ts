@@ -291,4 +291,101 @@ describeIfDb("a bill's own Dims and Finish columns, read at confirm", () => {
     expect(set.status).toBe(200);
     expect(await review()).toMatchObject({ dimensionCell: "Dia.400 x H420mm", depthWithoutWidth: null });
   });
+
+  it("takes the unit a reviewer says — one line, then the rest in one press — and the confirm writes it", { timeout: 60_000 }, async () => {
+    // The Butler public-areas shape: no unit printed anywhere, inch rows and
+    // millimetre rows side by side. One line prints its unit, which is never
+    // overridden and never offered.
+    const runId = (
+      await client.query(
+        `insert into intake_runs (project_id, source_kind, status, parsed, created_by, updated_by)
+         values ($1, 'boq_xlsx', 'parsed', $2::jsonb, 'qa', 'qa') returning id`,
+        [
+          projectId,
+          JSON.stringify({
+            schemaVersion: 4,
+            filename: "__QA public areas.xlsx",
+            sourcePreserved: false,
+            sheets: [
+              sheet("__QA LOUNGE", "DIMENSIONS", [
+                line(0, 2, "ZZ-UNT-01", "SIDE TABLE", { dimensionsRaw: "W18 x D20 x H22", finishRaw: null }),
+                line(1, 3, "ZZ-UNT-02", "DINING TABLE", { dimensionsRaw: "W2000 x D1000 x H700", finishRaw: null }),
+                line(2, 4, "ZZ-UNT-03", "BENCH", { dimensionsRaw: "W1500 x D400 x H450", finishRaw: null }),
+                line(3, 5, "ZZ-UNT-04", "STOOL", { dimensionsRaw: "W400 x D400 x H450 mm", finishRaw: null }),
+              ]),
+            ],
+          }),
+        ],
+      )
+    ).rows[0].id as string;
+    const { GET, PATCH } = await import("@/app/api/imports/[id]/route");
+    const patch = (body: unknown) =>
+      PATCH(
+        new Request("http://localhost/test", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        params(runId),
+      );
+    const plans = async () =>
+      ((await (await GET(new Request("http://localhost/test"), params(runId))).json()) as {
+        descriptions: Record<string, Record<string, { dimensionCell: string; unitMissing: boolean; unitSetOnReview: string | null }>>;
+      }).descriptions["0"] ?? {};
+
+    const before = await plans();
+    expect([0, 1, 2, 3].map((index) => before[String(index)]?.unitMissing)).toEqual([true, true, true, false]);
+
+    // ONE LINE: the side table is in inches.
+    const one = await patch({ sheetIndex: 0, index: 0, unitOverride: "in", unitOverrideVersion: 0 });
+    expect(one.status).toBe(200);
+    expect((await plans())["0"]).toMatchObject({ unitSetOnReview: "in", dimensionCell: "W457 x D508 x H559mm" });
+    // A stale screen is refused.
+    expect((await patch({ sheetIndex: 0, index: 0, unitOverride: "mm", unitOverrideVersion: 0 })).status).toBe(409);
+    // A printed unit is never overridden.
+    const printed = await patch({ sheetIndex: 0, index: 3, unitOverride: "in", unitOverrideVersion: 0 });
+    expect(printed.status).toBe(409);
+    expect(await printed.text()).toMatch(/prints its unit/);
+
+    // "SET THEM ALL": a list naming a line a person already set, or one that
+    // prints its unit, refuses the whole request and writes nothing.
+    const refused = await patch({
+      sheetIndex: 0,
+      unitOverrideAll: "mm",
+      lines: [
+        { index: 0, unitOverrideVersion: 1 },
+        { index: 1, unitOverrideVersion: 0 },
+      ],
+    });
+    expect(refused.status).toBe(409);
+    expect((await plans())["1"]?.unitSetOnReview).toBeNull();
+    // The lines the panel counted — the two still unset — in one request.
+    const all = await patch({
+      sheetIndex: 0,
+      unitOverrideAll: "mm",
+      lines: [
+        { index: 1, unitOverrideVersion: 0 },
+        { index: 2, unitOverrideVersion: 0 },
+      ],
+    });
+    expect(all.status).toBe(200);
+    expect(await all.json()).toMatchObject({ ok: true, written: 2 });
+    const after = await plans();
+    expect(after["0"]?.unitSetOnReview).toBe("in");
+    expect(after["1"]).toMatchObject({ unitSetOnReview: "mm", dimensionCell: "W2000 x D1000 x H700mm" });
+    expect(after["2"]?.unitSetOnReview).toBe("mm");
+    expect(after["3"]).toMatchObject({ unitSetOnReview: null, dimensionCell: "W400 x D400 x H450mm" });
+
+    const { POST } = await import("@/app/api/imports/[id]/confirm/route");
+    expect((await POST(post({}), params(runId))).status).toBe(200);
+
+    const table = await recordByCode("ZZ-UNT-01");
+    expect(
+      (await attributesOf(table.id)).filter((row) => row.attr_group === "dimension").map((row) => `${row.dimension_slot} ${row.value}${row.unit}`),
+    ).toEqual(["W 18in", "D 20in", "H 22in"]);
+    expect(await dimensionsAnswer(table.id)).toMatchObject({ value: "W457 x D508 x H559mm", state: "confirmed" });
+    const dining = await recordByCode("ZZ-UNT-02");
+    expect((await attributesOf(dining.id)).every((row) => row.unit === "mm")).toBe(true);
+    expect(await dimensionsAnswer(dining.id)).toMatchObject({ value: "W2000 x D1000 x H700mm", state: "confirmed" });
+  });
 });

@@ -53,7 +53,8 @@ import {
   BillDescriptionSummary,
   type ReviewDescription,
 } from "@/components/imports/BillDescription";
-import type { SlotOverride } from "@/lib/bill-description";
+import type { BillUnitOverride, SlotOverride } from "@/lib/bill-description";
+import { BillUnitAll } from "@/components/imports/BillDescription";
 import {
   effectiveRowImage,
   isNoPicture,
@@ -125,6 +126,9 @@ type Line = {
   // A reviewer's slot changes on the size line, and the version of that map
   // the screen was drawn with — sent back with every change.
   slotOverridesVersion?: number;
+  // The unit a reviewer said for a size that prints none, and that choice's
+  // own version — sent back with every change, one line or the sheet's "all".
+  unitOverride?: string; unitOverrideVersion?: number;
   // The picture a person chose for the row — a crop, or none — and its own
   // version, sent back with every change (`effectiveRowImage`).
   picture?: BillPictureOverride | null;
@@ -1047,6 +1051,56 @@ export default function ReviewImportPage() {
     }
   }
 
+  /** The unit of one line's size that prints none, or null to take it back. */
+  async function setUnit(sheetIndex: number, line: Line, unit: BillUnitOverride | null) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch(`/api/imports/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sheetIndex,
+          index: line.index,
+          unitOverride: unit,
+          unitOverrideVersion: line.unitOverrideVersion ?? 0,
+        }),
+      });
+      await load(true);
+      if (!res.ok) setError(res.error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * ONE UNIT FOR EVERY LINE THE PANEL COUNTED, in one request: the lines whose
+   * size prints no unit and that nobody has set yet, each with the version it
+   * was drawn at. A wrong row is then corrected on its own select.
+   */
+  async function setUnitAll(sheetIndex: number, lines: Line[], unit: BillUnitOverride) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await apiFetch(`/api/imports/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sheetIndex,
+          unitOverrideAll: unit,
+          lines: lines.map((line) => ({ index: line.index, unitOverrideVersion: line.unitOverrideVersion ?? 0 })),
+        }),
+      });
+      await load(true);
+      if (!res.ok) setError(res.error);
+      else setNotice(`The unit of ${lines.length} size${lines.length === 1 ? "" : "s"} is set to ${unit}. Each row says so, and can be changed on its own.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function setLineKind(sheetIndex: number, index: number, rowKind: BoqRowKind, finishForRow: number | null) {
     setError(null);
     setNotice(null);
@@ -1569,6 +1623,12 @@ export default function ReviewImportPage() {
           // note below says so rather than only describing a multi-line cell.
           const fromColumns = Object.values(descriptions).filter((plan) => (plan.columnCells ?? []).length > 0).length;
           const fromCells = Object.values(descriptions).filter((plan) => plan.statements.some((statement) => !statement.column)).length;
+          // The lines whose size prints no unit and nobody has set one yet —
+          // exactly what "set them all" writes, so its count is what it does.
+          const unitless = live.filter((line) => {
+            const plan = descriptions[line.index];
+            return plan?.unitMissing === true && !plan.unitSetOnReview && !line.unitOverride;
+          });
           const fabricFilings = data.fabricFilings[sheetIndex] ?? {};
           /**
            * THE COLUMNS PANEL IS OPEN when nobody has mapped this sheet yet
@@ -1804,6 +1864,13 @@ export default function ReviewImportPage() {
                   )}
                   Check what is shown under each line; amber is what needs a look.
                 </Note>
+              )}
+              {!sheet.ignored && !sheet.needsColumns && run.status === "parsed" && (
+                <BillUnitAll
+                  count={unitless.length}
+                  busy={busy}
+                  onApply={(unit) => void setUnitAll(sheetIndex, unitless, unit)}
+                />
               )}
               {!sheet.ignored && !sheet.needsColumns && (
                 <Card
@@ -2114,6 +2181,11 @@ export default function ReviewImportPage() {
                                       onSetSlot={
                                         run.status === "parsed" && !line.ignored
                                           ? (key, slot) => void setSlot(sheetIndex, line, key, slot)
+                                          : undefined
+                                      }
+                                      onSetUnit={
+                                        run.status === "parsed" && !line.ignored
+                                          ? (unit) => void setUnit(sheetIndex, line, unit)
                                           : undefined
                                       }
                                     />

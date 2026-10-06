@@ -16,7 +16,7 @@ import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { z } from "zod";
 import { sql, json, type Row } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
-import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
+import { withTransaction, transactionErrorResponse, DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { loadDrawingContext, recordChoices, resolveStagedRun } from "@/lib/drawing-resolution";
 import { reviewDrawingObservations } from "@/lib/confirm-drawings";
@@ -53,6 +53,9 @@ import {
   placedSizeOf,
   planSheetDescriptions,
   lineStatements,
+  lineSizeNeedsUnit,
+  isBillUnitOverride,
+  type BillUnitOverride,
   sheetColumnHeadings,
   resolveSlotOverrides,
   revisionDescriptionRefusal,
@@ -1257,6 +1260,10 @@ async function patchBoqLine(
     finishForRow?: unknown;
     slotOverride?: unknown;
     slotOverridesVersion?: unknown;
+    unitOverride?: unknown;
+    unitOverrideVersion?: unknown;
+    unitOverrideAll?: unknown;
+    lines?: unknown;
     picture?: unknown;
     pictureVersion?: unknown;
   },
@@ -1272,6 +1279,17 @@ async function patchBoqLine(
   if (body.slotOverride !== undefined) {
     if (index === null) return json({ ok: false, error: "A slot is changed on one line." }, 400);
     return patchSlotOverride(id, sheetIndex, index, body.slotOverride, body.slotOverridesVersion, actor);
+  }
+
+  // THE UNIT OF A SIZE THAT PRINTS NONE, said by a person: one line, or every
+  // line the sheet's panel counted, in one request. Checked against the LIVE
+  // line's plan under the lock, so a printed unit can never be overridden.
+  if (body.unitOverride !== undefined) {
+    if (index === null) return json({ ok: false, error: "A unit is set on one line." }, 400);
+    return patchUnitOverride(id, sheetIndex, index, body.unitOverride, body.unitOverrideVersion, actor);
+  }
+  if (body.unitOverrideAll !== undefined) {
+    return patchUnitOverrideAll(id, sheetIndex, body.unitOverrideAll, body.lines, actor);
   }
 
   // THE ROW'S PICTURE, chosen by a person: a crop of the bill's picture, none,
@@ -1852,6 +1870,150 @@ async function patchSlotOverride(
       `;
       if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
       return { version: Number(written[0].version), slotOverridesVersion: version };
+    });
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
+// ---- the unit of a size that prints none ------------------------------------
+//
+// A person says what an unprinted unit is, before the confirm, on the screen
+// that is the gate. Stored on the staged line (`unitOverride`) under its own
+// version, and APPLIED inside `planBillDescription`, which the review GET and
+// the confirm both call. Refused, writing nothing, when the line's placed size
+// now prints a unit or has none (409) — a printed unit is never overridden —
+// and when the line moved since the screen was drawn (409).
+
+/** Writes one line's unit; the caller holds the run's row lock. */
+async function writeLineUnit(
+  txn: TxnSql,
+  input: { id: string; sheetIndex: number; index: number; unit: BillUnitOverride | null; version: number; actor: string },
+) {
+  const { id, sheetIndex, index, unit, version, actor } = input;
+  // `null` removes the key rather than storing a null, so a line put back
+  // reads exactly as one nobody touched.
+  const written = await txn`
+    update intake_runs
+    set parsed = jsonb_set(
+          parsed,
+          array['sheets', ${String(sheetIndex)}, 'lines', ${String(index)}],
+          (coalesce(parsed->'sheets'->(${sheetIndex}::int)->'lines'->(${index}::int), '{}'::jsonb) - 'unitOverride')
+            || ${JSON.stringify(unit ? { unitOverride: unit, unitOverrideVersion: version } : { unitOverrideVersion: version })}::jsonb
+        ),
+        updated_by = ${actor}
+    where id = ${id} and status = 'parsed'
+    returning version
+  `;
+  if (!written[0]) throw new DomainConflictError("gone", "That line is no longer in this import.");
+  return Number(written[0].version);
+}
+
+/** The live line, locked, and whether its placed size prints no unit. */
+async function lockedLineForUnit(txn: TxnSql, id: string, sheetIndex: number, index: number) {
+  const rows = await txn`select parsed, status from intake_runs where id = ${id} for update`;
+  if (!rows[0]) throw new DomainConflictError("gone", "No such import.", { status: 404 });
+  if (rows[0].status !== "parsed") throw new DomainConflictError("confirmed", "This import is already confirmed.");
+  const sheet = assertBoqDocument(rows[0].parsed).sheets[sheetIndex];
+  const line = sheet?.lines[index];
+  if (!sheet || !line) throw new DomainConflictError("gone", "That line is no longer in this import.");
+  const needsUnit = line.rowKind !== "finish_for" && lineSizeNeedsUnit(lineStatements(line, sheetColumnHeadings(sheet)));
+  return { line, needsUnit };
+}
+
+async function patchUnitOverride(
+  id: string,
+  sheetIndex: number,
+  index: number,
+  change: unknown,
+  expectedVersion: unknown,
+  actor: string,
+): Promise<Response> {
+  if (change !== null && !isBillUnitOverride(change)) {
+    return json({ ok: false, error: "A unit is mm, cm or in." }, 400);
+  }
+  if (typeof expectedVersion !== "number") {
+    return json({ ok: false, error: "Send the version of this line's unit you were shown." }, 400);
+  }
+  try {
+    const result = await withTransaction(async (txn) => {
+      const { line, needsUnit } = await lockedLineForUnit(txn, id, sheetIndex, index);
+      const current = line.unitOverrideVersion ?? 0;
+      if (current !== expectedVersion) {
+        throw new DomainConflictError(
+          "unit_override_stale",
+          `The unit on row ${line.lineNo} was changed in another tab. Reload and check it before changing it again.`,
+        );
+      }
+      if (!needsUnit && change !== null) {
+        throw new DomainConflictError(
+          "unit_printed",
+          `Row ${line.lineNo}'s size prints its unit, or has no size to give one. Reload and look at it again.`,
+        );
+      }
+      const version = current + 1;
+      const runVersion = await writeLineUnit(txn, { id, sheetIndex, index, unit: change as BillUnitOverride | null, version, actor });
+      return { version: runVersion, unitOverrideVersion: version };
+    });
+    return json({ ok: true, ...result });
+  } catch (cause) {
+    return transactionErrorResponse(cause);
+  }
+}
+
+/**
+ * EVERY LINE THE PANEL COUNTED, ONE REQUEST. The screen sends the lines it
+ * offered with the versions it drew them at, and only those are written: a
+ * line that has since been given a unit, or whose size now prints one, refuses
+ * the whole request rather than being skipped — the count on the button was a
+ * promise about exactly these rows.
+ */
+async function patchUnitOverrideAll(
+  id: string,
+  sheetIndex: number,
+  change: unknown,
+  rawLines: unknown,
+  actor: string,
+): Promise<Response> {
+  if (!isBillUnitOverride(change)) return json({ ok: false, error: "A unit is mm, cm or in." }, 400);
+  const lines = Array.isArray(rawLines) ? rawLines : null;
+  if (
+    !lines ||
+    lines.length === 0 ||
+    !lines.every(
+      (entry) =>
+        entry && typeof entry === "object" && Number.isInteger((entry as { index?: unknown }).index) &&
+        typeof (entry as { unitOverrideVersion?: unknown }).unitOverrideVersion === "number",
+    )
+  ) {
+    return json({ ok: false, error: "Send the lines you were shown, each with the version of its unit." }, 400);
+  }
+  const wanted = lines as { index: number; unitOverrideVersion: number }[];
+  if (new Set(wanted.map((entry) => entry.index)).size !== wanted.length) {
+    return json({ ok: false, error: "A line is named twice." }, 400);
+  }
+  try {
+    const result = await withTransaction(async (txn) => {
+      let runVersion = 0;
+      for (const entry of wanted) {
+        const { line, needsUnit } = await lockedLineForUnit(txn, id, sheetIndex, entry.index);
+        const current = line.unitOverrideVersion ?? 0;
+        if (current !== entry.unitOverrideVersion || line.unitOverride) {
+          throw new DomainConflictError(
+            "unit_override_stale",
+            `The unit on row ${line.lineNo} was set since this screen was drawn. Reload and set them again.`,
+          );
+        }
+        if (!needsUnit) {
+          throw new DomainConflictError(
+            "unit_printed",
+            `Row ${line.lineNo}'s size prints its unit, or has no size to give one. Reload and set them again.`,
+          );
+        }
+        runVersion = await writeLineUnit(txn, { id, sheetIndex, index: entry.index, unit: change, version: current + 1, actor });
+      }
+      return { version: runVersion, written: wanted.length };
     });
     return json({ ok: true, ...result });
   } catch (cause) {

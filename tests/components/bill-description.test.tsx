@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { BillDescriptionPanelRow, BillDescriptionSummary, type ReviewDescription } from "@/components/imports/BillDescription";
+import { BillDescriptionPanelRow, BillDescriptionSummary, BillUnitAll, type ReviewDescription } from "@/components/imports/BillDescription";
 import { planBillDescription, type SlotOverride } from "@/lib/bill-description";
 import type { SpecFieldEntry } from "@/lib/drawing-document";
 
@@ -170,5 +170,59 @@ describe("a size part's slot, set on the review", () => {
     expect(screen.getByText("Finish: Natural oak")).toBeInTheDocument();
     expect(screen.getByText("Main timber finish")).toBeInTheDocument();
     expect(screen.getByText(/Each column cell is written to the record/)).toBeInTheDocument();
+  });
+
+  describe("the unit of a size that prints none", () => {
+    const sized = (cell: string, unitOverride?: string) =>
+      planBillDescription("SIDE TABLE", {
+        fields: FIELDS,
+        hasFabricLine: false,
+        columns: { dimensionsRaw: cell, headings: { dimensions: "Dims" } },
+        name: "SIDE TABLE",
+        unitOverride,
+      })!;
+
+    it("offers Unit: — / mm / cm / in beside the cell, and says what a person picked", () => {
+      const onSetUnit = vi.fn();
+      render(<BillDescriptionSummary plan={sized("W47.2 x D27.5")} open={false} onToggle={() => undefined} onSetUnit={onSetUnit} />);
+      const select = screen.getByRole("combobox");
+      expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual(["—", "mm", "cm", "in"]);
+      expect(select).toHaveValue("");
+      fireEvent.change(select, { target: { value: "in" } });
+      expect(onSetUnit).toHaveBeenCalledWith("in");
+      expect(screen.queryByText("unit set on review")).toBeNull();
+    });
+
+    it("once set, converts and says it was set on review — not printed", () => {
+      const onSetUnit = vi.fn();
+      const plan = sized("W47.2 x D27.5", "in");
+      expect(plan.dimensionCell).toBe("W1199 x D699mm");
+      render(<BillDescriptionSummary plan={plan} open={false} onToggle={() => undefined} onSetUnit={onSetUnit} />);
+      expect(screen.getByRole("combobox")).toHaveValue("in");
+      expect(screen.getByText("unit set on review")).toBeInTheDocument();
+      // The screen's own rendering: the inches as printed, millimetres beside.
+      expect(screen.getByText(plan.dimensionCellShown)).toBeInTheDocument();
+      expect(plan.dimensionCellShown).toMatch(/1199mm/);
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } });
+      expect(onSetUnit).toHaveBeenCalledWith(null);
+    });
+
+    it("offers nothing where the unit is printed", () => {
+      render(<BillDescriptionSummary plan={sized("W1200 x D500 mm")} open={false} onToggle={() => undefined} onSetUnit={() => undefined} />);
+      expect(screen.queryByRole("combobox")).toBeNull();
+    });
+
+    it("sets them all in one press, and is not there when there is nothing to set", () => {
+      const onApply = vi.fn();
+      const { rerender } = render(<BillUnitAll count={8} onApply={onApply} />);
+      expect(screen.getByText(/8 items have a size with no unit — set them all to/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+      expect(onApply).toHaveBeenLastCalledWith("mm");
+      fireEvent.change(screen.getByRole("combobox", { name: "Unit for every size with none" }), { target: { value: "in" } });
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+      expect(onApply).toHaveBeenLastCalledWith("in");
+      rerender(<BillUnitAll count={0} onApply={onApply} />);
+      expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+    });
   });
 });

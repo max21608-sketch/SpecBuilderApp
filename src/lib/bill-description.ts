@@ -461,7 +461,38 @@ export type BillDescriptionPlan = {
    * can offer "It's the diameter" / "It's the width" beside it. Null otherwise.
    */
   depthWithoutWidth: string | null;
+  /**
+   * The placed size states NO unit — not in its figures, not in its label or
+   * column heading — so the review offers the unit beside the composed cell
+   * (`unitOverride`). True whether or not a person has since set one.
+   */
+  unitMissing: boolean;
+  /** The unit a person set on the review for that size, where they did and it was applied. */
+  unitSetOnReview: BillUnitOverride | null;
 };
+
+/**
+ * WHAT A REVIEWER SAYS AN UNPRINTED UNIT IS, for one line's placed size.
+ * Matthew's Butler public-areas bill mixes inch rows and millimetre rows with
+ * no unit printed anywhere (2026-10-06); before this the only fix was per
+ * record after the confirm.
+ */
+export type BillUnitOverride = "mm" | "cm" | "in";
+export const BILL_UNIT_OVERRIDES: readonly BillUnitOverride[] = ["mm", "cm", "in"];
+
+export function isBillUnitOverride(value: unknown): value is BillUnitOverride {
+  return typeof value === "string" && (BILL_UNIT_OVERRIDES as readonly string[]).includes(value);
+}
+
+/**
+ * Whether this line's placed size states no unit, so a person may say one.
+ * The one test behind the review's select, the bulk "set them all", and the
+ * route that stores either — so none of them offers or accepts a unit over
+ * one the bill printed.
+ */
+export function lineSizeNeedsUnit(statements: readonly BillStatement[] | null): boolean {
+  return statements ? placedSizeOf(statements)?.unitless === true : false;
+}
 
 /**
  * The WHOLE value says "not decided" — "TBC", "To be confirmed". A size line
@@ -530,6 +561,7 @@ export function planBillDescription(
     fields,
     hasFabricLine,
     slotOverrides,
+    unitOverride,
     columns,
     name: singleLineName,
   }: {
@@ -537,6 +569,12 @@ export function planBillDescription(
     hasFabricLine: boolean;
     /** A reviewer's slot changes, by part key (`StagedBoqLine.slotOverrides`). */
     slotOverrides?: Readonly<Record<string, unknown>> | null;
+    /**
+     * A reviewer's unit for a placed size that PRINTS NONE
+     * (`StagedBoqLine.unitOverride`). Applied only there: a unit printed in
+     * the cell, the line's label or the column's heading is never overridden.
+     */
+    unitOverride?: unknown;
     columns?: (BillColumnCells & { headings?: BillColumnHeadings }) | null;
     name?: string | null;
   },
@@ -552,6 +590,7 @@ export function planBillDescription(
   // ---- which size line is placed, and what a reviewer said about its parts --
   const placed = placedSizeOf(statements);
   const resolved = resolveSlotOverrides(placed, slotOverrides);
+  const unitSetOnReview = placed?.unitless && isBillUnitOverride(unitOverride) ? unitOverride : null;
   if (resolved.problem) cautions.push(`Your slot changes on this line are not applied: ${resolved.problem}`);
   for (const key of resolved.unmatched) {
     cautions.push(`A slot change for “${key}” is ignored: the size line no longer prints that part.`);
@@ -572,12 +611,14 @@ export function planBillDescription(
         return;
       }
       if (placed && placed.index === index) {
-        const unit = placed.reading.unit;
-        const converted = placed.unitless
-          ? "No unit is printed on this size or its label, so it is kept as printed and not converted — correct the unit on the record's Specs tab."
-          : placed.metric
-            ? null
-            : "Converted from inches, exactly: the bill gives no metric size.";
+        const unit = placed.reading.unit ?? unitSetOnReview;
+        const converted = unitSetOnReview
+          ? `Unit set on review: the bill prints none, and the reviewer said ${unitSetOnReview}.`
+          : placed.unitless
+            ? "No unit is printed on this size or its label, so it is kept as printed and not converted — set the unit beside the size, or correct it on the record's Specs tab."
+            : placed.metric
+              ? null
+              : "Converted from inches, exactly: the bill gives no metric size.";
         for (const part of placed.reading.parts) {
           const key = slotPartKey(part);
           const slot = resolved.effective.get(key) ?? part.slot;
@@ -753,6 +794,8 @@ export function planBillDescription(
     dimensionFromImperial: shown?.fromImperial === true,
     cautions: [...new Set(cautions)],
     depthWithoutWidth,
+    unitMissing: placed?.unitless === true,
+    unitSetOnReview,
   };
 }
 
@@ -849,6 +892,7 @@ type PlanLine = {
   rowKind?: string;
   finishFor?: { row: number; code?: string | null } | null;
   slotOverrides?: Readonly<Record<string, unknown>> | null;
+  unitOverride?: unknown;
 };
 
 /**
@@ -880,6 +924,7 @@ export function planSheetDescriptions(
       fields,
       hasFabricLine: withFabric.has(line.lineNo),
       slotOverrides: line.slotOverrides ?? null,
+      unitOverride: line.unitOverride ?? null,
       columns: { dimensionsRaw: line.dimensionsRaw, finishRaw: line.finishRaw, headings },
       name: line.itemDescription ?? null,
     });
