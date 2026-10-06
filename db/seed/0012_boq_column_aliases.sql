@@ -2,7 +2,7 @@
 -- 0012_boq_column_aliases.sql -- the bill reader's header synonyms, as data.
 --
 -- EXACTLY the list that was `COLUMNS` in src/lib/boq-import.ts until 0040, and
--- nothing more. `tests/db/boq-columns.test.ts` compares these rows with that
+-- since then only words read off a real bill, each dated where it is added. `tests/db/boq-columns.test.ts` compares these rows with that
 -- constant (kept there as `REFERENCE_BOQ_ALIASES`), so the day the reader
 -- started loading its vocabulary from the database every bill read exactly as
 -- it did the day before.
@@ -52,7 +52,14 @@ from (values
   ('qty', 'quantity'),
   ('qtyUnit', 'unit'),
   ('qtyUnit', 'uom'),
-  ('qtyUnit', 'unit of measure')
+  ('qtyUnit', 'unit of measure'),
+  -- The Butler Arms bills (specifier Creation Luxury), 2026-10-06: the
+  -- bedrooms bill heads its columns "Dims" and "Finish", the public areas
+  -- bill "DIMENSIONS". Read by bill-description.ts, as a description cell's
+  -- own size and finish lines are. REQUIRES 0047 (the two roles).
+  ('dimensions', 'dims'),
+  ('dimensions', 'dimensions'),
+  ('finish', 'finish')
 ) as t(role, term)
 on conflict (term_norm) do update set
   role = excluded.role,

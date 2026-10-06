@@ -15,7 +15,11 @@
 // eight roles are the ones `COLUMNS` always had; `subArea`, `sourceLine` and
 // `notes` arrived with the Aman pricing document (2026-09-23), whose bill
 // carries a Sub-Area beside its Area, its own Line number and a Notes column
-// that says "OPTION 1" where the same code appears twice.
+// that says "OPTION 1" where the same code appears twice. `dimensions` and
+// `finish` arrived with the Butler Arms bills (2026-10-06), which print each
+// item's size and finish in COLUMNS of their own beside a one-line
+// description; both are read by `bill-description.ts`, the same reader that
+// reads a size or finish line inside a description cell.
 //
 // `ignore` is explicit. Prices, costs and pictures are never read into this
 // app — there is no pricing anywhere in it — and "a person said this column is
@@ -35,6 +39,8 @@ export const BOQ_READ_ROLES = [
   "productReference",
   "sourceLine",
   "notes",
+  "dimensions",
+  "finish",
 ] as const;
 
 export type BoqReadRole = (typeof BOQ_READ_ROLES)[number];
@@ -69,6 +75,8 @@ export const BOQ_ROLE_LABELS: Record<BoqRole, string> = {
   productReference: "Product reference",
   sourceLine: "Line number",
   notes: "Notes",
+  dimensions: "Dimensions",
+  finish: "Finish",
   ignore: "Not read",
 };
 

@@ -169,6 +169,8 @@ const ROLE_HELP: Record<(typeof BOQ_ROLES)[number], string> = {
   productReference: "a product or model reference that is not the client's code",
   sourceLine: "the bill's own line or item number",
   notes: "notes or remarks",
+  dimensions: "the item's size or dimensions, in a column of its own (W x D x H, a diameter)",
+  finish: "the item's finish or material, in a column of its own (oak, brass, a fabric)",
   ignore: "a column that is deliberately not read: prices, rates, costs, totals of money, pictures",
 };
 

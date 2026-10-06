@@ -124,6 +124,38 @@ describe("parseBoqSheets", () => {
     expect(staged.lines.map((line) => line.qty)).toEqual([1, 2]);
   });
 
+  it("reads a bill's own Dims and Finish columns by their headings, each cell staged as printed", () => {
+    // The Butler Arms bedrooms bill's shape (2026-10-06): a one-line
+    // description with the size and finish in columns of their own. Invented
+    // figures and words.
+    const bedrooms: SheetData = [
+      ["Code", "Description", "Qty", "Dims", "Finish", "PRICE PER UNIT"],
+      ["BA-01", "BED - EXAMPLE KING", 2, "W1900 x D2100 x H1200 mm", "SMOKED OAK\nBRASS FEET", 4321],
+      ["BA-02", "SOFA", 1, null, "SUEDE / NUBUCK", 8765],
+    ];
+    const staged = one(parseBoqSheets(sheet(bedrooms)));
+    expect(staged.columns?.dimensions).toEqual({ index: 3, heading: "Dims" });
+    expect(staged.columns?.finish).toEqual({ index: 4, heading: "Finish" });
+    expect(staged.lines[0]).toMatchObject({ dimensionsRaw: "W1900 x D2100 x H1200 mm", finishRaw: "SMOKED OAK\nBRASS FEET" });
+    // A blank cell under a column the sheet HAS is null, not absent.
+    expect(staged.lines[1]).toMatchObject({ dimensionsRaw: null, finishRaw: "SUEDE / NUBUCK" });
+    // The price is never read.
+    expect(JSON.stringify(staged.lines)).not.toMatch(/4321|8765/);
+
+    // The public areas bill heads it in capitals.
+    const publicAreas: SheetData = [
+      ["ITEM", "Code", "QTY", "DESCRIPTION", "DIMENSIONS"],
+      ["1", "PA-01", 4, "LOUNGE CHAIR", "W800 X D950 X H790 X SH430"],
+    ];
+    expect(one(parseBoqSheets(sheet(publicAreas))).lines[0]?.dimensionsRaw).toBe("W800 X D950 X H790 X SH430");
+  });
+
+  it("stages no Dims or Finish key on a bill without the columns, exactly as before", () => {
+    const staged = one(parseBoqSheets(sheet(TYPICAL)));
+    expect(staged.lines.every((line) => !("dimensionsRaw" in line) && !("finishRaw" in line))).toBe(true);
+    expect(staged.columns).not.toHaveProperty("dimensions");
+  });
+
   it("keeps a repeated client code as two separate lines", () => {
     // The case that killed the original schema: a BOQ code is not unique, so
     // nothing here may deduplicate. Two rows in, two lines out, different qty.

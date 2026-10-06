@@ -64,6 +64,10 @@ describe("the tool", () => {
     const props = STRUCTURE_TOOL.input_schema.properties;
     expect(STRUCTURE_TOOL.name).toBe(STRUCTURE_TOOL_NAME);
     expect(props.columns.items.properties.role.anyOf).toEqual([{ type: "string", enum: [...BOQ_ROLES] }, { type: "null" }]);
+    // A bill's own Dims and Finish columns are roles the model can name (2026-10-06).
+    expect(BOQ_ROLES).toEqual(expect.arrayContaining(["dimensions", "finish"]));
+    expect(props.columns.items.properties.role.description).toMatch(/- dimensions: the item's size/);
+    expect(props.columns.items.properties.role.description).toMatch(/- finish: the item's finish/);
     expect(props.rows.items.properties.kind.enum).toEqual([...BOQ_ROW_KINDS]);
     expect(STRUCTURE_TOOL.input_schema.required).toEqual(["notABill", "notABillEvidence", "headerRow", "headerRows", "columns", "rows"]);
     expect(STRUCTURE_TOOL.input_schema.additionalProperties).toBe(false);

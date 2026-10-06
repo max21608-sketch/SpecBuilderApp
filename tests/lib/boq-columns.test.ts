@@ -154,9 +154,11 @@ describe("the synonyms are passed in, and still match a WHOLE heading", () => {
   });
 
   it("the reference list is the old constant, role for role, and every role is a known one", () => {
-    expect(REFERENCE_BOQ_ALIASES.length).toBe(28); // 27, plus "q-ty" off a real mock-up tab (2026-10-06)
+    // 27, plus "q-ty" off a real mock-up tab, plus "dims", "dimensions" and
+    // "finish" off the Butler Arms bills (both 2026-10-06).
+    expect(REFERENCE_BOQ_ALIASES.length).toBe(31);
     for (const alias of REFERENCE_BOQ_ALIASES) expect(BOQ_ROLES).toContain(alias.role);
-    expect(new Set(REFERENCE_BOQ_ALIASES.map((alias) => foldHeading(alias.term))).size).toBe(28);
+    expect(new Set(REFERENCE_BOQ_ALIASES.map((alias) => foldHeading(alias.term))).size).toBe(31);
   });
 });
 

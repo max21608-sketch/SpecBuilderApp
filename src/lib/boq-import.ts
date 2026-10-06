@@ -123,6 +123,20 @@ export type BoqLine = {
   subArea?: string | null;
   sourceLine?: string | null;
   notes?: string | null;
+  /**
+   * A SIZE AND A FINISH IN COLUMNS OF THEIR OWN (the Butler Arms bills,
+   * 2026-10-06: `Description | Qty | Dims | Finish`), each the cell as
+   * printed. Present only where the sheet has the column — absent, not null,
+   * otherwise — so every bill staged before reads exactly as it did and no
+   * schema version moves: the v4 rule, keys added and every one optional.
+   *
+   * Read by `bill-description.ts`, the reader a description cell's own
+   * "Sizes:" and "Finish:" lines go through, so a size in a column and a size
+   * in a description compose, show and write identically. The column's
+   * HEADING (`Dims (mm)`) is on the sheet's `columns`, not on the line.
+   */
+  dimensionsRaw?: string | null;
+  finishRaw?: string | null;
 } & RowKindFields;
 
 /**
@@ -385,6 +399,10 @@ const COLUMNS = {
   productReference: ["product reference", "product ref", "reference"],
   qty: ["total q-ty", "q-ty", "total qty updated", "total qty", "total quantity", "qty", "quantity"],
   qtyUnit: ["unit", "uom", "unit of measure"],
+  // The Butler Arms bills, 2026-10-06: "Dims" and "Finish" on the bedrooms
+  // bill, "DIMENSIONS" on the public areas one.
+  dimensions: ["dims", "dimensions"],
+  finish: ["finish"],
 } as const;
 
 /** One heading the reader knows, and what it means. A row of `boq_column_aliases`. */
@@ -472,6 +490,8 @@ const COLUMN_LABEL: Record<ColumnKey, string> = {
   qtyUnit: "unit",
   sourceLine: "line number",
   notes: "notes",
+  dimensions: "dimensions",
+  finish: "finish",
 };
 
 /**
@@ -544,6 +564,16 @@ function text(value: unknown): string | null {
   if (!isPrintable(value)) return null;
   const out = (value instanceof Date ? sheetDate(value) : String(value)).replace(/\s+/g, " ").trim();
   return out === "" ? null : out;
+}
+
+/**
+ * A cell as printed, trimmed, with its line breaks kept: what `text` returns
+ * before it collapses the whitespace. Null where `text` would be null, so
+ * "the cell was blank" reads the same through both.
+ */
+function rawCell(value: unknown): string | null {
+  if (text(value) === null) return null;
+  return (value instanceof Date ? sheetDate(value) : String(value)).replace(/\r\n?/g, "\n").trim();
 }
 
 function quantity(value: unknown): number | null {
@@ -1078,6 +1108,11 @@ function readRows(
     ...(header.subArea !== undefined ? { subArea: text(at(row, "subArea")) } : {}),
     ...(header.sourceLine !== undefined ? { sourceLine: text(at(row, "sourceLine")) } : {}),
     ...(header.notes !== undefined ? { notes: text(at(row, "notes")) } : {}),
+    // A size or a finish in a column of its own, VERBATIM — line breaks and
+    // all, as a description cell is kept — because `bill-description.ts`
+    // reads it, and a reader cannot recover what a collapse threw away.
+    ...(header.dimensions !== undefined ? { dimensionsRaw: rawCell(at(row, "dimensions")) } : {}),
+    ...(header.finish !== undefined ? { finishRaw: rawCell(at(row, "finish")) } : {}),
   });
 
   const lines: BoqLine[] = [];
