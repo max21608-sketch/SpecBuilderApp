@@ -61,8 +61,11 @@ import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import type { NonFurnitureGuess } from "@/lib/non-furniture-guess";
 import type { BillPictureOverride, BoqRowImages } from "@/lib/bill-row-image";
 import {
+  BOQ_KEEP_ROLE,
   foldHeading,
+  keptHeading,
   type BoqColumnRef,
+  type BoqKeptCell,
   type BoqLayoutOrigin,
   type BoqMappingSource,
   type BoqReadRole,
@@ -137,6 +140,21 @@ export type BoqLine = {
    */
   dimensionsRaw?: string | null;
   finishRaw?: string | null;
+  /**
+   * THE BILL'S MOCK-UP FIGURE (2026-10-06): the `Prototype Quantity` cell as
+   * printed — `1`, `PARTIAL`, `N/A`, or null where the cell is blank. Present
+   * only where the sheet has the column. It is not `qty` (that is the
+   * order — "Rollout Quantity") and it is never apportioned or defaulted: what
+   * it does at confirm is `readMockupQty`'s (`bill-sheet-notices.ts`).
+   */
+  mockupQtyRaw?: string | null;
+  /**
+   * THE CELLS OF EVERY COLUMN KEPT IN NOTES, non-blank only, each with its
+   * column's heading as printed. Present (possibly empty) only where the sheet
+   * keeps a column. Composed into a NEW record's internal notes by
+   * `composeBillNotes`, after the `notes` column's text.
+   */
+  kept?: BoqKeptCell[];
 } & RowKindFields;
 
 /**
@@ -297,6 +315,13 @@ export type StagedBoqSheet = {
   /** Role → the column it was read from and that column's own heading. */
   columns?: Partial<Record<BoqReadRole, BoqColumnRef>>;
   /**
+   * The columns KEPT IN NOTES — the one role several columns share, so a list
+   * beside `columns` rather than a key in it. Absent where none is kept.
+   */
+  kept?: BoqColumnRef[];
+  /** Per kept column (by its index), what a MODEL read it from. */
+  keptEvidence?: Record<string, string>;
+  /**
    * The header row's headings as the sheet printed them, every column in
    * order (a two-row header joined per column). What a saved layout is saved
    * AGAINST, and what the panel prints above its selects.
@@ -414,6 +439,9 @@ const COLUMNS = {
   productReference: ["product reference", "product ref", "reference"],
   qty: ["total q-ty", "q-ty", "total qty updated", "total qty", "total quantity", "qty", "quantity"],
   qtyUnit: ["unit", "uom", "unit of measure"],
+  // Matthew's next bills, 2026-10-06: "Prototype Quantity" beside "Rollout
+  // Quantity". The whole heading only — never a bare "prototype".
+  mockupQty: ["prototype quantity"],
   // The Butler Arms bills, 2026-10-06: "Dims" and "Finish" on the bedrooms
   // bill, "DIMENSIONS" on the public areas one.
   dimensions: ["dims", "dimensions"],
@@ -437,6 +465,12 @@ export type BoqLayout = {
   name: string;
   headerRows: 1 | 2;
   mapping: Partial<Record<BoqReadRole, string>>;
+  /**
+   * The FOLDED headings of the columns kept in notes — stored in the row's
+   * `mapping` jsonb under the key `keep`, as a list, because it is the one role
+   * several columns share. Absent: none kept.
+   */
+  keep?: string[];
   /** Seeded by this repo, or saved by a person. Absent: a person's. */
   origin?: BoqLayoutOrigin;
   /** Row rules the bill's own words license (0042). Absent or null: none. */
@@ -479,6 +513,8 @@ function vocabularyOf(aliases: readonly BoqAlias[]): Vocabulary {
 type HeaderReading = {
   /** Which wanted column each recognised heading sat in. */
   found: Partial<Record<ColumnKey, number>>;
+  /** The columns whose heading an alias keeps in notes, in printed order. */
+  kept: number[];
   /** The headings on the row that matched no synonym at all, in printed order. */
   unrecognised: string[];
   /** True when both required columns are there, which makes this row the header. */
@@ -502,6 +538,7 @@ const COLUMN_LABEL: Record<ColumnKey, string> = {
   itemDescription: "description",
   productReference: "product reference",
   qty: "quantity",
+  mockupQty: "mock-up quantity",
   qtyUnit: "unit",
   sourceLine: "line number",
   notes: "notes",
@@ -613,6 +650,7 @@ function quantity(value: unknown): number | null {
  */
 function readHeader(row: readonly unknown[], vocabulary: Vocabulary): HeaderReading {
   const found: Partial<Record<ColumnKey, number>> = {};
+  const kept: number[] = [];
   const unrecognised: string[] = [];
   row.forEach((cell, index) => {
     const value = norm(cell);
@@ -622,11 +660,17 @@ function readHeader(row: readonly unknown[], vocabulary: Vocabulary): HeaderRead
       unrecognised.push(text(cell) ?? "");
       return;
     }
+    // A heading kept in notes: every column carrying it, which is the one
+    // role several columns share.
+    if (role === BOQ_KEEP_ROLE) {
+      kept.push(index);
+      return;
+    }
     // First column wins: "Product Reference" must not be claimed by `code`'s
     // "reference" synonym once a real "Code" column has been seen.
     if (role !== "ignore" && found[role] === undefined) found[role] = index;
   });
-  return { found, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
+  return { found, kept, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
 }
 
 /** How much of a header a row managed to be, for picking the closest one. */
@@ -683,9 +727,15 @@ function readHeaderPair(upper: readonly unknown[], lower: readonly unknown[], vo
       if (found[key] === undefined) found[key] = index;
     }
   }
+  // Kept columns from any of the three readings, once each, and never a
+  // column a role already took.
+  const taken = new Set(Object.values(found));
+  const kept = [...new Set(readings.flatMap((reading) => reading.kept))]
+    .filter((index) => !taken.has(index))
+    .sort((a, b) => a - b);
   // What NEITHER row nor the join recognised, for the refusal to quote.
   const unrecognised = readHeader(joined, vocabulary).unrecognised;
-  return { found, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
+  return { found, kept, unrecognised, complete: REQUIRED.every((key) => found[key] !== undefined) };
 }
 
 /**
@@ -713,7 +763,7 @@ function layoutAt(
   data: SheetData,
   headerIndex: number,
   layout: BoqLayout,
-): Partial<Record<ColumnKey, number>> | null {
+): { found: Partial<Record<ColumnKey, number>>; kept: number[] } | null {
   if (layout.headerRows === 2 && headerIndex < 1) return null;
   const row = data[headerIndex];
   if (!row) return null;
@@ -731,7 +781,17 @@ function layoutAt(
     used.add(index);
     found[role] = index;
   }
-  return found;
+  // A KEPT heading is held to the same rule: every one present, exactly, on a
+  // column of its own — a layout whose kept column moved does not apply.
+  const kept: number[] = [];
+  for (const heading of layout.keep ?? []) {
+    const want = foldHeading(heading);
+    const index = folded.findIndex((cell, at) => cell !== "" && cell === want && !used.has(at));
+    if (index < 0) return null;
+    used.add(index);
+    kept.push(index);
+  }
+  return { found, kept };
 }
 
 /** The widest row, capped: a sheet with a stray value in column ZZ is not 700 columns of bill. */
@@ -868,9 +928,8 @@ export function parseBoqSheets(
   if (sheets.length === 0) return { ok: false, error: "The file has no sheets." };
 
   const vocabulary = vocabularyOf(registers.aliases ?? REFERENCE_BOQ_ALIASES);
-  const layouts = [...(registers.layouts ?? [])].sort(
-    (a, b) => Object.keys(b.mapping).length - Object.keys(a.mapping).length,
-  );
+  const size = (layout: BoqLayout) => Object.keys(layout.mapping).length + (layout.keep?.length ?? 0);
+  const layouts = [...(registers.layouts ?? [])].sort((a, b) => size(b) - size(a));
 
   const readings = sheets.map(({ sheet, data }) => readSheet(sheet, data, vocabulary, layouts));
   const anyRead = readings.some((reading) => reading.sheet !== null);
@@ -903,9 +962,10 @@ function readSheet(
   //    synonyms, because a person decided it for exactly this bill.
   for (let rowIndex = 0; rowIndex < data.length; rowIndex += 1) {
     for (const layout of layouts) {
-      const found = layoutAt(data, rowIndex, layout);
-      if (!found) continue;
-      const read = readRows(sheet, data, rowIndex, found, {
+      const fit = layoutAt(data, rowIndex, layout);
+      if (!fit) continue;
+      const read = readRows(sheet, data, rowIndex, fit.found, {
+        kept: fit.kept,
         headerRows: layout.headerRows,
         source: "layout",
         layout: { id: layout.id, name: layout.name },
@@ -932,7 +992,10 @@ function readSheet(
     if (!row) continue;
     const reading = readHeader(row, vocabulary);
     if (reading.complete) {
-      return { sheet: readRows(sheet, data, rowIndex, reading.found, { source: "synonym" }), closest: null };
+      return {
+        sheet: readRows(sheet, data, rowIndex, reading.found, { kept: reading.kept, source: "synonym" }),
+        closest: null,
+      };
     }
 
     // A ROW THAT LOOKS LIKE HALF A HEADER GETS ONE MORE READING, with the row
@@ -944,7 +1007,7 @@ function readSheet(
       const pair = readHeaderPair(row, below, vocabulary);
       if (pair.complete) {
         return {
-          sheet: readRows(sheet, data, rowIndex + 1, pair.found, { headerRows: 2, source: "synonym" }),
+          sheet: readRows(sheet, data, rowIndex + 1, pair.found, { kept: pair.kept, headerRows: 2, source: "synonym" }),
           closest: null,
         };
       }
@@ -992,6 +1055,7 @@ function unreadSheet(
   for (const [role, index] of Object.entries(closest?.found ?? {}) as [ColumnKey, number][]) {
     columns[role] = { index, heading: headings[index] ?? "" };
   }
+  const kept = (closest?.kept ?? []).map((index) => ({ index, heading: headings[index] ?? "" }));
   return {
     sheetName: sheet,
     proposedRunName: sheet,
@@ -1003,6 +1067,7 @@ function unreadSheet(
     metadata: headerRow > 0 ? readMetadata(data, headerRow - 1) : { revision: null, date: null, notes: [] },
     lines: [],
     columns,
+    ...(kept.length > 0 ? { kept } : {}),
     headings,
     mappingSource: "synonym",
     layout: null,
@@ -1024,10 +1089,20 @@ function unreadSheet(
 export function readSheetWithColumns(
   sheet: string,
   data: SheetData,
-  mapping: { headerRow: number; headerRows: 1 | 2; columns: Partial<Record<BoqReadRole, number>> },
+  mapping: {
+    headerRow: number;
+    headerRows: 1 | 2;
+    columns: Partial<Record<BoqReadRole, number>>;
+    /** The columns kept in notes, any number of them. */
+    keep?: readonly number[];
+  },
   source: BoqMappingSource = "person",
 ): ParsedBoqSheet {
-  return readRows(sheet, data, mapping.headerRow - 1, mapping.columns, { headerRows: mapping.headerRows, source });
+  return readRows(sheet, data, mapping.headerRow - 1, mapping.columns, {
+    kept: mapping.keep ?? [],
+    headerRows: mapping.headerRows,
+    source,
+  });
 }
 
 /** As many of a row's own headings as a sentence can carry. */
@@ -1109,9 +1184,22 @@ function readRows(
   data: SheetData,
   headerIndex: number,
   header: Partial<Record<ColumnKey, number>>,
-  options: { headerRows?: number; source: BoqMappingSource; layout?: { id: string; name: string } | null },
+  options: {
+    headerRows?: number;
+    source: BoqMappingSource;
+    layout?: { id: string; name: string } | null;
+    /** The columns kept in notes. */
+    kept?: readonly number[];
+  },
 ): ParsedBoqSheet {
   const headerRows = options.headerRows ?? 1;
+  // Which column each role came from, with that column's own heading — so the
+  // screen can say "Spec Code is the code" rather than only showing codes.
+  // Read before the rows, because a kept cell is written under its heading.
+  const width = sheetWidth(data);
+  const headings = headingsAt(data, headerIndex, headerRows, width);
+  const taken = new Set(Object.values(header));
+  const keptColumns = [...new Set(options.kept ?? [])].filter((index) => !taken.has(index)).sort((a, b) => a - b);
   const at = (row: readonly unknown[], key: ColumnKey): unknown => {
     const index = header[key];
     return index === undefined ? null : row[index];
@@ -1128,6 +1216,18 @@ function readRows(
     // reads it, and a reader cannot recover what a collapse threw away.
     ...(header.dimensions !== undefined ? { dimensionsRaw: rawCell(at(row, "dimensions")) } : {}),
     ...(header.finish !== undefined ? { finishRaw: rawCell(at(row, "finish")) } : {}),
+    // The bill's mock-up figure, as printed: `1`, `PARTIAL`, `N/A` — never
+    // read as a number here, because a word in it is the point.
+    ...(header.mockupQty !== undefined ? { mockupQtyRaw: text(at(row, "mockupQty")) } : {}),
+    // Every kept column's cell, non-blank only, under its heading as printed.
+    ...(keptColumns.length > 0
+      ? {
+          kept: keptColumns.flatMap((index) => {
+            const value = text(row[index]);
+            return value === null ? [] : [{ heading: keptHeading(headings[index], index), value }];
+          }),
+        }
+      : {}),
   });
 
   const lines: BoqLine[] = [];
@@ -1172,10 +1272,6 @@ function readRows(
   // the three real ones beside it.
   const empty = lines.length === 0;
 
-  // Which column each role came from, with that column's own heading — so the
-  // screen can say "Spec Code is the code" rather than only showing codes.
-  const width = sheetWidth(data);
-  const headings = headingsAt(data, headerIndex, headerRows, width);
   const columns: Partial<Record<ColumnKey, BoqColumnRef>> = {};
   for (const [role, index] of Object.entries(header) as [ColumnKey, number][]) {
     columns[role] = { index, heading: headings[index] ?? "" };
@@ -1198,6 +1294,7 @@ function readRows(
     // the one row kind the document states outright (src/lib/boq-row-kinds.ts).
     lines: applyBracketRule(lines),
     columns,
+    ...(keptColumns.length > 0 ? { kept: keptColumns.map((index) => ({ index, heading: headings[index] ?? "" })) } : {}),
     headings,
     mappingSource: options.source,
     layout: options.layout ?? null,

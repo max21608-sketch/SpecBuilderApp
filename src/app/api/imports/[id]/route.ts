@@ -12,6 +12,7 @@
 //   the set the screen is filtering, so "the proposal at index 4" means a
 //   different row before and after an Ignore. Every operation here locates by
 //   `elem.id` in the live, locked JSON.
+import { billSheetNotices } from "@/lib/bill-sheet-notices";
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { z } from "zod";
 import { sql, json, type Row } from "@/lib/db";
@@ -1238,6 +1239,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     descriptionsRead: parsed ? billReadsDescriptions(parsed.sheets) : false,
     fabricFilings,
     finishCodePrefix,
+    // Per sheet: how many items its Prototype Quantity will also put on the
+    // mock-up phase, and whether no item line carries a code — the function
+    // the confirm reads its mock-up lines through (`bill-sheet-notices.ts`).
+    sheetNotices: parsed ? billSheetNotices(parsed.sheets) : {},
   });
 }
 

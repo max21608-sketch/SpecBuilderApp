@@ -139,6 +139,7 @@ describe("what of it is believed", () => {
       headerRow: 8,
       headerRows: 1,
       columns: { sourceLine: 0, area: 1, subArea: 2, boqCategory: 3, code: 4, itemDescription: 7, qtyUnit: 11, qty: 12, notes: 16 },
+      keep: [],
     });
     expect(reading.notes).toEqual([]);
     expect(reading.rows.map((row) => row.row)).toEqual([10, 14, 15]);

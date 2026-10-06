@@ -59,7 +59,11 @@ from (values
   -- own size and finish lines are. REQUIRES 0047 (the two roles).
   ('dimensions', 'dims'),
   ('dimensions', 'dimensions'),
-  ('finish', 'finish')
+  ('finish', 'finish'),
+  -- Matthew's next bills, 2026-10-06: "Prototype Quantity" beside "Rollout
+  -- Quantity" -- how many go in the mock-up. The whole heading only, never a
+  -- bare "prototype". REQUIRES 0047 as extended (the mockupQty role).
+  ('mockupQty', 'prototype quantity')
 ) as t(role, term)
 on conflict (term_norm) do update set
   role = excluded.role,

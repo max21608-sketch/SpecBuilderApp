@@ -39,6 +39,7 @@ import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
 import { Table, Td, Th, Tr } from "@/components/ui/Table";
 import {
+  BOQ_KEEP_ROLE,
   BOQ_MAPPING_SOURCE_LABELS,
   BOQ_ROLES,
   BOQ_ROLE_LABELS,
@@ -62,6 +63,10 @@ export type ColumnsPanelSheet = {
   ignored: boolean;
   lines: unknown[];
   columns?: Partial<Record<BoqReadRole, BoqColumnRef>>;
+  /** The columns kept in notes — the one role several columns may share. */
+  kept?: BoqColumnRef[];
+  /** Per kept column (by its index), what a MODEL read it from. */
+  keptEvidence?: Record<string, string>;
   headings?: string[];
   mappingSource?: BoqMappingSource;
   layout?: { id: string; name: string } | null;
@@ -102,6 +107,9 @@ function selectionsOf(sheet: ColumnsPanelSheet, width: number): (BoqRole | null)
   for (const [role, ref] of Object.entries(sheet.columns ?? {})) {
     if (!ref || !isBoqRole(role)) continue;
     if (ref.index >= 0 && ref.index < width) out[ref.index] = role;
+  }
+  for (const ref of sheet.kept ?? []) {
+    if (ref.index >= 0 && ref.index < width && out[ref.index] === null) out[ref.index] = BOQ_KEEP_ROLE;
   }
   return out;
 }
@@ -168,7 +176,20 @@ export default function BoqColumnsPanel({
     mapped.problem ??
     (headerRow === null
       ? "Click the row number the column headings are on."
-      : columnMappingProblem({ columns: mapped.columns, headerRow, headerRows, rowCount: preview.length, width }));
+      : columnMappingProblem({
+          columns: mapped.columns,
+          keep: mapped.keep,
+          headerRow,
+          headerRows,
+          rowCount: preview.length,
+          width,
+        }));
+
+  /** What a model read a column's role from: per role, or per column for one kept in notes. */
+  const evidenceFor = (role: BoqRole, index: number): string | null =>
+    role === BOQ_KEEP_ROLE
+      ? (sheet.keptEvidence?.[String(index)] ?? null)
+      : (sheet.mappingEvidence?.[role as BoqReadRole] ?? null);
 
   /** A person's layout or a model's mapping nobody has agreed to yet. Never a seeded layout. */
   const needsCheck = columnsAwaitingALook(sheet);
@@ -207,7 +228,7 @@ export default function BoqColumnsPanel({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sheetIndex, headerRow, headerRows, columns: mapped.columns, version }),
+          body: JSON.stringify({ sheetIndex, headerRow, headerRows, columns: mapped.columns, keep: mapped.keep, version }),
         },
       );
       if (!res.ok) {
@@ -373,6 +394,8 @@ export default function BoqColumnsPanel({
         )}
         <p className="mt-1 text-xs text-neutral-500">
           Click a row number to make it the header. Shift-click the row next to it to read two rows as one header.
+          {" "}Any number of columns can be <b>Kept in notes</b>: each cell goes into the new record&rsquo;s notes
+          under its heading. A price is never kept.
           {onAsk && " Asking the model is one small read, charged; setting the columns yourself is free."}
         </p>
         {(sheet.structure?.notes?.length ?? 0) > 0 && (
@@ -427,9 +450,9 @@ export default function BoqColumnsPanel({
                         <Chip tone={BADGE_TONE[badge] ?? "plain"}>{badge}</Chip>
                       </span>
                     )}
-                    {role && role !== "ignore" && sheet.mappingEvidence?.[role as BoqReadRole] && role === stagedRole && (
+                    {role && role !== "ignore" && role === stagedRole && evidenceFor(role, index) && (
                       <span className="mt-1 block text-[10.5px] font-normal text-neutral-500">
-                        {sheet.mappingEvidence[role as BoqReadRole]}
+                        {evidenceFor(role, index)}
                       </span>
                     )}
                   </Th>

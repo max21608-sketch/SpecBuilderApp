@@ -23,6 +23,14 @@
 //
 //   the quantity   the bill never said how many are in the mock-up room. Null,
 //                  and every screen says "quantity not given", never 1.
+//                  THE ONE EXCEPTION IS A BILL THAT DOES SAY (2026-10-06): a
+//                  `Prototype Quantity` column beside the rollout quantity is
+//                  the bill stating how many go in the mock-up, so the BOQ
+//                  confirm passes that figure (`quantities`) and it is written
+//                  -- where it is a number. Where the cell is words
+//                  (`PARTIAL`) the quantity stays null and the record's
+//                  internal note quotes the cell. Never 1, never apportioned
+//                  (`readMockupQty`, src/lib/bill-sheet-notices.ts).
 //   the specs      a mock-up item takes its own from the mock-up drawings,
 //                  which may differ. Copying the main line's would put a design
 //                  on the mock-up record that its own drawing contradicts, and
@@ -45,6 +53,12 @@
 // (the partial unique index in 0043 is the floor under that) and `record_no`
 // allocation (the boq-concurrency defect). One `mockup_add` change set covers
 // the phase AND the records, and every new record gets its version 1 under it.
+//
+// INSIDE ANOTHER ACT (`within`): the BOQ confirm already holds the project
+// lock and has its own change set open, so it passes that change set and this
+// takes neither -- the bill's confirm and the mock-up items it implies are ONE
+// change, and a second `for update` on a row this transaction holds would be
+// a lock nobody needed. The caller's promise is that it holds the lock.
 //
 // IDEMPOTENT: a source already represented on the mock-up phase -- an active
 // record there whose `mockup_of` is the source -- is reported, not duplicated.
@@ -138,7 +152,28 @@ export function describeMockupResult(
  */
 export async function addToMockupPhase(
   txn: TxnSql,
-  { projectId, recordIds, actor }: { projectId: string; recordIds: string[]; actor: string },
+  {
+    projectId,
+    recordIds,
+    actor,
+    within,
+    quantities,
+  }: {
+    projectId: string;
+    recordIds: string[];
+    actor: string;
+    /**
+     * The caller already holds the project row lock and has this change set
+     * open (the BOQ confirm): neither is taken again, and the records are
+     * versioned under it.
+     */
+    within?: { changeSetId: string };
+    /**
+     * Per SOURCE record: the mock-up record's quantity and internal note, where
+     * a bill said how many are in the mock-up. Absent: null and null, as ever.
+     */
+    quantities?: ReadonlyMap<string, { qty: number | null; internalNote: string | null }>;
+  },
 ): Promise<AddToMockupResult> {
   const ids = [...new Set(recordIds)];
   if (ids.length === 0) {
@@ -149,9 +184,11 @@ export async function addToMockupPhase(
 
   // THE PROJECT LOCK, FIRST. Everything below -- finding or making the phase,
   // reading max(record_no) -- is a read-then-write that two presses at once
-  // would otherwise both win.
-  const projects = await txn`select id from projects where id = ${projectId} for update`;
-  if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
+  // would otherwise both win. Inside another act, the caller holds it.
+  if (!within) {
+    const projects = await txn`select id from projects where id = ${projectId} for update`;
+    if (!projects[0]) throw new DomainConflictError("not_found", "No such project.", { status: 404 });
+  }
 
   const sources = await txn`
     select r.id, r.project_id, r.status, r.parent_id, run.is_mockup, run.status as run_status
@@ -221,12 +258,14 @@ export async function addToMockupPhase(
     return { ...result, message: describeMockupResult(result) };
   }
 
-  const changeSetId = await openChangeSet(txn, {
-    projectId,
-    kind: "mockup_add",
-    actor,
-    reason: `${plural(toAdd.length, "item")} added to ${runName ?? MOCKUP_PHASE_NAME}`,
-  });
+  const changeSetId =
+    within?.changeSetId ??
+    (await openChangeSet(txn, {
+      projectId,
+      kind: "mockup_add",
+      actor,
+      reason: `${plural(toAdd.length, "item")} added to ${runName ?? MOCKUP_PHASE_NAME}`,
+    }));
 
   let phaseCreated = false;
   if (!runId) {
@@ -260,14 +299,16 @@ export async function addToMockupPhase(
   for (const row of ordered) {
     const sourceId = String(row.id);
     nextNo += 1;
+    // Null and null unless a bill said how many (see the header).
+    const said = quantities?.get(sourceId);
     const inserted = await txn`
       insert into spec_records
         (project_id, run_id, record_no, status, category_id, item_description, product_reference,
          qty, designer, area, boq_category, level, level_suggested, level_suggested_reason,
-         mockup_of, created_by, updated_by)
+         internal_notes, mockup_of, created_by, updated_by)
       select project_id, ${runId}, ${nextNo}, 'active', category_id, item_description, product_reference,
-             null, designer, area, boq_category, level, level_suggested, level_suggested_reason,
-             id, ${actor}, ${actor}
+             ${said?.qty ?? null}, designer, area, boq_category, level, level_suggested, level_suggested_reason,
+             ${said?.internalNote ?? null}, id, ${actor}, ${actor}
         from spec_records where id = ${sourceId}
       returning id
     `;

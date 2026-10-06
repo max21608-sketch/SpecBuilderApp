@@ -13,7 +13,7 @@
 //
 // Three shapes, told apart by the body:
 //
-//   { sheetIndex, headerRow, headerRows, columns, version }
+//   { sheetIndex, headerRow, headerRows, columns, keep?, version }
 //       ONE SHEET, READ WITH THE COLUMNS A PERSON SET. The sheet is re-parsed
 //       with exactly that mapping, its lines re-suggested by the same function
 //       registration uses (`src/lib/boq-stage.ts`), and it REPLACES the staged
@@ -68,6 +68,8 @@ const SetColumns = z
     headerRow: z.number().int().positive(),
     headerRows: z.union([z.literal(1), z.literal(2)]),
     columns: z.record(z.string(), z.number().int().nonnegative()),
+    // The columns kept in notes: the one role several columns share.
+    keep: z.array(z.number().int().nonnegative()).max(60).optional(),
     version: Version,
   })
   .strict();
@@ -146,8 +148,10 @@ async function setColumns(run: BoqRunRow, body: z.infer<typeof SetColumns>, acto
     return json({ ok: false, error: `The stored file no longer has a sheet called “${current.sheetName}”.` }, 409);
   }
 
+  const keep = [...new Set(body.keep ?? [])].sort((a, b) => a - b);
   const problem = columnMappingProblem({
     columns,
+    keep,
     headerRow: body.headerRow,
     headerRows: body.headerRows,
     rowCount: source.data.length,
@@ -159,6 +163,7 @@ async function setColumns(run: BoqRunRow, body: z.infer<typeof SetColumns>, acto
     headerRow: body.headerRow,
     headerRows: body.headerRows,
     columns,
+    keep,
   });
 
   const version = await withTransaction(async (txn) => {

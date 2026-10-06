@@ -4,7 +4,7 @@
 // The review screen's automatic structure read (once, and never on a bill
 // already read), the yellow banner and the "The columns are right" gate a
 // model's columns wait behind, the Kind select on each line and the items a
-// fabric line is offered, and the Confirm label that counts fabric specs. No
+// fabric line is offered, and the Confirm label that counts fabric and finish specs. No
 // database, no model, no money: `apiFetch` and `next/navigation` are stubbed,
 // and every bill is the SYNTHETIC pricing-document layout.
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -213,7 +213,7 @@ describe("a model's columns wait for a person", () => {
     expect(confirm).toBeDisabled();
     // The label counts the fabric line as a spec, not a record.
     // Row 10 by the bill's bracket, row 14 by the model: two fabric specs.
-    expect(confirm.textContent).toBe("Confirm · creates 6 records and 2 fabric specs on 1 phase");
+    expect(confirm.textContent).toBe("Confirm · creates 6 records and 2 fabric and finish specs on 1 phase");
     const region = screen.getByRole("region", { name: "Columns of CASEGOODS+SEATING+TABLES" });
     expect(within(region).getAllByText("read by the model").length).toBeGreaterThan(0);
     expect(within(region).getByText("codes like ZZ-FUR-10")).toBeInTheDocument();
@@ -284,7 +284,7 @@ describe("a line's kind", () => {
     await user.click(screen.getByRole("button", { name: "Row 12 is Fabric — change" }));
     expect(screen.getByText("the bill's bracket")).toBeInTheDocument();
     expect(screen.getByText(/this is the nearer one above \(row 11\); check it/)).toBeInTheDocument();
-    expect(screen.getByText("written as the next free COM on row 11")).toBeInTheDocument();
+    expect(screen.getByText("written as a spec on row 11")).toBeInTheDocument();
     expect((screen.getByRole("combobox", { name: "Row 12 is the fabric of" }) as HTMLSelectElement).value).toBe("11");
   });
 
@@ -296,9 +296,9 @@ describe("a line's kind", () => {
     expect(screen.queryByRole("combobox", { name: "Row 14 is" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Row 14 is Fabric — change" }));
     expect(screen.getByRole("combobox", { name: "Row 14 is" })).toHaveValue("finish_for");
-    expect(screen.queryByText(/Not a record — its description is written as the next free COM spec on row 13/)).toBeNull();
+    expect(screen.queryByText(/Not a record — its description is written as a spec on row 13/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Why row 14 is a fabric line" }));
-    expect(screen.getByText(/Not a record — its description is written as the next free COM spec on row 13/)).toBeInTheDocument();
+    expect(screen.getByText(/Not a record — its description is written as a spec on row 13/)).toBeInTheDocument();
   });
 });
 

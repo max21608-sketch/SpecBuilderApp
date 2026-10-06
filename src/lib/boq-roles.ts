@@ -21,6 +21,17 @@
 // description; both are read by `bill-description.ts`, the same reader that
 // reads a size or finish line inside a description cell.
 //
+// `mockupQty` and `keep` arrived with Matthew's next bills (2026-10-06, Max's
+// decisions). A bill's `Prototype Quantity` beside its `Rollout Quantity` puts
+// the items it names on the project's mock-up phase at confirm
+// (`bill-sheet-notices.ts`, `addToMockupPhase`). And a column no other role
+// fits but somebody wants kept — the Butler Arms public areas bill's own
+// `PHASE` (the client's phasing, not our phase) — is `keep`: its cell goes
+// into the new record's internal notes as `<heading>: <value>`. `keep` is the
+// ONE role several columns may share, so it is not a READ role: `columns` stays
+// one column per role everywhere, and the kept columns travel beside it as a
+// list (`keep`), which is the least that had to move.
+//
 // `ignore` is explicit. Prices, costs and pictures are never read into this
 // app — there is no pricing anywhere in it — and "a person said this column is
 // not read" is a different statement from "nobody has said what it is".
@@ -31,6 +42,7 @@ export const BOQ_READ_ROLES = [
   "code",
   "itemDescription",
   "qty",
+  "mockupQty",
   "qtyUnit",
   "area",
   "subArea",
@@ -46,11 +58,18 @@ export const BOQ_READ_ROLES = [
 export type BoqReadRole = (typeof BOQ_READ_ROLES)[number];
 
 /**
- * Every role, including the deliberate "not read". The CHECK on
- * `boq_column_aliases.role` (0040) holds exactly this list, and
- * `tests/db/vocabulary-sync.test.ts` asserts the two agree.
+ * THE ROLE SEVERAL COLUMNS MAY SHARE: kept in the new record's notes, as
+ * `<heading>: <value>`. Not a read role, because every reader of `columns`
+ * relies on one column per role; the kept columns are a LIST beside it.
  */
-export const BOQ_ROLES = [...BOQ_READ_ROLES, "ignore"] as const;
+export const BOQ_KEEP_ROLE = "keep" as const;
+
+/**
+ * Every role, including "kept in notes" and the deliberate "not read". The
+ * CHECK on `boq_column_aliases.role` (0040, re-listed by 0047) holds exactly
+ * this list, and `tests/db/vocabulary-sync.test.ts` asserts the two agree.
+ */
+export const BOQ_ROLES = [...BOQ_READ_ROLES, BOQ_KEEP_ROLE, "ignore"] as const;
 
 export type BoqRole = (typeof BOQ_ROLES)[number];
 
@@ -67,6 +86,7 @@ export const BOQ_ROLE_LABELS: Record<BoqRole, string> = {
   code: "Code (client ref)",
   itemDescription: "Item description",
   qty: "Quantity",
+  mockupQty: "Mock-up quantity",
   qtyUnit: "Unit",
   area: "Area",
   subArea: "Sub-area",
@@ -77,6 +97,7 @@ export const BOQ_ROLE_LABELS: Record<BoqRole, string> = {
   notes: "Notes",
   dimensions: "Dimensions",
   finish: "Finish",
+  keep: "Kept in notes",
   ignore: "Not read",
 };
 
@@ -177,28 +198,39 @@ export function composeBoqArea(area: string | null | undefined, subArea: string 
  *     mistaking a title row for a header, and a person pointing at a row is
  *     not that risk.
  *   * The columns exist, and the header row is on the sheet.
+ *   * KEPT COLUMNS (`keep`) may be as many as the sheet has, but each is still
+ *     ONE column read as one thing: a kept column that is also the code would
+ *     put the code in two places.
  */
 export function columnMappingProblem(input: {
   columns: Partial<Record<BoqReadRole, number>>;
+  keep?: readonly number[];
   headerRow: number;
   headerRows: number;
   rowCount: number;
   width: number;
 }): string | null {
   const { columns, headerRow, headerRows, rowCount, width } = input;
+  const keep = input.keep ?? [];
   if (!Number.isInteger(headerRow) || headerRow < 1 || headerRow > rowCount) {
     return "Choose the row the column headings are on.";
   }
   if (headerRows !== 1 && headerRows !== 2) return "A header is one row, or two read as one.";
   if (headerRows === 2 && headerRow < 2) return "A two-row header needs a row above the one chosen.";
 
-  const byColumn = new Map<number, BoqReadRole[]>();
+  const byColumn = new Map<number, BoqRole[]>();
   for (const [role, index] of Object.entries(columns) as [BoqReadRole, number][]) {
     if (!isBoqReadRole(role)) return `“${String(role)}” is not a column role.`;
     if (!Number.isInteger(index) || index < 0 || index >= width) {
       return `The ${BOQ_ROLE_LABELS[role].toLowerCase()} column is not on this sheet.`;
     }
     byColumn.set(index, [...(byColumn.get(index) ?? []), role]);
+  }
+  for (const index of keep) {
+    if (!Number.isInteger(index) || index < 0 || index >= width) {
+      return "A column kept in notes is not on this sheet.";
+    }
+    byColumn.set(index, [...(byColumn.get(index) ?? []), BOQ_KEEP_ROLE]);
   }
   for (const [index, roles] of byColumn) {
     if (roles.length > 1) {
@@ -238,17 +270,24 @@ export function columnLetter(index: number): string {
  */
 export function columnsFromSelections(
   selections: readonly (BoqRole | null | undefined)[],
-): { columns: Partial<Record<BoqReadRole, number>>; problem: string | null } {
+): { columns: Partial<Record<BoqReadRole, number>>; keep: number[]; problem: string | null } {
   const columns: Partial<Record<BoqReadRole, number>> = {};
+  const keep: number[] = [];
   const seen = new Map<BoqReadRole, number[]>();
   selections.forEach((role, index) => {
     if (!role || role === "ignore") return;
+    // "Kept in notes" is the one role several columns may share.
+    if (role === BOQ_KEEP_ROLE) {
+      keep.push(index);
+      return;
+    }
     seen.set(role, [...(seen.get(role) ?? []), index]);
   });
   for (const [role, indexes] of seen) {
     if (indexes.length > 1) {
       return {
         columns: {},
+        keep: [],
         problem:
           `Columns ${indexes.map(columnLetter).join(" and ")} are both set as ${BOQ_ROLE_LABELS[role].toLowerCase()}. ` +
           "Each role is read from one column.",
@@ -256,5 +295,38 @@ export function columnsFromSelections(
     }
     columns[role] = indexes[0] as number;
   }
-  return { columns, problem: null };
+  return { columns, keep, problem: null };
+}
+
+/** One kept cell on a staged line: its column's heading as printed, and what the cell says. */
+export type BoqKeptCell = { heading: string; value: string };
+
+/**
+ * The heading a kept column is written under: the sheet's own, or its letter
+ * where the header cell is blank — a note reading ": 3" would say nothing.
+ */
+export function keptHeading(heading: string | null | undefined, index: number): string {
+  const printed = heading?.replace(/\s+/g, " ").trim();
+  return printed ? printed : `Column ${columnLetter(index)}`;
+}
+
+/**
+ * A NEW RECORD'S INTERNAL NOTES, as the bill gives them: the `notes` column's
+ * text, then one line per kept cell, `<Heading as printed>: <value>`. Blank
+ * kept cells were never staged, so they add nothing; a line with neither is
+ * null, never an empty string. Written on a new record only — a revision never
+ * writes over a person's notes (`confirm-boq.ts`).
+ */
+export function composeBillNotes(
+  notes: string | null | undefined,
+  kept: readonly BoqKeptCell[] | null | undefined,
+): string | null {
+  const lines: string[] = [];
+  const own = notes?.trim();
+  if (own) lines.push(own);
+  for (const cell of kept ?? []) {
+    const value = cell.value.trim();
+    if (value) lines.push(`${cell.heading}: ${value}`);
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
 }

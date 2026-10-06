@@ -1,6 +1,7 @@
 -- ==========================================================================
 -- 0047_boq_dimensions_finish_roles.sql -- a bill's own Dims and Finish
--- columns are roles the reader knows.
+-- columns are roles the reader knows; so are a Prototype Quantity and a
+-- column somebody wants kept in notes.
 --
 -- WHAT WAS FOUND (2026-10-06, Matthew's new bills run through the real
 -- reader). Both Butler Arms bills (specifier Creation Luxury) print each
@@ -17,6 +18,28 @@
 -- own "Sizes:" and "Finish:" lines already go through -- so nothing here
 -- adds a second size parser and nothing infers a unit from a figure.
 --
+-- AND TWO MORE, the same day, Max's decisions on the same bills (brief C):
+--
+--   `mockupQty`  a bill's "Prototype Quantity" beside its "Rollout Quantity".
+--                The items it names are ALSO put on the project's mock-up
+--                phase at confirm (src/lib/bill-sheet-notices.ts,
+--                addToMockupPhase). Seeded synonym: "prototype quantity".
+--   `keep`       "kept in notes": a column no other role fits that a person
+--                wants kept (the Butler Arms public areas bill's client
+--                `PHASE`). Each cell goes into the new record's internal
+--                notes as `<heading>: <value>`. The ONE role several columns
+--                may share -- in the staged JSON, a person's mapping and a
+--                saved layout it is a LIST beside the one-column roles
+--                (`boq_layouts.mapping.keep` is an array of folded headings),
+--                which the jsonb shape check below already allows.
+--
+-- 0047 WAS EXTENDED IN PLACE, not followed by a 0048, because on 2026-10-06
+-- it had been applied to LOCAL databases only. A database that already holds
+-- the first version of this file needs its ledger row removed and the file
+-- run again (it drops and re-adds the one constraint, so it is safe to):
+--   delete from schema_migrations where filename = '0047_boq_dimensions_finish_roles.sql';
+-- The sandbox has never had it; applying it there is Max's step.
+--
 -- WHY THIS IS A MIGRATION AT ALL: the role list is a CHECK on
 -- boq_column_aliases, and the seed's three new synonyms (db/seed/0012:
 -- "dims", "dimensions", "finish") are refused without it. It is the only
@@ -31,6 +54,8 @@
 -- boq_column_aliases_role_check:
 --   code, itemDescription, qty, qtyUnit, area, subArea, designer,
 --   boqCategory, productReference, sourceLine, notes, ignore
+-- and again for the extension, after the first version of this file:
+--   ... the same twelve, then dimensions, finish
 -- Re-check it on the sandbox before applying there: a value added since on
 -- that database and missing below would be deleted by this file.
 -- tests/db/vocabulary-sync.test.ts asserts BOQ_ROLES against the result.
@@ -42,7 +67,7 @@ alter table boq_column_aliases drop constraint boq_column_aliases_role_check;
 alter table boq_column_aliases add constraint boq_column_aliases_role_check check (role in (
   'code', 'itemDescription', 'qty', 'qtyUnit', 'area', 'subArea', 'designer',
   'boqCategory', 'productReference', 'sourceLine', 'notes', 'ignore',
-  'dimensions', 'finish'
+  'dimensions', 'finish', 'mockupQty', 'keep'
 ));
 
 commit;

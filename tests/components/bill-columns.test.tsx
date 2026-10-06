@@ -162,8 +162,25 @@ describe("the Columns panel", () => {
         qty: 12,
         notes: 16,
       },
+      keep: [],
     });
     await waitFor(() => expect(onRead).toHaveBeenCalledWith(expect.stringMatching(/8 lines\. Nothing is confirmed yet/)));
+  });
+
+  it("lets several columns be kept in notes, and sends them as a list beside the roles", async () => {
+    const user = userEvent.setup();
+    routes.current[`POST /api/imports/${IMPORT}/columns`] = { ok: true, version: 8, lines: 8 };
+    panel(unreadSheets()[0]!);
+    await user.selectOptions(select("E"), "code");
+    await user.selectOptions(select("C"), "keep");
+    await user.selectOptions(select("D"), "keep");
+    // Two columns on "Kept in notes" is not two columns on one role.
+    expect(screen.queryByRole("status")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Read the bill with these columns" }));
+    const call = routes.calls.find((c) => c.method === "POST");
+    expect(call?.body).toMatchObject({ keep: [2, 3] });
+    expect((call?.body as { columns: Record<string, number> }).columns).not.toHaveProperty("keep");
   });
 
   it("shows a refusal from the route on the panel", async () => {

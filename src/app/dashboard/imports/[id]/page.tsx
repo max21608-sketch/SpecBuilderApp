@@ -31,6 +31,11 @@ import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
 import { describeHeader, sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-import";
+import {
+  NO_CODES_REVIEW_SENTENCE,
+  readMockupQty,
+  type BillSheetNotice,
+} from "@/lib/bill-sheet-notices";
 // Pure: the one rule about what a row is, what stops a fabric line, and what
 // the Confirm button says it will write — the same functions the confirm runs.
 import {
@@ -76,6 +81,8 @@ import {
   BOQ_MAPPING_SOURCE_LABELS,
   columnLetter,
   columnsAwaitingALook,
+  composeBillNotes,
+  type BoqKeptCell,
   type BoqReadRole,
 } from "@/lib/boq-roles";
 import BoqColumnsPanel, { type ColumnsPanelSheet } from "@/components/imports/BoqColumnsPanel";
@@ -103,6 +110,9 @@ type Line = {
   itemDescriptionRaw?: string;
   // Present only where the bill has the column (v4) — see `BoqLine`.
   subArea?: string | null; sourceLine?: string | null; notes?: string | null;
+  // The bill's mock-up figure as printed, and the cells of the columns kept in
+  // notes — each present only where the sheet has the column. See `BoqLine`.
+  mockupQtyRaw?: string | null; kept?: BoqKeptCell[];
   categoryId: string | null; categoryStatus: string;
   categoryCandidates?: { id: string; name: string }[]; ignored: boolean;
   // Guessed at parse time, corrected here. `chosen` is what makes it a
@@ -136,9 +146,10 @@ type Line = {
 } & RowKindFields;
 
 /**
- * WHERE A FINISH LINE GOES AND WHAT IT DOES TO THE FINISHES LIBRARY — "→ COM 2
- * · new library entry GR-FAB-13 · swatch: this row's picture", "→ kept, no BWS
- * field (trim) · …" — one quiet line under the chip,
+ * WHAT A FINISH LINE DOES TO THE FINISHES LIBRARY — "new library entry
+ * GR-FAB-13 · swatch: this row's picture" — one quiet line under the chip,
+ * which says where it goes ("GR-FAB-13 → COM 2", "→ kept, no BWS field
+ * (trim)"), since 2026-10-06 in place of "→ next free COM", which a metal is not;
  * the layout's density rule. Where the line mints in the default `BW-F-`
  * series because the project has no short code, the way to set one is a link
  * to the project's details: setting it changes what is minted, not what is
@@ -147,9 +158,7 @@ type Line = {
 function FabricFilingLine({ plan, projectId }: { plan: FabricLinePlan; projectId: string }) {
   return (
     <span className="mt-0.5 block text-[11px] leading-4 text-neutral-500">
-      {/* The field, first: the same decision the confirm writes with. */}
-      {plan.goesTo}
-      {" · "}
+      {/* The field is on the chip above it; this is the filing. */}
       {plan.filing}
       {plan.askForShortCode && (
         <>
@@ -615,9 +624,17 @@ export default function ReviewImportPage() {
     descriptions: Record<number, Record<number, ReviewDescription>>;
     /** The confirm reads (or read) this bill's descriptions, so there is no charged read to offer. */
     descriptionsRead: boolean;
-    /** Per sheet, per staged line index: what a fabric line does to the finishes library, in words. */
+    /** Per sheet, per staged line index: what a finish line does to the finishes library, in words. */
     fabricFilings: Record<number, Record<number, FabricLinePlan>>;
+    /** Per sheet: its mock-up count and whether no item line carries a code (`billSheetNotices`). */
+    sheetNotices: Record<number, BillSheetNotice>;
   } | null>(null);
+  /**
+   * WHAT THE CONFIRM'S MOCK-UP STEP LEFT FOR A PERSON — an item a revision
+   * left on the mock-up phase, or one it could not add — said here after the
+   * reload, because navigating away would swallow it.
+   */
+  const [mockupNotice, setMockupNotice] = useState<string | null>(null);
   /**
    * WHETHER A RELOAD IS IN FLIGHT, and it is now RENDERED.
    *
@@ -716,6 +733,7 @@ export default function ReviewImportPage() {
       descriptions?: Record<number, Record<number, ReviewDescription>>;
       descriptionsRead?: boolean;
       fabricFilings?: Record<number, Record<number, FabricLinePlan>>;
+      sheetNotices?: Record<number, BillSheetNotice>;
     }>(`/api/imports/${id}`);
     if (!quiet) setLoading(false);
     if (!res.ok) { setError(res.error); return; }
@@ -730,6 +748,7 @@ export default function ReviewImportPage() {
       descriptions: res.data.descriptions ?? {},
       descriptionsRead: res.data.descriptionsRead ?? false,
       fabricFilings: res.data.fabricFilings ?? {},
+      sheetNotices: res.data.sheetNotices ?? {},
     });
   }, [id]);
 
@@ -1152,7 +1171,12 @@ export default function ReviewImportPage() {
     setError(null);
     setBlocked([]);
     try {
-      const res = await apiFetch<{ imported: number; projectId: string; runs: number }>(`/api/imports/${id}/confirm`, {
+      const res = await apiFetch<{
+        imported: number;
+        projectId: string;
+        runs: number;
+        mockup?: { skipped: number; left: number; message: string } | null;
+      }>(`/api/imports/${id}/confirm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ version: data.import.version }),
@@ -1161,6 +1185,14 @@ export default function ReviewImportPage() {
         setError(res.error);
         const lines = (res.data?.lines as { lineNo: number; code: string | null }[] | undefined) ?? [];
         setBlocked(lines);
+        return;
+      }
+      // THE MOCK-UP STEP LEFT SOMETHING FOR A PERSON: stay, reload, THEN say
+      // it — the confirmed screen offers the next step beside it.
+      const mockup = res.data.mockup;
+      if (mockup && (mockup.left > 0 || mockup.skipped > 0)) {
+        await load();
+        setMockupNotice(mockup.message);
         return;
       }
       // The project's run tabs, with the first one selected. A bill with three
@@ -1340,7 +1372,7 @@ export default function ReviewImportPage() {
                 : unchecked.length > 0
                   ? "Check the columns the model read, and press “The columns are right”, first."
                   : kindProblems.length > 0
-                    ? "Say which item each fabric line belongs to first."
+                    ? "Say which item each finish line belongs to first."
                     : undefined
             }
           >
@@ -1426,7 +1458,7 @@ export default function ReviewImportPage() {
         {reading && (
           <Note tone="info" title="Reading the columns…">
             One small read, charged. The model reads the layout — the header, what each column is and which rows
-            are fabric lines, sections or subtotals — and code then reads every cell from the stored spreadsheet.
+            are finish lines, sections or subtotals — and code then reads every cell from the stored spreadsheet.
             {asking === null && " It was started from another tab or a moment ago; this screen shows the result when it lands."}
           </Note>
         )}
@@ -1464,7 +1496,7 @@ export default function ReviewImportPage() {
           </Note>
         )}
         {run.status === "parsed" && kindProblems.length > 0 && (
-          <Note tone="warn" title="A fabric line has no item to be written onto.">
+          <Note tone="warn" title="A finish line has no item to be written onto.">
             {kindProblems.map((problem) => problem.problem).join(" ")}
           </Note>
         )}
@@ -1541,6 +1573,11 @@ export default function ReviewImportPage() {
         {run.status === "confirmed" && (
           <Note tone="good" actions={<NextStepAction step={step} size="sm" />}>
             This import has already been confirmed.
+          </Note>
+        )}
+        {run.status === "confirmed" && mockupNotice && (
+          <Note tone="warn" title="The Mock-up phase needs a look.">
+            {mockupNotice}
           </Note>
         )}
         {/* THE SPECIFICATIONS IN THE BILL'S OWN WORDS. A description cell packs
@@ -1739,8 +1776,28 @@ export default function ReviewImportPage() {
                     {(Object.entries(sheet.columns) as [BoqReadRole, { index: number; heading: string }][])
                       .sort((a, b) => a[1].index - b[1].index)
                       .map(([role, ref]) => `${BOQ_ROLE_LABELS[role]} ← “${ref.heading || "no heading"}” (${columnLetter(ref.index)})`)
+                      .concat(
+                        (sheet.kept ?? []).map(
+                          (ref) => `${BOQ_ROLE_LABELS.keep} ← “${ref.heading || "no heading"}” (${columnLetter(ref.index)})`,
+                        ),
+                      )
                       .join(" · ")}
                   </p>
+                )}
+
+                {/* WHAT THIS SHEET WILL DO BEYOND ITS OWN PHASE, AND WHAT IT
+                    WILL COST LATER — both said before the confirm, from the
+                    function the confirm reads (`bill-sheet-notices.ts`). */}
+                {!sheet.ignored && !sheet.needsColumns && data.sheetNotices[sheetIndex]?.mockup && (
+                  <Note tone="info" className="mt-3">
+                    {data.sheetNotices[sheetIndex]?.mockup?.sentence} Each takes the item&rsquo;s name, category and
+                    codes, and the bill&rsquo;s mock-up figure as its quantity where it is a number — never its specs.
+                  </Note>
+                )}
+                {!sheet.ignored && !sheet.needsColumns && data.sheetNotices[sheetIndex]?.noCodes && (
+                  <Note tone="warn" className="mt-3" title="This sheet gives its items no codes.">
+                    {NO_CODES_REVIEW_SENTENCE}
+                  </Note>
                 )}
 
                 {/* IS THIS A NEW RUN, OR A REVISION OF ONE?
@@ -1942,8 +1999,9 @@ export default function ReviewImportPage() {
                         <Th className="w-[120px]">
                           Kind
                           <Tip>
-                            A fabric line is not a record: it is written as the next free COM spec on its item. A section,
-                            subtotal or blank row is left out, and its Include box brings it back.
+                            A finish line — fabric, timber, metal, trim — is not a record: it is written as a spec on its
+                            item, in the next free field of its kind, or kept with no field. A section, subtotal or blank
+                            row is left out, and its Include box brings it back.
                           </Tip>
                         </Th>
                         <Th>Client ref</Th>
@@ -2095,7 +2153,12 @@ export default function ReviewImportPage() {
                                   <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                     {line.finishFor && (
                                       <Chip mono className={CHIP_WRAPS}>
-                                        {fabricOwnCode(line) ?? "no code"} → next free COM
+                                        {/* WHERE IT GOES, from the decision the
+                                            confirm writes with — a metal is not
+                                            "the next free COM". */}
+                                        {`${fabricOwnCode(line) ?? "no code"} ${
+                                          fabricFilings[line.index]?.goesTo ?? "→ a spec on its item"
+                                        }`}
                                       </Chip>
                                     )}
                                     <span className="text-[11px] text-neutral-500">
@@ -2176,8 +2239,14 @@ export default function ReviewImportPage() {
                                   {line.productReference && (
                                     <span className="text-neutral-500"> · {line.productReference}</span>
                                   )}
-                                  {line.notes && (
-                                    <span className="mt-0.5 block text-xs text-neutral-500">Notes: {line.notes}</span>
+                                  {/* WHAT THE NEW RECORD'S NOTES WILL SAY: the
+                                      notes column, then every kept column as
+                                      "heading: value" — `composeBillNotes`, the
+                                      function the confirm writes them with. */}
+                                  {composeBillNotes(line.notes, line.kept) && (
+                                    <span className="mt-0.5 block text-xs text-neutral-500">
+                                      Notes: {composeBillNotes(line.notes, line.kept)?.split("\n").join(" · ")}
+                                    </span>
                                   )}
                                   {description && (
                                     <BillDescriptionSummary
@@ -2238,6 +2307,17 @@ export default function ReviewImportPage() {
                                   {line.qty}
                                   {line.qtyUnit && <span className="text-neutral-400"> {line.qtyUnit}</span>}
                                 </>
+                              )}
+                              {/* THE BILL'S MOCK-UP FIGURE, as printed, beside
+                                  the order quantity — and only where it puts
+                                  the item on the mock-up phase. */}
+                              {readMockupQty(line.mockupQtyRaw).on && (
+                                <span
+                                  className="mt-0.5 block text-[11px] text-neutral-600"
+                                  title="Also added to the Mock-up phase at confirm, from the bill's mock-up column."
+                                >
+                                  Mock-up: {line.mockupQtyRaw}
+                                </span>
                               )}
                             </Td>
                             <Td mono muted>

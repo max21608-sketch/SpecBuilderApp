@@ -181,7 +181,19 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            (select count(*) from spec_records r where r.run_id = run.id and r.status = 'active') as record_count,
            (select count(*) from record_attributes a
               join spec_records r on r.id = a.record_id
-             where r.run_id = run.id and a.status = 'active') as attribute_count
+             where r.run_id = run.id and a.status = 'active') as attribute_count,
+           -- A PHASE A BILL MADE WHOSE ITEMS CARRY NO CODE AT ALL: a revised bill
+           -- cannot pair its lines (a codeless line pairs nothing), and the
+           -- phase says so once. Computed, never stored: give the items codes
+           -- and it stops being true. Bill lines only -- a configuration carries
+           -- no ref of its own by design.
+           (run.source_import_id is not null
+             and exists (select 1 from spec_records r
+                          where r.run_id = run.id and r.status = 'active' and r.parent_id is null)
+             and not exists (select 1 from spec_records r
+                               join spec_record_refs x on x.record_id = r.id and x.ref_system = 'boq_code'
+                              where r.run_id = run.id and r.status = 'active' and r.parent_id is null)
+           ) as bill_without_codes
     from spec_runs run
     where run.project_id = ${id} and run.status = 'active'
     order by run.sort_order, run.created_at

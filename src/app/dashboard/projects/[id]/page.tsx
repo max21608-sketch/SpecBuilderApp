@@ -77,6 +77,7 @@ import { inboxBuckets, type InboxOutcomeFields } from "@/lib/inbox-outcome";
 import { formatDay } from "@/lib/format-day";
 import BillColumnsAction, { isStuckBill, type StuckBill } from "@/components/imports/BillColumnsAction";
 import ReadBillSpecsAction from "@/components/imports/ReadBillSpecsAction";
+import { NO_CODES_PHASE_SENTENCE } from "@/lib/bill-sheet-notices";
 
 type Project = {
   id: string;
@@ -151,6 +152,8 @@ type SpecRun = {
   boq_revision: string | null;
   boq_date: string | null;
   header_notes: string[];
+  /** A bill made this phase and none of its items carries a code (`NO_CODES_PHASE_SENTENCE`). */
+  bill_without_codes?: boolean;
   record_count: string;
   attribute_count: string;
 };
@@ -1340,6 +1343,14 @@ function ProjectOverview() {
               {run.header_notes?.length > 0 && (
                 <p className="mt-1 text-xs text-neutral-500">
                   The bill said: {run.header_notes.join(" · ")}
+                </p>
+              )}
+              {/* A BILL WITH NO CODES, said once, beside what the bill said:
+                  amber, because the revision it warns about needs a person to
+                  pair every line by hand. */}
+              {run.bill_without_codes && (
+                <p className="mt-1 text-xs text-amber-800" role="note">
+                  {NO_CODES_PHASE_SENTENCE}
                 </p>
               )}
 

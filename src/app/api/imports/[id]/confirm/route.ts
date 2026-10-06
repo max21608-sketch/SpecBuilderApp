@@ -150,9 +150,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         billPictures: result.billPictures,
         inHouseFinishes: result.inHouseFinishes,
         fabricSwatches: result.fabricSwatches,
-        // A code whose fabric lines carry different pictures took no swatch,
+        // A code whose finish lines carry different pictures took no swatch,
         // and is named — the review said so beforehand, in the same words.
         swatchNotices: result.swatchNotices,
+        // What the bill's Prototype Quantity did: the items also put on the
+        // mock-up phase, and any a revision LEFT there, in words.
+        mockup: result.mockup,
         projectId: result.projectId,
         runs: result.runIds.length,
       });

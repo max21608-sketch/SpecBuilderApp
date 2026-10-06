@@ -364,7 +364,7 @@ export function rowKindProblems(lines: readonly KindLine[]): { lineNo: number; p
 
 // ---- what a confirm will do ---------------------------------------------------
 
-/** Records and fabric specs a confirm writes, over the LIVE sheets. */
+/** Records, and specs from finish lines (`fabricSpecs`: every kind), a confirm writes over the LIVE sheets. */
 export function boqConfirmCounts(sheets: readonly { ignored: boolean; lines: readonly KindLine[] }[]): {
   records: number;
   fabricSpecs: number;
@@ -392,9 +392,14 @@ export function boqConfirmCounts(sheets: readonly { ignored: boolean; lines: rea
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
- * The header's Confirm label. It says what the press writes — records AND
- * fabric specs — and, while a sheet still needs its columns, the one thing to
- * do first instead of "creates 0 records on 2 phases".
+ * The header's Confirm label. It says what the press writes — records AND the
+ * specs its finish lines become — and, while a sheet still needs its columns,
+ * the one thing to do first instead of "creates 0 records on 2 phases".
+ *
+ * "FABRIC AND FINISH SPECS", since 2026-10-06: a finish line is filed by its
+ * KIND (`bill-finish-kind.ts`), so the count holds timbers, metals and trims
+ * as well as fabrics, and "finish" alone is this app's word for timber and
+ * metal. `fabricSpecs` keeps its name; it counts every finish line.
  */
 export function boqConfirmLabel(input: {
   counts: { records: number; fabricSpecs: number; phases: number };
@@ -405,7 +410,8 @@ export function boqConfirmLabel(input: {
   if (input.busy) return "Importing…";
   if (input.unmapped > 0) return "Set the columns first";
   const { records, fabricSpecs, phases } = input.counts;
-  const fabrics = fabricSpecs > 0 ? ` and ${plural(fabricSpecs, "fabric spec", "fabric specs")}` : "";
+  const fabrics =
+    fabricSpecs > 0 ? ` and ${plural(fabricSpecs, "fabric or finish spec", "fabric and finish specs")}` : "";
   if (input.revising) return `Confirm · updates this phase from ${plural(records, "line", "lines")}${fabrics}`;
   return `Confirm · creates ${plural(records, "record", "records")}${fabrics} on ${plural(phases, "phase", "phases")}`;
 }
