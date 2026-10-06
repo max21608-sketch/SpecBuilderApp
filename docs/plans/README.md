@@ -62,8 +62,10 @@ the answer recomposed to `W1092 x D575 x H787mm`. GR-FUR-04's three
 disagreements are left open to look at. `checks:local` green at the tip (see
 the commit that adds this entry). **Not accepted by Max.**
 
-**Max's, in order:** (1) `npm run db:migrate` on the sandbox (0046); (2) the
-branch fast-forwards onto staging; (3) upload the tracker on staging — as a
+**2026-10-06: Max applied 0046 on the sandbox** (read back: the table and
+the `disagreement_resolve` kind present) **and `staging` fast-forwarded to
+`e828dda`.** The Vercel deployment of that SHA has not been checked by Claude
+(it needs a sign-in). **Max's next:** upload the tracker on staging — as a
 finishes schedule, then press "Also read its furniture". **Open:** a code on two
 lines of one phase (PL-FUR-04, GR-FUR-22, GR-FUR-26) waits for a person to pick
 the line; the bill's `W` on a bed is its length (GR-FUR-08A reads red over a
