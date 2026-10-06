@@ -216,6 +216,21 @@ export type StagedBoqLine = BoqLine & {
   slotOverrides?: Record<string, DimensionSlot | "note">;
   slotOverridesVersion?: number;
   /**
+   * THE UNIT A REVIEWER SAID FOR A SIZE THAT PRINTS NONE — the line's placed
+   * size, from its description or its own Dims cell (`BillUnitOverride` in
+   * `bill-description.ts`). Applied INSIDE `planBillDescription`, so the
+   * review GET and the confirm read one answer, and ONLY where the cell, the
+   * line's label and the column's heading print no unit: a printed unit is
+   * never overridden. Set one line at a time or by the sheet's "set them all",
+   * which never writes over a line that already has one.
+   *
+   * `unitOverrideVersion` is its own optimistic lock, `slotOverridesVersion`'s
+   * rule: absent is 0, every accepted change bumps it. OPTIONAL, and absent on
+   * every bill staged before 2026-10-06.
+   */
+  unitOverride?: "mm" | "cm" | "in";
+  unitOverrideVersion?: number;
+  /**
    * THE PICTURE A PERSON CHOSE FOR THIS ROW on the review: a crop of the
    * bill's picture, or none. Absent or null is the bill's own picture, as read
    * (`rowImages`). Read ONLY through `effectiveRowImage`

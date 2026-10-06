@@ -37,6 +37,7 @@
 // would pass a gate over fields nobody can even record.
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
+import { valueCarriesItsUnit } from "@/lib/dimensions";
 
 // ---- THE ORDER OF THIS ARRAY IS THE MODEL, NOT A PRESENTATION CHOICE -------
 //
@@ -167,6 +168,13 @@ export type GateSlotInput = {
   dimensionSlot: "W" | "D" | "H" | "SH" | "DIA";
   state: "confirmed" | "tbc";
   value: string | null;
+  /**
+   * The attribute's unit. REQUIRED, null meaning none was stated: a figure
+   * with no unit is not a measurement a price can be put on (`800` is 800mm
+   * or 800 inches), so it blocks the slot — see `gateStatus`. A drawing never
+   * confirms one; a bill cell or an email can (2026-10-06).
+   */
+  unit: string | null;
 };
 
 /**
@@ -285,6 +293,19 @@ export function gateStatus(
           reason: `${field.dimensionSlot} is on record as TBC.`,
           value: slot.value,
           state: "tbc",
+        };
+      }
+      // A FIGURE WITH NO UNIT IS NOT A SETTLED DIMENSION. Confirmed as what
+      // the document printed, and still a number nobody can convert: it
+      // blocks, saying why, until a person states the unit on the record. A
+      // value carrying its own feet-and-inch marks has stated one.
+      if (slot.unit === null && !valueCarriesItsUnit(slot.value)) {
+        return {
+          field,
+          outcome: "blocking",
+          reason: `${field.dimensionSlot} has no unit.`,
+          value: slot.value,
+          state: "confirmed",
         };
       }
       return { field, outcome: "satisfied", reason: "Confirmed.", value: slot.value, state: "confirmed" };

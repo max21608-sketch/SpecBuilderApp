@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   billReadsDescriptions,
+  lineSizeNeedsUnit,
   lineStatements,
   placedSizeOf,
   planBillDescription,
@@ -282,5 +283,60 @@ describe("classifyCallout's words, as a list", () => {
       expect(classifyCallout({ labelRaw: null, valueRaw: text }).kind).toBe(calloutKindsNamed(` ${text}`)[0] ?? null);
     }
     expect(calloutKindsNamed("SMOKED OILED OAK / BRUSHED BRASS HARDWARE")).toEqual(["metal", "timber"]);
+  });
+});
+
+describe("the unit a reviewer says for a size that prints none", () => {
+  const withUnit = (cell: string, unitOverride: unknown, heading = "Dims") =>
+    planBillDescription("SIDE TABLE", {
+      fields: FIELDS,
+      hasFabricLine: false,
+      columns: { dimensionsRaw: cell, headings: { dimensions: heading } },
+      name: "SIDE TABLE",
+      unitOverride,
+    })!;
+
+  it("fills a MISSING unit, and the composed cell then converts exactly", () => {
+    const before = withUnit("W47.2 x D27.5 x H16.5", null);
+    expect(before).toMatchObject({ unitMissing: true, unitSetOnReview: null });
+    const inches = withUnit("W47.2 x D27.5 x H16.5", "in");
+    expect(inches).toMatchObject({ unitMissing: true, unitSetOnReview: "in" });
+    expect(slots(inches.attributes)).toEqual(["W 47.2in", "D 27.5in", "H 16.5in"]);
+    expect(inches.dimensionCell).toBe("W1199 x D699 x H419mm");
+    expect(inches.cautions).toEqual([]);
+    expect(inches.attributes[0]?.why).toMatch(/Unit set on review/);
+    expect(withUnit("W800 X D950 X H790 X SH430", "mm").dimensionCell).toBe("W800 x D950 x H790 x SH430mm");
+  });
+
+  it("never overrides a unit printed in the cell or the heading, and is not offered there", () => {
+    const printed = withUnit("W1200 x D500 x H750 mm", "in");
+    expect(printed).toMatchObject({ unitMissing: false, unitSetOnReview: null, dimensionCell: "W1200 x D500 x H750mm" });
+    const headed = withUnit("W1200 x D500 x H750", "in", "Dims (mm)");
+    expect(headed).toMatchObject({ unitMissing: false, unitSetOnReview: null, dimensionCell: "W1200 x D500 x H750mm" });
+    // Something that is not a unit is not applied.
+    expect(withUnit("W800 x D950", "ft")).toMatchObject({ unitMissing: true, unitSetOnReview: null });
+  });
+
+  it("applies to a description's own size line the same way", () => {
+    const plan = planBillDescription("Side table\nSizes: W 18 x D 20", { fields: FIELDS, hasFabricLine: false, unitOverride: "in" })!;
+    expect(plan.dimensionCell).toBe("W457 x D508mm");
+  });
+
+  it("is offered only where the placed size prints no unit", () => {
+    const headings = { dimensions: "Dims" };
+    expect(lineSizeNeedsUnit(lineStatements({ dimensionsRaw: "W800 x D950" }, headings))).toBe(true);
+    expect(lineSizeNeedsUnit(lineStatements({ dimensionsRaw: "W800 x D950 mm" }, headings))).toBe(false);
+    expect(lineSizeNeedsUnit(lineStatements({ dimensionsRaw: "Which size?" }, headings))).toBe(false);
+    expect(lineSizeNeedsUnit(lineStatements({ dimensionsRaw: "W800 x D950" }, { dimensions: "Dims (cm)" }))).toBe(false);
+    expect(lineSizeNeedsUnit(null)).toBe(false);
+  });
+
+  it("is read by the sheet plan off the staged line", () => {
+    const plans = planSheetDescriptions(
+      [{ index: 0, lineNo: 2, itemDescription: "Side table", dimensionsRaw: "W18 x D20", unitOverride: "in" }],
+      FIELDS,
+      { dimensions: "Dims" },
+    );
+    expect(plans.get(0)?.dimensionCell).toBe("W457 x D508mm");
   });
 });

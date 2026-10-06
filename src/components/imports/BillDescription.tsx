@@ -24,16 +24,27 @@
 // server recomposes; nothing here composes a cell, so the chip after the
 // reload is `composeDimensionCell`'s own text again.
 // ============================================================================
+import { useState } from "react";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import { TONE } from "@/components/ui/tone";
 import ItemSpecChips from "@/components/records/ItemSpecChips";
-import type { BillDescriptionPlan, PlannedAttribute, SlotOverride } from "@/lib/bill-description";
+import {
+  BILL_UNIT_OVERRIDES,
+  isBillUnitOverride,
+  type BillDescriptionPlan,
+  type BillUnitOverride,
+  type PlannedAttribute,
+  type SlotOverride,
+} from "@/lib/bill-description";
 import { DIMENSION_SLOT_LABELS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
 import { toMillimetres, valueCarriesItsUnit } from "@/lib/dimensions";
 
 /** Set a size part's slot (`null` puts it back as printed). Absent where the line cannot change. */
 export type SetSlot = (key: string, slot: SlotOverride | null) => void;
+
+/** Say the unit of a size that prints none (`null` takes it back). Absent where the line cannot change. */
+export type SetUnit = (unit: BillUnitOverride | null) => void;
 
 const SLOT_CHOICES: { value: SlotOverride; short: string; long: string }[] = [
   ...DIMENSION_SLOTS.map((slot) => ({
@@ -71,6 +82,7 @@ export function BillDescriptionSummary({
   open,
   onToggle,
   onSetSlot,
+  onSetUnit,
   busy = false,
   chipClassName = "",
 }: {
@@ -78,6 +90,7 @@ export function BillDescriptionSummary({
   open: boolean;
   onToggle: () => void;
   onSetSlot?: SetSlot;
+  onSetUnit?: SetUnit;
   busy?: boolean;
   /**
    * Layout for the size and finish chips. The bill review passes a class that
@@ -118,6 +131,39 @@ export function BillDescriptionSummary({
           {open ? "Hide" : "Show"} all {plan.statements.length} statement{plan.statements.length === 1 ? "" : "s"}
         </Button>
       </ItemSpecChips>
+      {/* THE UNIT OF A SIZE THAT PRINTS NONE. Offered only where the placed
+          size states no unit in its figures, its label or its column heading,
+          so a printed unit can never be changed here. A person's choice, so it
+          is not badged as a guess — but the row says it was set on review. */}
+      {plan.unitMissing && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          {onSetUnit ? (
+            <label className="flex items-center gap-1 text-neutral-600">
+              Unit:
+              <select
+                className="rounded border border-neutral-300 bg-white px-1 py-0.5 text-xs"
+                value={plan.unitSetOnReview ?? ""}
+                disabled={busy}
+                onChange={(event) => onSetUnit(isBillUnitOverride(event.target.value) ? event.target.value : null)}
+              >
+                <option value="">—</option>
+                {BILL_UNIT_OVERRIDES.map((unit) => (
+                  <option key={unit} value={unit}>
+                    {unit}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            plan.unitSetOnReview && <span className="text-neutral-600">Unit: {plan.unitSetOnReview}</span>
+          )}
+          {plan.unitSetOnReview && (
+            <Chip tone="info" title="The bill prints no unit for this size; a reviewer set it">
+              unit set on review
+            </Chip>
+          )}
+        </div>
+      )}
       {plan.cautions.map((caution) => (
         <p key={caution} className={`text-xs ${TONE.warn.text}`}>
           {caution}
@@ -276,5 +322,51 @@ function SlotControl({
         </Button>
       )}
     </span>
+  );
+}
+
+/**
+ * ONE UNIT FOR EVERY SIZE ON THE SHEET THAT PRINTS NONE — the real Butler
+ * bedrooms bill prints no unit on eight of its nine sized rows, and eight
+ * selects is eight clicks for one fact. Shown only where at least one live
+ * line's size prints no unit and nobody has set it yet. Apply writes the same
+ * per-line unit those selects write, onto exactly the lines counted, in one
+ * request: never over a line a person already set, never over a printed unit.
+ */
+export function BillUnitAll({
+  count,
+  busy = false,
+  onApply,
+}: {
+  count: number;
+  busy?: boolean;
+  onApply: (unit: BillUnitOverride) => void;
+}) {
+  const [unit, setUnit] = useState<BillUnitOverride>("mm");
+  if (count === 0) return null;
+  return (
+    <div className={`flex flex-wrap items-center gap-2 rounded border px-3 py-2 text-xs ${TONE.warn.note}`}>
+      <span className={TONE.warn.text}>
+        {count} item{count === 1 ? " has" : "s have"} a size with no unit — set them all to
+      </span>
+      <select
+        aria-label="Unit for every size with none"
+        className="rounded border border-neutral-300 bg-white px-1 py-0.5 text-xs"
+        value={unit}
+        disabled={busy}
+        onChange={(event) => {
+          if (isBillUnitOverride(event.target.value)) setUnit(event.target.value);
+        }}
+      >
+        {BILL_UNIT_OVERRIDES.map((choice) => (
+          <option key={choice} value={choice}>
+            {choice}
+          </option>
+        ))}
+      </select>
+      <Button size="xs" variant="secondary" disabled={busy} onClick={() => onApply(unit)}>
+        Apply
+      </Button>
+    </div>
   );
 }
