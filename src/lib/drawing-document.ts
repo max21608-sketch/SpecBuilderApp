@@ -29,10 +29,26 @@
 // reviewer unticks a run where the spec genuinely differs.
 //
 // The same code matching TWO records in ONE run is the SX11A case and stays
-// ambiguous: two lines of one bill with the same code are two different items,
-// and picking one is a decision only a person can make. The two cases look
-// identical to a matcher that ignores runs, which is why grouping by run is the
-// whole of this function.
+// ambiguous: two lines of one bill with the same code MAY be two different
+// items, and saying which of them a drawing is for is a decision only a person
+// can make. The two cases look identical to a matcher that ignores runs, which
+// is why grouping by run is the whole of this function.
+//
+// THE REVIEWER MAY TICK ONE OF THEM OR SEVERAL (2026-10-11). The Aman bill
+// lists PL-FUR-11 twice in one phase — a stool in the Ambassador Suite's
+// bathroom and another in the Presidential Suite's wardrobe — and the one
+// drawing's own type schedule says it is for both. Two lines with one code are
+// sometimes two items and sometimes one item in two rooms, and only the page
+// and the person reading it can tell which. So each line is its own tick, and
+// the phase stops asking once ANY of its lines is ticked
+// (`drawingItemBlockers`). NOTHING IS PRE-SELECTED, EVER: ticking both by
+// default would write one drawing's specs onto an item it may not describe,
+// and nothing downstream would question it.
+//
+// A page code that is the END of several different bill codes
+// (`CodeEndMatch`, `code: null`) is not this case and stays ONE choice per
+// phase: the page names one code, and ticking GR-FUR-08 and PL-FUR-08 both is
+// not what it said (`oneLinePerPhase`).
 // ============================================================================
 import { endsOnSegment, findRecordsByRef, namesOnSegments, normaliseRef, type RecordEntry } from "@/lib/record-refs";
 import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
@@ -914,6 +930,52 @@ export function targetRecordIds(item: DrawingItem, resolution: DrawingResolution
   if (!item.targets) return resolution.suggested;
   const unticked = new Set(item.targets.unticked);
   return item.targets.ticked.filter((id) => !unticked.has(id));
+}
+
+/**
+ * Whether an ambiguous phase is ONE choice rather than one-or-several.
+ *
+ * True only where the page code is the END of several different bill codes and
+ * the document did not say which (`matchedBy.code === null`): the page names
+ * ONE code, so a phase holding a GR- and a PL- candidate gets one of them.
+ * Two lines carrying the SAME code may both be what the drawing is for — see
+ * the header. One function, read by the blocker and by the picker, so the
+ * screen cannot offer a choice the confirm refuses.
+ */
+export function oneLinePerPhase(resolution: { matchedBy?: { kind: "code_end"; code: string | null } }): boolean {
+  return resolution.matchedBy?.kind === "code_end" && resolution.matchedBy.code === null;
+}
+
+/**
+ * The reviewer's targets after one press, as the three drawings cards send
+ * them. `alsoUntick` is for a one-choice phase (`oneLinePerPhase`): picking one
+ * candidate SENDS the others as unticked, so a later read cannot tell a line
+ * nobody chose from one somebody deliberately dropped — and the confirm never
+ * sees two.
+ *
+ * `current` is null for an item nobody has touched, meaning "whatever
+ * resolves"; the suggestion is then the starting point, never an empty set,
+ * or the first press would untick every matched phase.
+ */
+export function toggledTargets(
+  current: { ticked: readonly string[]; unticked: readonly string[] } | null,
+  suggested: readonly string[],
+  recordId: string,
+  on: boolean,
+  alsoUntick: readonly string[] = [],
+): { ticked: string[]; unticked: string[] } {
+  const ticked = new Set(current?.ticked ?? suggested);
+  const unticked = new Set(current?.unticked ?? []);
+  const off = on ? alsoUntick.filter((id) => id !== recordId) : [recordId];
+  if (on) {
+    ticked.add(recordId);
+    unticked.delete(recordId);
+  }
+  for (const id of off) {
+    ticked.delete(id);
+    unticked.add(id);
+  }
+  return { ticked: [...ticked], unticked: [...unticked] };
 }
 
 // ---- unit suggestion -------------------------------------------------------
@@ -1922,20 +1984,34 @@ export function drawingItemBlockers(
     });
   }
 
+  // AN AMBIGUOUS PHASE ASKS UNTIL ONE OF ITS LINES IS TICKED, and no longer.
+  // It used to ask for as long as the phase WAS ambiguous, whatever the
+  // reviewer had ticked — so picking a line never cleared it, and a drawing
+  // for a code on two lines of one phase (PL-FUR-11 on the Aman bill) could
+  // never be confirmed at all. Read off `targets`, the same ticked-minus-
+  // unticked list everything above uses, so the screen and the confirm agree.
+  const live = new Set(targets);
+  const oneChoice = oneLinePerPhase(resolution);
   for (const run of resolution.runs) {
-    if (run.status === "ambiguous") {
-      blockers.push({
-        code: "ambiguous_run",
-        runId: run.runId,
-        // A code read off the END of several bill codes is a different
-        // question from two lines carrying one code, and the count of lines
-        // would not say what the choice is between.
-        message:
-          resolution.matchedBy && resolution.matchedBy.code === null
-            ? `${run.runName}: ${resolution.matchedBy.message}`
-            : `${run.runName} has ${run.candidates.length} lines with this code. Choose which one this drawing is.`,
-      });
-    }
+    if (run.status !== "ambiguous") continue;
+    const picked = run.candidates.filter((candidate) => live.has(candidate.id)).length;
+    // Several lines ticked is an answer where they share a code — the drawing
+    // is for each of them — and a contradiction where the page named ONE code
+    // that ends several. The picker un-picks the others; this is the gate
+    // behind it, because a hidden control is not one.
+    if (picked > 0 && !(oneChoice && picked > 1)) continue;
+    blockers.push({
+      code: "ambiguous_run",
+      runId: run.runId,
+      // A code read off the END of several bill codes is a different
+      // question from two lines carrying one code, and the count of lines
+      // would not say what the choice is between.
+      message: oneChoice
+        ? picked > 1
+          ? `${run.runName}: the page names one code, ${resolution.matchedBy!.pageCode}, and ${picked} lines are ticked. Tick only the one this drawing is.`
+          : `${run.runName}: ${resolution.matchedBy!.message}`
+        : `${run.runName} has ${run.candidates.length} lines with this code. Tick the line or lines this drawing is for.`,
+    });
   }
 
   if (named) blockers.push(...namedConfigurationBlockers(item, resolution, targets, named));

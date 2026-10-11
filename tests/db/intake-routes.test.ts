@@ -925,6 +925,99 @@ describeIfDb("intake routes", () => {
     }
   });
 
+  // ONE CODE ON TWO LINES OF ONE PHASE, and the drawing is for both (pilot,
+  // 2026-10-11): PL-FUR-11 on the Aman bill is a stool in a bathroom and in a
+  // wardrobe, and the one drawing's own schedule names both. Picking a line
+  // never cleared the block, so such a card could never be confirmed. Ticked
+  // through the REAL autosave, read back through the REAL review GET, and
+  // confirmed through the REAL route.
+  it("writes to both lines of one phase when the reviewer ticks both, under ONE change", async () => {
+    const code = "__QAX131";
+    const bath = await makeRecord(mainRunId, code, "__QA Stool bathroom");
+    const wardrobe = await makeRecord(mainRunId, code, "__QA Stool wardrobe");
+    const { runId, staged } = await stageDrawingRun(code, drawingItem(code));
+    const item = staged.items[0]!;
+
+    const { GET, PATCH } = await import("@/app/api/imports/[id]/route");
+    const blockersOf = async () => {
+      const body = await (await GET(new Request("http://x"), params(runId))).json();
+      const resolved = (body.resolution as { id: string; blockers: { code: string }[] }[]).find((r) => r.id === item.id)!;
+      return resolved.blockers.map((b) => b.code);
+    };
+    // Nothing pre-selected: the phase asks.
+    expect(await blockersOf()).toContain("ambiguous_run");
+
+    const saved = await PATCH(
+      patch({ itemId: item.id, expectedVersion: item.version, changes: { ticked: [bath, wardrobe], unticked: [] } }),
+      params(runId),
+    );
+    expect(saved.status).toBe(200);
+    // The screen agrees the card can commit before the confirm is asked.
+    expect(await blockersOf()).not.toContain("ambiguous_run");
+
+    const live = await client.query(`select version, parsed from intake_runs where id = $1`, [runId]);
+    const liveItem = live.rows[0].parsed.items[0];
+    const res = await confirmRoute(runId, {
+      version: Number(live.rows[0].version),
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: liveItem.version,
+      observations: liveItem.observations.map((o: { id: string; version: number }) => ({ id: o.id, version: o.version })),
+    });
+    const body = await res.json();
+    expect(res.status, String(body.error)).toBe(200);
+
+    // The same specs on both lines.
+    const written = async (recordId: string) =>
+      (
+        await client.query(
+          `select label, value, unit, source_run_id from record_attributes
+            where record_id = $1 and status = 'active' order by label, value`,
+          [recordId],
+        )
+      ).rows;
+    const onBath = await written(bath);
+    expect(onBath.length).toBeGreaterThan(0);
+    expect(onBath.every((row: { source_run_id: string }) => row.source_run_id === runId)).toBe(true);
+    expect(await written(wardrobe)).toEqual(onBath);
+    // ONE change set, and a version of each record under it.
+    const versions = await client.query(
+      `select record_id, change_set_id from record_snapshots where record_id = any($1::uuid[])`,
+      [[bath, wardrobe]],
+    );
+    expect(versions.rows.map((row: { record_id: string }) => row.record_id).sort()).toEqual([bath, wardrobe].sort());
+    expect(new Set(versions.rows.map((row: { change_set_id: string }) => row.change_set_id)).size).toBe(1);
+  });
+
+  it("refuses two lines of one phase when the page code only ENDS both, and writes nothing", async () => {
+    // The page prints __QAX132; the bill lists LV-__QAX132 and UP-__QAX132.
+    // The page named ONE code, so ticking both is refused by the confirm as
+    // well as un-picked by the card.
+    const lv = await makeRecord(mainRunId, "LV-__QAX132", "__QA Bed LV");
+    const up = await makeRecord(mainRunId, "UP-__QAX132", "__QA Bed UP");
+    const { runId, version, staged } = await stageDrawingRun("__QAX132", drawingItem("__QAX132"));
+    const item = staged.items[0]!;
+    await client.query(
+      `update intake_runs set parsed = jsonb_set(parsed, '{items,0,targets}', $2::jsonb) where id = $1`,
+      [runId, JSON.stringify({ ticked: [lv, up], unticked: [] })],
+    );
+    const res = await confirmRoute(runId, {
+      version: version + 1,
+      action: "confirm",
+      itemId: item.id,
+      itemVersion: item.version,
+      observations: item.observations.map((o) => ({ id: o.id, version: o.version })),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("blocked");
+    expect(body.error).toMatch(/the page names one code/);
+    for (const recordId of [lv, up]) {
+      const rows = await client.query(`select count(*)::int n from record_attributes where record_id = $1`, [recordId]);
+      expect(rows.rows[0].n).toBe(0);
+    }
+  });
+
   it("refuses a card whose code matches no record, naming the BOQ", async () => {
     const { runId, version, staged } = await stageDrawingRun("__QAZZZ", drawingItem("__QAZZZ"));
     const item = staged.items[0]!;

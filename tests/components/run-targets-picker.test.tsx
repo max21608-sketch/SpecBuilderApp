@@ -69,3 +69,76 @@ describe("the hand picker on a card that resolved to nothing", () => {
     expect(onToggle).toHaveBeenCalledWith("r-46", false);
   });
 });
+
+// ============================================================================
+// ONE CODE ON TWO LINES OF ONE PHASE (pilot, 2026-10-11).
+//
+// The Aman bill lists PL-FUR-11 twice in its Main Phase — the Ambassador
+// Suite's bathroom and the Presidential Suite's wardrobe — and the one drawing
+// is for both. The candidates were buttons that only ever TICKED: no way to
+// un-pick, and wording that said "choose which one". Now each line is its own
+// tick box. A page code that ends several DIFFERENT bill codes stays one
+// choice, and picking a line there un-picks the others.
+// ============================================================================
+
+const BATH = { id: "r-82", label: "PL-FUR-11 (82)", itemDescription: "Stool @ Bathroom" };
+const WARDROBE = { id: "r-107", label: "PL-FUR-11 (107)", itemDescription: "Stool @ Wardrobe" };
+
+function ambiguousPicker(ticked: string[], oneLinePerPhase = false) {
+  const onToggle = vi.fn();
+  render(
+    <RunTargets
+      runs={[{ runId: "run-main", runName: "Main Phase", status: "ambiguous", candidates: [BATH, WARDROBE] }]}
+      ticked={new Set(ticked)}
+      itemCodeRaw="PL-FUR-11"
+      records={[]}
+      busy={false}
+      onToggle={onToggle}
+      onPick={vi.fn()}
+      oneLinePerPhase={oneLinePerPhase}
+    />,
+  );
+  return { onToggle };
+}
+
+describe("two lines carrying the same code in one phase", () => {
+  it("asks for the line or lines, with nothing pre-selected", () => {
+    ambiguousPicker([]);
+    expect(screen.getByText(/Main Phase has 2 lines with this code — tick the line or lines this drawing\s+is for:/)).toBeTruthy();
+    const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes).toHaveLength(2);
+    expect(boxes.map((box) => box.checked)).toEqual([false, false]);
+  });
+
+  it("keeps the first line when a second is ticked", () => {
+    const { onToggle } = ambiguousPicker(["r-82"]);
+    const [bath, wardrobe] = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(bath!.checked).toBe(true);
+    wardrobe!.click();
+    // Only the pressed line moves: nothing is sent as unticked.
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onToggle).toHaveBeenCalledWith("r-107", true);
+  });
+
+  it("un-picks a ticked line when it is pressed again", () => {
+    const { onToggle } = ambiguousPicker(["r-82", "r-107"]);
+    (screen.getAllByRole("checkbox")[0] as HTMLInputElement).click();
+    expect(onToggle).toHaveBeenCalledWith("r-82", false);
+  });
+});
+
+describe("a page code that ends several different bill codes", () => {
+  it("un-picks the other line in the phase when one is picked", () => {
+    const { onToggle } = ambiguousPicker(["r-82"], true);
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+    expect(screen.getByRole("button", { name: /PL-FUR-11 \(82\)/ }).getAttribute("aria-pressed")).toBe("true");
+    screen.getByRole("button", { name: /PL-FUR-11 \(107\)/ }).click();
+    expect(onToggle).toHaveBeenCalledWith("r-107", true, ["r-82"]);
+  });
+
+  it("un-picks the picked line when it is pressed again", () => {
+    const { onToggle } = ambiguousPicker(["r-82"], true);
+    screen.getByRole("button", { name: /PL-FUR-11 \(82\)/ }).click();
+    expect(onToggle).toHaveBeenCalledWith("r-82", false);
+  });
+});

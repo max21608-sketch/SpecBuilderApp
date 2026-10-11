@@ -837,7 +837,7 @@ export default function DrawingsReview({
       {toChoose.length > 0 && (
         <Note tone="warn">
           {toChoose.length} item{toChoose.length === 1 ? "" : "s"} match{toChoose.length === 1 ? "es" : ""} more than one
-          line on the bill. Open {toChoose.length === 1 ? "it" : "each"} below and choose which line the drawing is for.
+          line on the bill. Open {toChoose.length === 1 ? "it" : "each"} below and tick the line or lines the drawing is for.
         </Note>
       )}
 

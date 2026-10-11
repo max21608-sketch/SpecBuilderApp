@@ -18,9 +18,13 @@ import ItemCard from "@/components/imports/DrawingItemCard";
 import { callbacks, callout, figure, item, records, resetIds, resolution, specFields } from "./fixtures";
 import type { DrawingObservation } from "@/lib/drawing-document";
 
-function renderCard(observations: DrawingObservation[], over: Parameters<typeof resolution>[0] = {}) {
+function renderCard(
+  observations: DrawingObservation[],
+  over: Parameters<typeof resolution>[0] = {},
+  itemOver: Parameters<typeof item>[0] = {},
+) {
   const spies = callbacks();
-  const staged = item({ observations });
+  const staged = item({ observations, ...itemOver });
   render(
     <ItemCard
       item={staged}
@@ -526,5 +530,52 @@ describe("the item card's level control", () => {
     renderCard([callout("FABRIC CODE", "Woven raffia", "UPH-07", { attrGroup: "material" })]);
     expect(screen.getByText(/nothing to suggest/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set a level…" })).toBeInTheDocument();
+  });
+});
+
+// ONE CODE ON TWO LINES OF ONE PHASE (pilot, 2026-10-11): PL-FUR-11 is on two
+// lines of the Aman Main Phase and the one drawing is for both. The card must
+// send BOTH lines as ticked when the second is pressed — the picker's own
+// behaviour is in `run-targets-picker.test.tsx`; this is the card saving it.
+describe("an item whose code is on two lines of one phase", () => {
+  const twoLines = {
+    resolution: {
+      runs: [{ runId: "run-main", runName: "MAIN RUN", status: "ambiguous" as const, candidates: [records[0]!, records[1]!] }],
+      suggested: [],
+    },
+    targets: ["rec-main"],
+  };
+
+  it("keeps the first line ticked when the second is ticked", async () => {
+    resetIds();
+    const spies = renderCard([], twoLines, { targets: { ticked: ["rec-main"], unticked: [] } });
+    const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes.map((box) => box.checked)).toEqual([true, false]);
+    await userEvent.click(boxes[1]!);
+    expect(spies.of("onSaveTargets")[0]!.args.slice(1)).toEqual([["rec-main", "rec-ve"], []]);
+  });
+
+  it("un-picks the first line when it is pressed again", async () => {
+    resetIds();
+    const spies = renderCard([], twoLines, { targets: { ticked: ["rec-main"], unticked: [] } });
+    await userEvent.click(screen.getAllByRole("checkbox")[0]!);
+    expect(spies.of("onSaveTargets")[0]!.args.slice(1)).toEqual([[], ["rec-main"]]);
+  });
+
+  it("un-picks the other line where the page code only ends both bill codes", async () => {
+    resetIds();
+    const spies = renderCard(
+      [],
+      {
+        ...twoLines,
+        resolution: {
+          ...twoLines.resolution,
+          matchedBy: { kind: "code_end", code: null, message: "The page names FUR-11, which is the end of 2 bill codes." },
+        },
+      },
+      { targets: { ticked: ["rec-main"], unticked: [] } },
+    );
+    await userEvent.click(screen.getByRole("button", { name: /AP364c-025/ }));
+    expect(spies.of("onSaveTargets")[0]!.args.slice(1)).toEqual([["rec-ve"], ["rec-main"]]);
   });
 });

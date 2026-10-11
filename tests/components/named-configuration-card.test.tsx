@@ -440,3 +440,32 @@ describe("the pairing question", () => {
     expect(groups.map((group) => group.textContent).join(" ")).toMatch(/has different configurations/);
   });
 });
+
+// ONE CODE ON TWO LINES OF ONE PHASE (pilot, 2026-10-11): the named card saves
+// both lines on every page of the code, as the item card does.
+describe("a named card whose code is on two lines of one phase", () => {
+  it("keeps the first line ticked on every page when the second is ticked", async () => {
+    const base = namedSheetRun();
+    const doc: StagedDrawings = {
+      ...base,
+      items: base.items.map((item) => ({ ...item, targets: { ticked: ["rec-main"], unticked: [] } })),
+    };
+    const { spies } = renderNamed(
+      doc,
+      resolutionsFor(doc, () => ({
+        resolution: {
+          runs: [{ runId: "run-main", runName: "MAIN RUN", status: "ambiguous", candidates: [records[0]!, records[1]!] }],
+          suggested: [],
+        },
+        targets: ["rec-main"],
+      })),
+    );
+    const appliesTo = screen.getByText("Applies to").parentElement!;
+    const boxes = within(appliesTo).getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes.map((box) => box.checked)).toEqual([true, false]);
+    await userEvent.click(boxes[1]!);
+    const saved = spies.of("onSaveTargets").map((call) => call.args.slice(1));
+    expect(saved.length).toBeGreaterThan(0);
+    for (const args of saved) expect(args).toEqual([["rec-main", "rec-ve"], []]);
+  });
+});

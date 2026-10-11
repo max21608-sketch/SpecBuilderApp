@@ -530,3 +530,36 @@ describe("a lettered page beside another document's configurations", () => {
     expect((within(choice).getByRole("checkbox", { name: "TYPE 5" }) as HTMLInputElement).checked).toBe(true);
   });
 });
+
+// ONE CODE ON TWO LINES OF ONE PHASE (pilot, 2026-10-11): every configuration
+// of the code is saved with BOTH lines ticked when the second is pressed — the
+// same as the item card, since Applies to is one set for the card.
+describe("a configuration card whose code is on two lines of one phase", () => {
+  it("keeps the first line ticked on every configuration when the second is ticked", async () => {
+    resetIds();
+    const targets = { ticked: ["rec-main"], unticked: [] };
+    const pages = [
+      page("a", 5, "Woven raffia", "S-201", { targets }),
+      page("b", 6, "Pale linen", "S-201", { targets }),
+    ];
+    const twoLines = (id: string, letter: string) =>
+      resolution({
+        id,
+        variantLabel: letter,
+        resolution: {
+          runs: [{ runId: "run-main", runName: "MAIN RUN", status: "ambiguous", candidates: [records[0]!, records[1]!] }],
+          suggested: [],
+        },
+        targets: ["rec-main"],
+      });
+    const spies = renderConfigurations(pages, new Map([["a", twoLines("a", "A")], ["b", twoLines("b", "B")]]));
+    const appliesTo = screen.getByText("Applies to").parentElement!;
+    const boxes = within(appliesTo).getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes.map((box) => box.checked)).toEqual([true, false]);
+    await userEvent.click(boxes[1]!);
+    expect(spies.of("onSaveTargets").map((call) => call.args.slice(1))).toEqual([
+      [["rec-main", "rec-ve"], []],
+      [["rec-main", "rec-ve"], []],
+    ]);
+  });
+});

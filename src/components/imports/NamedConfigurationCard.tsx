@@ -33,7 +33,7 @@
 import { Fragment, useState } from "react";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
-import { isMeasuredRow, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
+import { isMeasuredRow, oneLinePerPhase, toggledTargets, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
 import { fieldSlotGaps, naturalConfigurationOrder, tabMeasurements, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import type { DimensionSlot } from "@/lib/spec-vocab";
@@ -186,18 +186,16 @@ export default function NamedConfigurationCard({
   const { ticked, mixed } = sharedTargets(card.members);
   const runs = pendingMembers[0]?.resolution?.resolution.runs ?? card.members[0]?.resolution?.resolution.runs ?? [];
   const levelForTargets = levelTargets(runs, [...ticked]);
-  const toggleRun = (recordId: string, on: boolean) => {
+  const toggleRun = (recordId: string, on: boolean, alsoUntick: readonly string[] = []) => {
     for (const member of pendingMembers) {
-      const current = new Set(member.item.targets?.ticked ?? member.resolution?.resolution.suggested ?? []);
-      const unticked = new Set(member.item.targets?.unticked ?? []);
-      if (on) {
-        current.add(recordId);
-        unticked.delete(recordId);
-      } else {
-        current.delete(recordId);
-        unticked.add(recordId);
-      }
-      void onSaveTargets(member.item, [...current], [...unticked]);
+      const next = toggledTargets(
+        member.item.targets,
+        member.resolution?.resolution.suggested ?? [],
+        recordId,
+        on,
+        alsoUntick,
+      );
+      void onSaveTargets(member.item, next.ticked, next.unticked);
     }
   };
 
@@ -905,6 +903,9 @@ export default function NamedConfigurationCard({
             records={records}
             busy={busyHere}
             onToggle={toggleRun}
+            oneLinePerPhase={oneLinePerPhase(
+              pendingMembers[0]?.resolution?.resolution ?? card.members[0]?.resolution?.resolution ?? {},
+            )}
             onPick={(recordId) => {
               for (const member of pendingMembers) void onSaveTargets(member.item, [recordId], []);
             }}

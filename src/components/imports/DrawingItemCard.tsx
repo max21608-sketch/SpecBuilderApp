@@ -37,7 +37,7 @@ import { Fragment, useEffect, useState } from "react";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
-import { isMeasuredRow, measuredRows, wasReadByModel } from "@/lib/drawing-document";
+import { isMeasuredRow, measuredRows, oneLinePerPhase, toggledTargets, wasReadByModel } from "@/lib/drawing-document";
 import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
@@ -346,17 +346,9 @@ export default function ItemCard({
   // millimetres beside them. `dimensionCell` stays what BWS receives.
   const dimensionShown = composeDimensionCell(dimensionRows, null, { mode: "screen" });
 
-  const toggleRun = (recordId: string, on: boolean) => {
-    const ticked = new Set(item.targets?.ticked ?? resolution?.resolution.suggested ?? []);
-    const unticked = new Set(item.targets?.unticked ?? []);
-    if (on) {
-      ticked.add(recordId);
-      unticked.delete(recordId);
-    } else {
-      ticked.delete(recordId);
-      unticked.add(recordId);
-    }
-    void onSaveTargets(item, [...ticked], [...unticked]);
+  const toggleRun = (recordId: string, on: boolean, alsoUntick: readonly string[] = []) => {
+    const next = toggledTargets(item.targets, resolution?.resolution.suggested ?? [], recordId, on, alsoUntick);
+    void onSaveTargets(item, next.ticked, next.unticked);
   };
 
   const ignorePage = (
@@ -710,6 +702,7 @@ export default function ItemCard({
             records={records}
             busy={busy}
             onToggle={toggleRun}
+            oneLinePerPhase={resolution ? oneLinePerPhase(resolution.resolution) : false}
             onPick={(recordId) => void onSaveTargets(item, [recordId], [])}
             mockup={resolution?.resolution.mockup ?? null}
             codeMatches={resolution?.codeMatches ?? []}

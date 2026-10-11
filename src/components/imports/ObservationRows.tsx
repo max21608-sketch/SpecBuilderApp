@@ -1411,6 +1411,7 @@ export function RunTargets({
   busy,
   onToggle,
   onPick,
+  oneLinePerPhase = false,
   note,
   mockup,
   codeMatches,
@@ -1422,8 +1423,19 @@ export function RunTargets({
   itemCodeRaw: string | null;
   records: RecordChoice[];
   busy: boolean;
-  onToggle: (recordId: string, on: boolean) => void;
+  /**
+   * One press. `alsoUntick` is sent only by a ONE-CHOICE phase: the other
+   * candidates the pick replaces, so the card saves them as unticked in the
+   * same request rather than in a second one racing the first.
+   */
+  onToggle: (recordId: string, on: boolean, alsoUntick?: readonly string[]) => void;
   onPick: (recordId: string) => void;
+  /**
+   * `oneLinePerPhase(resolution)`: the page code is the END of several
+   * different bill codes, so an ambiguous phase is one choice. Otherwise its
+   * lines share one code and the reviewer may tick one or several.
+   */
+  oneLinePerPhase?: boolean;
   note?: ReactNode;
   /**
    * The page marks this item as a MOCK-UP drawing (0043): the server's
@@ -1550,25 +1562,68 @@ export function RunTargets({
                 </span>
               </span>
             </label>
+          ) : oneLinePerPhase ? (
+            <div key={run.runId} className="text-sm">
+              <p className="text-amber-900">
+                {run.runName} has {run.candidates.length} lines ending with this code — choose which one:
+              </p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {/* ONE CHOICE: the page names one code that ENDS several
+                    different bill codes, so picking a line sends the others
+                    in this phase as unticked, and pressing the picked one
+                    again un-picks it. `primary` is the CHOSEN one, not the
+                    recommended one — nothing is pre-selected. */}
+                {run.candidates.map((candidate) => {
+                  const on = ticked.has(candidate.id);
+                  return (
+                    <Button
+                      key={candidate.id}
+                      size="xs"
+                      variant={on ? "primary" : "secondary"}
+                      aria-pressed={on}
+                      disabled={busy}
+                      onClick={() =>
+                        on
+                          ? onToggle(candidate.id, false)
+                          : onToggle(
+                              candidate.id,
+                              true,
+                              run.candidates.map((other) => other.id).filter((id) => id !== candidate.id),
+                            )
+                      }
+                    >
+                      {candidate.label} · {candidate.itemDescription}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
           ) : (
             <div key={run.runId} className="text-sm">
               <p className="text-amber-900">
-                {run.runName} has {run.candidates.length} lines with this code — choose which one:
+                {run.runName} has {run.candidates.length} lines with this code — tick the line or lines this drawing
+                is for:
               </p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {/* Candidates, never a pre-selected guess. */}
-                {/* `primary` is the CHOSEN one, not the recommended one:
-                    nothing is pre-selected here, so at most one of them is
-                    filled in at a time and it is the reviewer's own pick. */}
+              {/* ONE OR SEVERAL, AND NOTHING PRE-SELECTED. Two lines carrying
+                  one code may be two different items or one item in two rooms
+                  (PL-FUR-11: a stool in a bathroom and in a wardrobe, one
+                  drawing whose own schedule names both). Each line is its own
+                  tick box, like a matched phase's, so a second tick keeps the
+                  first. Ticking every line by default would write this
+                  drawing onto an item it may not describe. */}
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5">
                 {run.candidates.map((candidate) => (
-                  <Button
-                    key={candidate.id}
-                    size="xs"
-                    variant={ticked.has(candidate.id) ? "primary" : "secondary"}
-                    onClick={() => onToggle(candidate.id, true)}
-                  >
-                    {candidate.label} · {candidate.itemDescription}
-                  </Button>
+                  <label key={candidate.id} className="flex items-center gap-2 text-sm text-neutral-800">
+                    <PartialCheckbox
+                      checked={ticked.has(candidate.id)}
+                      indeterminate={mixed?.has(candidate.id) ?? false}
+                      onChange={(on) => onToggle(candidate.id, on)}
+                    />
+                    <span>
+                      {candidate.label}
+                      <span className="ml-1 text-xs text-neutral-500">{candidate.itemDescription}</span>
+                    </span>
+                  </label>
                 ))}
               </div>
             </div>
