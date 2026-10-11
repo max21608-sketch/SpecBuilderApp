@@ -21,6 +21,28 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-11 (evening) — A code on two lines of one phase confirms onto one line or both; pilot v1.9
+
+Found by Max on pilot the same day: `AM-ID-PL-FUR-11 Stool.pdf` on P18181 v3
+read "Main Phase has 2 lines with this code — choose which one", and picking a
+line never cleared the block (`ambiguous_run` fired whatever was ticked), so
+the card could never be confirmed. The bill carries `PL-FUR-11` twice —
+Ambassador Suite / Bathroom (row 82) and Presidential Suite / Wardrobe (row
+107), qty 1 each, identical specs — and the drawing's own type schedule ticks
+"PL 11, KS 6 AMB, PS": it is the drawing for both. Now each line is a tick box,
+nothing pre-ticked, and the phase stops asking once one or more is ticked; a
+page code that only ENDS several different bill codes stays one choice per
+phase, refused at confirm otherwise (`fcf7d31`, one Opus coder,
+`~/dev/briefs/fur11/`). Verified in the browser on the LOCAL stack on TEST
+P99181 (the real Aman drawing, no read charged): both boxes ticked and kept
+over a reload, the three replace questions offered per record, confirm → 17
+applied, records 048 and 066 each with 15 attributes from the drawing, ONE
+`drawing_confirm` change set, a version on each, both Dimensions answers
+`Dia.550 x H381 x SH381mm`. `checks:local` green (3350 passed). No migration
+and no seed. Chip v1.9; `pilot` fast-forwarded to it. **Max's:** tick both
+lines on pilot's FUR-11 card and decide the height (bill 400 mm, drawing
+1'-3" = 381 mm). Not accepted by Max or Matthew.
+
 ## 2026-10-11 — Promoted to pilot: the tracker beside the bill and Matthew's four bills, at `b082041` (v1.8)
 
 At Max's instruction, before the catch-up with Matthew. Run by Max from the
