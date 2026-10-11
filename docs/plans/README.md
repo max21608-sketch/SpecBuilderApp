@@ -21,6 +21,23 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-11 — Promoted to pilot: the tracker beside the bill and Matthew's four bills, at `b082041` (v1.8)
+
+At Max's instruction, before the catch-up with Matthew. Run by Max from the
+main checkout (first pulled level with `origin/staging`): pilot backed up
+(`spec-builder-pilot-2026-10-11T17-35-41-054Z.sql`, 64 MB, outside the repo);
+`db:migrate --yes-pilot` applied 0046 and 0047 (45 already present);
+`db:seed --yes-pilot` ran all 13 seed files; `db:backfill-bill-swatches`
+found nothing to file, dry run and `--apply` alike — every bill on pilot was
+confirmed after the finishes build. By Claude: pilot's ledger read back
+read-only (47 rows, `attribute_disagreements` present, the four new column
+roles seeded), the chip bumped to v1.8 (its component test and the typecheck
+green), and `pilot` fast-forwarded `2434dfc` → `b082041` (44 commits: the
+tracker beside the bill, feet and inches as printed, Matthew's four bills).
+**Not done:** the tracker has not been uploaded on staging by Max; signed-in
+`/api/auth/me` at `b082041` and the first-session script on pilot are Max's.
+Not accepted by Max or Matthew.
+
 ## 2026-10-06 — Matthew's four bills: the structure read works again, finish lines by kind, Dims/Finish columns, prototype → mock-up
 
 Max handed over four bills from Matthew to train intake on (any-bill plan
