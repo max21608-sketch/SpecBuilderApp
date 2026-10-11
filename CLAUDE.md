@@ -1052,6 +1052,17 @@ code matching TWO records in ONE run is the `SX11A` case and stays **ambiguous**
 — candidates offered, nothing chosen. A matcher that ignores runs cannot tell
 those two apart, which is why grouping by run is the whole of the function.
 
+**The reviewer may tick ONE of those lines or SEVERAL** (2026-10-11). The Aman
+bill lists `PL-FUR-11` twice in one phase — one stool in the Ambassador Suite,
+one in the Presidential Suite — and the drawing's own type schedule says it is
+for both. Until then `ambiguous_run` fired for as long as the phase WAS
+ambiguous, whatever was ticked, so picking a line never cleared it and such a
+card could never be confirmed. It now clears once any of the phase's lines is
+in the ticked-minus-unticked targets, read by the screen and the confirm alike.
+Nothing is ever pre-ticked: two lines with one code are sometimes two items.
+A page code that is only the END of several different bill codes stays ONE
+choice per phase (`oneLinePerPhase`), and the confirm refuses two there.
+
 The card the reviewer reads is therefore the ITEM, not the record, and that is
 what commits atomically. This is the same rule as "the record is the unit of
 commit", not an exception to it: never commit a card somebody did not see whole.
