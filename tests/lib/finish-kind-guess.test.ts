@@ -78,6 +78,25 @@ describe("suggestFinishKind", () => {
   });
 });
 
+// Pilot walk, 2026-10-12: GR-TIM-12 read "no page says what GR means" in the
+// library while the drawings card read the same code as a timber.
+describe("suggestFinishKind on a three-part project code", () => {
+  it("reads the middle group, as the drawings path does", () => {
+    expect(suggestFinishKind({ code: "ZZ-TIM-12", description: null })).toEqual({
+      kind: "timber",
+      reason: "the code ZZ-TIM-12 says so",
+    });
+    expect(suggestFinishKind({ code: "ZZ-MTL-01", description: null })?.kind).toBe("metal");
+    expect(suggestFinishKind({ code: "ZZ-FAB-13", description: null })?.kind).toBe("fabric");
+  });
+
+  it("adds no meaning: an unmapped middle group says nothing, and the words still answer", () => {
+    expect(suggestFinishKind({ code: "ZZ-STN-04", description: null })).toBeNull();
+    expect(suggestFinishKind({ code: "ZZ-CH-01", description: null })).toBeNull();
+    expect(suggestFinishKind({ code: "ZZ-STN-04", description: "Honed marble" })?.kind).toBe("stone");
+  });
+});
+
 describe("suggestKindsFor", () => {
   it("leaves a finish somebody has already filed alone", () => {
     const out = suggestKindsFor([

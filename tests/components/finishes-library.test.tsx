@@ -401,3 +401,27 @@ describe("a code with no description anywhere (row e3)", () => {
     expect(listed.indexOf("ST-11")).toBe(listed.length - 1);
   });
 });
+
+// Pilot walk, 2026-10-12: a three-part project code is read by its middle
+// group, as the drawings path reads it, and the "nothing to suggest" sentence
+// names that group rather than the floor.
+describe("a three-part project code", () => {
+  it("suggests the kind its middle group says, and names the middle group where it says nothing", async () => {
+    const payload = {
+      ...PAYLOAD,
+      finishes: [
+        finish({ id: "fin-a", code: "ZZ-TIM-12", code_norm: "ZZ-TIM-12", kind: null, description: null, used_on: [] }),
+        finish({ id: "fin-b", code: "ZZ-STN-04", code_norm: "ZZ-STN-04", kind: null, description: null, used_on: [] }),
+      ],
+    };
+    fetchMock.mockImplementation(
+      async () => new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    render(<FinishesLibrary projectId="proj-1" />);
+    await screen.findByText("ZZ-TIM-12");
+    const timber = rows().find((row) => row.textContent?.includes("ZZ-TIM-12"))!;
+    expect(within(timber).getByText(/the code ZZ-TIM-12 says so/)).toBeInTheDocument();
+    const stone = rows().find((row) => row.textContent?.includes("ZZ-STN-04"))!;
+    expect(within(stone).getByText(/no page says what STN means/)).toBeInTheDocument();
+  });
+});

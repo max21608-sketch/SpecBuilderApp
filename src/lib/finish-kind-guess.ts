@@ -55,6 +55,7 @@ import {
   STONE_WORDS,
   TIMBER_EXTRA_WORDS,
   TIMBER_MATERIAL_WORDS,
+  projectCodeKind,
 } from "@/lib/material-words";
 
 export type FinishKindSuggestion = {
@@ -121,6 +122,17 @@ export function suggestFinishKind(finish: {
   const prefix = CODE_PREFIXES.find((entry) => letters.startsWith(entry.prefix));
   if (prefix) {
     return { kind: prefix.kind, reason: `the code ${finish.code.trim()} says so` };
+  }
+
+  // 1b. A THREE-PART project code says what it is in its MIDDLE group —
+  //     `GR-TIM-12`, where `GR` is the floor — read by the drawings path's own
+  //     `projectCodeKind`, after the prefix test (2026-10-12: the library said
+  //     "no page says what GR means" over a code the drawings card read as a
+  //     timber). No new meanings: an unmapped middle group (`STN`, `CH`) says
+  //     nothing, as it does on a drawing.
+  const projectKind = projectCodeKind(finish.code);
+  if (projectKind) {
+    return { kind: projectKind, reason: `the code ${finish.code.trim()} says so` };
   }
 
   // 2. The description's own words.

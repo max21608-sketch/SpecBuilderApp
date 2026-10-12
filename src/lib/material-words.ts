@@ -172,10 +172,15 @@ export function stackedTagCode(raw: string | null | undefined): string | null {
  */
 const PROJECT_CODE = /^\s*[A-Za-z]{2,4}-([A-Za-z]{2,4})-\d{1,4}[A-Za-z]?\s*$/;
 
-export function projectCodeKind(raw: string | null | undefined): (typeof CODE_PREFIXES)[number]["kind"] | null {
+/** The MIDDLE group of a three-part project code (`TIM` in `GR-TIM-03`), or null for any other shape. */
+export function projectCodeGroup(raw: string | null | undefined): string | null {
   const match = PROJECT_CODE.exec(raw ?? "");
-  if (!match) return null;
-  const middle = match[1]!.toLowerCase();
+  return match ? match[1]!.toUpperCase() : null;
+}
+
+export function projectCodeKind(raw: string | null | undefined): (typeof CODE_PREFIXES)[number]["kind"] | null {
+  const middle = projectCodeGroup(raw)?.toLowerCase();
+  if (!middle) return null;
   return CODE_PREFIXES.find((entry) => entry.prefix === middle)?.kind ?? null;
 }
 

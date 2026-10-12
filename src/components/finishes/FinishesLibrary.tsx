@@ -51,6 +51,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import { FINISH_KINDS, FINISH_KIND_LABELS, type FinishKind } from "@/lib/finishes";
 import { suggestKindsFor } from "@/lib/finish-kind-guess";
+import { projectCodeGroup } from "@/lib/material-words";
 import FinishSwatch from "@/components/finishes/FinishSwatch";
 import { FinishStandardCell, FinishStandardPanel } from "@/components/finishes/FinishStandard";
 import type { Palette } from "@/lib/palettes";
@@ -160,7 +161,9 @@ function haystack(finish: Finish): string {
  * there was nothing to make it from, which is a question somebody can answer.
  */
 function whyNoSuggestion(finish: Finish): string {
-  const prefix = /^[A-Za-z]+/.exec(finish.code.trim())?.[0];
+  // A three-part code is read by its middle group, so that is the group the
+  // sentence names: `GR-STN-04` asks what STN means, not what GR means.
+  const prefix = projectCodeGroup(finish.code) ?? /^[A-Za-z]+/.exec(finish.code.trim())?.[0];
   if (prefix) return `no page says what ${prefix.toUpperCase()} means`;
   return "the code says nothing this app reads";
 }
