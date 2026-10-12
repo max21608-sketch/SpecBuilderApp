@@ -149,15 +149,16 @@ describe("the bill review's groups", () => {
     mountReview([sheet]);
     await screen.findByRole("button", { name: "Row 10 is Fabric — change" });
     const codeCell = (lineNo: number) => rowOf(lineNo, "Fabric").querySelectorAll("td")[2]!;
+    const billCell = (lineNo: number) => within(codeCell(lineNo)).getByTitle("The bill's own cell").textContent;
     // Its own code; the bracket stays visible as the bill wrote it.
     expect(codeCell(10).textContent).toContain("ZZ-FAB-13");
-    expect(within(codeCell(10)).getByText("bill: ZZ-FAB-13 (ZZ-FUR-10)")).toBeInTheDocument();
+    expect(billCell(10)).toBe("bill: ZZ-FAB-13 (ZZ-FUR-10)");
     // N/A is no code: TBC, with the bill's N/A beneath.
     expect(within(codeCell(14)).getByText("TBC: no code")).toBeInTheDocument();
-    expect(within(codeCell(14)).getByText("bill: N/A")).toBeInTheDocument();
+    expect(billCell(14)).toBe("bill: N/A");
     // The item's code is never printed as the fabric's.
     expect(within(codeCell(15)).getByText("TBC: no code")).toBeInTheDocument();
-    expect(within(codeCell(15)).getByText("bill: ZZ-FUR-03 (the item's code)")).toBeInTheDocument();
+    expect(billCell(15)).toBe("bill: ZZ-FUR-03 (the item's code)");
     // The column and the chip read one answer.
     expect(within(rowOf(15, "Fabric")).getByText(/^no code /)).toBeInTheDocument();
     // An item line is unchanged.

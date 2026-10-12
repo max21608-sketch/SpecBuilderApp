@@ -176,7 +176,9 @@ function FabricCodeCell({ line }: { line: Pick<Line, "code" | "finishFor"> }) {
       )}
       {billCell && (
         <span className="mt-0.5 block font-sans text-[10.5px] text-neutral-400" title="The bill's own cell">
-          bill: {billCell}
+          {/* Never broken at its hyphens: `MUR-FUR--04` split over two lines
+              reads as two codes (the ClientRefs rule). */}
+          bill: <ClientRefs code={billCell} />
           {billCellIsItemCode ? " (the item's code)" : ""}
         </span>
       )}
