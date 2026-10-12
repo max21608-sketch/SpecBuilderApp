@@ -980,6 +980,12 @@ speaking, verified on both real copies (34 of 34 sit under their item). Per
 layout, never global. The bracket rule still wins; a bracket naming another
 line, or naming a ref no line carries, is flagged amber naming both; an FBX
 line with no item above gets no parent and a flag, never a silent record.
+**A bracket that is a ZONE LIST (`GR / MUR-FUR--04`) may only CONFIRM the
+item above, never choose one** (2026-10-12): the real bill copies that same
+bracket onto a fabric line under `PL-FUR-04`, so letting it pick would put the
+PL chair's fabric on the GR chair. Read with `expandZoneList`: the item above
+is a member → no flag; members are on the sheet and the item above is not →
+the flag names both.
 Without the rule the same bill staged 96 records and 5 fabric specs; with it,
 67 and 34. Only seeds write the column.
 
