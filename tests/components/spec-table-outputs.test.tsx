@@ -271,7 +271,7 @@ describe("what is missing on a phase table row", () => {
   // NOTHING OUTSTANDING, NOTHING TO OPEN. A disclosure over an empty list is a
   // control that teaches people it is not worth pressing.
   it("offers no disclosure on a row with nothing outstanding", async () => {
-    table([record({ to_quote_outstanding: 0, to_quote_questions: [] })]);
+    table([record({ to_quote_outstanding: 0, ready_to_quote: true, to_quote_questions: [] })]);
     expect(await screen.findByText("Can quote")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^0/ })).toBeNull();
   });
