@@ -15,7 +15,8 @@ describe("orderRecords", () => {
     rec("c", "ZZ-FUR-22"),
     rec("d", null),
     rec("e", "QQ-FUR-13"),
-    rec("f", "ZZ-FUR-9"),
+    rec("f", "ZZ-FUR-19/21"),
+    rec("h", "ZZ-FUR-19"),
     rec("g", "ZZ.FUR.22"),
   ];
 
@@ -24,7 +25,8 @@ describe("orderRecords", () => {
   });
 
   it("sorts by the folded client code, ties in bill order, no code last, a zone kept apart", () => {
-    expect(orderRecords(bill, "ref").map((r) => r.id)).toEqual(["e", "f", "b", "b1", "b2", "a", "c", "g", "d"]);
+    // `ZZ-FUR-19/21` sits beside ZZ-FUR-19, not after ZZ-FUR-22 as a number would.
+    expect(orderRecords(bill, "ref").map((r) => r.id)).toEqual(["e", "b", "b1", "b2", "h", "f", "a", "c", "g", "d"]);
   });
 
   it("keeps a configuration under its line even where its own position would split them", () => {

@@ -55,8 +55,10 @@ export function orderRecords<T extends Orderable>(records: readonly T[], order: 
   });
   decorated.sort((a, b) => {
     if ((a.key === "") !== (b.key === "")) return a.key === "" ? 1 : -1;
-    const byKey = a.key.localeCompare(b.key, "en", { numeric: true });
-    if (byKey !== 0) return byKey;
+    // Plain character order on the fold, never a "numeric" collation: that
+    // read `GR-FUR-19/21` as nineteen hundred and twenty-one and listed it
+    // after GR-FUR-26, away from GR-FUR-19 (the real bill, 2026-10-12).
+    if (a.key !== b.key) return a.key < b.key ? -1 : 1;
     if (a.at !== b.at) return a.at - b.at;
     return a.index - b.index;
   });
