@@ -29,6 +29,7 @@ import { hasPendingReview, isIntakeRunInFlight, isIntakeRunWorking, isReviewComp
 import PackSummary from "@/components/imports/PackSummary";
 import DocumentState from "@/components/imports/DocumentState";
 import { formatDay } from "@/lib/format-day";
+import { billFromEarlierPack, finishesFromEarlierPack, type ProjectDocument } from "@/lib/earlier-packs";
 import PageBody from "@/components/ui/PageBody";
 import BillColumnsAction, { isStuckBill } from "@/components/imports/BillColumnsAction";
 
@@ -158,6 +159,10 @@ export default function IntakeBatchPage({
   const [batchId, setBatchId] = useState("");
   const [batch, setBatch] = useState<Batch | null>(null);
   const [project, setProject] = useState<ProjectHead | null>(null);
+  // The project's other documents and its library size, from the same read as
+  // the crumb: an earlier pack's confirmed bill is not "no bill".
+  const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([]);
+  const [libraryCodes, setLibraryCodes] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -194,8 +199,13 @@ export default function IntakeBatchPage({
   // breaking the screen, because nothing on it depends on the project's row.
   useEffect(() => {
     if (!projectId) return;
-    void apiFetch<{ project: ProjectHead }>(`/api/projects/${projectId}`).then((res) => {
-      if (res.ok) setProject(res.data.project);
+    void apiFetch<{ project: ProjectHead; documents?: ProjectDocument[]; summary?: { finishes?: number } }>(
+      `/api/projects/${projectId}`,
+    ).then((res) => {
+      if (!res.ok) return;
+      setProject(res.data.project);
+      setProjectDocuments(res.data.documents ?? []);
+      setLibraryCodes(Number(res.data.summary?.finishes ?? 0));
     });
   }, [projectId]);
 
@@ -460,7 +470,7 @@ export default function IntakeBatchPage({
             meaning="creates the records everything else attaches to"
           >
             {packSteps.bill.length === 0 ? (
-              <span className="text-neutral-500">Not in this pack.</span>
+              <span className="text-neutral-500">{billFromEarlierPack(projectDocuments, batchId) ?? "Not in this pack."}</span>
             ) : (
               <>
                 {packSteps.bill.map((run) => run.filename ?? "Unnamed file").join(", ")} ·{" "}
@@ -492,8 +502,12 @@ export default function IntakeBatchPage({
           >
             {packSteps.finishes.length === 0 ? (
               <span className="text-neutral-500">
-                Not in this pack. Nothing is blocked without one — a drawing&rsquo;s finish codes go into the library
-                as it is confirmed.
+                {finishesFromEarlierPack(projectDocuments, batchId, libraryCodes) ?? (
+                  <>
+                    Not in this pack. Nothing is blocked without one — a drawing&rsquo;s finish codes go into the
+                    library as it is confirmed.
+                  </>
+                )}
               </span>
             ) : (
               <>
