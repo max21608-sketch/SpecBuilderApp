@@ -73,6 +73,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Tabs from "@/components/ui/Tabs";
 import { Table, Td, Tr } from "@/components/ui/Table";
 import { useUrlTab } from "@/lib/use-url-tab";
+import ProjectWideCard from "@/components/projects/ProjectWideCard";
 import { inboxBuckets, type InboxOutcomeFields } from "@/lib/inbox-outcome";
 import { formatDay } from "@/lib/format-day";
 import BillColumnsAction, { isStuckBill, type StuckBill } from "@/components/imports/BillColumnsAction";
@@ -626,6 +627,19 @@ function ProjectOverview() {
     setFailedDocuments(Number(res.data.failedDocuments ?? 0));
   }, [projectId]);
   usePoll(pollDocuments, { intervalMs: 5000, active: documentsInFlight });
+
+  // THE NUMBERS ONLY, after the Project-wide card writes: the summary and the
+  // completion move, and nothing else should. Never through `load()`, which
+  // re-seeds the details form somebody may be halfway through typing.
+  const refreshNumbers = useCallback(async () => {
+    const res = await apiFetch<{ summary: ProjectSummary; completion: ProjectCompletion; state: ProjectState }>(
+      `/api/projects/${encodeURIComponent(projectId)}`,
+    );
+    if (!res.ok) return;
+    setSummary(res.data.summary ?? EMPTY_SUMMARY);
+    setCompletion(res.data.completion ?? EMPTY_COMPLETION);
+    setState(res.data.state ?? "active");
+  }, [projectId]);
 
   // Runs grouped into the packs they arrived in, newest first, each pack's own
   // runs oldest first so they read in the order the work happens.
@@ -2004,6 +2018,12 @@ function ProjectOverview() {
               </>
             )}
           </Card>
+
+          {/* PROJECT-WIDE QUESTIONS, ANSWERED ONCE (Max, 2026-10-12). They do
+              not count in any item's TGQ and still block every quote, so they
+              live here, beside the project's own numbers — and every screen
+              that says "+n project-wide" links to this anchor. */}
+          {completion.records > 0 && <ProjectWideCard projectId={project.id} onChanged={() => void refreshNumbers()} />}
 
           {documentsCard}
 

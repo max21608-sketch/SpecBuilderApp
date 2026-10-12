@@ -522,9 +522,18 @@ export default function RecordChecklist({
       return (
         <Card
           key={section}
-          title={projectWide ? "Project-wide — the same answer applies to every item" : section}
+          title={projectWide ? "Project-wide — answered once on the project" : section}
           actions={
             projectWide ? (
+              <>
+              {/* WHERE THEY ARE ANSWERED. A link, because it goes somewhere:
+                  the overview's card writes one answer to every item. */}
+              <Link
+                href={`/dashboard/projects/${projectId}?tab=overview#project-wide`}
+                className="text-[12px] font-medium normal-case tracking-normal text-blue-700 no-underline hover:underline"
+              >
+                Answer on the project
+              </Link>
               <Button
                 variant="quiet"
                 size="xs"
@@ -537,6 +546,7 @@ export default function RecordChecklist({
                 </CardHeadingNote>
                 <span className="ml-2 normal-case tracking-normal">{projectWideOpen ? "hide" : "show"}</span>
               </Button>
+              </>
             ) : (
               <CardHeadingNote>
                 {rows.length} of {sectionTotals.get(section) ?? rows.length} here
@@ -547,8 +557,9 @@ export default function RecordChecklist({
         >
           {projectWide && !projectWideOpen ? (
             <p className="px-4 py-3 text-[12.5px] text-neutral-500">
-              The same answer applies to every item on this project. Nothing about the data has changed — these
-              questions are still asked of this record and still counted in the tiles above.
+              These are answered once, on the project, and the answer is written to every item that asks them. They
+              do not count in this item&rsquo;s TGQ, and they still block its quote until they are answered. This item
+              can still be the exception: open them to answer one here.
             </p>
           ) : (
           <div>

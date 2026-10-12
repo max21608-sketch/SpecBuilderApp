@@ -48,6 +48,7 @@ export type NextStepKind =
   | "review_documents"
   | "categorise"
   | "to_quote"
+  | "project_wide"
   | "waiting"
   | "export";
 
@@ -83,6 +84,8 @@ export type NextStepInput = {
     records: number;
     uncategorised: number;
     toQuote: number;
+    /** Distinct project-wide TGQ questions, answered once on the overview. Absent reads as none. */
+    projectWide?: number;
     documentsReading: number;
     documentsFailed: number;
   };
@@ -236,6 +239,21 @@ export function nextStep(input: NextStepInput): NextStep | null {
       } outstanding`,
       href: toQuote,
       count: summary.toQuote,
+      tone: "danger",
+      pending: false,
+    };
+  }
+
+  // THE PROJECT-WIDE QUESTIONS, once the items' own work is done. They block
+  // every quote and are answered once, on the overview's card (2026-10-12) —
+  // an export offered over them would be the "ready" the walk of pilot found.
+  const projectWide = summary.projectWide ?? 0;
+  if (projectWide > 0) {
+    return {
+      kind: "project_wide",
+      label: `Answer ${projectWide} project-wide question${projectWide === 1 ? "" : "s"}`,
+      href: `/dashboard/projects/${encodeURIComponent(projectId)}?tab=overview#project-wide`,
+      count: projectWide,
       tone: "danger",
       pending: false,
     };

@@ -27,6 +27,7 @@ type ProjectPayload = {
     records?: number;
     uncategorised?: number;
     toQuote?: number;
+    projectWide?: number;
     documentsReading?: number;
     documentsFailed?: number;
   };
@@ -63,6 +64,7 @@ export function useNextStep(projectId: string | null | undefined): NextStep | nu
             records: Number(data.summary?.records ?? 0),
             uncategorised: Number(data.summary?.uncategorised ?? 0),
             toQuote: Number(data.summary?.toQuote ?? 0),
+            projectWide: Number(data.summary?.projectWide ?? 0),
             documentsReading: Number(data.summary?.documentsReading ?? 0),
             documentsFailed: Number(data.summary?.documentsFailed ?? 0),
           },
