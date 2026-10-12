@@ -56,6 +56,7 @@ import AddConfiguration from "@/components/records/AddConfiguration";
 import AreaSelect from "@/components/ui/AreaSelect";
 import { areaOptions, matchesArea } from "@/lib/area-filter";
 import { useUrlTab } from "@/lib/use-url-tab";
+import { RECORD_ORDERS, RECORD_ORDER_LABELS, isRecordOrder, orderRecords, type RecordOrder } from "@/lib/record-order";
 import { letterColour } from "@/components/records/letter-colours";
 import {
   SPECS_AGREED_LABEL,
@@ -586,6 +587,17 @@ export default function SpecTable({
     resolve: (raw) => (raw && areas.some((option) => option.key === raw) ? raw : null),
   });
 
+  /**
+   * THE ORDER, in the URL beside the area (2026-10-12): bill order, or the
+   * client reference. It reorders the list and nothing else — and a value this
+   * screen does not know renders bill order and is left in the URL.
+   */
+  const [order, setOrder] = useUrlTab<RecordOrder>({
+    param: "order",
+    fallback: "bill",
+    resolve: (raw) => (isRecordOrder(raw) ? raw : null),
+  });
+
   if (error) return <p className="text-sm text-red-700">{error}</p>;
   if (!records) return <Spinner label="Loading spec records" />;
 
@@ -628,7 +640,7 @@ export default function SpecTable({
 
   /** What the table lists. The tiles and the filter row narrow this, nothing else. */
   const term = search.trim().toLowerCase();
-  const shown = records.filter((record) => {
+  const filtered = records.filter((record) => {
     if (
       term &&
       !`${numberOf(record)} ${record.refs ?? ""} ${record.parent_refs ?? ""} ${record.item_description} ${
@@ -662,6 +674,8 @@ export default function SpecTable({
         return true;
     }
   });
+  // The order is applied LAST, to what is listed: a sort never narrows.
+  const shown = orderRecords(filtered, order);
   const narrowed = focus !== null || term !== "" || category !== "" || designer !== "" || area !== "";
 
   // A ROW CAN BE TICKED when it is a live bill line on a phase that is not
@@ -899,6 +913,21 @@ export default function SpecTable({
                 left still matches the area text, which is what makes 35 of
                 them findable without a combobox. */}
             <AreaSelect options={areas} value={area} onChange={setArea} />
+            {/* THE ORDER. Bill order is the default; the client reference
+                brings one code's lines together, a configuration still under
+                its bill line. It reorders the list, never the counts. */}
+            <select
+              value={order}
+              onChange={(event) => setOrder(event.target.value as RecordOrder)}
+              aria-label="Order"
+              className="rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+            >
+              {RECORD_ORDERS.map((value) => (
+                <option key={value} value={value}>
+                  Order: {RECORD_ORDER_LABELS[value]}
+                </option>
+              ))}
+            </select>
             {focus !== null && (
               <button type="button" onClick={() => setFocus(null)} className="inline-flex">
                 <Chip tone={focus === "quotable" ? "good" : focus === "tgq" || focus === "disagree" ? "danger" : "warn"}>
