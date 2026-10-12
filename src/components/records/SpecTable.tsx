@@ -1377,8 +1377,13 @@ export default function SpecTable({
                             className="text-neutral-400 hover:text-neutral-700"
                             title="No category, so there is no checklist to count"
                           >
-                            <span className="text-xs">no category</span>{" "}
-                            <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                            {/* TWO SHORT LINES, so the words never widen the
+                                column past its box (the overflow rule). */}
+                            <span className="inline-block text-left text-[11px] leading-tight">
+                              no
+                              <br />
+                              category <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                            </span>
                           </button>
                         ) : record.to_quote_outstanding === null ? (
                           /* A DASH IS NEVER A ZERO. 0 here would read as
@@ -1438,8 +1443,12 @@ export default function SpecTable({
                             className="text-neutral-500 hover:text-neutral-800"
                             title="Nothing of its own; project-wide questions still block the quote"
                           >
-                            0 <span className="text-[11px]">+{record.project_wide_outstanding} project-wide</span>{" "}
-                            <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                            0 <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                            <span className="block text-[11px] leading-tight">
+                              +{record.project_wide_outstanding}
+                              <br />
+                              project-wide
+                            </span>
                           </button>
                         ) : (
                           <span className="text-neutral-400">—</span>
