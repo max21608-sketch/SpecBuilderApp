@@ -119,6 +119,8 @@ type DocumentRun = {
   waiting_for_slot?: boolean | null;
   /** A confirmed bill's specification read, where one was asked for. */
   bill_specs_run_id?: string | null;
+  /** A confirmed bill whose confirm read its description cells: no charged read is offered. */
+  descriptions_read?: boolean;
   /** What this document PRODUCED, counted off the FKs the confirm wrote. */
   specs_applied: string | number | null;
   runs_created: string | number | null;
@@ -1123,6 +1125,7 @@ function ProjectOverview() {
                               <ReadBillSpecsAction
                                 billRunId={run.id}
                                 specsRunId={run.bill_specs_run_id ?? null}
+                                descriptionsRead={run.descriptions_read === true}
                                 onRead={() => void load()}
                               />
                             ) : isIntakeRunWorking(run.status) || run.status === "pending" ? (

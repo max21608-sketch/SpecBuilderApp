@@ -32,6 +32,24 @@ import { assertBoqDocument } from "@/lib/boq-import";
 // without importing the registration protocol. Re-exported for every caller.
 export { billSpecsRequestId };
 
+/**
+ * WHETHER THIS BILL'S CONFIRM READ ITS DESCRIPTIONS — the one predicate the
+ * refusal below and the project's Documents list both ask, so the button is
+ * never offered on a bill the server would refuse (found on pilot, 2026-10-12).
+ * Takes the run's staged JSON as stored; anything that is not a bill is false.
+ */
+export function billDescriptionsReadAtConfirm(parsed: unknown): boolean {
+  let doc;
+  try {
+    doc = assertBoqDocument(parsed);
+  } catch {
+    // An older staged shape: its confirm predates reading descriptions
+    // (2026-09-30), and a list of documents must not fail over one.
+    return false;
+  }
+  return billReadsDescriptions(doc.sheets);
+}
+
 export async function registerBillSpecifications(
   txn: TxnSql,
   { billRunId, actor }: { billRunId: string; actor: string },
@@ -61,7 +79,7 @@ export async function registerBillSpecifications(
   // cells would stage every one of them again as proposals over values the
   // record already holds. Refused here as well as unoffered on the screen,
   // because a hidden button is not a gate.
-  if (bill.parsed && billReadsDescriptions(assertBoqDocument(bill.parsed).sheets)) {
+  if (billDescriptionsReadAtConfirm(bill.parsed)) {
     throw new DomainConflictError(
       "descriptions_read",
       "This bill's descriptions were read when it was confirmed: each record already carries their sizes, finishes and notes. There is nothing more to read.",

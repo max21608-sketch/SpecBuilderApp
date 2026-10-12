@@ -17,11 +17,18 @@ import Button, { buttonClass } from "@/components/ui/Button";
 export default function ReadBillSpecsAction({
   billRunId,
   specsRunId,
+  descriptionsRead = false,
   onRead,
 }: {
   billRunId: string;
   /** The specification read this bill already has, or null. */
   specsRunId: string | null;
+  /**
+   * The bill's confirm read its description cells (`billDescriptionsReadAtConfirm`,
+   * computed by the server). The charged read would be refused, so it is not
+   * offered, and the row says where its specifications came from instead.
+   */
+  descriptionsRead?: boolean;
   /** After a successful press: the caller reloads its list. */
   onRead?: () => void;
 }) {
@@ -33,6 +40,14 @@ export default function ReadBillSpecsAction({
       <Link href={`/dashboard/imports/${specsRunId}`} className={buttonClass("quiet", "xs", "no-underline")}>
         Its specifications
       </Link>
+    );
+  }
+
+  if (descriptionsRead) {
+    return (
+      <span className="text-right text-[11.5px] text-neutral-500">
+        Specifications read from its descriptions at confirm
+      </span>
     );
   }
 

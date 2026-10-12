@@ -20,6 +20,7 @@ import { loadProjectSummary } from "@/lib/project-summary";
 import { getSessionUser } from "@/lib/session";
 import { validateProgramme, type ProgrammeDates } from "@/lib/project-programme";
 import { ATTRIBUTE_UNITS, PROJECT_STATUSES, normaliseUnit } from "@/lib/spec-vocab";
+import { billDescriptionsReadAtConfirm } from "@/lib/bill-specifications";
 import { finishCodePrefixProblem, loadUnlinkedFinishCodes, normaliseFinishCodePrefix } from "@/lib/finishes";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
@@ -171,6 +172,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     order by r.created_at desc
     limit 50
   `;
+
+  // WHETHER A CONFIRMED BILL'S DESCRIPTIONS WERE READ AT ITS CONFIRM, so the
+  // Documents list offers the charged read only where the server would take it
+  // (`billDescriptionsReadAtConfirm`, the predicate the refusal asks). Read in
+  // code off the staged JSON, never re-expressed in SQL.
+  const confirmedBills = documents.filter(
+    (doc) => doc.source_kind === "boq_xlsx" && doc.status === "confirmed" && doc.source_preserved,
+  );
+  const readAtConfirm = new Set<string>();
+  if (confirmedBills.length > 0) {
+    const staged = await sql`
+      select id, parsed from intake_runs where id = any(${confirmedBills.map((doc) => String(doc.id))}::uuid[])
+    `;
+    for (const row of staged) if (billDescriptionsReadAtConfirm(row.parsed)) readAtConfirm.add(String(row.id));
+  }
+  for (const doc of documents) doc.descriptions_read = readAtConfirm.has(String(doc.id));
 
   // The runs (BOQ tabs) this project quotes. One tab each on the overview, so
   // the same item code at three different quantities reads as three sub-quotes
