@@ -241,7 +241,12 @@ function Captured({
   const pct = (n: number) => `${Math.round((n / total) * 100)}%`;
   return (
     <span
-      className="flex min-w-[5.5rem] items-center gap-2"
+      // 5rem, not 5.5: every other column of the phase table sits at its
+      // content's minimum, and this declared floor was the one width above
+      // what its content needs — the half-rem that put the table 6px past its
+      // box at 1920 and 1440 (overflow audit, 2026-10-12). The bar shortens
+      // by 8px; nothing wraps.
+      className="flex min-w-[5rem] items-center gap-2"
       title={`${settled} settled, ${tbc} TBC, ${total - settled - tbc} nobody has looked at, of ${total}`}
     >
       <span className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-200">
@@ -1038,7 +1043,7 @@ export default function SpecTable({
                   <Th num>Qty</Th>
                   <Th>Category</Th>
                   <Th>Level</Th>
-                  <Th className="w-[112px]">
+                  <Th className="w-[104px]">
                     Captured
                     <Tip>
                       How much of the checklist is answered — green settled, amber TBC. The split between spec
