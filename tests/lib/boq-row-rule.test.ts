@@ -71,9 +71,9 @@ describe("the category rule", () => {
   });
 
   it("places a line whose bracket names nothing on the sheet by its category, and says what the bracket said", () => {
-    const [, fab] = stage([item(20, "ZZ-FUR-04"), fabric(21, "ZZ-FAB-13 (ZZ / MUR-FUR--04)")]);
+    const [, fab] = stage([item(20, "ZZ-FUR-04"), fabric(21, "ZZ-FAB-13 (ZZ-FUR-99)")]);
     expect(fab).toMatchObject({ rowKind: "finish_for", rowKindSource: "bill", finishFor: { row: 20 } });
-    expect(fab!.rowKindFlag).toMatch(/names ZZ \/ MUR-FUR--04 in brackets, and no one item line on this sheet carries it; placed under row 20, ZZ-FUR-04/);
+    expect(fab!.rowKindFlag).toMatch(/names ZZ-FUR-99 in brackets, and no one item line on this sheet carries it; placed under row 20, ZZ-FUR-04/);
   });
 
   it("gives a fabric line with no item above it no parent, and a flag — it is never a fabric spec on a guess", () => {
@@ -102,6 +102,57 @@ describe("the category rule", () => {
     );
     // A category merely CONTAINING the prefix is not a fabric line.
     expect(stage([item(9, "ZZ-FUR-10"), fabric(10, "ZZ-FAB-13", { boqCategory: "SEA-FBX-IN" })])[1]!.rowKind).toBeUndefined();
+  });
+});
+
+// F5, 2026-10-12. The real bill prints `GR-FAB-13 (GR / MUR-FUR--04)` under
+// GR-FUR-04 AND copies the same bracket onto a fabric line under PL-FUR-04.
+// The zone list may CONFIRM the item above; it never chooses a parent.
+describe("a bracket that is a zone list, beside the category rule", () => {
+  it("confirms the item above when it is one of the zones, and names a zone with no line in words", () => {
+    const [, fab] = stage([item(20, "ZZ-FUR-04"), fabric(21, "ZZ-FAB-13 (ZZ / MUR-FUR--04)")]);
+    expect(fab).toMatchObject({ rowKind: "finish_for", rowKindSource: "bill", rowKindFlag: null, finishFor: { row: 20, code: "ZZ-FUR-04" } });
+    expect(fab!.rowKindEvidence).toBe(
+      "Category Code FBX-SEA-IN — the bill's fabric line; under row 20, ZZ-FUR-04. The bracket names ZZ / MUR-FUR--04; " +
+        "row 20, ZZ-FUR-04, is one of those. MUR-FUR--04 has no line on this sheet.",
+    );
+  });
+
+  it("keeps the item above and flags the real disagreement where the zones name a line elsewhere", () => {
+    const staged = stage([
+      item(20, "ZZ-FUR-04"),
+      fabric(21, "ZZ-FAB-13 (ZZ / MUR-FUR--04)"),
+      item(45, "PL-FUR-04"),
+      fabric(46, "ZZ-FAB-13 (ZZ / MUR-FUR--04)"),
+    ]);
+    const second = staged[3]!;
+    // Placed by the category rule, under the line above — never on row 20.
+    expect(second).toMatchObject({ rowKind: "finish_for", rowKindSource: "bill", finishFor: { row: 45, code: "PL-FUR-04" } });
+    expect(second.rowKindFlag).toBe(
+      "The bracket names ZZ / MUR-FUR--04 (ZZ-FUR-04 is row 20), but this fabric line sits under row 45, PL-FUR-04. " +
+        "Placed under the item above, by its category; check it. MUR-FUR--04 has no line on this sheet.",
+    );
+    // The first is still confirmed.
+    expect(staged[1]!.rowKindFlag).toBeNull();
+  });
+
+  it("keeps the old flag where no zone has a line on the sheet", () => {
+    const [, fab] = stage([item(20, "ZZ-FUR-05"), fabric(21, "ZZ-FAB-13 (ZZ / MUR-FUR--04)")]);
+    expect(fab).toMatchObject({ rowKind: "finish_for", finishFor: { row: 20 } });
+    expect(fab!.rowKindFlag).toMatch(
+      /names ZZ \/ MUR-FUR--04 in brackets, and no one item line on this sheet carries it; placed under row 20, ZZ-FUR-05/,
+    );
+    expect(fab!.rowKindEvidence).toBe("Category Code FBX-SEA-IN — the bill's fabric line; under row 20, ZZ-FUR-05.");
+  });
+
+  it("never lets the exact-bracket rule choose by a zone list", () => {
+    // No category rule: a zone-list bracket places nothing, as before.
+    const [, , fab] = applyBracketRule([item(20, "ZZ-FUR-04"), item(30, "MUR-FUR-04"), fabric(31, "ZZ-FAB-13 (ZZ / MUR-FUR--04)")]);
+    expect(fab!.rowKind).toBeUndefined();
+    expect(fab!.finishFor).toBeUndefined();
+    // An exact bracket still places, unflagged.
+    const [, exact] = applyBracketRule([item(20, "ZZ-FUR-04"), fabric(21, "ZZ-FAB-13 (ZZ-FUR-04)")]);
+    expect(exact).toMatchObject({ rowKind: "finish_for", rowKindFlag: null, finishFor: { row: 20 } });
   });
 });
 

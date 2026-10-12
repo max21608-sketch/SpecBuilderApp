@@ -33,6 +33,7 @@ import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { intakeSourceKind } from "@/lib/intake-source-types";
 import { parseBoqSheets, type BoqAlias, type BoqLayout, type ParsedBoqSheet } from "@/lib/boq-import";
 import { BOQ_ROLE_LABELS, columnLetter, isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
+import { parseRowRules } from "@/lib/boq-row-kinds";
 
 type GoldenLine = {
   row: number;
@@ -66,7 +67,7 @@ async function layoutsFrom(file: string | null): Promise<BoqLayout[]> {
   const raw = JSON.parse(await readFile(file, "utf8")) as unknown;
   const list = Array.isArray(raw) ? raw : [raw];
   return list.flatMap((entry, index) => {
-    const value = entry as { id?: unknown; name?: unknown; headerRows?: unknown; mapping?: unknown };
+    const value = entry as { id?: unknown; name?: unknown; headerRows?: unknown; mapping?: unknown; rowRules?: unknown };
     const mapping: Partial<Record<BoqReadRole, string>> = {};
     for (const [role, heading] of Object.entries((value.mapping ?? {}) as Record<string, unknown>)) {
       if (isBoqReadRole(role) && typeof heading === "string" && heading.trim()) mapping[role] = heading;
@@ -78,6 +79,9 @@ async function layoutsFrom(file: string | null): Promise<BoqLayout[]> {
         name: String(value.name ?? `layout ${index + 1}`),
         headerRows: value.headerRows === 2 ? (2 as const) : (1 as const),
         mapping,
+        // A seeded layout's row rule (0042), as `boq_layouts.row_rules` holds
+        // it — without it the gap measures the bracket rule alone.
+        rowRules: parseRowRules(value.rowRules),
       },
     ];
   });

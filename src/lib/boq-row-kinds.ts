@@ -41,7 +41,7 @@
 // A leaf, and pure: the review screen, the confirm and `npm run boq:gap` all
 // read the same rule, and a client component can import it.
 // ============================================================================
-import { normaliseRef } from "@/lib/record-refs";
+import { expandZoneList, normaliseRef } from "@/lib/record-refs";
 import { TBC_TOKENS, containsPhrase } from "@/lib/spec-vocab";
 
 /** What a row of a bill IS. Order is the review's select order. */
@@ -248,6 +248,15 @@ export function applyCategoryFinishRule<T extends CategoryLine>(
   const want = prefix.toUpperCase();
   const isFabricCategory = (line: CategoryLine) => (line.boqCategory ?? "").trim().toUpperCase().startsWith(want);
 
+  // The item lines on the sheet by folded code, for a bracket that is a zone
+  // list — read only to CONFIRM the line above, never to choose a line.
+  const itemLinesByRef = new Map<string, T[]>();
+  for (const line of lines) {
+    if (!line.code || isFabricCategory(line) || !isItemCandidate(line)) continue;
+    const ref = normaliseRef(line.code);
+    if (ref) itemLinesByRef.set(ref, [...(itemLinesByRef.get(ref) ?? []), line]);
+  }
+
   let above: T | null = null;
   return lines.map((line) => {
     if (!isFabricCategory(line)) {
@@ -282,18 +291,79 @@ export function applyCategoryFinishRule<T extends CategoryLine>(
     }
 
     const bracket = parseBracketCode(line.code);
+    const zone = bracket ? zoneListReading(bracket.itemRef, parent, itemLinesByRef) : null;
     return {
       ...line,
       rowKind: "finish_for" as const,
       rowKindSource: "bill" as const,
-      rowKindEvidence: `${said}; under ${describeRow(parent)}.`,
-      rowKindFlag: bracket
-        ? `The code names ${bracket.itemRef} in brackets, and no one item line on this sheet carries it; placed ` +
-          `under ${describeRow(parent)}, the item line above, by its category. Check it.`
-        : null,
+      rowKindEvidence: `${said}; under ${describeRow(parent)}.${zone?.evidence ? ` ${zone.evidence}` : ""}`,
+      rowKindFlag: zone
+        ? zone.flag
+        : bracket
+          ? `The code names ${bracket.itemRef} in brackets, and no one item line on this sheet carries it; placed ` +
+            `under ${describeRow(parent)}, the item line above, by its category. Check it.`
+          : null,
       finishFor: { row: parent.lineNo, code: parent.code },
     };
   });
+}
+
+/**
+ * A BRACKET THAT IS A ZONE LIST, read beside the category rule (2026-10-12,
+ * F5). The Aman bill prints `GR-FAB-13 (GR / MUR-FUR--04)` under `GR-FUR-04`:
+ * the bracket names the GR and MUR items (`expandZoneList`, the tracker's
+ * reader), and the line above is one of them.
+ *
+ * IT MAY ONLY CONFIRM, NEVER CHOOSE. The same bill copies that bracket onto a
+ * fabric line under `PL-FUR-04`; a zone list allowed to pick the parent would
+ * put that fabric on the GR desk chair, silently. So the category rule's
+ * placement stands either way, and the zone list only decides what the row
+ * SAYS: the item above is a member → confirmed, no flag; members are on the
+ * sheet and the item above is not one → the flag names the real
+ * disagreement; no member is on the sheet → null, and the old flag stands.
+ * A member with no line is named in words, never flagged. Null too where the
+ * bracket is not a zone list at all.
+ */
+function zoneListReading(
+  itemRef: string,
+  parent: { lineNo: number; code: string | null },
+  itemLinesByRef: ReadonlyMap<string, readonly { lineNo: number; code: string | null }[]>,
+): { evidence: string | null; flag: string | null } | null {
+  const members = expandZoneList(itemRef);
+  if (!members || members.length === 0) return null;
+  const onSheet = members.map((member) => ({ member, lines: itemLinesByRef.get(normaliseRef(member)) ?? [] }));
+  const missing = onSheet.filter((entry) => entry.lines.length === 0).map((entry) => entry.member);
+  const found = onSheet.filter((entry) => entry.lines.length > 0);
+  if (found.length === 0) return null;
+  const noLine =
+    missing.length === 0
+      ? ""
+      : ` ${listWords(missing)} ${missing.length === 1 ? "has" : "have"} no line on this sheet.`;
+  const parentFold = normaliseRef(parent.code ?? "");
+  if (parentFold !== "" && members.some((member) => normaliseRef(member) === parentFold)) {
+    return {
+      evidence: `The bracket names ${itemRef}; ${describeRow(parent)}, is one of those.${noLine}`,
+      flag: null,
+    };
+  }
+  const where = found
+    .map(({ lines }) => {
+      const rows = lines.map((other) => other.lineNo);
+      const code = lines[0]?.code ?? "";
+      return `${code} is row${rows.length === 1 ? "" : "s"} ${listWords(rows.map(String))}`;
+    })
+    .join("; ");
+  return {
+    evidence: null,
+    flag:
+      `The bracket names ${itemRef} (${where}), but this fabric line sits under ${describeRow(parent)}. ` +
+      `Placed under the item above, by its category; check it.${noLine}`,
+  };
+}
+
+function listWords(values: readonly string[]): string {
+  if (values.length <= 1) return values.join("");
+  return `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`;
 }
 
 // ---- what a person may choose ------------------------------------------------
