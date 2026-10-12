@@ -126,6 +126,8 @@ export type SpecRecord = {
   to_quote_outstanding: number | null;
   /** Project-wide TGQ questions this item carries — answered once on the project, never in the item's TGQ. */
   project_wide_outstanding?: number;
+  /** `readyToQuote`: categorised, own TGQ zero, and no project-wide TGQ outstanding on it. */
+  ready_to_quote?: boolean;
   to_quote_waiting: number;
   /**
    * WHICH questions those are, named rather than counted — and ABSENT until
@@ -639,11 +641,11 @@ export default function SpecTable({
     waitingItems: records.filter((record) => (record.waiting ?? 0) > 0).length,
     noCategory: records.filter((record) => !record.category_name).length,
     noLevel: records.filter((record) => !record.level).length,
-    // TGQ SATISFIED, which is a smaller claim than "nothing outstanding" and
-    // the only one this screen can make. A record with no level is out: nothing
-    // on it is tiered under the fallback half of TGQ, so calling it ready would
-    // be a reading of silence.
-    readyToQuote: records.filter((record) => record.to_quote_outstanding === 0).length,
+    // READY TO QUOTE is the server's `readyToQuote`: categorised, its own TGQ
+    // zero, and every project-wide TGQ question on it answered. Counted
+    // `to_quote_outstanding === 0` until 2026-10-12, which read "Ready to quote
+    // 1" on pilot for the one item with NO category and therefore no questions.
+    readyToQuote: records.filter((record) => record.ready_to_quote === true).length,
     // ITEMS on which two documents disagree, and the disagreements behind them.
     disagreeItems: records.filter((record) => (record.open_disagreements ?? 0) > 0).length,
     disagreements: records.reduce((sum, record) => sum + (record.open_disagreements ?? 0), 0),
@@ -678,7 +680,7 @@ export default function SpecTable({
       case "no_level":
         return !record.level;
       case "quotable":
-        return record.to_quote_outstanding === 0;
+        return record.ready_to_quote === true;
       case "disagree":
         return (record.open_disagreements ?? 0) > 0;
       default:
@@ -1375,7 +1377,8 @@ export default function SpecTable({
                             className="text-neutral-400 hover:text-neutral-700"
                             title="No category, so there is no checklist to count"
                           >
-                            — <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                            <span className="text-xs">no category</span>{" "}
+                            <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
                           </button>
                         ) : record.to_quote_outstanding === null ? (
                           /* A DASH IS NEVER A ZERO. 0 here would read as
@@ -1418,11 +1421,26 @@ export default function SpecTable({
                               </span>
                             )}
                           </span>
-                        ) : record.category_name ? (
+                        ) : record.ready_to_quote ? (
                           /* NOTHING OUTSTANDING, SO NOTHING TO OPEN. A
                              disclosure control over an empty list is a control
                              that teaches people it is not worth pressing. */
                           <span className="text-green-700">Can quote</span>
+                        ) : (record.project_wide_outstanding ?? 0) > 0 ? (
+                          /* NOTHING OF ITS OWN, AND THE PROJECT STILL OWES
+                             SOME. Never "Can quote": the project-wide
+                             questions block every quote. It opens, like any
+                             count, onto where they are. */
+                          <button
+                            type="button"
+                            onClick={() => toggleQuestions(record.id)}
+                            aria-expanded={expanded.has(record.id)}
+                            className="text-neutral-500 hover:text-neutral-800"
+                            title="Nothing of its own; project-wide questions still block the quote"
+                          >
+                            0 <span className="text-[11px]">+{record.project_wide_outstanding} project-wide</span>{" "}
+                            <span aria-hidden>{expanded.has(record.id) ? "▾" : "▸"}</span>
+                          </button>
                         ) : (
                           <span className="text-neutral-400">—</span>
                         )}
@@ -1682,10 +1700,32 @@ function ToQuotePanel({
   }
 
   if (!questions) return <p className="text-sm text-neutral-500">Loading the questions…</p>;
+
+  // THE PROJECT-WIDE ONES, named where they live. They are not in the list
+  // (the list is the item's own TGQ, and the count it opened from), but they
+  // still block the quote, so a count of "0 +2 project-wide" must open onto a
+  // sentence that says which two and where to answer them.
+  const projectWide = record.project_wide_outstanding ?? 0;
+  const projectWideLine =
+    projectWide > 0 ? (
+      <p className="mt-2 text-xs text-neutral-600">
+        And {projectWide} project-wide question{projectWide === 1 ? "" : "s"} blocking the quote,{" "}
+        <Link href="?tab=overview#project-wide" className="text-blue-700 no-underline hover:underline">
+          answered once on the project
+        </Link>{" "}
+        for every item that asks {projectWide === 1 ? "it" : "them"}.
+      </p>
+    ) : null;
+
   if (questions.length === 0) {
     // The count said there were some and the list is empty: the table has been
     // reloaded since. Said out loud rather than rendered as a blank panel.
-    return <p className="text-sm text-neutral-500">Nothing outstanding on this item.</p>;
+    return (
+      <div className="text-sm">
+        <p className="text-neutral-500">Nothing of this item&rsquo;s own outstanding.</p>
+        {projectWideLine}
+      </div>
+    );
   }
 
   const listed = showAll ? questions : questions.slice(0, QUESTIONS_SHOWN);
@@ -1737,6 +1777,7 @@ function ToQuotePanel({
           and {folded} more
         </Button>
       )}
+      {projectWideLine}
     </div>
   );
 }

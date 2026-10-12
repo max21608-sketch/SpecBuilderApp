@@ -11,6 +11,7 @@ import {
   isProjectWideQuestion,
   itemTgqCounts,
   projectWideTgqKeys,
+  readyToQuote,
 } from "@/lib/chase-grouping";
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 
@@ -87,5 +88,17 @@ describe("the item TGQ predicate", () => {
       q({ jsonId: 3 }),
     ]);
     expect([...keys].sort()).toEqual(["field:6", "prompt:toe agreement"]);
+  });
+});
+
+describe("ready to quote", () => {
+  it("is categorised, nothing of its own, and nothing project-wide", () => {
+    expect(readyToQuote({ categorised: true, toQuote: 0, projectWide: 0 })).toBe(true);
+    // GR-FUR-08A on pilot: no category, so no questions, so it "scored" ready.
+    expect(readyToQuote({ categorised: false, toQuote: 0, projectWide: 0 })).toBe(false);
+    // The stool: nothing of its own, and the project still owes two.
+    expect(readyToQuote({ categorised: true, toQuote: 0, projectWide: 2 })).toBe(false);
+    expect(readyToQuote({ categorised: true, toQuote: null, projectWide: 0 })).toBe(false);
+    expect(readyToQuote({ categorised: true, toQuote: 3, projectWide: 0 })).toBe(false);
   });
 });

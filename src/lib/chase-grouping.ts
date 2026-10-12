@@ -118,6 +118,23 @@ export function itemTgqCounts(
   return counts;
 }
 
+/**
+ * READY TO QUOTE, in one place.
+ *
+ * Categorised — an item with no category has NO questions and so scores
+ * nothing outstanding, which is not the same as having nothing outstanding
+ * (`project-completion.ts` refuses the same case). Its own TGQ is zero. And
+ * every project-wide TGQ question it carries is answered, because those still
+ * block every quote, whoever answers them and wherever.
+ */
+export function readyToQuote(item: {
+  categorised: boolean;
+  /** Null where nothing is tiered. Never ready. */
+  toQuote: number | null;
+  projectWide: number;
+}): boolean {
+  return item.categorised && item.toQuote === 0 && item.projectWide === 0;
+}
 
 /**
  * The shape this file needs from a question. Deliberately structural: the

@@ -34,6 +34,7 @@ import { GET as exportRoute } from "@/app/api/projects/[id]/export/route";
 import { GET as checkSheetRoute } from "@/app/api/projects/[id]/export/check-sheet/route";
 import { GET as recordsRoute } from "@/app/api/records/route";
 import { GET as infillRoute } from "@/app/api/projects/[id]/infill/route";
+import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 
 // The routes are the real ones; only the session is stubbed. Nothing here
 // registers a document, so no model is called and nothing is charged.
@@ -149,6 +150,62 @@ describeIfDb("records and phases, the shapes a real project arrives in", () => {
       expect(levels.rows[0].level).toBe("simple");
       const outstanding = await loadOutstanding(projectId, { lineIds: [uncategorisedId] });
       expect(outstanding).toEqual([]);
+    });
+  });
+
+  describe("ready to quote (found-in-use, 2026-10-12)", () => {
+    type Row = { id: string; to_quote_outstanding: number | null; project_wide_outstanding: number; ready_to_quote: boolean };
+    async function phaseRows(): Promise<Map<string, Row>> {
+      const response = await recordsRoute(
+        new Request(`http://localhost/api/records?projectId=${projectId}&runId=${runId}`),
+      );
+      const body = (await response.json()) as { records: Row[] };
+      return new Map(body.records.map((row) => [row.id, row]));
+    }
+
+    it("never counts an item with no category, which has no questions to have answered", async () => {
+      // Pilot, P18181 v3: "READY TO QUOTE 1 · TGQ satisfied", and the one was
+      // GR-FUR-08A, the only item on the phase with no category.
+      const rows = await phaseRows();
+      expect(rows.get(uncategorisedId)).toMatchObject({ to_quote_outstanding: null, ready_to_quote: false });
+      expect(rows.get(ordinaryId)?.ready_to_quote).toBe(false);
+    });
+
+    it("is not ready while a project-wide TGQ question is open on it, and is once it is answered", async () => {
+      const made = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, category_id, item_description, level,
+                                   status, created_by, updated_by)
+         values ($1, $2, 9, $3, '__QA Answered but for the project', 'simple', 'active', 'qa', 'qa') returning id`,
+        [projectId, runId, categoryId],
+      );
+      const id = made.rows[0].id as string;
+      try {
+        // Everything of its OWN confirmed; the project-wide section left open.
+        await client.query(
+          `insert into spec_answers (record_id, requirement_id, spec_field_id, state, value,
+                                     confirmed_by, confirmed_at, created_by, updated_by)
+           select $1, q.id, q.spec_field_id, 'confirmed', '__QA', 'qa', now(), 'qa', 'qa'
+             from requirements q where q.category_id = $2 and q.section is distinct from $3`,
+          [id, categoryId, PROJECT_WIDE_SECTION],
+        );
+        let row = (await phaseRows()).get(id)!;
+        expect(row.to_quote_outstanding).toBe(0);
+        expect(row.project_wide_outstanding).toBeGreaterThan(0);
+        expect(row.ready_to_quote).toBe(false);
+
+        await client.query(
+          `insert into spec_answers (record_id, requirement_id, spec_field_id, state, value,
+                                     confirmed_by, confirmed_at, created_by, updated_by)
+           select $1, q.id, q.spec_field_id, 'confirmed', '__QA', 'qa', now(), 'qa', 'qa'
+             from requirements q where q.category_id = $2 and q.section = $3`,
+          [id, categoryId, PROJECT_WIDE_SECTION],
+        );
+        row = (await phaseRows()).get(id)!;
+        expect(row).toMatchObject({ to_quote_outstanding: 0, project_wide_outstanding: 0, ready_to_quote: true });
+      } finally {
+        await client.query(`delete from spec_answers where record_id = $1`, [id]);
+        await client.query(`delete from spec_records where id = $1`, [id]);
+      }
     });
   });
 

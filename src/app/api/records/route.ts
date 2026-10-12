@@ -18,7 +18,7 @@ import {
   waitingByQuestion,
   type OutstandingQuestion,
 } from "@/lib/chase-drafts";
-import { inItemTgq, itemTgqCounts, projectWideTgqKeys } from "@/lib/chase-grouping";
+import { inItemTgq, itemTgqCounts, projectWideTgqKeys, readyToQuote } from "@/lib/chase-grouping";
 import { gateSummary, gatesForRecord, loadGateContext } from "@/lib/gate-load";
 import { EMPTY_SPEC_SUMMARY, loadSpecSummaries } from "@/lib/record-spec-summary";
 import { countOpenDisagreementsByRecord } from "@/lib/disagreements";
@@ -346,7 +346,7 @@ export async function GET(request: Request): Promise<Response> {
           }),
         ),
         waiting: counts?.waiting ?? 0,
-        // NULL, NOT 0, in two different cases, and the table prints them
+        // NULL, NOT 0, in three different cases, and the table prints them
         // differently because they are different answers:
         //
         //   untiered      a question on it has no tier: the fallback half of
@@ -354,6 +354,11 @@ export async function GET(request: Request): Promise<Response> {
         //                 this is. (His matrix needs no level, so a mapped
         //                 category is counted without one — the same reading
         //                 the record screen and the overview make.)
+        //   no category   it has NO questions, so it scores nothing
+        //                 outstanding — which is not having nothing
+        //                 outstanding. It read "Ready to quote 1 · TGQ
+        //                 satisfied" on pilot, the one item on the phase with
+        //                 no category (found-in-use, 2026-10-12).
         //   a SPLIT LINE  it is a heading. Its configurations are what the
         //                 export ships and what carries the questions, so
         //                 `loadOutstanding` does not count it at all — and
@@ -361,10 +366,18 @@ export async function GET(request: Request): Promise<Response> {
         //                 "Can quote", which is a claim about a record that
         //                 will never reach BWS.
         to_quote_outstanding:
-          Number(row.variant_count ?? 0) > 0 || tgq === null ? null : tgq.toQuote,
+          Number(row.variant_count ?? 0) > 0 || !row.category_id || tgq === null ? null : tgq.toQuote,
         // Project-wide TGQ questions this item still carries — answered once
         // on the project, counted apart, never inside the item's own TGQ.
         project_wide_outstanding: tgq?.projectWide ?? 0,
+        // READY TO QUOTE, by the one predicate: categorised, its own TGQ zero,
+        // AND every project-wide TGQ question on it answered — those still
+        // block every quote, wherever they are answered.
+        ready_to_quote: readyToQuote({
+          categorised: Boolean(row.category_id) && Number(row.variant_count ?? 0) === 0,
+          toQuote: Number(row.variant_count ?? 0) > 0 || !row.category_id || tgq === null ? null : tgq.toQuote,
+          projectWide: tgq?.projectWide ?? 0,
+        }),
         to_quote_waiting: counts?.toQuoteWaiting ?? 0,
         // Absent unless asked for, and absent is not empty: the table tells
         // the two apart so a row it has never fetched does not render as a row
