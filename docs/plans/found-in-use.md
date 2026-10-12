@@ -40,7 +40,7 @@ clearly not working … like the TGQ questions don't add up". Walked read-only,
 signed in as Max: pages, tabs and view switches only, nothing saved,
 confirmed, read or downloaded. Project *P18181 v3 — Miami Beach*.
 
-### "Ready to quote 1" is the one item with no category — OPEN
+### "Ready to quote 1" is the one item with no category — FIXED 2026-10-12 (`579fc36`)
 
 Phase tab tiles: TGQ 66 of 67 items, READY TO QUOTE 1 "TGQ satisfied". Every
 categorised row has TGQ outstanding. The one "ready" item is row 28,
@@ -48,7 +48,7 @@ categorised row has TGQ outstanding. The one "ready" item is row 28,
 no questions. The overview gets it right ("Settled 0 of 66 items"), and
 completion refuses this exact case. The phase tile does not.
 
-### TGQ means four different counts on one project — OPEN
+### TGQ means four different counts on one project — FIXED 2026-10-12 (`ba67a3b`, `6db6c7e`)
 
 - **Projects list:** "TGQ 1,507 across 1 project" (questions).
 - **Overview:** "TGQ 66 of 66 items · 1,507 questions" (items).
@@ -63,20 +63,24 @@ Measured on the local copy: of the 1,509 TGQ questions, 450 are 15
 project-wide questions repeated on 30 items. Decided the same day (recap P1):
 project-wide questions are answered once per project and stop counting per
 item; every screen counts any kind of question except project-wide.
+**Correction:** Drawers reads **27**, not 29. Two of its project-wide questions
+are spec fields (Access, field 6; Site survey, field 7), so the split is 18
+spec + 9 item readiness + 17 project-wide. Measured by the coder that built
+it.
 
-### The checklist's TGQ filter shows an empty list — OPEN
+### The checklist's TGQ filter shows an empty list — FIXED 2026-10-12 (`5f7c264`)
 
 Stool `v3-001`, Checklist tab, TGQ filter on: "showing 2 of 50". Nothing is
 listed. Both questions sit inside the closed "Project-wide — 19 outstanding ·
 2 of 19 here" card. This is what Max hit in the meeting: "it was still
 showing two missing, but it wouldn't show me which two".
 
-### "Checklist 47 / 50" means 47 outstanding — OPEN
+### "Checklist 47 / 50" means 47 outstanding — FIXED 2026-10-12 (`5f7c264`; now "48 open")
 
 The record's tab label reads like 47 done of 50. The tiles under it say TGQ 2,
 also 45, settled 3, so it is outstanding/total. Same on every record.
 
-### The chase screen says nothing is outstanding — OPEN
+### The chase screen says nothing is outstanding — FIXED 2026-10-12 (`5f7c264`)
 
 With no contacts on the project: "Everyone **0**" beside "Nobody assigned
 **3128**", and the Furniture lines tile reads "67 · **67 with nothing
@@ -102,14 +106,14 @@ Fixed in code on 2026-10-05 (`fabricOwnCode`), but this bill was confirmed
 earlier that day, so pilot still holds the second entry, used on 1 item
 (`v3-026`). It needs re-linking to `GR-FAB-13` by a person, or a backfill.
 
-### A three-part code gets no kind suggestion — OPEN
+### A three-part code gets no kind suggestion — FIXED 2026-10-12 (`9933fe8`; `STN` still unmapped)
 
 Finishes library: `GR-TIM-12` and `GR-TIM-13` show "NOTHING TO SUGGEST … no
 page says what GR means". The drawings path reads a three-part code's MIDDLE
 group (`projectCodeKind`). The library's `suggestFinishKind` reads the first.
 `STN-02` likewise ("no page says what STN means"), while `GR-STN-04` is Stone.
 
-### "Read the specifications in this bill — one read, charged" on a bill that refuses it — OPEN
+### "Read the specifications in this bill — one read, charged" on a bill that refuses it — FIXED 2026-10-12 (`2988f2d`)
 
 Overview and Documents tab, beside the confirmed Aman bill. That bill's
 confirm read its description cells, and CLAUDE.md says the server then
@@ -118,7 +122,7 @@ bill with a preserved source (`src/app/dashboard/projects/[id]/page.tsx:1122`).
 It was not pressed, because it is charged, so the refusal itself is not
 observed.
 
-### A replace prompt does not say which line — OPEN
+### A replace prompt does not say which line — FIXED 2026-10-12 (`0202b2f`)
 
 Drawings review, `AM-ID-PL-FUR-11 Stool.pdf`: "2 of these records already hold
 a value here", then two identical lines, "this phase: replace Sizes (mm):
@@ -144,7 +148,7 @@ a value here", then two identical lines, "this phase: replace Sizes (mm):
 Seen on PILOT v1.9, project *P18181 v3 — Miami Beach*, during the catch-up
 (`docs/plans/catchup-2026-10-12.md`, which has timestamps and frames).
 
-### A fabric line's code column prints a furniture code, or N/A — OPEN
+### A fabric line's code column prints a furniture code, or N/A — FIXED 2026-10-12 (`dec12fd`, display only; the stored-value half waits on Max)
 
 Bill review, GR-FUR-22 Option 2: row 25 is "Fabric for 24" and its code column
 reads `GR-FUR-22`. Row 23, the same fabric for Option 1, reads `N/A`. Both
@@ -155,7 +159,7 @@ because "Not applicable means something completely different" (16:40). Cause,
 checked: the column prints the raw cell (`src/app/dashboard/imports/[id]/page.tsx:2110`).
 The filing reads `fabricOwnCode` (`src/lib/boq-row-kinds.ts:504`).
 
-### One item, two TGQ numbers — OPEN
+### One item, two TGQ numbers — FIXED 2026-10-12 (`ba67a3b`)
 
 `GR-FUR-26 Drawers` read 44 TGQ on the phase table and 20 TGQ (24 "also") on
 the fill-in screen. Matthew quoted both, 23 minutes apart. `Side Table @
@@ -166,7 +170,7 @@ phase table counts readiness questions as TGQ, and `countOutstanding`
 the gap on a placeholder category is the project-wide section. Fixing it needs
 a decision first (the recap's P1 and P3).
 
-### Every item lists the project-wide questions as blocking its quote — OPEN
+### Every item lists the project-wide questions as blocking its quote — FIXED 2026-10-12 (`6db6c7e`: answered once on the project)
 
 The phase table's expansion of Drawers, "NEEDED BEFORE THIS ITEM CAN BE QUOTED",
 starts with "Project / commercial": TOE agreement, Expedited project

@@ -3447,6 +3447,62 @@ A fabric lands in the group **Materials and fabrics**, not *Finishes*: `finish`
 is this app's word for timber and metal. The BWS field is the part that
 matters.
 
+### An item's TGQ is its own questions; the project's are answered once
+
+`src/lib/chase-grouping.ts` (`inItemTgq`, `inProjectWideTgq`, `inChaseAsk`,
+`itemTgqCounts`, `readyToQuote`), `src/lib/project-summary.ts`,
+`src/lib/project-wide.ts`, `src/app/api/projects/[id]/project-wide/route.ts`,
+`src/components/projects/ProjectWideCard.tsx`, `src/lib/checklist-sections.ts`,
+`docs/plans/catchup-2026-10-12.md`
+
+The pilot walk of 2026-10-12 found TGQ meaning four different counts on one
+project. One item read 44 on the phase table and 20 on the fill-in screen,
+and Matthew quoted both. A stool said "2 missing" over an empty list, because
+both questions were in the folded project-wide card. "Ready to quote 1" was
+the one item with NO category. Max's ruling is the rule:
+
+- **An item's TGQ = its outstanding questions whose tier is `to_quote`, of
+  ANY kind (`spec_field` or `readiness`), MINUS the project-wide section.**
+  `inItemTgq` is that sentence. Every TypeScript screen counts through it, and
+  `project-summary.ts` says it again in SQL, held equal by
+  `tests/db/project-summary.test.ts`. Do not count by `requirementKind`. That
+  was the second rule, and on Matthew's matrix it drops readiness rows that
+  ARE TGQ.
+- **What a chase ASKS is a narrower set, and the screen says so.**
+  `inChaseAsk` = the item's TGQ, `spec_field` only (decision 19). The record
+  header sentence (`chase-counts.ts`) states each part.
+- **A question's TIER is untouched.** `questionTier` and the tier stored on
+  `email_draft_items` are what they were. This changes what is COUNTED, and
+  re-tiering would stale every unsent draft (the `chased_at` trap).
+- **Project-wide questions are answered ONCE, on the project** (Stage 2.8
+  step 2). The overview's card lists each distinct question once, keyed the way
+  `groupByQuestion` keys one. Saving writes the answer to EVERY active record
+  that asks it.
+  - **No project-level answers table.** It is still one `spec_answers` row
+    per record, which is what the export, gates, chase coverage and history
+    read.
+  - **The route re-derives the set under the project lock**, row for row and
+    version for version, and refuses WHOLE if it moved.
+  - **Missing and TBC rows are written.** A settled answer with a DIFFERENT
+    value is listed unticked, and replacing it needs a tick and a reason (or
+    an open change).
+  - **One change set, one version per record.** `spec_records.version` is
+    untouched. A dimension is refused: it is per item, always.
+- **They still block every quote.** `readyToQuote` = categorised AND the
+  item's own TGQ is 0 AND no project-wide TGQ is open on it. The gate panel
+  shows a project-wide field as "answered once on the project", and the
+  verdict still waits for it.
+- **A count opens onto its questions.** The checklist's TGQ filter lists the
+  item's own questions. The project-wide ones sit on their own tile and line,
+  one click away. The tab label says "n open" (it read "47 / 50", which looked
+  like 47 done).
+
+**Still not the same number, and said in words:** the record header counts
+Matthew's gate FIELDS (dimension slots, the record-column rows), and the TGQ
+tile counts checklist QUESTIONS. The stool reads "7 to answer at TGQ" beside a
+tile of 2, and the sentence breaks the 7 down. Which of the two the tile
+should show is still Max's call (the section below).
+
 ### TGQ is one name over two models, and which applies is per category
 
 `src/lib/tgq.ts` (`questionTier`, `TgqMatrix`), `src/lib/gate-load.ts`
@@ -3677,8 +3733,10 @@ tabs. Five things about it.
   — the same answer applies to every item"*, its outstanding count on the
   toggle, and a `#q-` deep link into it opens it. Nothing about the data
   changed; the constant lives in the leaf `src/lib/checklist-sections.ts` and a
-  pure test holds it against the seed. Step 2 — answering once per project and
-  fanning out — is built only if Matthew asks again after seeing this.
+  pure test holds it against the seed. **Step 2 is BUILT (2026-10-12, Max's
+  ruling):** see *An item's TGQ is its own questions; the project's are
+  answered once*. The card now links to the project, and its questions no
+  longer count in the item's TGQ tile.
 - **`RecordDetails` reads as a summary until Edit**, like the project's. Six
   inputs and two paragraphs of help above the tabs on every visit put the tabs
   themselves below the fold. The form inside is UNCHANGED, including the rule
