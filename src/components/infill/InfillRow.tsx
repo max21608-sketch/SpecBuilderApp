@@ -35,6 +35,7 @@
 // path resets `busy` in a `finally`, so an HTML error page cannot leave a box
 // disabled with nothing said.
 // ============================================================================
+import { inItemTgq, isProjectWideQuestion } from "@/lib/chase-grouping";
 import { useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
@@ -144,7 +145,11 @@ export default function InfillRow({
   const [recorded, setRecorded] = useState<InfillDimension[]>([]);
 
   const kind = rowKind(question, palette);
-  const toQuote = question.tier === "to_quote" && question.requirementKind === "spec_field";
+  // RED IS THE ITEM'S TGQ, the one rule the line's count is made from — a
+  // readiness question blocking a quote is red too. A project-wide one is
+  // answered once on the project and says so.
+  const toQuote = inItemTgq(question);
+  const projectWide = isProjectWideQuestion(question);
 
   async function run(fn: () => Promise<SaveOutcome>) {
     setBusy(true);
@@ -204,9 +209,11 @@ export default function InfillRow({
             title={
               toQuote
                 ? TIER_LABELS.to_quote
-                : question.requirementKind === "readiness"
-                  ? "Readiness — internal and commercial"
-                  : TIER_LABELS.later
+                : projectWide
+                  ? "Project-wide — answered once on the project"
+                  : question.requirementKind === "readiness"
+                    ? "Readiness — internal and commercial"
+                    : TIER_LABELS.later
             }
             className={`mt-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${
               toQuote ? TONE.danger.dot : question.requirementKind === "readiness" ? TONE.warn.dot : "bg-neutral-300"

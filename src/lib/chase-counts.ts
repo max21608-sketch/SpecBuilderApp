@@ -55,7 +55,16 @@
 //
 // Nothing here reads a database, so the record screen and the gate panel run
 // the same functions the tests do.
+//
+// ---- A FIFTH: PROJECT-WIDE (2026-10-12) -----------------------------------
+//
+//   project    a checklist question in the PROJECT-WIDE section (Access, Site
+//              survey, Assembly guide, …). Answered once on the project and
+//              never counted in the item's own TGQ (Max's ruling). The gate
+//              still waits for it — the verdict is unchanged — but the row
+//              must not read as this item's work.
 // ============================================================================
+import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 
 /** The outcomes `gateStatus` produces, repeated structurally so this stays a leaf. */
 export type GateRowOutcome = "satisfied" | "blocking" | "unknown" | "not_applicable" | "unanswerable";
@@ -67,6 +76,8 @@ export type GateQuestion = {
   local_key: string | null;
   /** `requirements.kind`. Absent on a caller that does not carry it. */
   kind?: string | null;
+  /** `requirements.section`. The project-wide section is answered on the project. */
+  section?: string | null;
 };
 
 /** One of Matthew's matrix rows, in either of the two shapes the app holds it. */
@@ -95,7 +106,7 @@ export function questionForField<Q extends GateQuestion>(field: GateFieldRef, an
   );
 }
 
-export type GateRowRole = "chase" | "details" | "readiness" | "slot" | "nowhere" | "settled";
+export type GateRowRole = "chase" | "details" | "readiness" | "slot" | "project" | "nowhere" | "settled";
 
 /**
  * What KIND of outstanding work one gate row is — or that it is not work.
@@ -111,6 +122,9 @@ export function gateRowRole(
 ): GateRowRole {
   if (row.outcome === "unanswerable") return "nowhere";
   if (row.outcome === "satisfied" || row.outcome === "not_applicable") return "settled";
+  // Before readiness: a project-wide question is the PROJECT's work whatever
+  // its kind, and it is answered once, on the project.
+  if (question && question.section === PROJECT_WIDE_SECTION) return "project";
   if (question && question.kind === "readiness") return "readiness";
   if (row.field.localKey !== null && !question) return "details";
   if (row.field.dimensionSlot) return "slot";
@@ -124,6 +138,8 @@ export type ChaseBuckets = {
   details: number;
   readiness: number;
   slots: number;
+  /** Answered once on the project. Never in the item's own TGQ. */
+  project: number;
   /** Chipped separately by the panel; never part of the sentence. */
   nowhere: number;
 };
@@ -134,6 +150,7 @@ export const EMPTY_BUCKETS: ChaseBuckets = {
   details: 0,
   readiness: 0,
   slots: 0,
+  project: 0,
   nowhere: 0,
 };
 
@@ -152,6 +169,7 @@ export function summariseGateRows<Q extends GateQuestion>(
       if (role === "chase") buckets.chase += 1;
       else if (role === "details") buckets.details += 1;
       else if (role === "readiness") buckets.readiness += 1;
+      else if (role === "project") buckets.project += 1;
       else buckets.slots += 1;
     }
   }
@@ -173,19 +191,41 @@ export function summariseGateRows<Q extends GateQuestion>(
 export function describeChaseCounts({
   buckets,
   toChase,
+  toQuote = null,
+  projectWide = null,
 }: {
   /** The TGQ gate's rows, bucketed. Null where Matthew's matrix does not reach the category. */
   buckets: ChaseBuckets | null;
-  /** Outstanding to-quote `spec_field` QUESTIONS. Null where nothing is tiered. */
+  /** Outstanding item-TGQ `spec_field` QUESTIONS (`inChaseAsk`). Null where nothing is tiered. */
   toChase: number | null;
+  /** The item's own TGQ (`inItemTgq`) — the Quote readiness tile. Read where there are no gate rows. */
+  toQuote?: number | null;
+  /** Project-wide TGQ questions on this item, answered once on the project. */
+  projectWide?: number | null;
 }): string | null {
-  // NO MATRIX VIEW, or no level and so nothing tiered: there is no second
-  // measure to set the first against, and a lone figure explains nothing.
-  if (!buckets || toChase === null) return null;
+  // NOTHING TIERED: there is no second measure to set the first against, and a
+  // lone figure explains nothing.
+  if (toChase === null) return null;
+  const projectClause = (count: number) => `${count} project-wide, answered once on the project`;
 
-  const { toAnswer, chase, details, readiness, slots } = buckets;
+  // NO MATRIX VIEW: the fallback model. The gap between the tile and the
+  // button is the readiness questions, and the project-wide ones sit beside
+  // both. Before 2026-10-12 this case printed nothing at all, and Side Table
+  // @ Bathroom read "47 TGQ" beside "Chase the 20" with no word between them.
+  if (!buckets) {
+    if (toQuote === null) return null;
+    const readiness = toQuote - toChase;
+    const pw = projectWide ?? 0;
+    if (readiness === 0 && pw === 0) return null;
+    const parts = [`${toQuote} TGQ`, `${toChase} to chase`];
+    if (readiness > 0) parts.push(`${readiness} you record here`);
+    if (pw > 0) parts.push(projectClause(pw));
+    return parts.join(" · ");
+  }
+
+  const { toAnswer, chase, details, readiness, slots, project } = buckets;
   const differs = chase !== toChase;
-  if (details === 0 && readiness === 0 && slots === 0 && !differs) return null;
+  if (details === 0 && readiness === 0 && slots === 0 && project === 0 && !differs) return null;
 
   const parts = [`${toAnswer} to answer at TGQ`];
   if (chase > 0 || differs) parts.push(`${chase} to chase`);
@@ -193,5 +233,6 @@ export function describeChaseCounts({
   if (details > 0) parts.push(`${details} you record on this item's details`);
   if (readiness > 0) parts.push(`${readiness} you record here`);
   if (slots > 0) parts.push(`${slots} counted as separate slots`);
+  if (project > 0) parts.push(projectClause(project));
   return parts.join(" · ");
 }

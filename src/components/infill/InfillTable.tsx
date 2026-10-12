@@ -43,6 +43,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
+import TgqCount from "@/components/drafts/TgqCount";
 import Chip from "@/components/ui/Chip";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { letterColour } from "@/components/records/letter-colours";
@@ -311,7 +312,9 @@ function LineRows({
   onSaveAnswer: SaveAnswer;
   onSaveDimension: SaveDimension;
 }) {
-  const optionsWithNothing = line.optionCount - line.options.filter((option) => option.counts.toQuote + option.counts.later > 0).length;
+  const optionsWithNothing =
+    line.optionCount -
+    line.options.filter((option) => option.counts.toQuote + (option.counts.projectWide ?? 0) + option.counts.later > 0).length;
 
   return (
     <>
@@ -375,9 +378,7 @@ function LineRows({
           )}
         </Td>
         <Td num>
-          <span className={line.counts.toQuote > 0 ? "font-semibold text-red-700" : "text-neutral-400"}>
-            {line.counts.toQuote}
-          </span>
+          <TgqCount toQuote={line.counts.toQuote} projectWide={line.counts.projectWide} />
         </Td>
         <Td num className={line.counts.later > 0 ? "text-neutral-600" : "text-neutral-400"}>
           {line.counts.later}
@@ -449,9 +450,7 @@ function LineRows({
                 {option.number && <span className="font-mono text-neutral-500"> · {option.number}</span>}
               </Td>
               <Td num>
-                <span className={option.counts.toQuote > 0 ? "font-semibold text-red-700" : "text-neutral-400"}>
-                  {option.counts.toQuote}
-                </span>
+                <TgqCount toQuote={option.counts.toQuote} projectWide={option.counts.projectWide} />
               </Td>
               <Td num className={option.counts.later > 0 ? "text-neutral-600" : "text-neutral-400"}>
                 {option.counts.later}

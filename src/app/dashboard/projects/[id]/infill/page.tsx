@@ -61,7 +61,7 @@ type Summary = {
   /** The areas, counted in item rows, for the by-question tab's filter. */
   questionAreas: AreaOption[];
   phases: { id: string; name: string }[];
-  totals: { questions: number; toQuote: number; later: number; noLevel: number; waiting: number };
+  totals: { questions: number; toQuote: number; projectWide?: number; later: number; noLevel: number; waiting: number };
   uncategorised: UncategorisedRecord[];
   categories: Category[];
   palettes: (Omit<Palette, "options" | "allowsFreeText" | "syncedAt" | "sourceNote"> & {
@@ -510,8 +510,22 @@ function InfillView() {
         )}
 
         <p className="text-sm text-neutral-600">
-          <b className="font-semibold text-neutral-900">{totals.toQuote.toLocaleString()}</b> needed to quote ·{" "}
-          {totals.later.toLocaleString()} also outstanding
+          {/* WHAT EACH NUMBER COUNTS. TGQ is the sum of the TGQ column below,
+              by the one rule — any question blocking a quote, minus the
+              project-wide ones, which are counted once on the project. */}
+          <b className="font-semibold text-neutral-900">{totals.toQuote.toLocaleString()}</b> TGQ on the items
+          {(totals.projectWide ?? 0) > 0 && (
+            <>
+              {" "}·{" "}
+              <Link
+                href={`/dashboard/projects/${project.id}?tab=overview#project-wide`}
+                className="text-blue-700 no-underline hover:underline"
+              >
+                {totals.projectWide} project-wide, answered once on the project
+              </Link>
+            </>
+          )}{" "}
+          · {totals.later.toLocaleString()} also outstanding
           {totals.noLevel > 0 && <> · {totals.noLevel.toLocaleString()} on items with no level</>}
           {totals.waiting > 0 && <> · {totals.waiting.toLocaleString()} already chased</>}
           {recorded > 0 && (

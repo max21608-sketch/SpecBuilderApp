@@ -13,6 +13,7 @@
 //
 // Rows are prefixed `__QA ` and deleted FK-safe; the PROJECT goes last and
 // takes its change sets with it (0014 refuses a direct delete).
+import { inItemTgq } from "@/lib/chase-grouping";
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
@@ -56,7 +57,7 @@ type ContactsOutstandingPayload = {
 type DraftsPayload = {
   ok: boolean;
   inventory: {
-    groups: { contact: { id: string }; questions: { tier: string | null }[] }[];
+    groups: { contact: { id: string }; questions: { tier: "to_quote" | "later" | null; section: string | null }[] }[];
   };
 };
 
@@ -200,8 +201,9 @@ describeIfDb("project payload — owes us, unlinked codes, failed reads", () => 
     expect(row).toBeTruthy();
 
     // The same grouping and the same tiers, reached by two routes. A copy of
-    // either rule in SQL is what this would catch.
-    expect(row?.toQuote).toBe(group?.questions.filter((q) => q.tier === "to_quote").length);
+    // either rule in SQL is what this would catch. TGQ is the item rule
+    // (2026-10-12): any kind, minus the project-wide section.
+    expect(row?.toQuote).toBe(group?.questions.filter((q) => inItemTgq(q)).length);
     expect(row?.alsoOutstanding).toBe(group?.questions.filter((q) => q.tier === "later").length);
     expect(row?.toQuote).toBeGreaterThan(0);
   });

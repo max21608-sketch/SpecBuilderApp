@@ -21,6 +21,103 @@
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
 import type { QuestionTier } from "@/lib/tgq";
+import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
+
+// ============================================================================
+// AN ITEM'S TGQ, DEFINED ONCE.
+//
+// Max, 2026-10-12, after the walk of pilot found TGQ meaning four counts on
+// one project: Drawers read 44 on the phase table and 20 on the fill-in
+// screen, 23 minutes apart, and Matthew quoted both. The phase table counted
+// every question whose tier was `to_quote`; `countOutstanding` counted only
+// the `spec_field` ones; and 450 of the 1,509 were fifteen PROJECT-WIDE
+// questions (TOE agreement, sales folder, site access, …) repeated on thirty
+// items. His ruling is the rule:
+//
+//   an item's TGQ = its outstanding questions whose tier is `to_quote`, of ANY
+//   kind, MINUS the project-wide section.
+//
+// The project-wide ones still block every quote. They are counted ONCE, on
+// the project, and answered there (`/api/projects/[id]/project-wide`).
+//
+// ---- WHAT THIS DOES NOT TOUCH -------------------------------------------
+//
+// A question's TIER. `questionTier` is unchanged and so is the tier stored on
+// `email_draft_items`: re-tiering would stale every unsent draft, the
+// `chased_at` trap. This is a rule about what is COUNTED as the item's own
+// work, not about which half of an email a question lands in.
+//
+// The gates. `gateStatus` still requires a project-wide TGQ field to be
+// answered before TGQ is met — the panel says it is answered on the project,
+// and the satisfied verdict still waits for it.
+//
+// Every TypeScript screen counts through these. `project-summary.ts` carries
+// the same rule in SQL, because the driver cannot share a fragment, and
+// `tests/db/project-summary.test.ts` holds the two equal.
+// ============================================================================
+
+/** The part of a question the TGQ rule reads. `section` is REQUIRED, so a caller cannot forget it and count a project-wide question as the item's. */
+export type TgqCountable = {
+  tier: QuestionTier | null;
+  section: string | null;
+};
+
+/** A question about the PROJECT, asked of every item that carries the section. */
+export function isProjectWideQuestion(question: { section: string | null }): boolean {
+  return question.section === PROJECT_WIDE_SECTION;
+}
+
+/** Counts in THIS ITEM's TGQ: blocks a quote, and is about the item. */
+export function inItemTgq(question: TgqCountable): boolean {
+  return question.tier === "to_quote" && !isProjectWideQuestion(question);
+}
+
+/** Blocks a quote, and is answered once on the project. */
+export function inProjectWideTgq(question: TgqCountable): boolean {
+  return question.tier === "to_quote" && isProjectWideQuestion(question);
+}
+
+/**
+ * What a chase ASKS by default: the item's TGQ, specification questions only.
+ * A readiness question is ours to record and is never chased (decision 19);
+ * a project-wide one is answered once on the project, not asked per item.
+ */
+export function inChaseAsk(question: TgqCountable & { requirementKind: "spec_field" | "readiness" }): boolean {
+  return inItemTgq(question) && question.requirementKind === "spec_field";
+}
+
+export type ItemTgqCounts = {
+  /** The item's own TGQ — what every screen prints as its TGQ. */
+  toQuote: number;
+  /** Of those, the ones a chase asks (`spec_field`). */
+  toChase: number;
+  /** Project-wide TGQ questions this item still carries. Counted apart, never inside `toQuote`. */
+  projectWide: number;
+  /** Everything else outstanding: tier `later`. */
+  later: number;
+};
+
+/**
+ * One item's TGQ counts, or NULL where any outstanding question on it is
+ * untiered (the fallback model with no level). Null is a dash, never a zero:
+ * "nothing blocks a quote" and "nobody has said what kind of item this is"
+ * are different answers.
+ */
+export function itemTgqCounts(
+  questions: readonly (TgqCountable & { requirementKind: "spec_field" | "readiness" })[],
+): ItemTgqCounts | null {
+  const counts: ItemTgqCounts = { toQuote: 0, toChase: 0, projectWide: 0, later: 0 };
+  for (const question of questions) {
+    if (question.tier === null) return null;
+    if (inItemTgq(question)) {
+      counts.toQuote += 1;
+      if (question.requirementKind === "spec_field") counts.toChase += 1;
+    } else if (inProjectWideTgq(question)) counts.projectWide += 1;
+    else counts.later += 1;
+  }
+  return counts;
+}
+
 
 /**
  * The shape this file needs from a question. Deliberately structural: the
@@ -32,6 +129,8 @@ export type GroupableQuestion = {
   requirementId: string;
   requirementKind: "spec_field" | "readiness";
   tier: QuestionTier | null;
+  /** The cheat sheet's section. Read by the TGQ rule: the project-wide section never counts in an item's TGQ. */
+  section: string | null;
   state: AnswerState;
   waiting: unknown | null;
   /** The client's own ref for this record. Empty on a finish option. */
@@ -233,31 +332,36 @@ export function allQuestions<Q>(line: FurnitureLine<Q>): Q[] {
 }
 
 export type OutstandingCounts = {
-  /** Spec-field questions that hold up a quotation. */
+  /** The item's own TGQ (`inItemTgq`): any kind of question, minus the project-wide section. */
   toQuote: number;
-  /** Everything else still outstanding, readiness questions included. */
+  /** Project-wide TGQ questions on these items, answered once on the project. Apart, never inside `toQuote`. */
+  projectWide: number;
+  /** Everything else still outstanding: tier `later`, or untiered. */
   later: number;
   waiting: number;
 };
 
 /**
- * The two numbers a line prints.
+ * The numbers a line prints.
  *
- * Readiness questions count as "also outstanding" rather than vanishing: they
- * are not selected by default and they are hidden by default, but they are
- * still outstanding, and a line that reported them as nothing would read as
- * finished when it is not.
+ * `toQuote` is the item's TGQ by the one rule (`inItemTgq`), readiness
+ * questions included — until 2026-10-12 this counted `spec_field` only and
+ * the fill-in screen read 20 where the phase table read 44 for the same
+ * drawers. The project-wide ones are counted apart, so a line never reads as
+ * clear while the project still owes them. The three partition the input.
  */
 export function countOutstanding(questions: readonly GroupableQuestion[]): OutstandingCounts {
   let toQuote = 0;
+  let projectWide = 0;
   let later = 0;
   let waiting = 0;
   for (const question of questions) {
-    if (question.tier === "to_quote" && question.requirementKind === "spec_field") toQuote += 1;
+    if (inItemTgq(question)) toQuote += 1;
+    else if (inProjectWideTgq(question)) projectWide += 1;
     else later += 1;
     if (question.waiting) waiting += 1;
   }
-  return { toQuote, later, waiting };
+  return { toQuote, projectWide, later, waiting };
 }
 
 // ---------------------------------------------------------------------------
@@ -311,19 +415,41 @@ export type QuestionGroup<Q> = {
   /** The heading. The BWS field's name where there is one — it is the shared half. */
   heading: string;
   fieldLabel: string | null;
-  /** How many of the rows under it hold up a quote. Never all-or-nothing: a
-   *  question can be TGQ on a hero item and later on a simple one. */
+  /** How many of the rows under it hold up a quote, by the item rule
+   *  (`inItemTgq`). Never all-or-nothing: a question can be TGQ on a hero item
+   *  and later on a simple one. */
   toQuote: number;
+  /** How many rows are project-wide TGQ — the same question answered once on the project. */
+  projectWide: number;
   /** One row per (record, question). The screen's edit rows. */
   rows: Q[];
 };
 
 /** The key two categories asking the same thing share. */
-export function questionGroupKey(question: QuestionGroupable): string {
+export function questionGroupKey(
+  question: Pick<QuestionGroupable, "requirementId" | "prompt" | "jsonId" | "localKey">,
+): string {
   if (question.jsonId !== null && question.jsonId !== undefined) return `field:${question.jsonId}`;
   if (question.localKey) return `local:${question.localKey}`;
   const folded = question.prompt.replace(/\s+/g, " ").trim().toLowerCase();
   return folded ? `prompt:${folded}` : `requirement:${question.requirementId}`;
+}
+
+/**
+ * PROJECT-LEVEL TGQ: how many DISTINCT project-wide questions still block a
+ * quote somewhere on the project. Keyed the way `groupByQuestion` keys a
+ * question, because `requirements` is per category — "Access" is seventeen
+ * rows and one question. This is the number the overview, the phase tab and
+ * the projects list print beside the item TGQ ("· 2 project-wide").
+ */
+export function projectWideTgqKeys(
+  questions: readonly (TgqCountable & Pick<QuestionGroupable, "requirementId" | "prompt" | "jsonId" | "localKey">)[],
+): Set<string> {
+  const keys = new Set<string>();
+  for (const question of questions) {
+    if (inProjectWideTgq(question)) keys.add(questionGroupKey(question));
+  }
+  return keys;
 }
 
 /**
@@ -350,6 +476,7 @@ export function groupByQuestion<Q extends QuestionGroupable>(questions: readonly
         heading: question.fieldLabel?.trim() || question.prompt.trim() || "Unnamed question",
         fieldLabel: question.fieldLabel,
         toQuote: 0,
+        projectWide: 0,
         rows: [],
       };
       groups.set(key, group);
@@ -358,7 +485,8 @@ export function groupByQuestion<Q extends QuestionGroupable>(questions: readonly
       group.requirementSet.add(question.requirementId);
       group.requirementIds.push(question.requirementId);
     }
-    if (question.tier === "to_quote" && question.requirementKind === "spec_field") group.toQuote += 1;
+    if (inItemTgq(question)) group.toQuote += 1;
+    else if (inProjectWideTgq(question)) group.projectWide += 1;
     group.rows.push(question);
   }
 
@@ -372,10 +500,11 @@ export function groupByQuestion<Q extends QuestionGroupable>(questions: readonly
       heading: group.heading,
       fieldLabel: group.fieldLabel,
       toQuote: group.toQuote,
+      projectWide: group.projectWide,
       rows: group.rows,
     }))
     .sort((a, b) => {
-      const blocking = (group: QuestionGroup<Q>) => (group.toQuote > 0 ? 0 : 1);
+      const blocking = (group: QuestionGroup<Q>) => (group.toQuote > 0 || group.projectWide > 0 ? 0 : 1);
       return blocking(a) - blocking(b) || b.toQuote - a.toQuote || a.heading.localeCompare(b.heading);
     });
 }

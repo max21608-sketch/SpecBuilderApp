@@ -124,6 +124,8 @@ export type SpecRecord = {
   waiting: number;
   /** null where the record has no level — not the same as "nothing is blocking". */
   to_quote_outstanding: number | null;
+  /** Project-wide TGQ questions this item carries — answered once on the project, never in the item's TGQ. */
+  project_wide_outstanding?: number;
   to_quote_waiting: number;
   /**
    * WHICH questions those are, named rather than counted — and ABSENT until
@@ -432,6 +434,8 @@ export default function SpecTable({
    */
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<PhaseInfo | null>(null);
+  /** Distinct project-wide TGQ questions on this phase's items (`/api/records`). */
+  const [projectWide, setProjectWide] = useState(0);
   const [mockupBusy, setMockupBusy] = useState(false);
   /** What the last press did, in the server's words. Kept until the next press or a dismissal. */
   const [mockupMessage, setMockupMessage] = useState<string | null>(null);
@@ -452,6 +456,7 @@ export default function SpecTable({
       retiredCount: number;
       categories: { id: string; family: string; name: string }[];
       phase?: PhaseInfo | null;
+      projectWide?: number;
     }>(`/api/records?${query.toString()}`);
     if (!res.ok) {
       setError(res.error);
@@ -463,6 +468,7 @@ export default function SpecTable({
     setRetiredCount(Number(res.data.retiredCount ?? 0));
     setCategories(res.data.categories ?? []);
     setPhase(res.data.phase ?? null);
+    setProjectWide(Number(res.data.projectWide ?? 0));
     summaryRef.current?.({
       records: res.data.records.length,
       toQuote: res.data.records.reduce((sum, record) => sum + (record.to_quote_outstanding ?? 0), 0),
@@ -784,9 +790,11 @@ export default function SpecTable({
             label="TGQ"
             tone="danger"
             value={tally.toQuoteItems}
-            meaning={`of ${records.length} item${records.length === 1 ? "" : "s"} · ${tally.toQuote.toLocaleString()} question${
+            // ITEM QUESTIONS — the one rule, project-wide apart (Max,
+            // 2026-10-12): those are answered once, on the project overview.
+            meaning={`of ${records.length} item${records.length === 1 ? "" : "s"} · ${tally.toQuote.toLocaleString()} item question${
               tally.toQuote === 1 ? "" : "s"
-            }`}
+            }${projectWide > 0 ? ` · ${projectWide} project-wide` : ""}`}
             onPress={() => setFocus(focus === "tgq" ? null : "tgq")}
             active={focus === "tgq"}
           />

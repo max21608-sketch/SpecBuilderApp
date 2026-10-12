@@ -114,7 +114,7 @@ describe("summariseGateRows", () => {
 
 describe("describeChaseCounts", () => {
   it("says nothing when every outstanding row is a question somebody is asked", () => {
-    const buckets = { toAnswer: 4, chase: 4, details: 0, readiness: 0, slots: 0, nowhere: 1 };
+    const buckets = { toAnswer: 4, chase: 4, details: 0, readiness: 0, slots: 0, project: 0, nowhere: 1 };
     expect(describeChaseCounts({ buckets, toChase: 4 })).toBeNull();
   });
 
@@ -133,26 +133,26 @@ describe("describeChaseCounts", () => {
     ];
     const answers = [130, 6, 191, 232].map((id, index) => question({ requirement_id: `q${index}`, json_id: id }));
     const buckets = summariseGateRows(rows, answers);
-    expect(buckets).toEqual({ toAnswer: 6, chase: 4, details: 2, readiness: 0, slots: 0, nowhere: 1 });
+    expect(buckets).toEqual({ toAnswer: 6, chase: 4, details: 2, readiness: 0, slots: 0, project: 0, nowhere: 1 });
     expect(describeChaseCounts({ buckets, toChase: 4 })).toBe(
       "6 to answer at TGQ · 4 to chase · 2 you record on this item's details",
     );
   });
 
   it("names a readiness row as one we record here", () => {
-    const buckets = { toAnswer: 5, chase: 4, details: 0, readiness: 1, slots: 0, nowhere: 0 };
+    const buckets = { toAnswer: 5, chase: 4, details: 0, readiness: 1, slots: 0, project: 0, nowhere: 0 };
     expect(describeChaseCounts({ buckets, toChase: 4 })).toBe("5 to answer at TGQ · 4 to chase · 1 you record here");
   });
 
   it("names the dimension slots when the gate counts four and the checklist asks one", () => {
-    const buckets = { toAnswer: 5, chase: 1, details: 0, readiness: 0, slots: 4, nowhere: 0 };
+    const buckets = { toAnswer: 5, chase: 1, details: 0, readiness: 0, slots: 4, project: 0, nowhere: 0 };
     expect(describeChaseCounts({ buckets, toChase: 1 })).toBe(
       "5 to answer at TGQ · 1 to chase · 4 counted as separate slots",
     );
   });
 
   it("carries every bucket at once, in one line, in order", () => {
-    const buckets = { toAnswer: 8, chase: 3, details: 2, readiness: 1, slots: 2, nowhere: 1 };
+    const buckets = { toAnswer: 8, chase: 3, details: 2, readiness: 1, slots: 2, project: 0, nowhere: 1 };
     expect(describeChaseCounts({ buckets, toChase: 3 })).toBe(
       "8 to answer at TGQ · 3 to chase · 2 you record on this item's details · 1 you record here · " +
         "2 counted as separate slots",
@@ -163,7 +163,7 @@ describe("describeChaseCounts", () => {
     // The gate's own chase bucket and the route's `toChase` are two readings of
     // the same population. If they part company that is a finding, not a
     // rounding, and the screen must not pick one.
-    const buckets = { toAnswer: 4, chase: 4, details: 0, readiness: 0, slots: 0, nowhere: 0 };
+    const buckets = { toAnswer: 4, chase: 4, details: 0, readiness: 0, slots: 0, project: 0, nowhere: 0 };
     expect(describeChaseCounts({ buckets, toChase: 3 })).toBe(
       "4 to answer at TGQ · 4 to chase · the button says 3 (differs — see the rows)",
     );
@@ -175,7 +175,45 @@ describe("describeChaseCounts", () => {
   });
 
   it("says nothing where the record has no level, because nothing is tiered", () => {
-    const buckets = { toAnswer: 6, chase: 4, details: 2, readiness: 0, slots: 0, nowhere: 1 };
+    const buckets = { toAnswer: 6, chase: 4, details: 2, readiness: 0, slots: 0, project: 0, nowhere: 1 };
     expect(describeChaseCounts({ buckets, toChase: null })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-12: project-wide questions are answered once, on the project.
+// ---------------------------------------------------------------------------
+describe("project-wide rows (Max, 2026-10-12)", () => {
+  it("calls a project-wide question the PROJECT's, whatever its kind", () => {
+    // Access (json 6) and Assembly guide (191) sit in the Project / commercial
+    // section of every cheat sheet. The gate still waits for them; the row
+    // must not read as this item's work.
+    const access = question({ requirement_id: "a", json_id: 6, section: "Project / commercial" });
+    expect(gateRowRole(row("blocking", { specFieldJsonId: 6 }), access)).toBe("project");
+    const toe = question({ requirement_id: "t", local_key: "toe", kind: "readiness", section: "Project / commercial" });
+    expect(gateRowRole(row("blocking", { localKey: "toe" }), toe)).toBe("project");
+  });
+
+  it("the stool: nothing of its own, two project-wide", () => {
+    const rows = [row("blocking", { specFieldJsonId: 6 }), row("blocking", { specFieldJsonId: 191 })];
+    const answers = [
+      question({ requirement_id: "a", json_id: 6, section: "Project / commercial" }),
+      question({ requirement_id: "b", json_id: 191, section: "Project / commercial" }),
+    ];
+    const buckets = summariseGateRows(rows, answers);
+    expect(buckets).toMatchObject({ toAnswer: 2, chase: 0, project: 2 });
+    expect(describeChaseCounts({ buckets, toChase: 0 })).toBe(
+      "2 to answer at TGQ · 2 project-wide, answered once on the project",
+    );
+  });
+
+  it("explains the FALLBACK too: Side Table read 47 TGQ beside Chase the 20, with no word between", () => {
+    expect(describeChaseCounts({ buckets: null, toChase: 20, toQuote: 29, projectWide: 15 })).toBe(
+      "29 TGQ · 20 to chase · 9 you record here · 15 project-wide, answered once on the project",
+    );
+  });
+
+  it("is still silent on the fallback where tile and button agree and nothing is project-wide", () => {
+    expect(describeChaseCounts({ buckets: null, toChase: 4, toQuote: 4, projectWide: 0 })).toBeNull();
   });
 });

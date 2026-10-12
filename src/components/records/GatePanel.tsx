@@ -127,6 +127,8 @@ export type GateAnswer = {
    * never chased — from a spec-field one, and the row's label says which.
    */
   kind?: string | null;
+  /** `requirements.section`. The project-wide section is answered once, on the project. */
+  section?: string | null;
   state: AnswerState;
 };
 
@@ -137,6 +139,7 @@ export default function GatePanel({
   palettes = [],
   categoryName = null,
   chaseHref = null,
+  projectWideHref = null,
 }: {
   gates: Record<Gate, GateStatus> | null;
   matrixFields?: MatrixFieldRow[] | null;
@@ -145,6 +148,8 @@ export default function GatePanel({
   categoryName?: string | null;
   /** Where "Chase the n" goes. Null renders no button rather than a dead one. */
   chaseHref?: string | null;
+  /** The project overview's Project-wide card, where those questions are answered once. */
+  projectWideHref?: string | null;
 }) {
   const [showAll, setShowAll] = useState<Partial<Record<Gate, boolean>>>({});
   const [why, setWhy] = useState(false);
@@ -198,6 +203,23 @@ export default function GatePanel({
     ) : (
       <span className="text-neutral-800">{field.fieldName}</span>
     );
+    // A PROJECT-WIDE FIELD IS NOT THIS ITEM'S WORK (Max, 2026-10-12). The gate
+    // still waits for it — the verdict is unchanged — but the row says where it
+    // is answered, once, for every item.
+    if (role === "project") {
+      return (
+        <>
+          {name}
+          {projectWideHref ? (
+            <Link href={projectWideHref} className="ml-1.5 text-[11px] text-blue-700 no-underline hover:underline">
+              answered once on the project
+            </Link>
+          ) : (
+            <span className="ml-1.5 text-[11px] text-neutral-500">answered once on the project</span>
+          )}
+        </>
+      );
+    }
     const label = role === "readiness" ? "you record this" : role === "details" ? "on the details" : null;
     if (!label) return name;
     return (

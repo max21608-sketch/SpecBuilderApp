@@ -17,6 +17,7 @@ function question(over: Partial<Q>): Q {
     requirementId: "q1",
     requirementKind: "spec_field",
     tier: "to_quote",
+    section: null,
     state: "missing",
     waiting: null,
     refs: "S-301",

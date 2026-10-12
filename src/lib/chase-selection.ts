@@ -51,6 +51,7 @@
 // predates this file and is asserted in `tests/components/chase-question-table.test.tsx`.
 // ============================================================================
 import type { QuestionTier } from "@/lib/tgq";
+import { isProjectWideQuestion } from "@/lib/chase-grouping";
 
 /**
  * The shape this file needs from a question. Structural on purpose, like
@@ -63,6 +64,8 @@ export type SelectableQuestion = {
   requirementKind: "spec_field" | "readiness";
   /** The server's reading. Null where the record has no level to read it at. */
   tier: QuestionTier | null;
+  /** The cheat sheet's section. A project-wide question is answered once on the project, never asked per item. */
+  section: string | null;
   /** A draft that already asked it. Anything non-null means somebody is waiting. */
   waiting: unknown | null;
   /** Who this question would be asked of. */
@@ -83,6 +86,11 @@ function chaseable(question: SelectableQuestion, contactId: string): boolean {
   if (!contactId) return false;
   if (question.contactId !== contactId) return false;
   if (question.requirementKind !== "spec_field") return false;
+  // ANSWERED ONCE, ON THE PROJECT (Max, 2026-10-12). Preselecting "Is access
+  // ok?" on thirty items would ask a designer one question thirty times — and
+  // the record's "Chase the n" button, which counts `inChaseAsk`, would land on
+  // a screen ticking more than it said. Still listed, still tickable by hand.
+  if (isProjectWideQuestion(question)) return false;
   if (question.waiting) return false;
   return true;
 }

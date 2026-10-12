@@ -17,6 +17,7 @@
 //   * Staleness is computed here, server-side, and returned per draft item.
 //     The client cannot distinguish "the record was retired" from "somebody
 //     answered it" by comparing versions, and those want different words.
+import { inChaseAsk, inItemTgq, projectWideTgqKeys } from "@/lib/chase-grouping";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import {
@@ -259,7 +260,13 @@ export async function GET(request: Request): Promise<Response> {
         outstanding: outstanding.length,
         specField: specFieldOutstanding.length,
         readiness: readinessOutstanding.length,
-        toQuote: outstanding.filter((q) => q.tier === "to_quote").length,
+        // THE ONE RULE (chase-grouping.ts): the items' own TGQ, any kind,
+        // minus the project-wide section; the subset a chase asks by default;
+        // and the distinct project-wide questions, answered once on the
+        // project. The tile says all three in words.
+        toQuote: outstanding.filter(inItemTgq).length,
+        toChase: outstanding.filter(inChaseAsk).length,
+        projectWide: projectWideTgqKeys(outstanding).size,
         later: outstanding.filter((q) => q.tier === "later").length,
         noLevel: outstanding.filter((q) => q.tier === null).length,
         waiting: waiting.size,

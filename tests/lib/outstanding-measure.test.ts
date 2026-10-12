@@ -18,6 +18,7 @@ function question(overrides: Partial<MeasurableQuestion> = {}): MeasurableQuesti
     fieldLabel: "Dimensions",
     state: "missing",
     tier: "to_quote",
+    section: null,
     level: "complex",
     parentId: null,
     area: "Signature Suite",

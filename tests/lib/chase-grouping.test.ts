@@ -16,6 +16,7 @@ function question(over: Partial<Q>): Q {
     requirementId: "q1",
     requirementKind: "spec_field",
     tier: "to_quote",
+    section: null,
     state: "missing",
     waiting: null,
     refs: "S-301",
@@ -125,24 +126,27 @@ describe("groupIntoLines", () => {
 });
 
 describe("countOutstanding", () => {
-  it("counts a readiness question as outstanding but never as blocking a quote", () => {
+  it("counts a readiness question in the item's TGQ, and the project-wide section apart (2026-10-12)", () => {
+    // Until 2026-10-12 this counted spec fields only, and Drawers read 20 here
+    // beside 44 on the phase table. One rule now: any kind, minus project-wide.
     const counts = countOutstanding([
       question({ tier: "to_quote" }),
       question({ tier: "to_quote", requirementKind: "readiness" }),
+      question({ tier: "to_quote", requirementKind: "readiness", section: "Project / commercial" }),
       question({ tier: "later" }),
     ]);
-    expect(counts).toEqual({ toQuote: 1, later: 2, waiting: 0 });
+    expect(counts).toEqual({ toQuote: 2, projectWide: 1, later: 1, waiting: 0 });
   });
 
   it("counts a question with no tier as outstanding rather than as blocking", () => {
     // A record with no level has no tier. tgq.ts refuses to read one, and a
     // count that guessed would make a levelless record look quotable.
-    expect(countOutstanding([question({ tier: null })])).toEqual({ toQuote: 0, later: 1, waiting: 0 });
+    expect(countOutstanding([question({ tier: null })])).toEqual({ toQuote: 0, projectWide: 0, later: 1, waiting: 0 });
   });
 
   it("counts what is awaiting a reply alongside, not instead", () => {
     const counts = countOutstanding([question({ waiting: { draftId: "d1" } }), question({})]);
-    expect(counts).toEqual({ toQuote: 2, later: 0, waiting: 1 });
+    expect(counts).toEqual({ toQuote: 2, projectWide: 0, later: 0, waiting: 1 });
   });
 });
 
@@ -209,11 +213,21 @@ describe("groupByQuestion", () => {
     expect(groups[0]!.rows).toHaveLength(2);
   });
 
-  it("a readiness question never counts as blocking a quote", () => {
+  it("a readiness question counts as blocking a quote; a project-wide one is counted apart", () => {
     const groups = groupByQuestion([
-      asked({ requirementKind: "readiness", tier: "to_quote", jsonId: null, localKey: "toe", fieldLabel: null }),
+      asked({ requirementKind: "readiness", tier: "to_quote", jsonId: null, localKey: "fit", fieldLabel: null }),
+      asked({
+        requirementKind: "readiness",
+        tier: "to_quote",
+        jsonId: null,
+        localKey: "toe",
+        fieldLabel: null,
+        section: "Project / commercial",
+      }),
     ]);
-    expect(groups[0]!.toQuote).toBe(0);
+    const byKey = new Map(groups.map((group) => [group.key, group]));
+    expect(byKey.get("local:fit")).toMatchObject({ toQuote: 1, projectWide: 0 });
+    expect(byKey.get("local:toe")).toMatchObject({ toQuote: 0, projectWide: 1 });
   });
 
   it("sorts what blocks a quote first, then by heading, stably", () => {

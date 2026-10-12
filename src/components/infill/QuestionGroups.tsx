@@ -56,6 +56,7 @@
 // ============================================================================
 import { useCallback, useMemo, useRef, useState } from "react";
 import Button from "@/components/ui/Button";
+import TgqCount from "@/components/drafts/TgqCount";
 import Chip from "@/components/ui/Chip";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import AreaSelect from "@/components/ui/AreaSelect";
@@ -76,6 +77,8 @@ export type QuestionSummary = {
   heading: string;
   fieldLabel: string | null;
   toQuote: number;
+  /** Rows that are project-wide TGQ: the same question answered once on the project. */
+  projectWide?: number;
   rows: number;
   records: number;
   /** The areas it is outstanding in. Null is "no area given". */
@@ -144,7 +147,7 @@ export default function QuestionGroups({
     () =>
       questions.filter((group) => {
         if (filters.tier === "to_quote" && group.toQuote === 0) return false;
-        if (filters.tier === "later" && group.toQuote === group.rows) return false;
+        if (filters.tier === "later" && group.toQuote + (group.projectWide ?? 0) === group.rows) return false;
         // A HEADING SURVIVES AN AREA FILTER IF ANY OF ITS ITEMS IS IN THAT
         // AREA. The rows inside are filtered too, so a heading that passes and
         // then shows nothing cannot happen.
@@ -365,9 +368,7 @@ function GroupRows({
         </Td>
         <Td num className="text-neutral-700">{group.records}</Td>
         <Td num>
-          <span className={group.toQuote > 0 ? "font-semibold text-red-700" : "text-neutral-400"}>
-            {group.toQuote}
-          </span>
+          <TgqCount toQuote={group.toQuote} projectWide={group.projectWide} />
         </Td>
         <Td>
           {/* A QUESTION CAN BLOCK A QUOTE ON ONE ITEM AND NOT ON ANOTHER —

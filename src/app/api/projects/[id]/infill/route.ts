@@ -94,6 +94,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     heading: group.heading,
     fieldLabel: group.fieldLabel,
     toQuote: group.toQuote,
+    projectWide: group.projectWide,
     rows: group.rows.length,
     // How many ITEMS owe it, which is the number the question is about.
     records: new Set(group.rows.map((row) => row.recordId)).size,

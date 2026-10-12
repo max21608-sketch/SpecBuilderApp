@@ -15,6 +15,7 @@ function question(over: Partial<SelectableQuestion> = {}): SelectableQuestion {
     requirementId: `req-${n}`,
     requirementKind: "spec_field",
     tier: "to_quote",
+    section: null,
     waiting: null,
     contactId: "c-1",
     ...over,
@@ -35,6 +36,15 @@ describe("defaultSelection", () => {
     // A real state, not a fault: everything blocking a quote has been answered
     // and what is left is "also outstanding". The screen says so in words.
     expect(defaultSelection([question({ tier: "later" })], "c-1").size).toBe(0);
+  });
+
+  it("never ticks a project-wide question: it is answered once on the project (2026-10-12)", () => {
+    // "Is access ok?" on thirty items is one question, asked thirty times.
+    // The record's "Chase the n" counts `inChaseAsk`, which leaves it out, so
+    // the preselection must too or the button lands on more ticks than it said.
+    const access = question({ section: "Project / commercial" });
+    expect(defaultSelection([access], "c-1").size).toBe(0);
+    expect(selectionSummary([access], "c-1").preselected).toBe(0);
   });
 
   it("never ticks a question somebody is already waiting on a reply for", () => {

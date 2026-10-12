@@ -19,7 +19,8 @@
 // they arrive has moved.
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
-import { groupByContact, loadOutstanding, type ProjectContact } from "@/lib/chase-drafts";
+import { groupByContact, loadOutstanding, type OutstandingQuestion, type ProjectContact } from "@/lib/chase-drafts";
+import { inItemTgq } from "@/lib/chase-grouping";
 
 export const dynamic = "force-dynamic";
 
@@ -58,8 +59,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // A tier of null is its own count. `questionTierOrNull` refuses to pick a
   // reading where the fallback model has no level, so adding those into either
   // column would be this route answering a question only a person can.
-  const tally = (questions: { tier: string | null }[]) => ({
-    toQuote: questions.filter((q) => q.tier === "to_quote").length,
+  // TGQ IS THE ITEM RULE (`inItemTgq`): any kind, minus the project-wide
+  // section, which nobody owes per item — it is answered once on the project.
+  const tally = (questions: OutstandingQuestion[]) => ({
+    toQuote: questions.filter(inItemTgq).length,
     alsoOutstanding: questions.filter((q) => q.tier === "later").length,
     noTier: questions.filter((q) => q.tier === null).length,
   });

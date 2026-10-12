@@ -55,6 +55,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
+import TgqCount from "@/components/drafts/TgqCount";
 import Chip from "@/components/ui/Chip";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -70,6 +71,9 @@ import { formatDay } from "@/lib/format-day";
 import {
   allQuestions,
   countOutstanding,
+  inChaseAsk,
+  inItemTgq,
+  isProjectWideQuestion,
   finishOptionQtyLabel,
   groupIntoLines,
   type FurnitureLine,
@@ -247,7 +251,11 @@ export default function ChaseQuestionTable({
   function visible(line: FurnitureLine<TableQuestion>, list: TableQuestion[]): TableQuestion[] {
     const lineHit = lineMatchesText(line);
     return list.filter((question) => {
-      if (tierValue !== "all" && question.tier !== tierValue) return false;
+      // THE TGQ FILTER IS THE ITEM RULE (`inItemTgq`), the one the line's own
+      // TGQ count is made from — a project-wide question is answered once on
+      // the project and is listed under "all".
+      if (tierValue === "to_quote" && !inItemTgq(question)) return false;
+      if (tierValue === "later" && question.tier !== "later") return false;
       if (!filters.showReadiness && question.requirementKind === "readiness") return false;
       if (!waitingValue && question.waiting) return false;
       if (filters.state && question.state !== filters.state) return false;
@@ -666,7 +674,7 @@ function LineRows({
   open: boolean;
   own: TableQuestion[];
   options: { option: FurnitureLine<TableQuestion>["options"][number]; questions: TableQuestion[] }[];
-  total: { toQuote: number; later: number; waiting: number };
+  total: { toQuote: number; projectWide: number; later: number; waiting: number };
   filteredCount: number | null;
   optionsWithNothing: number;
   openOptions: Set<string>;
@@ -769,9 +777,7 @@ function LineRows({
           )}
         </Td>
         <Td num>
-          <span className={total.toQuote > 0 ? "font-semibold text-red-700" : "text-neutral-400"}>
-            {total.toQuote}
-          </span>
+          <TgqCount toQuote={total.toQuote} projectWide={total.projectWide} />
           {filteredCount !== null && (
             <span className="block text-[11px] text-neutral-400">{filteredCount} shown</span>
           )}
@@ -852,9 +858,7 @@ function LineRows({
                 <Td num className="text-neutral-400">—</Td>
                 <Td />
                 <Td num>
-                  <span className={optionTotal.toQuote > 0 ? "font-semibold text-red-700" : "text-neutral-400"}>
-                    {optionTotal.toQuote}
-                  </span>
+                  <TgqCount toQuote={optionTotal.toQuote} projectWide={optionTotal.projectWide} />
                   {narrowed && questions.length !== option.questions.length && (
                     <span className="block text-[11px] text-neutral-400">{questions.length} shown</span>
                   )}
@@ -926,14 +930,15 @@ function QuestionRows({
   const open = unfolded.has(id);
   const listed = open ? ordered : ordered.slice(0, FOLD_AT);
   const rest = ordered.slice(listed.length);
-  const moreToQuote = rest.filter((q) => q.tier === "to_quote" && q.requirementKind === "spec_field").length;
+  const moreToQuote = rest.filter((q) => inChaseAsk(q)).length;
   const moreAlso = rest.length - moreToQuote;
 
   return (
     <>
       {listed.map((question) => {
         const k = key(question.recordId, question.requirementId);
-        const toQuote = question.tier === "to_quote" && question.requirementKind === "spec_field";
+        const toQuote = inChaseAsk(question);
+        const projectWide = isProjectWideQuestion(question);
         return (
           <tr key={k} className="hover:bg-neutral-50">
             <td colSpan={2} className={`border-b border-neutral-100 px-2 py-1.5 align-top ${pad}`}>
@@ -953,7 +958,9 @@ function QuestionRows({
                 title={
                   toQuote
                     ? TIER_LABELS.to_quote
-                    : question.requirementKind === "readiness"
+                    : projectWide
+                      ? "Project-wide — answered once on the project"
+                      : question.requirementKind === "readiness"
                       ? "Readiness — internal and commercial"
                       : TIER_LABELS.later
                 }

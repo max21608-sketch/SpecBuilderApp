@@ -1731,7 +1731,11 @@ function ProjectOverview() {
                   label="TGQ"
                   tone="danger"
                   value={summary.toQuoteItems}
-                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.toQuote.toLocaleString()} questions`}
+                  // ITEM QUESTIONS, with the project-wide ones apart — they
+                  // are answered once, on the card below, not per item.
+                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.toQuote.toLocaleString()} item questions${
+                    summary.projectWide > 0 ? ` · ${summary.projectWide} project-wide` : ""
+                  }`}
                   href={firstRunHref}
                 />
                 <StatTile
@@ -1868,8 +1872,18 @@ function ProjectOverview() {
                         <>
                           Items with at least one question blocking a quotation, of the{" "}
                           {summary.itemsWithQuestions.toLocaleString()} that have a category —{" "}
-                          {summary.toQuote.toLocaleString()} question
-                          {summary.toQuote === 1 ? "" : "s"} between them.
+                          {summary.toQuote.toLocaleString()} item question
+                          {summary.toQuote === 1 ? "" : "s"} between them
+                          {summary.projectWide > 0 && (
+                            <>
+                              , and{" "}
+                              <a href="#project-wide" className="text-blue-700 no-underline hover:underline">
+                                {summary.projectWide} project-wide
+                              </a>{" "}
+                              answered once for every item
+                            </>
+                          )}
+                          .
                           {summary.tgqFromFallback > 0 &&
                             ` His matrix for ${summary.tgqFromMatrix} items, the placeholder for ${summary.tgqFromFallback}.`}
                         </>

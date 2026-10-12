@@ -19,6 +19,7 @@
 // rather than the measurement of the four.
 // ============================================================================
 import type { OutstandingQuestion } from "@/lib/chase-drafts";
+import { inItemTgq, inProjectWideTgq } from "@/lib/chase-grouping";
 
 /** What the aggregation needs. Structural, so a test fixture need not be a full row. */
 export type MeasurableQuestion = Pick<
@@ -33,6 +34,7 @@ export type MeasurableQuestion = Pick<
   | "fieldLabel"
   | "state"
   | "tier"
+  | "section"
   | "level"
   | "parentId"
   | "area"
@@ -64,7 +66,10 @@ export type OutstandingMeasurement = {
   readiness: number;
   missing: number;
   tbc: number;
+  /** The items' own TGQ (`inItemTgq`): any kind, minus the project-wide section. */
   toQuote: number;
+  /** Project-wide TGQ ROWS — the same questions repeated per item, answered once on the project. */
+  projectWide: number;
   later: number;
   /** Questions on a record with no level, which therefore have no tier at all. */
   noTier: number;
@@ -114,6 +119,7 @@ export function measureOutstanding(
   let missing = 0;
   let tbc = 0;
   let toQuote = 0;
+  let projectWide = 0;
   let later = 0;
   let noTier = 0;
   let toQuoteFromMatrix = 0;
@@ -130,11 +136,12 @@ export function measureOutstanding(
     if (onMatrix) recordsOnMatrix.add(question.recordId);
     else recordsOnFallback.add(question.recordId);
 
-    if (question.tier === "to_quote") {
+    if (inItemTgq(question)) {
       toQuote += 1;
       if (onMatrix) toQuoteFromMatrix += 1;
       else toQuoteFromFallback += 1;
-    } else if (question.tier === "later") later += 1;
+    } else if (inProjectWideTgq(question)) projectWide += 1;
+    else if (question.tier === "later") later += 1;
     else noTier += 1;
 
     // The chase screen's unit: a finish option belongs to its parent's line.
@@ -153,8 +160,8 @@ export function measureOutstanding(
       total: 0,
     };
     record.total += 1;
-    if (question.tier === "to_quote") record.toQuote += 1;
-    else if (question.tier === "later") record.later += 1;
+    if (inItemTgq(question)) record.toQuote += 1;
+    else if (question.tier !== null) record.later += 1;
     else record.noTier += 1;
     byRecord.set(question.recordId, record);
 
@@ -168,6 +175,8 @@ export function measureOutstanding(
       recordIds: new Set<string>(),
     };
     tally.total += 1;
+    // Per question, the TIER: a project-wide question's rows are its whole
+    // point here — this table is where "the same question 30 times" shows.
     if (question.tier === "to_quote") tally.toQuote += 1;
     tally.recordIds.add(question.recordId);
     byQuestion.set(question.requirementId, tally);
@@ -180,6 +189,7 @@ export function measureOutstanding(
     missing,
     tbc,
     toQuote,
+    projectWide,
     later,
     noTier,
     toQuoteFromMatrix,

@@ -27,6 +27,9 @@ import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
 import { EMPTY_SUMMARY, loadProjectSummary } from "@/lib/project-summary";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
+import { loadOutstanding } from "@/lib/chase-drafts";
+import { inItemTgq, inProjectWideTgq, projectWideTgqKeys } from "@/lib/chase-grouping";
+import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -170,7 +173,9 @@ describeIfDb("project summary", () => {
 
     // Every ANSWER is exactly one of the four: that is a partition, and it is
     // what makes the question figures addable.
-    expect(result.toQuote + result.missing + result.tbc + result.settled).toBe(
+    // Since 2026-10-12 the project-wide TGQ rows are counted apart from the
+    // items' own TGQ, and the five together still partition.
+    expect(result.toQuote + result.projectWideRows + result.missing + result.tbc + result.settled).toBe(
       3 * allRequirementIds.length,
     );
 
@@ -226,6 +231,56 @@ describeIfDb("project summary", () => {
     );
     await agree();
     await client.query(`delete from spec_records where id = $1`, [variant.rows[0].id]);
+  });
+
+  it("THE SQL IS THE TS RULE: item TGQ minus the project-wide section, and project-wide by question", async () => {
+    // A FALLBACK category (not on Matthew's matrix) with a level: every
+    // question is to_quote, so it carries item readiness questions AND the
+    // project-wide section, spec fields and readiness both. That is the case
+    // the walk of 2026-10-12 found counted four ways.
+    const fallback = await client.query(
+      `select q.category_id as id
+         from requirements q
+        where q.category_id not in (select item_category_id from spec_matrix_category_map)
+        group by q.category_id
+       having count(*) filter (where q.kind = 'readiness' and q.section is distinct from $1) > 0
+          and count(*) filter (where q.section = $1 and q.kind = 'readiness') > 0
+          and count(*) filter (where q.section = $1 and q.kind = 'spec_field') > 0
+        limit 1`,
+      [PROJECT_WIDE_SECTION],
+    );
+    const extra = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, level, item_description, status,
+                                 created_by, updated_by)
+       values ($1, $2, 6, $3, 'simple', '__QA Drawers on the placeholder', 'active', 'qa', 'qa') returning id`,
+      [projectId, runId, fallback.rows[0].id],
+    );
+    try {
+      const result = await summary();
+      const outstanding = await loadOutstanding(projectId);
+      const itemTgq = outstanding.filter(inItemTgq);
+      const projectWideRows = outstanding.filter(inProjectWideTgq);
+
+      // Equal, number for number, to what every TypeScript screen counts.
+      expect(result.toQuote).toBe(itemTgq.length);
+      expect(result.projectWideRows).toBe(projectWideRows.length);
+      expect(result.projectWide).toBe(projectWideTgqKeys(outstanding).size);
+
+      // The cases that make it a rule and not a coincidence: a readiness
+      // question IS in the item's TGQ; nothing in the project-wide section is;
+      // and the project-wide figure is per QUESTION, so it is smaller than its
+      // rows as soon as two items ask the same one.
+      expect(itemTgq.some((question) => question.requirementKind === "readiness")).toBe(true);
+      expect(itemTgq.some((question) => question.section === PROJECT_WIDE_SECTION)).toBe(false);
+      expect(projectWideRows.some((question) => question.requirementKind === "spec_field")).toBe(true);
+      expect(result.projectWide).toBeGreaterThan(0);
+      expect(result.projectWide).toBeLessThan(result.projectWideRows);
+
+      // And the items: the placeholder record is held at TGQ by its own work.
+      expect(result.toQuoteItems).toBe(new Set(itemTgq.map((question) => question.recordId)).size);
+    } finally {
+      await client.query(`delete from spec_records where id = $1`, [extra.rows[0].id]);
+    }
   });
 
   it("a retired phase is out, like the export", async () => {

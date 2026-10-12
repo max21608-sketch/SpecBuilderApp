@@ -19,6 +19,7 @@ import { ITEM_LEVELS } from "@/lib/spec-vocab";
 import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-capture";
 import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
 import { loadPalettes } from "@/lib/palette-load";
+import { itemTgqCounts } from "@/lib/chase-grouping";
 import { loadConfigurationFamily } from "@/lib/configuration-family";
 import { currentPicture, itemImageSource, offeredPicture } from "@/lib/item-image";
 import { loadItemPictures } from "@/lib/item-image-write";
@@ -332,33 +333,32 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // any level" makes the record look urgent and "needed at none" makes it look
   // quotable. Both counts go null together: reporting `alsoOutstanding: 0`
   // beside 48 untiered questions would be a number that is simply false.
-  const untiered = outstanding.some((question) => question.tier === null);
+  // ONE RULE, `itemTgqCounts` (chase-grouping.ts): the item's TGQ is every
+  // outstanding to_quote question of any kind MINUS the project-wide section,
+  // which is counted apart and answered once on the project (Max, 2026-10-12).
+  // The phase table, the fill-in and chase lines and this screen all call it.
+  // Null where a question is untiered — the fallback with no level.
+  const tgq = itemTgqCounts(outstanding);
+  const untiered = tgq === null;
   const settled = answers.filter((row) => String(row.state ?? "") === "confirmed").length;
   const notApplicable = answers.filter((row) => String(row.state ?? "") === "na").length;
   const quoteReadiness = {
-    toQuote: untiered ? null : outstanding.filter((question) => question.tier === "to_quote").length,
+    toQuote: tgq?.toQuote ?? null,
     // ---- AND HOW MANY OF THOSE A CHASE WOULD ACTUALLY ASK ------------------
     //
     // A READINESS QUESTION IS OURS TO RECORD AND IS NEVER CHASED (decision
-    // 19). `groupByContact` has excluded them from its own to-quote figure
-    // since it was written, and the chase screen preselects `spec_field` rows
-    // only — so a button reading "Chase the 5" that lands on a screen ticking
-    // four is the same defect one screen later. That pair was read out loud on
-    // 2026-09-18 and nobody in the room could say why the numbers differed.
-    //
-    // `toQuote` keeps its meaning exactly — it is what the Quote readiness
-    // tile counts and what the spec table's TGQ column counts — and the button
-    // gets its own number rather than one of them being quietly redefined.
-    // Two names for two counts, because they answer two questions.
+    // 19), and the chase screen preselects `inChaseAsk` — so a button reading
+    // "Chase the 5" that lands on a screen ticking four is the same defect one
+    // screen later. The button gets its own number, and the header sentence
+    // (`describeChaseCounts`) says what lies between the two.
     //
     // `waiting` is deliberately NOT excluded here: whether to re-ask something
     // already chased is a decision the chase screen offers a control for, and
     // a header that silently dropped those would understate the work.
-    toChase: untiered
-      ? null
-      : outstanding.filter((question) => question.tier === "to_quote" && question.requirementKind === "spec_field")
-          .length,
-    alsoOutstanding: untiered ? null : outstanding.filter((question) => question.tier === "later").length,
+    toChase: tgq?.toChase ?? null,
+    /** Project-wide TGQ questions on this item. Answered once on the project; never in `toQuote`. */
+    projectWide: tgq?.projectWide ?? null,
+    alsoOutstanding: tgq?.later ?? null,
     /** Missing plus TBC, whatever the tier. Always a number, so a dash above it still has a size beside it. */
     outstanding: outstanding.length,
     settled,

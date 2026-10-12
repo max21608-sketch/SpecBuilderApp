@@ -246,6 +246,8 @@ export type Payload = {
     toQuote: number | null;
     /** Of `toQuote`, the ones a chase would ask — readiness rows are ours to record. */
     toChase: number | null;
+    /** Project-wide TGQ questions on this item: answered once on the project, never in `toQuote`. */
+    projectWide?: number | null;
     alsoOutstanding: number | null;
     outstanding: number;
     settled: number;
@@ -765,7 +767,12 @@ function RecordView() {
   // describe what is on the screen. Null where Matthew's matrix does not reach
   // the category: there is no second measure there to explain.
   const tgqBuckets = data.gates ? summariseGateRows(data.gates.TGQ.fields, answers) : null;
-  const chaseCounts = describeChaseCounts({ buckets: tgqBuckets, toChase: readiness.toChase });
+  const chaseCounts = describeChaseCounts({
+    buckets: tgqBuckets,
+    toChase: readiness.toChase,
+    toQuote: readiness.toQuote,
+    projectWide: readiness.projectWide ?? null,
+  });
 
   const gateSummaryLabel = data.gates
     ? `${GATES.filter((gate) => data.gates![gate].satisfied).length} of ${GATES.length}`
@@ -1000,6 +1007,9 @@ function RecordView() {
   );
 
   const chaseHref = `/dashboard/drafts?projectId=${record.project_id}`;
+  /** The overview's Project-wide card, where those questions are answered once for every item. */
+  const projectWideHref = `/dashboard/projects/${record.project_id}?tab=overview#project-wide`;
+  const projectWideCount = readiness.projectWide ?? 0;
 
   return (
     <>
@@ -1774,6 +1784,20 @@ function RecordView() {
                     )}
                   </span>
                 </div>
+                {/* PROJECT-WIDE, APART FROM THE ITEM'S OWN (Max, 2026-10-12).
+                    They still block every quote, so they are said here — but
+                    they are answered once on the project, and the number
+                    above is this item's own work. */}
+                {projectWideCount > 0 && (
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className={`text-[17px] font-semibold tabular-nums ${TONE.danger.text}`}>
+                      {projectWideCount}
+                    </span>
+                    <Link href={projectWideHref} className="text-neutral-500 no-underline hover:underline">
+                      project-wide, answered once on the project
+                    </Link>
+                  </div>
+                )}
                 <div className="mt-1 flex items-baseline gap-2">
                   <span className={`text-[17px] font-semibold tabular-nums ${TONE.warn.text}`}>
                     {readiness.alsoOutstanding ?? readiness.outstanding}
@@ -2094,6 +2118,7 @@ function RecordView() {
             palettes={data.palettes ?? []}
             categoryName={record.category_name}
             chaseHref={chaseHref}
+            projectWideHref={projectWideHref}
           />
         )}
 

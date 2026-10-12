@@ -50,6 +50,7 @@
 // worse than no figure.
 // ============================================================================
 import { sql } from "@/lib/db";
+import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 import { countOpenDisagreementsByProject, type ProjectDisagreements } from "@/lib/disagreements";
 
 export type ProjectSummary = {
@@ -61,8 +62,21 @@ export type ProjectSummary = {
   noLevel: number;
   /** How many of THOSE carry a suggestion waiting to be accepted. */
   levelSuggested: number;
-  /** Outstanding questions that block a quote at their record's level. */
+  /**
+   * The ITEMS' OWN TGQ, in questions: outstanding, blocking a quote, of any
+   * kind, MINUS the project-wide section (Max, 2026-10-12). The same rule as
+   * `inItemTgq` in chase-grouping.ts, re-expressed in SQL below; the db test
+   * holds the two equal.
+   */
   toQuote: number;
+  /**
+   * PROJECT-LEVEL TGQ: distinct project-wide questions still blocking a quote
+   * on any item in scope — "Access", once, not once per item. Keyed the way
+   * `groupByQuestion` keys a question. What the screens print beside TGQ.
+   */
+  projectWide: number;
+  /** The same project-wide TGQ counted per item, so the question counts still partition. */
+  projectWideRows: number;
   /** Outstanding, not blocking a quote. Split, because they are different jobs. */
   missing: number;
   tbc: number;
@@ -141,6 +155,8 @@ export const EMPTY_SUMMARY: ProjectSummary = {
   noLevel: 0,
   levelSuggested: 0,
   toQuote: 0,
+  projectWide: 0,
+  projectWideRows: 0,
   missing: 0,
   tbc: 0,
   settled: 0,
@@ -303,6 +319,22 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
              -- this drives off the requirements table with a left join.
              -- (No backticks in here: one closes the tagged template.)
              coalesce(a.state, 'missing') as state,
+             -- THE PROJECT-WIDE SECTION (Max, 2026-10-12). Bound from the one
+             -- constant in checklist-sections.ts, never typed here. Its TGQ
+             -- questions are counted ONCE for the project and never in an
+             -- item's own TGQ -- the inItemTgq rule.
+             (q.section is not distinct from ${PROJECT_WIDE_SECTION}::text) as project_wide,
+             -- WHICH QUESTION, across categories: questionGroupKey, in SQL.
+             -- requirements is per category, so Access is seventeen rows and
+             -- one question. BWS field, then local key, then the folded
+             -- prompt, then the row itself.
+             case
+               when f.json_id is not null then 'field:' || f.json_id::text
+               when coalesce(q.local_key, '') <> '' then 'local:' || q.local_key
+               when btrim(lower(regexp_replace(coalesce(q.prompt, ''), '\\s+', ' ', 'g'))) <> ''
+                 then 'prompt:' || btrim(lower(regexp_replace(q.prompt, '\\s+', ' ', 'g')))
+               else 'requirement:' || q.id::text
+             end as question_key,
              -- THE SAME RULE AS questionTier, IN SQL. His matrix where he wrote
              -- one for the category, the 0019 placeholder where he did not --
              -- never "nothing blocks a quote", which is what an unmapped
@@ -319,6 +351,7 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
              end as to_quote
       from scoped s
       join requirements q on q.category_id = s.category_id
+      left join spec_fields f on f.id = q.spec_field_id
       left join mapped_cats mc on mc.item_category_id = s.category_id
       left join tgq_questions tq on tq.requirement_id = q.id
       left join spec_answers a
@@ -350,7 +383,13 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
              -- purpose: nothing on it is tiered and picking a reading is the app
              -- answering a question only a person can. Under his matrix the tier
              -- needs no level, because his matrix has no level column.
-             count(*) filter (where state in ('missing', 'tbc') and to_quote)::int as to_quote,
+             -- THE ITEMS' OWN TGQ: minus the project-wide section, which is
+             -- counted once below. The four question counts still partition
+             -- with project_wide_rows beside them.
+             count(*) filter (where state in ('missing', 'tbc') and to_quote and not project_wide)::int as to_quote,
+             count(*) filter (where state in ('missing', 'tbc') and to_quote and project_wide)::int as project_wide_rows,
+             count(distinct question_key)
+               filter (where state in ('missing', 'tbc') and to_quote and project_wide)::int as project_wide,
              count(*) filter (where state = 'missing' and not to_quote)::int as missing,
              count(*) filter (where state = 'tbc' and not to_quote)::int as tbc,
              count(*) filter (where state in ('confirmed', 'na'))::int as settled,
@@ -362,7 +401,8 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
              -- which is why each is reported against the population below
              -- rather than beside its siblings as though they added up.
              count(distinct record_id)::int as items_with_questions,
-             count(distinct record_id) filter (where state in ('missing', 'tbc') and to_quote)::int as to_quote_items,
+             count(distinct record_id)
+               filter (where state in ('missing', 'tbc') and to_quote and not project_wide)::int as to_quote_items,
              count(distinct record_id) filter (where state in ('missing', 'tbc') and not to_quote)::int as also_outstanding_items,
              -- SETTLED AS AN ITEM COUNT IS "NOTHING OUTSTANDING AT ALL", not
              -- "has a settled answer" -- which would be true of almost every
@@ -395,6 +435,8 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
            rec.records, rec.uncategorised, rec.no_level, rec.level_suggested,
            rec.tgq_from_matrix, rec.tgq_from_fallback,
            coalesce(ans.to_quote, 0) as to_quote,
+           coalesce(ans.project_wide, 0) as project_wide,
+           coalesce(ans.project_wide_rows, 0) as project_wide_rows,
            coalesce(ans.missing, 0) as missing,
            coalesce(ans.tbc, 0) as tbc,
            coalesce(ans.settled, 0) as settled,
@@ -420,6 +462,8 @@ function toSummary(row: SummaryRow): ProjectSummary {
     noLevel: Number(row.no_level ?? 0),
     levelSuggested: Number(row.level_suggested ?? 0),
     toQuote: Number(row.to_quote ?? 0),
+    projectWide: Number(row.project_wide ?? 0),
+    projectWideRows: Number(row.project_wide_rows ?? 0),
     missing: Number(row.missing ?? 0),
     tbc: Number(row.tbc ?? 0),
     settled: Number(row.settled ?? 0),

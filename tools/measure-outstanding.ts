@@ -102,7 +102,8 @@ for (const project of projects) {
   console.log(`    spec field                    ${n(measurement.specField)}`);
   console.log(`    readiness                     ${n(measurement.readiness)}`);
   console.log(`    missing / TBC                 ${n(measurement.missing)} / ${n(measurement.tbc)}`);
-  console.log(`  TO QUOTE                        ${n(measurement.toQuote)}`);
+  console.log(`  TO QUOTE (items, any kind)      ${n(measurement.toQuote)}`);
+  console.log(`  PROJECT-WIDE TGQ (rows)         ${n(measurement.projectWide)}`);
   console.log(
     `    from Matthew's matrix         ${n(measurement.toQuoteFromMatrix)}  (${n(measurement.recordsOnMatrix)} records)`,
   );

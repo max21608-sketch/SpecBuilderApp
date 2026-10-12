@@ -65,6 +65,7 @@ function question(over: Partial<TableQuestion> = {}): TableQuestion {
     fieldLabel: "COM 1",
     requirementKind: "spec_field",
     tier: "to_quote",
+    section: null,
     state: "missing",
     waiting: null,
     refs: "S-301",

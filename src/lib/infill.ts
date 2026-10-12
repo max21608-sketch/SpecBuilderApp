@@ -31,11 +31,19 @@
 // real one.
 // ============================================================================
 import type { OutstandingQuestion, WaitingInfo } from "@/lib/chase-drafts";
-import { allQuestions, countOutstanding, groupIntoLines, type GroupableQuestion } from "@/lib/chase-grouping";
+import {
+  allQuestions,
+  countOutstanding,
+  groupIntoLines,
+  inItemTgq,
+  projectWideTgqKeys,
+  type GroupableQuestion,
+} from "@/lib/chase-grouping";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
 import { isOfferable, type Palette } from "@/lib/palettes";
 
-export type InfillCounts = { toQuote: number; later: number; waiting: number };
+/** `countOutstanding`'s own shape: the item TGQ, the project-wide TGQ apart from it, the rest. */
+export type InfillCounts = { toQuote: number; projectWide?: number; later: number; waiting: number };
 
 /**
  * How many of a line's outstanding questions are in each state.
@@ -206,10 +214,19 @@ export type InfillQuestion = {
   composed: string | null;
 };
 
-/** Totals for the header, over the same questions the lines were built from. */
+/**
+ * Totals for the header, over the same questions the lines were built from.
+ *
+ * `toQuote` is the SUM OF THE LINES' TGQ — the same predicate (`inItemTgq`),
+ * so the header can never say a number the column under it does not add up
+ * to. It read "1,507 needed to quote" over a column summing to ~725 until
+ * 2026-10-12. `projectWide` is the PROJECT-level figure: distinct project-wide
+ * questions still blocking a quote, answered once on the overview.
+ */
 export function infillTotals(questions: readonly OutstandingQuestion[], waiting: ReadonlySet<string>): {
   questions: number;
   toQuote: number;
+  projectWide: number;
   later: number;
   noLevel: number;
   waiting: number;
@@ -218,9 +235,16 @@ export function infillTotals(questions: readonly OutstandingQuestion[], waiting:
   let later = 0;
   let noLevel = 0;
   for (const question of questions) {
-    if (question.tier === "to_quote") toQuote += 1;
+    if (inItemTgq(question)) toQuote += 1;
+    else if (question.tier === null) noLevel += 1;
     else if (question.tier === "later") later += 1;
-    else noLevel += 1;
   }
-  return { questions: questions.length, toQuote, later, noLevel, waiting: waiting.size };
+  return {
+    questions: questions.length,
+    toQuote,
+    projectWide: projectWideTgqKeys(questions).size,
+    later,
+    noLevel,
+    waiting: waiting.size,
+  };
 }

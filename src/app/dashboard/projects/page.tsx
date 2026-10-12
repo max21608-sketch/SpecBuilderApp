@@ -182,7 +182,10 @@ function ProjectsView() {
       if (term && !`${project.bws_project_number} ${project.name} ${project.client ?? ""}`.toLowerCase().includes(term)) {
         return false;
       }
-      if (focus === "to_quote") return (project.summary ?? EMPTY_SUMMARY).toQuote > 0;
+      if (focus === "to_quote") {
+        const summary = project.summary ?? EMPTY_SUMMARY;
+        return summary.toQuote > 0 || (summary.projectWide ?? 0) > 0;
+      }
       if (focus === "waiting") return (project.waiting ?? 0) > 0;
       if (focus === "overdue") {
         const days = project.specs_agreed_by ? daysUntilSpecsAgreed(project.specs_agreed_by, today) : null;
@@ -203,18 +206,20 @@ function ProjectsView() {
     const rows = shown ?? [];
     const today = todayLocal();
     let toQuote = 0;
+    let projectWide = 0;
     let waiting = 0;
     let overdue = 0;
     let withWork = 0;
     for (const project of rows) {
       const summary = project.summary ?? EMPTY_SUMMARY;
       toQuote += summary.toQuote;
+      projectWide += summary.projectWide ?? 0;
       waiting += project.waiting ?? 0;
-      if (summary.toQuote > 0) withWork += 1;
+      if (summary.toQuote > 0 || (summary.projectWide ?? 0) > 0) withWork += 1;
       const days = project.specs_agreed_by ? daysUntilSpecsAgreed(project.specs_agreed_by, today) : null;
       if (days !== null && days < 0) overdue += 1;
     }
-    return { toQuote, waiting, overdue, withWork };
+    return { toQuote, projectWide, waiting, overdue, withWork };
   }, [shown]);
 
   return (
@@ -287,9 +292,14 @@ function ProjectsView() {
         <div className="mt-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
           <StatTile
             label="TGQ"
-            tone={totals.toQuote > 0 ? "danger" : "good"}
+            tone={totals.toQuote + totals.projectWide > 0 ? "danger" : "good"}
             value={totals.toQuote}
-            meaning={`across ${totals.withWork} project${totals.withWork === 1 ? "" : "s"}`}
+            // ITEM QUESTIONS, and the project-wide ones apart: those are
+            // answered once per project, so 15 of them repeated on 30 items
+            // are 15 questions, not 450 (Max, 2026-10-12).
+            meaning={`item questions${
+              totals.projectWide > 0 ? ` · ${totals.projectWide} project-wide` : ""
+            } · across ${totals.withWork} project${totals.withWork === 1 ? "" : "s"}`}
             onPress={totals.withWork > 0 ? () => setFocus(focus === "to_quote" ? null : "to_quote") : undefined}
             active={focus === "to_quote"}
           />
@@ -438,15 +448,26 @@ function ProjectsView() {
                   <Td num>
                     {(project.summary ?? EMPTY_SUMMARY).records === 0 ? (
                       <span className="text-neutral-400">—</span>
-                    ) : (project.summary ?? EMPTY_SUMMARY).toQuote === 0 ? (
+                    ) : (project.summary ?? EMPTY_SUMMARY).toQuote === 0 &&
+                      ((project.summary ?? EMPTY_SUMMARY).projectWide ?? 0) === 0 ? (
                       <span className="font-semibold tabular-nums text-green-700">0</span>
                     ) : (
-                      <Link
-                        href={`/dashboard/drafts?projectId=${project.id}`}
-                        className="font-semibold tabular-nums text-red-700 no-underline hover:underline"
-                      >
-                        {(project.summary ?? EMPTY_SUMMARY).toQuote.toLocaleString()}
-                      </Link>
+                      <>
+                        <Link
+                          href={`/dashboard/drafts?projectId=${project.id}`}
+                          className="font-semibold tabular-nums text-red-700 no-underline hover:underline"
+                        >
+                          {(project.summary ?? EMPTY_SUMMARY).toQuote.toLocaleString()}
+                        </Link>
+                        {((project.summary ?? EMPTY_SUMMARY).projectWide ?? 0) > 0 && (
+                          <Link
+                            href={`/dashboard/projects/${project.id}?tab=overview#project-wide`}
+                            className="block whitespace-nowrap text-[11px] text-neutral-500 no-underline hover:underline"
+                          >
+                            +{(project.summary ?? EMPTY_SUMMARY).projectWide} project-wide
+                          </Link>
+                        )}
+                      </>
                     )}
                   </Td>
                   {/* OVERDUE IS STATED, NEVER WORKED OUT BY THE READER — and a

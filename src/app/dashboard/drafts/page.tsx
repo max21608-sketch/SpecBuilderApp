@@ -86,6 +86,8 @@ type Question = {
   fieldLabel: string | null;
   state: AnswerState;
   tier: QuestionTier | null;
+  /** The cheat sheet's section. The TGQ rule reads it: project-wide never counts per item. */
+  section: string | null;
   waiting: { draftId: string; sentAt: string | null; contactName: string } | null;
   // Where the question sits in the bill, so the screen can group by furniture
   // line. Display only: none of it decides what may be asked.
@@ -135,6 +137,10 @@ type Inventory = {
     specField: number;
     readiness: number;
     toQuote: number;
+    /** Of `toQuote`, the specification questions a chase asks by default. */
+    toChase?: number;
+    /** Distinct project-wide TGQ questions, answered once on the project. */
+    projectWide?: number;
     later: number;
     noLevel: number;
     waiting: number;
@@ -756,7 +762,19 @@ function DraftsView() {
             label="TGQ"
             tone="danger"
             value={inventory.totals.toQuote}
-            meaning="blocking a quotation"
+            // WHAT THE NUMBER COUNTS, AND WHAT A CHASE ASKS. TGQ is the items'
+            // own (any question blocking a quote, project-wide ones apart); a
+            // chase asks only the specification questions by default, because
+            // readiness is ours to record (decision 19).
+            meaning={[
+              "on the items",
+              inventory.totals.toChase !== undefined && inventory.totals.toChase !== inventory.totals.toQuote
+                ? `${inventory.totals.toChase.toLocaleString()} a chase asks`
+                : null,
+              (inventory.totals.projectWide ?? 0) > 0 ? `+${inventory.totals.projectWide} project-wide` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
             onPress={() => setTier(tier === "to_quote" ? "all" : "to_quote")}
             active={tier === "to_quote"}
           />

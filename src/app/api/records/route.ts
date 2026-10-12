@@ -11,7 +11,14 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { createRecord } from "@/lib/manual-capture";
 import { REF_SYSTEMS } from "@/lib/spec-vocab";
-import { loadOutstanding, loadSentCoverage, questionKey, waitingByQuestion } from "@/lib/chase-drafts";
+import {
+  loadOutstanding,
+  loadSentCoverage,
+  questionKey,
+  waitingByQuestion,
+  type OutstandingQuestion,
+} from "@/lib/chase-drafts";
+import { inItemTgq, itemTgqCounts, projectWideTgqKeys } from "@/lib/chase-grouping";
 import { gateSummary, gatesForRecord, loadGateContext } from "@/lib/gate-load";
 import { EMPTY_SPEC_SUMMARY, loadSpecSummaries } from "@/lib/record-spec-summary";
 import { countOpenDisagreementsByRecord } from "@/lib/disagreements";
@@ -281,18 +288,19 @@ export async function GET(request: Request): Promise<Response> {
 
   const perRecord = new Map<
     string,
-    { waiting: number; toQuote: number; toQuoteWaiting: number; questions: ToQuoteQuestion[] }
+    { waiting: number; toQuoteWaiting: number; questions: ToQuoteQuestion[]; outstanding: OutstandingQuestion[] }
   >();
   for (const question of outstanding) {
-    const entry = perRecord.get(question.recordId) ?? { waiting: 0, toQuote: 0, toQuoteWaiting: 0, questions: [] };
+    const entry = perRecord.get(question.recordId) ?? { waiting: 0, toQuoteWaiting: 0, questions: [], outstanding: [] };
+    entry.outstanding.push(question);
     const isWaiting = waiting.has(questionKey(question.recordId, question.requirementId, 0));
     if (isWaiting) entry.waiting += 1;
-    if (question.tier === "to_quote") {
-      entry.toQuote += 1;
+    // THE ONE RULE (`inItemTgq`): to_quote, any kind, minus the project-wide
+    // section. The count below is `itemTgqCounts` over the same rows.
+    if (inItemTgq(question)) {
       if (isWaiting) entry.toQuoteWaiting += 1;
-      // THE LIST IS THE COUNT. Same loop, same predicate, same `questionTier`
-      // reading — so the row can never open onto a different set of questions
-      // from the number it opened.
+      // THE LIST IS THE COUNT. Same loop, same predicate — so the row can never
+      // open onto a different set of questions from the number it opened.
       if (withToQuote) {
         entry.questions.push({
           requirementId: question.requirementId,
@@ -309,6 +317,12 @@ export async function GET(request: Request): Promise<Response> {
     perRecord.set(question.recordId, entry);
   }
 
+  // PROJECT-LEVEL TGQ for the records on this response: the DISTINCT
+  // project-wide questions still blocking a quote on any of them. What the
+  // phase tab prints beside its item TGQ, "· 2 project-wide".
+  const listedIds = new Set(rows.map((row) => String(row.id)));
+  const projectWide = projectWideTgqKeys(outstanding.filter((question) => listedIds.has(question.recordId))).size;
+
   // The add-an-item form offers a category, because setting one is what
   // creates the checklist rows: an item added without one shows no questions,
   // which reads as an item with nothing outstanding.
@@ -322,6 +336,7 @@ export async function GET(request: Request): Promise<Response> {
     categories,
     records: rows.map((row) => {
       const counts = perRecord.get(String(row.id));
+      const tgq = itemTgqCounts(counts?.outstanding ?? []);
       return {
         ...row,
         gates: gateSummary(
@@ -331,15 +346,14 @@ export async function GET(request: Request): Promise<Response> {
           }),
         ),
         waiting: counts?.waiting ?? 0,
-        // null, not 0, where the record has no level: "nothing is blocking the
-        // quote" and "nobody has said what kind of item this is" are different
-        // answers and the table prints them differently.
         // NULL, NOT 0, in two different cases, and the table prints them
         // differently because they are different answers:
         //
-        //   no level      nobody has said what kind of item this is, so
-        //                 nothing on it is tiered under the fallback half of
-        //                 TGQ.
+        //   untiered      a question on it has no tier: the fallback half of
+        //                 TGQ with no level. Nobody has said what kind of item
+        //                 this is. (His matrix needs no level, so a mapped
+        //                 category is counted without one — the same reading
+        //                 the record screen and the overview make.)
         //   a SPLIT LINE  it is a heading. Its configurations are what the
         //                 export ships and what carries the questions, so
         //                 `loadOutstanding` does not count it at all — and
@@ -347,11 +361,10 @@ export async function GET(request: Request): Promise<Response> {
         //                 "Can quote", which is a claim about a record that
         //                 will never reach BWS.
         to_quote_outstanding:
-          Number(row.variant_count ?? 0) > 0
-            ? null
-            : row.level === null || row.level === undefined
-              ? null
-              : (counts?.toQuote ?? 0),
+          Number(row.variant_count ?? 0) > 0 || tgq === null ? null : tgq.toQuote,
+        // Project-wide TGQ questions this item still carries — answered once
+        // on the project, counted apart, never inside the item's own TGQ.
+        project_wide_outstanding: tgq?.projectWide ?? 0,
         to_quote_waiting: counts?.toQuoteWaiting ?? 0,
         // Absent unless asked for, and absent is not empty: the table tells
         // the two apart so a row it has never fetched does not render as a row
@@ -364,6 +377,7 @@ export async function GET(request: Request): Promise<Response> {
     retiredCount: Number(retiredRows[0]?.n ?? 0),
     includeRetired,
     phase,
+    projectWide,
   });
 }
 
