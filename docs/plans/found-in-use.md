@@ -33,6 +33,112 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-10-12 (afternoon): a read-only walk of pilot
+
+Max asked for a look over PILOT v1.9 before the fix plan: "is there anything
+clearly not working … like the TGQ questions don't add up". Walked read-only,
+signed in as Max: pages, tabs and view switches only, nothing saved,
+confirmed, read or downloaded. Project *P18181 v3 — Miami Beach*.
+
+### "Ready to quote 1" is the one item with no category — OPEN
+
+Phase tab tiles: TGQ 66 of 67 items, READY TO QUOTE 1 "TGQ satisfied". Every
+categorised row has TGQ outstanding. The one "ready" item is row 28,
+`GR-FUR-08A Bedframe & Headboard - TWIN`, which has NO category and therefore
+no questions. The overview gets it right ("Settled 0 of 66 items"), and
+completion refuses this exact case. The phase tile does not.
+
+### TGQ means four different counts on one project — OPEN
+
+- **Projects list:** "TGQ 1,507 across 1 project" (questions).
+- **Overview:** "TGQ 66 of 66 items · 1,507 questions" (items).
+- **Fill-in screen:** header "1,507 needed to quote", but its own TGQ column
+  sums to ~725, because it counts spec fields only (Drawers 20, phase table 44).
+- **Stool `v3-001`:** header "6 to answer at TGQ" (gate fields, incl. the W
+  and SH slots it lacks), Quote readiness tile "2 TGQ" (checklist), and the
+  phase table "2". The 2 are site access and assembly guide, both in the
+  project-wide section.
+
+Measured on the local copy: of the 1,509 TGQ questions, 450 are 15
+project-wide questions repeated on 30 items. Decided the same day (recap P1):
+project-wide questions are answered once per project and stop counting per
+item; every screen counts any kind of question except project-wide.
+
+### The checklist's TGQ filter shows an empty list — OPEN
+
+Stool `v3-001`, Checklist tab, TGQ filter on: "showing 2 of 50". Nothing is
+listed. Both questions sit inside the closed "Project-wide — 19 outstanding ·
+2 of 19 here" card. This is what Max hit in the meeting: "it was still
+showing two missing, but it wouldn't show me which two".
+
+### "Checklist 47 / 50" means 47 outstanding — OPEN
+
+The record's tab label reads like 47 done of 50. The tiles under it say TGQ 2,
+also 45, settled 3, so it is outstanding/total. Same on every record.
+
+### The chase screen says nothing is outstanding — OPEN
+
+With no contacts on the project: "Everyone **0**" beside "Nobody assigned
+**3128**", and the Furniture lines tile reads "67 · **67 with nothing
+outstanding**". The list under Everyone is empty ("0 lines shown of 0"). The
+real state is in the Nobody assigned tab: 66 records, no designer, 3128
+questions.
+
+### The same finish twice in the library: zone prefix — OPEN, needs a decision
+
+`MTL-01` ("Nothing recorded yet", 3 items) beside `GR-MTL-01` (Antique Bronze,
+17), `TIM-13` beside `GR-TIM-13`, `TIM-03` beside `GR-TIM-03`. The bare codes
+come from the bill's description cells, and the prefixed ones from its finish
+lines and drawings. It causes a false replace on the drawings card:
+`AM-ID-PL-FUR-11 Stool.pdf` reads `GR-FAB-14` and offers to REPLACE the bill's
+fabric `FAB-14` on two records. `normaliseFinishCode` is case and whitespace
+only, deliberately. `spec-reading-vocab.ts` already folds the zone prefix for
+the bill's own spec read. Whether a zone prefix (`GR-`, `PL-`, `MUR-`) means
+"the same finish" is Max's or Matthew's call, not a normaliser's.
+
+### `GR-FAB-13 PL-FUR-04` is still its own library entry — OPEN, data
+
+Fixed in code on 2026-10-05 (`fabricOwnCode`), but this bill was confirmed
+earlier that day, so pilot still holds the second entry, used on 1 item
+(`v3-026`). It needs re-linking to `GR-FAB-13` by a person, or a backfill.
+
+### A three-part code gets no kind suggestion — OPEN
+
+Finishes library: `GR-TIM-12` and `GR-TIM-13` show "NOTHING TO SUGGEST … no
+page says what GR means". The drawings path reads a three-part code's MIDDLE
+group (`projectCodeKind`). The library's `suggestFinishKind` reads the first.
+`STN-02` likewise ("no page says what STN means"), while `GR-STN-04` is Stone.
+
+### "Read the specifications in this bill — one read, charged" on a bill that refuses it — OPEN
+
+Overview and Documents tab, beside the confirmed Aman bill. That bill's
+confirm read its description cells, and CLAUDE.md says the server then
+refuses the charged read with a 409. The button is offered for every confirmed
+bill with a preserved source (`src/app/dashboard/projects/[id]/page.tsx:1122`).
+It was not pressed, because it is charged, so the refusal itself is not
+observed.
+
+### A replace prompt does not say which line — OPEN
+
+Drawings review, `AM-ID-PL-FUR-11 Stool.pdf`: "2 of these records already hold
+a value here", then two identical lines, "this phase: replace Sizes (mm):
+400mm (from Appendix 2 …)". The two records are two bill lines in one phase
+(`PL-FUR-11` rows 48 and 66), and nothing says which tick is which.
+
+### Smaller, seen in passing
+
+- **Pack screen, drawings-only pack:** "The bill of quantities: Not in this
+  pack", while the project's bill was confirmed in an earlier pack. True of
+  the pack, but it reads as "no bill".
+- **History:** "Drawings confirmed v3-046 · 25 specs" against "24 specs
+  applied" on the document. Not investigated.
+- **Phase table:** "Captured 1 of 48" on rows showing a size and two finish
+  codes. The finishes are TBC (the library entries are TBC), so they count as
+  not captured. Correct by the rules, but it reads as if nothing was read.
+- **Finish descriptions keep the bill's lead:** `FAB-11` reads "Fabric @
+  Bench Ottoman Collection Ref: …" and is used on 2 items, so the description
+  names one of them.
+
 ## 2026-10-12
 
 Seen on PILOT v1.9, project *P18181 v3 — Miami Beach*, during the catch-up
