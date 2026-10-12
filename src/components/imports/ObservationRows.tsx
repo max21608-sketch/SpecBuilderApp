@@ -1270,10 +1270,19 @@ export function ReplacePanel({
             const acknowledged = (observation.replaces ?? []).some(
               (entry) => !entry.retiresSlot && entry.recordId === recordId && entry.attributeId === occupant.attributeId,
             );
+            // WHICH LINE, where a phase has two with this code (PL-FUR-11 on
+            // two bill lines, pilot 2026-10-12): the phase alone printed two
+            // identical lines and nothing said which tick was which, so a
+            // candidate is named by its phase AND its record label.
+            const candidateOf = runs.flatMap((run) =>
+              run.status === "ambiguous"
+                ? run.candidates.filter((candidate) => candidate.id === recordId).map((candidate) => ({ run, candidate }))
+                : [],
+            )[0];
             const runName =
               recordNames?.[recordId] ??
               runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ??
-              "this phase";
+              (candidateOf ? `${candidateOf.run.runName} · ${candidateOf.candidate.label}` : "this phase");
             return (
               <label key={recordId} className="mt-1 flex items-start gap-2 text-amber-900">
                 <input
