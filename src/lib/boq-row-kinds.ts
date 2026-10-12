@@ -519,6 +519,28 @@ export function fabricOwnCode(line: { code: string | null; finishFor?: { code: s
   return ownCode;
 }
 
+/**
+ * WHAT A FABRIC LINE'S CODE COLUMN PRINTS (2026-10-12, F1): the fabric's own
+ * code — `fabricOwnCode`, the one the confirm files by and the chip prints —
+ * or nothing, which the screen reads as TBC (Sebastian: a fabric with no code
+ * of its own is TBC, never N/A and never a furniture code). The bill's own
+ * cell is returned beside it whenever it differs from what is printed, so the
+ * document's words stay on the screen; `billCellIsItemCode` says when that
+ * cell is the item's code. Display only: nothing here is stored or filed.
+ */
+export function fabricCodeDisplay(line: {
+  code: string | null;
+  finishFor?: { code: string | null } | null;
+}): { own: string | null; billCell: string | null; billCellIsItemCode: boolean } {
+  const own = fabricOwnCode(line);
+  const raw = (line.code ?? "").replace(/\s+/g, " ").trim();
+  const billCell = raw !== "" && raw !== own ? raw : null;
+  const parentCode = line.finishFor?.code ?? null;
+  const billCellIsItemCode =
+    billCell !== null && parentCode !== null && normaliseRef(billCell) === normaliseRef(parentCode);
+  return { own, billCell, billCellIsItemCode };
+}
+
 export function fabricLineIsPlaceholder(text: string | null | undefined, parentName: string | null | undefined): boolean {
   const raw = (text ?? "").trim();
   if (raw === "") return true;

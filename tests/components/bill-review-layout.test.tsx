@@ -142,6 +142,28 @@ describe("the bill review's groups", () => {
     expect(thumb.getAttribute("width")).toBe("52");
   });
 
+  it("prints a fabric's own code or TBC in the code column, the bill's cell small beneath (F1)", async () => {
+    const sheet = settledSheet();
+    // Row 15's cell carries the ITEM's code, as the real bill does on one line.
+    sheet.lines = sheet.lines.map((line) => (line.lineNo === 15 ? { ...line, code: "ZZ-FUR-03" } : line));
+    mountReview([sheet]);
+    await screen.findByRole("button", { name: "Row 10 is Fabric — change" });
+    const codeCell = (lineNo: number) => rowOf(lineNo, "Fabric").querySelectorAll("td")[2]!;
+    // Its own code; the bracket stays visible as the bill wrote it.
+    expect(codeCell(10).textContent).toContain("ZZ-FAB-13");
+    expect(within(codeCell(10)).getByText("bill: ZZ-FAB-13 (ZZ-FUR-10)")).toBeInTheDocument();
+    // N/A is no code: TBC, with the bill's N/A beneath.
+    expect(within(codeCell(14)).getByText("TBC: no code")).toBeInTheDocument();
+    expect(within(codeCell(14)).getByText("bill: N/A")).toBeInTheDocument();
+    // The item's code is never printed as the fabric's.
+    expect(within(codeCell(15)).getByText("TBC: no code")).toBeInTheDocument();
+    expect(within(codeCell(15)).getByText("bill: ZZ-FUR-03 (the item's code)")).toBeInTheDocument();
+    // The column and the chip read one answer.
+    expect(within(rowOf(15, "Fabric")).getByText(/^no code /)).toBeInTheDocument();
+    // An item line is unchanged.
+    expect(rowOf(9, "Item").querySelectorAll("td")[2]!.textContent).toBe("ZZ-FUR-10");
+  });
+
   it("shows one number per row, the bill's own line in the title", async () => {
     mountReview([settledSheet()]);
     await screen.findByRole("button", { name: "Row 9 is Item — change" });

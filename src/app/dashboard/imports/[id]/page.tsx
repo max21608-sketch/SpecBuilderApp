@@ -46,7 +46,7 @@ import {
   type RowKindFields,
 } from "@/lib/boq-row-kinds";
 import BoqRowKindCell, { RowKindReasoning } from "@/components/imports/BoqRowKindCell";
-import { fabricOwnCode } from "@/lib/boq-row-kinds";
+import { fabricCodeDisplay, fabricOwnCode } from "@/lib/boq-row-kinds";
 // Pure: where the review draws its lines — an item and the fabrics under it as
 // one group, a gap between groups, consecutive items of one code bracketed.
 // Layout only; nothing the confirm writes reads it.
@@ -155,6 +155,35 @@ type Line = {
  * to the project's details: setting it changes what is minted, not what is
  * already there.
  */
+/**
+ * A FABRIC LINE'S CODE COLUMN prints the fabric's OWN code — the one the chip
+ * beside it and the confirm both read (`fabricOwnCode`) — or TBC where it has
+ * none (2026-10-12: Sebastian, a fabric with no code of its own reads TBC,
+ * never N/A and never the item's code). Where the bill's cell says something
+ * else it stays underneath, small and grey, because it is what the document
+ * said. Display only.
+ */
+function FabricCodeCell({ line }: { line: Pick<Line, "code" | "finishFor"> }) {
+  const { own, billCell, billCellIsItemCode } = fabricCodeDisplay(line);
+  return (
+    <>
+      {own ? (
+        <ClientRefs code={own} />
+      ) : (
+        <Chip tone="warn" className="font-sans">
+          TBC: no code
+        </Chip>
+      )}
+      {billCell && (
+        <span className="mt-0.5 block font-sans text-[10.5px] text-neutral-400" title="The bill's own cell">
+          bill: {billCell}
+          {billCellIsItemCode ? " (the item's code)" : ""}
+        </span>
+      )}
+    </>
+  );
+}
+
 function FabricFilingLine({ plan, projectId }: { plan: FabricLinePlan; projectId: string }) {
   return (
     <span className="mt-0.5 block text-[11px] leading-4 text-neutral-500">
@@ -2107,7 +2136,13 @@ export default function ReviewImportPage() {
                               />
                             </Td>
                             <Td mono className={fabric ? "text-neutral-500" : undefined}>
-                              {line.code ? <ClientRefs code={line.code} /> : "—"}
+                              {fabric ? (
+                                <FabricCodeCell line={line} />
+                              ) : line.code ? (
+                                <ClientRefs code={line.code} />
+                              ) : (
+                                "—"
+                              )}
                               {alsoOn.length > 0 && (
                                 <span className="mt-0.5 block font-sans text-[10.5px] text-amber-800">
                                   also on row{alsoOn.length === 1 ? "" : "s"} {listOf(alsoOn)}
