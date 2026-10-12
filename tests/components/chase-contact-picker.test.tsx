@@ -159,3 +159,49 @@ describe("the contact strip", () => {
     expect(screen.getByRole("button", { name: "Draft it · 1 draft" })).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Found on pilot, 2026-10-12, on a project with NO contacts: "Everyone 0"
+// beside "Nobody assigned 3128", and "Furniture lines 67 · 67 with nothing
+// outstanding". Both numbers now say what is true, and Everyone opens onto
+// the items nobody can be asked about.
+// ---------------------------------------------------------------------------
+describe("a project nobody has been assigned to yet", () => {
+  function unrouted() {
+    const base = payload();
+    return {
+      ...base,
+      contacts: [],
+      inventory: {
+        ...base.inventory,
+        groups: [],
+        lineCount: 3,
+        settledLines: 0,
+        uncategorisedLines: 1,
+        blocked: [
+          { recordId: "r-1", recordLabel: "P17231-001", itemDescription: "Stool", designer: null, questionCount: 40, reason: "no designer on the record" },
+          { recordId: "r-2", recordLabel: "P17231-002", itemDescription: "Drawers", designer: null, questionCount: 44, reason: "no designer on the record" },
+        ],
+      },
+    };
+  }
+
+  it("counts everything outstanding under Everyone, and lists who cannot be asked", async () => {
+    apiFetch.mockResolvedValue({ ok: true, status: 200, data: unrouted() });
+    render(<DraftsPage />);
+    const everyone = await screen.findByRole("tab", { name: /Everyone/ });
+    expect(everyone.textContent).toBe("Everyone84");
+    expect(screen.getByText("Nobody can be asked yet.")).toBeTruthy();
+    // The list the count opens onto, under the same tab.
+    expect(screen.getByText("Drawers")).toBeTruthy();
+    expect(screen.getByText("Stool")).toBeTruthy();
+  });
+
+  it("never says the lines have nothing outstanding when nobody can be asked", async () => {
+    apiFetch.mockResolvedValue({ ok: true, status: 200, data: unrouted() });
+    render(<DraftsPage />);
+    await screen.findByRole("tab", { name: /Everyone/ });
+    expect(screen.queryByText(/3 with nothing outstanding/)).toBeNull();
+    expect(screen.getByText(/none with nothing outstanding · 1 with no category/)).toBeTruthy();
+  });
+});

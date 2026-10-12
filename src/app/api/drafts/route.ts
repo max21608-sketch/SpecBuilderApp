@@ -228,6 +228,14 @@ export async function GET(request: Request): Promise<Response> {
       // cannot report different sizes for one project. Questions alone cannot
       // give it: a line with nothing outstanding contributes none.
       lineCount: summary.records,
+      // WHAT IS DONE, read off the same summary rather than off the contact
+      // groups. The tile used to subtract the lines in a CONTACT's group from
+      // the line count, so a project with no contacts read "67 with nothing
+      // outstanding" over 3,128 open questions (found-in-use, 2026-10-12).
+      // Settled is "has questions, none open"; an uncategorised line has none
+      // at all and is counted apart, never as done.
+      settledLines: summary.settledItems,
+      uncategorisedLines: summary.uncategorised,
       // Grouped by the contact each record's designer resolves to.
       groups: groups.map((group) => ({
         contact: group.contact,

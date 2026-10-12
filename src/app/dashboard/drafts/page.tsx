@@ -127,6 +127,10 @@ type Inventory = {
   groups: { contact: Contact; questions: Question[] }[];
   /** Furniture lines in the export's scope — the overview's Line items count. */
   lineCount: number | null;
+  /** Lines with questions and none open (the summary's settled items). */
+  settledLines?: number;
+  /** Lines with no category: no questions at all, never "done". */
+  uncategorisedLines?: number;
   blocked: Blocked[];
   suggestedCodes: string[];
   uncategorised: { recordId: string; recordLabel: string; itemDescription: string }[];
@@ -512,9 +516,14 @@ function DraftsView() {
    * second half of this tile is about.
    */
   const lineTotals = (() => {
+    // OFF THE SUMMARY, NOT OFF THE CONTACT GROUPS. With no contacts there are
+    // no groups, and subtracting nothing from 67 read "67 with nothing
+    // outstanding" over 3,128 open questions (found-in-use, 2026-10-12).
     const withWork = new Set(inventory.groups.flatMap((group) => group.questions.map((q) => q.recordId)));
-    const settled = inventory.lineCount == null ? 0 : Math.max(0, inventory.lineCount - withWork.size);
-    return { lines: inventory.lineCount ?? withWork.size, settled };
+    const settled =
+      inventory.settledLines ??
+      (inventory.lineCount == null ? 0 : Math.max(0, inventory.lineCount - withWork.size));
+    return { lines: inventory.lineCount ?? withWork.size, settled, uncategorised: inventory.uncategorisedLines ?? 0 };
   })();
   const activeDrafts = data.drafts.filter((d) => d.status === "draft");
 
@@ -553,6 +562,8 @@ function DraftsView() {
   /** Records nobody can be asked about, as opposed to records with no level. */
   const nobody = inventory.blocked.filter((row) => isContactBlocker(row.reason));
   const nobodyQuestions = nobody.reduce((sum, row) => sum + row.questionCount, 0);
+  /** Every question no designer's group holds: nobody to ask, or no level. Listed on Everyone too. */
+  const blockedQuestions = inventory.blocked.reduce((sum, row) => sum + row.questionCount, 0);
 
   /** What the app guessed each level-less line is, keyed the way the table asks. */
   const levelSuggestions: Record<string, LevelSuggestion> = {};
@@ -562,6 +573,56 @@ function DraftsView() {
     }
   }
   const suggestedLevels = inventory.levelless.filter((row) => row.suggested).length;
+
+  /**
+   * NOBODY TO ASK. These records have questions and no route to a person, so
+   * they are not in the question table at any filter. Listed on their own tab
+   * AND under Everyone, so the Everyone count opens onto them too.
+   */
+  const nobodyCard = (
+    <Card
+      flush
+      title={
+        <>
+          Nobody assigned
+          <span className="font-medium normal-case tracking-normal text-neutral-500">
+            {" "}· {nobodyQuestions} question{nobodyQuestions === 1 ? "" : "s"} with no route to a person
+          </span>
+        </>
+      }
+    >
+      <Table>
+        <thead>
+          <tr>
+            <Th className="w-[16%]">Record</Th>
+            <Th>Item</Th>
+            <Th className="w-[34%]">Why nobody can be asked</Th>
+            <Th num className="w-[12%]">Questions</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {nobody.map((row) => (
+            <Tr key={row.recordId}>
+              <Td>
+                <Link
+                  href={`/dashboard/records/${row.recordId}`}
+                  className="font-mono text-blue-700 no-underline hover:underline"
+                >
+                  {row.recordLabel}
+                </Link>
+              </Td>
+              <Td>{row.itemDescription}</Td>
+              <Td>
+                <Chip tone="warn">{row.reason}</Chip>
+                {row.designer && <span className="ml-2 text-neutral-500">designer code {row.designer}</span>}
+              </Td>
+              <Td num>{row.questionCount}</Td>
+            </Tr>
+          ))}
+        </tbody>
+      </Table>
+    </Card>
+  );
 
   return (
     <>
@@ -623,10 +684,13 @@ function DraftsView() {
             value={contactTab}
             onChange={chooseContact}
             items={[
-              // EVERYONE IS EVERY DESIGNER. A colleague's group holds a copy of
-              // the same questions, so counting the strip over every group
-              // would report the project twice.
-              { id: "", label: "Everyone", count: designerQuestionCount },
+              // EVERYONE IS EVERYTHING OUTSTANDING: every designer's questions
+              // AND the ones nobody can be asked yet, which this tab lists
+              // under the table. It counted the designers' groups alone, so a
+              // project with no contacts read "Everyone 0" beside "Nobody
+              // assigned 3128" (found-in-use, 2026-10-12). A colleague's group
+              // holds a copy of the same questions and is never added on.
+              { id: "", label: "Everyone", count: designerQuestionCount + blockedQuestions },
               ...inventory.groups.map((group) => ({
                 id: group.contact.id,
                 // A COLLEAGUE IS MARKED, not just sorted last. `groupByContact`
@@ -802,11 +866,16 @@ function DraftsView() {
           <StatTile
             label="Furniture lines"
             value={lineTotals.lines}
-            meaning={
+            meaning={[
               lineTotals.settled > 0
                 ? `${lineTotals.settled} with nothing outstanding`
-                : "every one has something outstanding"
-            }
+                : lineTotals.uncategorised > 0
+                  ? "none with nothing outstanding"
+                  : "every one has something outstanding",
+              lineTotals.uncategorised > 0 ? `${lineTotals.uncategorised} with no category` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
             onPress={
               tier !== "all" || includeWaiting
                 ? () => {
@@ -838,54 +907,21 @@ function DraftsView() {
         />
 
         {contactTab === NOBODY ? (
-          /* NOBODY TO ASK. These records have questions and no route to a
-             person, so they are not in the table above at any filter — the tab
-             exists so they are not invisible either. */
-          <Card
-            flush
-            title={
-              <>
-                Nobody assigned
-                <span className="font-medium normal-case tracking-normal text-neutral-500">
-                  {" "}· {nobodyQuestions} question{nobodyQuestions === 1 ? "" : "s"} with no route to a person
-                </span>
-              </>
-            }
-          >
-            <Table>
-              <thead>
-                <tr>
-                  <Th className="w-[16%]">Record</Th>
-                  <Th>Item</Th>
-                  <Th className="w-[34%]">Why nobody can be asked</Th>
-                  <Th num className="w-[12%]">Questions</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {nobody.map((row) => (
-                  <Tr key={row.recordId}>
-                    <Td>
-                      <Link
-                        href={`/dashboard/records/${row.recordId}`}
-                        className="font-mono text-blue-700 no-underline hover:underline"
-                      >
-                        {row.recordLabel}
-                      </Link>
-                    </Td>
-                    <Td>{row.itemDescription}</Td>
-                    <Td>
-                      <Chip tone="warn">{row.reason}</Chip>
-                      {row.designer && <span className="ml-2 text-neutral-500">designer code {row.designer}</span>}
-                    </Td>
-                    <Td num>{row.questionCount}</Td>
-                  </Tr>
-                ))}
-              </tbody>
-            </Table>
-          </Card>
+          nobodyCard
         ) : (
           /* ---- what to ask, by furniture line ------------------------------ */
-          <ChaseQuestionTable
+          <>
+          {/* NOTHING ASKABLE YET IS SAID, not shown as an empty table under a
+              count of thousands. Every question on the project is under the
+              list below until a contact carries their designer code. */}
+          {tableQuestions.length === 0 && nobody.length > 0 && (
+            <Note tone="warn" title="Nobody can be asked yet.">
+              {nobodyQuestions.toLocaleString()} question{nobodyQuestions === 1 ? "" : "s"} on {nobody.length} item
+              {nobody.length === 1 ? "" : "s"} have no contact to go to — they are listed below. Add a contact with
+              the designer code the bill uses, under Contacts, and they move into this table.
+            </Note>
+          )}
+          {!(tableQuestions.length === 0 && nobody.length > 0) && <ChaseQuestionTable
             questions={tableQuestions}
             selected={selected}
             onToggle={toggle}
@@ -903,7 +939,9 @@ function DraftsView() {
               if (row?.suggested) void setLevel(row, row.suggested);
             }}
             acceptingLevel={settingLevel}
-          />
+          />}
+          {contactTab === "" && nobody.length > 0 && nobodyCard}
+          </>
         )}
 
         {/* ---- the blockers that are not about a contact -------------------- */}

@@ -198,7 +198,7 @@ describe("the record checklist", () => {
       answers: WITH_PROJECT_WIDE,
       readiness: { ...READINESS, toQuote: 0, alsoOutstanding: 2, outstanding: 2, settled: 1, notApplicable: 0 },
     });
-    expect(screen.getByText("Project-wide — the same answer applies to every item")).toBeInTheDocument();
+    expect(screen.getByText("Project-wide — answered once on the project")).toBeInTheDocument();
     // Closed: the rows inside are not on the page.
     expect(screen.queryByText("TOE agreement")).not.toBeInTheDocument();
     expect(screen.getByText("Seat height")).toBeInTheDocument();
@@ -219,6 +219,40 @@ describe("the record checklist", () => {
     expect(screen.getByText("TOE agreement")).toBeInTheDocument();
     expect(screen.getByText("Sales folder")).toBeInTheDocument();
     expect(screen.getByText("Seat height")).toBeInTheDocument();
+  });
+
+  // ---- 2026-10-12: a count always opens onto the questions behind it -------
+  //
+  // The stool read "TGQ 2 · showing 2 of 50" over an empty list: both were in
+  // the closed project-wide fold. TGQ is now the item's own, and the
+  // project-wide ones have a tile and a line of their own that open them.
+  it("the TGQ filter lists the item's own, and names the project-wide ones in a line that opens them", async () => {
+    renderChecklist({
+      answers: WITH_PROJECT_WIDE,
+      readiness: { ...READINESS, toQuote: 1, projectWide: 1, alsoOutstanding: 0, outstanding: 2, settled: 1, notApplicable: 0 },
+    });
+    // Opens on TGQ: the item's one, and not the project's.
+    expect(screen.getByText("Seat height")).toBeInTheDocument();
+    expect(screen.queryByText("TOE agreement")).not.toBeInTheDocument();
+    expect(screen.getByText(/showing 1 of 3/)).toBeInTheDocument();
+    expect(screen.getByText(/And 1 project-wide question blocking the quote/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Answer on the project" })).toHaveAttribute(
+      "href",
+      "/dashboard/projects/proj-1?tab=overview#project-wide",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Show it" }));
+    // The fold opens onto exactly the one the line counted.
+    expect(screen.getByText("TOE agreement")).toBeInTheDocument();
+    expect(screen.queryByText("Seat height")).not.toBeInTheDocument();
+  });
+
+  it("opens on the project-wide ones where the item has nothing of its own: the stool", () => {
+    renderChecklist({
+      answers: WITH_PROJECT_WIDE.filter((row) => row.requirement_id !== "i1"),
+      readiness: { ...READINESS, toQuote: 0, projectWide: 1, alsoOutstanding: 0, outstanding: 1, settled: 1, notApplicable: 0 },
+    });
+    expect(screen.getByText("TOE agreement")).toBeInTheDocument();
+    expect(screen.getByText(/showing 1 of 2/)).toBeInTheDocument();
   });
 
   it("draws no fold at all for a category that asks nothing project-wide", () => {

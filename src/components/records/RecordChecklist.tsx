@@ -59,7 +59,7 @@ import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import StatTile from "@/components/ui/StatTile";
 import Tip from "@/components/ui/Tip";
-import Button from "@/components/ui/Button";
+import Button, { buttonClass } from "@/components/ui/Button";
 import Note from "@/components/ui/Note";
 import { TONE } from "@/components/ui/tone";
 
@@ -113,10 +113,11 @@ type MatrixField = Pick<GateField, "localKey" | "fieldName" | "dimensionSlot"> &
 };
 
 /** Which rows the screen is narrowed to. Null is everything. */
-type Focus = "tgq" | "later" | "settled" | "na" | null;
+type Focus = "tgq" | "project" | "later" | "settled" | "na" | null;
 
 const FOCUS_LABELS: Record<Exclude<Focus, null>, string> = {
   tgq: "TGQ",
+  project: "Project-wide TGQ",
   later: "Also outstanding",
   settled: "Settled",
   na: "Not applicable",
@@ -195,6 +196,8 @@ export default function RecordChecklist({
   attributes: ChecklistAttribute[];
   readiness: {
     toQuote: number | null;
+    /** Project-wide TGQ questions on this item: answered once on the project, never in `toQuote`. */
+    projectWide?: number | null;
     alsoOutstanding: number | null;
     outstanding: number;
     settled: number;
@@ -234,7 +237,11 @@ export default function RecordChecklist({
       ? null
       : readiness.toQuote !== null && readiness.toQuote > 0
         ? "tgq"
-        : null,
+        : (readiness.projectWide ?? 0) > 0
+          ? // NOTHING OF ITS OWN, AND THE PROJECT STILL OWES SOME. Opening on
+            // them is what makes "0 TGQ · 2 project-wide" open onto the two.
+            "project"
+          : null,
   );
   const [search, setSearch] = useState("");
   // THE FOLD OPENS FOR A DEEP LINK. A `#q-<id>` from the gates tab, a chase or
@@ -398,7 +405,13 @@ export default function RecordChecklist({
     if (focus === "settled") return answer.state === "confirmed";
     if (focus === "na") return answer.state === "na";
     if (!isOutstanding(answer.state)) return false;
-    return focus === "tgq" ? tierOf(answer) === "to_quote" : tierOf(answer) !== "to_quote";
+    // THE ITEM RULE (`inItemTgq`, chase-grouping.ts): the TGQ tile counts the
+    // item's own, so the list under it is exactly those — never the project-
+    // wide ones, which were the "showing 2 of 50" over an empty list.
+    const projectWideRow = answer.section === PROJECT_WIDE_SECTION;
+    if (focus === "tgq") return tierOf(answer) === "to_quote" && !projectWideRow;
+    if (focus === "project") return tierOf(answer) === "to_quote" && projectWideRow;
+    return tierOf(answer) !== "to_quote";
   };
 
   const shown = answers.filter(matches);
@@ -428,6 +441,12 @@ export default function RecordChecklist({
   const projectWideOutstanding = answers.filter(
     (answer) => answer.section === PROJECT_WIDE_SECTION && isOutstanding(answer.state),
   ).length;
+  // Of those, the ones blocking a quote — the record route's `projectWide`,
+  // read off the same rows the list below is filtered from.
+  const projectWideTgq = answers.filter(
+    (answer) =>
+      answer.section === PROJECT_WIDE_SECTION && isOutstanding(answer.state) && tierOf(answer) === "to_quote",
+  ).length;
 
   if (answers.length === 0) {
     return (
@@ -441,15 +460,28 @@ export default function RecordChecklist({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-2.5 ${projectWideTgq > 0 ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         <StatTile
           label={TIER_LABELS.to_quote}
           tone="danger"
           value={readiness.toQuote ?? "—"}
-          meaning={readiness.noLevel ? "no level, so nothing is tiered" : "blocks a price going out"}
+          meaning={readiness.noLevel ? "no level, so nothing is tiered" : "this item's own, blocking a price"}
           onPress={readiness.toQuote ? () => setFocus(focus === "tgq" ? null : "tgq") : undefined}
           active={focus === "tgq"}
         />
+        {/* THE PROJECT-WIDE ONES, APART AND OPENABLE. They still block the
+            quote; they are answered once on the project. A count that cannot
+            be opened onto its questions is the defect Max hit on 2026-10-12. */}
+        {projectWideTgq > 0 && (
+          <StatTile
+            label="Project-wide"
+            tone="danger"
+            value={projectWideTgq}
+            meaning="TGQ, answered once on the project"
+            onPress={() => setFocus(focus === "project" ? null : "project")}
+            active={focus === "project"}
+          />
+        )}
         <StatTile
           label={TIER_LABELS.later}
           tone="warn"
@@ -487,7 +519,7 @@ export default function RecordChecklist({
             filter you forget you set. */}
         {focus && (
           <Button variant="quiet" size="xs" onClick={() => setFocus(null)}>
-            <Chip tone={focus === "tgq" ? "danger" : focus === "later" ? "warn" : focus === "settled" ? "good" : "plain"}>
+            <Chip tone={focus === "tgq" || focus === "project" ? "danger" : focus === "later" ? "warn" : focus === "settled" ? "good" : "plain"}>
               {FOCUS_LABELS[focus]} ✕
             </Chip>
           </Button>
@@ -509,6 +541,31 @@ export default function RecordChecklist({
           </Button>
         )}
       </div>
+
+      {/* THE TGQ LIST IS THE ITEM'S OWN, and the project-wide ones that still
+          block the quote are named in their own line — never folded away
+          under a count the list does not show. */}
+      {focus === "tgq" && projectWideTgq > 0 && (
+        <Note
+          tone="plain"
+          actions={
+            <>
+              <Button size="xs" variant="secondary" onClick={() => setFocus("project")}>
+                Show {projectWideTgq === 1 ? "it" : "them"}
+              </Button>
+              <Link
+                href={`/dashboard/projects/${projectId}?tab=overview#project-wide`}
+                className={buttonClass("quiet", "xs", "no-underline")}
+              >
+                Answer on the project
+              </Link>
+            </>
+          }
+        >
+          And {projectWideTgq} project-wide question{projectWideTgq === 1 ? "" : "s"} blocking the quote, answered once
+          on the project.
+        </Note>
+      )}
 
       {shown.length === 0 && (
         <Note tone="plain">
@@ -555,7 +612,7 @@ export default function RecordChecklist({
           }
           flush
         >
-          {projectWide && !projectWideOpen ? (
+          {projectWide && !projectWideOpen && focus !== "project" ? (
             <p className="px-4 py-3 text-[12.5px] text-neutral-500">
               These are answered once, on the project, and the answer is written to every item that asks them. They
               do not count in this item&rsquo;s TGQ, and they still block its quote until they are answered. This item

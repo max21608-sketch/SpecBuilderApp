@@ -1070,7 +1070,10 @@ function RecordView() {
               {
                 id: "checklist",
                 label: "Checklist",
-                count: answers.length === 0 ? null : `${outstandingCount} / ${answers.length}`,
+                // "47 OPEN", NOT "47 / 50", which read as 47 done of 50
+                // (found-in-use, 2026-10-12). One wording wherever the pair is
+                // shown: the open count; the total is the "showing n of N" line inside.
+                count: answers.length === 0 ? null : `${outstandingCount} open`,
                 tone: outstandingCount > 0 ? "warn" : "good",
               },
               { id: "gates", label: "Gates", count: gateSummaryLabel, tone: gateTone },
