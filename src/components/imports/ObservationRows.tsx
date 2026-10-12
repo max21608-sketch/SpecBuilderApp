@@ -41,7 +41,7 @@ import {
   type DrawingObservation,
   type FieldClash,
 } from "@/lib/drawing-document";
-import { canTakeSlot, millimetreReading } from "@/lib/slot-swap";
+import { canTakeSlot, millimetreReading, millimetresBeside } from "@/lib/slot-swap";
 import { useReviewRowActions } from "@/components/imports/review-row-actions";
 import type { ClashChoice } from "@/lib/clash-resolution";
 import {
@@ -862,17 +862,36 @@ export function ObservationRow({
             className="w-full min-w-[18rem] border border-neutral-300 rounded px-2 py-1 text-sm"
           />
         ) : (
-          <input
-            value={value ?? ""}
-            onChange={(event) =>
-              setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
-            }
-            onBlur={(event) => {
-              if (event.target.value === (observation.value ?? "")) return;
-              callbacks.onChange(observation, { value: event.target.value || null });
-            }}
-            className="w-full border border-neutral-300 rounded px-2 py-1 text-sm"
-          />
+          <div className="flex items-center gap-1.5">
+            <input
+              value={value ?? ""}
+              onChange={(event) =>
+                setDrafts((current) => ({ ...current, [observation.id]: { ...draft, value: event.target.value } }))
+              }
+              onBlur={(event) => {
+                if (event.target.value === (observation.value ?? "")) return;
+                callbacks.onChange(observation, { value: event.target.value || null });
+              }}
+              className="w-full min-w-0 border border-neutral-300 rounded px-2 py-1 text-sm"
+            />
+            {/* THE MILLIMETRES, RIGHT BESIDE THE FIGURE (Max, 2026-10-12):
+                `1'-3"` (381mm). Live off the box and the unit, through the one
+                conversion; none where it would be a guess. Display only — the
+                box keeps the page's own figure. */}
+            {(observation.attrGroup === "dimension" || isMeasuredRow(observation)) &&
+              (() => {
+                const mm = millimetresBeside(value, observation.unit);
+                return mm === null ? null : (
+                  <span
+                    className="shrink-0 whitespace-nowrap font-mono text-xs text-neutral-600"
+                    data-testid="mm-beside"
+                    title="The printed figure in whole millimetres, as the cell will write it"
+                  >
+                    ({mm}mm)
+                  </span>
+                );
+              })()}
+          </div>
         )}
         {/* THE UNIT, BESIDE THE FIGURE IT BELONGS TO. See the head above for
             why it is no longer a column of its own.

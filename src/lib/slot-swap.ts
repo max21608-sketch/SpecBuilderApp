@@ -239,6 +239,24 @@ export function millimetreReading(
   return { ok: true, text: `${converted.mm} mm (${printed})` };
 }
 
+/**
+ * THE MILLIMETRES BESIDE A FIGURE PRINTED IN ANOTHER UNIT (Max, 2026-10-12:
+ * `1'-3"` (381mm) on the Stool card). Whole millimetres through
+ * `toMillimetres`, the one conversion, at the precision the cell writes.
+ *
+ * Null wherever a bracket would be a guess or say nothing: no unit, a figure
+ * already in mm, a TBC beside the figure, and anything that does not read
+ * completely (a range, a stray word, `2'-5` with its inch mark lost, feet and
+ * inches recorded as cm). The row's existing amber states already say why.
+ */
+export function millimetresBeside(value: string | null, unit: AttributeUnit | null): number | null {
+  if (unit === null || unit === "mm") return null;
+  const { figure, tbcInline } = parseDimensionFigure(value);
+  if (figure === null || tbcInline) return null;
+  const converted = toMillimetres(value, unit);
+  return converted.ok ? converted.mm : null;
+}
+
 /** "the width", for a sentence. */
 export function slotWords(slot: DimensionSlot): string {
   return `the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}`;
