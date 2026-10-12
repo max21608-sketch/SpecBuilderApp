@@ -33,6 +33,51 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-10-12
+
+Seen on PILOT v1.9, project *P18181 v3 — Miami Beach*, during the catch-up
+(`docs/plans/catchup-2026-10-12.md`, which has timestamps and frames).
+
+### A fabric line's code column prints a furniture code, or N/A — OPEN
+
+Bill review, GR-FUR-22 Option 2: row 25 is "Fabric for 24" and its code column
+reads `GR-FUR-22`. Row 23, the same fabric for Option 1, reads `N/A`. Both
+rows' own chip says `no code → COM 1 · placeholder — not filed`, so the filing
+is right and the column is not. Sebastian and Matthew both stopped on it
+(14:40–16:38). Sebastian: a fabric with no code should read TBC, not N/A,
+because "Not applicable means something completely different" (16:40). Cause,
+checked: the column prints the raw cell (`src/app/dashboard/imports/[id]/page.tsx:2110`).
+The filing reads `fabricOwnCode` (`src/lib/boq-row-kinds.ts:504`).
+
+### One item, two TGQ numbers — OPEN
+
+`GR-FUR-26 Drawers` read 44 TGQ on the phase table and 20 TGQ (24 "also") on
+the fill-in screen. Matthew quoted both, 23 minutes apart. `Side Table @
+Bathroom` reads 47 TGQ on its quote-readiness tile beside a "Chase the 20"
+button, with no sentence explaining the 27 between them. Cause, checked: the
+phase table counts readiness questions as TGQ, and `countOutstanding`
+(`src/lib/chase-grouping.ts:256`) counts only `spec_field` questions. Most of
+the gap on a placeholder category is the project-wide section. Fixing it needs
+a decision first (the recap's P1 and P3).
+
+### Every item lists the project-wide questions as blocking its quote — OPEN
+
+The phase table's expansion of Drawers, "NEEDED BEFORE THIS ITEM CAN BE QUOTED",
+starts with "Project / commercial": TOE agreement, Expedited project
+confirmed by Jason?, Sales folder, Client sign off visit, and more (52:55). The
+same list appears on every item. Matthew described project-level information
+as its own tier above the line items (54:26). The record screen folds this
+section (Stage 2.8 step 1). The phase table and the TGQ count do not.
+
+### A drawers item is asked for COM 1–3, stitching and stud — OPEN, a matrix question
+
+The fill-in screen on GR-FUR-26 Drawers lists COM 1, COM 2, COM 3, Stitching
+spec, Stud spec, Fabric quantities and Interliner as outstanding (1:00:45).
+Matthew: "we don't need to know what the com is at this stage" (1:00:50). The
+Sideboards/Dressers sheet asks them and has no gate model, so all of them
+block. Not a code defect. It is exactly what Matthew and Claudia's review
+screen is meant to settle (recap D5 and P2).
+
 ## 2026-10-04
 
 Seen walking the real Aman pack on the local stack during the intake rebuild

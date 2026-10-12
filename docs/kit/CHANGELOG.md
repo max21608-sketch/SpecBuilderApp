@@ -4,6 +4,19 @@ Dated entries whenever a kit rule, template or chassis file changes. Record the
 reason, not just the change — the reason is what tells a future reader whether
 it still applies.
 
+## 2026-10-12 — `meeting-recap`: screenshots of a Stream recording work, through an image
+
+The skill said frames "come back black after repeated seeks … Do not debug
+it". That was wrong, and it was being followed. They are ALWAYS black: the
+screenshot does not capture the video layer, and it does not capture a canvas
+either. Drawing the frame onto a canvas and showing the canvas as an `<img>`
+works. `files/capture-stream-frame.js` does it, with the second trap built in:
+until the new image has decoded, the screenshot shows the previous one, so
+every frame was attributed to the wrong time. Each frame is now stamped with
+its own time. Found turning the 2026-10-12 catch-up into
+`docs/plans/catchup-2026-10-12.md`. That was the skill's third use, so the
+"kit candidate" note below now has its second meeting behind it.
+
 ## 2026-09-19 — a `meeting-recap` skill, and why it is mostly about the second pass
 
 Asked for after turning the 2h18m catchup of 2026-09-18 into

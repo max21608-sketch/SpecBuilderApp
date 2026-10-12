@@ -21,6 +21,40 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-12 — Catch-up: past intake, to reviewing the specs
+
+Recap: `docs/plans/catchup-2026-10-12.md`. Defects: `found-in-use.md`,
+2026-10-12. Shown on PILOT v1.9 to Matthew, Sebastian and Claudia. Decided in
+the room:
+
+- **D1 — a codeless fabric reads TBC, never N/A or a furniture code**
+  (Sebastian, 16:40).
+- **D2 — keep the client's bill lines; total the quantity per model for
+  costing** (Matthew, 20:58). Provisional: he will check with Jay.
+- **D3 — the phase table sorts by bill order or by client reference**
+  (21:47).
+- **D4 — a specification is W, D, H, SH; other figures are drawing-stage**
+  (Matthew, 4:51). This conflicts with "folded, never dropped", so it is Max's
+  call whether anything changes.
+- **D5 — the next phase is reviewing specs item by item, marking each as needed
+  for TGQ or TG0, filled in, or a question. TGQ is defined this way, in use, on
+  real jobs, not by a workbook** (Matthew, 39:36, 45:00).
+- **D6 — Matthew and Claudia design that screen this week** and send
+  screenshots (1:01:34).
+- **D7 — Max looks into reading from the BWS P-number SharePoint folder and
+  mailbox before Thursday with Steve**, without holding anything up (29:47,
+  34:58).
+- **D8 — the next test projects are new enquiries in the BWS folder format.
+  Miami Beach is not being quoted** (32:22, 33:29).
+- **D9 — a workflow diagram of the app** (55:59).
+- **D10 — the knowledge base and Task Panda stay outside the app** (Max
+  1:02:14, Matthew agreeing).
+
+Found afterwards, in the source: the phase table and the fill-in and chase
+screens count TGQ by different rules, which is why one item read 44 and then
+20. **Nothing built. Max decides what to implement in a separate session.
+Recap not confirmed by anybody who was in the room.**
+
 ## 2026-10-11 (evening) — A code on two lines of one phase confirms onto one line or both; pilot v1.9
 
 Found by Max on pilot the same day: `AM-ID-PL-FUR-11 Stool.pdf` on P18181 v3

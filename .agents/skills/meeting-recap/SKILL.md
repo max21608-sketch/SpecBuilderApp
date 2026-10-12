@@ -66,17 +66,24 @@ perhaps 35k tokens, which is cheap enough to hold in context for the whole task.
 Worth it when the screen being discussed tells you something the words do not —
 a field list, an error, a number nobody read out.
 
+**Do not screenshot the `<video>` element: it always comes back black.** The
+browser composites video on a layer the screenshot does not capture. A canvas
+is black too. Use `files/capture-stream-frame.js`: run it once through
+`javascript_tool`, `resize_window` to 1600x900, then per frame:
+
 ```js
-const v = document.querySelector('video');
-v.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:99999;background:#000;object-fit:contain';
-v.currentTime = <seconds>;
+await window.__snap(<seconds>)               // whole frame
+await window.__crop(<seconds>, x, y, w, h)   // a region of the 1920x1080 frame, enlarged
 ```
 
-Then `resize_window` to something large, wait 3s, `pause()`, screenshot.
+Then `computer { action: "wait", duration: 1 }`, then screenshot. **Skip the
+wait and every screenshot shows the PREVIOUS frame**, so each frame carries its
+own timestamp, stamped bottom right. Cite that stamp, not the time you asked
+for. `__crop` is how small text on a shared screen becomes readable; `zoom`
+only crops the screenshot and does not add resolution.
 
-**Frames come back black after repeated seeks**, and also genuinely black where
-a screen share was mid-transition. Do not debug it: re-seek a few seconds either
-side. If two attempts fail, move on — the transcript is the substance.
+A genuinely black frame (a screen share mid-transition) is still possible:
+re-seek a few seconds either side.
 
 ## 4. Separate DECISIONS from everything else
 

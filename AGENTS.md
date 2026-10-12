@@ -4021,6 +4021,15 @@ in PILOT, correct, with Max pressing the buttons Claude may not (pilot is
 read-only for Claude). Panther stays in the golden because it holds the
 multi-page and configuration cases.
 
+**2026-10-12: past intake, and the Aman project is no longer a live quote.**
+Read `docs/plans/catchup-2026-10-12.md` before planning. Matthew called intake
+mostly done. The next phase is a screen for reviewing specs item by item: for
+each spec, confirm it, mark it needed for TGQ or TG0, fill it in, or raise it
+as a question. He and Claudia design that screen themselves this week, so
+**do not build it ahead of their design**. The next test projects are new
+enquiries filed in BWS's P-number folder format. Max decides what to implement
+in a separate session; nothing from that meeting is built yet.
+
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
 curated document set — **not** Maybourne Paris, whose documents exist in several
@@ -4626,8 +4635,11 @@ proposed standard holding at TBC, layouts saved per specifier).
 notes into later model calls; a BWS *import* file carrying job numbers; PDF bills of
 quantities; images and scanned documents; splitting an oversize drawing set. M6
 VE rounds. Any write to BWS. Automatic email sending.
-SharePoint writes (and SharePoint READS as an intake source, which Matthew asked
-about on 2026-09-18 without requesting). BWS Messenger and Teams ingestion. The
+SharePoint writes. (SharePoint READS as an intake source: Matthew asked about
+them on 2026-09-18 without requesting them. On 2026-10-12 he asked Max to
+INVESTIGATE reading from BWS's per-project P-number folder and mailbox. Not
+built, and not to be built before that investigation and the talk with Steve:
+`docs/plans/catchup-2026-10-12.md`, P5 and P6.) BWS Messenger and Teams ingestion. The
 post-order/production flow.
 
 **Two things left this list on 2026-09-18 and neither is next.** Gates are built
@@ -4693,6 +4705,13 @@ and `SpecTable`, and a **Needed to quote** column sits beside them. `GET
   of everything, for every category his matrix does not reach; the next attempt
   is a conversation transcribed into the matrix, not another workbook. The
   paragraph below is the record of how it was designed, not a live task.
+  **2026-10-12: Matthew named a different route.** TGQ is to be marked IN THE
+  APP, per job, while he and Claudia work real projects ("on this job, these
+  are the critical specifications for TGQ … teach it … as we're doing it",
+  45:00). Nothing in the schema holds a per-record TGQ mark. `tgq_levels` is
+  per question and level, and `spec_field_gates` is per field and category.
+  How a mark on one job becomes a category rule, and who promotes it, is
+  undecided (`docs/plans/catchup-2026-10-12.md`, P2).
 - **TGQ is out with Matthew** (2026-09-16), as a spoken interview. Read
   `docs/plans/tgq-for-matthew.md` before acting on the answers. The 728
   requirement rows are only **62 distinct questions** — "Stitching spec" is on
@@ -4725,7 +4744,11 @@ and `SpecTable`, and a **Needed to quote** column sits beside them. `GET
   level on a record the way they set a category. Applying the answers is a
   re-seed plus a migration, not application logic.
 - **Who owns the requirement matrix is undecided** — it currently relies on
-  KAM / sales-support knowledge.
+  KAM / sales-support knowledge. Claudia Nogueira wrote the SharePoint cheat
+  sheets it was seeded from (2026-10-01). On 2026-10-12, Matthew said he and
+  Claudia will qualify it on real projects "for the next few months". That
+  makes them its working owners in practice, but nobody has said so as a
+  decision.
 - **The question-to-BWS-field mapping is this repo's judgement, not Matthew's.**
   Only 28 of the 56 BWS fields are reachable from a cheat-sheet question. Review
   it before the export is relied on.
