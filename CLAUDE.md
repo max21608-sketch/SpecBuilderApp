@@ -3497,11 +3497,18 @@ the one item with NO category. Max's ruling is the rule:
   one click away. The tab label says "n open" (it read "47 / 50", which looked
   like 47 done).
 
-**Still not the same number, and said in words:** the record header counts
-Matthew's gate FIELDS (dimension slots, the record-column rows), and the TGQ
-tile counts checklist QUESTIONS. The stool reads "7 to answer at TGQ" beside a
-tile of 2, and the sentence breaks the 7 down. Which of the two the tile
-should show is still Max's call (the section below).
+**Where Matthew wrote a matrix, the item's TGQ is the GATE's count** (Max,
+2026-10-13: "it should show the 7"). `itemTgq` (`src/lib/item-tgq.ts`) is
+the one function that returns the number AND the rows behind it. On a matrix
+category it is the TGQ gate rows still to answer, the `summariseGateRows`
+buckets chase + details + readiness + slot. That includes a dimension SLOT
+the composed cell hides (the stool's `D460 x H450mm` answers its Dimensions
+question while W and SH are open) and the record-column rows no checklist asks
+(Designer reference, Spec notes). Project-wide rows stay apart and
+`unanswerable` stays out, so the stool reads 6 + 1 project-wide. Elsewhere it
+is `inItemTgq` over the checklist questions. The gate is never judged in SQL:
+the overview's matrix half is totalled in TypeScript (`item-tgq-load.ts`),
+and `tests/db/item-tgq-totals.test.ts` holds totals equal to lines.
 
 ### TGQ is one name over two models, and which applies is per category
 
