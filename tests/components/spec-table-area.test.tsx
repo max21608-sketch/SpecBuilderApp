@@ -188,11 +188,11 @@ describe("the area select", () => {
       .getAllByRole("button")
       .find((button) => (button.textContent ?? "").startsWith("TGQ"))!;
     expect(within(tgq).getByText("4")).toBeTruthy();
-    expect(tgq.textContent).toContain("12 item questions");
+    expect(tgq.textContent).toContain("12 to answer on the items");
 
     await userEvent.selectOptions(screen.getByLabelText("Filter by area"), "living room");
     expect(within(tgq).getByText("4")).toBeTruthy();
-    expect(tgq.textContent).toContain("12 item questions");
+    expect(tgq.textContent).toContain("12 to answer on the items");
     // And nothing was reported up a second time with a narrower number. The
     // header still receives the QUESTION count, unchanged by the tile's unit.
     expect(summaries.every((tally) => tally.records === 4 && tally.toQuote === 12)).toBe(true);

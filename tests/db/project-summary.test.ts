@@ -28,6 +28,7 @@ import pg from "pg";
 import { EMPTY_SUMMARY, loadProjectSummary } from "@/lib/project-summary";
 import { isScopeFailure, loadExportScope } from "@/lib/export-scope";
 import { loadOutstanding } from "@/lib/chase-drafts";
+import { GET as recordsRoute } from "@/app/api/records/route";
 import { inItemTgq, inProjectWideTgq, projectWideTgqKeys } from "@/lib/chase-grouping";
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 
@@ -153,8 +154,12 @@ describeIfDb("project summary", () => {
     expect(result.records).toBe(3);
     expect(result.itemsWithQuestions).toBe(3);
 
-    // Only the record with nothing answered is held at TGQ.
-    expect(result.toQuoteItems).toBe(1);
+    // ALL THREE ARE HELD AT TGQ, and that is the 2026-10-13 rule rather than a
+    // regression: their category is on Matthew's matrix, so an item's TGQ is
+    // its TGQ GATE rows, and every fixture here has empty dimension slots and
+    // an empty designer reference and spec notes — rows no checklist question
+    // covers. "Every question answered" is not "TGQ met" on the matrix.
+    expect(result.toQuoteItems).toBe(3);
     // The one clear at TGQ still carries its other questions, and so does the
     // one with nothing answered.
     expect(result.alsoOutstandingItems).toBe(2);
@@ -175,7 +180,7 @@ describeIfDb("project summary", () => {
     // what makes the question figures addable.
     // Since 2026-10-12 the project-wide TGQ rows are counted apart from the
     // items' own TGQ, and the five together still partition.
-    expect(result.toQuote + result.projectWideRows + result.missing + result.tbc + result.settled).toBe(
+    expect(result.toQuoteQuestions + result.projectWideRows + result.missing + result.tbc + result.settled).toBe(
       3 * allRequirementIds.length,
     );
 
@@ -201,7 +206,8 @@ describeIfDb("project summary", () => {
     expect(result.records).toBe(4);
     expect(result.uncategorised).toBe(1);
     expect(result.itemsWithQuestions).toBe(3);
-    expect(result.toQuoteItems + result.alsoOutstandingItems).toBeLessThanOrEqual(3);
+    expect(result.toQuoteItems).toBeLessThanOrEqual(3);
+    expect(result.alsoOutstandingItems).toBeLessThanOrEqual(3);
     await client.query(`delete from spec_records where id = $1`, [extra.rows[0].id]);
   });
 
@@ -261,8 +267,9 @@ describeIfDb("project summary", () => {
       const itemTgq = outstanding.filter(inItemTgq);
       const projectWideRows = outstanding.filter(inProjectWideTgq);
 
-      // Equal, number for number, to what every TypeScript screen counts.
-      expect(result.toQuote).toBe(itemTgq.length);
+      // Equal, number for number, to what every TypeScript screen counts — in
+      // QUESTIONS, which is the unit that partitions.
+      expect(result.toQuoteQuestions).toBe(itemTgq.length);
       expect(result.projectWideRows).toBe(projectWideRows.length);
       expect(result.projectWide).toBe(projectWideTgqKeys(outstanding).size);
 
@@ -276,8 +283,22 @@ describeIfDb("project summary", () => {
       expect(result.projectWide).toBeGreaterThan(0);
       expect(result.projectWide).toBeLessThan(result.projectWideRows);
 
-      // And the items: the placeholder record is held at TGQ by its own work.
-      expect(result.toQuoteItems).toBe(new Set(itemTgq.map((question) => question.recordId)).size);
+      // TOTALS = SUM OF LINES (2026-10-13). The screen's TGQ is `itemTgq`:
+      // gate rows for the three records on his matrix, questions for the one
+      // on the placeholder. The overview's total must equal what the phase
+      // table's rows add up to, item for item.
+      const response = await recordsRoute(
+        new Request(`http://localhost/api/records?projectId=${projectId}&runId=${runId}`),
+      );
+      const body = (await response.json()) as { records: { id: string; to_quote_outstanding: number | null }[] };
+      const lines = body.records.map((row) => row.to_quote_outstanding ?? 0);
+      expect(result.toQuote).toBe(lines.reduce((sum, n) => sum + n, 0));
+      expect(result.toQuoteItems).toBe(lines.filter((n) => n > 0).length);
+      // The placeholder line is still its own questions, by the old rule.
+      const placeholderLine = body.records.find((row) => row.id === extra.rows[0].id)!;
+      expect(placeholderLine.to_quote_outstanding).toBe(
+        itemTgq.filter((question) => question.recordId === extra.rows[0].id).length,
+      );
     } finally {
       await client.query(`delete from spec_records where id = $1`, [extra.rows[0].id]);
     }

@@ -294,10 +294,10 @@ function ProjectsView() {
             label="TGQ"
             tone={totals.toQuote + totals.projectWide > 0 ? "danger" : "good"}
             value={totals.toQuote}
-            // ITEM QUESTIONS, and the project-wide ones apart: those are
+            // WHAT IS LEFT ON THE ITEMS (itemTgq), project-wide apart: those are
             // answered once per project, so 15 of them repeated on 30 items
             // are 15 questions, not 450 (Max, 2026-10-12).
-            meaning={`item questions${
+            meaning={`to answer on the items${
               totals.projectWide > 0 ? ` · ${totals.projectWide} project-wide` : ""
             } · across ${totals.withWork} project${totals.withWork === 1 ? "" : "s"}`}
             onPress={totals.withWork > 0 ? () => setFocus(focus === "to_quote" ? null : "to_quote") : undefined}

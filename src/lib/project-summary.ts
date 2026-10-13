@@ -51,6 +51,7 @@
 // ============================================================================
 import { sql } from "@/lib/db";
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
+import { loadMatrixItemTgq, type MatrixItemTgq } from "@/lib/item-tgq-load";
 import { countOpenDisagreementsByProject, type ProjectDisagreements } from "@/lib/disagreements";
 
 export type ProjectSummary = {
@@ -63,12 +64,26 @@ export type ProjectSummary = {
   /** How many of THOSE carry a suggestion waiting to be accepted. */
   levelSuggested: number;
   /**
-   * The ITEMS' OWN TGQ, in questions: outstanding, blocking a quote, of any
-   * kind, MINUS the project-wide section (Max, 2026-10-12). The same rule as
-   * `inItemTgq` in chase-grouping.ts, re-expressed in SQL below; the db test
-   * holds the two equal.
+   * THE ITEMS' OWN TGQ, by `itemTgq` (Max, 2026-10-12 and 2026-10-13): the sum
+   * of every item's TGQ as the phase table shows it. Two halves added here:
+   *
+   *   placeholder  outstanding to_quote questions of any kind, minus the
+   *                project-wide section — `inItemTgq` re-expressed in the SQL
+   *                below, on records whose category is NOT on his matrix;
+   *   matrix       each record's TGQ GATE rows still to answer, computed in
+   *                TypeScript by `loadMatrixItemTgq`, because a gate is never
+   *                judged in SQL.
+   *
+   * The db test holds the total equal to the sum of the lines.
    */
   toQuote: number;
+  /**
+   * The same items' outstanding to_quote QUESTIONS (minus project-wide), for
+   * both models — the unit that partitions with `missing`, `tbc`, `settled`
+   * and `projectWideRows`. Not a screen's TGQ: on the matrix the gate counts
+   * slots and record columns no question asks.
+   */
+  toQuoteQuestions: number;
   /**
    * PROJECT-LEVEL TGQ: distinct project-wide questions still blocking a quote
    * on any item in scope — "Access", once, not once per item. Keyed the way
@@ -155,6 +170,7 @@ export const EMPTY_SUMMARY: ProjectSummary = {
   noLevel: 0,
   levelSuggested: 0,
   toQuote: 0,
+  toQuoteQuestions: 0,
   projectWide: 0,
   projectWideRows: 0,
   missing: 0,
@@ -190,24 +206,38 @@ export const EMPTY_SUMMARY: ProjectSummary = {
 export async function loadProjectSummaries(projectIds: string[]): Promise<Map<string, ProjectSummary>> {
   const out = new Map<string, ProjectSummary>();
   if (projectIds.length === 0) return out;
-  const [rows, disagreements] = await Promise.all([
+  const [rows, disagreements, matrix] = await Promise.all([
     summaryRows(projectIds),
     countOpenDisagreementsByProject(sql, projectIds),
+    loadMatrixItemTgq(projectIds),
   ]);
   for (const row of rows) {
     const projectId = String(row.project_id);
-    out.set(projectId, withDisagreements(toSummary(row), disagreements.get(projectId)));
+    out.set(projectId, withMatrixTgq(withDisagreements(toSummary(row), disagreements.get(projectId)), projectId, matrix));
   }
   return out;
 }
 
 export async function loadProjectSummary(projectId: string): Promise<ProjectSummary> {
-  const [rows, disagreements] = await Promise.all([
+  const [rows, disagreements, matrix] = await Promise.all([
     summaryRows([projectId]),
     countOpenDisagreementsByProject(sql, [projectId]),
+    loadMatrixItemTgq([projectId]),
   ]);
   const row = rows[0];
-  return row ? withDisagreements(toSummary(row), disagreements.get(projectId)) : EMPTY_SUMMARY;
+  return row ? withMatrixTgq(withDisagreements(toSummary(row), disagreements.get(projectId)), projectId, matrix) : EMPTY_SUMMARY;
+}
+
+/** Adds the MATRIX half of the items' TGQ — gate rows, by `itemTgq` — to the SQL's placeholder half. */
+function withMatrixTgq(summary: ProjectSummary, projectId: string, matrix: Map<string, MatrixItemTgq>): ProjectSummary {
+  let toQuote = 0;
+  let items = 0;
+  for (const item of matrix.values()) {
+    if (item.projectId !== projectId || !item.count) continue;
+    toQuote += item.count;
+    items += 1;
+  }
+  return { ...summary, toQuote: summary.toQuote + toQuote, toQuoteItems: summary.toQuoteItems + items };
 }
 
 function withDisagreements(summary: ProjectSummary, found: ProjectDisagreements | undefined): ProjectSummary {
@@ -348,7 +378,8 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
                when mc.item_category_id is not null then tq.requirement_id is not null
                else
                  s.level is not null and q.tgq_levels @> array[s.level]::text[]
-             end as to_quote
+             end as to_quote,
+             (mc.item_category_id is not null) as mapped
       from scoped s
       join requirements q on q.category_id = s.category_id
       left join spec_fields f on f.id = q.spec_field_id
@@ -387,6 +418,14 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
              -- counted once below. The four question counts still partition
              -- with project_wide_rows beside them.
              count(*) filter (where state in ('missing', 'tbc') and to_quote and not project_wide)::int as to_quote,
+             -- THE PLACEHOLDER HALF of the items' TGQ: records whose category
+             -- is NOT on his matrix. The matrix half is gate rows, judged in
+             -- TypeScript (loadMatrixItemTgq) and added after this query.
+             count(*) filter (where state in ('missing', 'tbc') and to_quote and not project_wide and not mapped)::int
+               as to_quote_placeholder,
+             count(distinct record_id)
+               filter (where state in ('missing', 'tbc') and to_quote and not project_wide and not mapped)::int
+               as to_quote_items_placeholder,
              count(*) filter (where state in ('missing', 'tbc') and to_quote and project_wide)::int as project_wide_rows,
              count(distinct question_key)
                filter (where state in ('missing', 'tbc') and to_quote and project_wide)::int as project_wide,
@@ -435,6 +474,8 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
            rec.records, rec.uncategorised, rec.no_level, rec.level_suggested,
            rec.tgq_from_matrix, rec.tgq_from_fallback,
            coalesce(ans.to_quote, 0) as to_quote,
+           coalesce(ans.to_quote_placeholder, 0) as to_quote_placeholder,
+           coalesce(ans.to_quote_items_placeholder, 0) as to_quote_items_placeholder,
            coalesce(ans.project_wide, 0) as project_wide,
            coalesce(ans.project_wide_rows, 0) as project_wide_rows,
            coalesce(ans.missing, 0) as missing,
@@ -461,14 +502,16 @@ function toSummary(row: SummaryRow): ProjectSummary {
     uncategorised: Number(row.uncategorised ?? 0),
     noLevel: Number(row.no_level ?? 0),
     levelSuggested: Number(row.level_suggested ?? 0),
-    toQuote: Number(row.to_quote ?? 0),
+    // The placeholder half only; `withMatrixTgq` adds the matrix half.
+    toQuote: Number(row.to_quote_placeholder ?? 0),
+    toQuoteQuestions: Number(row.to_quote ?? 0),
     projectWide: Number(row.project_wide ?? 0),
     projectWideRows: Number(row.project_wide_rows ?? 0),
     missing: Number(row.missing ?? 0),
     tbc: Number(row.tbc ?? 0),
     settled: Number(row.settled ?? 0),
     itemsWithQuestions: Number(row.items_with_questions ?? 0),
-    toQuoteItems: Number(row.to_quote_items ?? 0),
+    toQuoteItems: Number(row.to_quote_items_placeholder ?? 0),
     alsoOutstandingItems: Number(row.also_outstanding_items ?? 0),
     settledItems: Number(row.settled_items ?? 0),
     finishes: Number(row.finishes ?? 0),

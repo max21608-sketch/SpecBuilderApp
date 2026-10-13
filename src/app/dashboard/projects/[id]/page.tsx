@@ -1747,7 +1747,7 @@ function ProjectOverview() {
                   value={summary.toQuoteItems}
                   // ITEM QUESTIONS, with the project-wide ones apart — they
                   // are answered once, on the card below, not per item.
-                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.toQuote.toLocaleString()} item questions${
+                  meaning={`of ${summary.itemsWithQuestions.toLocaleString()} items · ${summary.toQuote.toLocaleString()} to answer on the items${
                     summary.projectWide > 0 ? ` · ${summary.projectWide} project-wide` : ""
                   }`}
                   href={firstRunHref}
@@ -1884,10 +1884,10 @@ function ProjectOverview() {
                       href={chaseHref}
                       meaning={
                         <>
-                          Items with at least one question blocking a quotation, of the{" "}
+                          Items with something still blocking a quotation, of the{" "}
                           {summary.itemsWithQuestions.toLocaleString()} that have a category —{" "}
-                          {summary.toQuote.toLocaleString()} item question
-                          {summary.toQuote === 1 ? "" : "s"} between them
+                          {summary.toQuote.toLocaleString()} to answer between them (questions, and on
+                          Matthew&rsquo;s matrix also dimension slots and record columns)
                           {summary.projectWide > 0 && (
                             <>
                               , and{" "}

@@ -797,11 +797,12 @@ export default function SpecTable({
             label="TGQ"
             tone="danger"
             value={tally.toQuoteItems}
-            // ITEM QUESTIONS — the one rule, project-wide apart (Max,
-            // 2026-10-12): those are answered once, on the project overview.
-            meaning={`of ${records.length} item${records.length === 1 ? "" : "s"} · ${tally.toQuote.toLocaleString()} item question${
-              tally.toQuote === 1 ? "" : "s"
-            }${projectWide > 0 ? ` · ${projectWide} project-wide` : ""}`}
+            // TO ANSWER ON THE ITEMS — `itemTgq`'s rows: questions, and on
+            // Matthew's matrix also dimension slots and record columns
+            // (2026-10-13). Project-wide apart: answered once on the overview.
+            meaning={`of ${records.length} item${records.length === 1 ? "" : "s"} · ${tally.toQuote.toLocaleString()} to answer on the items${
+              projectWide > 0 ? ` · ${projectWide} project-wide` : ""
+            }`}
             onPress={() => setFocus(focus === "tgq" ? null : "tgq")}
             active={focus === "tgq"}
           />
