@@ -50,6 +50,7 @@ one agent.
 | `npm run db:backfill-answers` | one-off: fills checklist answers from attributes confirmed before promotion existed. Dry run unless `--apply`; safe to re-run |
 | `npm run db:backfill-snapshots` | one-off: gives every record that predates 0012 a version 1 under a `history_begins` change. Dry run unless `--apply`; safe to re-run |
 | `npm run db:backfill-bill-swatches` | one-off: for bills confirmed before 2026-10-05, gives each fabric code the picture its bill lines printed as its swatch, and files uncoded real fabrics as in-house finishes — the same rule the bill confirm now runs (`src/lib/bill-fabric-filing.ts`). Dry run unless `--apply`; safe to re-run; `--yes-pilot` / `--yes-production` |
+| `npm run db:backfill-finish-twins` | one-off: merges library rows that are one finish under two codes (a bare code and its zone twin, `MTL-01` / `GR-MTL-01`; and `fabricOwnCode` twins, `GR-FAB-13 PL-FUR-04`) into the canonical row, re-links their specs, recomposes answers, one version per record, one change set per project. A twin holding a different description, swatch or BW standard is skipped and named; an emptied twin is retired, never deleted. Dry run unless `--apply`; safe to re-run; `--yes-pilot` / `--yes-production` |
 | `npm run db:backfill-finishes` | one-off: builds each project's finishes library from the codes its drawings carry, and links them. Dry run unless `--apply`; safe to re-run. Leaves a code whose items disagree blank, and names it |
 | `npm run db:qa-clean` | sweeps what a failed database-tier test run left behind. Refuses production outright |
 | `npm run qa:fake-inbox` | invented correspondence for the inbox screen, recorded through the app's own `recordMessage` so the routing outcomes are real. Sandbox only, no production flag. Dry run unless `--apply`; `--clear --apply` sweeps it, keeping any message somebody has since assigned |
@@ -2313,6 +2314,19 @@ words so a value stays checkable against its page; the CELL renders the library.
 - **Normalisation is case and whitespace only.** `CH-01.1` and `CH-01-1` stay
   two finishes. A normaliser clever enough to merge them is clever enough to
   merge two codes a client meant to keep apart, and there is no way back.
+- **A bare code and its ZONE twin are one finish, and that is a LOOKUP, not a
+  normaliser** (Max, 2026-10-13, checked on the Aman bill, which writes
+  `TIM-13` on three rows and `GR-TIM-13` everywhere else). `findFinishByCode`
+  (`finishes.ts`) tries an exact match first. Only when that finds nothing does
+  a two-part `XXX-NN` read as the library's ONE `ZZ-XXX-NN`, or a three-part
+  code read as a bare twin that no other zone shares. **Two three-part codes
+  never fold** (`GR-MTL-01` and `PL-MTL-01` stay two), and a pointed code
+  (`CH-01.1`) is neither shape. Every read this way prints its sentence ("read
+  as GR-MTL-01: …"). The confirm, the bill review and the drawings card's
+  "already recorded" all call it. Duplicates stored before it are merged by
+  `npm run db:backfill-finish-twins`. **Known gap:** a fresh confirm files a
+  bare code it meets first as the canonical row, where the backfill prefers the
+  zoned one.
 - **`kind` is SUGGESTED and never written.** The rule was "never inferred", on
   the grounds that `classifyGroup` already guesses a group from words in a
   label and a second guess stacked silently on it produces a register full of
@@ -3286,7 +3300,12 @@ rule below is a trap rather than a preference.
   `N/A` as none, the item's own code as none, and the item's own code written
   after the fabric's without a bracket (`GR-FAB-13 PL-FUR-04`) taken off — the
   last whole word only, matched against that item's code, never "a word that
-  looks like a code".
+  looks like a code". **A placeholder finish line is written TBC, and a
+  line's CODE cell is never its words** (Max, 2026-10-13). `fabricLineWrite`
+  (`bill-fabric-filing.ts`) is the one decision: no words gives a TBC with no
+  value, and words that `fabricLineIsPlaceholder` calls nothing give TBC with
+  the words kept. "Fabric @ Armchair" used to be a CONFIRMED COM 1 that shipped
+  to BWS as written. Future confirms only: nothing stored was rewritten.
 - **In-house codes are `BW-<short code>-nnn`** (`projects.finish_code_prefix`,
   set on the project's details; `BW-F-nnn` where none is set). Minted under the
   project row lock as before. Changing the short code starts a new series and

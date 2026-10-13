@@ -21,6 +21,50 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-13 — Promoted to pilot: one TGQ, project-wide answered once, the pilot walk's fixes (v1.10)
+
+From the 2026-10-12 catch-up (`catchup-2026-10-12.md`) and the read-only walk
+of pilot that followed (`found-in-use.md`, 2026-10-12 afternoon). Max's rulings
+are in the recap. Built by two coders on the local stack, every commit reviewed
+here with screenshots at 1920 and 1440. The four checks with the database tier
+required were green on the promoted code (3,463 passed).
+
+- **TGQ means one thing.**
+  - An item's TGQ is its own outstanding quote-blocking questions, of any
+    kind, minus the project-wide section.
+  - Where Matthew wrote a matrix, it is the GATE's count: slots and record
+    columns included (`itemTgq`). The stool reads 6 + 1 project-wide.
+  - Every count opens onto its rows. Totals equal lines.
+  - Ready to quote never counts an uncategorised item.
+- **Project-wide questions are answered once, on the project** (Stage 2.8
+  step 2). A settled answer that differs is left alone unless ticked with a
+  reason.
+- **Bill review.**
+  - A fabric line's code column shows its own code or "TBC: no code", with
+    the bill's cell in grey.
+  - A zone-list bracket confirms the item above and never chooses one.
+  - A placeholder finish line is written TBC.
+- **The finishes library.**
+  - A bare code and its one zone twin are one finish (`findFinishByCode`).
+  - `STN` is stone, and three-part codes are read by their middle group.
+  - `db:backfill-finish-twins` merges the twins already stored.
+- **The rest.**
+  - The phase table sorts by client reference.
+  - Millimetres show beside feet and inches on the drawings card.
+  - No charged spec read is offered on a bill that already read its
+    descriptions.
+  - A replace prompt names its line.
+  - The pack screen names the earlier bill.
+  - The phase table fits its box.
+
+**For Max on pilot, after the deployment is Ready:** walk it signed in, then run
+the twin clean-up, dry first:
+`npx tsx --env-file=.env.pilot.local db/backfill-finish-twins.ts --yes-pilot`
+(read the plan), then the same with `--apply`. If `GR-FAB-13 PL-FUR-04` is
+skipped for differing swatches, re-link it by hand on `v3-026`.
+
+**Not accepted by anybody.**
+
 ## 2026-10-12 — Catch-up: past intake, to reviewing the specs
 
 Recap: `docs/plans/catchup-2026-10-12.md`. Defects: `found-in-use.md`,
