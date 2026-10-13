@@ -56,6 +56,14 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
 import TgqCount from "@/components/drafts/TgqCount";
+import { ITEM_TGQ_WHERE_LABEL } from "@/lib/item-tgq";
+
+/** One record's TGQ on Matthew's matrix, as the drafts route sends it. */
+export type ChaseItemTgq = {
+  count: number | null;
+  projectWide: number;
+  itemRows: { label: string; where: "specs" | "details" }[];
+};
 import Chip from "@/components/ui/Chip";
 import SuggestButton from "@/components/ui/SuggestButton";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
@@ -70,7 +78,7 @@ import { useUrlTab } from "@/lib/use-url-tab";
 import { formatDay } from "@/lib/format-day";
 import {
   allQuestions,
-  countOutstanding,
+  countWithItemTgq,
   inChaseAsk,
   inItemTgq,
   isProjectWideQuestion,
@@ -185,6 +193,7 @@ export default function ChaseQuestionTable({
   levelSuggestions,
   onAcceptLevel,
   acceptingLevel,
+  itemTgq,
 }: {
   questions: TableQuestion[];
   selected: Set<string>;
@@ -208,7 +217,15 @@ export default function ChaseQuestionTable({
   levelSuggestions?: Record<string, LevelSuggestion>;
   onAcceptLevel?: (recordId: string) => void;
   acceptingLevel?: string | null;
+  /**
+   * `itemTgq` for the records on Matthew's matrix (2026-10-13): their TGQ is
+   * the gate's rows, slots and record columns included, and the line's count
+   * is made from it. The rows that are not questions are listed when the line
+   * opens, as "record it on the item". A chase still ASKS questions only.
+   */
+  itemTgq?: Record<string, ChaseItemTgq>;
 }) {
+  const tgqByRecord = useMemo(() => new Map(Object.entries(itemTgq ?? {})), [itemTgq]);
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const [localTier, setLocalTier] = useState<"all" | QuestionTier>("all");
   const [localWaiting, setLocalWaiting] = useState(false);
@@ -543,7 +560,11 @@ export default function ChaseQuestionTable({
             )}
             {shown.map(({ line, own, options, visibleAll, searching }) => {
               const open = openLines.has(line.lineId) || searching;
-              const total = countOutstanding(allQuestions(line));
+              const total = countWithItemTgq(allQuestions(line), tgqByRecord);
+              const lineRecords = [line.lineId, ...line.options.map((option) => option.recordId)];
+              const itemRows = lineRecords.flatMap((recordId) =>
+                (tgqByRecord.get(recordId)?.itemRows ?? []).map((row) => ({ ...row, recordId })),
+              );
               const optionsWithNothing = line.optionCount - options.filter((entry) => entry.questions.length > 0).length;
               return (
                 <LineRows
@@ -570,6 +591,8 @@ export default function ChaseQuestionTable({
                   suggestion={levelSuggestions?.[line.lineId]}
                   onAcceptLevel={onAcceptLevel}
                   acceptingLevel={acceptingLevel ?? null}
+                  itemRows={itemRows}
+                  tgqByRecord={tgqByRecord}
                 />
               );
             })}
@@ -669,6 +692,8 @@ function LineRows({
   suggestion,
   onAcceptLevel,
   acceptingLevel,
+  itemRows = [],
+  tgqByRecord,
 }: {
   line: FurnitureLine<TableQuestion>;
   open: boolean;
@@ -692,6 +717,9 @@ function LineRows({
   suggestion?: LevelSuggestion;
   onAcceptLevel?: (recordId: string) => void;
   acceptingLevel: string | null;
+  /** TGQ rows on this line recorded on the item, not asked (`itemTgq`). */
+  itemRows?: { recordId: string; label: string; where: "specs" | "details" }[];
+  tgqByRecord?: ReadonlyMap<string, ChaseItemTgq>;
 }) {
   const allSelected =
     visibleOnLine.length > 0 && visibleOnLine.every((q) => selected.has(key(q.recordId, q.requirementId)));
@@ -805,6 +833,30 @@ function LineRows({
         </tr>
       )}
 
+      {/* COUNTED IN THE LINE'S TGQ AND NEVER ASKED: a dimension slot or a
+          record column on Matthew's matrix. Listed, with no tick box, so the
+          count opens onto every row behind it. */}
+      {open &&
+        itemRows.map((row) => (
+          <tr key={`${row.recordId}:${row.label}`}>
+            <td colSpan={2} className="border-b border-neutral-100 px-2 py-1.5 pl-12 align-top">
+              <span aria-hidden className={`inline-block h-1.5 w-1.5 rounded-full align-middle ${TONE.danger.dot}`} />
+            </td>
+            <td colSpan={COLUMNS - 2} className="border-b border-neutral-100 px-4 py-1.5 text-sm">
+              <span className="text-neutral-900">{row.label}</span>
+              <span className="text-neutral-400"> — not asked, </span>
+              <Link
+                href={`/dashboard/records/${row.recordId}?tab=specs${row.where === "details" ? "#item-details" : ""}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-700 no-underline hover:underline"
+              >
+                {ITEM_TGQ_WHERE_LABEL[row.where]}
+              </Link>
+            </td>
+          </tr>
+        ))}
+
       {open && (
         <QuestionRows
           id={line.lineId}
@@ -820,7 +872,7 @@ function LineRows({
       {open &&
         options.map(({ option, questions }) => {
           const optionOpen = openOptions.has(option.recordId) || searching;
-          const optionTotal = countOutstanding(option.questions);
+          const optionTotal = countWithItemTgq(option.questions, tgqByRecord);
           const optionSelected =
             questions.length > 0 && questions.every((q) => selected.has(key(q.recordId, q.requirementId)));
           const optionSome = questions.some((q) => selected.has(key(q.recordId, q.requirementId)));

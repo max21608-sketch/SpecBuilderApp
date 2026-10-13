@@ -18,6 +18,7 @@
 //     The client cannot distinguish "the record was retired" from "somebody
 //     answered it" by comparing versions, and those want different words.
 import { inChaseAsk, inItemTgq, projectWideTgqKeys } from "@/lib/chase-grouping";
+import { loadMatrixItemTgq } from "@/lib/item-tgq-load";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import {
@@ -78,11 +79,15 @@ export async function GET(request: Request): Promise<Response> {
       row.capsule_synced_at === null || row.capsule_synced_at === undefined ? null : String(row.capsule_synced_at),
   }));
 
-  const [outstanding, uncategorised, sentCoverage, summary] = await Promise.all([
+  const [outstanding, uncategorised, sentCoverage, summary, matrix] = await Promise.all([
     loadOutstanding(projectId),
     loadUncategorisedRecords(projectId),
     loadSentCoverage(projectId),
     loadProjectSummary(projectId),
+    // THE MATRIX HALF OF EACH ITEM'S TGQ (`itemTgq`, 2026-10-13), so the
+    // lines count gate rows where Matthew wrote a matrix. What a chase ASKS is
+    // unchanged: questions only.
+    loadMatrixItemTgq([projectId]),
   ]);
 
   const waiting = waitingByQuestion(outstanding, sentCoverage);
@@ -246,6 +251,21 @@ export async function GET(request: Request): Promise<Response> {
         })),
       })),
       blocked,
+      // Per record on Matthew's matrix: its TGQ count, project-wide count, and
+      // the rows that are not questions (slots, record columns), which the
+      // table lists as "record it on the item" when a line opens.
+      itemTgq: Object.fromEntries(
+        [...matrix.values()].map((item) => [
+          item.recordId,
+          {
+            count: item.count,
+            projectWide: item.projectWide,
+            itemRows: item.rows
+              .filter((row) => row.kind !== "question")
+              .map((row) => ({ label: row.label, where: row.where === "details" ? "details" : "specs" })),
+          },
+        ]),
+      ),
       suggestedCodes,
       uncategorised,
       unauthored: unauthored.map((row) => ({
@@ -272,7 +292,16 @@ export async function GET(request: Request): Promise<Response> {
         // minus the project-wide section; the subset a chase asks by default;
         // and the distinct project-wide questions, answered once on the
         // project. The tile says all three in words.
-        toQuote: outstanding.filter(inItemTgq).length,
+        // THE SUM OF THE LINES: each record with something outstanding counts
+        // its `itemTgq` — the gate's rows on the matrix, its own questions
+        // elsewhere — exactly as its line in the table does.
+        toQuote: (() => {
+          const own = new Map<string, number>();
+          for (const q of outstanding) own.set(q.recordId, (own.get(q.recordId) ?? 0) + (inItemTgq(q) ? 1 : 0));
+          let sum = 0;
+          for (const [recordId, n] of own) sum += matrix.get(recordId)?.count ?? n;
+          return sum;
+        })(),
         toChase: outstanding.filter(inChaseAsk).length,
         projectWide: projectWideTgqKeys(outstanding).size,
         later: outstanding.filter((q) => q.tier === "later").length,

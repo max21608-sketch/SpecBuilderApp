@@ -38,8 +38,17 @@ import {
   waitingByQuestion,
   type OutstandingQuestion,
 } from "@/lib/chase-drafts";
-import { summariseLines, infillTotals, type InfillDimension, type InfillQuestion, type InfillSister } from "@/lib/infill";
+import {
+  summariseLines,
+  infillTotals,
+  type InfillDimension,
+  type InfillLineSummary,
+  type InfillQuestion,
+  type InfillSister,
+} from "@/lib/infill";
 import { groupByQuestion } from "@/lib/chase-grouping";
+import { loadMatrixItemTgq, type MatrixItemTgq } from "@/lib/item-tgq-load";
+import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { areaOptions } from "@/lib/area-filter";
 import { normaliseFinishCode } from "@/lib/finishes";
 import { loadPalettes } from "@/lib/palette-load";
@@ -71,10 +80,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (requirements.length > 0) return detail(projectId, { requirementIds: requirements });
 
   // ---- the summary ---------------------------------------------------------
-  const [outstanding, uncategorised, coverage] = await Promise.all([
+  const [outstanding, uncategorised, coverage, matrix] = await Promise.all([
     loadOutstanding(projectId),
     loadUncategorisedRecords(projectId),
     loadSentCoverage(projectId),
+    // THE MATRIX HALF OF EACH ITEM'S TGQ (`itemTgq`, 2026-10-13): the TGQ
+    // gate's rows — slots and record columns included — which no list of
+    // questions can count. The overview adds the same half.
+    loadMatrixItemTgq([projectId]),
   ]);
   const waiting = waitingByQuestion(outstanding, coverage);
   const withWaiting = outstanding.map((question) => ({
@@ -82,7 +95,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     waiting: waiting.get(questionKey(question.recordId, question.requirementId, 0)) ?? null,
   }));
 
-  const lines = summariseLines(withWaiting);
+  const lines = summariseLines(withWaiting, matrix);
+  // AN ITEM ON THE MATRIX WITH NO QUESTION OUTSTANDING CAN STILL OWE ITS TGQ:
+  // every checklist question answered, and a dimension slot or the designer
+  // reference still empty. It has no question to group, so it would have no
+  // line, and the overview's total would count what this screen never lists.
+  // It gets a line of its own whose rows are all "record it on the item".
+  const listed = new Set(lines.flatMap((line) => [line.lineId, ...line.options.map((option) => option.recordId)]));
+  const gateOnly = [...matrix.values()].filter((item) => (item.count ?? 0) > 0 && !listed.has(item.recordId));
+  if (gateOnly.length > 0) lines.push(...(await gateOnlyLines(gateOnly)));
 
   // THE SECOND VIEW, off the same load. "Show me all the jobs with dimensions
   // missing" — one heading per question with its count, and its rows read when
@@ -141,7 +162,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     questions,
     questionAreas,
     phases: [...phases.entries()].map(([value, label]) => ({ id: value, name: label })),
-    totals: infillTotals(outstanding, new Set(waiting.keys())),
+    // THE HEADER IS THE SUM OF THE LINES, by construction: each line's TGQ is
+    // `itemTgq`'s, so the header's must be theirs added up, never a second
+    // count over the questions.
+    totals: {
+      ...infillTotals(outstanding, new Set(waiting.keys())),
+      toQuote: lines.reduce((sum, line) => sum + line.counts.toQuote, 0),
+    },
     uncategorised,
     categories,
     palettes,
@@ -298,4 +325,48 @@ async function loadFinishes(projectId: string): Promise<Map<string, string>> {
     if (description) out.set(String(row.code_norm), description);
   }
   return out;
+}
+
+/**
+ * A line for each record whose TGQ is all gate rows (`itemTgq` on the matrix)
+ * and which has no outstanding question to group into one. Its rows are listed
+ * as "record it on the item": nothing on it is a box to fill here.
+ */
+async function gateOnlyLines(items: MatrixItemTgq[]): Promise<InfillLineSummary[]> {
+  const rows = await sql`
+    select r.id, r.record_no, r.variant_ordinal, r.item_description, r.qty, r.level, r.area, r.run_id,
+           (select p2.record_no from spec_records p2 where p2.id = r.parent_id) as parent_record_no,
+           run.name as run_name, p.bws_project_number,
+           coalesce((select string_agg(x.ref_value, ', ' order by x.ref_value)
+                       from spec_record_refs x where x.record_id = coalesce(r.parent_id, r.id)), '') as refs
+      from spec_records r
+      join spec_runs run on run.id = r.run_id
+      join projects p on p.id = r.project_id
+     where r.id = any(${items.map((item) => item.recordId)}::uuid[])
+  `;
+  const byId = new Map(items.map((item) => [item.recordId, item]));
+  return rows.map((row) => {
+    const item = byId.get(String(row.id))!;
+    return {
+      lineId: String(row.id),
+      recordLabel: recordLabel(String(row.bws_project_number), numberingFromRow(row)),
+      code: String(row.refs ?? ""),
+      itemDescription: String(row.item_description ?? ""),
+      qty: row.qty === null || row.qty === undefined ? null : Number(row.qty),
+      runId: String(row.run_id),
+      runName: String(row.run_name ?? ""),
+      level: row.level === null || row.level === undefined ? null : String(row.level),
+      area: row.area === null || row.area === undefined ? null : String(row.area),
+      counts: { toQuote: item.count ?? 0, projectWide: item.projectWide, later: 0, waiting: 0 },
+      states: { missing: 0, tbc: 0 },
+      itemRows: item.rows.map((tgqRow) => ({
+        recordId: item.recordId,
+        label: tgqRow.label,
+        kind: tgqRow.kind,
+        where: tgqRow.where,
+      })),
+      optionCount: 0,
+      options: [],
+    };
+  });
 }

@@ -381,6 +381,47 @@ export function countOutstanding(questions: readonly GroupableQuestion[]): Outst
   return { toQuote, projectWide, later, waiting };
 }
 
+/** One record's TGQ as `itemTgq` counted it — what a line screen is handed for the records on the matrix. */
+export type RecordTgq = { count: number | null; projectWide: number };
+
+/**
+ * A line's counts, where some of its records are on Matthew's matrix.
+ *
+ * On the matrix an item's TGQ is its TGQ GATE rows (`itemTgq`, 2026-10-13):
+ * questions, dimension slots, record columns — which no list of questions can
+ * count. So for each record in `tgqByRecord` its gate count and project-wide
+ * count stand in for what its questions would say; every other record is
+ * counted by `countOutstanding`, unchanged. `later` and `waiting` are always
+ * the questions' own.
+ */
+export function countWithItemTgq(
+  questions: readonly GroupableQuestion[],
+  tgqByRecord?: ReadonlyMap<string, RecordTgq> | null,
+): OutstandingCounts {
+  const base = countOutstanding(questions);
+  if (!tgqByRecord || tgqByRecord.size === 0) return base;
+  const byRecord = new Map<string, GroupableQuestion[]>();
+  for (const question of questions) {
+    const list = byRecord.get(question.recordId) ?? [];
+    list.push(question);
+    byRecord.set(question.recordId, list);
+  }
+  let toQuote = 0;
+  let projectWide = 0;
+  for (const [recordId, list] of byRecord) {
+    const matrix = tgqByRecord.get(recordId);
+    if (matrix) {
+      toQuote += matrix.count ?? 0;
+      projectWide += matrix.projectWide;
+    } else {
+      const own = countOutstanding(list);
+      toQuote += own.toQuote;
+      projectWide += own.projectWide;
+    }
+  }
+  return { ...base, toQuote, projectWide };
+}
+
 // ---------------------------------------------------------------------------
 // The SECOND grouping: by question, then the items under it.
 //

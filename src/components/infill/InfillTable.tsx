@@ -44,6 +44,8 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
 import TgqCount from "@/components/drafts/TgqCount";
+import { ITEM_TGQ_WHERE_LABEL } from "@/lib/item-tgq";
+import { TONE } from "@/components/ui/tone";
 import Chip from "@/components/ui/Chip";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import { letterColour } from "@/components/records/letter-colours";
@@ -429,6 +431,12 @@ function LineRows({
           />
         ))}
 
+      {/* THE TGQ ROWS THAT ARE NOT QUESTIONS (`itemTgq` on Matthew's matrix):
+          a dimension slot, a record column. Counted in the line's TGQ, and
+          listed here so the count opens onto everything behind it — each is
+          recorded on the item, so it links there rather than offering a box. */}
+      {open && (line.itemRows ?? []).length > 0 && <ItemRows rows={line.itemRows ?? []} pad="pl-10" />}
+
       {open &&
         options.map(({ option, questions }) => (
           <FragmentRows key={option.recordId}>
@@ -479,6 +487,42 @@ function LineRows({
           </td>
         </tr>
       )}
+    </>
+  );
+}
+
+/** The rows of a line's TGQ that are recorded on the item, not answered here. */
+function ItemRows({
+  rows,
+  pad,
+}: {
+  rows: readonly { recordId: string; label: string; where: "checklist" | "specs" | "details" }[];
+  pad: string;
+}) {
+  return (
+    <>
+      {rows.map((row) => (
+        <tr key={`${row.recordId}:${row.label}`}>
+          <td className={`border-b border-neutral-100 px-2 py-1.5 align-top ${pad}`}>
+            <span aria-hidden className={`mt-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${TONE.danger.dot}`} />
+          </td>
+          <td colSpan={COLUMNS - 1} className="border-b border-neutral-100 px-4 py-1.5 text-sm">
+            <span className="text-neutral-900">{row.label}</span>
+            <span className="text-neutral-400"> — </span>
+            <Link
+              href={`/dashboard/records/${row.recordId}?tab=${row.where === "checklist" ? "checklist" : "specs"}${
+                row.where === "details" ? "#item-details" : ""
+              }`}
+              target="_blank"
+              rel="noopener noreferrer"
+              prefetch={false}
+              className="text-blue-700 no-underline hover:underline"
+            >
+              {ITEM_TGQ_WHERE_LABEL[row.where]}
+            </Link>
+          </td>
+        </tr>
+      ))}
     </>
   );
 }

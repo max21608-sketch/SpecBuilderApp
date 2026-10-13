@@ -33,13 +33,14 @@
 import type { OutstandingQuestion, WaitingInfo } from "@/lib/chase-drafts";
 import {
   allQuestions,
-  countOutstanding,
+  countWithItemTgq,
   groupIntoLines,
   inItemTgq,
   projectWideTgqKeys,
   type GroupableQuestion,
 } from "@/lib/chase-grouping";
 import { DIMENSIONS_JSON_ID } from "@/lib/promote-answers";
+import type { ItemTgqRow } from "@/lib/item-tgq";
 import { isOfferable, type Palette } from "@/lib/palettes";
 
 /** `countOutstanding`'s own shape: the item TGQ, the project-wide TGQ apart from it, the rest. */
@@ -93,10 +94,27 @@ export type InfillLineSummary = {
   area: string | null;
   counts: InfillCounts;
   states: InfillStates;
+  /**
+   * The TGQ rows on this line that are NOT checklist questions (`itemTgq` on
+   * Matthew's matrix): a dimension slot, a record column. Counted in
+   * `counts.toQuote`, and listed when the line opens as "record it on the
+   * item", so the count opens onto everything behind it.
+   */
+  itemRows?: InfillItemRow[];
   /** Live finish options, INCLUDING any with nothing outstanding. */
   optionCount: number;
   options: InfillOptionSummary[];
 };
+
+export type InfillItemRow = {
+  recordId: string;
+  label: string;
+  kind: "question" | "slot" | "details";
+  where: "checklist" | "specs" | "details";
+};
+
+/** What a line screen is handed for one record on Matthew's matrix. */
+export type RecordItemTgq = { count: number | null; projectWide: number; rows: readonly ItemTgqRow[] };
 
 /**
  * What the screen lists, from one load of the project.
@@ -108,9 +126,19 @@ export type InfillLineSummary = {
  */
 export function summariseLines<Q extends GroupableQuestion & { area?: string | null; state: string }>(
   questions: readonly Q[],
+  /** `itemTgq` for the records on Matthew's matrix. Absent: every record counts by its questions. */
+  tgqByRecord?: ReadonlyMap<string, RecordItemTgq> | null,
 ): InfillLineSummary[] {
   return groupIntoLines(questions).map((line) => {
     const everything = allQuestions(line);
+    const recordIds = [...new Set(everything.map((question) => question.recordId))];
+    const itemRows: InfillItemRow[] = [];
+    for (const recordId of recordIds) {
+      for (const row of tgqByRecord?.get(recordId)?.rows ?? []) {
+        if (row.kind === "question") continue;
+        itemRows.push({ recordId, label: row.label, kind: row.kind, where: row.where });
+      }
+    }
     return {
       lineId: line.lineId,
       recordLabel: line.recordLabel,
@@ -124,8 +152,9 @@ export function summariseLines<Q extends GroupableQuestion & { area?: string | n
       // same one, so the first is the line's. A line with none is listed and
       // says so rather than being dropped by an area filter.
       area: everything.find((question) => question.area?.trim())?.area?.trim() ?? null,
-      counts: countOutstanding(everything),
+      counts: countWithItemTgq(everything, tgqByRecord),
       states: countStates(everything),
+      itemRows,
       optionCount: line.optionCount,
       options: line.options.map((option) => ({
         recordId: option.recordId,
@@ -133,7 +162,7 @@ export function summariseLines<Q extends GroupableQuestion & { area?: string | n
         name: option.name,
         number: option.number,
         qty: option.qty,
-        counts: countOutstanding(option.questions),
+        counts: countWithItemTgq(option.questions, tgqByRecord),
       })),
     };
   });

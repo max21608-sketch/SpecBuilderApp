@@ -41,7 +41,11 @@ import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import StatTile from "@/components/ui/StatTile";
 import ChaseDraftCard, { type Draft } from "@/components/drafts/ChaseDraftCard";
-import ChaseQuestionTable, { type LevelSuggestion, type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
+import ChaseQuestionTable, {
+  type ChaseItemTgq,
+  type LevelSuggestion,
+  type TableQuestion,
+} from "@/components/drafts/ChaseQuestionTable";
 import ContactsPanel from "@/components/projects/ContactsPanel";
 import {
   ITEM_LEVELS,
@@ -132,6 +136,8 @@ type Inventory = {
   /** Lines with no category: no questions at all, never "done". */
   uncategorisedLines?: number;
   blocked: Blocked[];
+  /** `itemTgq` per record on Matthew's matrix: the line counts and the not-asked rows. */
+  itemTgq?: Record<string, ChaseItemTgq>;
   suggestedCodes: string[];
   uncategorised: { recordId: string; recordLabel: string; itemDescription: string }[];
   unauthored: Record<string, unknown>[];
@@ -939,6 +945,7 @@ function DraftsView() {
               if (row?.suggested) void setLevel(row, row.suggested);
             }}
             acceptingLevel={settingLevel}
+            itemTgq={inventory.itemTgq}
           />}
           {contactTab === "" && nobody.length > 0 && nobodyCard}
           </>
