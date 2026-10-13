@@ -37,6 +37,7 @@ import { clampText } from "@/lib/shout";
 import { ClientRefs } from "@/components/ui/ClientRefs";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { ITEM_TGQ_WHERE_LABEL } from "@/lib/item-tgq";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
 import Button from "@/components/ui/Button";
@@ -182,11 +183,15 @@ export type PhaseInfo = { id: string; name: string; isMockup: boolean };
 
 /** One outstanding to-quote question on a record, as `/api/records` names it. */
 export type ToQuoteQuestion = {
-  requirementId: string;
+  /** Null on a row that is not a checklist question (a slot, a record column). */
+  requirementId: string | null;
   label: string;
   section: string | null;
   state: string;
   waiting: boolean;
+  /** `itemTgq`'s kind and where it is answered. Absent on an older payload: a question. */
+  kind?: "question" | "slot" | "details";
+  where?: "checklist" | "specs" | "details";
 };
 
 /**
@@ -1743,7 +1748,9 @@ function ToQuotePanel({
   // appear — which is checklist order, because that is how the payload arrives.
   const sections: { name: string; questions: ToQuoteQuestion[] }[] = [];
   for (const question of listed) {
-    const name = question.section ?? "Other";
+    // A slot or a record column is recorded on the ITEM, not the checklist,
+    // and is grouped as such (`itemTgq`, 2026-10-13).
+    const name = question.kind && question.kind !== "question" ? "Recorded on the item" : (question.section ?? "Other");
     const last = sections[sections.length - 1];
     if (last && last.name === name) last.questions.push(question);
     else sections.push({ name, questions: [question] });
@@ -1760,17 +1767,28 @@ function ToQuotePanel({
             <p className="text-xs font-medium text-neutral-500">{section.name}</p>
             <ul className="mt-0.5 space-y-0.5">
               {section.questions.map((question) => (
-                <li key={question.requirementId}>
-                  {/* EACH NAME OPENS ON THE QUESTION. The checklist already
-                      renders `id="q-<requirementId>"` and scrolls to it after
-                      its payload lands, so this lands on the row rather than
-                      at the top of a list of 43. */}
+                <li key={`${question.kind ?? "question"}:${question.requirementId ?? question.label}`}>
+                  {/* EACH NAME OPENS WHERE IT IS ANSWERED. A question on its
+                      own checklist row (`#q-<requirementId>`, which the
+                      checklist scrolls to); a dimension slot on the Specs tab;
+                      a record column on the item's details. */}
                   <Link
-                    href={`/dashboard/records/${record.id}?tab=checklist#q-${question.requirementId}`}
+                    href={
+                      question.kind === "slot"
+                        ? `/dashboard/records/${record.id}?tab=specs`
+                        : question.kind === "details"
+                          ? `/dashboard/records/${record.id}?tab=specs#item-details`
+                          : question.requirementId
+                            ? `/dashboard/records/${record.id}?tab=checklist#q-${question.requirementId}`
+                            : `/dashboard/records/${record.id}?tab=gates`
+                    }
                     className="text-blue-700 no-underline hover:underline"
                   >
                     {question.label}
                   </Link>
+                  {question.where && question.where !== "checklist" && (
+                    <span className="ml-1 text-xs text-neutral-500">{ITEM_TGQ_WHERE_LABEL[question.where]}</span>
+                  )}
                   {question.state === "tbc" && (
                     <span className="ml-1 text-xs text-amber-700">TBC</span>
                   )}

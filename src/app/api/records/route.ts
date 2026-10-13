@@ -18,19 +18,26 @@ import {
   waitingByQuestion,
   type OutstandingQuestion,
 } from "@/lib/chase-drafts";
-import { inItemTgq, itemTgqCounts, projectWideTgqKeys, readyToQuote } from "@/lib/chase-grouping";
-import { gateSummary, gatesForRecord, loadGateContext } from "@/lib/gate-load";
+import { inItemTgq, projectWideTgqKeys, readyToQuote } from "@/lib/chase-grouping";
+import { gateSummary, gatesForRecord, itemTgqForRecord, loadGateContext } from "@/lib/gate-load";
 import { EMPTY_SPEC_SUMMARY, loadSpecSummaries } from "@/lib/record-spec-summary";
 import { countOpenDisagreementsByRecord } from "@/lib/disagreements";
 
 export const dynamic = "force-dynamic";
 
-/** One outstanding to-quote question, named rather than counted. */
+/**
+ * One row of an item's TGQ, named rather than counted (`itemTgq`). A checklist
+ * question, or on Matthew's matrix a dimension slot or a record column, each
+ * saying where it is answered.
+ */
 type ToQuoteQuestion = {
-  requirementId: string;
+  /** Null on a row that is not a checklist question. */
+  requirementId: string | null;
   label: string;
   section: string | null;
   state: string;
+  kind: "question" | "slot" | "details";
+  where: "checklist" | "specs" | "details";
   /** Asked, nothing back. The row says so rather than reading as untouched. */
   waiting: boolean;
 };
@@ -288,32 +295,15 @@ export async function GET(request: Request): Promise<Response> {
 
   const perRecord = new Map<
     string,
-    { waiting: number; toQuoteWaiting: number; questions: ToQuoteQuestion[]; outstanding: OutstandingQuestion[] }
+    { waiting: number; toQuoteWaiting: number; outstanding: OutstandingQuestion[] }
   >();
   for (const question of outstanding) {
-    const entry = perRecord.get(question.recordId) ?? { waiting: 0, toQuoteWaiting: 0, questions: [], outstanding: [] };
+    const entry = perRecord.get(question.recordId) ?? { waiting: 0, toQuoteWaiting: 0, outstanding: [] };
     entry.outstanding.push(question);
     const isWaiting = waiting.has(questionKey(question.recordId, question.requirementId, 0));
     if (isWaiting) entry.waiting += 1;
-    // THE ONE RULE (`inItemTgq`): to_quote, any kind, minus the project-wide
-    // section. The count below is `itemTgqCounts` over the same rows.
-    if (inItemTgq(question)) {
-      if (isWaiting) entry.toQuoteWaiting += 1;
-      // THE LIST IS THE COUNT. Same loop, same predicate — so the row can never
-      // open onto a different set of questions from the number it opened.
-      if (withToQuote) {
-        entry.questions.push({
-          requirementId: question.requirementId,
-          // The BWS field's name where the question fills one, the cheat
-          // sheet's own prompt where it does not. A readiness question has no
-          // field and its prompt is the only name it has.
-          label: question.fieldLabel ?? question.prompt,
-          section: question.section,
-          state: question.state,
-          waiting: isWaiting,
-        });
-      }
-    }
+    // "(n asked)" beside the count: the item-rule questions already chased.
+    if (inItemTgq(question) && isWaiting) entry.toQuoteWaiting += 1;
     perRecord.set(question.recordId, entry);
   }
 
@@ -336,7 +326,17 @@ export async function GET(request: Request): Promise<Response> {
     categories,
     records: rows.map((row) => {
       const counts = perRecord.get(String(row.id));
-      const tgq = itemTgqCounts(counts?.outstanding ?? []);
+      // THE ITEM'S TGQ BY THE ONE FUNCTION (`itemTgq`, Max 2026-10-13): the
+      // TGQ gate's rows where Matthew's matrix covers the category — from the
+      // same bulk context the TG0/TG1 columns read, never a gate in SQL — and
+      // the checklist's own questions where it does not. THE LIST IS THE
+      // COUNT: the cell's list below is these rows.
+      const tgq = itemTgqForRecord(
+        gateContext,
+        { id: String(row.id), categoryId: row.category_id ? String(row.category_id) : null },
+        counts?.outstanding ?? [],
+      );
+      const toQuote = Number(row.variant_count ?? 0) > 0 || !row.category_id ? null : tgq.count;
       return {
         ...row,
         gates: gateSummary(
@@ -366,23 +366,37 @@ export async function GET(request: Request): Promise<Response> {
         //                 "Can quote", which is a claim about a record that
         //                 will never reach BWS.
         to_quote_outstanding:
-          Number(row.variant_count ?? 0) > 0 || !row.category_id || tgq === null ? null : tgq.toQuote,
+          toQuote,
         // Project-wide TGQ questions this item still carries — answered once
         // on the project, counted apart, never inside the item's own TGQ.
-        project_wide_outstanding: tgq?.projectWide ?? 0,
+        project_wide_outstanding: tgq.projectWide,
         // READY TO QUOTE, by the one predicate: categorised, its own TGQ zero,
         // AND every project-wide TGQ question on it answered — those still
         // block every quote, wherever they are answered.
         ready_to_quote: readyToQuote({
           categorised: Boolean(row.category_id) && Number(row.variant_count ?? 0) === 0,
-          toQuote: Number(row.variant_count ?? 0) > 0 || !row.category_id || tgq === null ? null : tgq.toQuote,
-          projectWide: tgq?.projectWide ?? 0,
+          toQuote,
+          projectWide: tgq.projectWide,
         }),
         to_quote_waiting: counts?.toQuoteWaiting ?? 0,
         // Absent unless asked for, and absent is not empty: the table tells
         // the two apart so a row it has never fetched does not render as a row
         // with nothing outstanding.
-        to_quote_questions: withToQuote ? (counts?.questions ?? []) : undefined,
+        to_quote_questions: withToQuote
+          ? tgq.rows.map(
+              (item): ToQuoteQuestion => ({
+                requirementId: item.requirementId,
+                label: item.label,
+                section: item.section,
+                state: item.state,
+                kind: item.kind,
+                where: item.where,
+                waiting: item.requirementId
+                  ? waiting.has(questionKey(String(row.id), item.requirementId, 0))
+                  : false,
+              }),
+            )
+          : undefined,
         spec_summary: specSummaries.get(String(row.id)) ?? EMPTY_SPEC_SUMMARY,
         open_disagreements: disagreementCounts.get(String(row.id)) ?? 0,
       };
