@@ -91,9 +91,18 @@ describe("suggestFinishKind on a three-part project code", () => {
   });
 
   it("adds no meaning: an unmapped middle group says nothing, and the words still answer", () => {
-    expect(suggestFinishKind({ code: "ZZ-STN-04", description: null })).toBeNull();
     expect(suggestFinishKind({ code: "ZZ-CH-01", description: null })).toBeNull();
-    expect(suggestFinishKind({ code: "ZZ-STN-04", description: "Honed marble" })?.kind).toBe("stone");
+    expect(suggestFinishKind({ code: "ZZ-QQ-04", description: "Honed marble" })?.kind).toBe("stone");
+  });
+
+  // Max, 2026-10-13: "yes stn is stone" — read from NO_FIELD_CODE_PREFIXES,
+  // where the bill's own spec read already says so.
+  it("reads STN as stone, bare and as a middle group", () => {
+    expect(suggestFinishKind({ code: "STN-02", description: null })).toEqual({ kind: "stone", reason: "the code STN-02 says so" });
+    expect(suggestFinishKind({ code: "ZZ-STN-04", description: null })).toEqual({
+      kind: "stone",
+      reason: "the code ZZ-STN-04 says so",
+    });
   });
 });
 

@@ -55,8 +55,9 @@ import {
   STONE_WORDS,
   TIMBER_EXTRA_WORDS,
   TIMBER_MATERIAL_WORDS,
-  projectCodeKind,
+  projectCodeGroup,
 } from "@/lib/material-words";
+import { NO_FIELD_CODE_PREFIXES } from "@/lib/spec-reading-vocab";
 
 export type FinishKindSuggestion = {
   kind: FinishKind;
@@ -101,6 +102,25 @@ export function isFinishKindValue(value: unknown): value is FinishKind {
 }
 
 /**
+ * THE CODE LETTERS THE LIBRARY READS, beyond the drawings path's own.
+ *
+ * `STN` is stone (Max, 2026-10-13: "yes stn is stone"). It already says so in
+ * `NO_FIELD_CODE_PREFIXES` (spec-reading-vocab.ts, from the Aman bill), the
+ * list of codes naming a material no BWS field holds, and this reads that
+ * list rather than writing the fact a second time. It is NOT added to
+ * `CODE_PREFIXES`: that list is the drawings path's, `classifyCallout` maps
+ * each entry onto a BWS field, and neither `CalloutKind` nor `BillFinishKind`
+ * has a stone — giving a drawing a stone reading is a new decision about its
+ * group and field, not a list entry. Measured 2026-10-13 on the local stack:
+ * four staged drawing rows carry `GR-STN-04`, every one applied or already
+ * edited, so nothing read would have moved either way.
+ */
+const LIBRARY_CODE_PREFIXES: readonly { prefix: string; kind: FinishKind }[] = [
+  ...CODE_PREFIXES,
+  ...NO_FIELD_CODE_PREFIXES.flatMap((entry) => (isFinishKindValue(entry.what) ? [{ prefix: entry.prefix, kind: entry.what }] : [])),
+];
+
+/**
  * What kind this finish looks like, or null where nothing written down says.
  *
  * Pure, and tested in the pure tier: the screen, the bulk "file them all" route
@@ -119,18 +139,19 @@ export function suggestFinishKind(finish: {
   //    the BWS-style `WD-nn` prefix would be a rule invented from one example.
   //    Its description says "Dark tinted wood", so step 2 answers it anyway.
   const letters = normaliseName(finish.code).replace(/[^a-z]/g, "");
-  const prefix = CODE_PREFIXES.find((entry) => letters.startsWith(entry.prefix));
+  const prefix = LIBRARY_CODE_PREFIXES.find((entry) => letters.startsWith(entry.prefix));
   if (prefix) {
     return { kind: prefix.kind, reason: `the code ${finish.code.trim()} says so` };
   }
 
   // 1b. A THREE-PART project code says what it is in its MIDDLE group —
-  //     `GR-TIM-12`, where `GR` is the floor — read by the drawings path's own
-  //     `projectCodeKind`, after the prefix test (2026-10-12: the library said
-  //     "no page says what GR means" over a code the drawings card read as a
-  //     timber). No new meanings: an unmapped middle group (`STN`, `CH`) says
-  //     nothing, as it does on a drawing.
-  const projectKind = projectCodeKind(finish.code);
+  //     `GR-TIM-12`, where `GR` is the floor — read by `projectCodeGroup`, the
+  //     drawings path's own reader of it, after the prefix test (2026-10-12:
+  //     the library said "no page says what GR means" over a code the drawings
+  //     card read as a timber), against the library's letters, so `GR-STN-04`
+  //     is a stone. An unmapped middle group (`CH`) still says nothing.
+  const middle = projectCodeGroup(finish.code)?.toLowerCase();
+  const projectKind = middle ? LIBRARY_CODE_PREFIXES.find((entry) => entry.prefix === middle)?.kind : undefined;
   if (projectKind) {
     return { kind: projectKind, reason: `the code ${finish.code.trim()} says so` };
   }

@@ -411,7 +411,7 @@ describe("a three-part project code", () => {
       ...PAYLOAD,
       finishes: [
         finish({ id: "fin-a", code: "ZZ-TIM-12", code_norm: "ZZ-TIM-12", kind: null, description: null, used_on: [] }),
-        finish({ id: "fin-b", code: "ZZ-STN-04", code_norm: "ZZ-STN-04", kind: null, description: null, used_on: [] }),
+        finish({ id: "fin-b", code: "ZZ-CH-04", code_norm: "ZZ-CH-04", kind: null, description: null, used_on: [] }),
       ],
     };
     fetchMock.mockImplementation(
@@ -421,7 +421,7 @@ describe("a three-part project code", () => {
     await screen.findByText("ZZ-TIM-12");
     const timber = rows().find((row) => row.textContent?.includes("ZZ-TIM-12"))!;
     expect(within(timber).getByText(/the code ZZ-TIM-12 says so/)).toBeInTheDocument();
-    const stone = rows().find((row) => row.textContent?.includes("ZZ-STN-04"))!;
-    expect(within(stone).getByText(/no page says what STN means/)).toBeInTheDocument();
+    const unmapped = rows().find((row) => row.textContent?.includes("ZZ-CH-04"))!;
+    expect(within(unmapped).getByText(/no page says what CH means/)).toBeInTheDocument();
   });
 });
