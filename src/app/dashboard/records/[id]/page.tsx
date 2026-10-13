@@ -78,6 +78,7 @@ import { dimensionProvenance } from "@/components/records/dimension-provenance";
 import type { Palette } from "@/lib/palettes";
 import { GATES, type Gate, type GateStatus } from "@/lib/gates";
 import { describeChaseCounts, summariseGateRows } from "@/lib/chase-counts";
+import type { ItemTgqRow } from "@/lib/item-tgq";
 import PageBody from "@/components/ui/PageBody";
 import PageHeader from "@/components/ui/PageHeader";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
@@ -248,6 +249,9 @@ export type Payload = {
     toChase: number | null;
     /** Project-wide TGQ questions on this item: answered once on the project, never in `toQuote`. */
     projectWide?: number | null;
+    /** The rows `toQuote` counts (`itemTgq`). THE LIST IS THE COUNT. */
+    rows?: ItemTgqRow[];
+    model?: "matrix" | "placeholder";
     alsoOutstanding: number | null;
     outstanding: number;
     settled: number;
@@ -1741,12 +1745,16 @@ function RecordView() {
               {/* THE BILL'S OWN WORDS, AND THE TWO FREE-TEXT COLUMNS (0028).
                   Last, because the specs are what you came to read and this is
                   filled in once. */}
-              <RecordDetails
-                recordId={record.id}
-                record={record}
-                onSaved={load}
-                classification={classification}
-              />
+              {/* The anchor a TGQ row on a record column links to ("Designer
+                  reference — on this item's details"). */}
+              <div id="item-details" className="scroll-mt-24">
+                <RecordDetails
+                  recordId={record.id}
+                  record={record}
+                  onSaved={load}
+                  classification={classification}
+                />
+              </div>
             </div>
 
             {/* THE STICKY SIDEBAR. Recognising the item is the reason the

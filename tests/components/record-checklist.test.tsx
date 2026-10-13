@@ -572,3 +572,51 @@ describe("the checklist's Dimensions row", () => {
     expect(screen.getByText("W1900 x D1400mm (1250 L-shaped return)")).toBeInTheDocument();
   });
 });
+
+// ---- 2026-10-13: on Matthew's matrix the TGQ tile is the GATE's count -------
+//
+// Max: "with the TGQ question it should show the 7". The stool's tile read 2
+// (its checklist questions) while its header counted the TGQ gate's rows. The
+// tile now shows `itemTgq`'s number, and the filter lists every row behind it:
+// the questions in the checklist, the slots and record columns in a card of
+// their own, each linking to where it is answered.
+describe("the TGQ tile and filter on Matthew's matrix (2026-10-13)", () => {
+  const STOOL: ChecklistAnswer[] = [
+    answer({ requirement_id: "env", prompt: "Indoor/ Outdoor / Humid environment", json_id: 130 }),
+    answer({ requirement_id: "swv", prompt: "Swivel Mechanism 360 or 180?", json_id: 232 }),
+    answer({ requirement_id: "dim", prompt: "Dimensions", json_id: 3, state: "confirmed", value: "D460 x H450mm" }),
+    answer({ requirement_id: "stc", prompt: "Stitching spec", tgq_levels: [] }),
+  ];
+  const rows = [
+    { kind: "question" as const, requirementId: "env", label: "Outdoor", section: "Build details", state: "missing", where: "checklist" as const },
+    { kind: "question" as const, requirementId: "swv", label: "Swivel Mechs", section: "Build details", state: "missing", where: "checklist" as const },
+    { kind: "slot" as const, requirementId: null, label: "Width - W", section: null, state: "missing", where: "specs" as const },
+    { kind: "slot" as const, requirementId: null, label: "Seat height - SH", section: null, state: "missing", where: "specs" as const },
+    { kind: "details" as const, requirementId: null, label: "Designer reference", section: null, state: "missing", where: "details" as const },
+    { kind: "details" as const, requirementId: null, label: "Spec notes", section: null, state: "missing", where: "details" as const },
+  ];
+
+  it("shows the gate's 6 and opens onto all six rows", () => {
+    renderChecklist({
+      answers: STOOL,
+      readiness: { ...READINESS, toQuote: 6, rows, projectWide: 0, alsoOutstanding: 1, outstanding: 3, settled: 1, notApplicable: 0 },
+    });
+    const tile = screen.getAllByRole("button").find((button) => (button.textContent ?? "").startsWith("TGQ"))!;
+    expect(tile.textContent).toContain("6");
+    // The two questions, as checklist rows that can be answered here …
+    expect(screen.getByText("Indoor/ Outdoor / Humid environment")).toBeInTheDocument();
+    expect(screen.getByText("Swivel Mechanism 360 or 180?")).toBeInTheDocument();
+    expect(screen.queryByText("Stitching spec")).not.toBeInTheDocument();
+    // … and the four that are not questions, each with where it is answered.
+    expect(screen.getByText("Width - W")).toBeInTheDocument();
+    expect(screen.getByText("Seat height - SH")).toBeInTheDocument();
+    expect(screen.getByText("Designer reference")).toBeInTheDocument();
+    expect(screen.getByText("Spec notes")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "record it on the Specs tab" })[0]).toHaveAttribute("href", "?tab=specs");
+    expect(screen.getAllByRole("link", { name: "on this item's details" })[0]).toHaveAttribute(
+      "href",
+      "?tab=specs#item-details",
+    );
+    expect(screen.getByText(/showing 2 of 4 · 4 more recorded on the item/)).toBeInTheDocument();
+  });
+});

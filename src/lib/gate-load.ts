@@ -27,6 +27,7 @@
 import type { SqlLike } from "@/lib/record-atoms";
 import type { AnswerState } from "@/lib/spec-vocab";
 import type { TgqMatrix } from "@/lib/tgq";
+import { itemTgq, type ItemTgq, type ItemTgqOutstanding, type ItemTgqQuestion } from "@/lib/item-tgq";
 import {
   chainGates,
   gateStatus,
@@ -48,6 +49,12 @@ export type GateContext = {
   answersByRecord: Map<string, GateAnswerInput[]>;
   slotsByRecord: Map<string, GateSlotInput[]>;
   localsByRecord: Map<string, GateLocalInput>;
+  /**
+   * Every checklist question each category asks, whatever its state — what a
+   * gate row is matched to by `questionForField`, so `itemTgq` can say which
+   * of a gate's rows is a question, a slot, a record column or project-wide.
+   */
+  questionsByCategory: Map<string, ItemTgqQuestion[]>;
 };
 
 const EMPTY: GateContext = {
@@ -56,6 +63,7 @@ const EMPTY: GateContext = {
   answersByRecord: new Map(),
   slotsByRecord: new Map(),
   localsByRecord: new Map(),
+  questionsByCategory: new Map(),
 };
 
 export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promise<GateContext> {
@@ -195,7 +203,56 @@ export async function loadGateContext(exec: SqlLike, recordIds: string[]): Promi
     localsByRecord.set(key, locals);
   }
 
-  return { fieldsByCategory, askedByCategory, answersByRecord, slotsByRecord, localsByRecord };
+  // The checklist questions of the categories on his matrix, for `itemTgq`.
+  // Only those: a placeholder category's TGQ is its own questions, which the
+  // caller already holds.
+  const mapped = [...fieldsByCategory.keys()];
+  const questionRows =
+    mapped.length === 0
+      ? []
+      : await exec`
+          select q.category_id, q.id, q.kind, q.prompt, q.section, q.local_key, f.json_id, f.name as field_name
+            from requirements q left join spec_fields f on f.id = q.spec_field_id
+           where q.category_id = any(${mapped}::uuid[])
+             and q.category_id = any(
+               select category_id from spec_records where id = any(${recordIds}::uuid[]) and category_id is not null)
+           order by q.sort_order
+        `;
+  const questionsByCategory = new Map<string, ItemTgqQuestion[]>();
+  for (const row of questionRows) {
+    const key = String(row.category_id);
+    const list = questionsByCategory.get(key) ?? [];
+    list.push({
+      requirement_id: String(row.id),
+      kind: String(row.kind),
+      prompt: String(row.prompt ?? ""),
+      section: row.section === null || row.section === undefined ? null : String(row.section),
+      local_key: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
+      json_id: row.json_id === null || row.json_id === undefined ? null : Number(row.json_id),
+      field_label: row.field_name === null || row.field_name === undefined ? null : String(row.field_name),
+    });
+    questionsByCategory.set(key, list);
+  }
+
+  return { fieldsByCategory, askedByCategory, answersByRecord, slotsByRecord, localsByRecord, questionsByCategory };
+}
+
+/**
+ * ONE RECORD'S TGQ, by the one function (`itemTgq`): the TGQ gate's rows where
+ * his matrix covers the category, the checklist's own questions where it does
+ * not. The context is loaded once, in bulk, by the caller.
+ */
+export function itemTgqForRecord(
+  context: GateContext,
+  record: { id: string; categoryId: string | null },
+  outstanding: readonly ItemTgqOutstanding[],
+): ItemTgq {
+  const gates = gatesForRecord(context, record);
+  return itemTgq({
+    tgqGateRows: gates ? gates.TGQ.fields : null,
+    questions: record.categoryId ? (context.questionsByCategory.get(record.categoryId) ?? []) : [],
+    outstanding,
+  });
 }
 
 /**

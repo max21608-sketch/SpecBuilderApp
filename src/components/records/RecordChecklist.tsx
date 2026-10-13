@@ -49,6 +49,7 @@ import {
 } from "@/lib/spec-vocab";
 import { questionTierOrNull, TIER_LABELS } from "@/lib/tgq";
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
+import { ITEM_TGQ_WHERE_LABEL, type ItemTgqRow } from "@/lib/item-tgq";
 import { formatDay } from "@/lib/format-day";
 import type { Palette } from "@/lib/palettes";
 import type { Gate, GateField } from "@/lib/gates";
@@ -196,6 +197,13 @@ export default function RecordChecklist({
   attributes: ChecklistAttribute[];
   readiness: {
     toQuote: number | null;
+    /**
+     * The rows `toQuote` counts (`itemTgq`): checklist questions, and on
+     * Matthew's matrix also dimension slots and record columns. THE LIST IS
+     * THE COUNT — the TGQ filter lists exactly these. Absent on an older
+     * payload, where the filter falls back to the tier.
+     */
+    rows?: ItemTgqRow[];
     /** Project-wide TGQ questions on this item: answered once on the project, never in `toQuote`. */
     projectWide?: number | null;
     alsoOutstanding: number | null;
@@ -396,6 +404,16 @@ export default function RecordChecklist({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tierOf is rebuilt every render from these.
   }, [answers, level, matrix]);
 
+  // THE ITEM'S TGQ ROWS, AS THE SERVER COUNTED THEM (`itemTgq`). On Matthew's
+  // matrix some are not checklist questions at all — a dimension SLOT is
+  // settled by its attribute, a record column by the item's details — and
+  // they are listed in their own card below, so the tile's number always
+  // opens onto every row behind it (Max, 2026-10-13: "it should show the 7").
+  const tgqQuestionIds = readiness.rows
+    ? new Set(readiness.rows.filter((row) => row.kind === "question" && row.requirementId).map((row) => row.requirementId!))
+    : null;
+  const tgqItemRows = (readiness.rows ?? []).filter((row) => row.kind !== "question");
+
   const matches = (answer: ChecklistAnswer): boolean => {
     const term = search.trim().toLowerCase();
     if (term && !`${answer.prompt} ${answer.field_name ?? ""} ${answer.value ?? ""}`.toLowerCase().includes(term)) {
@@ -409,7 +427,11 @@ export default function RecordChecklist({
     // item's own, so the list under it is exactly those — never the project-
     // wide ones, which were the "showing 2 of 50" over an empty list.
     const projectWideRow = answer.section === PROJECT_WIDE_SECTION;
-    if (focus === "tgq") return tierOf(answer) === "to_quote" && !projectWideRow;
+    if (focus === "tgq") {
+      // THE ROWS THE TILE COUNTED, never a second reading of them.
+      if (tgqQuestionIds) return tgqQuestionIds.has(answer.requirement_id);
+      return tierOf(answer) === "to_quote" && !projectWideRow;
+    }
     if (focus === "project") return tierOf(answer) === "to_quote" && projectWideRow;
     return tierOf(answer) !== "to_quote";
   };
@@ -443,10 +465,12 @@ export default function RecordChecklist({
   ).length;
   // Of those, the ones blocking a quote — the record route's `projectWide`,
   // read off the same rows the list below is filtered from.
-  const projectWideTgq = answers.filter(
-    (answer) =>
-      answer.section === PROJECT_WIDE_SECTION && isOutstanding(answer.state) && tierOf(answer) === "to_quote",
-  ).length;
+  const projectWideTgq =
+    readiness.projectWide ??
+    answers.filter(
+      (answer) =>
+        answer.section === PROJECT_WIDE_SECTION && isOutstanding(answer.state) && tierOf(answer) === "to_quote",
+    ).length;
 
   if (answers.length === 0) {
     return (
@@ -527,6 +551,7 @@ export default function RecordChecklist({
         <span className="flex-1" />
         <span className="text-xs text-neutral-500">
           showing {shown.length} of {answers.length}
+          {focus === "tgq" && tgqItemRows.length > 0 && <> · {tgqItemRows.length} more recorded on the item</>}
         </span>
         {(focus || search.trim()) && (
           <Button
@@ -567,7 +592,42 @@ export default function RecordChecklist({
         </Note>
       )}
 
-      {shown.length === 0 && (
+      {/* THE TGQ ROWS THAT ARE NOT QUESTIONS, each saying where it is
+          answered: a slot on the Specs tab, a record column on the item's
+          details. Counted in the tile; listed here, never dropped. */}
+      {focus === "tgq" && tgqItemRows.length > 0 && (
+        <Card
+          flush
+          title={
+            <>
+              Recorded on the item, not the checklist
+              <CardHeadingNote>{tgqItemRows.length} counted in TGQ</CardHeadingNote>
+            </>
+          }
+        >
+          <ul>
+            {tgqItemRows.map((row) => (
+              <li
+                key={`${row.kind}:${row.label}`}
+                className="flex items-baseline gap-2 border-b border-neutral-100 px-4 py-2.5 text-sm"
+              >
+                <span aria-hidden className={`mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full ${TONE.danger.dot}`} />
+                <span className="text-neutral-900">{row.label}</span>
+                <span className="text-neutral-400">—</span>
+                <Link
+                  href={row.where === "details" ? "?tab=specs#item-details" : "?tab=specs"}
+                  className="text-blue-700 no-underline hover:underline"
+                >
+                  {ITEM_TGQ_WHERE_LABEL[row.where]}
+                </Link>
+                {row.state === "tbc" && <span className="text-xs text-amber-700">TBC</span>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {shown.length === 0 && tgqItemRows.length === 0 && (
         <Note tone="plain">
           Nothing matches. The {answers.length} questions are all still there — a filter narrows what is listed and
           never what is asked.

@@ -20,6 +20,7 @@ import { editRecordDetails, type EditRecordDetailsResult } from "@/lib/manual-ca
 import { gatesForRecord, loadGateContext, loadTgqMatrices } from "@/lib/gate-load";
 import { loadPalettes } from "@/lib/palette-load";
 import { itemTgqCounts } from "@/lib/chase-grouping";
+import { itemTgq } from "@/lib/item-tgq";
 import { loadConfigurationFamily } from "@/lib/configuration-family";
 import { currentPicture, itemImageSource, offeredPicture } from "@/lib/item-image";
 import { loadItemPictures } from "@/lib/item-image-write";
@@ -340,10 +341,31 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // Null where a question is untiered — the fallback with no level.
   const tgq = itemTgqCounts(outstanding);
   const untiered = tgq === null;
+  // THE ITEM'S TGQ, BY THE ONE FUNCTION (Max, 2026-10-13: "it should show the
+  // 7"). On Matthew's matrix it is the TGQ gate's rows still to answer —
+  // questions, dimension slots, record columns — minus the project-wide ones;
+  // elsewhere the checklist's own questions, as above. The rows come with it,
+  // so the Checklist tab's TGQ filter lists exactly what the tile counts.
+  const item = itemTgq({
+    tgqGateRows: gates ? gates.TGQ.fields : null,
+    questions: answers.map((row) => ({
+      requirement_id: String(row.requirement_id),
+      json_id: row.json_id === null || row.json_id === undefined ? null : Number(row.json_id),
+      local_key: row.local_key === null || row.local_key === undefined ? null : String(row.local_key),
+      kind: String(row.kind),
+      section: row.section === null || row.section === undefined ? null : String(row.section),
+      prompt: String(row.prompt ?? ""),
+      field_label: row.field_name === null || row.field_name === undefined ? null : String(row.field_name),
+    })),
+    outstanding,
+  });
   const settled = answers.filter((row) => String(row.state ?? "") === "confirmed").length;
   const notApplicable = answers.filter((row) => String(row.state ?? "") === "na").length;
   const quoteReadiness = {
-    toQuote: tgq?.toQuote ?? null,
+    toQuote: item.count,
+    /** Which model counted `toQuote`, and the rows it counted. THE LIST IS THE COUNT. */
+    model: item.model,
+    rows: item.rows,
     // ---- AND HOW MANY OF THOSE A CHASE WOULD ACTUALLY ASK ------------------
     //
     // A READINESS QUESTION IS OURS TO RECORD AND IS NEVER CHASED (decision
@@ -357,7 +379,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // a header that silently dropped those would understate the work.
     toChase: tgq?.toChase ?? null,
     /** Project-wide TGQ questions on this item. Answered once on the project; never in `toQuote`. */
-    projectWide: tgq?.projectWide ?? null,
+    projectWide: item.count === null ? null : item.projectWide,
     alsoOutstanding: tgq?.later ?? null,
     /** Missing plus TBC, whatever the tier. Always a number, so a dash above it still has a size beside it. */
     outstanding: outstanding.length,
