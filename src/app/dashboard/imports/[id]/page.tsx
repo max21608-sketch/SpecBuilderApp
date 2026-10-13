@@ -190,6 +190,9 @@ function FabricFilingLine({ plan, projectId }: { plan: FabricLinePlan; projectId
   return (
     <span className="mt-0.5 block text-[11px] leading-4 text-neutral-500">
       {/* The field is on the chip above it; this is the filing. */}
+      {/* THE STATE THE CONFIRM WILL STORE (`fabricLineWrite`): a line that
+          names no fabric is written TBC, so it is chased rather than shipped. */}
+      {plan.tbc && <span className="font-medium text-amber-800">written TBC · </span>}
       {plan.filing}
       {plan.askForShortCode && (
         <>

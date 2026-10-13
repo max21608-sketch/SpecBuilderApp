@@ -144,9 +144,15 @@ export type BillFinishLine = {
   finishFor?: { code?: string | null } | null;
 };
 
-/** The words a finish line writes as its value: the description verbatim, or its code where it has none. */
+/**
+ * The words a finish line writes as its value: its description verbatim, or
+ * nothing. NEVER its code cell (Max, 2026-10-13): that fell back to `N/A`, the
+ * item's own code or the bracketed cell, stored as if the bill had described
+ * the finish in those words. A line with no words of its own is a TBC with no
+ * value (`fabricLineWrite`).
+ */
 export function billFinishLineWords(line: BillFinishLine): string {
-  return (line.itemDescription ?? line.itemDescriptionRaw ?? "").trim() || (line.code ?? "").trim();
+  return (line.itemDescription ?? line.itemDescriptionRaw ?? "").trim();
 }
 
 /**

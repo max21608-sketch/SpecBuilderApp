@@ -7,6 +7,8 @@
 import { describe, expect, it } from "vitest";
 import {
   decideFabricFiling,
+  fabricLineValue,
+  fabricLineWrite,
   fabricMaterialCode,
   planBillFabrics,
   planFinishSwatches,
@@ -234,6 +236,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       filing: "new library entry ZZ-FAB-13",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
+      tbc: false,
     });
     expect(out.get("0:3")?.filing).toBe("new library entry ZZ-FAB-13, with row 3");
     expect(out.get("0:3")?.swatch).toBe("swatch: this row's picture");
@@ -250,6 +253,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       filing: "matches ZZ-FAB-13 in the library",
       swatch: "swatch: none (the library already has one)",
       askForShortCode: false,
+      tbc: false,
     });
   });
 
@@ -283,12 +287,14 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       filing: "new in-house fabric — numbered BW-ZZA-… at confirm",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
+      tbc: false,
     });
     expect(out.get("0:3")).toEqual({
       goesTo: "→ COM 1",
       filing: "same words as row 3 — one in-house code",
       swatch: "swatch: row 3's picture",
       askForShortCode: false,
+      tbc: false,
     });
   });
 
@@ -302,6 +308,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       filing: "new in-house fabric — numbered BW-F-… at confirm",
       swatch: "swatch: none in the bill",
       askForShortCode: true,
+      tbc: false,
     });
   });
 
@@ -327,6 +334,7 @@ describe("planBillFabrics — the review's line per fabric row", () => {
       filing: "placeholder — not filed",
       swatch: null,
       askForShortCode: false,
+      tbc: true,
     });
   });
 
@@ -408,5 +416,39 @@ describe("the review's swatch sentence reads the row's EFFECTIVE picture", () =>
       fabric(1, 3, "ZZ-FAB-13 (ZZ-FUR-10)", "Example velvet", 2, "ZZ-FUR-10", { picture: { none: true } }),
     ]);
     expect(out.get("0:1")?.swatch).toBe("swatch: none — no picture chosen for this row");
+  });
+});
+
+// Max, 2026-10-13: a placeholder fabric line is TBC, and a line with no words
+// of its own has no value — never its code cell.
+describe("fabricLineWrite — what the confirm stores and the review predicts", () => {
+  const line = (code: string | null, itemDescription: string) => ({
+    code,
+    itemDescription,
+    rowKind: "finish_for" as const,
+    finishFor: { row: 2, code: "ZZ-FUR-22" },
+  });
+
+  it("writes a placeholder TBC, keeping its words", () => {
+    expect(fabricLineWrite(line("N/A", "Fabric @ Armchair (Option 1)"), "Armchair (Option 1)")).toEqual({
+      value: "Fabric @ Armchair (Option 1)",
+      state: "tbc",
+    });
+    expect(fabricLineWrite(line(null, "Fabric: N/A"), "Armchair")).toEqual({ value: "Fabric: N/A", state: "tbc" });
+    expect(fabricLineWrite(line(null, "N/A"), "Armchair")).toEqual({ value: "N/A", state: "tbc" });
+  });
+
+  it("never writes the code cell as the words: no words is a TBC with no value", () => {
+    expect(fabricLineWrite(line("ZZ-FAB-13 (ZZ-FUR-22)", ""), "Armchair")).toEqual({ value: null, state: "tbc" });
+    expect(fabricLineWrite(line("ZZ-FUR-22", "  "), "Armchair")).toEqual({ value: null, state: "tbc" });
+    expect(fabricLineValue(line("N/A", ""))).toBe("");
+  });
+
+  it("leaves a described fabric confirmed, and a TBC phrase TBC, as before", () => {
+    expect(fabricLineWrite(line("ZZ-FAB-13", "Fabric @ Armchair Collection: Example velvet, Colour: Ivory"), "Armchair")).toEqual({
+      value: "Fabric @ Armchair Collection: Example velvet, Colour: Ivory",
+      state: "confirmed",
+    });
+    expect(fabricLineWrite(line("ZZ-FAB-13", "Example velvet — colour TBC"), "Armchair").state).toBe("tbc");
   });
 });

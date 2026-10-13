@@ -47,7 +47,7 @@
 //     that gives one.
 //   * A placeholder's picture is filed nowhere: it has no finish to belong to.
 // ============================================================================
-import { fabricOwnCode, fabricLineIsPlaceholder, type RowKindFields } from "@/lib/boq-row-kinds";
+import { fabricOwnCode, fabricLineIsPlaceholder, fabricLineState, type RowKindFields } from "@/lib/boq-row-kinds";
 import { billItemName } from "@/lib/bill-description";
 import {
   billFinishLineKind,
@@ -96,9 +96,31 @@ export type FabricFiling =
 
 type FabricLine = { code: string | null; itemDescription: string } & RowKindFields;
 
-/** The words a fabric line writes as its spec — the description verbatim, or its code where it has none. */
+/** The words a fabric line writes as its spec — the description verbatim, or "" where it has none (never its code). */
 export function fabricLineValue(line: FabricLine): string {
   return billFinishLineWords(line);
+}
+
+/**
+ * WHAT A FINISH LINE WRITES: its value and its state. The ONE decision the
+ * confirm writes and the review predicts (Max, 2026-10-13).
+ *
+ * A PLACEHOLDER IS TBC. "Fabric @ Armchair (Option 1)", "Fabric: N/A", or no
+ * words at all name no fabric, and `fabricLineState` alone stored them
+ * CONFIRMED unless they carried a TBC phrase — a settled COM answer that
+ * shipped to BWS as written and was never chased. `fabricLineIsPlaceholder`
+ * is the existing rule (the bill's lead, the item's name, filler and TBC
+ * phrases taken off). A line with no words is a TBC with NO value: its code
+ * cell is never its words. Anything else keeps `fabricLineState`.
+ */
+export function fabricLineWrite(
+  line: FabricLine,
+  parentName: string | null,
+): { value: string | null; state: "tbc" | "confirmed" } {
+  const value = fabricLineValue(line);
+  if (value === "") return { value: null, state: "tbc" };
+  if (fabricLineIsPlaceholder(value, parentName)) return { value, state: "tbc" };
+  return { value, state: fabricLineState(value) };
 }
 
 /**
@@ -248,6 +270,8 @@ export type FabricLinePlan = {
   swatch: string | null;
   /** True where the line mints in `BW-F-` because the project has no short code. */
   askForShortCode: boolean;
+  /** The state the confirm will store (`fabricLineWrite`): a placeholder is TBC. Absent on a carried line, which writes nothing. */
+  tbc?: boolean;
 };
 
 /**
@@ -291,6 +315,7 @@ export function planBillFabrics(input: {
       chosen: ChosenPicture;
       goesTo: string;
       kind: BillFinishKind;
+      tbc?: boolean;
     }
   >();
   /** The slots each item holds as its finish lines are walked, by the item's row on the sheet. */
@@ -321,7 +346,9 @@ export function planBillFabrics(input: {
     for (const line of live.filter((entry) => entry.rowKind === "finish_for")) {
       const key = `${sheetIndex}:${line.index}`;
       const parent = line.finishFor ? sheet.lines.find((entry) => entry.lineNo === line.finishFor?.row) : undefined;
-      const says = fabricLineValue(line);
+      // What the confirm will write, decided by the confirm's own function.
+      const written = fabricLineWrite(line, parent ? billItemName(parent) : null);
+      const says = written.value ?? "";
       const { kind } = billFinishLineKind(line);
       const candidate: SwatchCandidate = {
         sheetName: sheet.sheetName,
@@ -370,13 +397,14 @@ export function planBillFabrics(input: {
         chosen: chosenPicture(line.picture),
         goesTo: describeBillFinishSlot(placement),
         kind,
+        tbc: written.state === "tbc",
       });
     }
   }
 
   const swatches = planFinishSwatches(groups, input.heldSwatches);
   const out = new Map<string, FabricLinePlan>();
-  for (const [key, { filing, candidate, key: finishKey, chosen, goesTo, kind }] of filings) {
+  for (const [key, { filing, candidate, key: finishKey, chosen, goesTo, kind, tbc }] of filings) {
     if (filing === null) {
       out.set(key, {
         goesTo,
@@ -391,6 +419,7 @@ export function planBillFabrics(input: {
       filing: describeFiling(filing, planned, series, candidate.rowNo, kind),
       swatch: finishKey ? describeSwatch(swatches.get(finishKey), candidate, chosen) : null,
       askForShortCode: filing.outcome === "mint" && series === INTERNAL_FINISH_PREFIX,
+      tbc,
     });
   }
   return out;

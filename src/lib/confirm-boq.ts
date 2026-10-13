@@ -39,7 +39,7 @@ import {
 import { effectiveArea } from "@/lib/boq-reconcile";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
-import { fabricLineState, rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
+import { rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
 import {
   BILL_FINISH_SLOT_IDS,
   billFinishNoun,
@@ -51,7 +51,7 @@ import {
   billFinishLineKind,
   decideFabricFiling,
   descriptionFilesAFinish,
-  fabricLineValue,
+  fabricLineWrite,
   fabricMaterialCode,
   planFinishSwatches,
   swatchDifferNotice,
@@ -921,7 +921,10 @@ async function writeFabricLine(
   },
 ): Promise<{ written: boolean; finishId: string | null; minted: boolean }> {
   const { recordId, line, runId, projectId, actor, library } = input;
-  const value = fabricLineValue(line);
+  // THE ONE DECISION the review predicts: a placeholder is TBC, and a line
+  // with no words has no value — never its code cell (2026-10-13).
+  const written = fabricLineWrite(line, input.parentName);
+  const value = written.value ?? "";
   const materialCode = fabricMaterialCode(line);
   const { kind } = billFinishLineKind(line);
   const nothing = { written: false, finishId: null, minted: false };
@@ -973,8 +976,8 @@ async function writeFabricLine(
       (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
        source_run_id, source_page, sort_order, created_by, updated_by)
     values
-      (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${value}, null, ${materialCode}, ${finishId},
-       ${fieldId}, ${fabricLineState(value)}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
+      (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${written.value}, null, ${materialCode}, ${finishId},
+       ${fieldId}, ${written.state}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
   `;
   return { written: true, finishId, minted: filing.outcome === "mint" };
 }
