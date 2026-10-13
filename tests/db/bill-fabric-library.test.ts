@@ -215,7 +215,7 @@ describeIfDb("the bill fills the finishes library", () => {
     const body = (await response.json()) as {
       fabricFilings: Record<
         number,
-        Record<number, { goesTo: string; filing: string; swatch: string | null; askForShortCode: boolean }>
+        Record<number, { goesTo: string; filing: string; swatch: string | null; askForShortCode: boolean; tbc?: boolean }>
       >;
       import: { parsed: { sheets: { lines: { index: number; lineNo: number; rowKind?: string }[] }[] } };
     };
@@ -226,6 +226,7 @@ describeIfDb("the bill fills the finishes library", () => {
       filing: "new library entry ZZ-FAB-13",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
+      tbc: false,
     });
     expect(line(6)?.filing).toBe("new library entry ZZ-FAB-13, with row 4");
     expect(line(8)?.swatch).toBe("swatch: none — rows 8 and 10 differ");
@@ -234,19 +235,29 @@ describeIfDb("the bill fills the finishes library", () => {
       filing: "new in-house fabric — numbered BW-ZZA-… at confirm",
       swatch: "swatch: this row's picture",
       askForShortCode: false,
+      tbc: false,
     });
     expect(line(14)).toEqual({
       goesTo: "→ COM 1",
       filing: "same words as row 12 — one in-house code",
       swatch: "swatch: row 12's picture",
       askForShortCode: false,
+      tbc: false,
     });
-    expect(line(16)).toEqual({ goesTo: "→ COM 1", filing: "placeholder — not filed", swatch: null, askForShortCode: false });
+    expect(line(16)).toEqual({
+      goesTo: "→ COM 1",
+      filing: "placeholder — not filed",
+      swatch: null,
+      askForShortCode: false,
+      // A placeholder is written TBC (2026-10-13).
+      tbc: true,
+    });
     expect(line(18)).toEqual({
       goesTo: "→ COM 1",
       filing: "matches ZZ-FAB-15 in the library",
       swatch: "swatch: none (the library already has one)",
       askForShortCode: false,
+      tbc: false,
     });
   });
 
