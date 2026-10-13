@@ -169,6 +169,14 @@ export type Finish = {
    * COMPOSES a statement (`loadRecordAtoms`, `loadPromotable`) always sets it.
    */
   standard?: FinishStandard | null;
+  /**
+   * The ZONES (`GR`, `PL`) of the three-part codes this finish's items carry
+   * where the finish itself is a bare two-part code — read by
+   * `findFinishByCode` so `GR-MTL-01` read onto a bare `MTL-01` stops
+   * `PL-MTL-01` folding onto it too (two three-part codes never meet through
+   * their bare twin). Optional: a loader that leaves it out reads as none.
+   */
+  zonesOnItems?: string[];
 };
 
 /** `AttributeStandard` (bw-standard.ts), as a finish carries it (0045). */
@@ -250,8 +258,71 @@ export function combineFinishState(attributeState: AttributeState, finish: Finis
 export type FinishResolution =
   | { status: "none" }
   | { status: "new"; code: string; codeNorm: string }
-  | { status: "matched"; finish: Finish }
-  | { status: "conflict"; finish: Finish; saysInstead: string };
+  /** `readAs` is the sentence saying a zone twin was read (`findFinishByCode`); absent on an exact match. */
+  | { status: "matched"; finish: Finish; readAs?: string }
+  | { status: "conflict"; finish: Finish; saysInstead: string; readAs?: string };
+
+// ===========================================================================
+// A BARE CODE AND ITS ZONE-PREFIXED TWIN ARE ONE FINISH (Max, 2026-10-13)
+//
+// The Aman bill writes `TIM-13` and `MTL-01` on a few rows and `GR-TIM-13`,
+// `GR-MTL-01` everywhere else, PL items included: "they are the same". The
+// library held both, and a drawing reading `GR-FAB-14` offered to REPLACE the
+// bill's `FAB-14`.
+//
+// `normaliseFinishCode` is unchanged — case and whitespace only — and exact
+// still wins. Only where the exact step finds NOTHING:
+//   * a two-part `XXX-NN` is the one three-part `ZZ-XXX-NN` in the library
+//     whose last two groups equal it — and nothing where two zones carry it
+//     (`GR-MTL-01` and `PL-MTL-01`: which one is a person's call);
+//   * a three-part `ZZ-XXX-NN` is the library's two-part `XXX-NN` — and
+//     nothing where another zone's twin (`PL-XXX-NN`) is also in the library,
+//     because then the zones are being kept apart.
+// Two three-part codes NEVER fold onto each other, and a code with a point or
+// a sub-part (`CH-01.1`, `GR-TIM-08.1`) is not either shape. The read is an
+// inference, so it carries a sentence (`readAs`) that the screens print.
+// ===========================================================================
+
+const TWO_PART_CODE = /^([A-Z]{2,4})-(\d{1,4}[A-Z]?)$/;
+const THREE_PART_CODE = /^([A-Z]{2,4})-([A-Z]{2,4})-(\d{1,4}[A-Z]?)$/;
+
+/** A finish the library holds under this code: exactly, or as its one zone twin (with the sentence saying so). */
+export function findFinishByCode(
+  code: string | null | undefined,
+  library: readonly Finish[],
+): { finish: Finish; readAs: string | null } | null {
+  const norm = normaliseFinishCode(code ?? "");
+  if (!norm) return null;
+  const exact = library.find((entry) => entry.codeNorm === norm);
+  if (exact) return { finish: exact, readAs: null };
+
+  const bare = TWO_PART_CODE.exec(norm);
+  if (bare) {
+    const twins = library.filter((entry) => {
+      const parts = THREE_PART_CODE.exec(entry.codeNorm);
+      return parts !== null && parts[2] === bare[1] && parts[3] === bare[2];
+    });
+    if (twins.length !== 1) return null;
+    const twin = twins[0] as Finish;
+    const zone = THREE_PART_CODE.exec(twin.codeNorm)?.[1] ?? "";
+    return { finish: twin, readAs: `read as ${twin.code}: ${norm} is written without its ${zone}` };
+  }
+
+  const zoned = THREE_PART_CODE.exec(norm);
+  if (zoned) {
+    const tail = `${zoned[2]}-${zoned[3]}`;
+    const twin = library.find((entry) => entry.codeNorm === tail);
+    if (!twin) return null;
+    const otherZones =
+      library.some((entry) => {
+        const parts = THREE_PART_CODE.exec(entry.codeNorm);
+        return parts !== null && entry.codeNorm !== norm && `${parts[2]}-${parts[3]}` === tail;
+      }) || (twin.zonesOnItems ?? []).some((zone) => zone !== zoned[1]);
+    if (otherZones) return null;
+    return { finish: twin, readAs: `read as ${twin.code}: the same code without its ${zoned[1]}` };
+  }
+  return null;
+}
 
 /**
  * Client finish codes the drawings carry that the library does not hold.
@@ -307,6 +378,45 @@ export function finishWordsOf(materialCodeRaw: string | null, value: string | nu
   return asCode(says) === asCode(code) ? null : says;
 }
 
+/**
+ * Are two codes ONE finish of this library? Equal codes are; two three-part
+ * codes that differ never are (`GR-MTL-01` and `PL-MTL-01`, even where both
+ * would read onto a bare `MTL-01`); otherwise only where the library reads
+ * both as the same row (`findFinishByCode`).
+ */
+export function sameFinishCode(a: string, b: string, library: readonly Finish[]): boolean {
+  const normA = normaliseFinishCode(a);
+  const normB = normaliseFinishCode(b);
+  if (normA === "" || normB === "") return false;
+  if (normA === normB) return true;
+  if (THREE_PART_CODE.test(normA) && THREE_PART_CODE.test(normB)) return false;
+  const finishA = findFinishByCode(normA, library)?.finish;
+  const finishB = findFinishByCode(normB, library)?.finish;
+  return Boolean(finishA && finishB && finishA.id === finishB.id);
+}
+
+/**
+ * `resolveFinishCode` for a WALK that files as it goes — the bill's confirm
+ * and the review that predicts it, over one mutable library. Where a
+ * three-part code is read onto a bare twin, the twin remembers the zone, so a
+ * later line of another zone is not folded onto it too. Both walks call this,
+ * in the same order, so the review and the confirm agree.
+ */
+export function resolveFinishCodeInWalk(
+  materialCodeRaw: string | null,
+  observedValue: string | null,
+  library: Finish[],
+): FinishResolution {
+  const resolution = resolveFinishCode(materialCodeRaw, observedValue, library);
+  if ((resolution.status === "matched" || resolution.status === "conflict") && resolution.readAs) {
+    const zone = THREE_PART_CODE.exec(normaliseFinishCode(materialCodeRaw ?? ""))?.[1];
+    if (zone && !(resolution.finish.zonesOnItems ?? []).includes(zone)) {
+      resolution.finish.zonesOnItems = [...(resolution.finish.zonesOnItems ?? []), zone];
+    }
+  }
+  return resolution;
+}
+
 export function resolveFinishCode(
   materialCodeRaw: string | null,
   observedValue: string | null,
@@ -317,8 +427,10 @@ export function resolveFinishCode(
   const codeNorm = normaliseFinishCode(raw);
   if (!codeNorm) return { status: "none" };
 
-  const finish = library.find((entry) => entry.codeNorm === codeNorm);
-  if (!finish) return { status: "new", code: raw, codeNorm };
+  const found = findFinishByCode(raw, library);
+  if (!found) return { status: "new", code: raw, codeNorm };
+  const { finish } = found;
+  const readAs = found.readAs ? { readAs: found.readAs } : {};
 
   // A conflict only when the library has actually committed to a description.
   // A `tbc` finish with no description is waiting to be told, not disagreeing.
@@ -326,9 +438,9 @@ export function resolveFinishCode(
   const described = finish.description?.trim();
   const says = finishWordsOf(raw, observedValue);
   if (described && says && described.toLowerCase() !== says.toLowerCase()) {
-    return { status: "conflict", finish, saysInstead: says };
+    return { status: "conflict", finish, saysInstead: says, ...readAs };
   }
-  return { status: "matched", finish };
+  return { status: "matched", finish, ...readAs };
 }
 
 // ===========================================================================

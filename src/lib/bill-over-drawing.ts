@@ -90,7 +90,7 @@ export function billReplacements(
       const occupant = isDimension
         ? occupied.dimensions.get(recordId)?.get(observation.dimensionSlot!)
         : occupied.fields.get(recordId)?.get(observation.specFieldId!);
-      if (occupant?.fromBill && !alreadyRecorded(observation, occupant)) {
+      if (occupant?.fromBill && !alreadyRecorded(observation, occupant, occupied.library)) {
         const ack = own.get(recordId);
         out.push({
           observationId: observation.id,

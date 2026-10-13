@@ -45,7 +45,7 @@ import {
   billFinishNoun,
   decideBillFinishSlot,
 } from "@/lib/bill-finish-kind";
-import { normaliseFinishCode, resolveFinishCode, type Finish, type FinishCodeOrigin } from "@/lib/finishes";
+import { normaliseFinishCode, resolveFinishCodeInWalk, type Finish, type FinishCodeOrigin } from "@/lib/finishes";
 import { createFinish, mintInternalFinishCode } from "@/lib/finish-edit";
 import {
   billFinishLineKind,
@@ -1055,7 +1055,7 @@ async function fileFinishCode(
   input: { projectId: string; code: string | null; says: string | null; library: Finish[]; actor: string },
 ): Promise<string | null> {
   const { projectId, code, says, library, actor } = input;
-  const resolution = resolveFinishCode(code, says, library);
+  const resolution = resolveFinishCodeInWalk(code, says, library);
   if (resolution.status === "matched") return resolution.finish.id;
   if (resolution.status === "new") {
     return createAndRemember(txn, { projectId, code: resolution.code, origin: "client", says, library, actor });

@@ -773,6 +773,7 @@ export default function NamedConfigurationCard({
                                 guessWhy={undefined}
                                 finishFiling={member?.resolution?.finishFilings?.[observation.id]}
                                 swatchRefusal={member?.resolution?.swatchRefusals?.[observation.id] ?? null}
+                      codeReadAs={member?.resolution?.finishCodeReads?.[observation.id] ?? null}
                                 showMm={showMm}
                                 candidateRows={observation.candidates?.map((candidate) =>
                                   candidateRowFor(row.item, observation, candidate),

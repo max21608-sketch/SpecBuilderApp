@@ -120,6 +120,8 @@ export type ItemResolution = {
    * it out. From `swatchRefusalsFor`, the confirm's own reading.
    */
   swatchRefusals?: Record<string, string>;
+  /** A finish row's code read as its zone twin, and the sentence (`finishCodeReadsFor`). */
+  finishCodeReads?: Record<string, string>;
   /**
    * The values THE BILL wrote that this card would replace (brief G), for the
    * card's one "use this drawing's values over the bill's" press. From
@@ -583,6 +585,7 @@ export default function ItemCard({
                               candidateRowFor(item, observation, candidate),
                             )}
                             swatchRefusal={resolution?.swatchRefusals?.[observation.id] ?? null}
+                      codeReadAs={resolution?.finishCodeReads?.[observation.id] ?? null}
                             page={item.page}
                             itemPages={pages}
                             importId={importId}

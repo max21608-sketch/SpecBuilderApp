@@ -102,6 +102,12 @@ export type ResolvedItem = {
    */
   swatchRefusals?: Record<string, string>;
   /**
+   * Per pending finish row whose code the library reads as its ZONE TWIN
+   * (`findFinishByCode`, 2026-10-13): "read as FAB-14: the same code without
+   * its GR". An inference, so the row says it. Absent where there is none.
+   */
+  finishCodeReads?: Record<string, string>;
+  /**
    * The values THE BILL wrote that this card's pending rows would replace
    * (brief G): what the card's one press acknowledges, and lists before the
    * press. From `billReplacements`, over the same occupancy the blockers read.
@@ -178,7 +184,14 @@ export type FinishFilingView = {
 /** The project's finishes library, as the pure resolver wants it. */
 export async function loadFinishLibrary(projectId: string): Promise<Finish[]> {
   const rows = await sql`
-    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state
+    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state,
+           -- The zones of three-part codes this finish's items carry
+           -- (Finish.zonesOnItems). THE SAME EXPRESSION in bill-fabric-load.ts,
+           -- drawing-resolution.ts and confirm-drawings.ts; change all three.
+           (select coalesce(array_agg(distinct split_part(upper(btrim(a.material_code)), '-', 1)), '{}')
+              from record_attributes a
+             where a.finish_id = project_finishes.id and a.status = 'active'
+               and upper(btrim(a.material_code)) ~ '^[A-Z]{2,4}-[A-Z]{2,4}-[0-9]{1,4}[A-Z]?$') as zones_on_items
     from project_finishes where project_id = ${projectId} and status = 'active'
   `;
   return rows.map((row) => ({
@@ -192,6 +205,7 @@ export async function loadFinishLibrary(projectId: string): Promise<Finish[]> {
     reference: row.reference === null || row.reference === undefined ? null : String(row.reference),
     colour: row.colour === null || row.colour === undefined ? null : String(row.colour),
     state: String(row.state) as Finish["state"],
+    zonesOnItems: Array.isArray(row.zones_on_items) ? row.zones_on_items.map(String) : [],
   }));
 }
 
@@ -262,6 +276,23 @@ export function swatchRefusalsFor(
   return out;
 }
 
+/**
+ * The pending finish rows whose code is read as its zone twin, and the
+ * sentence saying so — `resolveFinishCode`, the confirm's own reading.
+ */
+export function finishCodeReadsFor(
+  item: StagedDrawings["items"][number],
+  library: readonly Finish[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const observation of item.observations) {
+    if (observation.reviewStatus !== "pending" || !observation.materialCodeRaw?.trim()) continue;
+    const reading = resolveFinishCode(observation.materialCodeRaw, observation.value, [...library]);
+    if ((reading.status === "matched" || reading.status === "conflict") && reading.readAs) out[observation.id] = reading.readAs;
+  }
+  return out;
+}
+
 /** The key only where it says something: `{}` would change every frozen v1–v3 resolution. */
 function withSwatchRefusals(refusals: Record<string, string>): { swatchRefusals?: Record<string, string> } {
   return Object.keys(refusals).length > 0 ? { swatchRefusals: refusals } : {};
@@ -290,7 +321,7 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
   // correction. Read by the ONE predicate a specification document's
   // registers and confirm read too (attribute-from-bill.ts), so a drawing and
   // a tracker cannot disagree about which value is the bill's.
-  const [rows, billHeld] = await Promise.all([
+  const [rows, billHeld, library] = await Promise.all([
     sql`
     select a.id, a.record_id, a.spec_field_id, a.dimension_slot, a.version, a.label, a.value, a.unit,
            a.state, a.material_code, a.source_page, at.filename as source_filename
@@ -303,6 +334,9 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
       and (a.spec_field_id is not null or a.dimension_slot is not null)
   `,
     loadBillHeldIds(sql, { projectId }),
+    // The library rides with the occupancy (`OccupiedSlots.library`), so a
+    // zone twin reads as the same finish here and at the confirm.
+    loadFinishLibrary(projectId),
   ]);
   // The occupant itself, not just that there is one: a reviewer looking at a
   // revised drawing has to be told WHAT it would replace and off which page,
@@ -334,7 +368,7 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
       dimensions.set(recordId, map);
     }
   }
-  return { fields, dimensions };
+  return { fields, dimensions, library };
 }
 
 /** The registers a drawings screen needs, read once for any number of runs. */
@@ -515,7 +549,7 @@ export function occupantsFor(
             : undefined;
       // The same measurement already recorded is not something to replace, and
       // offering a tick for it is a question with no decision in it.
-      if (occupant && !alreadyRecorded(observation, occupant)) found.push({ recordId, occupant });
+      if (occupant && !alreadyRecorded(observation, occupant, occupied.library)) found.push({ recordId, occupant });
     }
     if (found.length > 0) out[observation.id] = found;
   }
@@ -582,6 +616,10 @@ export function resolveStagedRun(
       writesTo: Object.fromEntries(writesTo),
       finishFilings: finishFilingsFor(item, context.finishes),
       ...withSwatchRefusals(swatchRefusalsFor(item, context.finishes)),
+      ...(() => {
+        const reads = finishCodeReadsFor(item, context.finishes);
+        return Object.keys(reads).length > 0 ? { finishCodeReads: reads } : {};
+      })(),
       ...withBillReplacements(billReplacements(item, targets, occupied, named)),
       named: named ? namedResolution(targets, resolution, named) : null,
       ...withCodeMatches(resolution.runs.length === 0 ? codeMatchesOf(staged, item, context.records) : []),
@@ -637,7 +675,7 @@ function alreadyRecordedWarnings(
       const occupant = isDimension
         ? occupied.dimensions.get(recordId)?.get(observation.dimensionSlot!)
         : occupied.fields.get(recordId)?.get(observation.specFieldId!);
-      if (!alreadyRecorded(observation, occupant)) continue;
+      if (!alreadyRecorded(observation, occupant, occupied.library)) continue;
       count += 1;
       pages.add(occupant?.sourcePage ? `page ${occupant.sourcePage}` : "another page");
     }

@@ -54,7 +54,7 @@ import { endsOnSegment, findRecordsByRef, namesOnSegments, normaliseRef, type Re
 import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
 // `finishes.ts` is a leaf here and imports nothing from this file.
-import { normaliseFinishCode, type FinishFiling } from "@/lib/finishes";
+import { normaliseFinishCode, sameFinishCode, type Finish, type FinishFiling } from "@/lib/finishes";
 // Both leaves: neither imports anything from this file.
 import { paletteOptionFor, type Palette } from "@/lib/palettes";
 import type { StagedStandard } from "@/lib/bw-standard";
@@ -1719,6 +1719,12 @@ export type OccupiedSlot = {
 export type OccupiedSlots = {
   fields: Map<string, Map<string, OccupiedSlot>>;
   dimensions: Map<string, Map<DimensionSlot, OccupiedSlot>>;
+  /**
+   * The project's finishes library, so a finish code reads its zone twin
+   * (`findFinishByCode`) the same way on the card and at the confirm. Optional:
+   * absent, two codes are compared exactly, as they always were.
+   */
+  library?: readonly Finish[];
 };
 
 /**
@@ -1749,6 +1755,8 @@ export function alreadyRecorded(
   observation: Pick<DrawingObservation, "attrGroup" | "dimensionSlot" | "value" | "valueRaw" | "unit" | "state"> &
     Partial<Pick<DrawingObservation, "specFieldId" | "materialCodeRaw">>,
   occupant: (Pick<OccupiedSlot, "value" | "unit" | "state"> & Partial<Pick<OccupiedSlot, "materialCode">>) | undefined,
+  /** The project's library (`OccupiedSlots.library`), so a zone twin reads as the same finish. */
+  library?: readonly Finish[],
 ): boolean {
   if (!occupant) return false;
   // A FINISH is the same finish by the client's own CODE — WD-01 and WD-01 —
@@ -1761,6 +1769,7 @@ export function alreadyRecorded(
     return sameFinish(
       { code: observation.materialCodeRaw, words: observation.value ?? observation.valueRaw },
       { code: occupant.materialCode, words: occupant.value },
+      library,
     );
   }
   if (!observation.dimensionSlot) return false;
@@ -2073,7 +2082,7 @@ export function drawingItemBlockers(
           // The same measurement already recorded is not a replacement —
           // decided PER RECORD, since one fan-out can be a no-op on one record
           // and a real write on another.
-          if (alreadyRecorded(observation, occupant)) return false;
+          if (alreadyRecorded(observation, occupant, occupied.library)) return false;
           return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
         });
         if (clash) {
@@ -2094,7 +2103,7 @@ export function drawingItemBlockers(
         const occupant = occupiedFields.get(recordId)?.get(observation.specFieldId ?? "");
         if (!occupant) return false;
         // The same finish, by the client's code, is not a replacement.
-        if (alreadyRecorded(observation, occupant)) return false;
+        if (alreadyRecorded(observation, occupant, occupied.library)) return false;
         return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
       });
       if (clash) {
@@ -3923,7 +3932,7 @@ export function occupancyThrough(occupied: OccupiedSlots, writeTo: ReadonlyMap<s
     if (dimension) dimensions.set(parentId, dimension);
     else dimensions.delete(parentId);
   }
-  return { fields, dimensions };
+  return { fields, dimensions, ...(occupied.library ? { library: occupied.library } : {}) };
 }
 
 /**
@@ -4744,10 +4753,20 @@ export function finishWordsKey(text: string | null | undefined): string {
 export function sameFinish(
   a: { code: string | null | undefined; words: string | null | undefined },
   b: { code: string | null | undefined; words: string | null | undefined },
+  /**
+   * The project's library, where the caller has it. Two codes that differ
+   * are still one finish when the library reads both as ONE row
+   * (`findFinishByCode`: `GR-FAB-14` and the bill's `FAB-14`, Max
+   * 2026-10-13). Never two three-part codes: that function will not fold them.
+   */
+  library?: readonly Finish[],
 ): boolean {
   const codeA = normaliseFinishCode(a.code ?? "");
   const codeB = normaliseFinishCode(b.code ?? "");
-  if (codeA !== "" && codeB !== "") return codeA === codeB;
+  if (codeA !== "" && codeB !== "") {
+    if (codeA === codeB) return true;
+    return library ? sameFinishCode(codeA, codeB, library) : false;
+  }
   const wordsA = finishWordsKey(a.words);
   return wordsA !== "" && wordsA === finishWordsKey(b.words);
 }

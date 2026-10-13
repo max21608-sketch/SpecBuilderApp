@@ -739,6 +739,7 @@ export function ObservationRow({
   showMm = false,
   candidateRows,
   swatchRefusal = null,
+  codeReadAs = null,
 }: {
   observation: DrawingObservation;
   /** The card's "Show in mm" (brief F): print each figure converted beside the value. Display only. */
@@ -754,6 +755,8 @@ export function ObservationRow({
    * the server's `swatchRefusals`. The picker then shows it unticked.
    */
   swatchRefusal?: string | null;
+  /** The library reads this row's code as its zone twin (`finishCodeReads`): the sentence saying so. */
+  codeReadAs?: string | null;
   page: number | null;
   /**
    * Every page of the ITEM this row belongs to, so a swatch printed on the
@@ -1020,7 +1023,11 @@ export function ObservationRow({
           />
         )}
         {observation.materialCodeRaw && (
-          <p className="mt-0.5 text-xs text-neutral-500">code {observation.materialCodeRaw}</p>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            code {observation.materialCodeRaw}
+            {/* A ZONE TWIN IS AN INFERENCE, SO IT IS SAID (2026-10-13). */}
+            {codeReadAs && <span className="text-amber-800"> · {codeReadAs}</span>}
+          </p>
         )}
         {/* A FINISH WITH NO CODE HAS NOWHERE TO BE FILED, and that is what the
             library is addressed by. The control sits where the code prints,

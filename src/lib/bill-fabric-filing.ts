@@ -69,7 +69,7 @@ import {
   internalFinishSeries,
   normaliseFinishCode,
   readUncodedFinish,
-  resolveFinishCode,
+  resolveFinishCodeInWalk,
   INTERNAL_FINISH_PREFIX,
   type Finish,
 } from "@/lib/finishes";
@@ -77,7 +77,7 @@ import {
 /** What one fabric line does to the library. */
 export type FabricFiling =
   /** Coded, and the library holds the code saying the same (or nothing yet). Linked. */
-  | { outcome: "matched"; finish: Finish }
+  | { outcome: "matched"; finish: Finish; readAs?: string }
   /**
    * Coded, and the library has no such code: a new CLIENT finish, TBC, with the
    * line's words as its description — or with NONE where the words are only a
@@ -86,7 +86,7 @@ export type FabricFiling =
    */
   | { outcome: "new"; code: string; describe: boolean }
   /** Coded, and the library describes the code differently: linked to nothing (the CONFLICT rule). */
-  | { outcome: "conflict"; finish: Finish; saysInstead: string }
+  | { outcome: "conflict"; finish: Finish; saysInstead: string; readAs?: string }
   /** No code, and an in-house finish is worded exactly the same. Linked. */
   | { outcome: "same_words"; finish: Finish }
   /** No code, real words: an in-house code is minted at confirm, TBC, the line's words. */
@@ -162,10 +162,14 @@ export function decideFabricFiling(input: {
   // as "Technical Details TBC": the client is naming the same fabric and not
   // repeating it. Words that say nothing cannot disagree with the library, so
   // they are not offered to the CONFLICT rule (found 2026-10-05, the local walk).
-  const coded = resolveFinishCode(materialCode, placeholder ? null : says, [...library]);
-  if (coded.status === "matched") return { outcome: "matched", finish: coded.finish };
+  const coded = resolveFinishCodeInWalk(materialCode, placeholder ? null : says, [...library]);
+  // A ZONE TWIN (`findFinishByCode`) keeps its sentence, so the review says it.
+  const readAs = (status: { readAs?: string }) => (status.readAs ? { readAs: status.readAs } : {});
+  if (coded.status === "matched") return { outcome: "matched", finish: coded.finish, ...readAs(coded) };
   if (coded.status === "new") return { outcome: "new", code: coded.code, describe: !placeholder };
-  if (coded.status === "conflict") return { outcome: "conflict", finish: coded.finish, saysInstead: coded.saysInstead };
+  if (coded.status === "conflict") {
+    return { outcome: "conflict", finish: coded.finish, saysInstead: coded.saysInstead, ...readAs(coded) };
+  }
 
   if (placeholder) return { outcome: "placeholder" };
   const reading = readUncodedFinish(says, library, null);
@@ -333,7 +337,7 @@ export function planBillFabrics(input: {
 
     for (const line of items) {
       for (const { code, words } of input.descriptionCodes(sheetIndex, line.index)) {
-        const resolution = resolveFinishCode(code, words, library);
+        const resolution = resolveFinishCodeInWalk(code, words, library);
         if (resolution.status !== "new") continue;
         plan(pendingFinish(`planned:${sheetIndex}:${line.lineNo}:${resolution.codeNorm}`, resolution.code, "client", words), line.lineNo, false);
       }
@@ -454,10 +458,10 @@ export function describeFiling(
     case "matched": {
       const earlier = planned.get(filing.finish.id);
       if (earlier && earlier.rowNo !== rowNo) return `new library entry ${filing.finish.code}, with row ${earlier.rowNo}`;
-      return `matches ${filing.finish.code} in the library`;
+      return filing.readAs ? `matches ${filing.finish.code} in the library — ${filing.readAs}` : `matches ${filing.finish.code} in the library`;
     }
     case "conflict":
-      return `${filing.finish.code} — the library describes it differently; not linked`;
+      return `${filing.finish.code} — the library describes it differently; not linked${filing.readAs ? ` (${filing.readAs})` : ""}`;
     case "same_words": {
       const earlier = planned.get(filing.finish.id);
       if (earlier?.minted) return `same words as row ${earlier.rowNo} — one in-house code`;

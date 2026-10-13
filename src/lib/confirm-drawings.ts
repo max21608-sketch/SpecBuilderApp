@@ -503,12 +503,50 @@ export async function confirmDrawingItem(
     : [];
   const writeIds = named ? existingNamedIds : ordered.map((parentId) => variantOf.get(parentId) ?? parentId);
 
+  // ---- the project's finishes library, for the codes this card carries ----
+  //
+  // Read once, before the fan-out. A code that is already in the library links
+  // to it; a code nobody has seen creates an entry, TBC, holding what this
+  // page said. A CONFLICT — the library has committed to a description and
+  // this page says something else — LINKS NOTHING: linking would make the item
+  // render the library's words while its own page said otherwise, and there is
+  // no way to tell which is right. It stays unlinked and shows up on the
+  // finishes page as a code needing a person, which is house/conventions.md §5:
+  // anything unresolvable becomes a visible flag, never a plausible-looking
+  // wrong answer.
+  const libraryRows = await txn`
+    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state,
+           -- The zones of three-part codes this finish's items carry
+           -- (Finish.zonesOnItems). THE SAME EXPRESSION in bill-fabric-load.ts,
+           -- drawing-resolution.ts and confirm-drawings.ts; change all three.
+           (select coalesce(array_agg(distinct split_part(upper(btrim(a.material_code)), '-', 1)), '{}')
+              from record_attributes a
+             where a.finish_id = project_finishes.id and a.status = 'active'
+               and upper(btrim(a.material_code)) ~ '^[A-Z]{2,4}-[A-Z]{2,4}-[0-9]{1,4}[A-Z]?$') as zones_on_items
+    from project_finishes where project_id = ${run.projectId} and status = 'active'
+  `;
+  const library: Finish[] = libraryRows.map((row) => ({
+    id: String(row.id),
+    code: String(row.code),
+    codeNorm: String(row.code_norm),
+    codeOrigin: isFinishCodeOrigin(row.code_origin) ? row.code_origin : "client",
+    kind: isFinishKind(row.kind) ? row.kind : null,
+    description: row.description === null || row.description === undefined ? null : String(row.description),
+    supplierRaw: row.supplier_raw === null || row.supplier_raw === undefined ? null : String(row.supplier_raw),
+    reference: row.reference === null || row.reference === undefined ? null : String(row.reference),
+    colour: row.colour === null || row.colour === undefined ? null : String(row.colour),
+    state: String(row.state) as Finish["state"],
+    zonesOnItems: Array.isArray(row.zones_on_items) ? row.zones_on_items.map(String) : [],
+  }));
+
   // Blockers are recomputed here, never trusted from the screen. `occupied` is
   // read live so a slot filled by another card a second ago is caught.
   // Both halves, for the reason loadOccupiedSlots gives: a BWS field and a
   // dimension slot are two uniqueness rules, and reading one would let the
   // other collide at insert.
-  const byWriteTarget: OccupiedSlots = { fields: new Map(), dimensions: new Map() };
+  // The library rides with the occupancy, so `alreadyRecorded` reads a zone
+  // twin (`GR-FAB-14` over the bill's `FAB-14`) exactly as the screen does.
+  const byWriteTarget: OccupiedSlots = { fields: new Map(), dimensions: new Map(), library };
   if (writeIds.length > 0) {
     const occupiedRows = await txn`
       select id, record_id, spec_field_id, dimension_slot, version, label, value, unit, state, material_code, source_page
@@ -660,34 +698,6 @@ export async function confirmDrawingItem(
     })()}${item.itemCodeRaw ? ` (${item.itemCodeRaw})` : ""}`,
     sourceIntakeRunId: runId,
   });
-
-  // ---- the project's finishes library, for the codes this card carries ----
-  //
-  // Read once, before the fan-out. A code that is already in the library links
-  // to it; a code nobody has seen creates an entry, TBC, holding what this
-  // page said. A CONFLICT — the library has committed to a description and
-  // this page says something else — LINKS NOTHING: linking would make the item
-  // render the library's words while its own page said otherwise, and there is
-  // no way to tell which is right. It stays unlinked and shows up on the
-  // finishes page as a code needing a person, which is house/conventions.md §5:
-  // anything unresolvable becomes a visible flag, never a plausible-looking
-  // wrong answer.
-  const libraryRows = await txn`
-    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, state
-    from project_finishes where project_id = ${run.projectId} and status = 'active'
-  `;
-  const library: Finish[] = libraryRows.map((row) => ({
-    id: String(row.id),
-    code: String(row.code),
-    codeNorm: String(row.code_norm),
-    codeOrigin: isFinishCodeOrigin(row.code_origin) ? row.code_origin : "client",
-    kind: isFinishKind(row.kind) ? row.kind : null,
-    description: row.description === null || row.description === undefined ? null : String(row.description),
-    supplierRaw: row.supplier_raw === null || row.supplier_raw === undefined ? null : String(row.supplier_raw),
-    reference: row.reference === null || row.reference === undefined ? null : String(row.reference),
-    colour: row.colour === null || row.colour === undefined ? null : String(row.colour),
-    state: String(row.state) as Finish["state"],
-  }));
 
   const finishIdByObservation = new Map<string, string | null>();
   for (const observation of taken) {
@@ -953,7 +963,7 @@ export async function confirmDrawingItem(
           : observation.specFieldId
             ? byWriteTarget.fields.get(recordId)?.get(observation.specFieldId)
             : undefined;
-      if (existingDimension && alreadyRecorded(observation, existingDimension)) {
+      if (existingDimension && alreadyRecorded(observation, existingDimension, byWriteTarget.library)) {
         sortOrder -= 1;
         inserts -= 1;
         // The diameter is already there, so IT is what took the retired
