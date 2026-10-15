@@ -13,6 +13,7 @@ import {
 import { TOOLS, TOOL_VARIANTS } from "@/lib/extraction-schema";
 import { STRUCTURE_TOOL } from "@/lib/boq-structure";
 import { CLASSIFY_TOOL } from "@/lib/document-classify";
+import { TRANSCRIBE_TOOL } from "@/lib/pdf-bill-transcribe";
 import { DOCUMENT_KINDS } from "@/lib/spec-vocab";
 import { EXTRACTION_MODEL, readExtractionResponse } from "@/lib/anthropic";
 
@@ -94,6 +95,7 @@ const EVERY_TOOL = [
   ["extraction: shop_drawings v3", TOOL_VARIANTS.shop_drawings!.v3!.tool] as const,
   ["bill structure", STRUCTURE_TOOL] as const,
   ["classify", CLASSIFY_TOOL] as const,
+  ["PDF bill transcription", TRANSCRIBE_TOOL] as const,
 ];
 
 describe("toOutputSchema over every tool that is sent to the extraction model", () => {
