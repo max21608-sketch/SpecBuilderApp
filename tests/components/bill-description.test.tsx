@@ -60,11 +60,17 @@ describe("a bill line's description on the review screen", () => {
     fireEvent.click(screen.getByRole("button", { name: /Show all 6 statements/ }));
     const rows = screen.getAllByRole("row");
     // The summary's row, then the panel's own row: never a cell beside the data.
-    const panel = rows.find((row) => within(row).queryByText("As printed"));
+    const panel = rows.find((row) => within(row).queryByTestId("bill-as-printed"));
     expect(panel).toBeDefined();
     expect(within(panel!).getByText("Sizes (Inch): 20\"\" (1'-8\"\") H X 2'-6\"\" DIA")).toBeInTheDocument();
     expect(within(panel!).getByText(/is the size line placed/)).toBeInTheDocument();
-    expect(within(panel!).getByText("Diameter 760mm")).toBeInTheDocument();
+    // What BWS receives, large, at the top of the panel; then one row per figure.
+    expect(within(within(panel!).getByTestId("what-bws-receives")).getByTestId("bws-cell")).toHaveTextContent("Dia.760 x H510mm");
+    const figures = within(panel!).getByTestId("bill-figures");
+    expect(within(figures).getByText("Dia 760 mm")).toBeInTheDocument();
+    expect(within(figures).getByText("H 510 mm")).toBeInTheDocument();
+    // The document is labelled as the document, never a column beside the output.
+    expect(within(panel!).getByTestId("bill-as-printed")).toHaveTextContent(/The bill, as printed — the document/);
     expect(screen.getByRole("button", { name: /Hide all 6 statements/ })).toHaveAttribute("aria-expanded", "true");
   });
 
@@ -116,28 +122,58 @@ describe("a size part's slot, set on the review", () => {
   it("offers each size part W · D · H · SH · Dia · note, with its current slot pressed", () => {
     const onSetSlot = vi.fn();
     render(<Editable plan={planFor()} onSetSlot={onSetSlot} />);
-    const height = screen.getByRole("group", { name: "What H 420 is" });
-    expect(within(height).getByRole("button", { name: "H" })).toHaveAttribute("aria-pressed", "true");
+    const height = screen.getByRole("group", { name: "What 420 is" });
+    expect(within(height).getByRole("button", { name: "420 is the height" })).toHaveAttribute("aria-pressed", "true");
     expect(within(height).getAllByRole("button").map((button) => button.textContent)).toEqual(["W", "D", "H", "SH", "Dia", "note"]);
-    fireEvent.click(within(height).getByRole("button", { name: "note" }));
+    fireEvent.click(within(height).getByRole("button", { name: "420 is a note, not a slot" }));
     expect(onSetSlot).toHaveBeenLastCalledWith("H 420", "note");
   });
 
   it("says which parts a reviewer changed, recomposed, and puts one back as printed", () => {
     const onSetSlot = vi.fn();
     render(<Editable plan={planFor({ "D 400": "DIA" })} onSetSlot={onSetSlot} />);
-    expect(screen.getByText("Dia.400 x H420mm")).toBeInTheDocument();
+    expect(screen.getByTestId("bws-cell")).toHaveTextContent("Dia.400 x H420mm");
     expect(screen.queryByText(/gives a D and no W/)).toBeNull();
-    expect(screen.getByText("changed on review")).toBeInTheDocument();
-    const depth = screen.getByRole("group", { name: "What D 400 is" });
-    expect(within(depth).getByRole("button", { name: "Dia" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(within(depth).getByRole("button", { name: "As printed" }));
+    expect(screen.getByText("set by you")).toBeInTheDocument();
+    const depth = screen.getByRole("group", { name: "What 400 is" });
+    expect(within(depth).getByRole("button", { name: "400 is the diameter" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(onSetSlot).toHaveBeenLastCalledWith("D 400", null);
+  });
+
+  // Workstream E: on SO-03 only three of the four figures offered a slot.
+  it("gives EVERY figure the same picker, the SH line's included, one click each", () => {
+    const onSetSlot = vi.fn();
+    const bench = planBillDescription("BENCH", {
+      fields: FIELDS,
+      hasFabricLine: false,
+      columns: { dimensionsRaw: "REFER TO DRAWING\n720 X 1400 X 720MM\nSH: 420MM", headings: { dimensions: "DIMENSIONS CM / MM L X W X H" } },
+      name: "BENCH",
+    })!;
+    render(
+      <table>
+        <tbody>
+          <BillDescriptionPanelRow plan={bench} raw="BENCH" colSpan={10} onSetSlot={onSetSlot} />
+        </tbody>
+      </table>,
+    );
+    const figures = screen.getByTestId("bill-figures");
+    expect(within(figures).getAllByRole("group").map((group) => group.getAttribute("aria-label"))).toEqual([
+      "What 720 is",
+      "What 1400 is",
+      "What 720 is",
+      "What 420 is",
+    ]);
+    expect(within(figures).getAllByText("order assumed")).toHaveLength(3);
+    fireEvent.click(within(figures).getByRole("button", { name: "1400 is the width" }));
+    expect(onSetSlot).toHaveBeenLastCalledWith("D 1400", "W");
+    fireEvent.click(within(figures).getByRole("button", { name: "420 is the height" }));
+    expect(onSetSlot).toHaveBeenLastCalledWith("SH: 420MM | SH 420", "H");
   });
 
   it("offers no control where the line cannot change", () => {
     render(<Editable plan={planFor()} />);
-    expect(screen.queryByRole("group", { name: /What D 400 is/ })).toBeNull();
+    expect(screen.queryByRole("group", { name: /What 400 is/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "It's the diameter" })).toBeNull();
   });
 
@@ -163,13 +199,13 @@ describe("a size part's slot, set on the review", () => {
       </table>,
     );
     // A size with no unit reads in the composer's own words, as a description's would.
-    expect(screen.getByText("[W 800 — no unit] [D 950 — no unit] [H 790 — no unit]")).toBeInTheDocument();
+    expect(screen.getAllByText("[W 800 — no unit] [D 950 — no unit] [H 790 — no unit]")).toHaveLength(2);
     expect(screen.getByText("W800 has no unit, so it cannot be converted to millimetres.")).toHaveClass("text-amber-700");
     expect(screen.getByText("The bill's Dims column")).toBeInTheDocument();
     expect(screen.getByText("The bill's Finish column")).toBeInTheDocument();
     expect(screen.getByText("Finish: Natural oak")).toBeInTheDocument();
     expect(screen.getByText("Timber finish 1")).toBeInTheDocument();
-    expect(screen.getByText(/Each column cell is written to the record/)).toBeInTheDocument();
+    expect(screen.getByText(/Every statement is kept on the record/)).toBeInTheDocument();
   });
 
   describe("the unit of a size that prints none", () => {

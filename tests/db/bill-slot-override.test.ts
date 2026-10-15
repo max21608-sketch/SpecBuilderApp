@@ -160,19 +160,24 @@ describeIfDb("a size part's slot, corrected before the confirm", () => {
     expect(await stale.text()).toMatch(/changed in another tab/);
     expect(await stagedLine()).toMatchObject({ slotOverrides: { "D 400": "DIA" }, slotOverridesVersion: 1 });
 
-    // TWO PARTS IN ONE SLOT is refused in words, and writes nothing.
-    const doubled = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "H 420", slot: "DIA" }, slotOverridesVersion: 1 });
-    expect(doubled.status).toBe(400);
-    expect(await doubled.text()).toMatch(/both in the diameter slot/);
-    expect(await stagedLine()).toMatchObject({ slotOverrides: { "D 400": "DIA" }, slotOverridesVersion: 1 });
+    // A SLOT ANOTHER PART HOLDS is taken, and the holder becomes a note in the
+    // same write (workstream E, 2026-10-15) — a slot still never holds two.
+    const swapped = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "H 420", slot: "DIA" }, slotOverridesVersion: 1 });
+    expect(swapped.status).toBe(200);
+    expect(await stagedLine()).toMatchObject({ slotOverrides: { "D 400": "note", "H 420": "DIA" }, slotOverridesVersion: 2 });
+    expect((await review()).descriptions["0"]?.["0"]?.dimensionCell).toBe("Dia.420mm");
+    // And back: the diameter to the 400 (the 420 to a note), then the 420 as printed.
+    expect((await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "D 400", slot: "DIA" }, slotOverridesVersion: 2 })).status).toBe(200);
+    expect((await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "H 420", slot: null }, slotOverridesVersion: 3 })).status).toBe(200);
+    expect(await stagedLine()).toMatchObject({ slotOverrides: { "D 400": "DIA" }, slotOverridesVersion: 4 });
 
     // A PART THE LINE DOES NOT PRINT is refused rather than stored.
-    const gone = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "W 900", slot: "W" }, slotOverridesVersion: 1 });
+    const gone = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "W 900", slot: "W" }, slotOverridesVersion: 4 });
     expect(gone.status).toBe(409);
     expect(await gone.text()).toMatch(/no longer prints “W 900”/);
 
     // Not a slot.
-    const nonsense = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "D 400", slot: "Diameter" }, slotOverridesVersion: 1 });
+    const nonsense = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "D 400", slot: "Diameter" }, slotOverridesVersion: 4 });
     expect(nonsense.status).toBe(400);
   });
 
@@ -200,7 +205,7 @@ describeIfDb("a size part's slot, corrected before the confirm", () => {
     expect(dims.rows.map((row) => row.value)).toContain("Dia.400 x H420mm");
 
     // The confirmed bill takes no further slot changes.
-    const late = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "D 400", slot: "D" }, slotOverridesVersion: 1 });
+    const late = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "D 400", slot: "D" }, slotOverridesVersion: 4 });
     expect(late.status).toBe(409);
   });
 });

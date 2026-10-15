@@ -203,7 +203,35 @@ describe("the configuration card", () => {
       ]),
     );
     expect(screen.getByRole("button", { name: /Confirm S-201/ })).toBeDisabled();
-    expect(screen.getByText(/S-201 B cannot be confirmed yet: Choose millimetres or centimetres\./)).toBeInTheDocument();
+    // Said in the "needs you" list at the top, and the bar points at it (2026-10-15).
+    const list = screen.getByRole("region", { name: "What needs you" });
+    expect(within(list).getByText("Choose millimetres or centimetres.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /One thing needs you — listed at the top/ })).toBeInTheDocument();
+  });
+
+  it("lists what stops confirm, and a link to a configuration's own row opens that configuration first", async () => {
+    resetIds();
+    const pages = [page("a", 5, "Woven raffia", "S-201"), page("b", 6, "Pale linen", "S-201")];
+    const fabricB = pages[1]!.observations.find((o) => o.value === "Pale linen")!;
+    renderConfigurations(
+      pages,
+      new Map([
+        ["a", resolution({ id: "a", variantLabel: "A" })],
+        [
+          "b",
+          resolution({
+            id: "b",
+            variantLabel: "B",
+            blockers: [{ code: "no_state", message: "Say whether it is stated or TBC.", observationId: fabricB.id }],
+          }),
+        ],
+      ]),
+    );
+    expect(screen.getByRole("tab", { name: /S-201 A/ })).toHaveAttribute("aria-selected", "true");
+    const list = screen.getByRole("region", { name: "What needs you" });
+    await userEvent.click(within(list).getByRole("link", { name: "S-201 B · ARMCHAIR: stated or TBC?" }));
+    expect(screen.getByRole("tab", { name: /S-201 B/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByDisplayValue("Pale linen")).toBeInTheDocument();
   });
 
   it("collapses a configuration that has already been applied", async () => {

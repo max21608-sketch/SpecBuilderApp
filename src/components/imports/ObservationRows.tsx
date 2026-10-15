@@ -1275,9 +1275,12 @@ export function ReplacePanel({
   blocked,
   heading,
   recordNames,
+  colSpan = OBSERVATION_COLUMNS,
   onChange,
 }: {
   observation: DrawingObservation;
+  /** The table's column count, where it is not the observation table's. */
+  colSpan?: number;
   occupants: { recordId: string; occupant: Occupant }[];
   runs: RunResolution[];
   busy: boolean;
@@ -1300,7 +1303,7 @@ export function ReplacePanel({
   const several = occupants.length > 1;
   return (
     <tr id={replacePanelId(observation.id)} className={blocked ? "bg-amber-50/40" : undefined}>
-      <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2">
+      <td colSpan={colSpan} className="px-4 pb-2">
         {/* WHICH DOCUMENT HOLDS WHAT, AND ONE CHOICE (2026-10-15). The box
             said "this item already holds a value here — tick to replace it",
             and Matthew read it backwards for eight minutes: it never said the
@@ -1397,13 +1400,22 @@ export function ReplacePanel({
 }
 
 /** Why a row cannot commit, and what is merely worth knowing. */
-export function RowNotes({ blockers, warnings }: { blockers: RowBlocker[]; warnings: RowWarning[] }) {
+export function RowNotes({
+  blockers,
+  warnings,
+  colSpan = OBSERVATION_COLUMNS,
+}: {
+  blockers: RowBlocker[];
+  warnings: RowWarning[];
+  /** The table's column count, where it is not the observation table's. */
+  colSpan?: number;
+}) {
   const actions = useReviewRowActions();
   if (blockers.length === 0 && warnings.length === 0) return null;
   const clash = blockers.find((blocker) => blocker.clash)?.clash ?? null;
   return (
     <tr className="bg-amber-50/40">
-      <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2 text-xs text-amber-900">
+      <td colSpan={colSpan} className="px-4 pb-2 text-xs text-amber-900">
         {blockers.map((blocker) => blocker.message).join(" ")}
         {/* THE THREE ANSWERS, ON THE ROW (plan any-bill, step 4). The old
             advice — "ignore one, or move one to another field" — put a

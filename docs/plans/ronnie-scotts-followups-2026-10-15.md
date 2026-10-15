@@ -309,6 +309,34 @@ drawing card.
   one click per figure, `tools/overflow-audit.mjs` is clean, and Max has
   walked it.
 
+**BUILT 2026-10-15 (evening), not yet walked by Max.** Mock-up:
+`docs/design/dimension-picker-mockup.html` (two frames, each before and after
+the clicks). One picker for both screens (`SlotPicker`, with
+`WhatBwsReceives` above it, `src/components/imports/SlotPicker.tsx`).
+
+- **Bill line.** Every figure on every size line is addressable
+  (`LineFigure`, `resolveSlotOverrides(placed, overrides, statements)`): the
+  placed line's parts keep their old keys, a later line's figure is
+  `<line> | <part>`. Picking a held slot moves its holder to a note in the same
+  PATCH (`slotChangeFor`); the 400 "Move the other part first" can no longer
+  be caused by one pick. A later size line any figure of which stays a note is
+  still written whole as a note. The panel reads top to bottom: what BWS
+  receives, each figure, everything else the bill says, then "The bill, as
+  printed — the document". On the local stack, SO-03 went from
+  `W720 x D1400 x H720 x SH420mm` to `W1400 x D720 x H720 x SH420mm` in two
+  clicks.
+- **Drawing card.** The size left the spec table for its own section at the
+  top of the card (`DrawingSize`): what BWS receives, then one row per figure
+  (`isSizeRow`), the slot holders shown and every other figure one click away.
+  The slot select and the "Use as" buttons are one picker; a slot is still the
+  swap (`swapSlotRequest`), a note still the plain patch. Value, unit and
+  state sit behind "Edit value" except where the row cannot commit without
+  them. On the local stack, TB-08 went from `W900 x H710mm` to
+  `W3500 x D900 x H710mm` in two clicks, each replace question under its row.
+- **The two configuration cards** carry the "needs you" list
+  (`configurationNeedsYou`); a link opens that configuration's tab first. Their
+  geometry tables still use the old row (not reworked here).
+
 ### F — Control over phases (design only, now)
 
 Max: three packages as three phases is "almost good", but "there should be an

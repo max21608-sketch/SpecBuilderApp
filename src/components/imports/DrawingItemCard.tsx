@@ -37,7 +37,6 @@ import { Fragment, useEffect, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
-import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { isMeasuredRow, measuredRows, oneLinePerPhase, toggledTargets, uncertainNotices, wasReadByModel } from "@/lib/drawing-document";
 import { drawingNeedsYou, needsYouListId, runTargetsId } from "@/lib/needs-you";
 import { goToAndFlash } from "@/lib/go-to";
@@ -49,7 +48,8 @@ import ItemImagePicker from "@/components/imports/ItemImagePicker";
 import PagePreview from "@/components/imports/PagePreview";
 import ItemReadNotes from "@/components/imports/ItemReadNotes";
 import { pagesInWords } from "@/lib/drawing-items";
-import { candidateRowFor, swapSlotRequest } from "@/lib/slot-swap";
+import { candidateRowFor, isSizeRow, swapSlotRequest } from "@/lib/slot-swap";
+import DrawingSize, { sizeRowsShown } from "@/components/imports/DrawingSize";
 import {
   ObservationRow,
   ObservationTableHead,
@@ -73,7 +73,6 @@ import { AddConfiguration, UnsplitNote } from "@/components/imports/Configuratio
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
-import Tip from "@/components/ui/Tip";
 
 // Re-exported from where they now live, so the screens keep one import.
 export type { Occupant, RecordChoice, RunResolution, SpecField } from "@/components/imports/ObservationRows";
@@ -289,8 +288,16 @@ export default function ItemCard({
   // A row with a blocker on it is never folded away among the statements.
   const rowBlocked = (observation: DrawingObservation) =>
     (resolution?.blockers ?? []).some((blocker) => blocker.observationId === observation.id);
+  // THE SIZE HAS ITS OWN SECTION (workstream E, 2026-10-15): every figure,
+  // one picker each, above the table. The table holds everything else.
+  const sizeRows = pending.filter(isSizeRow);
+  const [showAllFigures, setShowAllFigures] = useState(false);
+  const foldedFigures = new Set(sizeRowsShown(sizeRows, rowBlocked).folded.map((row) => row.id));
   const { ordered, otherIds, otherDimensionRows, firstOtherId, statementIds, statementRows, firstStatementId } =
-    orderRows(pending, rowBlocked);
+    orderRows(
+      pending.filter((row) => !isSizeRow(row)),
+      rowBlocked,
+    );
 
   // Every control on a row of THIS card writes to THIS page's observation. The
   // configuration card passes callbacks that reach further; nothing in
@@ -535,7 +542,7 @@ export default function ItemCard({
   const guessWhy = new Map(guess.guesses.map((entry) => [entry.observationId, entry.why]));
 
   // Which rows the reviewer is being asked to confirm rather than merely read.
-  const guessedRows = ordered.filter(
+  const guessedRows = [...sizeRows, ...ordered].filter(
     (o) => (o.slotSuggested && o.dimensionSlot) || o.groupSuggested,
   );
 
@@ -560,6 +567,7 @@ export default function ItemCard({
         // A folded row is unfolded first, so the link has somewhere to land.
         onGo={(entry) => {
           if (!entry.observationId) return;
+          if (foldedFigures.has(entry.observationId)) setShowAllFigures(true);
           if (otherIds.has(entry.observationId)) setShowOtherDimensions(true);
           if (statementIds.has(entry.observationId)) setShowStatements(true);
         }}
@@ -574,7 +582,38 @@ export default function ItemCard({
           figures. */}
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
+          {/* THE SIZE FIRST: what BWS receives, then each figure. */}
+          <DrawingSize
+            rows={sizeRows}
+            cell={{
+              shown: dimensionShown,
+              fileText: dimensionCell.text,
+              problems: dimensionCell.problems.map((problem) => problem.message),
+            }}
+            drafts={drafts}
+            setDrafts={setDrafts}
+            busy={busy}
+            showMm={showMm}
+            showAll={showAllFigures}
+            onToggleAll={() => setShowAllFigures((value) => !value)}
+            blockersFor={blockerFor}
+            warningsFor={warningFor}
+            occupantsFor={(observationId) => resolution?.occupants?.[observationId] ?? []}
+            runs={resolution?.resolution.runs ?? []}
+            guessWhy={(observationId) => guessWhy.get(observationId)}
+            candidateRow={(observation, index) => {
+              const candidate = observation.candidates?.[index];
+              return candidate ? candidateRowFor(item, observation, candidate) : null;
+            }}
+            onSwapSlot={rowCallbacks.onSwapSlot}
+            onChange={rowCallbacks.onChange}
+            onIgnore={rowCallbacks.onIgnore}
+          />
           {/* The specs themselves. */}
+          {ordered.length > 0 && (
+          <p className="mb-1 mt-4 text-th font-bold uppercase tracking-wider text-neutral-500">Finishes and everything else</p>
+          )}
+          {ordered.length > 0 && (
           <div className="overflow-x-auto rounded-lg border border-neutral-200">
             <table className="w-full border-collapse text-cell">
               <ObservationTableHead />
@@ -646,6 +685,7 @@ export default function ItemCard({
               </tbody>
             </table>
           </div>
+          )}
 
           {/* ONE SENTENCE UNDER THE TABLE, not a reason repeated on every row.
               It says what the yellow means and what this card's particular
@@ -663,33 +703,6 @@ export default function ItemCard({
               Confirm or correct them — a row set back to a note keeps its label and figure either way.
             </p>
           )}
-
-          {/* WHAT BWS WILL ACTUALLY RECEIVE in field 3, from this card's pending
-              rows, through the same function the export calls. This is the only
-              place a human can check the whole ruling at a glance, and it is
-              what makes the positional W x D x H assumption acceptable: a
-              transposed order is obvious here in a second. ALWAYS SHOWN, even
-              when empty — a card with no line at all reads as one with nothing
-              to say about its size, which is the opposite of the truth. */}
-          <div className="mt-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
-            <p className="text-th font-semibold uppercase tracking-wider text-neutral-500">
-              BWS Dimensions
-              <Tip>Exactly what BWS field 3 will receive, composed the way the export composes it.</Tip>
-            </p>
-            {dimensionCell.text ? (
-              <ComposedDimensionText shown={dimensionShown} fileText={dimensionCell.text} />
-            ) : (
-              <p className="text-neutral-500">
-                No width, depth or height placed yet. Give a figure below its slot, or leave them as notes — they stay
-                on the item either way.
-              </p>
-            )}
-            {dimensionCell.problems.map((problem, index) => (
-              <p key={index} className="text-xs text-amber-700">
-                {problem.message}
-              </p>
-            ))}
-          </div>
 
           {/* THE BILL'S VALUES, ONE PRESS (brief G): every value the bill wrote
               that confirming would replace, named before the press. */}

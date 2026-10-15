@@ -51,17 +51,29 @@ function renderCard(
 function rowLabels(): string[] {
   return screen
     .getAllByRole("row")
+    .filter((row) => !row.hasAttribute("data-figure-row"))
     .map((row) => row.querySelectorAll("td")[1]?.textContent?.trim() ?? "")
     .filter(Boolean);
 }
 
-/** The table row whose value box holds this figure. */
+/** The row holding this value: a size figure by the figure it prints, any other row by its value box. */
 function rowFor(value: string): HTMLElement {
-  const found = screen
-    .getAllByRole("row")
-    .find((row) => within(row).queryByDisplayValue(value) !== null);
+  const figureRow = figureRows().find((row) =>
+    [...row.querySelectorAll("span.font-mono")].some((span) => span.textContent === value),
+  );
+  const found = figureRow ?? screen.getAllByRole("row").find((row) => within(row).queryByDisplayValue(value) !== null);
   if (!found) throw new Error(`No row holds the value ${value}`);
   return found;
+}
+
+/** The size section's figure rows, in the order shown (workstream E). */
+function figureRows(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>("[data-figure-row]")];
+}
+
+/** The size section's rows by the label the page printed beside each figure. */
+function figureLabels(): string[] {
+  return figureRows().map((row) => row.getAttribute("data-label") ?? "");
 }
 
 describe("the item card's dimension rows", () => {
@@ -83,15 +95,35 @@ describe("the item card's dimension rows", () => {
     renderCard(s201());
     // The fold names how many it is hiding, so the card never implies the page
     // says less than it does.
-    expect(screen.getByText(/Other dimensions \(3\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Every other figure the drawing prints \(3\)/)).toBeInTheDocument();
     // Two FRONT rows on screen: the placed width and the placed height. The
     // front elevation's 42 and 27 are folded away with the side's 50.
-    expect(rowLabels().filter((label) => label === "FRONT")).toHaveLength(2);
-    expect(screen.queryByDisplayValue("42")).toBeNull();
+    expect(figureLabels().filter((label) => label === "FRONT")).toHaveLength(2);
+    expect(figureRows()).toHaveLength(4);
 
-    await userEvent.click(screen.getByRole("button", { name: /Other dimensions \(3\) — show/ }));
-    expect(rowLabels().filter((label) => label === "FRONT")).toHaveLength(4);
-    expect(screen.getByDisplayValue("42")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Every other figure the drawing prints \(3\) — show/ }));
+    expect(figureLabels().filter((label) => label === "FRONT")).toHaveLength(4);
+    expect(rowFor("42")).toBeInTheDocument();
+  });
+
+  // Workstream E: "only three of the four" figures offered a slot.
+  it("gives every figure, folded or not, the same one picker — and only one", async () => {
+    renderCard(s201());
+    await userEvent.click(screen.getByRole("button", { name: /Every other figure the drawing prints \(3\) — show/ }));
+    const pickers = within(screen.getByTestId("drawing-figures")).getAllByRole("group", { name: /^What .* is$/ });
+    expect(pickers).toHaveLength(7);
+    for (const picker of pickers) {
+      expect(within(picker).getAllByRole("button").map((button) => button.textContent)).toEqual(["W", "D", "H", "SH", "Dia", "note"]);
+    }
+    // No slot select and no separate "Use as" row beside it any more.
+    expect(screen.queryByRole("group", { name: "Use as" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Keep as a note" })).toBeNull();
+  });
+
+  it("says what each figure becomes, and what BWS receives at the top", () => {
+    renderCard(s201());
+    expect(within(rowFor("640")).getByText("W 640 mm")).toBeInTheDocument();
+    expect(within(screen.getByTestId("what-bws-receives")).getByTestId("bws-cell")).toHaveTextContent("W640 x D685 x H680 x SH445mm");
   });
 
   it("composes the BWS cell from the placed slots", () => {
@@ -105,9 +137,8 @@ describe("the item card's dimension rows", () => {
     // toggle and nothing else, which reads as a page that measures nothing.
     resetIds();
     renderCard([figure("FRONT", "640"), figure("SIDE", "685")]);
-    expect(screen.queryByText(/Other dimensions/)).toBeNull();
-    expect(screen.getByDisplayValue("640")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("685")).toBeInTheDocument();
+    expect(screen.queryByText(/Every other figure/)).toBeNull();
+    expect(figureLabels()).toEqual(["FRONT", "SIDE"]);
   });
 
   it("says so in words when nothing is placed, rather than showing no line", () => {
@@ -117,7 +148,7 @@ describe("the item card's dimension rows", () => {
     // about its size.
     resetIds();
     renderCard([figure("FRONT", "640"), figure("SIDE", "685")]);
-    expect(screen.getByText(/BWS Dimensions/i)).toBeInTheDocument();
+    expect(screen.getByText(/What BWS receives/i)).toBeInTheDocument();
     expect(screen.getByText(/No width, depth or height placed yet/i)).toBeInTheDocument();
   });
 
@@ -235,7 +266,7 @@ describe("the table's width", () => {
   // Panther run). What CAN be held here is the count: one column fewer is what
   // bought the room, and a `colSpan` that does not match it is the trap that
   // squeezed the replace acknowledgement into a ribbon once already.
-  it("has six columns, and every spanning panel covers all six", () => {
+  it("has six columns, and every spanning panel covers its own table's columns", () => {
     resetIds();
     const rows = [
       figure("FRONT", "640", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm" }),
@@ -244,9 +275,9 @@ describe("the table's width", () => {
     renderCard(rows, {
       blockers: [{ code: "unit_missing", message: "Choose millimetres or centimetres.", observationId: rows[0]!.id }],
     });
-    const headings = screen.getAllByRole("columnheader");
-    expect(headings).toHaveLength(6);
-    expect(headings.map((cell) => cell.textContent?.trim())).toEqual([
+    const figures = screen.getByTestId("drawing-figures");
+    const specs = [...document.querySelectorAll("table")].find((table) => table !== figures && within(table).queryByText("Group"))!;
+    expect(within(specs).getAllByRole("columnheader").map((cell) => cell.textContent?.trim())).toEqual([
       "Group",
       "Label",
       "Value",
@@ -254,29 +285,31 @@ describe("the table's width", () => {
       "State",
       "",
     ]);
+    // The size section: figure, what it is, what it becomes, the row's actions.
+    expect(within(figures).getAllByRole("columnheader")).toHaveLength(4);
 
     // A spanning panel is its OWN `<tr>` with ONE cell, and that cell spans
-    // every column. Short and the panel stops before the last column; long and
-    // the row is wider than the table it is in.
+    // every column of the table it is in. Short and the panel stops before the
+    // last column; long and the row is wider than the table it is in.
     const spanning = [...document.querySelectorAll("td[colspan]")];
     expect(spanning.length).toBeGreaterThan(0);
     for (const cell of spanning) {
-      expect(cell.getAttribute("colspan")).toBe("6");
+      const table = cell.closest("table")!;
+      expect(cell.getAttribute("colspan")).toBe(String(table.querySelectorAll("thead th").length));
       expect(cell.parentElement?.children).toHaveLength(1);
     }
   });
 
-  it("keeps the unit beside the figure it belongs to, with its provenance", () => {
-    // It was a column of its own. Folded into the value cell, the select and
-    // the sentence that says where the unit came from have to travel with it --
+  it("keeps the unit beside the figure it belongs to, with its provenance", async () => {
     // "printed on the page" is not decoration, it is the difference between a
-    // measurement and a guess.
+    // measurement and a guess. The unit select is one click away (Edit value).
     resetIds();
     renderCard([figure("FRONT", "640", { attrGroup: "dimension", dimensionSlot: "W", unit: "mm", unitSource: "printed" })]);
     const row = rowFor("640");
-    const valueCell = row.querySelectorAll("td")[2]!;
-    expect(within(valueCell).getByLabelText("printed in")).toHaveValue("mm");
-    expect(within(valueCell).getByText("printed on the page")).toBeInTheDocument();
+    const figureCell = row.querySelectorAll("td")[0]!;
+    expect(within(figureCell).getByText(/printed on the page/)).toBeInTheDocument();
+    await userEvent.click(within(row).getByRole("button", { name: "Edit value" }));
+    expect(within(rowFor("640")).getByLabelText("printed in")).toHaveValue("mm");
   });
 });
 
@@ -423,13 +456,15 @@ describe("a specification sheet's blank sub-dimensions", () => {
 
   it("folds a blank sub-dimension away, though it states no figure at all", async () => {
     renderCard(s201Sheet());
-    const labels = rowLabels();
+    const labels = figureLabels();
     expect(labels).toContain("WIDTH");
     expect(labels).not.toContain("WIDTH SEAT");
     expect(labels).not.toContain("DEPTH BACK");
 
-    await userEvent.click(screen.getByRole("button", { name: /Other dimensions \(5\)/ }));
-    expect(rowLabels()).toContain("WIDTH SEAT");
+    await userEvent.click(screen.getByRole("button", { name: /Every other figure the drawing prints \(5\)/ }));
+    expect(figureLabels()).toContain("WIDTH SEAT");
+    // It states no figure, so it says so where a slot would be offered.
+    expect(within(screen.getByTestId("drawing-figures")).getAllByText("no figure printed")).toHaveLength(5);
   });
 
   it("puts the four that matter first, in the order the composed cell writes them", () => {
@@ -437,7 +472,7 @@ describe("a specification sheet's blank sub-dimensions", () => {
     // under it in a different order makes a transposition harder to spot, not
     // easier, and spotting one is the entire point of that panel.
     renderCard(s201Sheet());
-    expect(rowLabels().slice(0, 4)).toEqual(["WIDTH", "DEPTH", "HEIGHT", "HEIGHT SEAT"]);
+    expect(figureLabels().slice(0, 4)).toEqual(["WIDTH", "DEPTH", "HEIGHT", "HEIGHT SEAT"]);
   });
 
   it("groups what is left instead of leaving it in the order the model reported it", () => {
@@ -450,8 +485,9 @@ describe("a specification sheet's blank sub-dimensions", () => {
       callout("EXPOSED WOODWORK", "Dark tinted wood", "WD-05"),
     ]);
     // Materials, then finishes, then the paragraphs — whatever order the page
-    // happened to state them in.
-    expect(rowLabels()).toEqual(["WIDTH", "FABRIC CODE", "EXPOSED WOODWORK", "REMARKS", "Item"]);
+    // happened to state them in. The width is in the size section above.
+    expect(figureLabels()).toEqual(["WIDTH"]);
+    expect(rowLabels()).toEqual(["FABRIC CODE", "EXPOSED WOODWORK", "REMARKS", "Item"]);
   });
 });
 

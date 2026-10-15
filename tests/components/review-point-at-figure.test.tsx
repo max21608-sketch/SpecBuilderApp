@@ -9,9 +9,10 @@
 // measurement I want you to look at"), and was surprised that the unit select
 // relabels rather than converts (Matthew, 45:03). So:
 //
-//   * every measured row, FOLDED ONES INCLUDED, carries "Use as W · D · H · SH
-//     · Dia", and a click sends ONE swap naming every row the card shows
-//     holding that slot, at the version shown;
+//   * every measured row, FOLDED ONES INCLUDED, carries ONE picker — W · D ·
+//     H · SH · Dia · note, in the size section since workstream E
+//     (2026-10-15) — and a slot click sends ONE swap naming every row the card
+//     shows holding that slot, at the version shown;
 //   * a slot's rival figure offers "Use this instead", the same swap on the
 //     row that IS that figure;
 //   * the unit select says "printed in", the card-wide control says "Every
@@ -59,12 +60,17 @@ function renderCard(staged: DrawingItem, over: Parameters<typeof resolution>[0] 
   return spies;
 }
 
-/** The table row whose value box holds this figure. */
+/** The size section's row printing this figure (workstream E), or any row whose box holds it. */
 function rowFor(value: string): HTMLElement {
-  const found = screen.getAllByRole("row").find((row) => within(row).queryByDisplayValue(value) !== null);
+  const figureRow = [...document.querySelectorAll<HTMLElement>("[data-figure-row]")].find((row) =>
+    [...row.querySelectorAll("span.font-mono")].some((span) => span.textContent === value),
+  );
+  const found = figureRow ?? screen.getAllByRole("row").find((row) => within(row).queryByDisplayValue(value) !== null);
   if (!found) throw new Error(`No row holds the value ${value}`);
   return found;
 }
+
+const SLOT_NAMES = ["width", "depth", "height", "seat height", "diameter"];
 
 /** A shop drawing: W/D/H placed off the elevations, SECTION B and an arm height folded. */
 function sectionB() {
@@ -77,25 +83,26 @@ function sectionB() {
   return { width, depth, height, section, arm, staged: item({ observations: [width, depth, height, section, arm], pages: [1] }) };
 }
 
-describe("Use as W · D · H · SH · Dia", () => {
+describe("one slot picker per figure: W · D · H · SH · Dia · note", () => {
   it("is on every measured row, the folded ones included", async () => {
     const { staged } = sectionB();
     renderCard(staged);
-    // Three placed slots inline, each with the five buttons.
-    expect(screen.getAllByRole("group", { name: "Use as" })).toHaveLength(3);
-    await userEvent.click(screen.getByRole("button", { name: /Other dimensions \(2\)/ }));
-    expect(screen.getAllByRole("group", { name: "Use as" })).toHaveLength(5);
+    // Three placed slots inline, each with the picker.
+    const pickers = () => within(screen.getByTestId("drawing-figures")).getAllByRole("group", { name: /^What .* is$/ });
+    expect(pickers()).toHaveLength(3);
+    await userEvent.click(screen.getByRole("button", { name: /Every other figure the drawing prints \(2\)/ }));
+    expect(pickers()).toHaveLength(5);
     const row = rowFor("880");
-    for (const name of ["width", "depth", "height", "seat height", "diameter"]) {
-      expect(within(row).getByRole("button", { name: `Use as ${name}` })).toBeEnabled();
+    for (const name of SLOT_NAMES) {
+      expect(within(row).getByRole("button", { name: `880 is the ${name}` })).toBeEnabled();
     }
   });
 
   it("sends ONE swap naming the row that holds the slot, at the version shown", async () => {
     const { staged, depth, section } = sectionB();
     const spies = renderCard(staged);
-    await userEvent.click(screen.getByRole("button", { name: /Other dimensions \(2\)/ }));
-    await userEvent.click(within(rowFor("880")).getByRole("button", { name: "Use as depth" }));
+    await userEvent.click(screen.getByRole("button", { name: /Every other figure the drawing prints \(2\)/ }));
+    await userEvent.click(within(rowFor("880")).getByRole("button", { name: "880 is the depth" }));
     const saves = spies.of("onSaveObservation");
     expect(saves).toHaveLength(1);
     const [savedItem, mover, changes] = saves[0]!.args as [DrawingItem, DrawingObservation, Record<string, unknown>];
@@ -107,7 +114,7 @@ describe("Use as W · D · H · SH · Dia", () => {
   it("shows the slot a row already fills as pressed, not as something to click", () => {
     const { staged } = sectionB();
     renderCard(staged);
-    const button = within(rowFor("2100")).getByRole("button", { name: "Use as width" });
+    const button = within(rowFor("2100")).getByRole("button", { name: "2100 is the width" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-pressed", "true");
   });
@@ -115,7 +122,17 @@ describe("Use as W · D · H · SH · Dia", () => {
   it("is not offered on a row that states no figure", () => {
     resetIds();
     renderCard(item({ observations: [figure("REMARKS", "SUBMIT SHOP DRAWINGS FOR REVIEW", { attrGroup: "note" })] }));
-    expect(screen.queryByRole("group", { name: "Use as" })).toBeNull();
+    expect(screen.queryByRole("group", { name: /^What .* is$/ })).toBeNull();
+    expect(screen.queryByTestId("drawing-figures")).toBeNull();
+  });
+
+  it("sends a note as a note, and never a write for the slot a row already holds", async () => {
+    const { staged, width } = sectionB();
+    const spies = renderCard(staged);
+    await userEvent.click(within(rowFor("2100")).getByRole("button", { name: "2100 is a note, not a slot" }));
+    const [, mover, changes] = spies.of("onSaveObservation")[0]!.args as [DrawingItem, DrawingObservation, Record<string, unknown>];
+    expect(mover.id).toBe(width.id);
+    expect(changes).toEqual({ attrGroup: "note", dimensionSlot: null });
   });
 });
 
@@ -173,9 +190,10 @@ describe("a slot's rival figure", () => {
 });
 
 describe("the unit control says what it does", () => {
-  it("labels the row's select 'printed in' where a person can read it", () => {
+  it("labels the row's select 'printed in' where a person can read it", async () => {
     const { staged } = sectionB();
     renderCard(staged);
+    await userEvent.click(within(rowFor("2100")).getByRole("button", { name: "Edit value" }));
     const row = rowFor("2100");
     expect(within(row).getByText("printed in")).toBeVisible();
     expect(within(row).getByLabelText("printed in")).toHaveValue("mm");

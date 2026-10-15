@@ -261,3 +261,20 @@ export function millimetresBeside(value: string | null, unit: AttributeUnit | nu
 export function slotWords(slot: DimensionSlot): string {
   return `the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}`;
 }
+
+/**
+ * A ROW THE CARD'S SIZE SECTION LISTS, one figure each (workstream E,
+ * 2026-10-15): every dimension, every row the page itself measured as
+ * not-overall (figure or not, so a figure the read could not number still
+ * shows where its siblings are), and every other note that states one figure.
+ * A specification sheet's labelled statement counts only with a unit printed
+ * beside it — "QUANTITY 1" is a number, not a size. Display only: what a row
+ * IS is unchanged, and the confirm never reads this.
+ */
+export function isSizeRow(observation: DrawingObservation): boolean {
+  if (observation.attrGroup === "dimension") return true;
+  if (observation.attrGroup !== "note") return false;
+  if (observation.statement === true) return observation.unit !== null && isMeasuredRow(observation);
+  if (observation.isOverall === false) return true;
+  return isMeasuredRow(observation);
+}

@@ -36,6 +36,8 @@ export type NeedsYouItem = {
   observationId?: string;
   /** The bill sheet it is about, so the review can switch to its tab first. */
   sheetIndex?: number;
+  /** The page (staged item) it is about, so a configuration card can open that configuration's tab first. */
+  itemId?: string;
 };
 
 // ---- ids, so the list and the rows cannot disagree about an address --------
@@ -147,6 +149,55 @@ export function drawingNeedsYou(input: {
     records.push({ key: `${blocker.code}-${position}`, words: firstSentence(blocker.message), target: null, why: blocker.message });
   });
   return [...uncertain, ...records, ...onRows];
+}
+
+// ---- a configuration card ------------------------------------------------------
+
+/**
+ * ONE LIST FOR A CARD OF SEVERAL PAGES — the configuration cards, whose rows
+ * sit on a tab per configuration (2026-10-15, the follow-up to the single
+ * card's list). Each page's blockers become items as on a single card, named
+ * by their configuration where there is more than one, and carry the page's
+ * `itemId` so the card can open that tab before scrolling.
+ *
+ * A blocker the card raises once for every page (no phase, a name the
+ * database refuses) arrives once per page: said once. A link to "the records
+ * this page is for" goes to the card's one Applies-to box, `runsTarget`. A row
+ * shown on the card as ANOTHER row — a configuration's copy of a shared
+ * measurement, drawn once as its leader's row — is pointed at that row
+ * (`alias`).
+ */
+export function configurationNeedsYou(input: {
+  members: readonly {
+    itemId: string;
+    name: string;
+    blockers: readonly CardBlockerLike[];
+    rows: readonly CardRowLike[];
+    slots: ReadonlyMap<number, DimensionSlot | null>;
+  }[];
+  runsTarget: string;
+  alias?: (observationId: string) => string | null;
+}): NeedsYouItem[] {
+  const several = input.members.length > 1;
+  const out: NeedsYouItem[] = [];
+  const said = new Set<string>();
+  for (const member of input.members) {
+    for (const entry of drawingNeedsYou({ itemId: member.itemId, blockers: member.blockers, rows: member.rows, slots: member.slots })) {
+      const target =
+        entry.target === runTargetsId(member.itemId)
+          ? input.runsTarget
+          : entry.observationId && entry.target === observationRowId(entry.observationId)
+            ? observationRowId(input.alias?.(entry.observationId) ?? entry.observationId)
+            : entry.target;
+      const onRow = Boolean(entry.observationId) || entry.key.startsWith("uncertain-");
+      const words = several && onRow ? `${member.name} · ${entry.words}` : entry.words;
+      const once = `${words}|${target ?? ""}`;
+      if (said.has(once)) continue;
+      said.add(once);
+      out.push({ ...entry, key: `${member.itemId}-${entry.key}`, words, target, itemId: member.itemId });
+    }
+  }
+  return out;
 }
 
 // ---- a bill review -------------------------------------------------------------

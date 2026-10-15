@@ -179,7 +179,10 @@ describe("a card whose document names its configurations", () => {
     }));
     renderNamed(doc, resolutions);
     expect(screen.getByRole("button", { name: /Confirm Q-301/ })).toBeDisabled();
-    expect(screen.getByText(/1 decision left before Q-301 can be confirmed/)).toBeInTheDocument();
+    // Each page's side of the clash in the "needs you" list, and the bar points at it (2026-10-15).
+    const list = screen.getByRole("region", { name: "What needs you" });
+    expect(within(list).getAllByText(/same finish, or two\?/)).toHaveLength(2);
+    expect(screen.getByRole("link", { name: /2 things need you — listed at the top/ })).toBeInTheDocument();
     // On BOTH rows, each naming the other page's words.
     expect(screen.getByText(/page 2 says “Maker A, Ref. X, woven”/)).toBeInTheDocument();
     expect(screen.getByText(/page 1 says “Maker A, Ref. X”/)).toBeInTheDocument();

@@ -2,7 +2,7 @@
 // decides whether a confirm can go — that stays the blockers' — so these hold
 // that every blocker becomes a short next step with a place to go.
 import { describe, expect, it } from "vitest";
-import { billNeedsYou, drawingNeedsYou, sheetsWaiting } from "@/lib/needs-you";
+import { billNeedsYou, configurationNeedsYou, drawingNeedsYou, sheetsWaiting } from "@/lib/needs-you";
 import { recordedFrom, sourceSays, sourceWords } from "@/lib/source-words";
 import { replaceComparison } from "@/lib/replace-words";
 
@@ -113,5 +113,50 @@ describe("where a value came from", () => {
         { slot: null, value: "Sienna Walnut", unit: null },
       ),
     ).toBe("The bill says “PL DINING TABLE TO BE EXTENDABLE TIMBER” · this drawing says “Sienna Walnut”");
+  });
+});
+
+describe("configurationNeedsYou", () => {
+  const member = (itemId: string, name: string, blockers: { code: string; message: string; observationId?: string }[]) => ({
+    itemId,
+    name,
+    blockers,
+    rows: [{ id: `${itemId}-com`, labelRaw: "FABRIC", attrGroup: "material" }],
+    slots: new Map(),
+  });
+
+  it("names each row by its configuration, and carries the page so the card can open its tab", () => {
+    const items = configurationNeedsYou({
+      members: [
+        member("p1", "TYPE 1", [{ code: "slot_taken", message: "COM 1 is held.", observationId: "p1-com" }]),
+        member("p2", "TYPE 2", [{ code: "no_state", message: "Stated or TBC?", observationId: "p2-com" }]),
+      ],
+      runsTarget: "runs-card",
+    });
+    expect(items.map((item) => [item.words, item.target, item.itemId])).toEqual([
+      ["TYPE 1 · FABRIC: field already held — use this drawing's, or ignore the row", "replace-p1-com", "p1"],
+      ["TYPE 2 · FABRIC: stated or TBC?", "row-p2-com", "p2"],
+    ]);
+  });
+
+  it("says a blocker every page raises once, and sends the records link to the card's one box", () => {
+    const items = configurationNeedsYou({
+      members: [
+        member("p1", "A", [{ code: "no_targets", message: "No phase." }]),
+        member("p2", "B", [{ code: "no_targets", message: "No phase." }]),
+      ],
+      runsTarget: "runs-card",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ words: "Choose the record this page is for", target: "runs-card" });
+  });
+
+  it("points a configuration's copy of a shared row at the row the card draws", () => {
+    const items = configurationNeedsYou({
+      members: [member("p2", "B", [{ code: "unit_missing", message: "Unit?", observationId: "p2-com" }])],
+      runsTarget: "runs-card",
+      alias: (id) => (id === "p2-com" ? "p1-com" : null),
+    });
+    expect(items[0]).toMatchObject({ target: "row-p1-com", observationId: "p2-com", itemId: "p2" });
   });
 });

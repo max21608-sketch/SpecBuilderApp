@@ -35,10 +35,12 @@ import {
   isBillUnitOverride,
   type BillDescriptionPlan,
   type BillUnitOverride,
+  type PlanFigure,
   type PlannedAttribute,
   type SlotOverride,
 } from "@/lib/bill-description";
-import { DIMENSION_SLOT_LABELS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
+import { DIMENSION_SLOT_LABELS } from "@/lib/spec-vocab";
+import { SlotPicker, WhatBwsReceives } from "@/components/imports/SlotPicker";
 import { toMillimetres, valueCarriesItsUnit } from "@/lib/dimensions";
 
 /** Set a size part's slot (`null` puts it back as printed). Absent where the line cannot change. */
@@ -46,15 +48,6 @@ export type SetSlot = (key: string, slot: SlotOverride | null) => void;
 
 /** Say the unit of a size that prints none (`null` takes it back). Absent where the line cannot change. */
 export type SetUnit = (unit: BillUnitOverride | null) => void;
-
-const SLOT_CHOICES: { value: SlotOverride; short: string; long: string }[] = [
-  ...DIMENSION_SLOTS.map((slot) => ({
-    value: slot as SlotOverride,
-    short: slot === "DIA" ? "Dia" : slot,
-    long: DIMENSION_SLOT_LABELS[slot].toLowerCase(),
-  })),
-  { value: "note", short: "note", long: "a note, not a slot" },
-];
 
 /** The plan as the review GET sends it: plus, on a line a revision carries, why it will not be written. */
 export type ReviewDescription = BillDescriptionPlan & { revisionRefusal?: string | null };
@@ -199,7 +192,7 @@ export function BillDescriptionSummary({
           return (
             <div key={key} className="flex flex-wrap items-center gap-1 text-xs text-neutral-600">
               <span className="font-mono">{key}</span> is:
-              <SlotControl part={part} current="note" busy={busy} onSetSlot={onSetSlot} />
+              <SlotPicker current="note" figure={key} busy={busy} currentClickable onPick={(slot) => onSetSlot(key, slot)} />
             </div>
           );
         })}
@@ -208,7 +201,38 @@ export function BillDescriptionSummary({
   );
 }
 
-/** Every statement of the cell, verbatim, beside what the confirm writes for it — and the cell as printed. */
+/** What one figure becomes, in the reviewer's words: `W 720 mm`, `H 2'-4" (711mm)`, or a note. */
+export function figureBecomes(figure: Pick<PlanFigure, "slot" | "figure" | "unit">): string {
+  if (figure.slot === "note") return "a note";
+  const short = figure.slot === "DIA" ? "Dia" : figure.slot;
+  if (valueCarriesItsUnit(figure.figure) || figure.unit === "in") {
+    const mm = toMillimetres(figure.figure, "in");
+    const printed = valueCarriesItsUnit(figure.figure) ? figure.figure : `${figure.figure}"`;
+    return `${short} ${printed}${mm.ok ? ` (${mm.mm}mm)` : ""}`;
+  }
+  return figure.unit ? `${short} ${figure.figure} ${figure.unit}` : `${short} ${figure.figure} (no unit)`;
+}
+
+/** Where a figure is printed, in words: `1st of “720 X 1400 X 720MM” · no letter printed`. */
+function figureWhere(figure: PlanFigure): string {
+  const nth = ["1st", "2nd", "3rd"][figure.ordinal - 1] ?? `${figure.ordinal}th`;
+  const at = figure.of > 1 ? `${nth} of “${figure.line}”` : `“${figure.line}”`;
+  const letter = figure.assumed
+    ? "no letter printed"
+    : figure.printed
+      ? `printed as ${figure.printed === "DIA" ? "Dia" : figure.printed}`
+      : "no letter printed";
+  return `${at} · ${letter}`;
+}
+
+/**
+ * THE LINE EXPANDED, top to bottom (workstream E, 2026-10-15): what BWS
+ * receives, large; ONE row per figure the line prints, each with the same
+ * picker; everything else the line says beside what it is written as; and the
+ * bill as printed LAST, in a box labelled as the document. Matthew read the
+ * old right-hand "As printed" column as the output (26:08) — the document is
+ * never a column beside what is written.
+ */
 export function BillDescriptionPanelRow({
   plan,
   raw,
@@ -223,79 +247,134 @@ export function BillDescriptionPanelRow({
   onSetSlot?: SetSlot;
   busy?: boolean;
 }) {
+  const figures = plan.figures ?? [];
+  // Everything that is not one figure: finishes, words, and a size line kept
+  // whole as a note — which says why, so it stays listed beside its figures.
+  const rest = plan.attributes.filter((attribute) => !attribute.slot && !attribute.part);
+  const shownCell = { text: plan.dimensionCellShown ?? plan.dimensionCell, fromImperial: plan.dimensionFromImperial === true };
   return (
     <tr>
       <td colSpan={colSpan} className="border-b border-neutral-100 bg-neutral-50 px-4 py-3">
-        <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-neutral-500">
-                <th className="py-1 pr-3 font-normal">The bill says</th>
-                <th className="py-1 pr-3 font-normal">Written as</th>
-                <th className="py-1 font-normal">Why</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plan.attributes.map((attribute, index) => (
-                <tr key={index} className="border-t border-neutral-200 align-top">
-                  <td className="py-1 pr-3 font-mono text-neutral-800">
-                    {attribute.label}: {attribute.value}
-                  </td>
-                  <td className="py-1 pr-3 text-neutral-800">
-                    {becomes(attribute)}
-                    {attribute.materialCode && isFinish(attribute) && (
-                      <span className="text-neutral-500"> · {attribute.materialCode} filed in the finishes library</span>
-                    )}
-                    {attribute.part?.overridden && (
-                      <Chip
-                        tone="info"
-                        className="ml-1.5"
-                        title={
-                          attribute.part.printed
-                            ? `The bill printed ${attribute.part.key}`
-                            : `The bill printed ${attribute.part.key} with no letter`
-                        }
+        <div className="space-y-3">
+          <WhatBwsReceives
+            shown={shownCell}
+            fileText={plan.dimensionCell}
+            empty={figures.length > 0 ? "No slot filled yet — give a figure its slot below." : "This line gives no size."}
+          />
+          {figures.length > 0 && (
+            <div>
+              <p className="mb-1 text-th font-bold uppercase tracking-wider text-neutral-500">Each figure the bill prints</p>
+              <table className="w-full rounded-lg border border-neutral-200 bg-white text-xs" data-testid="bill-figures">
+                <thead>
+                  <tr className="text-left text-neutral-500">
+                    <th className="w-[40%] px-3 py-1.5 font-normal">Figure, as the bill prints it</th>
+                    <th className="px-3 py-1.5 font-normal">Is</th>
+                    <th className="px-3 py-1.5 font-normal">Becomes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {figures.map((figure) => {
+                    const guessed = figure.assumed && !figure.overridden && figure.slot !== "note";
+                    return (
+                      <tr
+                        key={figure.key}
+                        className={`border-t border-neutral-100 align-top ${guessed ? TONE.guess.row : figure.overridden ? TONE.info.row : ""}`}
+                        data-figure={figure.key}
                       >
-                        changed on review
-                      </Chip>
-                    )}
-                    {attribute.part && onSetSlot && (
-                      <SlotControl
-                        part={attribute.part}
-                        current={attribute.slot ?? "note"}
-                        busy={busy}
-                        onSetSlot={onSetSlot}
-                      />
-                    )}
-                  </td>
-                  <td className="py-1 text-neutral-600">{attribute.why ?? ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div>
-            <p className="mb-1 text-xs text-neutral-500">As printed</p>
-            <p className="whitespace-pre-line rounded border border-neutral-200 bg-white p-2 font-mono text-xs text-neutral-800">
-              {raw.replace(/\r\n?/g, "\n")}
+                        <td className="px-3 py-1.5">
+                          <span className="font-mono text-sm font-semibold text-neutral-900">{figure.figure}</span>
+                          {figure.unit && <span className="ml-1 text-neutral-500">{figure.unit}</span>}
+                          <p className="text-neutral-500">{figureWhere(figure)}</p>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          {onSetSlot ? (
+                            <SlotPicker
+                              current={figure.slot}
+                              figure={figure.figure}
+                              busy={busy}
+                              currentClickable
+                              onPick={(slot) => onSetSlot(figure.key, slot)}
+                            />
+                          ) : (
+                            <span className="font-mono">{figure.slot === "note" ? "note" : figure.slot}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <span className={figure.slot === "note" ? "text-neutral-500" : "font-mono font-semibold text-neutral-900"}>
+                            {figureBecomes(figure)}
+                          </span>
+                          {guessed && (
+                            <Chip tone="guess" className="ml-1.5" title="The line prints no letter: the slot comes from printed order">
+                              order assumed
+                            </Chip>
+                          )}
+                          {figure.overridden && (
+                            <>
+                              <Chip tone="info" className="ml-1.5" title={`The bill printed ${figureWhere(figure)}`}>
+                                set by you
+                              </Chip>
+                              {onSetSlot && (
+                                <Button variant="quiet" size="xs" className="ml-1" disabled={busy} onClick={() => onSetSlot(figure.key, null)}>
+                                  Undo
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {rest.length > 0 && (
+            <div>
+              <p className="mb-1 text-th font-bold uppercase tracking-wider text-neutral-500">Everything else the bill says about it</p>
+              <table className="w-full rounded-lg border border-neutral-200 bg-white text-xs">
+                <thead>
+                  <tr className="text-left text-neutral-500">
+                    <th className="w-[40%] px-3 py-1.5 font-normal">The bill says</th>
+                    <th className="w-[22%] whitespace-nowrap px-3 py-1.5 font-normal">Written as</th>
+                    <th className="px-3 py-1.5 font-normal">Why</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rest.map((attribute, index) => (
+                    <tr key={index} className="border-t border-neutral-100 align-top">
+                      <td className="px-3 py-1.5 font-mono text-neutral-800">
+                        {attribute.label}: {attribute.value}
+                      </td>
+                      <td className="px-3 py-1.5 text-neutral-800">
+                        {becomes(attribute)}
+                        {attribute.materialCode && isFinish(attribute) && (
+                          <span className="text-neutral-500"> · {attribute.materialCode} filed in the finishes library</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-neutral-600">{attribute.why ?? ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {/* THE DOCUMENT, LAST, and labelled as the document. */}
+          <div className="rounded-lg border border-dashed border-neutral-300 bg-white px-3 py-2" data-testid="bill-as-printed">
+            <p className="text-th font-bold uppercase tracking-wider text-neutral-500">
+              The bill, as printed <span className="font-normal normal-case tracking-normal">— the document, not what is written</span>
             </p>
+            {raw.trim() !== "" && (
+              <p className="mt-1 whitespace-pre-line font-mono text-xs text-neutral-800">{raw.replace(/\r\n?/g, "\n")}</p>
+            )}
             {/* A BILL'S OWN DIMS AND FINISH COLUMNS, as printed under their
                 headings — read by the same reader as the description's lines. */}
-            {/* A Dims cell of several lines is several cells of one column. */}
-            {(plan.columnCells ?? []).map((cell, index) => (
-              <div key={`${cell.column}-${index}`} className="mt-2">
-                <p className="mb-1 text-xs text-neutral-500">The bill&apos;s {cell.heading} column</p>
-                <p className="whitespace-pre-line rounded border border-neutral-200 bg-white p-2 font-mono text-xs text-neutral-800">
-                  {cell.value}
-                </p>
+            {groupColumnCells(plan.columnCells ?? []).map((cell) => (
+              <div key={cell.heading} className="mt-1.5">
+                <p className="text-xs text-neutral-500">The bill&apos;s {cell.heading} column</p>
+                <p className="whitespace-pre-line font-mono text-xs text-neutral-800">{cell.lines.join("\n")}</p>
               </div>
             ))}
-            <p className="mt-1 text-xs text-neutral-500">
-              {(plan.columnCells ?? []).length === plan.statements.length
-                ? "Each column cell is written to the record, sourced to this bill with no page."
-                : (plan.columnCells ?? []).length > 0
-                  ? "Every line after the first, and each column cell, is written to the record, sourced to this bill with no page."
-                  : "Every line after the first is written to the record, sourced to this bill with no page."}
-            </p>
+            <p className="mt-1 text-xs text-neutral-500">Every statement is kept on the record, sourced to this bill with no page.</p>
           </div>
         </div>
       </td>
@@ -303,52 +382,15 @@ export function BillDescriptionPanelRow({
   );
 }
 
-/**
- * W · D · H · SH · Dia · note for one size part. BUTTONS, never a select: a
- * select already showing "D" fires no change when somebody picks D, so the
- * press recording "yes, it is a depth" would do nothing — the level picker's
- * trap. The current slot is pressed; "As printed" removes the change.
- */
-function SlotControl({
-  part,
-  current,
-  busy,
-  onSetSlot,
-}: {
-  part: NonNullable<PlannedAttribute["part"]>;
-  current: SlotOverride;
-  busy: boolean;
-  onSetSlot: SetSlot;
-}) {
-  return (
-    <span className="mt-1 flex flex-wrap items-center gap-0.5" role="group" aria-label={`What ${part.key} is`}>
-      {SLOT_CHOICES.map((choice) => {
-        const pressed = choice.value === current;
-        return (
-          <button
-            key={choice.value}
-            type="button"
-            aria-pressed={pressed}
-            title={`${part.key} is ${choice.long}`}
-            disabled={busy}
-            onClick={() => onSetSlot(part.key, choice.value)}
-            className={`rounded border px-1.5 py-0.5 font-mono text-[11px] leading-4 disabled:opacity-50 ${
-              pressed
-                ? "border-neutral-800 bg-neutral-800 text-white"
-                : "border-neutral-300 bg-white text-neutral-700 hover:border-neutral-500"
-            }`}
-          >
-            {choice.short}
-          </button>
-        );
-      })}
-      {part.overridden && (
-        <Button variant="quiet" size="xs" disabled={busy} onClick={() => onSetSlot(part.key, null)}>
-          As printed
-        </Button>
-      )}
-    </span>
-  );
+/** A Dims cell of several lines is several cells of one column: shown as the one cell it was. */
+function groupColumnCells(cells: { heading: string; value: string }[]): { heading: string; lines: string[] }[] {
+  const out: { heading: string; lines: string[] }[] = [];
+  for (const cell of cells) {
+    const last = out[out.length - 1];
+    if (last && last.heading === cell.heading) last.lines.push(cell.value);
+    else out.push({ heading: cell.heading, lines: [cell.value] });
+  }
+  return out;
 }
 
 /**

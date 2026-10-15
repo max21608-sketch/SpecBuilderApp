@@ -51,7 +51,6 @@ import {
   billItemName,
   billReadsDescriptions,
   isSlotOverride,
-  placedParts,
   placedSizeOf,
   planSheetDescriptions,
   lineStatements,
@@ -60,6 +59,7 @@ import {
   type BillUnitOverride,
   sheetColumnHeadings,
   resolveSlotOverrides,
+  slotChangeFor,
   revisionDescriptionRefusal,
   type SlotOverride,
 } from "@/lib/bill-description";
@@ -1805,11 +1805,14 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
 
 // A SIZE PART'S SLOT, set by a person before the confirm (Matthew, 2026-10-01:
 // a round stool's "D" is its diameter). `{ key, slot }`, where `key` is the
-// part as the plan addressed it (`placedParts`) and `slot` one of the five, or
-// `note`, or null to put it back as printed. Refused, writing nothing, when the
-// part is no longer on the line's placed size (409), when the map moved since
-// the screen was drawn (409), and when the change would put two parts in one
-// slot (400, in `resolveSlotOverrides`' own sentence).
+// figure as the plan addressed it (`resolveSlotOverrides(...).figures`, any
+// figure the line prints since workstream E) and `slot` one of the five, or
+// `note`, or null to put it back as printed. A slot another figure holds moves
+// that figure to a note in the same write (`slotChangeFor`). Refused, writing
+// nothing, when the figure is no longer on the line (409), when the map moved
+// since the screen was drawn (409), and when the result would still put two
+// figures in one slot (400, in `resolveSlotOverrides`' own sentence) — which a
+// single pick can no longer cause.
 async function patchSlotOverride(
   id: string,
   sheetIndex: number,
@@ -1849,18 +1852,22 @@ async function patchSlotOverride(
       // the plan places from, so a part offered on the screen is a part here.
       const statements = line.rowKind === "finish_for" ? null : lineStatements(line, sheetColumnHeadings(sheet!));
       const placed = statements ? placedSizeOf(statements) : null;
-      // A lettered part or an unlettered figure (`710` of `700 DIA X 710MM`):
-      // the parts the plan offers, from the one function that lists them.
-      if (!placed || !placedParts(placed).some((part) => part.key === key)) {
+      // ANY FIGURE THE LINE PRINTS (workstream E): a placed part, an
+      // unlettered figure (`710` of `700 DIA X 710MM`) or a later line's
+      // (`SH: 420MM`) — the figures the plan offers, from the one function
+      // that lists them.
+      const figures = statements ? resolveSlotOverrides(placed, line.slotOverrides ?? null, statements).figures : [];
+      if (!statements || !figures.some((figure) => figure.key === key)) {
         throw new DomainConflictError(
           "slot_part_gone",
           `Row ${line.lineNo}'s size no longer prints “${key}”. Reload and look at it again.`,
         );
       }
-      const next: Record<string, SlotOverride> = { ...(line.slotOverrides ?? {}) };
-      if (slot === null) delete next[key];
-      else next[key] = slot;
-      const resolved = resolveSlotOverrides(placed, next);
+      // PICKING A HELD SLOT MOVES ITS HOLDER TO A NOTE, in this same write —
+      // the drawings card's swap rule (`slotChangeFor`). A slot still never
+      // holds two figures; the reviewer is just never asked to clear it first.
+      const { next } = slotChangeFor(placed, statements, line.slotOverrides ?? null, key, slot);
+      const resolved = resolveSlotOverrides(placed, next, statements);
       if (resolved.problem) throw new DomainConflictError("slot_taken", resolved.problem, { status: 400 });
       const version = current + 1;
       const written = await txn`

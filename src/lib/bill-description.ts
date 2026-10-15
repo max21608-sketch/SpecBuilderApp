@@ -421,41 +421,178 @@ export function placedSizeOf(statements: readonly BillStatement[]): PlacedSize |
   );
 }
 
-export type ResolvedSlotOverrides = {
-  /** Each part's key → the slot it is written in, or `note`. Every part of the line, overridden or not. */
-  effective: Map<string, SlotOverride>;
-  /** The keys a person set that this line's parts carry. */
-  applied: Set<string>;
-  /** Keys that name no part of the line as it now reads — ignored, and said so. */
-  unmatched: string[];
-  /**
-   * Why NONE of the changes is applied: they would put two parts in one slot.
-   * A slot holds one figure (`composeDimensionCell`'s `duplicate_slot`), and
-   * picking which of two a person meant would be this app deciding.
-   */
-  problem: string | null;
+/**
+ * ONE FIGURE A BILL LINE PRINTS, wherever on the line it is printed — the
+ * placed size line's parts, a later line's (`SH: 420MM`), and the figures of a
+ * size stated again (an imperial twin). Every one is offered the same slot
+ * picker on the review (workstream E, 2026-10-15: "only three of the four"
+ * offered one, because only the placed line's parts were addressable).
+ *
+ * `key` is the address a slot change is stored under. A placed part keeps the
+ * key it always had (`slotPartKey`, or its figure alone), so every override
+ * stored before this day still finds its part; a figure on any OTHER line is
+ * `<the line as printed> | <its part key>` — keyed on what the bill printed,
+ * never on a position, for `slotPartKey`'s reason.
+ */
+export type LineFigure = {
+  key: string;
+  /** The figure as printed, `720`, `2'-4"`. */
+  figure: string;
+  /** The unit its line states, or null where it states none. */
+  unit: "mm" | "cm" | "m" | "in" | null;
+  /** The slot the BILL printed beside it, or the one printed order gave it (`assumed`); null where none. */
+  printed: DimensionSlot | null;
+  /** Its slot came from printed ORDER, not a letter (`720 X 1400 X 720MM`). */
+  assumed: boolean;
+  /** The statement it is printed in. */
+  statementIndex: number;
+  line: string;
+  /** It is a part of the placed size line. */
+  placed: boolean;
+  /** Its position among the figures of its line, 1-based, and how many the line prints. */
+  ordinal: number;
+  of: number;
+  /** What it is with no person's change: the printed slot, a later line's filled slot, or a note. */
+  defaultSlot: SlotOverride;
 };
 
+export type ResolvedSlotOverrides = {
+  /** Each figure's key → the slot it is written in, or `note`. Every figure of the line, overridden or not. */
+  effective: Map<string, SlotOverride>;
+  /** The keys a person set that this line's figures carry. */
+  applied: Set<string>;
+  /** Keys that name no figure of the line as it now reads — ignored, and said so. */
+  unmatched: string[];
+  /**
+   * Why NONE of the changes is applied: they would put two figures in one
+   * slot. A slot holds one figure (`composeDimensionCell`'s `duplicate_slot`),
+   * and picking which of two a person meant would be this app deciding. The
+   * route never stores such a map — picking a held slot moves its holder to a
+   * note in the same write (`slotChangeFor`) — so this is the backstop for a
+   * map that went stale under a re-read.
+   */
+  problem: string | null;
+  /** Every figure, in printed order, with its default. Empty where `statements` were not given. */
+  figures: LineFigure[];
+};
+
+/** The address of a figure on a line OTHER than the placed one. */
+export function otherLineFigureKey(line: string, partKey: string): string {
+  return `${line} | ${partKey}`;
+}
+
 /**
- * A reviewer's slot changes, read against the parts of the placed size line.
- * Pure: the plan applies the result, and the PATCH refuses a change whose
- * result carries a `problem` before anything is stored.
+ * Every figure of the line with its default slot. The placed line's parts
+ * first (printed slot, else note), then each later size line's: a line
+ * `sizeSupplements` fills takes those slots — computed against what the placed
+ * line HOLDS after `placedEffective`, a person's changes included — and every
+ * other figure is a note.
+ */
+function lineFigures(
+  statements: readonly BillStatement[],
+  placed: PlacedSize | null,
+  placedEffective: Map<string, SlotOverride>,
+): LineFigure[] {
+  const out: LineFigure[] = [];
+  if (placed) {
+    const parts = placedParts(placed);
+    parts.forEach((part, index) => {
+      const read = placed.reading.parts.find((entry) => slotPartKey(entry) === part.key);
+      out.push({
+        key: part.key,
+        figure: part.figure,
+        unit: placed.reading.unit as LineFigure["unit"],
+        printed: part.printed,
+        assumed: read?.slotSuggested === true,
+        statementIndex: placed.index,
+        line: placed.statement.line,
+        placed: true,
+        ordinal: index + 1,
+        of: parts.length,
+        defaultSlot: part.printed ?? "note",
+      });
+    });
+  }
+  const held = new Set<DimensionSlot>(
+    [...placedEffective.values()].filter((slot): slot is DimensionSlot => slot !== "note"),
+  );
+  const supplements = sizeSupplements(statements, placed, held);
+  statements.forEach((statement, index) => {
+    if (placed && index === placed.index) return;
+    const readLabel = sizeReadLabel(statement);
+    if (!statement.label || !readLabel || isTbcValue(statement.value)) return;
+    const reading = readDimension(readLabel, statement.value);
+    if (!reading) return;
+    const filled = supplements.get(index);
+    const lettered = reading.parts
+      .filter((part) => part.figure !== null)
+      .map((part) => ({ partKey: slotPartKey(part), printed: part.slot as DimensionSlot | null, figure: part.figure!, assumed: part.slotSuggested }));
+    const bare = (reading.unlettered ?? []).map((figure) => ({ partKey: figure, printed: null, figure, assumed: false }));
+    const all = [...lettered, ...bare];
+    all.forEach((entry, position) => {
+      out.push({
+        key: otherLineFigureKey(statement.line, entry.partKey),
+        figure: entry.figure,
+        unit: reading.unit as LineFigure["unit"],
+        printed: entry.printed,
+        assumed: entry.assumed,
+        statementIndex: index,
+        line: statement.line,
+        placed: false,
+        ordinal: position + 1,
+        of: all.length,
+        defaultSlot: filled && entry.printed ? entry.printed : "note",
+      });
+    });
+  });
+  return out;
+}
+
+/**
+ * A reviewer's slot changes, read against every figure of the line. Pure: the
+ * plan applies the result, and the PATCH refuses a change whose result
+ * carries a `problem` before anything is stored.
+ *
+ * Without `statements` it reads the placed line's parts alone, as it always
+ * did; with them, every figure the line prints (`lineFigures`).
  */
 export function resolveSlotOverrides(
   placed: PlacedSize | null,
   overrides: Readonly<Record<string, unknown>> | null | undefined,
+  statements?: readonly BillStatement[] | null,
 ): ResolvedSlotOverrides {
-  const effective = new Map<string, SlotOverride>();
-  const applied = new Set<string>();
-  const parts = placedParts(placed);
-  const keys = new Set(parts.map((part) => part.key));
   const wanted = Object.entries(overrides ?? {}).filter(([, value]) => isSlotOverride(value)) as [string, SlotOverride][];
+  const parts = placedParts(placed);
+  const placedKeys = new Set(parts.map((part) => part.key));
+
+  // The placed line first: what it holds decides which later line fills a gap.
+  const placedCandidate = new Map<string, SlotOverride>();
+  for (const part of parts) {
+    const asked = wanted.find(([key]) => key === part.key)?.[1];
+    placedCandidate.set(part.key, asked ?? part.printed ?? "note");
+  }
+  const figures: LineFigure[] = statements
+    ? lineFigures(statements, placed, placedCandidate)
+    : parts.map((part, index) => ({
+        key: part.key,
+        figure: part.figure,
+        unit: (placed?.reading.unit ?? null) as LineFigure["unit"],
+        printed: part.printed,
+        assumed: false,
+        statementIndex: placed?.index ?? 0,
+        line: placed?.statement.line ?? "",
+        placed: true,
+        ordinal: index + 1,
+        of: parts.length,
+        defaultSlot: part.printed ?? "note",
+      }));
+  const keys = new Set(figures.map((figure) => figure.key));
   const unmatched = wanted.map(([key]) => key).filter((key) => !keys.has(key));
   const asked = new Map(wanted.filter(([key]) => keys.has(key)));
 
-  // A part with no letter is a note until a person gives it a slot.
+  // A figure with no letter is a note until a person gives it a slot.
   const candidate = new Map<string, SlotOverride>();
-  for (const part of parts) candidate.set(part.key, asked.get(part.key) ?? part.printed ?? "note");
+  for (const figure of figures) candidate.set(figure.key, asked.get(figure.key) ?? figure.defaultSlot);
   const bySlot = new Map<DimensionSlot, string[]>();
   for (const [key, slot] of candidate) {
     if (slot === "note") continue;
@@ -464,17 +601,57 @@ export function resolveSlotOverrides(
   const clash = [...bySlot.entries()].find(([, holders]) => holders.length > 1);
   if (clash && asked.size > 0) {
     const [slot, holders] = clash;
-    for (const part of parts) effective.set(part.key, part.printed ?? "note");
+    // None of the changes is applied: every figure reads as it does with none.
+    const plain = resolveSlotOverrides(placed, null, statements);
     return {
-      effective,
-      applied,
+      ...plain,
       unmatched,
-      problem: `That would put ${holders.map((key) => `“${key}”`).join(" and ")} both in the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()} slot, and a slot holds one figure. Move the other part first.`,
+      problem: `That would put ${holders.map((key) => `“${shortKey(key)}”`).join(" and ")} both in the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()} slot, and a slot holds one figure. Move the other part first.`,
     };
   }
-  for (const [key, slot] of candidate) effective.set(key, slot);
-  for (const key of asked.keys()) applied.add(key);
-  return { effective, applied, unmatched, problem: null };
+  const effective = new Map(candidate);
+  const applied = new Set(asked.keys());
+  // Placed keys keep their place in the map even where `statements` were not given.
+  for (const key of placedKeys) if (!effective.has(key)) effective.set(key, placedCandidate.get(key) ?? "note");
+  return { effective, applied, unmatched, problem: null, figures };
+}
+
+/** A figure's key as a person reads it: the part, without the line it is on. */
+function shortKey(key: string): string {
+  const at = key.lastIndexOf(" | ");
+  return at >= 0 ? key.slice(at + 3) : key;
+}
+
+/**
+ * THE OVERRIDE MAP AFTER ONE PICK, and the figures it moved. Picking a slot
+ * another figure holds moves that figure to a note IN THE SAME WRITE — the
+ * drawings card's `swapSlot` rule on the bill (workstream E, 2026-10-15).
+ * `null` takes the change back. Pure; the PATCH stores the map it returns.
+ */
+export function slotChangeFor(
+  placed: PlacedSize | null,
+  statements: readonly BillStatement[],
+  current: Readonly<Record<string, unknown>> | null | undefined,
+  key: string,
+  slot: SlotOverride | null,
+): { next: Record<string, SlotOverride>; moved: string[] } {
+  const next: Record<string, SlotOverride> = {};
+  for (const [entry, value] of Object.entries(current ?? {})) if (isSlotOverride(value)) next[entry] = value;
+  const moved: string[] = [];
+  if (slot === null) {
+    delete next[key];
+    return { next, moved };
+  }
+  if (slot !== "note") {
+    const now = resolveSlotOverrides(placed, next, statements);
+    for (const [other, held] of now.effective) {
+      if (other === key || held !== slot) continue;
+      next[other] = "note";
+      moved.push(other);
+    }
+  }
+  next[key] = slot;
+  return { next, moved };
 }
 
 export type BillDescriptionPlan = {
@@ -522,6 +699,23 @@ export type BillDescriptionPlan = {
   unitMissing: boolean;
   /** The unit a person set on the review for that size, where they did and it was applied. */
   unitSetOnReview: BillUnitOverride | null;
+  /**
+   * EVERY FIGURE THE LINE PRINTS, in printed order, with the slot the confirm
+   * writes it in (or `note`) — one row each on the review, each with the same
+   * picker (workstream E, 2026-10-15). Optional so a plan built before that
+   * day still reads.
+   */
+  figures?: PlanFigure[];
+};
+
+/** One figure of a bill line as the review shows it: `LineFigure` plus what it is now. */
+export type PlanFigure = Omit<LineFigure, "defaultSlot" | "statementIndex"> & {
+  /** The slot the confirm writes it in, or `note`. */
+  slot: SlotOverride;
+  /** A person set it on the review. */
+  overridden: boolean;
+  /** Its line's own label, where it has one — the column heading for a Dims cell. */
+  label: string | null;
 };
 
 /**
@@ -642,7 +836,7 @@ export function planBillDescription(
 
   // ---- which size line is placed, and what a reviewer said about its parts --
   const placed = placedSizeOf(statements);
-  const resolved = resolveSlotOverrides(placed, slotOverrides);
+  const resolved = resolveSlotOverrides(placed, slotOverrides, statements);
   const unitSetOnReview = placed?.unitless && isBillUnitOverride(unitOverride) ? unitOverride : null;
   if (resolved.problem) cautions.push(`Your slot changes on this line are not applied: ${resolved.problem}`);
   for (const key of resolved.unmatched) {
@@ -652,7 +846,12 @@ export function planBillDescription(
   const attributes: PlannedAttribute[] = [];
   const taken = new Set<string>();
   const unletteredAwaiting: string[] = [];
-  const supplements = sizeSupplements(statements, placed, resolved);
+  // Every figure printed on a line OTHER than the placed one, by statement.
+  const otherFigures = new Map<number, LineFigure[]>();
+  for (const figure of resolved.figures) {
+    if (figure.placed) continue;
+    otherFigures.set(figure.statementIndex, [...(otherFigures.get(figure.statementIndex) ?? []), figure]);
+  }
 
   statements.forEach((statement, index) => {
     const label = statement.label;
@@ -776,28 +975,43 @@ export function planBillDescription(
         }
         return;
       }
-      // A LATER LINE GIVING ONLY WHAT THE PLACED ONE LEFT EMPTY fills it
-      // (2026-10-15): the Ronnie Scott's Dims cell prints "720 X 1400 X
-      // 720MM" and then "SH: 420MM". That is not the size stated again.
-      const extra = supplements.get(index);
-      if (extra) {
-        const named = extra.parts.map((part) => DIMENSION_SLOT_LABELS[part.slot].toLowerCase()).join(" and ");
-        for (const part of extra.parts) {
-          attributes.push({
-            attrGroup: "dimension",
-            label,
-            value: part.figure ?? statement.value,
-            unit: extra.unit,
-            slot: part.slot,
-            materialCode: null,
-            finishWords: null,
-            specFieldId: null,
-            specFieldName: null,
-            state: "confirmed",
-            line: statement.line,
-            why: `This line gives only the ${named}, which “${placed!.statement.line}” leaves empty, so it fills that slot.`,
-          });
-        }
+      // A LATER LINE'S FIGURES. A line giving ONLY what the placed one left
+      // empty fills it by default (2026-10-15): the Ronnie Scott's Dims cell
+      // prints "720 X 1400 X 720MM" and then "SH: 420MM", which is not the
+      // size stated again. Any other figure of a later line is a note until a
+      // person gives it a slot on the review (workstream E) — and a line any
+      // figure of which stays a note is ALSO kept whole, as printed, so
+      // nothing it said is lost.
+      const figures = otherFigures.get(index) ?? [];
+      const slotted = figures.filter((figure) => resolved.effective.get(figure.key) !== "note");
+      for (const figure of slotted) {
+        const slot = resolved.effective.get(figure.key) as DimensionSlot;
+        const overridden = resolved.applied.has(figure.key);
+        const named = figures
+          .filter((entry) => entry.defaultSlot !== "note")
+          .map((entry) => DIMENSION_SLOT_LABELS[entry.defaultSlot as DimensionSlot].toLowerCase())
+          .join(" and ");
+        attributes.push({
+          attrGroup: "dimension",
+          label,
+          value: figure.figure,
+          unit: figure.unit,
+          slot,
+          materialCode: null,
+          finishWords: null,
+          specFieldId: null,
+          specFieldName: null,
+          state: "confirmed",
+          line: statement.line,
+          why: overridden
+            ? `Set by the reviewer: ${figure.figure} on “${statement.line}”, written as the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}.`
+            : `This line gives only the ${named}, which “${placed!.statement.line}” leaves empty, so it fills that slot.`,
+          part: { key: figure.key, printed: figure.printed, overridden },
+        });
+      }
+      if (figures.length > 0 && slotted.length === figures.length) return;
+      if (figures.length > 0 && figures.every((figure) => resolved.applied.has(figure.key))) {
+        attributes.push(note(statement, "Set by the reviewer: kept as a note rather than a slot."));
         return;
       }
       const refusal = sizeLineRefusal(readLabel, statement.value);
@@ -911,6 +1125,20 @@ export function planBillDescription(
     unletteredAwaiting,
     unitMissing: placed?.unitless === true,
     unitSetOnReview,
+    figures: resolved.figures.map((figure) => ({
+      key: figure.key,
+      figure: figure.figure,
+      unit: figure.unit,
+      printed: figure.printed,
+      assumed: figure.assumed,
+      line: figure.line,
+      placed: figure.placed,
+      ordinal: figure.ordinal,
+      of: figure.of,
+      slot: resolved.effective.get(figure.key) ?? "note",
+      overridden: resolved.applied.has(figure.key),
+      label: statements[figure.statementIndex]?.label ?? null,
+    })),
   };
 }
 
@@ -931,13 +1159,11 @@ export function planBillDescription(
 function sizeSupplements(
   statements: readonly BillStatement[],
   placed: PlacedSize | null,
-  resolved: ResolvedSlotOverrides,
+  placedHolds: ReadonlySet<DimensionSlot>,
 ): Map<number, DimensionReading> {
   const out = new Map<number, DimensionReading>();
   if (!placed) return out;
-  const held = new Set<DimensionSlot>(
-    [...resolved.effective.values()].filter((slot): slot is DimensionSlot => slot !== "note"),
-  );
+  const held = new Set<DimensionSlot>(placedHolds);
   statements.forEach((statement, index) => {
     if (index === placed.index) return;
     const readLabel = sizeReadLabel(statement);

@@ -14,6 +14,8 @@ import {
   planSheetDescriptions,
   readBillDescription,
   resolveSlotOverrides,
+  slotChangeFor,
+  otherLineFigureKey,
   revisionDescriptionRefusal,
   type PlannedAttribute,
 } from "@/lib/bill-description";
@@ -397,6 +399,30 @@ describe("resolveSlotOverrides", () => {
   });
 });
 
+describe("slotChangeFor", () => {
+  const statements = lineStatements({ dimensionsRaw: "W 900 x D 600 x H 750MM\nSH: 450MM" }, { dimensions: "Dims" })!;
+  const placed = placedSizeOf(statements);
+
+  it("moves the figure holding a slot to a note in the same change, so one pick never refuses", () => {
+    const change = slotChangeFor(placed, statements, {}, "D 600", "W");
+    expect(change).toEqual({ next: { "W 900": "note", "D 600": "W" }, moved: ["W 900"] });
+    expect(resolveSlotOverrides(placed, change.next, statements).problem).toBeNull();
+  });
+
+  it("takes a later line's figure out of a slot a placed part is moved into", () => {
+    const sh = otherLineFigureKey("SH: 450MM", "SH 450");
+    const resolved = resolveSlotOverrides(placed, {}, statements);
+    expect(resolved.figures.map((f) => f.key)).toContain(sh);
+    const change = slotChangeFor(placed, statements, {}, "H 750", "SH");
+    expect(change.moved).toEqual([sh]);
+    expect(resolveSlotOverrides(placed, change.next, statements).effective.get(sh)).toBe("note");
+  });
+
+  it("null takes the change back and moves nothing", () => {
+    expect(slotChangeFor(placed, statements, { "D 600": "DIA" }, "D 600", null)).toEqual({ next: {}, moved: [] });
+  });
+});
+
 // ============================================================================
 // A Dims cell of several lines (the Ronnie Scott's procurement schedule,
 // LBPCo, 2026-10-15): "REFER TO DRAWING" / "740 X 740 X 720MM" / "SH: 420MM"
@@ -427,7 +453,38 @@ describe("a Dims cell of several lines", () => {
     const sh = p?.attributes.find((a) => a.slot === "SH");
     expect(sh).toMatchObject({ attrGroup: "dimension", value: "420", unit: "mm", state: "confirmed", line: "SH: 420MM" });
     expect(sh?.why).toMatch(/gives only the seat height, which “720 X 1400 X 720MM” leaves empty/);
-    expect(sh?.part ?? null).toBeNull();
+    // Addressable since workstream E: the SH line's figure has a picker too.
+    expect(sh?.part).toEqual({ key: "SH: 420MM | SH 420", printed: "SH", overridden: false });
+  });
+
+  // Workstream E (2026-10-15): "only three of the four" figures offered a slot.
+  it("lists every figure the line prints, the SH line's included, each with the slot it is written in", () => {
+    const p = plan("REFER TO DRAWING\n720 X 1400 X 720MM\nSH: 420MM");
+    expect(p?.figures?.map((f) => [f.key, f.figure, f.slot, f.assumed, `${f.ordinal}/${f.of}`])).toEqual([
+      ["W 720", "720", "W", true, "1/3"],
+      ["D 1400", "1400", "D", true, "2/3"],
+      ["H 720", "720", "H", true, "3/3"],
+      ["SH: 420MM | SH 420", "420", "SH", false, "1/1"],
+    ]);
+  });
+
+  it("writes a person's slot on the SH line's figure, and keeps the line whole when it becomes a note", () => {
+    const toH = planBillDescription(null, {
+      fields: FIELDS,
+      hasFabricLine: false,
+      columns: { dimensionsRaw: "720 X 1400 X 720MM\nSH: 420MM", headings: { dimensions: "DIMENSIONS CM / MM L X W X H" } },
+      slotOverrides: { "H 720": "note", "SH: 420MM | SH 420": "H" },
+    });
+    expect(toH?.dimensionCell).toBe("W720 x D1400 x H420mm");
+    expect(toH?.figures?.find((f) => f.figure === "420")).toMatchObject({ slot: "H", overridden: true });
+    const asNote = planBillDescription(null, {
+      fields: FIELDS,
+      hasFabricLine: false,
+      columns: { dimensionsRaw: "720 X 1400 X 720MM\nSH: 420MM", headings: { dimensions: "DIMENSIONS CM / MM L X W X H" } },
+      slotOverrides: { "SH: 420MM | SH 420": "note" },
+    });
+    expect(asNote?.dimensionCell).toBe("W720 x D1400 x H720mm");
+    expect(asNote?.attributes.find((a) => a.line === "SH: 420MM")).toMatchObject({ attrGroup: "note", value: "SH: 420MM" });
   });
 
   it("keeps every other later size line a note: a slot already held, a second notation, a unit not printed", () => {

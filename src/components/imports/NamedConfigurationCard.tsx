@@ -34,7 +34,10 @@ import { Fragment, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
-import { isMeasuredRow, oneLinePerPhase, toggledTargets, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
+import { isMeasuredRow, oneLinePerPhase, toggledTargets, uncertainNotices, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
+import { configurationNeedsYou, needsYouListId, runTargetsId } from "@/lib/needs-you";
+import { goToAndFlash } from "@/lib/go-to";
+import NeedsYou from "@/components/ui/NeedsYou";
 import { fieldSlotGaps, naturalConfigurationOrder, tabMeasurements, sharedTargets, sharedWithSentence, type NamedTab, type NamedTabRow } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
 import type { DimensionSlot } from "@/lib/spec-vocab";
@@ -310,6 +313,33 @@ export default function NamedConfigurationCard({
     }
   };
 
+  // ------------------------------------------------------------- needs you
+  //
+  // WHAT STILL STOPS CONFIRM, AS PLACES TO GO — the single card's list
+  // (2026-10-15), over every page of the code. A row sits on the tab of each
+  // configuration it lands on, so a link opens the first such tab, unfolds
+  // what could hide it, and then scrolls there.
+  const needsYou = configurationNeedsYou({
+    members: pendingMembers.map((member) => ({
+      itemId: member.item.id,
+      name: `Page ${member.item.page ?? "?"}`,
+      blockers: member.resolution?.blockers ?? [],
+      rows: member.item.observations,
+      slots: new Map(uncertainNotices(member.item).map((notice) => [notice.index, notice.slot])),
+    })),
+    runsTarget: runTargetsId(card.id),
+  });
+  const listId = needsYouListId(card.id);
+  const goTo = (entry: (typeof needsYou)[number]) => {
+    setOpen(true);
+    if (!entry.observationId) return;
+    const home = named.tabs.find((candidate) => candidate.rows.some((row) => row.observation.id === entry.observationId));
+    if (home) setActiveLabel(home.label);
+    setShowOther(true);
+    setShowStatements(true);
+    setShowNotes(true);
+  };
+
   // --------------------------------------------------------------- confirm
   const blockedMember = pendingMembers.find((member) => (member.resolution?.blockers.length ?? 0) > 0);
   // TWO PAGES, ONE FIELD, DIFFERENT WORDS: one decision per pair, however many
@@ -527,6 +557,7 @@ export default function NamedConfigurationCard({
   return (
     <div className="mt-4 rounded-[10px] border border-neutral-200 bg-white">
       {header}
+      <NeedsYou id={listId} items={needsYou} className="mx-4 mt-3" onGo={goTo} />
 
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0" role="tabpanel" aria-label={variantName(card.codeRaw, tab.label, card.codeRaw)}>
@@ -900,6 +931,7 @@ export default function NamedConfigurationCard({
           />
           <PagePicker pages={pages} current={shownPage} onPick={setPreviewPage} />
 
+          <div id={runTargetsId(card.id)} className="rounded-lg">
           <RunTargets
             runs={runs}
             ticked={ticked}
@@ -927,6 +959,7 @@ export default function NamedConfigurationCard({
               ) : undefined
             }
           />
+          </div>
 
           <LevelControl
             targets={levelForTargets}
@@ -943,7 +976,20 @@ export default function NamedConfigurationCard({
 
       <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
         <p className="text-neutral-600">
-          {decisions > 0
+          {/* SHORT, AND IT POINTS AT THE LIST (2026-10-15), as on the single card. */}
+          {blockedMember && needsYou.length > 0 ? (
+            <a
+              href={`#${listId}`}
+              className="font-medium text-amber-800 underline decoration-amber-500 underline-offset-2"
+              onClick={(event) => {
+                event.preventDefault();
+                goToAndFlash(listId);
+              }}
+            >
+              {needsYou.length === 1 ? "One thing needs you" : `${needsYou.length} things need you`} — listed at the top
+              of this card
+            </a>
+          ) : decisions > 0
             ? `${decisions} decision${decisions === 1 ? "" : "s"} left before ${card.codeRaw} can be confirmed: two pages give one field in different words. Ignore one, or move one to another field — each is marked on its row.`
             : blockedMember
               ? `Page ${blockedMember.item.page ?? "?"} cannot be confirmed yet: ${blockedMember.resolution?.blockers[0]?.message ?? ""}`

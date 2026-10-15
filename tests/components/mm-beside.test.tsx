@@ -4,7 +4,7 @@
 // guess. Display only.
 import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ItemCard from "@/components/imports/DrawingItemCard";
 import { callbacks, figure, item, records, resetIds, resolution, specFields } from "./fixtures";
@@ -45,8 +45,13 @@ function Harness({ initial }: { initial: DrawingItem }) {
   );
 }
 
+/** The size section's row for a figure, by the figure it prints (or holds in its box). */
 function rowFor(value: string): HTMLElement {
-  const found = screen.getAllByRole("row").find((row) => within(row).queryByDisplayValue(value) !== null);
+  const found = [...document.querySelectorAll<HTMLElement>("[data-figure-row]")].find(
+    (row) =>
+      within(row).queryByDisplayValue(value) !== null ||
+      [...row.querySelectorAll("span.font-mono")].some((span) => span.textContent === value),
+  );
   if (!found) throw new Error(`No row holds the value ${value}`);
   return found;
 }
@@ -74,8 +79,8 @@ describe("the millimetres beside a figure", () => {
     expect(beside("18")).toBe("(457mm)");
     expect(beside("84")).toBe("(840mm)");
     expect(beside("640")).toBeNull();
-    // The box keeps the page's own figure.
-    expect(within(rowFor(`1'-3"`)).getByDisplayValue(`1'-3"`)).toBeInTheDocument();
+    // The row keeps the page's own figure, and says what it becomes.
+    expect(within(rowFor(`1'-3"`)).getByText(`H 1'-3" (381mm)`)).toBeInTheDocument();
   });
 
   it("shows nothing for a figure that does not read completely, or has no unit", () => {
@@ -98,6 +103,7 @@ describe("the millimetres beside a figure", () => {
 
   it("follows the box as it is typed and the unit as it is changed", async () => {
     render(<Harness initial={stool()} />);
+    await userEvent.click(within(rowFor("18")).getByRole("button", { name: "Edit value" }));
     const box = within(rowFor("18")).getByDisplayValue("18");
     await userEvent.clear(box);
     await userEvent.type(box, "20");

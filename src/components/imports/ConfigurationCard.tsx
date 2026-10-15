@@ -55,7 +55,10 @@ import { Fragment, useEffect, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
-import { measuredRows, oneLinePerPhase, toggledTargets, wasReadByModel, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
+import { measuredRows, oneLinePerPhase, toggledTargets, uncertainNotices, wasReadByModel, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
+import { configurationNeedsYou, needsYouListId, runTargetsId } from "@/lib/needs-you";
+import { goToAndFlash } from "@/lib/go-to";
+import NeedsYou from "@/components/ui/NeedsYou";
 import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import { sharedTargets, type ConfigurationMember, type ReviewCard } from "@/lib/configuration-cards";
 import { variantName } from "@/lib/record-variants";
@@ -217,6 +220,47 @@ function PageConfigurationCard({
 
   const busyHere = busy === card.id || pendingMembers.some((member) => busy === member.item.id);
   const pageImportId = (itemId: string) => importIdFor?.(itemId) ?? importId;
+
+  // ------------------------------------------------------------- needs you
+  //
+  // WHAT STILL STOPS CONFIRM, AS PLACES TO GO — the single card's list
+  // (2026-10-15), over every configuration. A link opens that configuration's
+  // tab first; a row drawn once in the shared geometry table is pointed at
+  // the row the card shows; a folded row is unfolded.
+  const [revealExtras, setRevealExtras] = useState<Record<string, number>>({});
+  const sharedLeaderOf = new Map<string, string>();
+  if (card.geometry.status === "shared") {
+    for (const row of card.geometry.rows) {
+      for (const copy of Object.values(row.byMember)) if (copy) sharedLeaderOf.set(copy.id, row.leader.id);
+    }
+  }
+  const needsYou = configurationNeedsYou({
+    members: pendingMembers.map((member) => ({
+      itemId: member.item.id,
+      name: memberName(card, member),
+      blockers: member.resolution?.blockers ?? [],
+      rows: member.item.observations,
+      slots: new Map(uncertainNotices(member.item).map((notice) => [notice.index, notice.slot])),
+    })),
+    runsTarget: runTargetsId(card.id),
+    alias: (observationId) => sharedLeaderOf.get(observationId) ?? null,
+  });
+  const listId = needsYouListId(card.id);
+  const goTo = (entry: (typeof needsYou)[number]) => {
+    setOpen(true);
+    if (!entry.observationId) return;
+    if (sharedLeaderOf.has(entry.observationId)) {
+      setShowOther(true);
+      return;
+    }
+    if (entry.itemId) {
+      if (card.split) setActiveTab(entry.itemId);
+      const extras = card.geometry.status === "shared" ? (card.geometry.extras[entry.itemId] ?? []) : [];
+      if (extras.some((extra) => extra.id === entry.observationId)) {
+        setRevealExtras((current) => ({ ...current, [entry.itemId!]: (current[entry.itemId!] ?? 0) + 1 }));
+      }
+    }
+  };
 
   // ------------------------------------------------------------------ header
   const header = (
@@ -549,6 +593,7 @@ function PageConfigurationCard({
   return (
     <div className="mt-4 rounded-[10px] border border-neutral-200 bg-white">
       {header}
+      <NeedsYou id={listId} items={needsYou} className="mx-4 mt-3" onGo={goTo} />
 
       {/* TWO COLUMNS, AND THE RIGHT ONE STAYS PUT. A card covering four
           configurations is long, and the drawing the figures are checked
@@ -743,6 +788,7 @@ function PageConfigurationCard({
                   : new Set<string>()
               }
               extras={geometry.status === "shared" ? (geometry.extras[member.item.id] ?? []) : []}
+              revealExtras={revealExtras[member.item.id] ?? 0}
               onSaveObservation={onSaveObservation}
               onReview={onReview}
               onImage={onImage}
@@ -779,6 +825,7 @@ function PageConfigurationCard({
           />
           <PagePicker pages={pages} current={shownPage} onPick={setPreviewPage} />
 
+          <div id={runTargetsId(card.id)} className="rounded-lg">
           <RunTargets
             runs={pendingMembers[0]?.resolution?.resolution.runs ?? card.members[0]?.resolution?.resolution.runs ?? []}
             ticked={ticked}
@@ -808,6 +855,8 @@ function PageConfigurationCard({
             }
           />
 
+          </div>
+
           {/* THE LEVEL, ON THE BILL LINES THIS CARD APPLIES TO. One control for
               the card, like Applies to and for the same reason: a level is a
               statement about the ITEM, and one configuration priced as a hero
@@ -828,7 +877,20 @@ function PageConfigurationCard({
 
       <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[#fcfcfc] px-4 py-3">
         <p className="text-neutral-600">
-          {blockedMember
+          {/* SHORT, AND IT POINTS AT THE LIST (2026-10-15), as on the single card. */}
+          {blockedMember && needsYou.length > 0 ? (
+            <a
+              href={`#${listId}`}
+              className="font-medium text-amber-800 underline decoration-amber-500 underline-offset-2"
+              onClick={(event) => {
+                event.preventDefault();
+                goToAndFlash(listId);
+              }}
+            >
+              {needsYou.length === 1 ? "One thing needs you" : `${needsYou.length} things need you`} — listed at the top
+              of this card
+            </a>
+          ) : blockedMember
             ? `${memberName(card, blockedMember)} cannot be confirmed yet: ${
                 blockedMember.resolution?.blockers[0]?.message ?? ""
               }`
@@ -921,6 +983,7 @@ function ConfigurationSection({
   busy,
   sharedRowIds,
   extras,
+  revealExtras = 0,
   onSaveObservation,
   onReview,
   onImage,
@@ -936,6 +999,8 @@ function ConfigurationSection({
   busy: boolean;
   sharedRowIds: ReadonlySet<string>;
   extras: DrawingObservation[];
+  /** Bumped by a "needs you" link to a row in the page-only fold, which then opens. */
+  revealExtras?: number;
   onSaveObservation: (item: DrawingItem, observation: DrawingObservation, changes: Record<string, unknown>) => Promise<void>;
   onReview: (item: DrawingItem, observations: DrawingObservation[], action: "confirm" | "ignore" | "restore") => Promise<void>;
   onImage: (itemId: string, image: CroppedImage | null) => void;
@@ -947,6 +1012,9 @@ function ConfigurationSection({
   const [armed, setArmed] = useState(false);
   const [showExtras, setShowExtras] = useState(false);
   useEffect(() => setArmed(false), [member.pending.length]);
+  useEffect(() => {
+    if (revealExtras > 0) setShowExtras(true);
+  }, [revealExtras]);
   const name = memberName(card, member);
 
   if (member.state !== "pending") {
