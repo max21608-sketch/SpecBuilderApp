@@ -31,6 +31,7 @@ export default function NeedsYou({
   items,
   title = "Before you can confirm",
   onGo,
+  tone = "warn",
   className = "",
 }: {
   /** The list's own id, so a sentence beside Confirm can link back to it. */
@@ -39,6 +40,12 @@ export default function NeedsYou({
   title?: string;
   /** Called with the item before scrolling: switch a tab, unfold a row. */
   onGo?: (item: NeedsYouItem) => void;
+  /**
+   * Amber: it needs a person before the confirm. Red only for the checks a
+   * TRANSCRIBED bill failed (`transcriptionNeedsYou`), which the confirm does
+   * not wait on and a person must not miss.
+   */
+  tone?: "warn" | "danger";
   /** Layout only. */
   className?: string;
 }) {
@@ -49,7 +56,7 @@ export default function NeedsYou({
     <section
       id={id}
       aria-label="What needs you"
-      className={`rounded-lg border px-3.5 py-2.5 text-[12.5px] leading-5 ${TONE.warn.note} ${className}`.trim()}
+      className={`rounded-lg border px-3.5 py-2.5 text-[12.5px] leading-5 ${TONE[tone].note} ${className}`.trim()}
     >
       <p className="font-semibold">
         {title}: {items.length === 1 ? "one thing needs you" : `${items.length} things need you`}
@@ -62,7 +69,7 @@ export default function NeedsYou({
               {item.target ? (
                 <a
                   href={`#${item.target}`}
-                  className="font-medium underline decoration-amber-500 underline-offset-2 hover:decoration-2"
+                  className={`font-medium underline underline-offset-2 hover:decoration-2 ${tone === "danger" ? "decoration-red-500" : "decoration-amber-500"}`}
                   onClick={(event) => {
                     event.preventDefault();
                     onGo?.(item);

@@ -2,7 +2,7 @@
 // decides whether a confirm can go — that stays the blockers' — so these hold
 // that every blocker becomes a short next step with a place to go.
 import { describe, expect, it } from "vitest";
-import { billNeedsYou, configurationNeedsYou, drawingNeedsYou, sheetsWaiting } from "@/lib/needs-you";
+import { billLineId, billNeedsYou, configurationNeedsYou, drawingNeedsYou, sheetsWaiting, transcriptionNeedsYou } from "@/lib/needs-you";
 import { recordedFrom, sourceSays, sourceWords } from "@/lib/source-words";
 import { replaceComparison } from "@/lib/replace-words";
 
@@ -158,5 +158,38 @@ describe("configurationNeedsYou", () => {
       alias: (id) => (id === "p2-com" ? "p1-com" : null),
     });
     expect(items[0]).toMatchObject({ target: "row-p1-com", observationId: "p2-com", itemId: "p2" });
+describe("transcriptionNeedsYou (a bill the model transcribed from a PDF)", () => {
+  const pages: Record<number, number> = { 3: 1, 4: 1, 5: 2 };
+  const lines = [
+    { lineNo: 3, code: "ZZ-01" },
+    { lineNo: 4, code: "ZZ-02" },
+    { lineNo: 5, code: null },
+  ];
+  const total = { code: "total_mismatch", words: "Quantities on p.1 add to 20, not 21", why: "The PDF prints 21…" };
+
+  it("gives one item per failed total, pointing at its first line, and one per doubtful line", () => {
+    const items = transcriptionNeedsYou({
+      sheetIndex: 0,
+      tab: "Sheet1",
+      single: true,
+      lines,
+      pageOf: (lineNo) => pages[lineNo] ?? null,
+      checks: new Map([
+        [3, [total]],
+        [4, [total, { code: "unclear", words: "Unclear: QTY", why: "The model could not read QTY…" }]],
+        [5, [{ code: "code_not_in_text", words: "Code X is not in p.2's text", why: "…" }]],
+      ]),
+    });
+    expect(items.map((item) => [item.words, item.target])).toEqual([
+      ["Quantities on p.1 add to 20, not 21 — check its 2 lines against the PDF", billLineId(0, 3)],
+      ["ZZ-02 (p.1): unclear: QTY — check it against the PDF", billLineId(0, 4)],
+      ["Row 5 (p.2): code X is not in p.2's text — check it against the PDF", billLineId(0, 5)],
+    ]);
+    expect(items.every((item) => item.sheetIndex === 0 && item.why)).toBe(true);
+  });
+
+  it("names the tab on a bill of several", () => {
+    const items = transcriptionNeedsYou({ sheetIndex: 1, tab: "Casegoods", single: false, lines, pageOf: () => 1, checks: new Map([[3, [total]]]) });
+    expect(items[0]?.words).toBe("Quantities on p.1 add to 20, not 21 on “Casegoods” — check the line against the PDF");
   });
 });

@@ -271,3 +271,57 @@ export function billNeedsYou(input: {
 export function sheetsWaiting(items: readonly NeedsYouItem[]): Set<number> {
   return new Set(items.flatMap((item) => (item.sheetIndex === undefined ? [] : [item.sheetIndex])));
 }
+
+// ---- a bill the model transcribed from a PDF (workstream C2) -------------------
+
+/**
+ * WHAT A TRANSCRIBED BILL'S CROSS-CHECKS FOUND, as places to go — the RED
+ * list beside the amber one. The confirm does not wait on these (Max approved
+ * transcription on the condition that every line is marked and a person
+ * checks it, and the person reviewing is that check), so they are never in
+ * "Before you can confirm", where they would be untrue; they are red because a
+ * mis-copied quantity looks exactly like a real one.
+ *
+ * One item per failed total (pointing at its first line — every line it
+ * covers is marked red on the table), and one per line the code check or the
+ * model's own doubt flagged.
+ */
+export function transcriptionNeedsYou(input: {
+  sheetIndex: number;
+  tab: string;
+  single: boolean;
+  lines: readonly { lineNo: number; code: string | null }[];
+  checks: ReadonlyMap<number, readonly { code: string; words: string; why: string }[]>;
+  pageOf: (lineNo: number) => number | null;
+}): NeedsYouItem[] {
+  const on = input.single ? "" : ` on “${input.tab}”`;
+  const totals = new Map<string, { first: number; count: number; why: string }>();
+  const perLine: NeedsYouItem[] = [];
+  for (const line of [...input.lines].sort((a, b) => a.lineNo - b.lineNo)) {
+    for (const check of input.checks.get(line.lineNo) ?? []) {
+      if (check.code === "total_mismatch") {
+        const entry = totals.get(check.words);
+        if (entry) entry.count += 1;
+        else totals.set(check.words, { first: line.lineNo, count: 1, why: check.why });
+        continue;
+      }
+      const page = input.pageOf(line.lineNo);
+      const name = line.code?.trim() || `Row ${line.lineNo}`;
+      perLine.push({
+        key: `transcribed-${input.sheetIndex}-${line.lineNo}-${check.code}`,
+        words: `${name}${page ? ` (p.${page})` : ""}${on}: ${check.words.charAt(0).toLowerCase()}${check.words.slice(1)} — check it against the PDF`,
+        target: billLineId(input.sheetIndex, line.lineNo),
+        why: check.why,
+        sheetIndex: input.sheetIndex,
+      });
+    }
+  }
+  const totalItems = [...totals.entries()].map(([words, entry]) => ({
+    key: `transcribed-total-${input.sheetIndex}-${entry.first}-${words}`,
+    words: `${words}${on} — check ${entry.count === 1 ? "the line" : `its ${entry.count} lines`} against the PDF`,
+    target: billLineId(input.sheetIndex, entry.first),
+    why: entry.why,
+    sheetIndex: input.sheetIndex,
+  }));
+  return [...totalItems, ...perLine];
+}
