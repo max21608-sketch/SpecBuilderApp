@@ -51,6 +51,7 @@ import {
   billItemName,
   billReadsDescriptions,
   isSlotOverride,
+  placedParts,
   placedSizeOf,
   planSheetDescriptions,
   lineStatements,
@@ -60,7 +61,6 @@ import {
   sheetColumnHeadings,
   resolveSlotOverrides,
   revisionDescriptionRefusal,
-  slotPartKey,
   type SlotOverride,
 } from "@/lib/bill-description";
 import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
@@ -1805,7 +1805,7 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
 
 // A SIZE PART'S SLOT, set by a person before the confirm (Matthew, 2026-10-01:
 // a round stool's "D" is its diameter). `{ key, slot }`, where `key` is the
-// part as the plan addressed it (`slotPartKey`) and `slot` one of the five, or
+// part as the plan addressed it (`placedParts`) and `slot` one of the five, or
 // `note`, or null to put it back as printed. Refused, writing nothing, when the
 // part is no longer on the line's placed size (409), when the map moved since
 // the screen was drawn (409), and when the change would put two parts in one
@@ -1849,7 +1849,9 @@ async function patchSlotOverride(
       // the plan places from, so a part offered on the screen is a part here.
       const statements = line.rowKind === "finish_for" ? null : lineStatements(line, sheetColumnHeadings(sheet!));
       const placed = statements ? placedSizeOf(statements) : null;
-      if (!placed || !placed.reading.parts.some((part) => slotPartKey(part) === key)) {
+      // A lettered part or an unlettered figure (`710` of `700 DIA X 710MM`):
+      // the parts the plan offers, from the one function that lists them.
+      if (!placed || !placedParts(placed).some((part) => part.key === key)) {
         throw new DomainConflictError(
           "slot_part_gone",
           `Row ${line.lineNo}'s size no longer prints “${key}”. Reload and look at it again.`,

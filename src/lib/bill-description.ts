@@ -32,7 +32,17 @@
 //   unit is stated as mm or cm is placed; only where there is none does a
 //   plain-inch line convert (exactly — `in` is a unit this app holds). Every
 //   other size line is kept as a note. Two statements on one slot would ship
-//   whichever the composer happened to prefer.
+//   whichever the composer happened to prefer. THE ONE EXCEPTION (2026-10-15):
+//   a later line whose every part is lettered, in a printed unit, and names
+//   only slots the placed line left empty fills them — `SH: 420MM` under
+//   `720 X 1400 X 720MM` is the seat height, not the size again
+//   (`sizeSupplements`). It still never puts two statements on one slot.
+// - A FIGURE WITH NO LETTER BESIDE A LETTERED ONE IS ASKED ABOUT, NOT PLACED.
+//   `700 DIA X 710MM` letters the 700; the 710 is very likely the height, and
+//   reading it so from its position is the inference the dimension model
+//   refuses. It is a note saying the line does not give its slot — never "not
+//   one of the five slots", which is what it said until 2026-10-15 — and the
+//   review offers the slots beside it (`placedParts`, `unletteredAwaiting`).
 // - NOT OVERALL IS NOT A SLOT. "Fully reclined", "SEAT:", "Overhang",
 //   "Undertable", a base's W x D, a garbled `D 51 0`: notes, verbatim. A
 //   reclined length in W is a width nothing downstream would question.
@@ -326,7 +336,7 @@ export type PlannedAttribute = {
    * slot the bill printed, and whether a person has set it. Absent on every
    * other row.
    */
-  part?: { key: string; printed: DimensionSlot; overridden: boolean } | null;
+  part?: { key: string; printed: DimensionSlot | null; overridden: boolean } | null;
 };
 
 // ---- a reviewer's slot change ----------------------------------------------
@@ -351,6 +361,25 @@ export function isSlotOverride(value: unknown): value is SlotOverride {
  */
 export function slotPartKey(part: { slot: DimensionSlot; figure: string | null }): string {
   return part.figure ? `${part.slot} ${part.figure}` : part.slot;
+}
+
+/**
+ * ONE PART OF THE PLACED SIZE LINE a reviewer can say the slot of: a lettered
+ * figure (`D 380`, printed as a depth), or a figure the line printed with NO
+ * letter beside a lettered one (`710` in `700 DIA X 710MM`, printed as
+ * nothing, so a note until a person says otherwise — 2026-10-15). Keyed on
+ * what the bill printed, as `slotPartKey` explains; an unlettered part's key
+ * is its figure alone, which no lettered key can equal.
+ */
+export type SizePart = { key: string; printed: DimensionSlot | null; figure: string };
+
+/** The parts of the placed line, lettered first in printed order, then the unlettered ones. */
+export function placedParts(placed: PlacedSize | null): SizePart[] {
+  if (!placed) return [];
+  return [
+    ...placed.reading.parts.map((part) => ({ key: slotPartKey(part), printed: part.slot, figure: part.figure ?? "" })),
+    ...(placed.reading.unlettered ?? []).map((figure) => ({ key: figure, printed: null, figure })),
+  ];
 }
 
 /** The size line the plan places: its statement and its reading, or null. */
@@ -416,17 +445,15 @@ export function resolveSlotOverrides(
 ): ResolvedSlotOverrides {
   const effective = new Map<string, SlotOverride>();
   const applied = new Set<string>();
-  const parts = placed?.reading.parts ?? [];
-  const keys = new Set(parts.map(slotPartKey));
+  const parts = placedParts(placed);
+  const keys = new Set(parts.map((part) => part.key));
   const wanted = Object.entries(overrides ?? {}).filter(([, value]) => isSlotOverride(value)) as [string, SlotOverride][];
   const unmatched = wanted.map(([key]) => key).filter((key) => !keys.has(key));
   const asked = new Map(wanted.filter(([key]) => keys.has(key)));
 
+  // A part with no letter is a note until a person gives it a slot.
   const candidate = new Map<string, SlotOverride>();
-  for (const part of parts) {
-    const key = slotPartKey(part);
-    candidate.set(key, asked.get(key) ?? part.slot);
-  }
+  for (const part of parts) candidate.set(part.key, asked.get(part.key) ?? part.printed ?? "note");
   const bySlot = new Map<DimensionSlot, string[]>();
   for (const [key, slot] of candidate) {
     if (slot === "note") continue;
@@ -435,7 +462,7 @@ export function resolveSlotOverrides(
   const clash = [...bySlot.entries()].find(([, holders]) => holders.length > 1);
   if (clash && asked.size > 0) {
     const [slot, holders] = clash;
-    for (const part of parts) effective.set(slotPartKey(part), part.slot);
+    for (const part of parts) effective.set(part.key, part.printed ?? "note");
     return {
       effective,
       applied,
@@ -478,6 +505,13 @@ export type BillDescriptionPlan = {
    * can offer "It's the diameter" / "It's the width" beside it. Null otherwise.
    */
   depthWithoutWidth: string | null;
+  /**
+   * The keys of the placed line's UNLETTERED figures nobody has given a slot
+   * or kept as a note yet (`710` in `700 DIA X 710MM`) — each one's caution's
+   * own address, so the screen can offer the slots beside it. Optional so a
+   * plan built before 2026-10-15 still reads.
+   */
+  unletteredAwaiting?: string[];
   /**
    * The placed size states NO unit — not in its figures, not in its label or
    * column heading — so the review offers the unit beside the composed cell
@@ -615,6 +649,8 @@ export function planBillDescription(
 
   const attributes: PlannedAttribute[] = [];
   const taken = new Set<string>();
+  const unletteredAwaiting: string[] = [];
+  const supplements = sizeSupplements(statements, placed, resolved);
 
   statements.forEach((statement, index) => {
     const label = statement.label;
@@ -636,11 +672,13 @@ export function planBillDescription(
             : placed.metric
               ? null
               : "Converted from inches, exactly: the bill gives no metric size.";
-        for (const part of placed.reading.parts) {
-          const key = slotPartKey(part);
-          const slot = resolved.effective.get(key) ?? part.slot;
+        for (const part of placedParts(placed)) {
+          const key = part.key;
+          const slot = resolved.effective.get(key) ?? part.printed ?? "note";
           const overridden = resolved.applied.has(key);
-          const printedAs = `printed as ${DIMENSION_SLOT_LABELS[part.slot].toLowerCase()} (${key})`;
+          const printedAs = part.printed
+            ? `printed as ${DIMENSION_SLOT_LABELS[part.printed].toLowerCase()} (${key})`
+            : `printed with no letter (${key})`;
           if (slot === "note") {
             attributes.push({
               attrGroup: "note",
@@ -654,15 +692,29 @@ export function planBillDescription(
               specFieldName: null,
               state: "confirmed",
               line: statement.line,
-              why: `Set by the reviewer: ${printedAs}, kept as a note rather than a slot.`,
-              part: { key, printed: part.slot, overridden },
+              // AN UNLETTERED FIGURE IS NOT "NOT A SLOT" — it is a figure the
+              // line does not say the slot of. `700 DIA X 710MM` letters the
+              // 700 and not the 710; the 710 is very likely the height, and
+              // reading it so from its position beside a lettered figure is
+              // the inference CLAUDE.md refuses. So it is a note that says
+              // exactly that, and the reviewer is offered the slots.
+              why: overridden
+                ? `Set by the reviewer: ${printedAs}, kept as a note rather than a slot.`
+                : `Printed with no letter beside a lettered figure, so it fills no slot: the line does not say which this is. Say which slot it is, if the drawing does.`,
+              part: { key, printed: part.printed, overridden },
             });
+            if (!overridden) {
+              unletteredAwaiting.push(key);
+              cautions.push(
+                `“${statement.line}” prints ${key} with no letter, so it fills no slot — say which slot it is, or keep it as a note.`,
+              );
+            }
             continue;
           }
           attributes.push({
             attrGroup: "dimension",
             label,
-            value: part.figure ?? statement.value,
+            value: part.figure || statement.value,
             unit,
             slot,
             materialCode: null,
@@ -672,11 +724,11 @@ export function planBillDescription(
             state: "confirmed",
             line: statement.line,
             why: overridden
-              ? slot === part.slot
+              ? slot === part.printed
                 ? `Checked by the reviewer: a ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}, as printed.${converted ? ` ${converted}` : ""}`
                 : `Set by the reviewer: ${printedAs}, written as the ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}.${converted ? ` ${converted}` : ""}`
               : converted,
-            part: { key, printed: part.slot, overridden },
+            part: { key, printed: part.printed, overridden },
           });
         }
         // FIGURES WITH NO LETTERS are placed W x D x H in the order printed —
@@ -713,11 +765,36 @@ export function planBillDescription(
           );
         }
         // What the line states that is not one of the five slots — a length,
-        // a base, a clearance — stays as the whole line, verbatim.
-        if (placed.reading.qualifier) {
-          attributes.push(
-            note(statement, `Not one of the five slots: ${placed.reading.qualifier}. The line is kept as printed.`),
-          );
+        // a base, a clearance — stays as the whole line, verbatim. An
+        // unlettered figure is not that, and has its own row above.
+        const beyond = placed.reading.unlettered ? (placed.reading.beyondSlots ?? []) : null;
+        const notSlots = beyond ? (beyond.length > 0 ? beyond.join(" x ") : null) : placed.reading.qualifier;
+        if (notSlots) {
+          attributes.push(note(statement, `Not one of the five slots: ${notSlots}. The line is kept as printed.`));
+        }
+        return;
+      }
+      // A LATER LINE GIVING ONLY WHAT THE PLACED ONE LEFT EMPTY fills it
+      // (2026-10-15): the Ronnie Scott's Dims cell prints "720 X 1400 X
+      // 720MM" and then "SH: 420MM". That is not the size stated again.
+      const extra = supplements.get(index);
+      if (extra) {
+        const named = extra.parts.map((part) => DIMENSION_SLOT_LABELS[part.slot].toLowerCase()).join(" and ");
+        for (const part of extra.parts) {
+          attributes.push({
+            attrGroup: "dimension",
+            label,
+            value: part.figure ?? statement.value,
+            unit: extra.unit,
+            slot: part.slot,
+            materialCode: null,
+            finishWords: null,
+            specFieldId: null,
+            specFieldName: null,
+            state: "confirmed",
+            line: statement.line,
+            why: `This line gives only the ${named}, which “${placed!.statement.line}” leaves empty, so it fills that slot.`,
+          });
         }
         return;
       }
@@ -829,9 +906,53 @@ export function planBillDescription(
     dimensionFromImperial: shown?.fromImperial === true,
     cautions: [...new Set(cautions)],
     depthWithoutWidth,
+    unletteredAwaiting,
     unitMissing: placed?.unitless === true,
     unitSetOnReview,
   };
+}
+
+/**
+ * THE LATER SIZE LINES THAT GIVE ONLY SLOTS THE PLACED LINE LEFT EMPTY, by
+ * statement index — each fills them. Every other later size line stays the
+ * note it always was ("states the same size again"). Strict on purpose,
+ * because a size twice in two notations is the normal case and must never
+ * become two attributes on one slot:
+ *
+ * - every part LETTERED (`SH: 420MM`) — a bare figure says no slot;
+ * - nothing left over, not TBC, a unit printed on the line or its label —
+ *   never borrowed from the placed line, the `W47.2` beside `W2000` rule;
+ * - not inches under a placed metric line — that is the imperial twin;
+ * - no slot the placed line holds (after a reviewer's changes) or an earlier
+ *   such line took, and no diameter beside a width or depth, either way.
+ */
+function sizeSupplements(
+  statements: readonly BillStatement[],
+  placed: PlacedSize | null,
+  resolved: ResolvedSlotOverrides,
+): Map<number, DimensionReading> {
+  const out = new Map<number, DimensionReading>();
+  if (!placed) return out;
+  const held = new Set<DimensionSlot>(
+    [...resolved.effective.values()].filter((slot): slot is DimensionSlot => slot !== "note"),
+  );
+  statements.forEach((statement, index) => {
+    if (index === placed.index) return;
+    const readLabel = sizeReadLabel(statement);
+    if (!statement.label || !readLabel || isTbcValue(statement.value)) return;
+    const reading = readDimension(readLabel, statement.value);
+    if (!reading || reading.parts.length === 0 || reading.tbc || reading.qualifier) return;
+    if (reading.unit === null) return;
+    if (reading.imperial && placed.metric) return;
+    if (reading.parts.some((part) => part.slotSuggested || part.figure === null)) return;
+    const slots = reading.parts.map((part) => part.slot);
+    const clashes = (slot: DimensionSlot) =>
+      held.has(slot) || (slot === "DIA" && (held.has("W") || held.has("D"))) || ((slot === "W" || slot === "D") && held.has("DIA"));
+    if (slots.some(clashes)) return;
+    for (const slot of slots) held.add(slot);
+    out.set(index, reading);
+  });
+  return out;
 }
 
 /** The value says, somewhere in it, that it is not decided: "TBC", "TBC - velvet". */

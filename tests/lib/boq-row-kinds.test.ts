@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyBracketRule,
+  boqConfirmBlocker,
   boqConfirmCounts,
   boqConfirmLabel,
   fabricCodeOf,
@@ -269,5 +270,41 @@ describe("fabricLineIsPlaceholder", () => {
 
   it("does not strip a lead before the @ that is not the bill's own lead words", () => {
     expect(fabricLineIsPlaceholder("Example Mills velvet @ seat", "Armchair")).toBe(false);
+  });
+});
+
+// The Ronnie Scott's call, 2026-10-15: Confirm was disabled with two of three
+// tabs waiting on "The columns are right", and the reason was a hover title.
+describe("boqConfirmBlocker — the reason beside a disabled Confirm", () => {
+  const none = { single: false, reading: false, unmapped: [], unchecked: [], kindProblems: [], noLiveLines: false };
+
+  it("is null when nothing stops the confirm", () => {
+    expect(boqConfirmBlocker(none)).toBeNull();
+  });
+
+  it("names the tabs waiting on “The columns are right”", () => {
+    expect(boqConfirmBlocker({ ...none, unchecked: ["CASEGOODS TABLES", "MIRRORS"] })).toBe(
+      "The “CASEGOODS TABLES” and “MIRRORS” tabs are waiting on “The columns are right”.",
+    );
+    expect(boqConfirmBlocker({ ...none, unchecked: ["MIRRORS"] })).toBe("The “MIRRORS” tab is waiting on “The columns are right”.");
+    expect(boqConfirmBlocker({ ...none, single: true, unchecked: ["Sheet1"] })).toBe("This bill is waiting on “The columns are right”.");
+  });
+
+  it("lists every reason, in the order a person clears them", () => {
+    expect(
+      boqConfirmBlocker({
+        ...none,
+        unmapped: ["A", "B", "C"],
+        unchecked: ["D"],
+        kindProblems: [{ tab: "D", count: 2 }],
+        reading: true,
+      }),
+    ).toBe(
+      "Set the columns on the “A”, “B” and “C” tabs, or drop them. The “D” tab is waiting on “The columns are right”. 2 finish lines on the “D” tab have no item — say which item each belongs to. The model is still reading the columns.",
+    );
+  });
+
+  it("says when every line is dropped", () => {
+    expect(boqConfirmBlocker({ ...none, noLiveLines: true })).toBe("Every line is dropped, so there is nothing to confirm.");
   });
 });

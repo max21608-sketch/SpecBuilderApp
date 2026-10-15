@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
 import {
   billItemName,
   billReadsDescriptions,
+  lineStatements,
   planBillDescription,
+  placedParts,
   placedSizeOf,
   planSheetDescriptions,
   readBillDescription,
@@ -413,9 +415,105 @@ describe("a Dims cell of several lines", () => {
 
   it("reads line by line: words are notes, never part of a size", () => {
     const p = plan("REFER TO DRAWING\n800 X 1700 X 780MM\nSH: 420MM");
-    expect(p?.dimensionCell).toBe("W800 x D1700 x H780mm");
     const notes = p?.attributes.filter((a) => a.attrGroup === "note").map((a) => a.value);
-    expect(notes).toEqual(expect.arrayContaining(["REFER TO DRAWING", "SH: 420MM"]));
+    expect(notes).toEqual(["REFER TO DRAWING"]);
+  });
+
+  // The bench SO-03 and the sofa SO-04 (frames 24:22, 26:10): the seat
+  // height was written as a note, "states the same size again".
+  it("fills the seat height from a later line that gives only a slot the size line left empty", () => {
+    const p = plan("REFER TO DRAWING\n720 X 1400 X 720MM\nSH: 420MM");
+    expect(p?.dimensionCell).toBe("W720 x D1400 x H720 x SH420mm");
+    const sh = p?.attributes.find((a) => a.slot === "SH");
+    expect(sh).toMatchObject({ attrGroup: "dimension", value: "420", unit: "mm", state: "confirmed", line: "SH: 420MM" });
+    expect(sh?.why).toMatch(/gives only the seat height, which “720 X 1400 X 720MM” leaves empty/);
+    expect(sh?.part ?? null).toBeNull();
+  });
+
+  it("keeps every other later size line a note: a slot already held, a second notation, a unit not printed", () => {
+    // The same slot again, even at a different figure: never two on one slot.
+    expect(plan("720 X 1400 X 720MM\nH 730MM")?.dimensionCell).toBe("W720 x D1400 x H720mm");
+    // Part new, part held: the whole line stays a note.
+    expect(plan("720 X 1400 X 720MM\nH 720 X SH 420MM")?.dimensionCell).toBe("W720 x D1400 x H720mm");
+    // A diameter beside a width and depth is a conflict, not an empty slot.
+    expect(plan("720 X 1400 X 720MM\nDIA 700MM")?.dimensionCell).toBe("W720 x D1400 x H720mm");
+    // Inches under a metric size are the imperial twin.
+    expect(plan("720 X 1400 X 720MM\nSH 16.5\"")?.dimensionCell).toBe("W720 x D1400 x H720mm");
+    // No unit on the later line: never borrowed from the line above.
+    const unitless = plan("720 X 1400 X 720MM\nSH 420");
+    expect(unitless?.dimensionCell).toBe("W720 x D1400 x H720mm");
+    expect(unitless?.attributes.find((a) => a.value === "SH 420")?.why).toMatch(/states the same size again/);
+    // An unlettered figure says no slot at all.
+    expect(plan("W720 X D1400MM\n420MM")?.dimensionCell).toBe("W720 x D1400mm");
+    // Two lines both giving SH: the first fills it, the second is a note.
+    expect(plan("720 X 1400 X 720MM\nSH: 420MM\nSH: 430MM")?.dimensionCell).toBe("W720 x D1400 x H720 x SH420mm");
+  });
+
+  it("lets a reviewer's change win the slot: a part moved into SH puts the later SH line back to a note", () => {
+    const p = planBillDescription(null, {
+      fields: [],
+      hasFabricLine: false,
+      columns: { dimensionsRaw: "W720 X D1400 X H720MM\nSH: 420MM", headings: { dimensions: heading } },
+      slotOverrides: { "H 720": "SH" },
+      name: "BENCH",
+    });
+    expect(p?.dimensionCell).toBe("W720 x D1400 x SH720mm");
+    expect(p?.attributes.filter((a) => a.slot === "SH")).toHaveLength(1);
+  });
+
+  // TB-01C and TB-05C (frames 36:00, 39:50): "Not one of the five slots: 710"
+  // was false, and in the room it was read as the height going in.
+  it("keeps a figure printed with no letter beside a lettered one as a note that says so, and offers its slot", () => {
+    const p = plan("REFER TO DRAWING\n700 DIA X 710MM");
+    expect(p?.dimensionCell).toBe("Dia.700mm");
+    const bare = p?.attributes.find((a) => a.part?.key === "710");
+    expect(bare).toMatchObject({ attrGroup: "note", slot: null, value: "710", unit: "mm", part: { key: "710", printed: null, overridden: false } });
+    expect(bare?.why).toMatch(/no letter/);
+    expect(p?.attributes.some((a) => /Not one of the five slots/.test(a.why ?? ""))).toBe(false);
+    expect(p?.unletteredAwaiting).toEqual(["710"]);
+    expect(p?.cautions.join(" ")).toMatch(/prints 710 with no letter, so it fills no slot/);
+  });
+
+  it("writes the unlettered figure where the reviewer says, through the one list the route checks", () => {
+    const cell = "REFER TO DRAWING\n700 DIA X 710MM";
+    const placed = placedSizeOf(lineStatements({ dimensionsRaw: cell }, { dimensions: heading }) ?? []);
+    expect(placedParts(placed).map((part) => [part.key, part.printed])).toEqual([
+      ["DIA 700", "DIA"],
+      ["710", null],
+    ]);
+    const asHeight = planBillDescription(null, {
+      fields: [],
+      hasFabricLine: false,
+      columns: { dimensionsRaw: cell, headings: { dimensions: heading } },
+      slotOverrides: { "710": "H" },
+      name: "LOUNGE TABLE",
+    });
+    expect(asHeight?.dimensionCell).toBe("Dia.700 x H710mm");
+    expect(asHeight?.attributes.find((a) => a.slot === "H")?.why).toMatch(/Set by the reviewer: printed with no letter \(710\), written as the height/);
+    expect(asHeight?.unletteredAwaiting).toEqual([]);
+    expect(asHeight?.cautions).toEqual([]);
+    // "It's a note" is an answer too: the caution goes, the note stays.
+    const kept = planBillDescription(null, {
+      fields: [],
+      hasFabricLine: false,
+      columns: { dimensionsRaw: cell, headings: { dimensions: heading } },
+      slotOverrides: { "710": "note" },
+      name: "LOUNGE TABLE",
+    });
+    expect(kept?.dimensionCell).toBe("Dia.700mm");
+    expect(kept?.unletteredAwaiting).toEqual([]);
+    expect(kept?.attributes.find((a) => a.part?.key === "710")?.why).toMatch(/Set by the reviewer/);
+    // And never two parts in one slot.
+    expect(resolveSlotOverrides(placed, { "710": "DIA" }).problem).toMatch(/both in the diameter slot/);
+  });
+
+  it("keeps what is truly not a slot apart from an unlettered figure", () => {
+    const p = plan("DIA 700 X L 900 X 710MM");
+    expect(p?.dimensionCell).toBe("Dia.700mm");
+    expect(p?.unletteredAwaiting).toEqual(["710"]);
+    expect(p?.attributes.find((a) => /Not one of the five slots/.test(a.why ?? ""))?.why).toBe(
+      "Not one of the five slots: L 900. The line is kept as printed.",
+    );
   });
 
   it("never reads the D of DRAWING as a depth", () => {

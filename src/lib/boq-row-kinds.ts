@@ -486,6 +486,55 @@ export function boqConfirmLabel(input: {
   return `Confirm · creates ${plural(records, "record", "records")}${fabrics} on ${plural(phases, "phase", "phases")}`;
 }
 
+/**
+ * WHY THE BILL'S CONFIRM IS DISABLED, in words, naming the tab that waits —
+ * or null where nothing stops it. Printed BESIDE the button (2026-10-15, the
+ * Ronnie Scott's call): the reason lived in a hover title and a banner at the
+ * top, and with two of three tabs still waiting on "The columns are right"
+ * Max spent four minutes looking for it and blamed a missing category. A
+ * blocker renders where the refused control is, not only on its tooltip.
+ *
+ * `tabs` are the names the tab strip shows; `single` is a bill of one sheet,
+ * which has no tab strip to point at. Every reason is listed, in the order a
+ * person clears them, because fixing the first and finding a second waiting
+ * is the same hunt again.
+ */
+export function boqConfirmBlocker(input: {
+  single: boolean;
+  /** A model is still reading the columns. */
+  reading: boolean;
+  /** Live sheets nobody has said the columns of. */
+  unmapped: readonly string[];
+  /** Live sheets whose columns a model read and nobody has agreed to. */
+  unchecked: readonly string[];
+  /** Finish lines with no item, by the tab they are on. */
+  kindProblems: readonly { tab: string; count: number }[];
+  /** Every line on every live sheet is dropped. */
+  noLiveLines: boolean;
+}): string | null {
+  const where = (tabs: readonly string[]) => {
+    const unique = [...new Set(tabs)];
+    if (input.single) return "this bill";
+    const quoted = unique.map((tab) => `“${tab}”`);
+    const list = quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}`;
+    return `the ${list} tab${unique.length === 1 ? "" : "s"}`;
+  };
+  const reasons: string[] = [];
+  if (input.unmapped.length > 0) reasons.push(`Set the columns on ${where(input.unmapped)}, or drop ${input.unmapped.length === 1 ? "it" : "them"}.`);
+  if (input.unchecked.length > 0) {
+    const subject = where(input.unchecked);
+    const verb = input.single || new Set(input.unchecked).size === 1 ? "is" : "are";
+    reasons.push(`${subject.charAt(0).toUpperCase()}${subject.slice(1)} ${verb} waiting on “The columns are right”.`);
+  }
+  const problems = input.kindProblems.reduce((total, entry) => total + entry.count, 0);
+  if (problems > 0) {
+    reasons.push(`${plural(problems, "finish line", "finish lines")} on ${where(input.kindProblems.map((entry) => entry.tab))} ${problems === 1 ? "has" : "have"} no item — say which item ${problems === 1 ? "it belongs" : "each belongs"} to.`);
+  }
+  if (input.reading) reasons.push("The model is still reading the columns.");
+  if (input.noLiveLines && input.unmapped.length === 0) reasons.push("Every line is dropped, so there is nothing to confirm.");
+  return reasons.length > 0 ? reasons.join(" ") : null;
+}
+
 // ---- a fabric line's state -------------------------------------------------------
 
 function fold(value: string): string {

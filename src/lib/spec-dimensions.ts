@@ -89,6 +89,24 @@ export type DimensionReading = {
    * hand is not made to say.
    */
   imperial?: boolean;
+  /**
+   * The figures an overall line printed with NO letter beside a lettered one
+   * — the 710 of `700 DIA X 710MM` — in printed order, each also inside
+   * `qualifier`. No slot is read for them: a line mixing prefixed and bare
+   * parts never lets the bare half borrow the lettered half's credibility. A
+   * caller that shows the line to a person may offer them a slot to pick;
+   * nothing here picks one. Only a part that reads as ONE figure, in the
+   * line's own unit or none, is listed: `L 800`, a component's `W 66` and
+   * anything that is not a plain figure stay in the qualifier alone.
+   */
+  unlettered?: string[];
+  /**
+   * Present beside `unlettered`: the qualifier's OTHER parts — what the line
+   * states that is not one of the five slots (`L 800`, a base's size) — so a
+   * caller can say each of the two things truthfully. Absent where there is
+   * nothing unlettered, and then `qualifier` is all of it.
+   */
+  beyondSlots?: string[];
 };
 
 /**
@@ -226,6 +244,8 @@ export function readDimension(attributeRaw: string | null, valueRaw: string | nu
   if (label.unit) units.add(label.unit);
   /** What the line states that is not one of the five slots, verbatim. */
   const leftovers: string[] = [];
+  /** Bare figures among the leftovers, with the unit each printed, if any. */
+  const bare: { at: number; figure: string; unit: AttributeUnit | null }[] = [];
   // A COMPONENT named partway along the line — "Dia 122 x H 75 x Base: W 66 x
   // D 66" — ends the item's own size. What follows is the base's, and reading
   // its `D 66` as the table's depth would sit a depth beside a diameter.
@@ -247,6 +267,12 @@ export function readDimension(attributeRaw: string | null, valueRaw: string | nu
       // `L`, `P`: printed, and not one of the five. Never mapped — `L` is not
       // `W` — and never dropped.
       leftovers.push(part.value);
+      // A figure with no letter at all is listed apart, for a person to say
+      // what it is. It only matters beside a lettered figure: three bare
+      // figures are read positionally by `parseCombinedDimensions` and never
+      // reach here, and a line with no lettered figure places nothing.
+      const plain = imperialCompoundAnywhere(part.value) ? null : figureWithUnit(part.value);
+      if (plain) bare.push({ at: leftovers.length - 1, ...plain });
       continue;
     }
     const figure = figureWithUnit(partValue);
@@ -275,6 +301,12 @@ export function readDimension(attributeRaw: string | null, valueRaw: string | nu
   if (units.size > 1) return null;
   const unit = [...units][0] ?? null;
 
+  // The same figure twice with no letter ("700 DIA X 710 X 710") is two
+  // parts no address can tell apart, so neither is offered.
+  const sameUnit = bare.filter((figure) => figure.unit === null || figure.unit === unit);
+  const offered = new Set(sameUnit.map((figure) => figure.figure)).size === sameUnit.length ? sameUnit : [];
+  const unlettered = offered.map((figure) => figure.figure);
+  const beyond = leftovers.filter((_, at) => !offered.some((figure) => figure.at === at));
   return {
     parts,
     unit,
@@ -282,6 +314,7 @@ export function readDimension(attributeRaw: string | null, valueRaw: string | nu
     qualifier: leftovers.length > 0 ? leftovers.join(" x ") : null,
     tbc: false,
     imperial: unit === "in" || label.imperial,
+    ...(unlettered.length > 0 ? { unlettered, beyondSlots: beyond } : {}),
   };
 }
 

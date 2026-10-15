@@ -186,6 +186,22 @@ export function BillDescriptionSummary({
           </Button>
         </div>
       )}
+      {/* A FIGURE PRINTED WITH NO LETTER beside a lettered one — the 710 of
+          `700 DIA X 710MM`. The line does not say its slot, so the plan keeps
+          it a note and asks; the slots are offered here, beside the caution,
+          so nobody has to open the statements to answer it. Pressing "note"
+          answers it too. */}
+      {onSetSlot &&
+        (plan.unletteredAwaiting ?? []).map((key) => {
+          const part = plan.attributes.find((attribute) => attribute.part?.key === key)?.part;
+          if (!part) return null;
+          return (
+            <div key={key} className="flex flex-wrap items-center gap-1 text-xs text-neutral-600">
+              <span className="font-mono">{key}</span> is:
+              <SlotControl part={part} current="note" busy={busy} onSetSlot={onSetSlot} />
+            </div>
+          );
+        })}
       {plan.revisionRefusal && <p className={`text-xs ${TONE.warn.text}`}>{plan.revisionRefusal}</p>}
     </div>
   );
@@ -230,7 +246,15 @@ export function BillDescriptionPanelRow({
                       <span className="text-neutral-500"> · {attribute.materialCode} filed in the finishes library</span>
                     )}
                     {attribute.part?.overridden && (
-                      <Chip tone="info" className="ml-1.5" title={`The bill printed ${attribute.part.key}`}>
+                      <Chip
+                        tone="info"
+                        className="ml-1.5"
+                        title={
+                          attribute.part.printed
+                            ? `The bill printed ${attribute.part.key}`
+                            : `The bill printed ${attribute.part.key} with no letter`
+                        }
+                      >
                         changed on review
                       </Chip>
                     )}
@@ -255,8 +279,9 @@ export function BillDescriptionPanelRow({
             </p>
             {/* A BILL'S OWN DIMS AND FINISH COLUMNS, as printed under their
                 headings — read by the same reader as the description's lines. */}
-            {(plan.columnCells ?? []).map((cell) => (
-              <div key={cell.column} className="mt-2">
+            {/* A Dims cell of several lines is several cells of one column. */}
+            {(plan.columnCells ?? []).map((cell, index) => (
+              <div key={`${cell.column}-${index}`} className="mt-2">
                 <p className="mb-1 text-xs text-neutral-500">The bill&apos;s {cell.heading} column</p>
                 <p className="whitespace-pre-line rounded border border-neutral-200 bg-white p-2 font-mono text-xs text-neutral-800">
                   {cell.value}

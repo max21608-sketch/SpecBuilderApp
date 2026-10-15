@@ -20,6 +20,7 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import { TONE } from "@/components/ui/tone";
 import PageHeader from "@/components/ui/PageHeader";
 import NextStepAction from "@/components/ui/NextStepAction";
 import { useNextStep } from "@/lib/use-next-step";
@@ -41,6 +42,7 @@ import {
 // the Confirm button says it will write — the same functions the confirm runs.
 import {
   boqConfirmCounts,
+  boqConfirmBlocker,
   boqConfirmLabel,
   rowKindProblems,
   type BoqRowKind,
@@ -1285,6 +1287,21 @@ export default function ReviewImportPage() {
   const counts = boqConfirmCounts(sheets);
   const structureState = run.model_metadata?.structureRead;
   const reading = asking !== null || structurePending(structureState);
+  /** A sheet as its tab names it — the words the reason beside Confirm uses, so it points at a tab you can see. */
+  const tabName = (sheet: (typeof sheets)[number]) => sheet.proposedRunName || sheet.sheetName;
+  const confirmBlocker =
+    run.status === "parsed"
+      ? boqConfirmBlocker({
+          single: sheets.length === 1,
+          reading,
+          unmapped: unmapped.map(tabName),
+          unchecked: unchecked.map(tabName),
+          kindProblems: activeSheets
+            .map((sheet) => ({ tab: tabName(sheet), count: rowKindProblems(sheet.lines).length }))
+            .filter((entry) => entry.count > 0),
+          noLiveLines: activeLines.length === 0,
+        })
+      : null;
   const canAsk = run.status === "parsed" && run.has_source !== false && run.parsed?.sourcePreserved !== false;
   const ignoredSheets = sheets.filter((sheet) => sheet.ignored);
   /** The revision and date the FIRST live tab printed, as text. Both stay text. */
@@ -1402,6 +1419,15 @@ export default function ReviewImportPage() {
           // (nothing parsed yet, no active lines) keeps it on screen, because
           // then it is the control being refused and it has to say so.
           run.status === "confirmed" ? null : (
+          <>
+          {/* THE REASON, BESIDE THE BUTTON IT DISABLES, naming the tab that
+              waits (2026-10-15). It used to be the button's hover title only,
+              and a person scrolled into a tab saw neither it nor the banner. */}
+          {confirmBlocker && !busy && (
+            <p className={`max-w-[26rem] text-right text-xs ${TONE.warn.text}`}>
+              {confirmBlocker}
+            </p>
+          )}
           <Button
             variant="primary"
             onClick={confirm}
@@ -1414,18 +1440,11 @@ export default function ReviewImportPage() {
               unchecked.length > 0 ||
               kindProblems.length > 0
             }
-            title={
-              unmapped.length > 0
-                ? "Set the columns of every live sheet, or drop it, first."
-                : unchecked.length > 0
-                  ? "Check the columns the model read, and press “The columns are right”, first."
-                  : kindProblems.length > 0
-                    ? "Say which item each finish line belongs to first."
-                    : undefined
-            }
+            title={confirmBlocker ?? undefined}
           >
             {boqConfirmLabel({ counts, revising, unmapped: unmapped.length, busy })}
           </Button>
+          </>
           )
         }
         tabs={
