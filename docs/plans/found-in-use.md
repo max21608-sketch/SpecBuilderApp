@@ -40,7 +40,7 @@ PILOT v1.11, project *P16717 — ronnie-scotts-lbpco*, the bill review of
 `RONNIE SCOTTS ST4 Procurement Schedule (converted).xlsx`. Timestamps are into
 the recording, and each one marks a frame that was looked at.
 
-### A Dims line stating only the seat height is dropped as "the same size again" — OPEN
+### A Dims line stating only the seat height is dropped as "the same size again" — FIXED 2026-10-15 (`dfed295`)
 
 The bench SO-03 (frame 24:22) and the sofa SO-04 (frame 26:10) each have a
 second Dims line, `SH: 420MM`. It is written as a note: *"Not placed:
@@ -51,13 +51,28 @@ source:** `planSheetDescriptions` in `src/lib/bill-description.ts` (around line
 723) notes every later line that reads as a size. It does not check whether
 the line states only slots the placed line left empty.
 
-### `700 DIA X 710MM` composes `Dia.700mm` and the height is lost — OPEN
+**Fixed:** a later line whose every part is lettered, with a printed unit and
+nothing left over, naming only slots the placed line left empty, fills them
+(`sizeSupplements`). SO-03 composes `W720 x D1400 x H720 x SH420mm` on the
+converted workbook; so do SO-01, SO-04, CH-02, CH-03 and CH-05. Every other
+later size line stays a note. The Aman and bills-1006 plans are unchanged.
+
+### `700 DIA X 710MM` composes `Dia.700mm` and the height is lost — FIXED 2026-10-15 (`dfed295`)
 
 TB-01C (frame 36:00) and TB-05C (frame 39:50). The line is kept as a note
 reading *"Not one of the five slots: 710. The line is kept as printed."* There
 is no H on either record. In the room Max said "It is going in" (36:13), and
 Matthew read "one of the five slots" off the screen. **Cause not diagnosed.**
 The note's words suggest the bare 710 became the reading's qualifier.
+
+**Diagnosed and fixed:** it did. The line letters the 700 (`DIA`, read as a
+label after its figure) and not the 710. A line mixing lettered and bare
+parts gives the bare part no slot, so the rule held. The note's words were
+false. The 710 is now a note saying the line gives it no letter, with a
+caution, and the review offers W · D · H · SH · Dia · note beside it through
+the existing slot-change route. Nothing chooses H for it. Reading
+`NNN DIA X NNN` as Dia x H on its own would be a new inference, and that is
+Max's call.
 
 ### A fabric line naming a code on two lines goes on one, and the other gets no fabric — OPEN, needs a decision
 
@@ -66,7 +81,7 @@ CH-03 is on two lines: SALON (2) and PDR MEMBERS ROOM (12). Its fabric line
 Matthew: "FB CH03, which is both those… items for the salon and the PDR"
 (21:51). The confirm went through as it was.
 
-### The bill's Confirm is disabled with its reason only in a hover title — OPEN
+### The bill's Confirm is disabled with its reason only in a hover title — FIXED 2026-10-15 (`dfed295`)
 
 With two of three tabs still waiting on "The columns are right", Confirm was
 disabled. Max spent 29:15–33:27 looking for why ("It doesn't actually tell me
@@ -74,6 +89,10 @@ what's blocking it") and first blamed a missing category. The reason is the
 button's `title` (`src/app/dashboard/imports/[id]/page.tsx`, around line 1416)
 and a banner at the top of the page. Max was scrolled down the first tab and
 saw neither.
+
+**Fixed:** the reason is printed beside the button, naming each tab that waits
+("The “UPHOLSTERED” and “MIRRORS” tabs are waiting on “The columns are
+right”."). It is still in the header, so it scrolls away with it.
 
 ### The expanded bill line is read across, and the composed cell is missed — OPEN, design
 
