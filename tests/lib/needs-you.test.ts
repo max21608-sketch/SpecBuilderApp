@@ -158,6 +158,9 @@ describe("configurationNeedsYou", () => {
       alias: (id) => (id === "p2-com" ? "p1-com" : null),
     });
     expect(items[0]).toMatchObject({ target: "row-p1-com", observationId: "p2-com", itemId: "p2" });
+  });
+});
+
 describe("transcriptionNeedsYou (a bill the model transcribed from a PDF)", () => {
   const pages: Record<number, number> = { 3: 1, 4: 1, 5: 2 };
   const lines = [
