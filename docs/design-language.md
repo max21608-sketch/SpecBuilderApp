@@ -184,13 +184,14 @@ All in `src/components/ui/`. Reach for these before writing a class string.
 |---|---|---|
 | `PageHeader` | the identity band: crumbs, the h1, a status `Pill` beside it, subtitle, actions, the `Tabs` | a second h1 lower on the page |
 | `PageBody` | the content column, `std` or `wide` | — |
-| `Tabs` + `useUrlTab` | a strip anything links INTO lives in the URL (`?tab=`); a strip nested in a review component keeps `useState` | a tab that reads the URL itself |
+| `Tabs` + `useUrlTab` | a strip anything links INTO lives in the URL (`?tab=`); a strip nested in a review component keeps `useState`. `attention` paints a tab red while it holds something a confirm waits on | a tab that reads the URL itself |
 | `StatTile` | one number and what it counts, in three rows; `href: null` renders a box, never a dead link | a number with nowhere to go and no judgement |
 | `Card` | a titled box; `flush` when it holds a table | wrapping a single paragraph |
 | `Table` / `Th` / `Td` / `Tr` / `GroupRow` | any list over six long | the drawings card's inner tables until Part B reaches them |
 | `Chip` | a fact about one cell: a state, a code (`mono`), a routing signal | a row's overall state |
 | `Pill` | a row's STATE from a closed set: ACTIVE, COMPLETED, BASELINE | a value |
 | `Note` | a conditional banner that appears because of the data | standing explanation |
+| `NeedsYou` | what still stops a Confirm, at the top of a review: each item the next step in a few words and a link that scrolls to the row and lights it (`goToAndFlash`); the full sentences under *Why*. Built from the blockers by `src/lib/needs-you.ts`, never instead of them (2026-10-15) | a reason only in a button's hover title; a paragraph of blocker messages beside Confirm |
 | `Tip` | one or two sentences on hover | a sentence whose absence would mislead |
 | `SuggestButton` | an app guess, its evidence, one click to accept | anything without evidence |
 | `Button` / `buttonClass` | every action; `buttonClass` for downloads | colour through `className` |

@@ -115,7 +115,7 @@ Classifying the cell whole is by design. The item name in a BWS field is not.
 The phase table shows `CH-01 (TO BE CONFIRMED)` as a client ref (frame 45:48).
 The schedule's qualifier on its code became part of the pre-sale key.
 
-### The replace box is read backwards — OPEN (part 2)
+### The replace box is read backwards — FIXED 2026-10-15 (`e888e75`)
 
 TB-08's drawing card, in the part 2 recording (36:36–44:38). The box says
 *"This item already holds a value here. Tick to replace it — the old one is
@@ -126,7 +126,14 @@ which way round it works: "I still don't know which way around it is"
 the bill says* (43:52). The rule is right ("it's great that it flags it",
 42:33). The sentence is the defect.
 
-### "Another page" counts the bill, which has no pages — OPEN (part 2)
+**Fixed:** the box is one comparison and one choice: *"CASEGOODS TABLES: The
+bill says W 900mm · this drawing says W 3500mm"*, a bordered tick named
+**Use this drawing's**, and beside it *"To keep the bill's, ignore this row or
+make it a note."* The old sentence about retiring is behind *What replacing
+does* (`src/lib/replace-words.ts`). The tick and its keys are unchanged.
+Walked on the local stack on TB-08's card with the width set to 3500.
+
+### "Another page" counts the bill, which has no pages — FIXED 2026-10-15 (`e888e75`)
 
 On the card, the height reads *"Already recorded from another page — the same
 figure"* when the other source is the bill (frame 26:00,
@@ -136,16 +143,33 @@ page"*, and that "page" is the bill (`dimension-provenance.ts:80`). Max asked
 the same evening why TB-08's H row carries the bill's column heading as its
 label. It is the bill's own row, kept because the drawing's 710 matched it.
 
-### "Correct" reads as "mark this correct" — OPEN (part 2)
+**Fixed:** a source is named for what it is (`src/lib/source-words.ts`): the
+card reads *"Already recorded from the bill — the same figure"*, the
+slot-taken blockers name the bill, and the record reads *"… off
+AM-ID-PL-FUR-12 Dresser.pdf p1 and 1 row from the bill"* (seen on the local
+stack). The occupant and the record route now carry whether the source run is
+a bill (`source_kind = 'boq_xlsx'`).
+
+### "Correct" reads as "mark this correct" — FIXED 2026-10-15 (`e888e75`)
 
 The record's Specs tab. Matthew: "Is that to mark it that it is correct or is
 that to change it?" (53:30). It changes it.
 
-### The drawing card's "Checked" boxes block the confirm unseen — OPEN (part 2)
+**Fixed:** the button reads **Edit value** (Max: "It should probably be edit",
+53:39), and a bill line's common spec **Edit on all n**.
+
+### The drawing card's "Checked" boxes block the confirm unseen — FIXED 2026-10-15 (`e888e75`)
 
 TB-08, part 2 at 50:26–50:51 and 1:04:07–1:04:27. Max: "It's not very clear
 that there's a checked box there… you have to click that to be able to
 confirm." This is the bill review's hover-title problem on a second screen.
+
+**Fixed:** the button is a bordered **Mark checked**, and the notice holding
+the card has an amber rule. A list at the top of the card (`NeedsYou`) names
+each thing still stopping Confirm in a few words, each a link that scrolls to
+its notice, replace box or row and lights it. The full sentences are under
+*Why*. The bill review has the same list, and a tab still waiting is red.
+The two configuration cards do not have the list yet.
 
 ### One material on three lines of a drawing became two timber finishes — OPEN, question (part 2)
 
