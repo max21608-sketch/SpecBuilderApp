@@ -2838,11 +2838,17 @@ lines beneath it — sent as PDFs printed from Excel. Four things, each a trap:
   value, "REFER TO DRAWING 740 X 740 X 720MM SH: 420MM" read as D740 — the D
   of DRAWING — and a sofa's 1700mm width landed in D. A line with no figure is
   a note; the first size line is placed (`placedSizeOf`); a one-line cell
-  reads exactly as before. **KNOWN DEFECT, seen 2026-10-15 on pilot:** a
-  later line giving ONLY a slot the placed line left empty (`SH: 420MM` under
-  `720 X 1400 X 720MM`) is noted as "the same size again", so the seat height
-  is lost. And `700 DIA X 710MM` composes `Dia.700mm` with no H. Both are in
-  `found-in-use.md`. "One placed line" must not be read as "drop the SH".
+  reads exactly as before. **A later line that gives ONLY slots the placed
+  line left empty fills them** (`sizeSupplements`, `dfed295`): `SH: 420MM`
+  under `720 X 1400 X 720MM` is the seat height. That needs every part
+  lettered, a unit printed, nothing left over, no slot already held, no inches
+  under a metric line, and no Dia beside W/D. Every other later size line stays
+  a note, and there are never two values on one slot. Until 2026-10-15 this
+  line was noted as "the same size again", and the seat height was lost on
+  pilot. **`700 DIA X 710MM` still gives the bare 710 no slot** (the
+  mixed-line rule is unchanged). The note now says the line gives it no
+  letter, and the review offers a slot beside it (`placedParts`). Nothing
+  picks one.
 - **Bare figures placed in printed order now say so**, and name the column
   heading's own order where it prints one: this schedule heads it "L X W X H"
   and prints a sofa as `800 X 1700 X 780MM`. `L` is still not a slot; the
