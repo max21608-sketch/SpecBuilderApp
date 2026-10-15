@@ -445,11 +445,13 @@ export function rowKindProblems(lines: readonly KindLine[]): { lineNo: number; p
  *
  * Three things about it are traps rather than preferences:
  *
- *   * ONLY WHERE THE LINE NAMES THE CODE: its bracket (`(CH-03)`), its own
- *     code ending on the item's (`FB-CH-03`), or the model's reading of which
- *     row it belongs to. A layout's category rule (Aman's `FBX-`, "the item
- *     above") names no code and still writes to one line; a bracket naming
- *     something else (a zone list) keeps it to one line too.
+ *   * ONLY WHERE THE LINE'S OWN CELLS NAME THE CODE: its bracket (`(CH-03)`),
+ *     or its own code ending on the item's (`FB-CH-03`). WHERE it sits — under
+ *     the item, by a layout's category rule (Aman's `FBX-`), by the model's
+ *     reading or by a person's choice — is position, and position names no
+ *     code: a `Fabric @ Sofa` line coded `N/A` under the second of two
+ *     OPTION lines stays on that option. A bracket naming something else (a
+ *     zone list) keeps it to one line too.
  *   * A LINE THAT HAS ITS OWN FINISH LINES TAKES NONE FROM ANOTHER. The same
  *     schedule prints CH-02 twice, each with its OWN two fabric lines (FB_06
  *     and FB_07 under the salon, FB_08 and FB_09 under the members bar).
@@ -480,7 +482,6 @@ type TargetLine = {
   code: string | null;
   ignored?: boolean;
   rowKind?: string | null;
-  rowKindSource?: string | null;
   finishFor?: { row: number } | null;
 };
 
@@ -492,7 +493,6 @@ function namesItsCode(line: TargetLine, itemCode: string): string | null {
   if (bracket) return normaliseRef(bracket.itemRef) === fold ? "its bracket names it" : null;
   const own = (line.code ?? "").trim();
   if (own && (normaliseRef(own) === fold || endsOnSegment(own, itemCode))) return `its code ${own} names it`;
-  if (line.rowKindSource === "model") return "the model read it as that item's";
   return null;
 }
 

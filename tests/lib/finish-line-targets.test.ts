@@ -42,11 +42,15 @@ describe("finishLineTargets", () => {
     expect(finishLineTargets(zone, zone[2]!).rows).toEqual([5]);
   });
 
-  it("the model's reading names the item's code; a person's choice of row, alone, does not", () => {
-    const model = [item(2, "ZC-03"), item(3, "ZC-03"), finish(4, "ZB-1", 3, "model")];
-    expect(finishLineTargets(model, model[2]!).rows).toEqual([2, 3]);
-    const person = [item(2, "ZC-03"), item(3, "ZC-03"), finish(4, "ZB-1", 3, "person")];
-    expect(finishLineTargets(person, person[2]!).rows).toEqual([3]);
+  it("where the line sits names no code — the model's reading or a person's, under the second of two OPTION lines", () => {
+    for (const source of ["model", "person"]) {
+      const lines = [item(12, "ZZ-FUR-03"), item(13, "ZZ-FUR-03"), finish(14, "N/A", 13, source), finish(15, null, 13, source)];
+      expect(finishLineTargets(lines, lines[2]!).rows).toEqual([13]);
+      expect(finishLineTargets(lines, lines[3]!).rows).toEqual([13]);
+    }
+    // The same reading, where the line's own code names the item: both.
+    const named = [item(2, "ZC-03"), item(3, "ZC-03"), finish(4, "ZB-ZC-03", 3, "model")];
+    expect(finishLineTargets(named, named[2]!).rows).toEqual([2, 3]);
   });
 
   it("a layout's category rule names no code and stays on the item above", () => {
