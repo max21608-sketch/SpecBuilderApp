@@ -60,7 +60,7 @@ one agent.
 | `npm run create-user` · `npm run hash-password` | there is no self-signup |
 | `npm run dump:drawings -- --run=<id>` | read only: what a staged drawing run reduces to through the REAL read-time pipeline — measured rows, placed slots, folded rows, unit provenance, the composed BWS cell. Run it before and after a change to that pipeline; the diff is the change |
 | `npm run vocab:gap` | read only: every label the staged documents carry, which route places it (slot / BWS field / question), what is left, and — the point — what a looser rule would have wrongly written instead. Run it before seeding `requirement_aliases`, and read the NEAR MISSES before adding one |
-| `npm run boq:gap -- <folder> [--golden <dir>]` | read only, no database: what every bill in a folder reduces to through the real reader — how the header was found, the column map, lines, lines with no code or qty, row kinds, qty sum — and, with `--golden`, line/code/quantity/fabric-parent accuracy against hand-checked expectations kept OUTSIDE the repo. It is how "the reader nails this specifier" becomes a number |
+| `npm run boq:gap -- <folder> [--golden <dir>] [--categories]` | read only, no database: what every bill in a folder reduces to through the real reader — how the header was found, the column map, lines, lines with no code or qty, row kinds, qty sum, finish lines written to more than one item — and, with `--golden`, line/code/quantity/fabric-parent accuracy against hand-checked expectations kept OUTSIDE the repo; `--categories` gives each line's suggested category off the seed files. It is how "the reader nails this specifier" becomes a number |
 | `npm run db:backfill-standards` | one-off: where a palette pick at intake OVERWROTE the drawing's words (before 0041), puts the words back into `value` and the pick into `standard_*` as `proposed`, read from the staged run. Dry run unless `--apply`; safe to re-run; ambiguous rows are reported, never guessed |
 | `npm run spec:gap -- <runId>` | read only, local stack: a specification-document run's proposals by outcome (placed / record only / ambiguous / nothing) as STAGED and as a free re-match would leave them, and the top unplaced labels. Run it before and after any change to `spec-reading-vocab.ts` |
 | `npm run palette:gap` | read only: every callout that lands on a palette-backed BWS field, how many match an option exactly, and — the point — what a SUBSTRING step would have written instead. Run it before widening the match past the exact step. On 2026-09-22 it read 98 callouts over 47 staged runs, **0 matching and 0 near misses**, which is the evidence §6.2 asked for |
@@ -2352,7 +2352,11 @@ words so a value stays checkable against its page; the CELL renders the library.
   button with its evidence beside it, and a person's click files it. The
   `level_suggested` rule (0025) in a second place — the register cannot fill
   with mistakes, because every entry in it was agreed to by somebody looking at
-  the row.
+  the row. **A trim is a kind** (0049, 2026-10-15). The Ronnie Scott's COM
+  list files `TR_01`… beside its fabrics. It is suggested from `TR` + a number
+  (exactly: `TRV-01` is not a trim), from a bill's `F-TR-nn`, or from the word
+  "trim", read before the material the trim is made of. A trim still fills no
+  BWS field.
 - **A CONFLICT links nothing.** Where the library has committed to a
   description and a new drawing says something else, the attribute stays
   unlinked and shows on the finishes page as a code needing a person. Linking
@@ -2875,6 +2879,37 @@ with different cloth link without a question, and that is what the code
 means. **0048 must be on a database before its seed is run.** Still open: the
 converted workbook's leather rows carry their name in the notes column
 (`DIABLO WALNUT` in FINISH), a PDF-conversion shift.
+
+**A COM line naming a code that is on two lines of a phase goes on each line
+that has no finish line of its own** (`finishLineTargets` in
+`boq-row-kinds.ts`; Max, 2026-10-15: "apply it to both, no tick boxes").
+Naming means the line's bracket, or its own code ending in the item's code
+(`FB-CH-03` → `CH-03`). Where the line SITS (the model's reading, a person's,
+a layout's category rule) names nothing. A twin with its own finish lines
+keeps only its own: otherwise the salon CH-02's cloths would land on the
+members-bar CH-02 beside its own. Each record gets its own attribute in the
+next free slot of its kind, and the finish is filed once. The confirm, the
+review's arrow and the description reader call the one function. An ITEM line
+on two lines is still SX11A. Measured over 391 staged finish lines: only
+FB-CH-03 moves. **Still open:** the bill's own charged specification read
+(`bill-rows.ts`) maps a fabric line's row to ONE record.
+
+**A bill line's category is matched on the item, before any ` @ `**
+(`suggestCategory`, `boq-stage.ts`, 2026-10-15). "Side Table @ Lounge" is a
+side table; without this rule, the term "Lounge table" tied nine Aman lines.
+`npm run boq:gap -- <folder> --categories` reads the seed through the same
+function, so diff it before and after any change to seed 0004.
+
+**"Timber finish 1" and "Metal finish 1" are screen names, never BWS's**
+(`fieldDisplayName`, `src/lib/spec-field-label.ts`; Matthew and Max,
+2026-10-15). They cover json_id 4 and 5. `spec_fields.name` and `name_norm`
+(which document matching uses), the export headers, the quote, the costing
+sheet and the chase EMAIL all keep BWS's names. The check sheet prints both:
+`Metal finish 1 (BWS: Main metal finish)`. Any screen that prints a field name
+calls `fieldDisplayName`, and a test holds the map against seed 0001. The 17
+checklist questions worded "Main timber finish" DISPLAY the new name and keep
+their seeded wording, because rewording them would make every unsent chase
+draft stale.
 
 ### A bill's own specification read resolves by ROW, and a long sheet is read in windows
 
@@ -4214,6 +4249,21 @@ only in a button's hover title. One was "Checked" boxes nobody could see. One
 was a replace box read backwards for eight minutes. The full explanation still
 exists, one click away. It is never deleted, because it is how a reviewer
 checks a value. But it is not what the person reads first.
+**Built 2026-10-15 (`e888e75`):**
+- One "needs you" list sits at the top of the bill review and of the
+  single-item drawing card (`NeedsYou`, `src/lib/needs-you.ts`). Each blocker
+  is a few words and a link. The link switches tab or unfolds the row, then
+  scrolls to it and lights it (`goToAndFlash`). The full sentences are under
+  "Why".
+- A bill tab still waiting shows red (`Tabs`, `attention`).
+- The replace box reads "The bill says W 900mm · this drawing says W 3500mm",
+  with a "Use this drawing's" tick (`replace-words.ts`).
+- A source is named "the bill", never "another page" (`source-words.ts`).
+- "Correct" is now "Edit value".
+- The blockers themselves are unchanged: the list only shortens them and
+  points at them.
+- **Not yet on the two configuration cards**, whose rows sit on
+  per-configuration tabs.
 
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
