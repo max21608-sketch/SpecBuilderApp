@@ -302,6 +302,42 @@ export async function fabricSwatchBillWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/**
+ * A PROCUREMENT SCHEDULE THAT NAMES ITS CLOTHS BY A COM CODE (2026-10-15) —
+ * invented, in the shape of the Ronnie Scott's schedule (LBPCo): each item,
+ * then its COM line, which carries its own FF&E code, a COM CODE, a
+ * description saying where the cloth goes, and the cloth in the FINISH
+ * column. Headings the seeded synonyms all know, so it reads without a model.
+ *
+ *   2  ZC-01  POUFEE      3  ZB-CH-01C.A  ZB_04  velvet, "POUFFE DEPTH FABRIC"
+ *   4  ZC-03  ARMCHAIR    5  ZB-CH-03     ZB_04  the same velvet, "ARMCHAIR @ FABRIC"
+ *   6  ZC-02  ARMCHAIR    7  ZB-CH-02A    ZB_06  plush, internal seat and back
+ *   8  ZC-02  ARMCHAIR    9  ZB-CH-02A    ZB_08  velour — ONE FF&E code, two cloths
+ *  10  ZM-01  MIRROR         carries a COM code of its own on its item line
+ */
+export const COM_CODE_CLOTH = {
+  velvet: "NAME: EXAMPLE VELVET\nCODE: 1234.56\nCOLOUR: IVORY",
+  plush: "NAME: EXAMPLE PLUSH\nCOLOUR: COGNAC",
+  velour: "NAME: EXAMPLE VELOUR\nCOLOUR: RUST",
+} as const;
+
+export async function comCodeBillWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  addSheet(book, "UPHOLSTERED", [
+    ["FF&E CODE", "COM CODE", "DESCRIPTION", "FINISH", "QTY", "UOM"],
+    ["ZC-01", null, "POUFEE", "EXAMPLE POUFFE\nCOM", 9, "EACH"],
+    ["ZB-CH-01C.A", "ZB_04", "POUFFE DEPTH\nFABRIC", COM_CODE_CLOTH.velvet, 7.5, "METRE"],
+    ["ZC-03", null, "ARMCHAIR", "EXAMPLE CHAIR\nCOM", 12, "EACH"],
+    ["ZB-CH-03", "ZB_04", "ARMCHAIR @ FABRIC", COM_CODE_CLOTH.velvet, 36, "METRE"],
+    ["ZC-02", null, "ARMCHAIR", "EXAMPLE ARMCHAIR\nCOM", 2, "EACH"],
+    ["ZB-CH-02A", "ZB_06", "ARMCHAIR\nINTERNAL SEAT &\nBACK FABRIC", COM_CODE_CLOTH.plush, 3, "METRE"],
+    ["ZC-02", null, "ARMCHAIR", "EXAMPLE ARMCHAIR\nCOM", 8, "EACH"],
+    ["ZB-CH-02A", "ZB_08", "ARMCHAIR\nINTERNAL SEAT &\nBACK FABRIC", COM_CODE_CLOTH.velour, 12, "METRE"],
+    ["ZM-01", "ZB_20", "MIRROR", null, 1, "EACH"],
+  ]);
+  return bytes(book);
+}
+
 /** The words of `finishLinesBillWorkbook`'s finish lines, by row — invented, every one. */
 export const FINISH_LINES = {
   4: { code: "F-FA-05", words: "EXAMPLE MILL | ZX-1 / ALPHA | MOHAIR | IVORY" },

@@ -141,6 +141,16 @@ export type BoqLine = {
   dimensionsRaw?: string | null;
   finishRaw?: string | null;
   /**
+   * THE CODE A FINISHES SCHEDULE KNOWS A FINISH LINE'S FINISH BY (the
+   * Ronnie Scott's procurement schedule's "COM CODE", 2026-10-15): `FB_16`,
+   * beside the line's own FF&E code. Present only where the sheet has the
+   * column, so every bill staged before reads exactly as it did. On a finish
+   * line it is the code the library files the finish under, and the line's
+   * `finishRaw` is the cloth (`bill-fabric-filing.ts`); on an item line it is
+   * kept in the record's notes.
+   */
+  finishCode?: string | null;
+  /**
    * THE BILL'S MOCK-UP FIGURE (2026-10-06): the `Prototype Quantity` cell as
    * printed — `1`, `PARTIAL`, `N/A`, or null where the cell is blank. Present
    * only where the sheet has the column. It is not `qty` (that is the
@@ -446,6 +456,9 @@ const COLUMNS = {
   // bill, "DIMENSIONS" on the public areas one.
   dimensions: ["dims", "dimensions"],
   finish: ["finish"],
+  // The Ronnie Scott's procurement schedule, 2026-10-15: "COM CODE", the code
+  // the COM list describes each cloth under.
+  finishCode: ["com code"],
 } as const;
 
 /** One heading the reader knows, and what it means. A row of `boq_column_aliases`. */
@@ -544,6 +557,7 @@ const COLUMN_LABEL: Record<ColumnKey, string> = {
   notes: "notes",
   dimensions: "dimensions",
   finish: "finish",
+  finishCode: "finish code",
 };
 
 /**
@@ -1247,6 +1261,7 @@ function readRows(
     // reads it, and a reader cannot recover what a collapse threw away.
     ...(header.dimensions !== undefined ? { dimensionsRaw: rawCell(at(row, "dimensions")) } : {}),
     ...(header.finish !== undefined ? { finishRaw: rawCell(at(row, "finish")) } : {}),
+    ...(header.finishCode !== undefined ? { finishCode: text(at(row, "finishCode")) } : {}),
     // The bill's mock-up figure, as printed: `1`, `PARTIAL`, `N/A` — never
     // read as a number here, because a word in it is the point.
     ...(header.mockupQty !== undefined ? { mockupQtyRaw: text(at(row, "mockupQty")) } : {}),

@@ -47,7 +47,13 @@
 //     that gives one.
 //   * A placeholder's picture is filed nowhere: it has no finish to belong to.
 // ============================================================================
-import { fabricOwnCode, fabricLineIsPlaceholder, fabricLineState, type RowKindFields } from "@/lib/boq-row-kinds";
+import {
+  fabricFilingCode,
+  fabricLineIsPlaceholder,
+  fabricLineState,
+  fabricScheduleCode,
+  type RowKindFields,
+} from "@/lib/boq-row-kinds";
 import { billItemName } from "@/lib/bill-description";
 import {
   billFinishLineKind,
@@ -94,11 +100,109 @@ export type FabricFiling =
   /** No code and nothing beyond TBC and filler: never filed, never matched. */
   | { outcome: "placeholder" };
 
-type FabricLine = { code: string | null; itemDescription: string } & RowKindFields;
+type FabricLine = {
+  code: string | null;
+  itemDescription: string;
+  itemDescriptionRaw?: string | null;
+  /** The bill's own Finish column, as printed (`boq-import.ts`). */
+  finishRaw?: string | null;
+  /** The bill's own finish-code column — the COM CODE (`fabricScheduleCode`). */
+  finishCode?: string | null;
+} & RowKindFields;
 
-/** The words a fabric line writes as its spec — the description verbatim, or "" where it has none (never its code). */
+// ============================================================================
+// A LINE THAT NAMES ITS FINISH BY A SCHEDULE CODE (2026-10-15, the Ronnie
+// Scott's procurement schedule, LBPCo).
+//
+// Each COM, leather and trim line there reads, across its columns:
+//
+//   FF&E CODE FB-SO-01 · COM CODE FB_16 · DESCRIPTION "SOFA @ FABRIC" ·
+//   FINISH / REFERENCE "NAME: POLLACK - EMBELLUSHED PLUSH / CODE: 5046/06
+//   CAYENNE / COLOUR: …"
+//
+// The description is WHERE the cloth goes ("POUFFE DEPTH FABRIC", "ARMCHAIR
+// MAIN BODY FABRIC") or a placeholder; the cloth is in the finish column; and
+// the cloth's identity is the COM code, which the project's COM LIST
+// describes. Read as every other bill's finish line, the confirm wrote "SOFA @
+// FABRIC" into COM 1 as a TBC and filed FB-SO-01, a position code two
+// different cloths share on that schedule, so nothing linked to the COM list.
+//
+// So where a line carries a schedule code, and only there (every other bill
+// has no such column and writes exactly as before):
+//
+//   * THE VALUE IS THE FINISH COLUMN'S CLOTH, whitespace folded to one line as
+//     every Finish column cell is (`columnStatements`). A blank finish cell
+//     keeps the description, as before.
+//   * THE QUALIFIER IS THE DESCRIPTION'S PLACEMENT (0029): "POUFFE DEPTH",
+//     the material word at its end taken off. None where the description is
+//     a placeholder ("SOFA @ FABRIC") or a bare code ("TR-CH-01").
+//   * IT IS FILED UNDER THE SCHEDULE CODE (`fabricFilingCode`), and the
+//     bill's cloth is NEITHER offered to the CONFLICT rule NOR written as the
+//     library's description. The bill's finish cell is its COPY of the COM
+//     list, in its own layout: against the list's entry ("CARYATIS - MADAME
+//     E; Colour: CUIVRE") the copy ("NAME: CARYATIS - MADAME E CODE: M441
+//     909 COLOUR: CUIVRE …") disagrees in formatting alone, so compared it
+//     linked nothing whichever was read first, and written as the description
+//     it turned the list's own entry into a conflict. The code is the key, as
+//     a drawing callout printing only `GR TIM 04` is (`finishWordsOf`); the
+//     list describes it. Until a list is read the library row is TBC with no
+//     words, and the item's attribute keeps the cloth as the evidence.
+//
+// The cost, knowingly: two lines quoting one COM code with different cloth
+// link to one finish without a question. One code, one cloth is what a COM
+// code means, and the review prints both lines' cloth.
+// ============================================================================
+
+/** True where the line names its finish by a schedule code (the bill's COM CODE). */
+export function filedByScheduleCode(line: FabricLine): boolean {
+  return fabricScheduleCode(line) !== null;
+}
+
+/** The cloth a schedule-coded line's finish column states, on one line, or "" where it states none. */
+function scheduleLineCloth(line: FabricLine): string {
+  return (line.finishRaw ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The words a fabric line writes as its spec — the description verbatim, or
+ * "" where it has none (never its code). A line filed by a schedule code
+ * writes its finish column's cloth instead, where it has one.
+ */
 export function fabricLineValue(line: FabricLine): string {
+  if (filedByScheduleCode(line)) {
+    const cloth = scheduleLineCloth(line);
+    if (cloth !== "") return cloth;
+  }
   return billFinishLineWords(line);
+}
+
+/** A material word at the END of a placement ("POUFFE DEPTH FABRIC", "BAR STOOL @ LEATHER"). */
+const TRAILING_MATERIAL = /\s*@?\s*\b(?:fabrics?|leathers?|trims?|com)\s*$/i;
+
+const foldWords = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/**
+ * WHERE ON THE ITEM a schedule-coded line's cloth goes — its description,
+ * the material word at its end taken off — or null. Only where the value is
+ * the finish column's cloth: otherwise the description IS the value.
+ *
+ * Null where what is left says nothing about where: the item's own name
+ * ("SOFA @ FABRIC" under a SOFA), a bare code ("TR-CH-01"), or a TBC. NOT the
+ * placeholder test: that one takes position words ("main", "body", "seat")
+ * as filler, which is right for whether a line names a fabric and wrong here,
+ * where the position words are the whole point ("ARMCHAIR MAIN BODY").
+ */
+export function fabricLinePlacement(line: FabricLine, parentName: string | null): string | null {
+  if (!filedByScheduleCode(line) || scheduleLineCloth(line) === "") return null;
+  const words = billFinishLineWords(line).replace(/\s+/g, " ").trim();
+  const placement = words.replace(TRAILING_MATERIAL, "").replace(/\s*@\s*$/, "").trim();
+  if (placement === "") return null;
+  if (parentName && foldWords(placement) === foldWords(parentName)) return null;
+  if (!/\s/.test(placement) && /\d/.test(placement)) return null;
+  if (fabricLineIsPlaceholder(placement, null) && !/[a-z]{3,}/i.test(placement.replace(/\b(?:tbc|tba|tbd|n\/?a)\b/gi, ""))) {
+    return null;
+  }
+  return placement;
 }
 
 /**
@@ -116,20 +220,25 @@ export function fabricLineValue(line: FabricLine): string {
 export function fabricLineWrite(
   line: FabricLine,
   parentName: string | null,
-): { value: string | null; state: "tbc" | "confirmed" } {
+): { value: string | null; state: "tbc" | "confirmed"; qualifier?: string } {
   const value = fabricLineValue(line);
-  if (value === "") return { value: null, state: "tbc" };
-  if (fabricLineIsPlaceholder(value, parentName)) return { value, state: "tbc" };
-  return { value, state: fabricLineState(value) };
+  // Only a schedule-coded line has one, so every other line's write is the
+  // shape it always was.
+  const placement = fabricLinePlacement(line, parentName);
+  const qualifier = placement ? { qualifier: placement } : {};
+  if (value === "") return { value: null, state: "tbc", ...qualifier };
+  if (fabricLineIsPlaceholder(value, parentName)) return { value, state: "tbc", ...qualifier };
+  return { value, state: fabricLineState(value), ...qualifier };
 }
 
 /**
- * The fabric's own code: the bracket removed, `N/A` and blank as none, and
- * NONE where it is the item's own code — a fabric line whose code is its
- * item's names no fabric at all.
+ * The code a fabric line is filed under (`fabricFilingCode`): its schedule
+ * code where the bill gives one, otherwise its own — the bracket removed,
+ * `N/A` and blank as none, and NONE where it is the item's own code (a
+ * fabric line whose code is its item's names no fabric at all).
  */
 export function fabricMaterialCode(line: FabricLine): string | null {
-  return fabricOwnCode(line);
+  return fabricFilingCode(line);
 }
 
 /** WHAT A FINISH LINE IS (`bill-finish-kind.ts`), re-exported for the confirm. */
@@ -154,8 +263,20 @@ export function decideFabricFiling(input: {
   /** The item line's name, which the bill's lead repeats. */
   parentName: string | null;
   library: readonly Finish[];
+  /**
+   * The line is filed by a schedule code (`filedByScheduleCode`): the code
+   * links, and the line's words neither describe nor contradict it.
+   */
+  byScheduleCode?: boolean;
 }): FabricFiling {
   const { materialCode, says, words, parentName, library } = input;
+  if (input.byScheduleCode && materialCode) {
+    const byCode = resolveFinishCodeInWalk(materialCode, null, [...library]);
+    if (byCode.status === "matched") {
+      return { outcome: "matched", finish: byCode.finish, ...(byCode.readAs ? { readAs: byCode.readAs } : {}) };
+    }
+    if (byCode.status === "new") return { outcome: "new", code: byCode.code, describe: false };
+  }
   const placeholder = fabricLineIsPlaceholder(words, parentName);
   // A CODED PLACEHOLDER LINKS BY ITS CODE. The Aman bill names GR-FAB-13 under
   // the stool with its collection and colour, and again under the desk chair
@@ -256,7 +377,13 @@ type PlanLine = FabricLine & {
   itemDescriptionRaw?: string | null;
   replaces?: { recordId: string; recordVersion: number } | null;
 };
-type PlanSheet = { sheetName: string; ignored: boolean; lines: readonly PlanLine[] };
+type PlanSheet = {
+  sheetName: string;
+  ignored: boolean;
+  lines: readonly PlanLine[];
+  /** The finish-code column's heading as printed, for the sentence ("by its COM CODE"). */
+  columns?: { finishCode?: { heading: string } } | null;
+};
 
 /** A finish the bill would create, in the review's copy of the library. */
 type Planned = { finish: Finish; rowNo: number; minted: boolean };
@@ -276,6 +403,12 @@ export type FabricLinePlan = {
   askForShortCode: boolean;
   /** The state the confirm will store (`fabricLineWrite`): a placeholder is TBC. Absent on a carried line, which writes nothing. */
   tbc?: boolean;
+  /**
+   * WHAT IS WRITTEN, where it is not the description the row already shows: a
+   * line filed by a schedule code writes its finish column's cloth, with its
+   * placement as the qualifier (`fabricLineWrite`). Absent otherwise.
+   */
+  writes?: { value: string; qualifier: string | null };
 };
 
 /**
@@ -320,6 +453,8 @@ export function planBillFabrics(input: {
       goesTo: string;
       kind: BillFinishKind;
       tbc?: boolean;
+      writes?: { value: string; qualifier: string | null };
+      byCodeHeading?: string;
     }
   >();
   /** The slots each item holds as its finish lines are walked, by the item's row on the sheet. */
@@ -377,12 +512,14 @@ export function planBillFabrics(input: {
       const taken = (parent && slotsByItem.get(parent.lineNo)) || new Set<number>();
       const placement = decideBillFinishSlot(kind, taken);
       if (placement.jsonId !== null) taken.add(placement.jsonId);
+      const byScheduleCode = filedByScheduleCode(line);
       const filing = decideFabricFiling({
         materialCode: fabricMaterialCode(line),
         says,
         words: line.itemDescription,
         parentName: parent ? billItemName(parent) : null,
         library,
+        byScheduleCode,
       });
       let finishKey: string | null = null;
       if (filing.outcome === "matched" || filing.outcome === "same_words") finishKey = filing.finish.id;
@@ -402,13 +539,17 @@ export function planBillFabrics(input: {
         goesTo: describeBillFinishSlot(placement),
         kind,
         tbc: written.state === "tbc",
+        ...(byScheduleCode && written.value && written.value !== billFinishLineWords(line)
+          ? { writes: { value: written.value, qualifier: written.qualifier ?? null } }
+          : {}),
+        ...(byScheduleCode ? { byCodeHeading: sheet.columns?.finishCode?.heading?.trim() || "finish code" } : {}),
       });
     }
   }
 
   const swatches = planFinishSwatches(groups, input.heldSwatches);
   const out = new Map<string, FabricLinePlan>();
-  for (const [key, { filing, candidate, key: finishKey, chosen, goesTo, kind, tbc }] of filings) {
+  for (const [key, { filing, candidate, key: finishKey, chosen, goesTo, kind, tbc, writes, byCodeHeading }] of filings) {
     if (filing === null) {
       out.set(key, {
         goesTo,
@@ -418,12 +559,19 @@ export function planBillFabrics(input: {
       });
       continue;
     }
+    const filed = describeFiling(filing, planned, series, candidate.rowNo, kind);
     out.set(key, {
       goesTo,
-      filing: describeFiling(filing, planned, series, candidate.rowNo, kind),
+      // A schedule-coded line says which column it was filed by, and that the
+      // schedule — not the bill's copy of it — describes the code.
+      filing:
+        byCodeHeading && (filing.outcome === "new" || filing.outcome === "matched")
+          ? `${filed}, by its ${byCodeHeading}${filing.outcome === "new" ? " — described when the finishes schedule is read" : ""}`
+          : filed,
       swatch: finishKey ? describeSwatch(swatches.get(finishKey), candidate, chosen) : null,
       askForShortCode: filing.outcome === "mint" && series === INTERNAL_FINISH_PREFIX,
       tbc,
+      ...(writes ? { writes } : {}),
     });
   }
   return out;

@@ -452,3 +452,132 @@ describe("fabricLineWrite — what the confirm stores and the review predicts", 
     expect(fabricLineWrite(line("ZZ-FAB-13", "Example velvet — colour TBC"), "Armchair").state).toBe("tbc");
   });
 });
+
+// ---- a line that names its finish by a schedule code (2026-10-15) -----------------
+//
+// The shape is the Ronnie Scott's procurement schedule's (LBPCo): each COM line
+// carries its own FF&E code (a POSITION code two cloths may share), a COM CODE
+// the COM list describes the cloth under, a description that says where the
+// cloth goes, and the cloth itself in the Finish column. Codes and words are
+// invented.
+describe("a finish line filed by its schedule code (the bill's COM CODE column)", () => {
+  type Line = Parameters<typeof planBillFabrics>[0]["sheets"][number]["lines"][number];
+  const item = (index: number, lineNo: number, code: string, name: string): Line => ({
+    index,
+    lineNo,
+    code,
+    itemDescription: name,
+    ignored: false,
+    rowKind: "item",
+    finishCode: null,
+  });
+  const com = (
+    index: number,
+    lineNo: number,
+    own: string,
+    comCode: string | null,
+    words: string,
+    cloth: string | null,
+    parentRow: number,
+    parentCode: string,
+  ): Line => ({
+    index,
+    lineNo,
+    code: own,
+    itemDescription: words,
+    ignored: false,
+    rowKind: "finish_for",
+    finishFor: { row: parentRow, code: parentCode },
+    finishCode: comCode,
+    finishRaw: cloth,
+  });
+  const cloth = "NAME: EXAMPLE VELVET\nCODE: 1234.56\nCOLOUR: IVORY";
+
+  it("files under the COM code, writes the Finish column's cloth on one line, and keeps the placement as the qualifier", () => {
+    const line = com(1, 3, "ZB-CH-01A", "ZB_01", "POUFFE DEPTH FABRIC", cloth, 2, "ZC-01");
+    expect(fabricMaterialCode(line)).toBe("ZB_01");
+    expect(fabricLineWrite(line, "POUFEE")).toEqual({
+      value: "NAME: EXAMPLE VELVET CODE: 1234.56 COLOUR: IVORY",
+      state: "confirmed",
+      qualifier: "POUFFE DEPTH",
+    });
+    expect(fabricLineWrite(com(1, 3, "ZB-CH-02B", "ZB_09", "ARMCHAIR MAIN BODY FABRIC", cloth, 2, "ZC-02"), "ARMCHAIR").qualifier).toBe(
+      "ARMCHAIR MAIN BODY",
+    );
+  });
+
+  it("gives no qualifier where the description is a placeholder or a bare code", () => {
+    expect(fabricLineWrite(com(1, 3, "ZB-SO-01", "ZB_16", "SOFA @ FABRIC", cloth, 2, "ZS-01"), "SOFA")).not.toHaveProperty(
+      "qualifier",
+    );
+    expect(fabricLineWrite(com(1, 3, "ZT-CH-01B", "ZT_01", "ZT-CH-01", cloth, 2, "ZC-01"), "POUFEE")).not.toHaveProperty("qualifier");
+    expect(fabricLineWrite(com(1, 3, "ZB-CH-07", "ZB_14", "TBC", cloth, 2, "ZC-07"), "POUFFE")).not.toHaveProperty("qualifier");
+    // The item's name with more said is a placement.
+    expect(fabricLineWrite(com(1, 3, "ZB-TB-01", "ZB_12", "TABLE SKIRT @ LEATHER", cloth, 2, "ZT-15"), "TABLE").qualifier).toBe(
+      "TABLE SKIRT",
+    );
+  });
+
+  it("keeps the description where the Finish cell is blank, and files by the line's own code where the COM cell is blank or N/A", () => {
+    expect(fabricLineWrite(com(1, 3, "ZB-CH-01A", "ZB_01", "POUFFE DEPTH FABRIC", null, 2, "ZC-01"), "POUFEE")).toEqual({
+      value: "POUFFE DEPTH FABRIC",
+      state: "confirmed",
+    });
+    const blank = com(1, 3, "ZB-CH-01A", "N/A", "POUFFE DEPTH FABRIC", cloth, 2, "ZC-01");
+    expect(fabricMaterialCode(blank)).toBe("ZB-CH-01A");
+    expect(fabricLineValue(blank)).toBe("POUFFE DEPTH FABRIC");
+  });
+
+  it("links by the code whatever the bill's copy of the cloth says, and creates a new code with NO description", () => {
+    const says = "NAME: EXAMPLE VELVET CODE: 1234.56 COLOUR: IVORY";
+    const listed = finish({ code: "ZB_04", codeNorm: "ZB_04", description: "EXAMPLE VELVET; Colour: IVORY" });
+    const input = { materialCode: "ZB_04", says, words: "ARMCHAIR @ FABRIC", parentName: "ARMCHAIR" };
+    expect(decideFabricFiling({ ...input, library: [listed], byScheduleCode: true })).toMatchObject({
+      outcome: "matched",
+      finish: { id: "fin-1" },
+    });
+    expect(decideFabricFiling({ ...input, library: [], byScheduleCode: true })).toEqual({
+      outcome: "new",
+      code: "ZB_04",
+      describe: false,
+    });
+    // Without the column, the same words against the same row are the CONFLICT rule, unchanged.
+    expect(decideFabricFiling({ ...input, words: says, library: [listed] })).toMatchObject({ outcome: "conflict" });
+  });
+
+  it("puts three items quoting one COM code on ONE library entry, and says what each line writes", () => {
+    const out = planBillFabrics({
+      sheets: [
+        {
+          sheetName: "UPHOLSTERED",
+          ignored: false,
+          columns: { finishCode: { heading: "COM CODE" } },
+          lines: [
+            item(0, 2, "ZC-01", "POUFEE"),
+            com(1, 3, "ZB-CH-01C.A", "ZB_04", "POUFFE DEPTH FABRIC", cloth, 2, "ZC-01"),
+            item(2, 4, "ZC-03", "ARMCHAIR"),
+            com(3, 5, "ZB-CH-03", "ZB_04", "ARMCHAIR @ FABRIC", cloth, 4, "ZC-03"),
+            item(4, 6, "ZS-03", "BENCH"),
+            com(5, 7, "ZB-SO-03", "ZB_04", "BENCH @ FABRIC", cloth, 6, "ZS-03"),
+          ],
+        },
+      ],
+      rowImages: null,
+      library: [],
+      heldSwatches: new Set(),
+      prefix: "ZZA",
+      descriptionCodes: () => [],
+      heldFabric: () => [],
+      heldSlots: () => [],
+    });
+    expect(out.get("0:1")).toMatchObject({
+      goesTo: "→ COM 1",
+      filing: "new library entry ZB_04, by its COM CODE — described when the finishes schedule is read",
+      writes: { value: "NAME: EXAMPLE VELVET CODE: 1234.56 COLOUR: IVORY", qualifier: "POUFFE DEPTH" },
+      tbc: false,
+    });
+    expect(out.get("0:3")?.filing).toBe("new library entry ZB_04, with row 3, by its COM CODE");
+    expect(out.get("0:5")?.filing).toBe("new library entry ZB_04, with row 3, by its COM CODE");
+    expect(out.get("0:5")?.writes).toEqual({ value: "NAME: EXAMPLE VELVET CODE: 1234.56 COLOUR: IVORY", qualifier: null });
+  });
+});

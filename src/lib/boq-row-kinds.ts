@@ -590,9 +590,41 @@ export function fabricOwnCode(line: { code: string | null; finishFor?: { code: s
 }
 
 /**
- * WHAT A FABRIC LINE'S CODE COLUMN PRINTS (2026-10-12, F1): the fabric's own
- * code — `fabricOwnCode`, the one the confirm files by and the chip prints —
- * or nothing, which the screen reads as TBC (Sebastian: a fabric with no code
+ * THE CODE A FINISHES SCHEDULE KNOWS THE LINE'S FINISH BY, or null: the
+ * bill's own `finishCode` column (the Ronnie Scott's procurement schedule's
+ * COM CODE, 2026-10-15), `N/A` and blank as none. Null on every bill without
+ * the column, so those file exactly as they did.
+ */
+export function fabricScheduleCode(line: { finishCode?: string | null }): string | null {
+  return typeof line.finishCode === "string" ? fabricCodeOf(line.finishCode) : null;
+}
+
+/**
+ * THE CODE A FINISH LINE IS FILED UNDER IN THE LIBRARY: its schedule code
+ * where the bill gives one (`fabricScheduleCode`), otherwise its own
+ * (`fabricOwnCode`). The confirm files by it, the review's chip and code
+ * column print it, so the three cannot disagree.
+ *
+ * WHY THE SCHEDULE CODE WINS. On the Ronnie Scott's schedule the FF&E code of
+ * a COM line is a POSITION on an item type: `FB-CH-02A` is Plushy cognac on
+ * the first-floor armchairs and Velours Aldo on the third-floor ones, and
+ * `FB-CH-01B` is a leather on one pouffe and a fabric on another. Filed by
+ * it, the second cloth of each conflicted with the first and linked nothing.
+ * The COM code is the cloth: `FB_04` is one velvet on three items, and the
+ * COM list describes it once.
+ */
+export function fabricFilingCode(line: {
+  code: string | null;
+  finishCode?: string | null;
+  finishFor?: { code: string | null } | null;
+}): string | null {
+  return fabricScheduleCode(line) ?? fabricOwnCode(line);
+}
+
+/**
+ * WHAT A FABRIC LINE'S CODE COLUMN PRINTS (2026-10-12, F1): the code it is
+ * filed under — `fabricFilingCode`, the one the confirm files by and the chip
+ * prints — or nothing, which the screen reads as TBC (Sebastian: a fabric with no code
  * of its own is TBC, never N/A and never a furniture code). The bill's own
  * cell is returned beside it whenever it differs from what is printed, so the
  * document's words stay on the screen; `billCellIsItemCode` says when that
@@ -600,9 +632,10 @@ export function fabricOwnCode(line: { code: string | null; finishFor?: { code: s
  */
 export function fabricCodeDisplay(line: {
   code: string | null;
+  finishCode?: string | null;
   finishFor?: { code: string | null } | null;
 }): { own: string | null; billCell: string | null; billCellIsItemCode: boolean } {
-  const own = fabricOwnCode(line);
+  const own = fabricFilingCode(line);
   const raw = (line.code ?? "").replace(/\s+/g, " ").trim();
   const billCell = raw !== "" && raw !== own ? raw : null;
   const parentCode = line.finishFor?.code ?? null;

@@ -21,6 +21,16 @@
 // description; both are read by `bill-description.ts`, the same reader that
 // reads a size or finish line inside a description cell.
 //
+// `finishCode` arrived with the Ronnie Scott's procurement schedule (LBPCo,
+// 2026-10-15), whose COM, leather and trim lines each carry TWO codes: the
+// FF&E CODE (`FB-CH-02A`, the position on an item type, which two different
+// cloths share on that schedule) and the COM CODE (`FB_06`, the code the COM
+// LIST describes the cloth under, which three items share). A finish line is
+// filed in the library under its `finishCode`; on an item line the cell is
+// kept in the record's notes. Not `productReference`: the model maps a cloth
+// NAME there too ("BW FAUX LEATHER", the Butler Arms public areas bill), and
+// filing by it would make codes out of words. `bill-fabric-filing.ts`.
+//
 // `mockupQty` and `keep` arrived with Matthew's next bills (2026-10-06, Max's
 // decisions). A bill's `Prototype Quantity` beside its `Rollout Quantity` puts
 // the items it names on the project's mock-up phase at confirm
@@ -53,6 +63,7 @@ export const BOQ_READ_ROLES = [
   "notes",
   "dimensions",
   "finish",
+  "finishCode",
 ] as const;
 
 export type BoqReadRole = (typeof BOQ_READ_ROLES)[number];
@@ -97,6 +108,7 @@ export const BOQ_ROLE_LABELS: Record<BoqRole, string> = {
   notes: "Notes",
   dimensions: "Dimensions",
   finish: "Finish",
+  finishCode: "Finish code (on a finish line)",
   keep: "Kept in notes",
   ignore: "Not read",
 };

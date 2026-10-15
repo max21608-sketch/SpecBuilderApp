@@ -47,7 +47,7 @@ import {
   type RowKindFields,
 } from "@/lib/boq-row-kinds";
 import BoqRowKindCell, { RowKindReasoning } from "@/components/imports/BoqRowKindCell";
-import { fabricCodeDisplay, fabricOwnCode } from "@/lib/boq-row-kinds";
+import { fabricCodeDisplay, fabricFilingCode } from "@/lib/boq-row-kinds";
 // Pure: where the review draws its lines — an item and the fabrics under it as
 // one group, a gap between groups, consecutive items of one code bracketed.
 // Layout only; nothing the confirm writes reads it.
@@ -114,6 +114,9 @@ type Line = {
   // The bill's mock-up figure as printed, and the cells of the columns kept in
   // notes — each present only where the sheet has the column. See `BoqLine`.
   mockupQtyRaw?: string | null; kept?: BoqKeptCell[];
+  // The bill's finish-code column (COM CODE), where the sheet has it: the code
+  // a finish line is filed under (`fabricFilingCode`).
+  finishCode?: string | null;
   categoryId: string | null; categoryStatus: string;
   categoryCandidates?: { id: string; name: string }[]; ignored: boolean;
   // Guessed at parse time, corrected here. `chosen` is what makes it a
@@ -157,14 +160,14 @@ type Line = {
  * already there.
  */
 /**
- * A FABRIC LINE'S CODE COLUMN prints the fabric's OWN code — the one the chip
- * beside it and the confirm both read (`fabricOwnCode`) — or TBC where it has
+ * A FABRIC LINE'S CODE COLUMN prints the code it is filed under — the one the
+ * chip beside it and the confirm both read (`fabricFilingCode`) — or TBC where it has
  * none (2026-10-12: Sebastian, a fabric with no code of its own reads TBC,
  * never N/A and never the item's code). Where the bill's cell says something
  * else it stays underneath, small and grey, because it is what the document
  * said. Display only.
  */
-function FabricCodeCell({ line }: { line: Pick<Line, "code" | "finishFor"> }) {
+function FabricCodeCell({ line }: { line: Pick<Line, "code" | "finishCode" | "finishFor"> }) {
   const { own, billCell, billCellIsItemCode } = fabricCodeDisplay(line);
   return (
     <>
@@ -194,6 +197,14 @@ function FabricFilingLine({ plan, projectId }: { plan: FabricLinePlan; projectId
       {/* THE STATE THE CONFIRM WILL STORE (`fabricLineWrite`): a line that
           names no fabric is written TBC, so it is chased rather than shipped. */}
       {plan.tbc && <span className="font-medium text-amber-800">written TBC · </span>}
+      {/* A line filed by its COM code writes its finish column's cloth, not
+          the description printed above it — said, so the row is not read as
+          writing "SOFA @ FABRIC". */}
+      {plan.writes && (
+        <span className="block text-neutral-700">
+          writes “{plan.writes.value}”{plan.writes.qualifier ? ` — ${plan.writes.qualifier}` : ""}
+        </span>
+      )}
       {plan.filing}
       {plan.askForShortCode && (
         <>
@@ -2199,7 +2210,7 @@ export default function ReviewImportPage() {
                                         {/* WHERE IT GOES, from the decision the
                                             confirm writes with — a metal is not
                                             "the next free COM". */}
-                                        {`${fabricOwnCode(line) ?? "no code"} ${
+                                        {`${fabricFilingCode(line) ?? "no code"} ${
                                           fabricFilings[line.index]?.goesTo ?? "→ a spec on its item"
                                         }`}
                                       </Chip>

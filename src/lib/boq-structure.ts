@@ -174,6 +174,8 @@ const ROLE_HELP: Record<(typeof BOQ_ROLES)[number], string> = {
   notes: "notes or remarks",
   dimensions: "the item's size or dimensions, in a column of its own (W x D x H, a diameter)",
   finish: "the item's finish or material, in a column of its own (oak, brass, a fabric)",
+  finishCode:
+    "on a line that is the FABRIC, LEATHER or TRIM of the item above it, the code a finishes schedule or COM list knows that finish by, in a column of its own BESIDE the line's own code (e.g. 'COM CODE' reading FB_01, FB_16). Not the client's item code, and not a supplier's product number or a cloth's name",
   keep:
     "a column that says something about each item that no role above fits and a person would want kept with it — e.g. the client's own phasing ('PHASE'). Each cell is copied into the item's notes under the column's heading. The ONE role you may give to several columns. NEVER a price, rate, cost or any money column, and never pictures: those are ignore, and keep is not a way to read them",
   ignore: "a column that is deliberately not read: prices, rates, costs, totals of money, pictures",

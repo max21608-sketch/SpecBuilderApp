@@ -2831,10 +2831,25 @@ lines beneath it — sent as PDFs printed from Excel. Four things, each a trap:
 - **A COM list is a finishes schedule**, not a fabric schedule: one row per
   code (`FB_01`, `TR_01`) saying what the code IS, naming no item.
 
-**STILL OPEN:** a COM line writes its DESCRIPTION ("SOFA @ FABRIC", a
-placeholder, so TBC) while the cloth is in its FINISH / REFERENCE cell, and it
-files under its FF&E code (`FB-SO-01`) while the COM list knows it as its COM
-CODE (`FB_16`), so the two never link.
+**A COM line is filed by its COM CODE** (`finishCode`, 0048, seeded synonym
+"com code"; `fabricFilingCode`, `fabricLineWrite`, `decideFabricFiling` in
+`bill-fabric-filing.ts`). Its FF&E code is a POSITION (`FB-CH-02A` is two
+cloths on two floors), so it is not the key. Where a line has a COM code it
+writes its FINISH column's cloth as its value, with the description's
+placement ("POUFFE DEPTH") as the 0029 qualifier. It is filed under the COM
+code. The bill's copy of the cloth is never compared with the library and is
+never written as its description. The two layouts disagree in formatting
+alone, so either order would have conflicted, and the finishes schedule
+describes the code. Bill first, the schedule then "fills" every code. An item
+line's COM cell goes to its notes. NOT `productReference`: the model puts a
+cloth name there on the Butler Arms bill. Lines without the column write
+exactly as before (`boq:gap` on Aman and bills-1006 unchanged). Verified on
+the local stack (TEST T16718): 17 lines on 14 codes, `FB_04` on three items,
+`FB_12` on two, and the COM list filled all 14. Two lines quoting one COM code
+with different cloth link without a question, and that is what the code
+means. **0048 must be on a database before its seed is run.** Still open: the
+converted workbook's leather rows carry their name in the notes column
+(`DIABLO WALNUT` in FINISH), a PDF-conversion shift.
 
 ### A bill's own specification read resolves by ROW, and a long sheet is read in windows
 

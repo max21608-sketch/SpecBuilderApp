@@ -63,7 +63,11 @@ from (values
   -- Matthew's next bills, 2026-10-06: "Prototype Quantity" beside "Rollout
   -- Quantity" -- how many go in the mock-up. The whole heading only, never a
   -- bare "prototype". REQUIRES 0047 as extended (the mockupQty role).
-  ('mockupQty', 'prototype quantity')
+  ('mockupQty', 'prototype quantity'),
+  -- The Ronnie Scott's procurement schedule (LBPCo), 2026-10-15: "COM CODE",
+  -- the code the COM list describes each cloth under, beside the line's own
+  -- FF&E CODE. A finish line is filed under it. REQUIRES 0048 (the role).
+  ('finishCode', 'com code')
 ) as t(role, term)
 on conflict (term_norm) do update set
   role = excluded.role,

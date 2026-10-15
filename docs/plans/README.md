@@ -21,6 +21,35 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-15 — Ronnie Scott's: a COM line is filed by its COM CODE, and links to the COM list
+
+The procurement schedule (LBPCo, P16717) gives each COM, leather and trim line
+an FF&E code and a COM CODE. The confirm used to file under the FF&E code,
+which is a position code (`FB-CH-02A` names two different cloths), and it
+wrote the description ("SOFA @ FABRIC") as the value. The cloth is in the
+FINISH / REFERENCE cell. So nothing linked to the COM list.
+
+- **A new bill role, `finishCode`** (migration 0048, seeded synonym "com code").
+  The model's structure read maps COM CODE to it on all three sheets of the
+  real schedule. `productReference` was not enough: on the Butler Arms bill the
+  model puts a cloth name there.
+- **A line with a COM code** files under it, writes the Finish cell's cloth as
+  its value and takes the description's placement as its qualifier. Its words
+  are never compared with the library and never written as a code's
+  description, because the COM list describes the code. An item line's COM
+  cell goes to its notes.
+- **Verified on the local stack** (TEST T16718, two charged reads): the bill
+  and then the COM list. There were 30 records and 17 finish lines on 14 codes:
+  `FB_04` on three items and `FB_12` on two. The COM list reported "already
+  held, no description yet" for all 14 and filled them, with no conflicts.
+  `boq:gap` on Aman and bills-1006 was byte-identical apart from the synonym
+  count.
+- **Max's steps:** apply 0048 to the sandbox and to pilot, then re-run the seed.
+  Read the live `boq_column_aliases_role_check` first.
+- **Seen and not fixed:** the classifier filed the schedule as an FF&E schedule
+  on one upload, so declare it as a bill. The converted workbook's leather rows
+  are shifted by one column.
+
 ## 2026-10-13 — Promoted to pilot: one TGQ, project-wide answered once, the pilot walk's fixes (v1.10)
 
 From the 2026-10-12 catch-up (`catchup-2026-10-12.md`) and the read-only walk

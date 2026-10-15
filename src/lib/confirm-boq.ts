@@ -53,6 +53,7 @@ import {
   descriptionFilesAFinish,
   fabricLineWrite,
   fabricMaterialCode,
+  filedByScheduleCode,
   planFinishSwatches,
   swatchDifferNotice,
   type FabricFiling,
@@ -92,6 +93,14 @@ type StagedLine = {
   mockupQtyRaw?: string | null;
   /** The cells of the columns kept in notes, where the sheet keeps any (`composeBillNotes`). */
   kept?: BoqKeptCell[];
+  /** The bill's own Finish column, as printed, where the sheet has it. */
+  finishRaw?: string | null;
+  /**
+   * The bill's finish-code column (COM CODE), where the sheet has it: a
+   * finish line is filed under it (`fabricFilingCode`); an item line keeps it
+   * in its notes.
+   */
+  finishCode?: string | null;
   categoryId: string | null;
   /**
    * The level, and whether a person chose it.
@@ -108,6 +117,18 @@ type StagedLine = {
   /** The record this line continues, at the version the reviewer was shown. */
   replaces?: { recordId: string; recordVersion: number } | null;
 } & RowKindFields;
+
+/**
+ * AN ITEM LINE'S FINISH-CODE CELL IS KEPT IN ITS NOTES, under the column's
+ * heading. The column names a finish line's code; on an item line nothing
+ * files by it, and a mapped column whose cell vanished would be a value the
+ * document stated and the app dropped.
+ */
+function keptWithFinishCode(line: StagedLine, heading: string | null | undefined): BoqKeptCell[] | undefined {
+  const value = line.finishCode?.trim();
+  if (!value) return line.kept;
+  return [...(line.kept ?? []), { heading: heading?.trim() || "Finish code", value }];
+}
 
 /**
  * Which column a staged line's level belongs in.
@@ -590,7 +611,8 @@ export async function confirmBoqImport(
            ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${line.designer},
            ${effectiveArea(line)}, ${line.boqCategory ?? null},
            ${decided.level}, ${decided.suggested}, ${decided.reason},
-           ${composeBillNotes(line.notes, line.kept)}, ${runId}, ${line.lineNo}, ${actor}, ${actor})
+           ${composeBillNotes(line.notes, keptWithFinishCode(line, sheet.columns?.finishCode?.heading))}, ${runId},
+           ${line.lineNo}, ${actor}, ${actor})
         returning id
       `;
       const recordId = String(inserted[0]?.id ?? "");
@@ -968,16 +990,17 @@ async function writeFabricLine(
     words: line.itemDescription,
     parentName: input.parentName,
     library,
+    byScheduleCode: filedByScheduleCode(line),
   });
   const finishId = await fileFinish(txn, { projectId, filing, says: value, library, actor });
 
   await txn`
     insert into record_attributes
-      (record_id, attr_group, dimension_slot, label, value, unit, material_code, finish_id, spec_field_id, state,
-       source_run_id, source_page, sort_order, created_by, updated_by)
+      (record_id, attr_group, dimension_slot, label, value, qualifier, unit, material_code, finish_id, spec_field_id,
+       state, source_run_id, source_page, sort_order, created_by, updated_by)
     values
-      (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${written.value}, null, ${materialCode}, ${finishId},
-       ${fieldId}, ${written.state}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
+      (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${written.value}, ${written.qualifier ?? null}, null,
+       ${materialCode}, ${finishId}, ${fieldId}, ${written.state}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
   `;
   return { written: true, finishId, minted: filing.outcome === "mint" };
 }
