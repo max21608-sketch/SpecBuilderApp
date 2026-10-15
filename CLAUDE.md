@@ -65,6 +65,7 @@ one agent.
 | `npm run spec:gap -- <runId>` | read only, local stack: a specification-document run's proposals by outcome (placed / record only / ambiguous / nothing) as STAGED and as a free re-match would leave them, and the top unplaced labels. Run it before and after any change to `spec-reading-vocab.ts` |
 | `npm run palette:gap` | read only: every callout that lands on a palette-backed BWS field, how many match an option exactly, and — the point — what a SUBSTRING step would have written instead. Run it before widening the match past the exact step. On 2026-09-22 it read 98 callouts over 47 staged runs, **0 matching and 0 near misses**, which is the evidence §6.2 asked for |
 | `npm run bill:descriptions -- <bill.xlsx> [--layouts f.json] [--kinds golden.json] [--out file]` | read only: per item line, the name, the composed dimension cell, each finish with its field and each note — exactly what the confirm will write from the description cells. Output goes OUTSIDE the repo. Run it before and after changing the reader. On the real Aman bill, 2026-09-30: 67 of 67 read, 61 with dimensions (164 slots), 70 finishes (64 in a BWS field) |
+| `npm run pdf:schedule -- <out.xlsx> <schedule.pdf> [...]` | read only: a schedule that arrived only as a PDF PRINTED FROM EXCEL (the Ronnie Scott's procurement schedules, 2026-10-15) put back into a workbook, one sheet per file, by the PDF's own text layer — columns by the header's label positions, rows anchored on ORDER QTY, no model. Pictures are not carried. Output OUTSIDE the repo; read the rows it prints against the PDF before uploading. Ask the specifier for the native workbook first |
 | `node tools/overflow-audit.mjs` | read only, against a DEV server (`PLAYWRIGHT_DIR`, `QA_EMAIL`, `QA_PASSWORD`, `BASE` as for `first-session.mjs`): walks the projects list, a project's tabs, two records' four tabs, fill-in, the inbox and the document reviews at 1920 and 1440, and exits 1 on any box wider than itself. Run it after any screen change |
 
 Tests run in FOUR tiers — pure / component / db-gated / route. **A db-tier
@@ -2801,6 +2802,39 @@ was AROUND it, and each is a trap:
   with a sentence, never a failed bill).
 - **A tab still called "Sheet1" proposes the file's name** as its phase name,
   or two single-tab bills make two phases nobody can tell apart.
+
+### A procurement schedule is a bill: the model reads its columns, and a Dims cell is read line by line
+
+`src/lib/boq-structure-wanted.ts`, `src/lib/bill-description.ts` (`columnStatements`),
+`src/lib/document-classify.ts`, `tools/pdf-schedule-to-xlsx.ts`
+
+Found 2026-10-15 on the Ronnie Scott's tender (LBPCo, P16717), whose only
+bill is a "Procurement Schedule" — line items, ORDER QTY, and each item's COM
+lines beneath it — sent as PDFs printed from Excel. Four things, each a trap:
+
+- **A sheet the known headings mapped with NO quantity column is read by the
+  model automatically**, once (`sheetWantsStructureRead`, shared by the page
+  and the route). "FF&E CODE", "DESCRIPTION" and "UOM" are synonyms, "ORDER
+  QTY" is not, so the sheet read as mapped: every line "quantity not given",
+  every COM line an item, and the model read that got all of it right sat
+  behind a button in a closed panel. A person's, a layout's or a model's
+  mapping is never second-guessed.
+- **A Dims cell of several lines is read LINE BY LINE.** Folded into one
+  value, "REFER TO DRAWING 740 X 740 X 720MM SH: 420MM" read as D740 — the D
+  of DRAWING — and a sofa's 1700mm width landed in D. A line with no figure is
+  a note; the first size line is placed (`placedSizeOf`); a one-line cell
+  reads exactly as before.
+- **Bare figures placed in printed order now say so**, and name the column
+  heading's own order where it prints one: this schedule heads it "L X W X H"
+  and prints a sofa as `800 X 1700 X 780MM`. `L` is still not a slot; the
+  reviewer sets the slots.
+- **A COM list is a finishes schedule**, not a fabric schedule: one row per
+  code (`FB_01`, `TR_01`) saying what the code IS, naming no item.
+
+**STILL OPEN:** a COM line writes its DESCRIPTION ("SOFA @ FABRIC", a
+placeholder, so TBC) while the cloth is in its FINISH / REFERENCE cell, and it
+files under its FF&E code (`FB-SO-01`) while the COM list knows it as its COM
+CODE (`FB_16`), so the two never link.
 
 ### A bill's own specification read resolves by ROW, and a long sheet is read in windows
 

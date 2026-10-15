@@ -112,8 +112,8 @@ export const CLASSIFY_TOOL = {
           "- shop_drawings: dimensioned drawings of items to manufacture, with elevations, plans or sections.\n" +
           "- specification_sheets: one sheet per item, each giving that item's size, materials and finishes, usually with a photograph.\n" +
           "- ffe_schedule: a schedule of furniture, fixtures and equipment by room or area, naming products rather than dimensioning them.\n" +
-          "- finishes_schedule: a list of FINISH codes and what each one is. A tracker, register or log listing finish codes (\"AB TIM 01\", \"WD-05\", \"MTL-01\") with their materials is a finishes schedule whatever its filename says, even where it also tracks some furniture.\n" +
-          "- fabric_schedule: a list of FABRICS and where each is used.\n" +
+          "- finishes_schedule: a list of FINISH codes and what each one is. A tracker, register or log listing finish codes (\"AB TIM 01\", \"WD-05\", \"MTL-01\") with their materials is a finishes schedule whatever its filename says, even where it also tracks some furniture. So is a COM LIST: one row per finish code (\"FB_01\", \"TR_01\"), each with its fabric, leather or trim, a swatch and a supplier, saying what the code IS rather than which item takes it.\n" +
+          "- fabric_schedule: a list of FABRICS and WHERE each is used — which item, or which part of an item, takes which fabric. A list that only says what each fabric code is, naming no item, is a finishes schedule.\n" +
           "- specification_bible: a long reference document specifying many items or materials in prose.\n" +
           "- preamble: general conditions imposed on a whole package — standards, tolerances, fire and flameproofing, samples, delivery. It specifies no individual item.\n" +
           "- email: a message with headers, a sender and a subject.\n" +
@@ -331,7 +331,8 @@ price cells may already be filled in by the supplier.
 
 A document that lists finish codes with the material each one is — timbers, metals, stones, fabrics —
 is a FINISHES SCHEDULE whatever it is called — a tracker, a register, a log — and even where it also lists some furniture. Judge
-it by its content, not its filename.
+it by its content, not its filename. A COM list — one row per fabric, leather or trim code with its
+swatch and supplier, naming no item — is a finishes schedule too, not a fabric schedule.
 
 Answer unclear whenever you are not sure. It costs nothing and asks a person.
 

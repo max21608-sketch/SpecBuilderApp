@@ -36,6 +36,7 @@
     "palette:gap": "tsx --env-file-if-exists=.env.local tools/palette-gap.ts",
     "boq:gap": "tsx tools/boq-gap.ts",
     "bill:descriptions": "tsx tools/bill-description-read.ts",
+    "pdf:schedule": "tsx tools/pdf-schedule-to-xlsx.ts",
     "spec:gap": "node --env-file=.env.localstack.local tools/localstack/tool.mjs tools/spec-gap.ts",
     "qa:fake-inbox": "tsx --env-file-if-exists=.env.local tools/qa-fake-inbox.ts",
     "qa:levels": "tsx --env-file-if-exists=.env.local tools/qa-levels-and-designer.ts",

@@ -4,7 +4,8 @@
 // ONE SMALL READ, CHARGED — AND NEVER TWICE FOR ONE PRESS.
 //
 // Called automatically ONCE, the first time the review opens a bill that has a
-// sheet nobody could map and no structure read on record, and again whenever a
+// sheet nobody could map — or one the known headings mapped with no quantity
+// column (`sheetWantsStructureRead`) — and no structure read on record, and again whenever a
 // person presses "Ask the model to read the columns" on a sheet's panel. It is
 // the only place a bill meets a model, and what the model says is applied to
 // the STAGED bill exactly as a person's columns are — a re-read of the stored
@@ -32,6 +33,7 @@ import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { assertBoqDocument, BOQ_SCHEMA_VERSION, type BoqDocument } from "@/lib/boq-import";
+import { sheetWantsStructureRead } from "@/lib/boq-structure-wanted";
 import { loadBoqRun, readBoqSource } from "@/lib/boq-run-source";
 import { loadLineSuggester, stageStructureReading } from "@/lib/boq-stage";
 import {
@@ -129,7 +131,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         ? [body.data.sheetIndex]
         : []
       : staged.sheets.flatMap((sheet, index) =>
-          sheet.needsColumns && !sheet.ignored && !record.sheets?.[sheet.sheetName] ? [index] : [],
+          sheetWantsStructureRead(sheet, Boolean(record.sheets?.[sheet.sheetName])) ? [index] : [],
         );
   if (body.data.sheetIndex !== undefined && targets.length === 0) {
     return json({ ok: false, error: "That sheet is not in this bill." }, 400);

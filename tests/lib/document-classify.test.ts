@@ -225,6 +225,19 @@ describe("a tracker listing finish codes", () => {
     expect(line).toMatch(/whatever its filename says/);
   });
 
+  it("files a COM list as a finishes schedule, and keeps a fabric schedule for WHERE a fabric is used", () => {
+    // The Ronnie Scott's COM list (LBPCo, 2026-10-15) lists FB_01..FB_27 and
+    // TR_01..TR_03 with a swatch, the cloth and a supplier, and names no item;
+    // it was filed as a FABRIC schedule and read against records that do not
+    // carry those codes, instead of filling the finishes library.
+    const genre = (CLASSIFY_TOOL.input_schema.properties.genre as { description: string }).description;
+    const finishes = genre.split("\n").find((text) => text.startsWith("- finishes_schedule"));
+    const fabric = genre.split("\n").find((text) => text.startsWith("- fabric_schedule"));
+    expect(finishes).toMatch(/COM LIST/);
+    expect(fabric).toMatch(/WHERE each is used/);
+    expect(fabric).toMatch(/naming no item, is a finishes schedule/);
+  });
+
   it("is said in the prompt, by content rather than by name", () => {
     expect(CLASSIFY_PROMPT).toMatch(/FINISHES SCHEDULE whatever it is called/);
     expect(CLASSIFY_PROMPT).toMatch(/by its content, not its filename/);

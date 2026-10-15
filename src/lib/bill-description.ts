@@ -147,6 +147,23 @@ export function columnStatements(cells: BillColumnCells, headings: BillColumnHea
     const value = line.replace(/\s+/g, " ");
     if (value === "") return;
     const heading = headings[column]?.trim() || COLUMN_FALLBACK_LABEL[column];
+    // A DIMS CELL OF SEVERAL LINES IS READ LINE BY LINE (2026-10-15, the
+    // Ronnie Scott's schedule: "REFER TO DRAWING" / "740 X 740 X 720MM" /
+    // "SH: 420MM"). Folded into one value, the words in front of the figures
+    // reached the size reader with them and "DRAWING 740" was read as D740 —
+    // a sofa's 1700mm width written as its depth. Each line is now its own
+    // statement: a line with no figure is a note and never a size, and
+    // `placedSizeOf` places the first size line as it does in a description
+    // cell, keeping the rest as notes. A one-line cell reads exactly as before.
+    const lines = column === "dimensions" ? line.split("\n").map((part) => part.trim()).filter(Boolean) : [line];
+    if (lines.length > 1) {
+      for (const part of lines) {
+        const partValue = part.replace(/\s+/g, " ");
+        if (/\d/.test(partValue)) out.push({ line: part, label: heading, value: partValue, labelFrom: "column", column });
+        else out.push({ line: part, label: heading, value: partValue, labelFrom: "column" });
+      }
+      return;
+    }
     out.push({ line, label: heading, value, labelFrom: "column", column });
   };
   add("dimensions", cells.dimensionsRaw);
@@ -661,6 +678,24 @@ export function planBillDescription(
               : converted,
             part: { key, printed: part.slot, overridden },
           });
+        }
+        // FIGURES WITH NO LETTERS are placed W x D x H in the order printed —
+        // the one inference here, so the reviewer is told, and told which
+        // order the column's own heading prints where it prints one. The
+        // Ronnie Scott's schedule heads it "L X W X H" and prints a sofa as
+        // "800 X 1700 X 780MM": 1700 is the width, and printed order puts it
+        // in D. Silent once a person has set any of the line's slots.
+        const assumed = placed.reading.parts.filter((part) => part.slotSuggested);
+        if (assumed.length > 0 && resolved.applied.size === 0) {
+          const headingOrder =
+            statement.column === "dimensions"
+              ? /\b([LWDH])\s*X\s*([LWDH])(?:\s*X\s*([LWDH]))?\b/i.exec(statement.label ?? "")?.[0]
+              : undefined;
+          cautions.push(
+            headingOrder && !/^W\s*X\s*D/i.test(headingOrder)
+              ? `“${statement.line}” prints no letters, so it is placed W x D x H in printed order — but the column heading says ${headingOrder.toUpperCase()}. Check which figure is the width and set the slots.`
+              : `“${statement.line}” prints no letters, so it is placed W x D x H in printed order — check it against the drawing.`,
+          );
         }
         // A DEPTH WITH NO WIDTH, on a line that names no diameter, is the
         // shape a round stool or side table is written in when "D" means its

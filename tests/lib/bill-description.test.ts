@@ -394,3 +394,42 @@ describe("resolveSlotOverrides", () => {
     ]);
   });
 });
+
+// ============================================================================
+// A Dims cell of several lines (the Ronnie Scott's procurement schedule,
+// LBPCo, 2026-10-15): "REFER TO DRAWING" / "740 X 740 X 720MM" / "SH: 420MM"
+// under a heading "DIMENSIONS CM / MM L X W X H". Folded into one value,
+// "DRAWING 740" read as D740 and a sofa's 1700mm width landed in D.
+// ============================================================================
+describe("a Dims cell of several lines", () => {
+  const heading = "DIMENSIONS CM / MM L X W X H";
+  const plan = (cell: string, dims = heading) =>
+    planBillDescription(null, {
+      fields: [],
+      hasFabricLine: false,
+      columns: { dimensionsRaw: cell, headings: { dimensions: dims } },
+      name: "SOFA",
+    });
+
+  it("reads line by line: words are notes, never part of a size", () => {
+    const p = plan("REFER TO DRAWING\n800 X 1700 X 780MM\nSH: 420MM");
+    expect(p?.dimensionCell).toBe("W800 x D1700 x H780mm");
+    const notes = p?.attributes.filter((a) => a.attrGroup === "note").map((a) => a.value);
+    expect(notes).toEqual(expect.arrayContaining(["REFER TO DRAWING", "SH: 420MM"]));
+  });
+
+  it("never reads the D of DRAWING as a depth", () => {
+    expect(plan("REFER TO DRAWING\nDIA 400 X H420MM")?.dimensionCell).toBe("Dia.400 x H420mm");
+  });
+
+  it("says so when bare figures are placed in printed order against a heading printing another order", () => {
+    const p = plan("REFER TO DRAWING\n800 X 1700 X 780MM");
+    expect(p?.cautions.join(" ")).toMatch(/column heading says L X W X H/);
+    expect(plan("800 X 1700 X 780MM", "Dims")?.cautions.join(" ")).toMatch(/printed order — check it against the drawing/);
+  });
+
+  it("leaves a one-line cell reading exactly as before", () => {
+    expect(plan("W740 x D740 x H720 x SH420mm", "Dims")?.dimensionCell).toBe("W740 x D740 x H720 x SH420mm");
+    expect(plan("W740 x D740 x H720 x SH420mm", "Dims")?.cautions).toEqual([]);
+  });
+});

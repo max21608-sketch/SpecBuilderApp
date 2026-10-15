@@ -31,6 +31,7 @@ import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
 import { describeHeader, sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-import";
+import { sheetWantsStructureRead } from "@/lib/boq-structure-wanted";
 import {
   NO_CODES_REVIEW_SENTENCE,
   readMockupQty,
@@ -1047,7 +1048,9 @@ export default function ReviewImportPage() {
 
   /**
    * THE AUTOMATIC READ: once, the first time this screen opens a bill with a
-   * live sheet nobody could map and no structure read on record. Never on a
+   * live sheet nobody could map — or one the known headings mapped with no
+   * quantity column (`sheetWantsStructureRead`) — and no structure read on
+   * record. Never on a
    * bill whose original was not kept (there is nothing to re-read with the
    * answer), never while another tab's read is in flight, and never twice
    * from one visit.
@@ -1059,8 +1062,8 @@ export default function ReviewImportPage() {
     if (bill.parsed?.sourcePreserved === false) return;
     const state = bill.model_metadata?.structureRead;
     if (structurePending(state)) return;
-    const wanted = (bill.parsed?.sheets ?? []).some(
-      (sheet) => sheet.needsColumns && !sheet.ignored && !state?.sheets?.[sheet.sheetName],
+    const wanted = (bill.parsed?.sheets ?? []).some((sheet) =>
+      sheetWantsStructureRead(sheet, Boolean(state?.sheets?.[sheet.sheetName])),
     );
     if (!wanted) return;
     autoAsked.current = true;
