@@ -234,6 +234,18 @@ describe("the free paths are unchanged", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("holds a scan the model filed as a schedule, saying that choosing Bill has it transcribed (C2)", async () => {
+    const { buildPdf } = await import("../fixtures/build-pdf.mjs");
+    stored.bytes = buildPdf([{ image: true }]);
+    answers({ genre: "ffe_schedule", titleText: "FF&E PROCUREMENT SCHEDULE", evidence: "a schedule of items", certain: true });
+    const { body } = await classify();
+    expect(body.decision).toBeNull();
+    expect(body.unsupported).toBeNull();
+    expect(body.held).toBe(
+      "Read as an FF&E schedule; its pages are pictures, with no text a program can read. If it is the bill, choose Bill of quantities: the model will transcribe it (one charged read) and mark every line for you to check against its page.",
+    );
+  });
+
   it("files a scanned PDF the model is certain is a bill as one, to be transcribed (C2)", async () => {
     const { buildPdf } = await import("../fixtures/build-pdf.mjs");
     stored.bytes = buildPdf([{ image: true }, { image: true }]);

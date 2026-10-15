@@ -137,6 +137,28 @@ export function transcriptionChecks(input: {
     }
     covered = covered.filter((line) => !NOT_COUNTED.has(line.rowKind ?? "item"));
     const sum = covered.reduce((acc, line) => acc + (line.qty ?? 0), 0);
+    // A WHOLE-BILL TOTAL POINTS AT THE PAGES WHOSE OWN TOTAL FAILED, where every
+    // page it covers prints one: a page that adds up is not where the copy went
+    // wrong, and painting its lines red too teaches people to ignore red. With
+    // a page that prints no total of its own, it cannot be narrowed.
+    let flagged = covered;
+    if (total.scope === "document") {
+      const pagesCovered = new Set(covered.map((line) => pageOf(line.lineNo)));
+      const pageTotals = qtyTotals.filter((other) => other.scope === "page");
+      const everyPageHasOne = [...pagesCovered].every((page) => page !== null && pageTotals.some((other) => other.page === page));
+      if (everyPageHasOne) {
+        const failing = new Set(
+          pageTotals
+            .filter((other) => {
+              const value = printedNumber(other.valueRaw);
+              const pageSum = covered.filter((line) => pageOf(line.lineNo) === other.page).reduce((acc, line) => acc + (line.qty ?? 0), 0);
+              return value === null || Math.abs(value - pageSum) >= 1e-9;
+            })
+            .map((other) => other.page),
+        );
+        if (failing.size > 0) flagged = covered.filter((line) => failing.has(pageOf(line.lineNo) ?? -1));
+      }
+    }
     const where =
       total.scope === "document" ? "the whole bill" : total.scope === "section" ? `the section ending on page ${total.page}` : `page ${total.page}`;
     if (Math.abs(sum - printed) < 1e-9) {
@@ -146,7 +168,7 @@ export function transcriptionChecks(input: {
     const why = `The PDF prints ${total.valueRaw} as the ${label} for ${where}, and the quantities transcribed under it add up to ${sum}. One of them, or the total, was copied wrong: check each against page ${total.page}.`;
     summary.push(why);
     const words = `Quantities on ${total.scope === "document" ? "the bill" : `p.${total.page}`} add to ${sum}, not ${total.valueRaw}`;
-    for (const line of covered) add(line.lineNo, { code: "total_mismatch", words, why });
+    for (const line of flagged) add(line.lineNo, { code: "total_mismatch", words, why });
   }
 
   // 2. Codes against the text layer.

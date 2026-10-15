@@ -250,6 +250,28 @@ describe("transcriptionChecks", () => {
     expect(result.byLine.has(6)).toBe(false);
   });
 
+  it("points a failed whole-bill total at the page whose own total failed, not at a page that adds up", () => {
+    const result = check({
+      totals: [
+        { page: 1, label: "PAGE TOTAL", column: 2, valueRaw: "20", scope: "page" },
+        { page: 2, label: "PAGE TOTAL", column: 2, valueRaw: "5", scope: "page" },
+        { page: 2, label: "GRAND TOTAL", column: 2, valueRaw: "25", scope: "document" },
+      ],
+    });
+    expect([...result.byLine.keys()]).toEqual([5]);
+    expect(result.byLine.get(5)?.map((flag) => flag.words)).toEqual(["Quantities on p.2 add to 2, not 5", "Quantities on the bill add to 22, not 25"]);
+  });
+
+  it("keeps a failed whole-bill total on every line where a page prints no total of its own", () => {
+    const result = check({
+      totals: [
+        { page: 1, label: "PAGE TOTAL", column: 2, valueRaw: "20", scope: "page" },
+        { page: 2, label: "GRAND TOTAL", column: 2, valueRaw: "25", scope: "document" },
+      ],
+    });
+    expect([...result.byLine.keys()]).toEqual([3, 4, 5]);
+  });
+
   it("adds a section total from the last section heading", () => {
     const result = check(
       { totals: [{ page: 2, label: "Sub-total", column: 2, valueRaw: "8", scope: "section" }] },

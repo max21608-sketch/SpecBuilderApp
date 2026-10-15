@@ -54,7 +54,7 @@ const MAX_PDF_BYTES = 30 * 1024 * 1024;
 const MAX_PAGE_TEXT = 20_000;
 const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 /** Beside the PDF's own name, the way C1's `(read from PDF).xlsx` is: every list naming the run says where it came from. */
-export const TRANSCRIBED_WORKBOOK_SUFFIX = " (transcribed from PDF).xlsx";
+const TRANSCRIBED_WORKBOOK_SUFFIX = " (transcribed from PDF).xlsx";
 
 const Body = z
   .object({

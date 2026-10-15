@@ -236,15 +236,37 @@ export async function POST(request: Request): Promise<Response> {
         200,
       );
     }
+    // A SCAN THE MODEL FILED AS SOME SCHEDULE, OR COULD NOT PLACE, may be the
+    // bill — the fast model files a procurement schedule as an FF&E schedule
+    // (C1, measured). Held, C1's way, with the next step in the sentence:
+    // choosing Bill has it transcribed. A scanned drawing, spec sheet, preamble
+    // or message is still refused: nothing here reads pictures of those.
+    if (!NOT_A_BILL.has(result.genre)) {
+      return json(
+        {
+          ok: true,
+          genre: result.genre,
+          decision: null,
+          unsupported: null,
+          held: `${GENRE_WORDS[result.genre] ? `Read as ${GENRE_WORDS[result.genre]}; its` : "Its"} pages are pictures, with no text a program can read. If it is the bill, choose Bill of quantities: the model will transcribe it (one charged read) and mark every line for you to check against its page.`,
+          titleText: result.titleText,
+          evidence: result.evidence,
+          certain: result.certain,
+          charged: true,
+          largeDocument: result.model !== CLASSIFY_MODEL,
+        },
+        200,
+      );
+    }
     return json(
       {
         ok: true,
-        genre: "unclear",
+        genre: result.genre,
         decision: null,
         unsupported: scanned,
-        titleText: null,
-        evidence: "the pages carry no text, only images",
-        certain: true,
+        titleText: result.titleText,
+        evidence: result.evidence || "the pages carry no text, only images",
+        certain: result.certain,
         charged: true,
       },
       200,

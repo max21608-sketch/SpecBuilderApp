@@ -1487,18 +1487,27 @@ export default function ReviewImportPage() {
                 {". "}
               </>
             )}
-            {transcribed
+            {transcribing && (
+              <>
+                <span className={TONE.warn.text}>A PDF a program could not read: the model transcribes it, every line marked.</span>{" "}
+              </>
+            )}
+            {transcription
               ? null
               : Object.keys(run.model_metadata?.structureRead?.sheets ?? {}).length > 0
                 ? "Every cell read by code; the model read the columns (one small read, charged)."
                 : "Parsed by code, not by a model — nothing here was charged."}{" "}
-            {sheets.length} tab
-            {sheets.length === 1 ? "" : "s"}
+            {!transcribing && (
+              <>
+                {sheets.length} tab
+                {sheets.length === 1 ? "" : "s"}
+              </>
+            )}
             {revisionLabel && <> · {revisionLabel}</>}
             {/* A reload after an action. Inline rather than a spinner over the
                 table: the rows stay readable and nothing on the page moves. */}
             {loading && <> · <span className="text-neutral-500">reloading…</span></>}
-            {run.parsed?.sourcePreserved !== false && (
+            {run.parsed?.sourcePreserved !== false && !transcribing && (
               <>
                 {" · "}
                 <a
