@@ -1155,7 +1155,7 @@ export async function confirmDrawingItem(
     values ('intake_run', ${runId}, 'parsed', ${status}, ${actor},
             ${`${taken.length} spec${taken.length === 1 ? "" : "s"} applied to ${writes.length} record${writes.length === 1 ? "" : "s"}${
               alreadyByObservation.size > 0
-                ? `; ${[...alreadyByObservation.values()].reduce((n, list) => n + list.length, 0)} already recorded from another page`
+                ? `; ${[...alreadyByObservation.values()].reduce((n, list) => n + list.length, 0)} already on the record`
                 : ""
             }`})
   `;

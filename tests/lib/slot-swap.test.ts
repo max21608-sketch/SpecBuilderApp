@@ -204,7 +204,7 @@ describe("a doubt about an overall slot holds the card", () => {
       {
         code: "uncertain_unchecked",
         index: 0,
-        message: expect.stringMatching(/^The read was unsure of the width: The plan prints 760 .* press Checked on the notice\.$/),
+        message: expect.stringMatching(/^The read was unsure of the width: The plan prints 760 .* press Mark checked on the notice\.$/),
       },
     ]);
     expect(uncertainNotices(doubtful()).map((notice) => [notice.index, notice.slot, notice.settled])).toEqual([

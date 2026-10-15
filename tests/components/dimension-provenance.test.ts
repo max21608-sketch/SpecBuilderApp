@@ -66,4 +66,33 @@ describe("the dimensions provenance sentence", () => {
     const text = dimensionProvenance([row("mm", "Apx 1a", 1), row("mm", null, null)]);
     expect(text).toContain("with 1 typed by hand");
   });
+
+  it("names the bill, never counting its row as another page (2026-10-15, TB-08)", () => {
+    // TB-08's height was the bill's own row, kept because the drawing's 710
+    // matched it, and the caption said "and 1 other page" — so Max went
+    // looking for a second page of the drawing.
+    const bill = { unit: "mm", sourceFilename: "RONNIE SCOTTS ST4.xlsx", sourcePage: null, sourceIsBill: true };
+    const text = dimensionProvenance([
+      row("mm", "TB-08_DINING TABLE.pdf", 1),
+      row("mm", "TB-08_DINING TABLE.pdf", 1),
+      row("mm", "TB-08_DINING TABLE.pdf", 1),
+      bill,
+    ]);
+    expect(text).toBe(
+      "Composed from 4 measured rows off TB-08_DINING TABLE.pdf p1 and 1 row from the bill, already in millimetres.",
+    );
+    expect(text).not.toContain("other page");
+  });
+
+  it("says off the bill where the bill wrote most of it", () => {
+    const bill = { unit: "mm", sourceFilename: "Bill.xlsx", sourcePage: null, sourceIsBill: true };
+    expect(dimensionProvenance([bill, bill, row("mm", "S-200", 2)])).toBe(
+      "Composed from 3 measured rows off the bill (Bill.xlsx) and 1 other page, already in millimetres.",
+    );
+  });
+
+  it("names a pageless document by its file, not as a page", () => {
+    const text = dimensionProvenance([row("mm", "S-200", 2), row("mm", "S-200", 2), row("mm", "Reply from Hayley.eml", null)]);
+    expect(text).toContain("off S-200 p2 and 1 row from Reply from Hayley.eml");
+  });
 });

@@ -18,6 +18,11 @@
 //    find it saying page 11 next week.
 //  - A MIXED PAGE SAYS SO. Two units among four slots is not a detail: it is
 //    either a real mixed set or a misread, and both are worth a second look.
+//  - THE BILL IS NAMED, NEVER COUNTED AS A PAGE (2026-10-15). A bill row has
+//    no page, and TB-08's caption read "and 1 other page" for a height that
+//    was the bill's own row — Max went looking for a second page of the
+//    drawing. A row off the bill says "from the bill"; a document with no
+//    page (an email, a schedule) is named by its file.
 //  - A ROW WITH NO SOURCE IS NAMED AS TYPED. A hand-typed spec carries no run
 //    and no page, deliberately (0028), and calling that "off the drawings"
 //    would be a false provenance rather than a missing one.
@@ -30,6 +35,8 @@ export type ProvenanceRow = {
   unit: string | null;
   sourceFilename: string | null;
   sourcePage: number | null;
+  /** Written by a bill of quantities' run. Absent: not known to be the bill's. */
+  sourceIsBill?: boolean;
 };
 
 /** "centimetres", not "Centimetres (cm)". The label spells it for a select. */
@@ -54,7 +61,7 @@ export function dimensionProvenance(rows: readonly ProvenanceRow[]): string | nu
   if (rows.length === 0) return null;
 
   // ---- which page, counted --------------------------------------------------
-  const pages = new Map<string, { filename: string; page: number | null; count: number }>();
+  const pages = new Map<string, { filename: string; page: number | null; bill: boolean; count: number }>();
   let typed = 0;
   for (const row of rows) {
     if (!row.sourceFilename) {
@@ -64,10 +71,11 @@ export function dimensionProvenance(rows: readonly ProvenanceRow[]): string | nu
     // Keyed as JSON rather than a joined string: a filename can contain
     // anything, and a separator that can appear in the data is a key that
     // can collide.
-    const key = JSON.stringify([row.sourceFilename, row.sourcePage]);
+    const bill = row.sourceIsBill === true;
+    const key = JSON.stringify([row.sourceFilename, row.sourcePage, bill]);
     const seen = pages.get(key);
     if (seen) seen.count += 1;
-    else pages.set(key, { filename: row.sourceFilename, page: row.sourcePage, count: 1 });
+    else pages.set(key, { filename: row.sourceFilename, page: row.sourcePage, bill, count: 1 });
   }
   const ordered = [...pages.values()].sort(
     (a, b) => b.count - a.count || (a.page ?? 0) - (b.page ?? 0) || (a.filename < b.filename ? -1 : 1),
@@ -76,8 +84,22 @@ export function dimensionProvenance(rows: readonly ProvenanceRow[]): string | nu
   const parts: string[] = [`Composed from ${plural(rows.length, "measured row", "measured rows")}`];
   const first = ordered[0];
   if (first) {
-    parts.push(` off ${first.filename}${first.page ? ` p${first.page}` : ""}`);
-    if (ordered.length > 1) parts.push(` and ${plural(ordered.length - 1, "other page", "other pages")}`);
+    parts.push(first.bill ? ` off the bill (${first.filename})` : ` off ${first.filename}${first.page ? ` p${first.page}` : ""}`);
+    const rest = ordered.slice(1);
+    const clauses: string[] = [];
+    // Pages of documents, counted as pages — what this always said.
+    const otherPages = rest.filter((entry) => !entry.bill && entry.page !== null).length;
+    if (otherPages > 0) clauses.push(plural(otherPages, "other page", "other pages"));
+    // The bill, by its ROWS, because it has no pages to count.
+    const billRows = rest.filter((entry) => entry.bill).reduce((total, entry) => total + entry.count, 0);
+    if (billRows > 0) clauses.push(`${plural(billRows, "row", "rows")} from the bill`);
+    // A document with no page (an email, a schedule): by name.
+    for (const entry of rest.filter((other) => !other.bill && other.page === null)) {
+      clauses.push(`${plural(entry.count, "row", "rows")} from ${entry.filename}`);
+    }
+    if (clauses.length > 0) {
+      parts.push(` and ${clauses.length === 1 ? clauses[0] : `${clauses.slice(0, -1).join(", ")} and ${clauses[clauses.length - 1]}`}`);
+    }
   }
   if (typed > 0) parts.push(`${first ? ", with " : ", "}${plural(typed, "typed by hand", "typed by hand")}`);
 

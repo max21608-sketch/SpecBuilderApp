@@ -20,6 +20,7 @@ import { sql } from "@/lib/db";
 import { loadBillHeldIds } from "@/lib/attribute-from-bill";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { itemImageSource } from "@/lib/item-image";
+import { recordedFrom } from "@/lib/source-words";
 import {
   assertStagedDrawings,
   specFieldEntries,
@@ -324,7 +325,8 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
   const [rows, billHeld, library] = await Promise.all([
     sql`
     select a.id, a.record_id, a.spec_field_id, a.dimension_slot, a.version, a.label, a.value, a.unit,
-           a.state, a.material_code, a.source_page, at.filename as source_filename
+           a.state, a.material_code, a.source_page, at.filename as source_filename,
+           (ir.source_kind = 'boq_xlsx') as source_is_bill
     from record_attributes a
     join spec_records r on r.id = a.record_id
     left join intake_runs ir on ir.id = a.source_run_id
@@ -356,6 +358,7 @@ export async function loadOccupiedSlots(projectId: string): Promise<OccupiedSlot
       sourceFilename: row.source_filename === null || row.source_filename === undefined ? null : String(row.source_filename),
       sourcePage: row.source_page === null || row.source_page === undefined ? null : Number(row.source_page),
       fromBill: billHeld.has(String(row.id)),
+      sourceIsBill: row.source_is_bill === true,
     };
     if (row.spec_field_id) {
       const map = fields.get(recordId) ?? new Map<string, OccupiedSlot>();
@@ -669,7 +672,7 @@ function alreadyRecordedWarnings(
     if (observation.reviewStatus !== "pending") continue;
     const isDimension = observation.attrGroup === "dimension" && Boolean(observation.dimensionSlot);
     if (!isDimension && !observation.specFieldId) continue;
-    const pages = new Set<string>();
+    const sources = new Set<string>();
     let count = 0;
     for (const recordId of rowWriteRecords(observation.id, targets, named)) {
       const occupant = isDimension
@@ -677,13 +680,15 @@ function alreadyRecordedWarnings(
         : occupied.fields.get(recordId)?.get(observation.specFieldId!);
       if (!alreadyRecorded(observation, occupant, occupied.library)) continue;
       count += 1;
-      pages.add(occupant?.sourcePage ? `page ${occupant.sourcePage}` : "another page");
+      // NAMED FOR WHAT IT IS (2026-10-15): the bill has no pages, and "another
+      // page" sent a reviewer looking for a page of the drawing.
+      if (occupant) sources.add(recordedFrom(occupant));
     }
     if (count === 0) continue;
     out.push({
       code: "already_recorded",
       observationId: observation.id,
-      message: `Already recorded from ${[...pages].join(" and ")}${count > 1 ? ` on ${count} records` : ""} — ${
+      message: `Already recorded ${[...sources].join(" and ")}${count > 1 ? ` on ${count} records` : ""} — ${
         isDimension ? "the same figure" : `the same finish, ${(observation.materialCodeRaw ?? "").trim()}`
       }, so nothing new is written there.`,
     });

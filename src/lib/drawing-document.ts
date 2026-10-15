@@ -53,6 +53,7 @@
 import { endsOnSegment, findRecordsByRef, namesOnSegments, normaliseRef, type RecordEntry } from "@/lib/record-refs";
 import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
+import { sourceWords } from "@/lib/source-words";
 // `finishes.ts` is a leaf here and imports nothing from this file.
 import { normaliseFinishCode, sameFinishCode, type Finish, type FinishFiling } from "@/lib/finishes";
 // Both leaves: neither imports anything from this file.
@@ -1654,6 +1655,12 @@ export function suggestSpecField(
 
 // ---- blockers --------------------------------------------------------------
 
+/** ", from the bill" / ", from TB-08.pdf p1" / ", typed by hand" — never "from another page" (2026-10-15). */
+function heldFrom(holder: OccupiedSlot | undefined): string {
+  if (!holder) return "";
+  return holder.sourceIsBill || holder.sourceFilename ? `, from ${sourceWords(holder)}` : ", typed by hand";
+}
+
 export type DrawingBlocker =
   | { code: "no_targets"; message: string }
   | { code: "ambiguous_run"; message: string; runId: string }
@@ -1714,6 +1721,12 @@ export type OccupiedSlot = {
    * to be the bill's", which is the cautious reading.
    */
   fromBill?: boolean;
+  /**
+   * Written by a bill of quantities' run at all, corrected since or not — so
+   * the card says "the bill" rather than "another page" (2026-10-15). Wording
+   * only: `fromBill` is still what the one-press replacement reads.
+   */
+  sourceIsBill?: boolean;
 };
 
 export type OccupiedSlots = {
@@ -2086,11 +2099,15 @@ export function drawingItemBlockers(
           return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
         });
         if (clash) {
+          // NAMED FOR WHERE IT CAME FROM (2026-10-15): "from another page" was
+          // the bill, which has no pages.
+          const holder = occupied.dimensions.get(clash)?.get(slot);
+          const whose = recordsOf(observation).length > 1 ? "One of these records" : "This item";
           blockers.push({
             code: "dimension_slot_taken",
             observationId: observation.id,
             recordId: clash,
-            message: `One of these records already has a ${DIMENSION_SLOT_LABELS[slot].toLowerCase()} from another page. Tick it to replace it, or make this a note.`,
+            message: `${whose} already has a ${DIMENSION_SLOT_LABELS[slot].toLowerCase()}${heldFrom(holder)}. Tick “Use this drawing's” to replace it, or make this row a note.`,
           });
         }
       }
@@ -2107,11 +2124,13 @@ export function drawingItemBlockers(
         return acknowledged.get(recordId)?.attributeId !== occupant.attributeId;
       });
       if (clash) {
+        const holder = occupiedFields.get(clash)?.get(observation.specFieldId ?? "");
+        const whose = recordsOf(observation).length > 1 ? "one of these records" : "this item";
         blockers.push({
           code: "slot_taken",
           observationId: observation.id,
           recordId: clash,
-          message: "That BWS field already has a value on one of these records. Tick it to replace it, choose another field, or make this a note.",
+          message: `That BWS field already has a value on ${whose}${heldFrom(holder)}. Tick “Use this drawing's” to replace it, choose another field, or make this row a note.`,
         });
       }
     }
@@ -2262,7 +2281,7 @@ export function uncertainBlockers(item: Pick<DrawingItem, "uncertain" | "uncerta
       return {
         code: "uncertain_unchecked" as const,
         index: notice.index,
-        message: `The read was unsure of the ${slot}: ${notice.why.trim()} Check the ${slot} against the drawing — correct it, or press Checked on the notice.`,
+        message: `The read was unsure of the ${slot}: ${notice.why.trim()} Check the ${slot} against the drawing — correct it, or press Mark checked on the notice.`,
       };
     });
 }

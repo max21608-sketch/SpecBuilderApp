@@ -956,7 +956,7 @@ function ConfigurationSection({
               applied.length === 1 ? "" : "s"
             } written${
               applied.some((o) => o.applied?.alreadyRecorded?.length)
-                ? `, ${applied.filter((o) => o.applied?.alreadyRecorded?.length).length} of them already recorded from another page`
+                ? `, ${applied.filter((o) => o.applied?.alreadyRecorded?.length).length} of them already on the record`
                 : ""
             }.`
           : "— ignored. The rows are restorable under Ignored below."}

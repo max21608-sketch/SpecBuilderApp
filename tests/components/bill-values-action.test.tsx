@@ -118,7 +118,9 @@ describe("the bill's values, one press per card", () => {
     const typed = { ...occupant("att-h", "450", "mm"), sourceFilename: null, sourcePage: null };
     renderCard(rows, undefined, { occupants: { [rows[1]!.id]: [{ recordId: "rec-main", occupant: typed }] } });
     expect(screen.queryByRole("button", { name: BUTTON })).toBeNull();
-    expect(screen.getByText(/Tick to replace it/)).toBeTruthy();
+    // The replace box names whose value it is (2026-10-15): typed, not the bill.
+    expect(screen.getByRole("checkbox", { name: /Use this drawing's/ })).toBeTruthy();
+    expect(screen.getByText(/Typed by hand: H 450mm/)).toBeTruthy();
     expect(screen.queryByText(/The bill already gave this item/)).toBeNull();
   });
 });

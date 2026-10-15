@@ -16,6 +16,7 @@
 import type { DrawingItem } from "@/lib/drawing-document";
 import { uncertainNotices } from "@/lib/drawing-document";
 import Button from "@/components/ui/Button";
+import { uncertainNoticeId } from "@/lib/needs-you";
 
 const ABOUT_WORDS: Record<string, string> = {
   width: "Width",
@@ -71,15 +72,27 @@ export default function ItemReadNotes({
       </p>
       <ul className="mt-1 space-y-0.5 text-xs text-amber-900">
         {notes.map((note) => (
-          <li key={note.key} className="flex flex-wrap items-center gap-x-2">
+          <li
+            key={note.key}
+            // Where a "needs you" link lands. A notice that holds the card has
+            // an amber rule down its left, so it reads as the thing to do.
+            id={uncertainNoticeId(note.item.id, note.index)}
+            className={`flex flex-wrap items-center gap-x-2 rounded ${
+              note.slot && note.settled === null ? "-ml-2 border-l-4 border-amber-500 pl-1.5" : ""
+            }`.trim()}
+          >
             <span>
               <b>{note.label}:</b> {note.why}
             </span>
             {note.slot && note.settled === "checked" && <span className="text-neutral-600">— checked</span>}
             {note.slot && note.settled === "touched" && <span className="text-neutral-600">— you changed this slot</span>}
             {note.slot && note.settled === null && onCheck && (
-              <Button size="xs" variant="quiet" disabled={busy} onClick={() => onCheck(note.item, note.index)}>
-                Checked
+              // A BORDERED BUTTON THAT SAYS WHAT IT DOES (2026-10-15). It was a
+              // `quiet` "Checked", bordered only on hover, and read as a word
+              // saying the thing was already checked: "It's not very clear
+              // that there's a checked box there" (Max, 1:04:07).
+              <Button size="xs" disabled={busy} onClick={() => onCheck(note.item, note.index)}>
+                Mark checked
               </Button>
             )}
           </li>

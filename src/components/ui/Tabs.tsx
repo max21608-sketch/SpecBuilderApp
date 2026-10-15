@@ -35,6 +35,12 @@ export type TabItem<T extends string> = {
   tone?: Tone;
   /** Struck through: a BOQ sheet the reviewer has marked as not to be imported. */
   muted?: boolean;
+  /**
+   * RED: this tab holds something a person must do before a confirm can go —
+   * a bill sheet still waiting on its columns (Matthew, 2026-10-15). Red is
+   * "blocks money going out", and a refused confirm is that.
+   */
+  attention?: boolean;
   /** Dropped from the strip entirely, so callers can keep a static list. */
   hidden?: boolean;
 };
@@ -70,13 +76,23 @@ export default function Tabs<T extends string>({
               role="tab"
               aria-selected={on}
               onClick={() => onChange(item.id)}
+              // Two utilities for one property never share a class string:
+              // which wins is the stylesheet's order, not this one.
               className={`-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-[13px] ${
-                on
-                  ? "border-neutral-900 font-semibold text-neutral-900"
-                  : "border-transparent text-neutral-500 hover:text-neutral-800"
+                on ? "border-neutral-900 font-semibold" : "border-transparent"
+              } ${
+                item.attention
+                  ? `font-semibold ${TONE.danger.text}`
+                  : on
+                    ? "text-neutral-900"
+                    : "text-neutral-500 hover:text-neutral-800"
               } ${item.muted ? "line-through opacity-60" : ""}`.trim()}
             >
+              {item.attention && (
+                <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${TONE.danger.dot}`} />
+              )}
               {item.label}
+              {item.attention && <span className="sr-only"> — needs you</span>}
               {item.count !== null && item.count !== undefined && (
                 <span
                   className={`rounded-full px-1.5 py-px text-[11px] tabular-nums ${TONE[item.tone ?? "plain"].bubble}`}

@@ -148,7 +148,7 @@ type Attribute = {
   material_code: string | null; state: AttributeState; sort_order: number; version: number;
   source_page: number | null; source_run_id: string | null; created_by: string | null;
   field_name: string | null; json_id: number | null; field_category: string | null;
-  source_filename: string | null; source_document_kind: string | null;
+  source_filename: string | null; source_document_kind: string | null; source_is_bill?: boolean | null;
   /**
    * 0041: the BW standard beside the client's words, its state, and the email
    * that agreed it. Optional so an older payload still renders.
@@ -827,6 +827,7 @@ function RecordView() {
       unit: attribute.unit,
       sourceFilename: attribute.source_filename,
       sourcePage: attribute.source_page,
+      sourceIsBill: attribute.source_is_bill === true,
     })),
   );
   const byGroup = ATTRIBUTE_GROUPS.map((group) => ({
@@ -1378,12 +1379,15 @@ function RecordView() {
                                       and there was no such verb: a value could
                                       be retired, or a new one typed with no
                                       page. Correcting keeps the page. */}
+                                  {/* "EDIT VALUE", NOT "CORRECT" (2026-10-15): Matthew
+                                      asked whether "Correct" marks the value as
+                                      correct. It opens the correction. */}
                                   <Button
                                     size="xs"
-                                    title="Correct this value, keeping the page it was read from"
+                                    title="Change this value, keeping the page it was read from"
                                     onClick={() => beginCorrection(attribute)}
                                   >
-                                    Correct
+                                    Edit value
                                   </Button>
                                   {/* Kept, never deleted — the row stays as
                                       evidence that a document said this, with who
@@ -1521,7 +1525,7 @@ function RecordView() {
                               <tr className="bg-amber-50/60">
                                 <td colSpan={5} className="border-b border-amber-200 px-4 py-3">
                                   <p className="text-sm font-medium text-neutral-900">
-                                    Correct “{attribute.label}”
+                                    Edit “{attribute.label}”
                                   </p>
                                   <p className="mt-0.5 text-xs text-neutral-600">
                                     The old value is kept and marked as superseded, and the new one KEEPS the page it

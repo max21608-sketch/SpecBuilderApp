@@ -29,3 +29,40 @@
     max-width: 100%;
   }
 }
+
+/* WHERE A "NEEDS YOU" LINK LANDS, briefly lit (2026-10-15). The list at the
+   top of a review names the next step and scrolls to it; the place it lands
+   glows amber — "needs a person" — and fades, so the eye finds the row the
+   words were about. A table row is lit by its cells, because a `tr` takes no
+   box-shadow. `src/lib/go-to.ts` sets and clears the attribute. */
+@keyframes needs-you-glow {
+  0%,
+  55% {
+    box-shadow: 0 0 0 3px rgb(245 158 11);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(245 158 11 / 0);
+  }
+}
+@keyframes needs-you-cell {
+  0%,
+  55% {
+    background-color: rgb(254 243 199);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+[data-needs-you-flash]:not(tr) {
+  animation: needs-you-glow 2.4s ease-out;
+}
+tr[data-needs-you-flash] > td {
+  animation: needs-you-cell 2.4s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-needs-you-flash]:not(tr),
+  tr[data-needs-you-flash] > td {
+    animation-duration: 0.01s;
+    outline: 3px solid rgb(245 158 11);
+  }
+}

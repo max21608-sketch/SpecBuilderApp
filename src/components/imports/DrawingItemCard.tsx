@@ -37,7 +37,10 @@ import { Fragment, useEffect, useState } from "react";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
-import { isMeasuredRow, measuredRows, oneLinePerPhase, toggledTargets, wasReadByModel } from "@/lib/drawing-document";
+import { isMeasuredRow, measuredRows, oneLinePerPhase, toggledTargets, uncertainNotices, wasReadByModel } from "@/lib/drawing-document";
+import { drawingNeedsYou, needsYouListId, runTargetsId } from "@/lib/needs-you";
+import { goToAndFlash } from "@/lib/go-to";
+import NeedsYou from "@/components/ui/NeedsYou";
 import { EMPTY_GUESS, guessSlotsFromViews } from "@/lib/dimension-guess";
 import type { DrawingItem, DrawingObservation } from "@/lib/drawing-document";
 import LevelControl, { levelTargets, suggestLevelFromCard } from "@/components/imports/LevelControl";
@@ -452,9 +455,7 @@ export default function ItemCard({
       </Button>
     </div>
   );
-  const header = (
-    <>
-      {headerBar}
+  const readNotes = (
       <ItemReadNotes
         items={[item]}
         busy={busy}
@@ -467,6 +468,11 @@ export default function ItemCard({
             : undefined
         }
       />
+  );
+  const header = (
+    <>
+      {headerBar}
+      {readNotes}
       {unsplit}
     </>
   );
@@ -532,9 +538,33 @@ export default function ItemCard({
     (o) => (o.slotSuggested && o.dimensionSlot) || o.groupSuggested,
   );
 
+  // WHAT STILL STOPS CONFIRM, AS PLACES TO GO (2026-10-15). The blockers are
+  // the server's, unchanged; this says each as a next step and a link.
+  const needsYou = drawingNeedsYou({
+    itemId: item.id,
+    blockers,
+    rows: item.observations,
+    slots: new Map(uncertainNotices(item).map((notice) => [notice.index, notice.slot])),
+  });
+  const listId = needsYouListId(item.id);
+
   return (
     <div className="mt-4 rounded-[10px] border border-neutral-200 bg-white">
-      {header}
+      {headerBar}
+      {/* FIRST UNDER THE CODE, above the read's own notices it may point at. */}
+      <NeedsYou
+        id={listId}
+        items={needsYou}
+        className="mx-4 my-3"
+        // A folded row is unfolded first, so the link has somewhere to land.
+        onGo={(entry) => {
+          if (!entry.observationId) return;
+          if (otherIds.has(entry.observationId)) setShowOtherDimensions(true);
+          if (statementIds.has(entry.observationId)) setShowStatements(true);
+        }}
+      />
+      {readNotes}
+      {unsplit}
 
       {/* TWO COLUMNS, AND THE RIGHT ONE STAYS PUT. The rows are read against the
           drawing, so the drawing, the picture and the runs this page applies to
@@ -697,7 +727,9 @@ export default function ItemCard({
             />
           </div>
 
-          {/* Which runs this drawing applies to. */}
+          {/* Which runs this drawing applies to. The id is where a "needs
+              you" link about the records lands. */}
+          <div id={runTargetsId(item.id)} className="rounded-lg">
           <RunTargets
             runs={resolution?.resolution.runs ?? []}
             ticked={new Set(targets)}
@@ -720,6 +752,7 @@ export default function ItemCard({
             }
             className="rounded-lg border border-neutral-200 px-3 py-2.5"
           />
+          </div>
 
           {/* THE LEVEL, BESIDE THE RECORDS IT LANDS ON. §0.3: a control lives
               beside the thing it acts on, and what a level is set ON is the
@@ -739,16 +772,25 @@ export default function ItemCard({
             that belong to the card itself, so an item whose every blocker was on
             a row showed an EMPTY sentence beside a disabled button: the one
             thing a screen must never do is refuse without saying why. */}
+        {/* SHORT, AND IT POINTS AT THE LIST (2026-10-15). The full sentences
+            used to be joined here, beside a button scrolled far from the rows
+            they were about; they are now under "Why" on the list at the top. */}
         <p className="text-neutral-600">
-          {(() => {
-            if (blockers.length === 0) {
-              return `Writes ${pending.length} spec${pending.length === 1 ? "" : "s"} to ${targets.length} record${targets.length === 1 ? "" : "s"}.`;
-            }
-            const cardLevel = blockers.filter((b) => !b.observationId).map((b) => b.message);
-            if (cardLevel.length > 0) return cardLevel.join(" ");
-            const rows = new Set(blockers.map((b) => b.observationId)).size;
-            return `${rows} row${rows === 1 ? "" : "s"} above need${rows === 1 ? "s" : ""} attention before this can be confirmed.`;
-          })()}
+          {blockers.length === 0 ? (
+            `Writes ${pending.length} spec${pending.length === 1 ? "" : "s"} to ${targets.length} record${targets.length === 1 ? "" : "s"}.`
+          ) : (
+            <a
+              href={`#${listId}`}
+              className="font-medium text-amber-800 underline decoration-amber-500 underline-offset-2"
+              onClick={(event) => {
+                event.preventDefault();
+                goToAndFlash(listId);
+              }}
+            >
+              {needsYou.length === 1 ? "One thing needs you" : `${needsYou.length} things need you`} — listed at the top
+              of this card
+            </a>
+          )}
         </p>
         <span className="flex-1" />
         {ignorePage}

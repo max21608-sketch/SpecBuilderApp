@@ -42,6 +42,9 @@ import {
   type FieldClash,
 } from "@/lib/drawing-document";
 import { canTakeSlot, millimetreReading, millimetresBeside } from "@/lib/slot-swap";
+import { keepWords, replaceComparison } from "@/lib/replace-words";
+import { observationRowId, replacePanelId } from "@/lib/needs-you";
+import { sourceWords } from "@/lib/source-words";
 import { useReviewRowActions } from "@/components/imports/review-row-actions";
 import type { ClashChoice } from "@/lib/clash-resolution";
 import {
@@ -91,6 +94,8 @@ export type Occupant = {
   unit: string | null;
   sourceFilename: string | null;
   sourcePage: number | null;
+  /** Written by a bill's run, so the replace box says "the bill" (2026-10-15). Absent: not known. */
+  sourceIsBill?: boolean;
 };
 
 /**
@@ -141,6 +146,8 @@ export type RowBlocker = {
   pairKey?: string;
   /** A cross-page `field_conflict`'s three answers, as data (plan any-bill, step 4). */
   clash?: FieldClash;
+  /** Which of the read's doubts, on `uncertain_unchecked`. */
+  index?: number;
 };
 export type RowWarning = { code: string; message: string; observationId: string };
 
@@ -812,6 +819,8 @@ export function ObservationRow({
     // checking. The background keeps saying "guessed", the left edge says
     // "blocked".
     <tr
+      // Where a "needs you" link lands (`needs-you.ts`).
+      id={observationRowId(observation.id)}
       className={`border-t border-neutral-100${guessed ? " bg-yellow-100/70" : blocked ? " bg-amber-50/40" : ""}${
         blocked ? " border-l-4 border-l-amber-400" : ""
       }`}
@@ -1280,18 +1289,27 @@ export function ReplacePanel({
   recordNames?: Record<string, string>;
   onChange: (observation: DrawingObservation, changes: Record<string, unknown>) => void;
 }) {
+  const [why, setWhy] = useState(false);
   if (occupants.length === 0) return null;
+  const incoming = {
+    slot: observation.attrGroup === "dimension" ? (observation.dimensionSlot ?? null) : null,
+    value: observation.value ?? observation.valueRaw,
+    unit: observation.unit,
+  };
+  const several = occupants.length > 1;
   return (
-    <tr className={blocked ? "bg-amber-50/40" : undefined}>
+    <tr id={replacePanelId(observation.id)} className={blocked ? "bg-amber-50/40" : undefined}>
       <td colSpan={OBSERVATION_COLUMNS} className="px-4 pb-2">
-        <div className="border border-amber-300 bg-amber-50 rounded px-2 py-1.5 text-xs">
-          {heading && <p className="mb-1 font-medium text-amber-900">{heading}</p>}
-          <p className="text-amber-900">
-            {occupants.length === 1
-              ? "This item already holds a value here."
-              : `${occupants.length} of these records already hold a value here.`}{" "}
-            Tick to replace it — the old one is kept, marked retired, and linked to this as its replacement.
-          </p>
+        {/* WHICH DOCUMENT HOLDS WHAT, AND ONE CHOICE (2026-10-15). The box
+            said "this item already holds a value here — tick to replace it",
+            and Matthew read it backwards for eight minutes: it never said the
+            held value was the bill's, nor what this drawing says instead. The
+            tick and its keys are unchanged; the words are `replace-words.ts`. */}
+        <div
+          className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900"
+          data-replace-panel={observation.id}
+        >
+          {heading && <p className="mb-1 font-medium">{heading}</p>}
           {occupants.map(({ recordId, occupant }) => {
             const acknowledged = (observation.replaces ?? []).some(
               (entry) => !entry.retiresSlot && entry.recordId === recordId && entry.attributeId === occupant.attributeId,
@@ -1309,43 +1327,68 @@ export function ReplacePanel({
               recordNames?.[recordId] ??
               runs.find((run) => run.status === "matched" && run.record.id === recordId)?.runName ??
               (candidateOf ? `${candidateOf.run.runName} · ${candidateOf.candidate.label}` : "this phase");
+            const held = { ...occupant, slot: incoming.slot };
             return (
-              <label key={recordId} className="mt-1 flex items-start gap-2 text-amber-900">
-                <input
-                  type="checkbox"
-                  checked={acknowledged}
-                  disabled={busy}
-                  onChange={(event) => {
-                    // Only this slot's own entry: a W or D a diameter retires
-                    // on the same record (brief G) is a separate decision.
-                    const others = (observation.replaces ?? []).filter(
-                      (entry) => entry.recordId !== recordId || Boolean(entry.retiresSlot),
-                    );
-                    const next = event.target.checked
-                      ? [...others, { recordId, attributeId: occupant.attributeId, attributeVersion: occupant.attributeVersion }]
-                      : others;
-                    onChange(observation, { replaces: next });
-                  }}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-medium">{runName}</span>: replace{" "}
-                  <span className="font-mono">
-                    {occupant.label}
-                    {occupant.value ? `: ${occupant.value}` : ""}
-                    {occupant.unit ?? ""}
-                  </span>
-                  {occupant.sourceFilename && (
-                    <span className="text-amber-800">
-                      {" "}
-                      (from {occupant.sourceFilename}
-                      {occupant.sourcePage ? ` p${occupant.sourcePage}` : ""})
-                    </span>
-                  )}
-                </span>
-              </label>
+              <div key={recordId} className={several ? "mt-1 first:mt-0" : undefined}>
+                <p className="font-medium">
+                  <span className="font-semibold">{runName}</span>
+                  {": "}
+                  <span className="font-mono">{replaceComparison(held, incoming)}</span>
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <label className="inline-flex items-center gap-1.5 rounded border border-amber-400 bg-white px-2 py-0.5 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={acknowledged}
+                      disabled={busy}
+                      aria-label={`Use this drawing's${several ? ` on ${runName}` : ""}`}
+                      onChange={(event) => {
+                        // Only this slot's own entry: a W or D a diameter retires
+                        // on the same record (brief G) is a separate decision.
+                        const others = (observation.replaces ?? []).filter(
+                          (entry) => entry.recordId !== recordId || Boolean(entry.retiresSlot),
+                        );
+                        const next = event.target.checked
+                          ? [...others, { recordId, attributeId: occupant.attributeId, attributeVersion: occupant.attributeVersion }]
+                          : others;
+                        onChange(observation, { replaces: next });
+                      }}
+                    />
+                    Use this drawing&rsquo;s
+                  </label>
+                  <span className="text-amber-800">{acknowledged ? `Confirming replaces ${occupant.sourceIsBill ? "the bill's" : "the old one"}.` : keepWords(occupant)}</span>
+                </div>
+              </div>
             );
           })}
+          {/* THE OLD EXPLANATION, ONE CLICK AWAY. Never deleted: it is how a
+              reviewer learns that replacing deletes nothing. */}
+          <button
+            type="button"
+            className="mt-1 text-[11px] text-amber-800 underline decoration-dotted"
+            aria-expanded={why}
+            onClick={() => setWhy((value) => !value)}
+          >
+            {why ? "Hide what replacing does" : "What replacing does"}
+          </button>
+          {why && (
+            <div className="mt-0.5 text-amber-900">
+              <p>
+                {several
+                  ? `${occupants.length} of these records already hold a value here.`
+                  : "This item already holds a value here."}{" "}
+                Ticking replaces it — the old one is kept, marked retired, and linked to this as its replacement.
+              </p>
+              {occupants.map(({ recordId, occupant }) => (
+                <p key={recordId} className="font-mono">
+                  {occupant.label}
+                  {occupant.value ? `: ${occupant.value}` : ""}
+                  {occupant.unit ?? ""}
+                  <span className="font-sans text-amber-800"> — {sourceWords(occupant)}{occupant.sourceIsBill && occupant.sourceFilename ? ` (${occupant.sourceFilename})` : ""}</span>
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       </td>
     </tr>

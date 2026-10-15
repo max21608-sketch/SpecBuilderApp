@@ -335,7 +335,7 @@ export default function BillLineConfigurations({
                               <Button
                                 size="xs"
                                 disabled={busy}
-                                title={`Correct this on all ${n} configurations`}
+                                title={`Change this on all ${n} configurations`}
                                 onClick={() =>
                                   setEditing({
                                     kind: "correct",
@@ -347,7 +347,7 @@ export default function BillLineConfigurations({
                                   })
                                 }
                               >
-                                Correct on all {n}
+                                Edit on all {n}
                               </Button>
                               <Button
                                 variant="quiet"
@@ -367,7 +367,7 @@ export default function BillLineConfigurations({
                           <tr className={open.kind === "retire" ? "bg-red-50/60" : "bg-amber-50/60"}>
                             <td colSpan={4} className="border-b border-amber-200 px-4 py-3">
                               <p className="text-sm font-medium text-neutral-900">
-                                {open.kind === "correct" ? `Correct “${shared.label}” on all ${n}` : `Retire “${shared.label}” from all ${n}`}
+                                {open.kind === "correct" ? `Edit “${shared.label}” on all ${n}` : `Retire “${shared.label}” from all ${n}`}
                               </p>
                               <p className="mt-0.5 text-xs text-neutral-600">
                                 {open.kind === "correct"

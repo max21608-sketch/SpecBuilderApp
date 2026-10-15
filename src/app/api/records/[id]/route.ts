@@ -99,13 +99,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            -- force on a linked spec. The spec's own columns above are then
            -- history, and the screen says the library's replaces them.
            fin.standard_value as finish_standard_value, fin.standard_state as finish_standard_state,
-           src.filename as source_filename, src.document_kind as source_document_kind
+           src.filename as source_filename, src.document_kind as source_document_kind,
+           -- A bill's own row has no page, so the record names it as the bill
+           -- rather than "another page" (2026-10-15).
+           (src.source_kind = 'boq_xlsx') as source_is_bill
     from record_attributes a
     left join spec_fields f on f.id = a.spec_field_id
     left join project_finishes fin on fin.id = a.finish_id
     left join attachments ev on ev.id = a.standard_agreed_evidence_id
     left join (
-      select r.id, r.document_kind, at.filename
+      select r.id, r.document_kind, r.source_kind, at.filename
       from intake_runs r left join attachments at on at.id = r.attachment_id
     ) src on src.id = a.source_run_id
     where a.record_id = ${id} and a.status = 'active'

@@ -292,7 +292,16 @@ describe("the bill review", () => {
   it("opens on the Columns panel for a bill nobody could read, and will not confirm it", async () => {
     mountReview({}, unreadSheets());
     expect(await screen.findByRole("region", { name: "Columns of CASEGOODS+SEATING+TABLES" })).toBeInTheDocument();
-    expect(screen.getByText("Say which column is which before confirming.")).toBeInTheDocument();
+    // ONE LIST OF WHAT NEEDS YOU, FIRST ON THE PAGE (2026-10-15): the sheet
+    // waiting on its columns is a link there, and its tab is red. The
+    // sentence that used to be an amber banner is the item's "Why".
+    const list = screen.getByRole("region", { name: "What needs you" });
+    const link = within(list).getByRole("link", { name: /Set the columns on “CASEGOODS\+SEATING\+TABLES”, or drop the sheet/ });
+    expect(link).toHaveAttribute("href", "#sheet-0-columns");
+    expect(document.getElementById("sheet-0-columns")).not.toBeNull();
+    expect(screen.getByRole("tab", { name: /CASEGOODS\+SEATING\+TABLES.*needs you/ })).toBeInTheDocument();
+    await userEvent.click(within(list).getByRole("button", { name: "Why" }));
+    expect(within(list).getAllByText(/nobody has said which column is which/).length).toBeGreaterThan(0);
     // The header says the one thing to do first (plan any-bill Step 2.8),
     // never "creates 0 records on 2 phases".
     const confirm = screen.getByRole("button", { name: "Set the columns first" });

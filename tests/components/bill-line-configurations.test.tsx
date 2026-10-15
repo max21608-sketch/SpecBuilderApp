@@ -95,7 +95,7 @@ describe("the bill line's Specs tab", () => {
     render(<BillLineConfigurations lineId="line-12" family={family()} specFields={[]} onDone={() => undefined} />);
 
     expect(screen.getByText("Common to all 3 configurations")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Correct on all 3" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit on all 3" })).toBeInTheDocument();
     // The composed cell over the common slots, by the one composer.
     expect(screen.getByText("SH440mm")).toBeInTheDocument();
 
@@ -117,7 +117,7 @@ describe("the bill line's Specs tab", () => {
   it("offers no edit on a row that differs", () => {
     render(<BillLineConfigurations lineId="line-12" family={family()} specFields={[]} onDone={() => undefined} />);
     // One common row, one Correct: the differing COM 1 has none.
-    expect(screen.getAllByRole("button", { name: /Correct on all/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /Edit on all/ })).toHaveLength(1);
   });
 
   it("sends every row and version the screen showed with a common correction", async () => {
@@ -125,7 +125,7 @@ describe("the bill line's Specs tab", () => {
     const shown = family();
     render(<BillLineConfigurations lineId="line-12" family={shown} specFields={[]} onDone={onDone} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Correct on all 3" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit on all 3" }));
     const value = screen.getByLabelText("Value");
     await userEvent.clear(value);
     await userEvent.type(value, "450");

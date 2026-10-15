@@ -141,10 +141,13 @@ beforeEach(() => {
 });
 
 describe("correcting a spec from the record", () => {
-  it("offers Correct beside Retire on every active spec", async () => {
+  it("offers Edit value beside Retire on every active spec", async () => {
     serve(payload());
     render(<RecordPage />);
-    expect(await screen.findByRole("button", { name: "Correct" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Edit value" })).toBeTruthy();
+    // "Correct" read as "mark this correct" (Matthew, 2026-10-15, 53:30). The
+    // button opens the correction, so its label must not be that word alone.
+    expect(screen.queryByRole("button", { name: "Correct" })).toBeNull();
     expect(screen.getByRole("button", { name: "Retire" })).toBeTruthy();
   });
 
@@ -162,13 +165,13 @@ describe("correcting a spec from the record", () => {
     render(<RecordPage />);
     await userEvent.click(await screen.findByRole("button", { name: /retired spec/ }));
     expect(await screen.findByRole("button", { name: "Put back" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Correct" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit value" })).toBeNull();
   });
 
   it("opens filled in with what the row currently says", async () => {
     serve(payload());
     render(<RecordPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Correct" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit value" }));
     expect((await screen.findByLabelText("Value")) as HTMLInputElement).toHaveValue("1900");
     expect(screen.getByLabelText("Unit")).toHaveValue("mm");
     expect(screen.getByLabelText("State")).toHaveValue("confirmed");
@@ -182,7 +185,7 @@ describe("correcting a spec from the record", () => {
   it("posts the correction once, with the version it was opened at", async () => {
     serve(payload());
     render(<RecordPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Correct" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit value" }));
     const value = await screen.findByLabelText("Value");
     await userEvent.clear(value);
     await userEvent.type(value, "1090");
@@ -212,7 +215,7 @@ describe("correcting a spec from the record", () => {
       data: null,
     });
     render(<RecordPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Correct" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit value" }));
     await userEvent.type(await screen.findByLabelText("Why"), "Misread");
     await userEvent.click(screen.getByRole("button", { name: "Save the correction" }));
     // RELOADED FIRST, REPORTED AFTER — the message survives the reload the
@@ -242,7 +245,7 @@ describe("correcting a spec from the record", () => {
       }),
     );
     render(<RecordPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Correct" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit value" }));
     await screen.findByLabelText("Value");
     expect(screen.queryByLabelText("Unit")).toBeNull();
   });
@@ -302,7 +305,7 @@ describe("correcting a spec from the record", () => {
         }),
       );
       render(<RecordPage />);
-      await screen.findByRole("button", { name: "Correct" });
+      await screen.findByRole("button", { name: "Edit value" });
       expect(screen.queryByTitle(/^BWS field/)).toBeNull();
     });
   });

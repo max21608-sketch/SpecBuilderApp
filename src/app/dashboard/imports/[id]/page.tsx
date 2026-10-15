@@ -20,6 +20,9 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
+import NeedsYou from "@/components/ui/NeedsYou";
+import { billLineId, billNeedsYou, needsYouListId, sheetColumnsId, sheetsWaiting } from "@/lib/needs-you";
+import { goToAndFlash } from "@/lib/go-to";
 import { TONE } from "@/components/ui/tone";
 import PageHeader from "@/components/ui/PageHeader";
 import NextStepAction from "@/components/ui/NextStepAction";
@@ -1302,6 +1305,25 @@ export default function ReviewImportPage() {
           noLiveLines: activeLines.length === 0,
         })
       : null;
+  // WHAT THE CONFIRM WAITS ON, AS PLACES TO GO (2026-10-15): the same reasons
+  // as `confirmBlocker`, each a link to the panel or line on its own tab, and
+  // the tabs that still need somebody painted red.
+  const needsYou =
+    run.status === "parsed"
+      ? billNeedsYou({
+          sheets: sheets.map((sheet, index) => ({
+            index,
+            tab: tabName(sheet),
+            unmapped: unmapped.includes(sheet),
+            unchecked: unchecked.includes(sheet),
+            problems: sheet.ignored ? [] : rowKindProblems(sheet.lines),
+          })),
+          single: sheets.length === 1,
+          reading,
+          noLiveLines: activeLines.length === 0,
+        })
+      : [];
+  const waitingSheets = sheetsWaiting(needsYou);
   const canAsk = run.status === "parsed" && run.has_source !== false && run.parsed?.sourcePreserved !== false;
   const ignoredSheets = sheets.filter((sheet) => sheet.ignored);
   /** The revision and date the FIRST live tab printed, as text. Both stay text. */
@@ -1426,6 +1448,21 @@ export default function ReviewImportPage() {
           {confirmBlocker && !busy && (
             <p className={`max-w-[26rem] text-right text-xs ${TONE.warn.text}`}>
               {confirmBlocker}
+              {needsYou.some((entry) => entry.target) && (
+                <>
+                  {" "}
+                  <a
+                    href={`#${needsYouListId("bill")}`}
+                    className="font-medium underline decoration-amber-500 underline-offset-2"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      goToAndFlash(needsYouListId("bill"));
+                    }}
+                  >
+                    Take me there
+                  </a>
+                </>
+              )}
             </p>
           )}
           <Button
@@ -1468,6 +1505,9 @@ export default function ReviewImportPage() {
                 label: sheet.proposedRunName || sheet.sheetName,
                 count: sheet.lines.filter((line) => !line.ignored).length,
                 muted: sheet.ignored,
+                // RED WHILE IT WAITS ON SOMEBODY (Matthew, 2026-10-15 part 2,
+                // 1:46): the confirm is refused until it is done.
+                attention: waitingSheets.has(index),
               }))}
             />
           ) : undefined
@@ -1475,6 +1515,24 @@ export default function ReviewImportPage() {
       />
 
       <PageBody width="wide">
+        {/* ONE LIST OF WHAT THE CONFIRM WAITS ON, FIRST ON THE PAGE, each item
+            a link that switches to its tab and lights the panel or line
+            (2026-10-15). It replaces two amber banners whose sentences are now
+            each item's "Why". */}
+        <NeedsYou
+          id={needsYouListId("bill")}
+          items={needsYou}
+          className="mt-3"
+          onGo={(entry) => {
+            if (entry.sheetIndex === undefined) return;
+            setSheetTab(entry.sheetIndex);
+            // A Columns link opens the panel, so there is a panel to land on.
+            if (entry.target === sheetColumnsId(entry.sheetIndex)) {
+              const index = entry.sheetIndex;
+              setOpenPanels((current) => new Set(current).add(index));
+            }
+          }}
+        />
         {/* THE BILL THAT COULD NOT BE READ SAYS SO ON THIS SCREEN.
             ==================================================================
             The parser's refusal was returned by the registration route as a 422
@@ -1562,31 +1620,9 @@ export default function ReviewImportPage() {
             The model never typed a value: every code, description and quantity below was read by code.
           </Note>
         )}
-        {run.status === "parsed" && kindProblems.length > 0 && (
-          <Note tone="warn" title="A finish line has no item to be written onto.">
-            {kindProblems.map((problem) => problem.problem).join(" ")}
-          </Note>
-        )}
-
-        {/* WHICH SHEETS STILL NEED SOMEBODY, named, above everything else: the
-            confirm is disabled until each is mapped or dropped, and a disabled
-            button that does not say why is a screen nobody can finish. */}
-        {run.status === "parsed" && unmapped.length > 0 && (
-          <Note tone="warn" title="Say which column is which before confirming.">
-            {unmapped.length === 1 ? (
-              <>
-                Nothing has been read from <span className="font-mono">{unmapped[0]?.sheetName}</span> yet: set its
-                columns below, or drop the sheet if it is not a bill.
-              </>
-            ) : (
-              <>
-                Nothing has been read from {unmapped.length} sheets yet (
-                {unmapped.map((sheet) => sheet.sheetName).join(", ")}): set each one&rsquo;s columns, or drop the ones
-                that are not a bill.
-              </>
-            )}
-          </Note>
-        )}
+        {/* THE SENTENCES THAT WERE TWO AMBER BANNERS HERE — a finish line
+            with no item, a sheet nobody has mapped — are each item's "Why" on
+            the list above, one click away and never deleted. */}
 
         {/* A TAB IS A PHASE, NOT A REVISION. Three tabs quote the same codes at
             different quantities and can all be live at once, which is why they
@@ -1894,6 +1930,8 @@ export default function ReviewImportPage() {
                 )}
               </Card>
 
+              {/* Where a "needs you" link about this sheet's columns lands. */}
+              <div id={sheetColumnsId(sheetIndex)} className="rounded-[10px]">
               {panelOpen && (
                 <BoqColumnsPanel
                   // Re-mounted when what was READ changes, so a successful read
@@ -1916,6 +1954,7 @@ export default function ReviewImportPage() {
                   asking={reading}
                 />
               )}
+              </div>
               {panelOpen && (sheet.preview?.length ?? 0) === 0 && run.status === "parsed" && run.has_source && (
                 <div className="mt-2">
                   <Button size="sm" disabled={busy} onClick={() => void readAgain()}>
@@ -2140,6 +2179,7 @@ export default function ReviewImportPage() {
                         return (
                           <Fragment key={line.index}>
                           <Tr
+                            id={billLineId(sheetIndex, line.lineNo)}
                             tone={duplicated ? "warn" : "plain"}
                             className={[
                               ROW_NO_RULE,

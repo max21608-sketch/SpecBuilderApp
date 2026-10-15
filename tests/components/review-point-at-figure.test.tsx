@@ -18,7 +18,7 @@
 //     figure on this card is printed in: mm · cm · in";
 //   * "Show in mm" prints each figure converted, and writes nothing;
 //   * a specification sheet's other statements fold under their own heading;
-//   * a doubt the read raised about an overall slot offers "Checked".
+//   * a doubt the read raised about an overall slot offers "Mark checked".
 //
 // The component tier runs without a database and is scoped by PATH in
 // vitest.config.ts, so there is no `@vitest-environment` docblock here.
@@ -279,9 +279,9 @@ describe("a doubt the read raised about a size", () => {
       blockers: [{ code: "uncertain_unchecked", message: "The read was unsure of the width: …" }],
     });
     const notes = screen.getByRole("note", { name: "What the read was unsure of" });
-    expect(within(notes).getAllByRole("button", { name: "Checked" })).toHaveLength(1);
+    expect(within(notes).getAllByRole("button", { name: "Mark checked" })).toHaveLength(1);
     expect(within(notes).getByText(/holds the card until you check it/)).toBeInTheDocument();
-    await userEvent.click(within(notes).getByRole("button", { name: "Checked" }));
+    await userEvent.click(within(notes).getByRole("button", { name: "Mark checked" }));
     expect(spies.onSaveItem).toHaveBeenCalledWith(staged, { uncertainChecked: [0] });
     expect(screen.getByRole("button", { name: /Confirm 1 spec/ })).toBeDisabled();
   });
@@ -289,7 +289,7 @@ describe("a doubt the read raised about a size", () => {
   it("says a checked or touched doubt is settled, and offers nothing more", () => {
     renderCard(doubtful({ uncertainChecked: [0] }));
     const notes = screen.getByRole("note", { name: "What the read was unsure of" });
-    expect(within(notes).queryByRole("button", { name: "Checked" })).toBeNull();
+    expect(within(notes).queryByRole("button", { name: "Mark checked" })).toBeNull();
     expect(within(notes).getByText("— checked")).toBeInTheDocument();
   });
 });
