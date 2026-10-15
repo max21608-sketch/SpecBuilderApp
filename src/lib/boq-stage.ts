@@ -117,10 +117,10 @@ export async function loadLineSuggester(exec: TxnSql): Promise<(line: SuggestInp
   // "Armchairs, Benches, Stools, Sofas", which share no word.
   const categories = await exec`select id, name from item_categories`;
   const aliases = await exec`select category_id, term from item_category_aliases`;
-  const candidates: MatchCandidate[] = [
-    ...categories.map((c) => ({ id: String(c.id), name: String(c.name) })),
-    ...aliases.map((a) => ({ id: String(a.category_id), name: String(a.term) })),
-  ];
+  const register: CategoryRegister = {
+    categories: categories.map((c) => ({ id: String(c.id), name: String(c.name) })),
+    aliases: aliases.map((a) => ({ categoryId: String(a.category_id), term: String(a.term) })),
+  };
 
   // The LEVEL, guessed the same way and for the same reason: stored at parse
   // time so the confirm writes what the reviewer saw. Unlike the category it
@@ -149,7 +149,7 @@ export async function loadLineSuggester(exec: TxnSql): Promise<(line: SuggestInp
     // lines ("Desk Chair / Finish - Wood…", "Bench Ottoman / … Finish") put a
     // second sheet's word at the same score and left the line ambiguous.
     // The level is still read off the whole cell: that is where the metal is.
-    const match = matchName(billItemName(line), candidates);
+    const category = suggestCategory(billItemName(line), register);
     const decided = (
       categoryId: string | null,
       categoryStatus: string,
@@ -165,20 +165,60 @@ export async function loadLineSuggester(exec: TxnSql): Promise<(line: SuggestInp
       ...extra,
     });
 
-    if (match.status === "confident") return decided(match.id, "suggested");
-    if (match.status === "ambiguous") {
-      // Several terms pointing at ONE category is agreement, not ambiguity.
-      const ids = [...new Set(match.candidates.map((candidate) => candidate.id))];
-      if (ids.length === 1) return decided(ids[0] ?? null, "suggested");
-      return decided(null, "ambiguous", {
-        categoryCandidates: ids.map((id) => ({
-          id,
-          name: String(categories.find((c) => String(c.id) === id)?.name ?? id),
-        })),
-      });
+    if (category.status === "ambiguous") {
+      return decided(null, "ambiguous", { categoryCandidates: category.candidates });
     }
-    return decided(null, "none");
+    return decided(category.categoryId, category.status);
   };
+}
+
+/** The category names and the bill vocabulary (`item_category_aliases`) a line's name is matched against. */
+export type CategoryRegister = {
+  categories: readonly { id: string; name: string }[];
+  aliases: readonly { categoryId: string; term: string }[];
+};
+
+export type CategorySuggestion =
+  | { status: "suggested"; categoryId: string }
+  | { status: "ambiguous"; categoryId: null; candidates: { id: string; name: string }[] }
+  | { status: "none"; categoryId: null };
+
+/**
+ * THE CATEGORY A BILL LINE'S NAME SUGGESTS. Pure, so `npm run boq:gap --
+ * --categories` reads a bill through the same decision the staging does,
+ * from the seed files rather than a database: a second copy is how a
+ * measurement starts describing a matcher the app no longer runs.
+ */
+export function suggestCategory(name: string, register: CategoryRegister): CategorySuggestion {
+  // A NAME WRITTEN `<item> @ <where>` IS MATCHED ON THE ITEM (2026-10-15).
+  // The Aman bill names its lines "Side Table @ Lounge" and "Pouf @ Bedroom";
+  // the Ronnie Scott's bill "ARMCHAIR @ FABRIC" and "BAR STOOL @". What follows
+  // the @ is a place or a part, never the item, and read as a word of the name
+  // it scores: once "Lounge table" was a term, "Side Table @ Lounge" tied
+  // Dining tables with Side Coffee Bedside Tables and a line that had always
+  // resolved was put back to a person. A name that is ONLY "@ …" is matched
+  // whole, as before.
+  const item = name.replace(/\s+@(?:\s.*)?$/s, "").trim() || name;
+  // Candidates are the category names plus the BOQ vocabulary: a BOQ says
+  // "Sofa" and the sheet is called "Armchairs, Benches, Stools, Sofas",
+  // which share no word.
+  const candidates: MatchCandidate[] = [
+    ...register.categories.map((c) => ({ id: c.id, name: c.name })),
+    ...register.aliases.map((a) => ({ id: a.categoryId, name: a.term })),
+  ];
+  const match = matchName(item, candidates);
+  if (match.status === "confident") return { status: "suggested", categoryId: match.id };
+  if (match.status === "ambiguous") {
+    // Several terms pointing at ONE category is agreement, not ambiguity.
+    const ids = [...new Set(match.candidates.map((candidate) => candidate.id))];
+    if (ids.length === 1) return { status: "suggested", categoryId: ids[0]! };
+    return {
+      status: "ambiguous",
+      categoryId: null,
+      candidates: ids.map((id) => ({ id, name: register.categories.find((c) => c.id === id)?.name ?? id })),
+    };
+  }
+  return { status: "none", categoryId: null };
 }
 
 /** A parsed sheet, staged: the same sheet with every line suggested. The line index is per sheet. */

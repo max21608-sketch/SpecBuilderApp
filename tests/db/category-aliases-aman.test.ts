@@ -41,8 +41,10 @@ describeIfDb("the Aman bill's item words", () => {
 
   it("files each word the bill used on the sheet chosen for it", async () => {
     expect(await sheetFor("Drawers")).toEqual({ status: "suggested", slug: "sideboards-dressers" });
-    expect(await sheetFor("Pouf @ Lounge")).toEqual({ status: "suggested", slug: "ottomans-storage-boxes" });
-    expect(await sheetFor("Pouf @ Bedroom")).toEqual({ status: "suggested", slug: "ottomans-storage-boxes" });
+    // Pouf MOVED to the Armchairs sheet on 2026-10-15 (Max), beside the
+    // Ronnie Scott's pouffe: category-aliases-ronnie.test.ts.
+    expect(await sheetFor("Pouf @ Lounge")).toEqual({ status: "suggested", slug: "armchairs-benches-stools-sofas" });
+    expect(await sheetFor("Pouf @ Bedroom")).toEqual({ status: "suggested", slug: "armchairs-benches-stools-sofas" });
     expect(await sheetFor("Bench Ottoman")).toEqual({ status: "suggested", slug: "ottomans-storage-boxes" });
     expect(await sheetFor("Chaise Lounge")).toEqual({ status: "suggested", slug: "sofas-bed-daybeds" });
     // Already there: the miss on pilot was the whole description cell.

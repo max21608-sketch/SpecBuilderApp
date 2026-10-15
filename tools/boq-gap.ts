@@ -1,4 +1,4 @@
-// npm run boq:gap -- <folder> [--golden <dir>] [--layouts <file.json>]
+// npm run boq:gap -- <folder> [--golden <dir>] [--layouts <file.json>] [--categories]
 //
 // ============================================================================
 // READ ONLY. WHAT THE BILL READER MAKES OF EVERY BILL IN A FOLDER, AS A NUMBER.
@@ -24,6 +24,12 @@
 // golden check of a bill in an unknown layout is run with its layout, or after
 // the model's reading has been saved as one.
 //
+// With --categories, every item line's name and the category it would be
+// suggested, through `suggestCategory` (the staging's own decision) over the
+// category names and `item_category_aliases` read from `db/seed/0002` and
+// `db/seed/0004` as FILES. Run it before and after changing that seed and diff
+// the two: the only lines that move should be the ones the new terms name.
+//
 // Real bills never enter the repo; neither does this tool's output. It writes
 // nothing anywhere.
 // ============================================================================
@@ -34,6 +40,8 @@ import { intakeSourceKind } from "@/lib/intake-source-types";
 import { parseBoqSheets, type BoqAlias, type BoqLayout, type ParsedBoqSheet } from "@/lib/boq-import";
 import { BOQ_ROLE_LABELS, columnLetter, isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
 import { parseRowRules } from "@/lib/boq-row-kinds";
+import { billItemName } from "@/lib/bill-description";
+import { suggestCategory, type CategoryRegister } from "@/lib/boq-stage";
 
 type GoldenLine = {
   row: number;
@@ -45,7 +53,7 @@ type GoldenLine = {
 type Golden = { file: string; sheet: string; lineCount: number; lines: GoldenLine[] };
 
 function usage(): never {
-  console.error("usage: npm run boq:gap -- <folder> [--golden <dir>] [--layouts <file.json>]");
+  console.error("usage: npm run boq:gap -- <folder> [--golden <dir>] [--layouts <file.json>] [--categories]");
   process.exit(2);
 }
 
@@ -60,6 +68,42 @@ async function seededAliases(): Promise<BoqAlias[]> {
   }
   if (aliases.length === 0) throw new Error(`No aliases found in ${file}.`);
   return aliases;
+}
+
+/**
+ * The category register as the seed files write it. A category's id here is
+ * its SLUG, which is what both files key on; nothing is read from a database.
+ */
+async function seededCategories(): Promise<CategoryRegister> {
+  const read = (name: string) => readFile(path.join(process.cwd(), "db/seed", name), "utf8");
+  const unquote = (value: string | undefined) => (value ?? "").replace(/''/g, "'");
+  const categories = [...(await read("0002_item_categories.sql")).matchAll(/\(\s*'([a-z-]+)'\s*,\s*'[a-z]+'\s*,\s*'((?:[^']|'')*)'/g)].map(
+    (match) => ({ id: match[1]!, name: unquote(match[2]) }),
+  );
+  const aliases = [...(await read("0004_category_aliases.sql")).matchAll(/^\s*\(\s*'([a-z-]+)'\s*,\s*'((?:[^']|'')*)'\s*\)/gm)].map(
+    (match) => ({ categoryId: match[1]!, term: unquote(match[2]) }),
+  );
+  if (categories.length === 0 || aliases.length === 0) throw new Error("No categories or aliases found in db/seed/0002 and 0004.");
+  return { categories, aliases };
+}
+
+function describeCategories(sheet: ParsedBoqSheet, register: CategoryRegister): string[] {
+  const items = sheet.lines.filter((line) => line.rowKind !== "finish_for");
+  const out: string[] = [];
+  const tally = { suggested: 0, ambiguous: 0, none: 0 };
+  for (const line of items) {
+    const name = billItemName(line);
+    const category = suggestCategory(name, register);
+    tally[category.status] += 1;
+    const said =
+      category.status === "suggested"
+        ? (register.categories.find((c) => c.id === category.categoryId)?.name ?? category.categoryId)
+        : category.status === "ambiguous"
+          ? `AMBIGUOUS: ${category.candidates.map((c) => c.name).join(" | ")}`
+          : "none";
+    out.push(`    row ${line.lineNo} ${fold(name).slice(0, 60)} → ${said}`);
+  }
+  return [`  categories: ${tally.suggested} suggested, ${tally.ambiguous} ambiguous, ${tally.none} none, of ${items.length} item line(s)`, ...out];
 }
 
 async function layoutsFrom(file: string | null): Promise<BoqLayout[]> {
@@ -198,6 +242,7 @@ async function main(): Promise<void> {
   const aliases = await seededAliases();
   const layouts = await layoutsFrom(option("--layouts"));
   const golden = await goldens(option("--golden"));
+  const categories = args.includes("--categories") ? await seededCategories() : null;
 
   console.log(`boq:gap — ${folder} · ${aliases.length} seeded synonyms · ${layouts.length} layout(s)${golden.size ? " · golden" : ""}`);
   const names = (await readdir(folder)).filter((name) => ["xlsx", "csv", "tsv"].includes(intakeSourceKind(name, ""))).sort();
@@ -219,6 +264,7 @@ async function main(): Promise<void> {
     for (const sheet of result.sheets) {
       console.log(` sheet “${sheet.sheetName}”`);
       for (const line of describeSheet(sheet)) console.log(line);
+      if (categories) for (const line of describeCategories(sheet, categories)) console.log(line);
     }
     const expected = golden.get(name) ?? golden.get(name.replace(/\.[^.]+$/, ""));
     if (expected) {

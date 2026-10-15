@@ -19,8 +19,8 @@
 --   * "Drawers" -> Sideboards Dressers: a free-standing casegood with stone,
 --     metal and timber; that sheet asks drawer liner, runners, handles and
 --     stone. Wardrobes asks the same, but a wardrobe is a hanging carcass.
---   * "Pouf" -> Ottomans Storage boxes: upholstered, no back. The Armchairs
---     sheet asks back cushion, back build and swivel, none of which a pouf has.
+--   * "Pouf" was first put on Ottomans Storage boxes ("upholstered, no back"),
+--     and MOVED to Armchairs Benches Stools Sofas on 2026-10-15 -- see below.
 --   * "Bench Ottoman" -> Ottomans Storage boxes, for the same reason: it is an
 --     OTTOMAN in bench form (the head noun is the last word), a seat and a
 --     COM with no back. The two-word term is an EXACT match for the item's
@@ -39,6 +39,38 @@
 -- X1 HEADBOARD PER X2 BED BASES)" names BOTH a bed base and a headboard,
 -- whole words each, so two sheets tie and a person is asked: that is the
 -- matcher refusing to guess, not failing to read.
+--
+-- 2026-10-15, THE RONNIE SCOTT'S PROCUREMENT SCHEDULE (LBPCo, P16717). On
+-- pilot Matthew set the category of every line the matcher left blank, and Max
+-- confirmed that evening that what pilot holds is right and should happen by
+-- itself next time. These terms are those lines' own names, as the bill
+-- writes them, onto the sheet a person chose:
+--
+--   * "Pouffe" and "Poufee" -> Armchairs Benches Stools Sofas. "Poufee" is the
+--     bill's own misspelling, on three lines; it is kept because it is the
+--     word a real bill used, and nothing else is spelt that way.
+--   * "Pouf" MOVED here from Ottomans Storage boxes, the same day (Max). It
+--     was this file's own judgement for the Aman bill and nobody at BW had
+--     confirmed it; Matthew's placing of a pouffe is the only answer a person
+--     has given. A term maps to ONE category, so a pouf and a pouffe on two
+--     sheets would contradict each other. Records already confirmed are not
+--     touched: a category is staged with the line and the seed re-runs nothing.
+--   * "Lounge table" and "Bar height table" -> Dining tables, as placed.
+--     FLAGGED (Q4 of docs/plans/catchup-2026-10-15.md, "leave it, but flag
+--     it"): this bill's lounge table is 710 high, which is dining height. A
+--     LOW lounge table on another bill will now be suggested Dining tables
+--     rather than Side Coffee Bedside Tables. It is a suggestion the reviewer
+--     sees on the line, so the cost is one correction, not a wrong record.
+--   * "Greeter" and "DJ table" -> Drinks Cabinets Service Stations, as placed:
+--     a casegood a person stands behind to serve from.
+--   * "Greeter station" and "DJ booth" -> the same sheet. The bill's OWN
+--     category column says "CASEGOOD - GREETER STATION" and "CASEGOOD - DJ
+--     BOOTH", so these are verified wording too, for a bill that names its
+--     lines that way. Nothing reads that column yet (plan A1b, undecided).
+--
+-- Not given a term: the line named only "TABLE". It ties Dining tables, Side
+-- Coffee Bedside Tables and Consoles Desks Dressing Tables, and a person is
+-- asked; only the bill's category column ("TABLE - LOUNGE") says which.
 -- ==========================================================================
 
 insert into item_category_aliases (category_id, term, term_norm, created_by)
@@ -53,6 +85,9 @@ from (values
   ('armchairs-benches-stools-sofas', 'Bed Bench'),
   ('armchairs-benches-stools-sofas', 'Entrance Stool'),
   ('armchairs-benches-stools-sofas', 'Bathroom Stool'),
+  ('armchairs-benches-stools-sofas', 'Pouf'),
+  ('armchairs-benches-stools-sofas', 'Pouffe'),
+  ('armchairs-benches-stools-sofas', 'Poufee'),
   ('sofas-bed-daybeds', 'Sofa bed'),
   ('sofas-bed-daybeds', 'Daybed'),
   ('sofas-bed-daybeds', 'Chaise Lounge'),
@@ -68,14 +103,19 @@ from (values
   ('desk-chair-cinema-chair', 'Cinema chair'),
   ('ottomans-storage-boxes', 'Ottoman'),
   ('ottomans-storage-boxes', 'Storage box'),
-  ('ottomans-storage-boxes', 'Pouf'),
   ('ottomans-storage-boxes', 'Bench Ottoman'),
   ('consoles-desks-dressing-tables', 'Console'),
   ('consoles-desks-dressing-tables', 'Desk'),
   ('consoles-desks-dressing-tables', 'Dressing table'),
   ('dining-tables', 'Dining table'),
+  ('dining-tables', 'Lounge table'),
+  ('dining-tables', 'Bar height table'),
   ('drinks-cabinets-service-stations', 'Drinks cabinet'),
   ('drinks-cabinets-service-stations', 'Service station'),
+  ('drinks-cabinets-service-stations', 'Greeter'),
+  ('drinks-cabinets-service-stations', 'Greeter station'),
+  ('drinks-cabinets-service-stations', 'DJ table'),
+  ('drinks-cabinets-service-stations', 'DJ booth'),
   ('mirrors', 'Mirror'),
   ('shelves-bookcase', 'Shelf'),
   ('shelves-bookcase', 'Bookcase'),

@@ -105,13 +105,22 @@ bill's own category column, and the category a person set:
   height. A low lounge table on another project will now land in Dining tables
   rather than Side Coffee Bedside Tables. The category is still a suggestion
   the reviewer sees, so the cost is one correction, not a wrong record.
-- **DECISION NEEDED: `Pouf`.** The seed maps `Pouf` → Ottomans Storage boxes.
-  That was this repo's own judgement on 2026-09-30 for the Aman bill ("no
-  back"), never confirmed by Matthew. A term maps to ONE category, so `Pouf`
-  and `Pouffe` landing on two different sheets would contradict each other.
-  **Recommended: move `Pouf` to Armchairs Benches Stools Sofas too**, since
-  that is the only answer a person at BW has given. Records already confirmed
-  are not touched either way.
+- **DECIDED (Max, 2026-10-15): `Pouf` moves to Armchairs Benches Stools Sofas
+  too.** The seed had mapped `Pouf` → Ottomans Storage boxes, this repo's own
+  judgement on 2026-09-30 for the Aman bill ("no back"), never confirmed by
+  Matthew. A term maps to ONE category, so `Pouf` and `Pouffe` on two sheets
+  would contradict each other, and Matthew's placing of a pouffe is the only
+  answer a person at BW has given. The seed's 2026-09-30 comment now says so.
+  Records already confirmed are not touched.
+- **Found while building it: a name written `<item> @ <where>` is matched on
+  the item** (`suggestCategory`, `boq-stage.ts`). With `Lounge table` a term,
+  the Aman bill's nine "Side Table @ Lounge" / "Coffee Table @ Lounge" lines
+  tied Dining tables with Side Coffee Bedside Tables and went back to a
+  person. What follows the `@` is a place or a part, never the item. Measured
+  with `npm run boq:gap -- <folder> --categories` (new): on Aman only the two
+  `Pouf @` lines move (the decision above); on bills-1006 nothing moves; on
+  Ronnie Scott's every line is categorised except the one named only `TABLE`,
+  which ties four sheets and needs A1b.
 - **A1b (code), only if Max wants it:** when the item's name matches nothing,
   try the bill's own category column (`boq_category`, already staged). Ronnie
   Scott's names its lines `TABLE` and `GREETER` but categorises them `TABLE -
