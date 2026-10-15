@@ -254,8 +254,42 @@ with no quantity of its own is merged into the nearest line.
   read-only tool. CLAUDE.md's *Explicitly excluded* line comes out, and the
   bill section gains "a PDF bill is read by its text layer".
 
-**C2. Otherwise the model transcribes, as a marked exception. APPROVED by
-Max, 2026-10-15, in writing:** *"a PDF bill with no usable text layer may be
+**C2. Otherwise the model transcribes, as a marked exception.** — BUILT
+2026-10-15
+
+Built as below (`src/lib/pdf-bill-transcribe.ts`, `src/lib/pdf-bill-checks.ts`,
+`/api/imports/[id]/transcribe`). Where C1's reader refuses (a scan, or text
+that is not a table; never a PDF that will not open), registration holds the
+bill as WAITING and nothing is charged. The review starts the transcription
+once (claim-guarded like the structure read, 800 s). The model copies the
+table in two-page windows into a grid; code stores it as a workbook BESIDE the
+PDF ("(transcribed from PDF).xlsx"), which becomes the run's source. From
+there it is the ordinary bill path, the structure read included. Every line
+says "transcribed" beside its `p. N` link. Code checks printed quantity
+totals, codes against any text layer, and the model's own "unclear" cells. A
+line that fails is red, and so is a separate "Check against the PDF" list. It
+is NOT in "Before you can confirm": the confirm is unchanged.
+
+Measured on the local stack (TEST T16730), on an invented 2-page bill
+rendered to pictures only (`tests/fixtures/build-image-pdf.mjs`): one window,
+15 s, 5,381 tokens in and 1,617 out; 18 of 18 lines exact. Page 2's printed
+total was made 3 too high on purpose: page 2's 7 lines are red, page 1 (whose
+total adds up) is not. Found by the walk:
+
+- **The fast classifier files a scanned procurement schedule as an FF&E
+  schedule**, as C1 found for the text ones. So a scan it files as any
+  schedule, or cannot place, is HELD with one sentence: "If it is the bill,
+  choose Bill of quantities: the model will transcribe it". A scanned
+  drawing, spec sheet, preamble or email is still refused. A scan now costs
+  one small identifying read, where it used to be refused unseen.
+- A whole-bill total that fails points only at the pages whose own total
+  failed, where every page prints one. Otherwise all 18 lines were red.
+
+Still open: the pack screen calls a waiting bill "Ready to review". A
+transcription past 24 pages is refused (split the PDF). One retryable failure
+re-reads every window. And a real scanned bill has not been through it.
+
+APPROVED by Max, 2026-10-15, in writing: *"a PDF bill with no usable text layer may be
 transcribed by the model, every line marked transcribed with its page and
 checked by a person. Add C2 to the queue after C1."*
 
