@@ -1,0 +1,267 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The dimension menu, reworked — mock-up for Max (2026-10-15)</title>
+<style>
+:root{
+  --ink:#171717; --ink-2:#404040; --ink-3:#737373; --ink-4:#a3a3a3;
+  --line:#e5e5e5; --line-2:#d4d4d4; --bg:#fafaf9; --card:#fff;
+  --red:#b91c1c; --red-bg:#fef2f2; --red-line:#fecaca;
+  --amber:#a16207; --amber-bg:#fffbeb; --amber-line:#fde68a;
+  --green:#15803d; --green-bg:#f0fdf4; --green-line:#bbf7d0;
+  --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-line:#bfdbfe;
+  --sky:#0369a1; --sky-bg:#f0f9ff;
+  --guess:#fef9c3; --guess-line:#fde047;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.wrap{max-width:1400px;margin:0 auto;padding:0 20px 40px}
+.frame-title{max-width:1400px;margin:36px auto 6px;padding:0 20px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.frame-note{max-width:1400px;margin:0 auto 12px;padding:0 20px;color:var(--ink-2);font-size:13px}
+.topbar{background:var(--ink);color:#fff;padding:9px 20px;display:flex;gap:18px;font-size:13px;align-items:center}
+.env{background:#facc15;color:#000;font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px}
+.btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;padding:6px 12px;border-radius:6px;border:1px solid var(--line-2);background:#fff;color:var(--ink);white-space:nowrap}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+.btn.sm{padding:3px 9px;font-size:12px}
+.btn.quiet{border-color:transparent;background:transparent;color:var(--ink-2)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 8px;border-radius:5px;border:1px solid var(--line);background:#fafafa;color:var(--ink-2);white-space:nowrap}
+.chip.blue{color:var(--blue);background:var(--blue-bg);border-color:var(--blue-line)}
+.chip.amber{color:var(--amber);background:var(--amber-bg);border-color:var(--amber-line)}
+.chip.guess{color:#854d0e;background:var(--guess);border-color:var(--guess-line)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:16px}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);background:#fcfcfc}
+td{padding:9px 12px;border-bottom:1px solid #f0f0ef;vertical-align:top;font-size:13px}
+.muted{color:var(--ink-3);font-size:12px}
+.note{border:1px solid;border-radius:8px;padding:9px 12px;font-size:12.5px}
+.note.amber{background:var(--amber-bg);border-color:var(--amber-line);color:#78350f}
+.note.guess{background:#fefce8;border-color:var(--guess-line);color:#713f12}
+.ann{margin:14px 0 0;border-left:3px solid var(--blue);background:#fff;padding:10px 14px;font-size:12.5px;color:var(--ink-2);border-radius:0 8px 8px 0}
+.ann b{color:var(--ink)}
+.ann ul{margin:6px 0 0;padding-left:18px}
+.ann li{margin:3px 0}
+
+/* ---- the one shape ---- */
+.receives{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.receives .k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.receives .v{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:20px;font-weight:600;letter-spacing:-.01em}
+.receives .ok{color:var(--ink-3);font-size:12px}
+.figs th:nth-child(1){width:38%}
+.figs th:nth-child(2){width:250px}
+.fig{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:600}
+.where{font-size:12px;color:var(--ink-3);margin-top:1px}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.seg span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:3px 9px;border-left:1px solid var(--line-2);background:#fff;color:var(--ink-2);cursor:pointer}
+.seg span:first-child{border-left:0}
+.seg span.on{background:var(--ink);color:#fff}
+.seg span.sep{border-left:2px solid var(--line-2)}
+.becomes{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:600}
+.becomes.note{font-family:inherit;font-weight:400;color:var(--ink-3);border:0;padding:0;font-size:12.5px}
+tr.guess td{background:#fefce8}
+tr.moved td{background:#eff6ff}
+.panel td{background:var(--amber-bg);border-bottom:1px solid var(--amber-line);font-size:12.5px;color:#78350f}
+.fold td{background:#fafafa;padding:7px 12px}
+.doc{border:1px dashed var(--line-2);border-radius:8px;background:#fcfcfc;padding:10px 12px}
+.doc .k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.doc pre{margin:6px 0 0;font-size:12px;white-space:pre-wrap;color:var(--ink-2)}
+.billrow td{background:#fff}
+.side{border:1px solid var(--line);border-radius:8px;background:#fafafa;height:220px;display:flex;align-items:center;justify-content:center;color:var(--ink-4);font-size:12px}
+.arrow{color:var(--ink-4);padding:0 4px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}
+.sec{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:16px 0 6px}
+</style>
+
+<div class="topbar"><b>Project Spec Builder</b><span class="env">DEV</span><span>Projects</span><span>Inbox</span></div>
+
+<!-- ======================================================================= -->
+<div class="frame-title">Frame 1 · The bill review, one line expanded — SO-03 BENCH (Ronnie Scott's, T16717)</div>
+<div class="frame-note">The line folds as today: one summary under the item's name. Expanded, it reads top to bottom — what BWS receives, then ONE row per figure the line prints, then everything else the bill says, then the bill as printed, labelled as the document.</div>
+<div class="wrap">
+  <div class="card">
+    <table>
+      <thead><tr><th style="width:90px">Line</th><th style="width:110px">Code</th><th>Item</th><th style="width:60px">Qty</th><th style="width:220px">Category</th></tr></thead>
+      <tbody>
+        <tr class="billrow">
+          <td class="mono">24</td><td class="mono">SO-03</td>
+          <td><b>BENCH</b>
+            <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span class="chip mono">W720 x D1400 x H720 x SH420mm</span>
+              <span class="chip">1 note</span>
+              <span class="btn sm quiet">Hide the size and 2 statements</span>
+            </div>
+          </td>
+          <td class="mono">1</td><td>Armchairs, benches, stools…</td>
+        </tr>
+        <tr><td colspan="5" style="background:#fafafa;padding:16px">
+          <div class="receives">
+            <span class="k">What BWS receives</span>
+            <span class="v">W720 x D1400 x H720 x SH420mm</span>
+            <span class="ok">Dimensions, field 3 — composed from the slots below</span>
+          </div>
+          <div class="note guess" style="margin-top:8px">“720 X 1400 X 720MM” prints no letters, so it is placed W x D x H in printed order — but the column heading says <b>L X W X H</b>. Check which figure is the width.</div>
+
+          <div class="sec">Each figure the bill prints</div>
+          <table class="figs" style="background:#fff;border:1px solid var(--line);border-radius:8px">
+            <thead><tr><th>Figure, as the bill prints it</th><th>Is</th><th>Becomes</th></tr></thead>
+            <tbody>
+              <tr class="guess"><td><span class="fig">720</span> <span class="muted">mm</span><div class="where">1st of “720 X 1400 X 720MM” · no letter printed</div></td>
+                <td><span class="seg"><span class="on">W</span><span>D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+                <td><span class="becomes">W 720 mm</span> <span class="chip guess">order assumed</span></td></tr>
+              <tr class="guess"><td><span class="fig">1400</span> <span class="muted">mm</span><div class="where">2nd of “720 X 1400 X 720MM” · no letter printed</div></td>
+                <td><span class="seg"><span>W</span><span class="on">D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+                <td><span class="becomes">D 1400 mm</span> <span class="chip guess">order assumed</span></td></tr>
+              <tr class="guess"><td><span class="fig">720</span> <span class="muted">mm</span><div class="where">3rd of “720 X 1400 X 720MM” · no letter printed</div></td>
+                <td><span class="seg"><span>W</span><span>D</span><span class="on">H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+                <td><span class="becomes">H 720 mm</span> <span class="chip guess">order assumed</span></td></tr>
+              <tr><td><span class="fig">420</span> <span class="muted">mm</span><div class="where">“SH: 420MM” · printed as SH</div></td>
+                <td><span class="seg"><span>W</span><span>D</span><span>H</span><span class="on">SH</span><span>Dia</span><span class="sep">note</span></span></td>
+                <td><span class="becomes">SH 420 mm</span></td></tr>
+            </tbody>
+          </table>
+
+          <div class="sec">Everything else the bill says about it</div>
+          <table style="background:#fff;border:1px solid var(--line);border-radius:8px">
+            <thead><tr><th style="width:38%">The bill says</th><th>Written as</th></tr></thead>
+            <tbody>
+              <tr><td class="mono" style="font-size:12px">REFER TO DRAWING</td><td>a note</td></tr>
+              <tr><td class="mono" style="font-size:12px">RSL LISTENING LOUNGE BENCH TIMBER UPHOLSTERED…</td><td>a note <span class="muted">— names more than one kind of finish, kept whole</span></td></tr>
+            </tbody>
+          </table>
+
+          <div class="doc" style="margin-top:14px">
+            <span class="k">The bill, as printed</span> <span class="muted">— the document, not what is written</span>
+            <pre class="mono">DIMENSIONS CM / MM L X W X H
+REFER TO DRAWING
+720 X 1400 X 720MM
+SH: 420MM</pre>
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sec" style="margin-top:22px">The same line after two clicks — W on 1400, then D on the first 720</div>
+  <div class="card" style="padding:16px;background:#fafafa">
+    <div class="receives">
+      <span class="k">What BWS receives</span>
+      <span class="v">W1400 x D720 x H720 x SH420mm</span>
+      <span class="ok">Dimensions, field 3</span>
+    </div>
+    <table class="figs" style="background:#fff;border:1px solid var(--line);border-radius:8px;margin-top:12px">
+      <thead><tr><th>Figure, as the bill prints it</th><th>Is</th><th>Becomes</th></tr></thead>
+      <tbody>
+        <tr class="moved"><td><span class="fig">720</span> <span class="muted">mm</span><div class="where">1st of “720 X 1400 X 720MM”</div></td>
+          <td><span class="seg"><span>W</span><span class="on">D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+          <td><span class="becomes">D 720 mm</span> <span class="chip blue">set by you</span> <span class="btn sm quiet">As printed</span></td></tr>
+        <tr class="moved"><td><span class="fig">1400</span> <span class="muted">mm</span><div class="where">2nd of “720 X 1400 X 720MM”</div></td>
+          <td><span class="seg"><span class="on">W</span><span>D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+          <td><span class="becomes">W 1400 mm</span> <span class="chip blue">set by you</span> <span class="btn sm quiet">As printed</span></td></tr>
+        <tr><td><span class="fig">720</span> <span class="muted">mm</span><div class="where">3rd of “720 X 1400 X 720MM”</div></td>
+          <td><span class="seg"><span>W</span><span>D</span><span class="on">H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+          <td><span class="becomes">H 720 mm</span></td></tr>
+        <tr><td><span class="fig">420</span> <span class="muted">mm</span><div class="where">“SH: 420MM”</div></td>
+          <td><span class="seg"><span>W</span><span>D</span><span>H</span><span class="on">SH</span><span>Dia</span><span class="sep">note</span></span></td>
+          <td><span class="becomes">SH 420 mm</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ann"><b>What changes on the bill line</b>
+    <ul>
+      <li><b>Every figure is a row with the same picker</b> — the SH line included. Today only the three figures of the placed line offer a slot ("only three of the four").</li>
+      <li><b>Picking a slot another figure holds moves that figure to a note</b> in the same write. W on 1400 sends the first 720 to a note; D on it puts it back. No "move the other part first" refusal.</li>
+      <li><b>What BWS receives sits large at the top</b>, composed by <span class="mono">composeDimensionCell</span> as now. <b>"As printed" is the bill</b>, in a dashed box under everything, labelled as the document — never a column beside the output.</li>
+      <li><b>Nothing is guessed that is not today.</b> A figure printed with no letter beside a lettered one still starts as a note; bare figures in printed order are still yellow with the heading's own order named.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ======================================================================= -->
+<div class="frame-title">Frame 2 · The drawing card — TB-08 DINING TABLE (pages 1 and 3)</div>
+<div class="frame-note">The size leaves the spec table and gets its own section at the top of the card. Folded, it shows the slots the read filled; "Every other figure" opens the rest — each with the same picker. Finishes and notes stay in the table below, unchanged.</div>
+<div class="wrap">
+  <div class="card">
+    <div style="display:flex;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)">
+      <b class="mono">TB-08</b><span>DINING TABLE</span><span class="chip">pages 1 and 3</span><span style="flex:1"></span><span class="muted">Every figure on this card is printed in:</span><span class="btn sm">mm</span><span class="btn sm">cm</span><span class="btn sm">in</span><span class="btn sm quiet">Collapse</span>
+    </div>
+    <div style="padding:12px 16px 0"><div class="note amber"><b>Before you can confirm: one thing needs you</b><br>1. <u>MATERIAL(S) and FINISH: field already held — use this drawing's, or ignore the row</u></div></div>
+    <div style="padding:16px" class="cols">
+      <div>
+        <div class="receives">
+          <span class="k">What BWS receives</span>
+          <span class="v">W900 x H710mm</span>
+          <span class="ok">Dimensions, field 3</span>
+        </div>
+        <div class="sec">Each figure the drawing prints</div>
+        <table class="figs" style="border:1px solid var(--line);border-radius:8px">
+          <thead><tr><th>Figure, as the page prints it</th><th>Is</th><th>Becomes</th><th style="width:70px"></th></tr></thead>
+          <tbody>
+            <tr><td><span class="fig">900</span> <span class="muted">mm</span><div class="where">Width · page 1 · DIMENSIONS</div></td>
+              <td><span class="seg"><span class="on">W</span><span>D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+              <td><span class="becomes">W 900 mm</span><div class="where">already on the item from the bill</div></td><td class="muted">Ignore</td></tr>
+            <tr><td><span class="fig">710</span> <span class="muted">mm</span><div class="where">Height · page 1 · DIMENSIONS</div></td>
+              <td><span class="seg"><span>W</span><span>D</span><span class="on">H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+              <td><span class="becomes">H 710 mm</span><div class="where">already on the item from the bill</div></td><td class="muted">Ignore</td></tr>
+            <tr class="fold"><td colspan="4"><span class="btn sm quiet">Hide the other 10 figures</span> <span class="muted">Kept on the item as notes unless you give one a slot.</span></td></tr>
+            <tr><td><span class="fig">3500</span> <span class="muted">mm</span><div class="where">Length, DIMENSIONS box · page 1</div></td>
+              <td><span class="seg"><span>W</span><span>D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep on">note</span></span></td>
+              <td><span class="becomes note">a note</span></td><td class="muted">Ignore</td></tr>
+            <tr><td><span class="fig">3500</span> <span class="muted">mm</span><div class="where">OVERALL EXTENDED LENGTH, 3D view · page 3</div></td>
+              <td><span class="seg"><span>W</span><span>D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep on">note</span></span></td>
+              <td><span class="becomes note">a note</span></td><td class="muted">Ignore</td></tr>
+            <tr><td><span class="fig">900</span> <span class="muted">mm</span><div class="where">WIDTH, 3D view · page 3</div></td>
+              <td><span class="seg"><span>W</span><span>D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep on">note</span></span></td>
+              <td><span class="becomes note">a note</span></td><td class="muted">Ignore</td></tr>
+            <tr><td><span class="fig">2000</span> <span class="muted">mm</span><div class="where">Dimensions (Standard/Closed) Length · page 3</div></td>
+              <td><span class="seg"><span>W</span><span>D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep on">note</span></span></td>
+              <td><span class="becomes note">a note</span></td><td class="muted">Ignore</td></tr>
+            <tr><td colspan="4" class="muted">… five more, the same shape …</td></tr>
+            <tr><td><span class="mono" style="font-size:13px">[dimension to scale]mm</span><div class="where">LEG SPACING, front elevation · page 3</div></td>
+              <td class="muted">no figure printed</td>
+              <td><span class="becomes note">a note</span></td><td class="muted">Ignore</td></tr>
+          </tbody>
+        </table>
+        <div class="sec">Finishes and everything else</div>
+        <div class="muted" style="border:1px solid var(--line);border-radius:8px;padding:14px">The spec table as today — MATERIAL(S) and FINISH, Tabletop Material, Base Material, Hardware… — without the size rows.</div>
+      </div>
+      <div><div class="side">the page (preview) · the picture · applies to · level</div></div>
+    </div>
+  </div>
+
+  <div class="sec" style="margin-top:22px">The same card after two clicks — W on 3500 (page 1), then D on 900 (Width, page 1)</div>
+  <div class="card" style="padding:16px">
+    <div class="receives">
+      <span class="k">What BWS receives</span>
+      <span class="v">W3500 x D900 x H710mm</span>
+      <span class="ok">Dimensions, field 3</span>
+    </div>
+    <table class="figs" style="border:1px solid var(--line);border-radius:8px;margin-top:12px">
+      <thead><tr><th>Figure, as the page prints it</th><th>Is</th><th>Becomes</th><th style="width:70px"></th></tr></thead>
+      <tbody>
+        <tr class="moved"><td><span class="fig">3500</span> <span class="muted">mm</span><div class="where">Length, DIMENSIONS box · page 1</div></td>
+          <td><span class="seg"><span class="on">W</span><span>D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+          <td><span class="becomes">W 3500 mm</span></td><td class="muted">Ignore</td></tr>
+        <tr class="panel"><td colspan="4">The bill says <b class="mono">W 900mm</b> · this drawing says <b class="mono">W 3500mm</b> &nbsp; <label><input type="checkbox"> Use this drawing's</label></td></tr>
+        <tr class="moved"><td><span class="fig">900</span> <span class="muted">mm</span><div class="where">Width · page 1 · DIMENSIONS</div></td>
+          <td><span class="seg"><span>W</span><span class="on">D</span><span>H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+          <td><span class="becomes">D 900 mm</span></td><td class="muted">Ignore</td></tr>
+        <tr class="panel"><td colspan="4">The bill says <b class="mono">D 3500mm</b> · this drawing says <b class="mono">D 900mm</b> &nbsp; <label><input type="checkbox"> Use this drawing's</label></td></tr>
+        <tr><td><span class="fig">710</span> <span class="muted">mm</span><div class="where">Height · page 1 · DIMENSIONS</div></td>
+          <td><span class="seg"><span>W</span><span>D</span><span class="on">H</span><span>SH</span><span>Dia</span><span class="sep">note</span></span></td>
+          <td><span class="becomes">H 710 mm</span><div class="where">already on the item from the bill</div></td><td class="muted">Ignore</td></tr>
+        <tr class="fold"><td colspan="4"><span class="btn sm quiet">Every other figure the drawing prints (10) — show</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ann"><b>What changes on the drawing card</b>
+    <ul>
+      <li><b>One row per figure, one picker</b> (W · D · H · SH · Dia · note) — the select and the separate "Use as" buttons become one control. The same picker as the bill.</li>
+      <li><b>Picking a held slot moves the holder to a note in the same locked write</b> — the existing swap (<span class="mono">swapSlot</span>), unchanged on the server.</li>
+      <li><b>What BWS receives moves from the bottom of the card to the top of the size</b>, large. The page itself stays in the sidebar: that is the document.</li>
+      <li>The bill's replace question sits under the row it is about, in the wording of 15 Oct. A figure with no number to place (<span class="mono">[dimension to scale]</span>) says so instead of offering a slot.</li>
+      <li>Editing a figure, its unit or its state stays one click away on the row ("Edit value"); doubts, blockers and the "needs you" list are unchanged.</li>
+    </ul>
+  </div>
+</div>
