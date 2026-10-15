@@ -199,7 +199,37 @@ Over the 391 finish lines staged on the local stack, only FB-CH-03 moves.
 
 ### C — PDF bills (decided: yes)
 
-**C1. A PDF with a text layer is read by code (no model, exact).**
+**C1. A PDF with a text layer is read by code (no model, exact).** — BUILT 2026-10-15
+
+Built as below (`src/lib/pdf-bill.ts`; the run's source is the workbook, the
+PDF a second attachment, each line's page on the staged document as
+`pdfSource`). Measured on the local stack: the three real PDFs stage 28, 16 and
+3 lines, every staged field equal to the hand-converted workbook's (575 of
+575), and confirm. Three things were found by running the real files:
+
+- **The fast model files these PDFs as FF&E SCHEDULES, certain.** Their pages
+  say "FF&E SPECIFICATION"; "Procurement Schedule" is only in the filename.
+  Telling the classify prompt "a procurement schedule is a bill" did not move
+  it (measured, then reverted). So where the model names another schedule and
+  the PDF's text reads as a bill's table, the row is HELD in amber: *"Read as
+  an FF&E schedule, but its text is a table of 28 lines with a quantity on
+  each: if it is the bill, choose Bill of quantities."* A person picks Bill
+  (one select, or the bulk control). Neither reading wins on its own (house
+  §5/§6), and nothing is registered or charged until they do.
+- **A spec sheet's "QUANTITY : 2" over a drawing read as a three-line bill**,
+  and the merged Panther preamble's prose ("quantities and dimensions supplied
+  by…") as a two-line one. A header now needs two more headings the registers
+  know whole, and no prose line in its band. Checked on 47 real PDFs that are
+  not bills (Aman, Panther, bills-1006) and the 26 Ronnie Scott's sheets and
+  COM list: none reads as a bill.
+- The phase is named after the PDF (`261013_RONNIE SCOTTS_Procurement
+  Schedule_ST4_MIRRORS`), where the hand-converted workbook's tab said
+  `MIRRORS`. The reviewer edits it, as for any bill.
+
+Still true: pictures are not carried (said on the review's header tip); a
+header with fewer than two headings the registers know, besides its quantity,
+is refused rather than handed to the model's structure read; a section row
+with no quantity of its own is merged into the nearest line.
 
 - Promote `tools/pdf-schedule-to-xlsx.ts` into `src/lib/pdf-bill.ts`. It
   places columns by the header's label positions and anchors rows on the
