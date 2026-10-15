@@ -21,6 +21,28 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-15 (evening) — Max's answers to the Ronnie Scott's questions, and the plan
+
+`docs/plans/ronnie-scotts-followups-2026-10-15.md`. Max answered:
+
+- **PDF bills: yes.** First by code from the text layer. The model transcribes
+  only as a marked exception, and only after Max confirms the rule change in
+  writing.
+- **The categories on pilot's P16717 are correct**, so they go in by
+  themselves next time (aliases). `Lounge table` → Dining tables is seeded
+  with the Q4 flag. Still his call: whether the seeded `Pouf` moves from
+  Ottomans to Armchairs to match `Pouffe`.
+- **A fabric line naming a code on two lines goes on both.** No tick boxes.
+- **A `trim` finish kind.**
+- **"Metal finish 1" / "Timber finish 1" on screens.** BWS's field names stay
+  in the file and in the matching.
+- **Phases:** fine this time, but people need control over creating phases
+  and assigning items to them. Design first.
+- **The dimension menu** on the bill line and the drawing card is to be
+  reworked: every figure gets the slot picker. Mock-up first.
+- **TGQ-focused intake:** think about it, do not build it now.
+- **Q4 and Q6 are left, and flagged.**
+
 ## 2026-10-15 — Catch-up: Ronnie Scott's confirmed on pilot with Matthew
 
 `docs/plans/catchup-2026-10-15.md`. On PILOT v1.11 Max uploaded the converted

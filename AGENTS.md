@@ -4818,10 +4818,11 @@ proposed standard holding at TBC, layouts saved per specifier).
 
 **Explicitly excluded, so they are not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; PDF bills of
-quantities (ASKED FOR by Claudia on 2026-10-15 and not decided; the only route
-that keeps "code reads every cell" is the `pdf:schedule` text-layer reader, and
-it works only on PDFs printed from Excel. Max's call:
-`docs/plans/catchup-2026-10-15.md`, Q1); images and scanned documents; splitting an oversize drawing set. M6
+quantities (DECIDED YES by Max on 2026-10-15, NOT YET BUILT, so still refused
+at classify. They will be read by CODE from the text layer first, and the model
+will transcribe only as a marked exception after Max confirms that rule change
+in writing: `docs/plans/ronnie-scotts-followups-2026-10-15.md`, C1/C2); images
+and scanned documents; splitting an oversize drawing set. M6
 VE rounds. Any write to BWS. Automatic email sending.
 SharePoint writes. (SharePoint READS as an intake source: Matthew asked about
 them on 2026-09-18 without requesting them. On 2026-10-12 he asked Max to
