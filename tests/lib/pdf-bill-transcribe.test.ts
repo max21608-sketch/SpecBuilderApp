@@ -14,13 +14,13 @@ import {
   TranscribeOutput,
   mergeTranscription,
   planPageWindows,
-  printedNumber,
   transcribePdfBill,
   transcribeWindowInstruction,
-  transcriptionChecks,
   transcriptionToSheet,
-  type TranscriptionEvidence,
+  transcriptionWorkbook,
 } from "@/lib/pdf-bill-transcribe";
+import { printedNumber, transcriptionChecks, type CheckedLine, type PdfTranscription } from "@/lib/pdf-bill-checks";
+import { readSpreadsheetSheets } from "@/lib/intake-source";
 
 const HEADINGS = ["FF&E CODE", "DESCRIPTION", "QTY", "UOM"];
 
@@ -162,8 +162,21 @@ describe("the sheet a transcription becomes", () => {
     expect(sheet.data[0]).toEqual(["Revision: 0"]);
     expect(sheet.headerRow).toBe(2);
     expect(sheet.data[1]).toEqual(HEADINGS);
-    expect(sheet.rowPages).toEqual({ 3: 1, 4: 1, 5: 2 });
-    expect(sheet.rowUnclear).toEqual({ 4: ["QTY"] });
+    expect(sheet.firstRow).toBe(3);
+    expect(sheet.pages).toEqual([1, 1, 2]);
+    expect(sheet.rowUnclear).toEqual({ "4": ["QTY"] });
+  });
+
+  it("survives the round trip through the .xlsx stored beside the PDF", async () => {
+    const bytes = await transcriptionWorkbook(sheet, "Sheet1");
+    const sheets = await readSpreadsheetSheets(bytes, "bill (transcribed from PDF).xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const parsed = parseBoqSheets(sheets);
+    expect(parsed.ok && parsed.sheets[0]!.lines.map((line) => [line.lineNo, line.code, line.qty])).toEqual([
+      [3, "ZZ-01", 14],
+      [4, "ZZ-02", 6],
+      [5, "ZZ-03", 2],
+    ]);
+    expect(parsed.ok && parsed.sheets[0]!.metadata.revision).toBe("0");
   });
 
   it("is read by the ordinary bill reader exactly as a workbook is", () => {
@@ -179,62 +192,57 @@ describe("the sheet a transcription becomes", () => {
 });
 
 describe("transcriptionChecks", () => {
-  const evidence = (overrides: Partial<TranscriptionEvidence> = {}): TranscriptionEvidence => ({
-    rowPages: { 3: 1, 4: 1, 5: 2 },
-    rowUnclear: {},
-    totals: [],
-    pageText: [null, null],
-    ...overrides,
-  });
-  const lines = [
+  const pages: Record<number, number> = { 3: 1, 4: 1, 5: 2 };
+  const pageOf = (lineNo: number) => pages[lineNo] ?? null;
+  const transcription = (overrides: Partial<PdfTranscription> = {}) => ({ totals: [], pageText: [null, null], rowUnclear: {}, ...overrides });
+  const lines: CheckedLine[] = [
     { lineNo: 3, code: "ZZ-01", qty: 14 },
     { lineNo: 4, code: "ZZ-02", qty: 6 },
     { lineNo: 5, code: "ZZ-03", qty: 2 },
   ];
+  const check = (overrides: Partial<PdfTranscription>, qtyColumn: number | null = 2, withLines: CheckedLine[] = lines) =>
+    transcriptionChecks({ lines: withLines, qtyColumn, pageOf, transcription: transcription(overrides) });
 
   it("passes a page total that equals its lines", () => {
-    const result = transcriptionChecks({
-      lines,
-      qtyColumn: 2,
-      evidence: evidence({ totals: [{ page: 1, label: "Page total", column: 2, valueRaw: "20", scope: "page" }] }),
-    });
+    const result = check({ totals: [{ page: 1, label: "Page total", column: 2, valueRaw: "20", scope: "page" }] });
     expect(result.byLine.size).toBe(0);
     expect(result.summary.join()).toMatch(/equals the quantities transcribed under it/);
   });
 
   it("flags every line a mis-added total covers, and no other", () => {
-    const result = transcriptionChecks({
-      lines,
-      qtyColumn: 2,
-      evidence: evidence({ totals: [{ page: 1, label: "Page total", column: 2, valueRaw: "21", scope: "page" }] }),
-    });
+    const result = check({ totals: [{ page: 1, label: "Page total", column: 2, valueRaw: "21", scope: "page" }] });
     expect([...result.byLine.keys()]).toEqual([3, 4]);
     expect(result.byLine.get(3)?.[0]).toMatchObject({ code: "total_mismatch", words: "Quantities on p.1 add to 20, not 21" });
     expect(result.byLine.get(3)?.[0]?.why).toMatch(/check each against page 1/);
   });
 
   it("adds a document total over every line, and leaves out section and subtotal rows", () => {
-    const result = transcriptionChecks({
-      lines: [...lines, { lineNo: 6, code: null, qty: 22, rowKind: "subtotal" }],
-      qtyColumn: 2,
-      evidence: evidence({ totals: [{ page: 2, label: "TOTAL", column: 2, valueRaw: "1,022", scope: "document" }] }),
-    });
+    const result = check(
+      { totals: [{ page: 2, label: "TOTAL", column: 2, valueRaw: "1,022", scope: "document" }] },
+      2,
+      [...lines, { lineNo: 6, code: null, qty: 22, rowKind: "subtotal" }],
+    );
     expect(result.byLine.get(5)?.[0]?.words).toBe("Quantities on the bill add to 22, not 1,022");
     expect(result.byLine.has(6)).toBe(false);
   });
 
+  it("adds a section total from the last section heading", () => {
+    const result = check(
+      { totals: [{ page: 2, label: "Sub-total", column: 2, valueRaw: "8", scope: "section" }] },
+      2,
+      [{ lineNo: 3, code: "ZZ-01", qty: 14 }, { lineNo: 4, code: null, qty: null, rowKind: "section" }, { lineNo: 5, code: "ZZ-02", qty: 6 }],
+    );
+    expect([...result.byLine.keys()]).toEqual([5]);
+  });
+
   it("checks only the quantity column's totals, and says so when the quantity is not mapped", () => {
-    const priceTotal = evidence({ totals: [{ page: 1, label: "TOTAL", column: 3, valueRaw: "999", scope: "page" }] });
-    expect(transcriptionChecks({ lines, qtyColumn: 2, evidence: priceTotal }).byLine.size).toBe(0);
-    expect(transcriptionChecks({ lines, qtyColumn: null, evidence: priceTotal }).summary.join()).toMatch(/quantity column is not set/);
+    const priceTotal = { totals: [{ page: 1, label: "TOTAL", column: 3, valueRaw: "999", scope: "page" as const }] };
+    expect(check(priceTotal).byLine.size).toBe(0);
+    expect(check(priceTotal, null).summary.join()).toMatch(/quantity column is not set/);
   });
 
   it("checks a code against its page's text, only where that text covers the table", () => {
-    const result = transcriptionChecks({
-      lines,
-      qtyColumn: 2,
-      evidence: evidence({ pageText: ["FF&E CODE DESCRIPTION zz-01 Lounge chair 14 ZZ-O2 Side table 6", "Title block only"] }),
-    });
+    const result = check({ pageText: ["FF&E CODE DESCRIPTION zz-01 Lounge chair 14 ZZ-O2 Side table 6", "Title block only"] });
     // ZZ-02 was transcribed; the page's text says ZZ-O2.
     expect([...result.byLine.keys()]).toEqual([4]);
     expect(result.byLine.get(4)?.[0]).toMatchObject({ code: "code_not_in_text", words: "Code ZZ-02 is not in p.1's text" });
@@ -242,13 +250,13 @@ describe("transcriptionChecks", () => {
   });
 
   it("says a scanned PDF's codes could not be checked, and flags nothing for it", () => {
-    const result = transcriptionChecks({ lines, qtyColumn: 2, evidence: evidence() });
+    const result = check({});
     expect(result.byLine.size).toBe(0);
     expect(result.summary.join()).toMatch(/No page of this PDF carries text a program can read/);
   });
 
   it("flags every line the model could not read with certainty", () => {
-    const result = transcriptionChecks({ lines, qtyColumn: 2, evidence: evidence({ rowUnclear: { 4: ["QTY"] } }) });
+    const result = check({ rowUnclear: { "4": ["QTY"] } });
     expect(result.byLine.get(4)?.[0]).toMatchObject({ code: "unclear", words: "Unclear: QTY" });
     expect(result.byLine.get(4)?.[0]?.why).toMatch(/check it against page 1/);
   });

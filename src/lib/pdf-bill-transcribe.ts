@@ -49,7 +49,11 @@ import { z } from "zod";
 import type { SheetData } from "read-excel-file/node";
 import { EXTRACTION_MODEL, streamedErrorType } from "@/lib/anthropic";
 import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
+import ExcelJS from "exceljs";
 import { answerRequest, readAnswer } from "@/lib/model-request";
+import type { PrintedTotal } from "@/lib/pdf-bill-checks";
+
+export { transcriptionChecks, printedNumber, type PrintedTotal, type PdfTranscription } from "@/lib/pdf-bill-checks";
 
 export const TRANSCRIBE_TOOL_NAME = "record_bill_transcription";
 export const TRANSCRIBE_MODEL = EXTRACTION_MODEL;
@@ -252,15 +256,6 @@ export type TranscribedRow = {
   unclear: string[];
 };
 
-export type PrintedTotal = {
-  page: number;
-  label: string;
-  column: number;
-  /** As printed. */
-  valueRaw: string;
-  scope: "page" | "section" | "document";
-};
-
 export type Transcription = {
   /** The model's evidence where it read the document as having no table of items. */
   notABill: string | null;
@@ -402,194 +397,42 @@ export function mergeTranscription(windows: readonly PageWindow[], outputs: read
 export type TranscribedSheet = {
   /** Exactly what a workbook's sheet reads as: the lines above the header, the header, the rows. */
   data: SheetData;
-  /** 1-based sheet row → the PDF page it was transcribed from. */
-  rowPages: Record<number, number>;
-  /** 1-based sheet row → what the model or code doubted about it. */
-  rowUnclear: Record<number, string[]>;
   /** The header's own 1-based row. */
   headerRow: number;
+  /** The first line's row, and each line's PDF page from there on — `PdfBillSource`'s own shape. */
+  firstRow: number;
+  pages: number[];
+  /** Sheet row (a staged line's `lineNo`) → what the model or code doubted about it. */
+  rowUnclear: Record<string, string[]>;
 };
 
 /**
  * The transcription as a SHEET, the shape `parseBoqSheets` and the Columns
  * panel read — so from here a transcribed bill is mapped, staged, reviewed and
- * confirmed exactly as a workbook is. Every cell stays the STRING the model
- * wrote: the reader parses a quantity from text as it does from a csv, and a
- * code like `0012` keeps its zeros.
+ * confirmed exactly as a workbook is. The lines printed above the table stay
+ * above the header, where the reader finds a revision and a date. Every cell
+ * stays the STRING the model wrote: the reader parses a quantity from text as
+ * it does from a csv, and a code like `0012` keeps its zeros.
  */
 export function transcriptionToSheet(transcription: Transcription): TranscribedSheet {
   const data: SheetData = [];
-  const rowPages: Record<number, number> = {};
-  const rowUnclear: Record<number, string[]> = {};
+  const rowUnclear: Record<string, string[]> = {};
   for (const line of transcription.aboveHeader) data.push([line.text]);
   data.push(transcription.columns.map((heading) => heading));
   const headerRow = data.length;
   for (const row of transcription.rows) {
     data.push(row.cells.map((cell) => (cell === "" ? null : cell)));
-    rowPages[data.length] = row.page;
-    if (row.unclear.length > 0) rowUnclear[data.length] = [...row.unclear];
+    if (row.unclear.length > 0) rowUnclear[String(data.length)] = [...row.unclear];
   }
-  return { data, rowPages, rowUnclear, headerRow };
+  return { data, headerRow, firstRow: headerRow + 1, pages: transcription.rows.map((row) => row.page), rowUnclear };
 }
 
-// ---- the cross-checks ---------------------------------------------------------
-
-/** What `transcriptionChecks` needs of a staged line. */
-export type CheckedLine = {
-  lineNo: number;
-  code: string | null;
-  qty: number | null;
-  rowKind?: string;
-};
-
-export type LineCheck = {
-  code: "total_mismatch" | "code_not_in_text" | "unclear";
-  /** A few words, for the needs-you list and the line. */
-  words: string;
-  /** The whole sentence, behind "Why". */
-  why: string;
-};
-
-/** What the transcription kept beside the sheet for the checks. */
-export type TranscriptionEvidence = {
-  rowPages: Record<number, number>;
-  rowUnclear: Record<number, string[]>;
-  totals: PrintedTotal[];
-  /**
-   * Per page (index 0 is page 1), the text the PDF's own text layer holds for
-   * it, or null where the page has none. A scanned page is null.
-   */
-  pageText: (string | null)[];
-};
-
-export type TranscriptionCheckResult = {
-  byLine: Map<number, LineCheck[]>;
-  /** One sentence per check, whether it passed, failed or could not run. */
-  summary: string[];
-};
-
-/** A printed figure as a number: `1,240` is 1240, `12 nr` is 12. Null when it is not one figure. */
-export function printedNumber(raw: string): number | null {
-  const cleaned = raw.replace(/[,\s]/g, "").replace(/(nr|no|ea|pcs?|units?)$/i, "");
-  if (!/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
-}
-
-const foldForText = (value: string) => value.replace(/\s+/g, "").toUpperCase();
-/** Lines that are not counted in a printed total of quantities. */
-const NOT_COUNTED = new Set(["section", "subtotal", "blank"]);
-
-/**
- * WHAT CODE CAN CHECK OF A TRANSCRIPTION, line by line. Pure: the staged lines
- * (with the column the bill's quantity was read from), and the evidence kept
- * at transcription. Re-run on every read, never stored, so a person changing
- * the columns re-checks against the new mapping.
- *
- *   1. A printed total of the QUANTITY column against the sum of the lines it
- *      totals (its page, its section, or the whole document). A mismatch flags
- *      every line it covers: code cannot tell which of them was mis-copied.
- *   2. Each line's code against its page's text layer, but only on a page
- *      whose text covers the table — at least one transcribed code IS in it.
- *      A page whose only text is a title block would otherwise flag every line.
- *   3. Every line the model said it could not read with certainty.
- */
-export function transcriptionChecks(input: {
-  lines: readonly CheckedLine[];
-  qtyColumn: number | null;
-  evidence: TranscriptionEvidence;
-}): TranscriptionCheckResult {
-  const { lines, evidence } = input;
-  const byLine = new Map<number, LineCheck[]>();
-  const summary: string[] = [];
-  const add = (lineNo: number, check: LineCheck) => {
-    const list = byLine.get(lineNo) ?? [];
-    if (!list.some((existing) => existing.code === check.code && existing.words === check.words)) list.push(check);
-    byLine.set(lineNo, list);
-  };
-  const pageOf = (line: CheckedLine) => evidence.rowPages[line.lineNo] ?? null;
-
-  // 1. Printed totals.
-  const qtyTotals = input.qtyColumn === null ? [] : evidence.totals.filter((total) => total.column === input.qtyColumn);
-  if (input.qtyColumn === null) summary.push("The quantity column is not set yet, so the printed totals were not checked.");
-  else if (qtyTotals.length === 0) summary.push("The PDF prints no total of the quantities, so they could not be added up against one.");
-  const ordered = [...lines].sort((a, b) => a.lineNo - b.lineNo);
-  for (const total of qtyTotals) {
-    const printed = printedNumber(total.valueRaw);
-    const label = total.label ? `“${total.label}”` : "total";
-    if (printed === null) {
-      summary.push(`Page ${total.page}'s ${label} (${total.valueRaw || "blank"}) is not one figure, so it was not checked.`);
-      continue;
-    }
-    let covered: CheckedLine[];
-    if (total.scope === "document") covered = ordered;
-    else if (total.scope === "page") covered = ordered.filter((line) => pageOf(line) === total.page);
-    else {
-      // A section: the lines of its page back to the last section heading.
-      const onOrBefore = ordered.filter((line) => (pageOf(line) ?? 0) <= total.page);
-      const start = onOrBefore.map((line) => line.rowKind).lastIndexOf("section");
-      covered = onOrBefore.slice(start + 1);
-    }
-    covered = covered.filter((line) => !NOT_COUNTED.has(line.rowKind ?? "item"));
-    const sum = covered.reduce((acc, line) => acc + (line.qty ?? 0), 0);
-    const where = total.scope === "document" ? "the document" : total.scope === "section" ? `the section ending on page ${total.page}` : `page ${total.page}`;
-    if (Math.abs(sum - printed) < 1e-9) {
-      summary.push(`The ${label} for ${where} (${total.valueRaw}) equals the quantities transcribed under it.`);
-      continue;
-    }
-    const why = `The PDF prints ${total.valueRaw} as the ${label} for ${where}, and the quantities transcribed under it add up to ${sum}. One of them, or the total, was copied wrong: check each against page ${total.page}.`;
-    summary.push(why);
-    for (const line of covered) {
-      add(line.lineNo, { code: "total_mismatch", words: `Quantities on ${total.scope === "document" ? "the bill" : `p.${total.page}`} add to ${sum}, not ${total.valueRaw}`, why });
-    }
-  }
-
-  // 2. Codes against the text layer.
-  const pages = new Map<number, CheckedLine[]>();
-  for (const line of ordered) {
-    const page = pageOf(line);
-    if (page === null || !line.code?.trim()) continue;
-    pages.set(page, [...(pages.get(page) ?? []), line]);
-  }
-  const textless: number[] = [];
-  const notCovering: number[] = [];
-  for (const [page, onPage] of [...pages.entries()].sort((a, b) => a[0] - b[0])) {
-    const raw = evidence.pageText[page - 1] ?? null;
-    if (!raw || !raw.trim()) {
-      textless.push(page);
-      continue;
-    }
-    const pageText = foldForText(raw);
-    const found = onPage.filter((line) => pageText.includes(foldForText(line.code!)));
-    if (found.length === 0) {
-      notCovering.push(page);
-      continue;
-    }
-    for (const line of onPage) {
-      if (found.includes(line)) continue;
-      add(line.lineNo, {
-        code: "code_not_in_text",
-        words: `Code ${line.code} is not in p.${page}'s text`,
-        why: `Page ${page} carries text a program can read, and the code ${line.code} transcribed on this line is not in it. The page may print it differently: check it against page ${page}.`,
-      });
-    }
-  }
-  if (textless.length > 0) summary.push(`${textless.length === pages.size ? "No page" : `Page${textless.length === 1 ? "" : "s"} ${textless.join(", ")}`} of this PDF carries text a program can read, so ${textless.length === pages.size ? "no" : "those"} codes could be checked against it.`);
-  if (notCovering.length > 0) summary.push(`The text on page${notCovering.length === 1 ? "" : "s"} ${notCovering.join(", ")} holds none of the transcribed codes (it is not the table's), so the codes there were not checked against it.`);
-
-  // 3. What the model could not read.
-  for (const line of ordered) {
-    const unclear = evidence.rowUnclear[line.lineNo] ?? [];
-    if (unclear.length === 0) continue;
-    const page = pageOf(line);
-    add(line.lineNo, {
-      code: "unclear",
-      words: `Unclear: ${unclear.slice(0, 2).join(", ")}${unclear.length > 2 ? "…" : ""}`,
-      why: `The model could not read ${unclear.join("; ")} on this line with certainty${page ? `: check it against page ${page}` : ""}.`,
-    });
-  }
-
-  return { byLine, summary };
+/** The sheet as an .xlsx, stored beside the PDF as the run's source — what every re-read of the bill reads. */
+export async function transcriptionWorkbook(sheet: TranscribedSheet, sheetName: string): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  const target = book.addWorksheet(sheetName);
+  for (const row of sheet.data) target.addRow(row.map((cell) => (cell === null || cell === undefined ? null : String(cell))));
+  return Buffer.from(await book.xlsx.writeBuffer());
 }
 
 // ---- the call ------------------------------------------------------------------
