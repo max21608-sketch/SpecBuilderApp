@@ -74,12 +74,25 @@ the existing slot-change route. Nothing chooses H for it. Reading
 `NNN DIA X NNN` as Dia x H on its own would be a new inference, and that is
 Max's call.
 
-### A fabric line naming a code on two lines goes on one, and the other gets no fabric — OPEN, needs a decision
+### A fabric line naming a code on two lines goes on one, and the other gets no fabric — FIXED 2026-10-15 (workstream B)
 
 CH-03 is on two lines: SALON (2) and PDR MEMBERS ROOM (12). Its fabric line
 `FB_04` (FF&E code `FB-CH-03`) reads "for 18", the PDR line only (frame 21:05).
 Matthew: "FB CH03, which is both those… items for the salon and the PDR"
 (21:51). The confirm went through as it was.
+
+**Fixed** (Max: "apply it to both, no tick boxes"): `finishLineTargets`
+(`boq-row-kinds.ts`) writes a finish line to every line of the phase carrying
+the code it NAMES — by its bracket, or by its own code ending on the item's
+(`FB-CH-03`) — that has no finish line of its own, each in the next free slot
+of its kind on that record. The review row reads "for 17 and 18",
+"FB_04 → COM 1 on rows 17 and 18" and a sentence saying why. Two limits, both
+judgements: a twin WITH its own finish lines keeps only its own (CH-02 and
+CH-01 on this schedule, GR-FUR-22 and PL-FUR-04 on Aman), and where a line
+sits (the model's reading, a person's, a layout's category rule) names no
+code. Verified on the local stack (TEST T16719): FB_04 on both CH-03 records.
+Pilot's P16717 was confirmed before this, so its salon CH-03 still needs the
+fabric typed or the bill re-read.
 
 ### The bill's Confirm is disabled with its reason only in a hover title — FIXED 2026-10-15 (`dfed295`)
 

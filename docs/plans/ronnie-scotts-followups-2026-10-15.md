@@ -161,7 +161,15 @@ bill's own category column, and the category a person set:
   finds nothing outside the map, and a test asserts the map's ids exist in
   the register.
 
-### B — A fabric line names a code on two lines: it goes on both (decided)
+### B — A fabric line names a code on two lines: it goes on both (decided) — BUILT 2026-10-15
+
+Built as below with two narrowings, both found by measuring: a twin that has
+its OWN finish lines takes none from another (read literally, the rule put the
+salon CH-02's cloth on the members-bar CH-02 beside its own, and moved Aman's
+GR-FUR-22 and PL-FUR-04), and the model's reading of where a line sits is
+position, not naming (an `N/A` "Fabric @ Sofa" under OPTION 2 stays there).
+Over the 391 finish lines staged on the local stack, only FB-CH-03 moves.
+`found-in-use.md` has the detail.
 
 - Today a COM line whose code names an item on two lines of a phase (CH-03,
   SALON ×2 and PDR ×12) attaches to the nearer one above and is flagged
