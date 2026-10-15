@@ -1021,7 +1021,7 @@ function QuestionRows({
                   toQuote ? TONE.danger.dot : question.requirementKind === "readiness" ? TONE.warn.dot : "bg-neutral-300"
                 }`}
               />
-              <span className="text-neutral-900">{question.prompt}</span>
+              <span className="text-neutral-900">{fieldDisplayName(question.prompt)}</span>
               {question.fieldLabel && (
                 <span className="block pl-3.5 text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
               )}

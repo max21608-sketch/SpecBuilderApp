@@ -417,7 +417,7 @@ export default function RecordChecklist({
 
   const matches = (answer: ChecklistAnswer): boolean => {
     const term = search.trim().toLowerCase();
-    if (term && !`${answer.prompt} ${answer.field_name ?? ""} ${fieldDisplayName(answer.field_name, answer.json_id) ?? ""} ${answer.value ?? ""}`.toLowerCase().includes(term)) {
+    if (term && !`${answer.prompt} ${fieldDisplayName(answer.prompt)} ${answer.field_name ?? ""} ${fieldDisplayName(answer.field_name, answer.json_id) ?? ""} ${answer.value ?? ""}`.toLowerCase().includes(term)) {
       return false;
     }
     if (focus === null) return true;
@@ -727,7 +727,7 @@ export default function RecordChecklist({
                       />
                     )}
                     <span className="min-w-0">
-                      <span className="text-neutral-900">{answer.prompt}</span>
+                      <span className="text-neutral-900">{fieldDisplayName(answer.prompt)}</span>
                       {answer.json_id !== null && FIELD_TIPS[answer.json_id] && (
                         <Tip>{FIELD_TIPS[answer.json_id]!}</Tip>
                       )}
@@ -884,7 +884,7 @@ export default function RecordChecklist({
                   {isDimensions && (
                     <div className="border-t border-dashed border-neutral-200 bg-[#fcfcfc] px-4 py-2.5 min-[760px]:col-span-4">
                       <DimensionAnswer
-                        subject={answer.prompt}
+                        subject={fieldDisplayName(answer.prompt)}
                         held={heldDimensions}
                         busy={savingId === answer.answer_id}
                         note={dimensionNote}

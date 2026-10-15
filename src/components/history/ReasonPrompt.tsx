@@ -12,6 +12,7 @@
 // answer to something else, and this appears carrying that edit — nothing is
 // retyped, and the reviewer can also attach the email that asked for it.
 import { useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import type { AnswerState } from "@/lib/spec-vocab";
 import EvidenceUpload, { type UploadedEvidence } from "@/components/history/EvidenceUpload";
 import Button from "@/components/ui/Button";
@@ -53,7 +54,7 @@ export default function ReasonPrompt({
   return (
     <div className="mt-3 border border-amber-300 bg-amber-50 rounded-lg px-4 py-3">
       <p className="text-sm font-medium text-amber-900">
-        “{pending.prompt}” is already confirmed. Say why it is changing.
+        “{fieldDisplayName(pending.prompt)}” is already confirmed. Say why it is changing.
       </p>
       <p className="mt-0.5 text-xs text-amber-800">
         This is recorded against the item, so a later “we never asked for this” can be answered. Attach the email or

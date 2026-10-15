@@ -242,12 +242,12 @@ export default function InfillRow({
                 {/* The PROMPT still, quietly: two categories word the same BWS
                     field differently, and the heading above is the field. */}
                 {" · "}
-                {question.prompt}
+                {fieldDisplayName(question.prompt)}
               </span>
             </>
           ) : (
             <>
-              <span className="text-neutral-900">{question.prompt}</span>
+              <span className="text-neutral-900">{fieldDisplayName(question.prompt)}</span>
               {question.fieldLabel && (
                 <span className="block text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
               )}

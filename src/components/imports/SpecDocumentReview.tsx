@@ -882,7 +882,7 @@ function ProposalRow({
             {questions.map((question) => (
               <option key={question.id} value={question.id}>
                 {question.section ? `${question.section} · ` : ""}
-                {question.prompt}
+                {fieldDisplayName(question.prompt)}
               </option>
             ))}
           </select>
@@ -1803,7 +1803,7 @@ function NoteRow({
             {questions.map((question) => (
               <option key={question.id} value={question.id}>
                 {question.section ? `${question.section} · ` : ""}
-                {question.prompt}
+                {fieldDisplayName(question.prompt)}
               </option>
             ))}
           </select>

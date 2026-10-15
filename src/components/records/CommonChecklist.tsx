@@ -23,6 +23,7 @@
 // Specs tab's common W, D, H and SH are where they are corrected.
 // ============================================================================
 import { Fragment, useMemo, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
@@ -179,7 +180,7 @@ export default function CommonChecklist({
                 return (
                   <Fragment key={group.requirementId}>
                     <Tr>
-                      <Td>{group.prompt}</Td>
+                      <Td>{fieldDisplayName(group.prompt)}</Td>
                       <Td>
                         <Answered value={shared.value} state={shared.state} />
                       </Td>
@@ -288,7 +289,7 @@ export default function CommonChecklist({
             <tbody>
               {differs.map((group) => (
                 <Tr key={group.requirementId}>
-                  <Td>{group.prompt}</Td>
+                  <Td>{fieldDisplayName(group.prompt)}</Td>
                   <Td>
                     <ul className="space-y-0.5">
                       {group.members.map((member) => (

@@ -313,7 +313,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
             <ul className="mt-1 list-inside list-disc">
               {diff.map((row, index) => (
                 <li key={index}>
-                  <span className="font-medium">{row.recordLabel}</span> {row.prompt}
+                  <span className="font-medium">{row.recordLabel}</span> {fieldDisplayName(row.prompt)}
                   {row.why ? ` — ${row.why}` : ""}
                 </li>
               ))}
@@ -359,7 +359,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                     </Link>{" "}
                     {item.refs && <span className="font-mono text-neutral-900">{item.refs}</span>}
                   </Td>
-                  <Td>{item.prompt}</Td>
+                  <Td>{fieldDisplayName(item.prompt)}</Td>
                   <Td muted>{fieldDisplayName(item.fieldLabel) ?? "—"}</Td>
                   <Td muted>{item.currentValueText ?? "—"}</Td>
                   <Td className="text-right">

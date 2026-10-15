@@ -206,8 +206,8 @@ function QuestionRows({
       <Tr className="cursor-pointer" onClick={onToggle}>
         <Td>
           <span className="mr-1.5 text-neutral-500">{open ? "▾" : "▸"}</span>
-          <span className="text-neutral-900">{question.heading}</span>
-          {question.fieldLabel && question.fieldLabel !== question.heading && (
+          <span className="text-neutral-900">{fieldDisplayName(question.heading)}</span>
+          {question.fieldLabel && fieldDisplayName(question.fieldLabel) !== fieldDisplayName(question.heading) && (
             <span className="block pl-4 text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
           )}
         </Td>

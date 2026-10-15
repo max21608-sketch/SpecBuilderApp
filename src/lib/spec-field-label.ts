@@ -20,8 +20,11 @@
 // ONE map, a leaf with no imports, so a client component and a server sentence
 // call the same function. Keyed on `json_id`, the register's key. Where a
 // payload carries only the name, BWS's exact name (folded by case and
-// whitespace) finds the same row, and `tests/lib/spec-field-label.test.ts`
-// holds both halves against `db/seed/0001_spec_fields.sql`: a BWS rename fails
+// whitespace) finds the same row -- which is also how a cheat-sheet PROMPT that
+// is exactly that name ("Main timber finish", on 17 sheets) reads on screen:
+// re-seeding the prompt would stale every unsent chase draft, whose coverage
+// snapshot froze it. `tests/lib/spec-field-label.test.ts` holds the map
+// against `db/seed/0001_spec_fields.sql`: a BWS rename fails
 // it rather than quietly putting the old name back on screen.
 
 export const SPEC_FIELD_DISPLAY_NAMES: readonly { jsonId: number; bwsName: string; displayName: string }[] = [

@@ -35,6 +35,7 @@
 //     everything the user had just untucked.
 // ============================================================================
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-fetch";
@@ -737,7 +738,7 @@ function DraftsView() {
                   return (
                     <li key={index}>
                       {r.recordLabel ? <span className="font-medium">{r.recordLabel}</span> : null}
-                      {r.prompt ? ` — “${r.prompt}”` : ""} {r.reason ?? r.why ?? ""}
+                      {r.prompt ? ` — “${fieldDisplayName(r.prompt)}”` : ""} {r.reason ?? r.why ?? ""}
                     </li>
                   );
                 })}
