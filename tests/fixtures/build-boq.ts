@@ -338,6 +338,34 @@ export async function comCodeBillWorkbook(): Promise<Buffer> {
   return bytes(book);
 }
 
+/**
+ * A COM LINE NAMING A CODE ON TWO LINES OF ONE PHASE (2026-10-15) — invented,
+ * in the shape of the Ronnie Scott's CH-03 case: ZC-03 is printed twice and
+ * only the second has COM lines under it. ZC-02 is printed twice too, and
+ * EACH has its own COM line, which must stay on its own line.
+ *
+ *   2  ZC-03  ARMCHAIR, 2   no COM line of its own
+ *   3  ZC-03  ARMCHAIR, 12  4  ZB-EXTRA  ZB_02  plush (names no code: row 3 only)
+ *                           5  ZB-ZC-03  ZB_04  velvet (names ZC-03: rows 2 AND 3)
+ *   6  ZC-02  ARMCHAIR, 2   7  ZB-ZC-02  ZB_06  plush
+ *   8  ZC-02  ARMCHAIR, 8   9  ZB-ZC-02  ZB_08  velour
+ */
+export async function twinLinesComBillWorkbook(): Promise<Buffer> {
+  const book = new ExcelJS.Workbook();
+  addSheet(book, "UPHOLSTERED", [
+    ["FF&E CODE", "COM CODE", "DESCRIPTION", "FINISH", "QTY", "UOM"],
+    ["ZC-03", null, "ARMCHAIR", "EXAMPLE CHAIR\nCOM", 2, "EACH"],
+    ["ZC-03", null, "ARMCHAIR", "EXAMPLE CHAIR\nCOM", 12, "EACH"],
+    ["ZB-EXTRA", "ZB_02", "ARMCHAIR @ FABRIC", COM_CODE_CLOTH.plush, 4, "METRE"],
+    ["ZB-ZC-03", "ZB_04", "ARMCHAIR @ FABRIC", COM_CODE_CLOTH.velvet, 36, "METRE"],
+    ["ZC-02", null, "ARMCHAIR", "EXAMPLE ARMCHAIR\nCOM", 2, "EACH"],
+    ["ZB-ZC-02", "ZB_06", "ARMCHAIR @ FABRIC", COM_CODE_CLOTH.plush, 3, "METRE"],
+    ["ZC-02", null, "ARMCHAIR", "EXAMPLE ARMCHAIR\nCOM", 8, "EACH"],
+    ["ZB-ZC-02", "ZB_08", "ARMCHAIR @ FABRIC", COM_CODE_CLOTH.velour, 12, "METRE"],
+  ]);
+  return bytes(book);
+}
+
 /** The words of `finishLinesBillWorkbook`'s finish lines, by row — invented, every one. */
 export const FINISH_LINES = {
   4: { code: "F-FA-05", words: "EXAMPLE MILL | ZX-1 / ALPHA | MOHAIR | IVORY" },

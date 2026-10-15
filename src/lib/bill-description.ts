@@ -98,6 +98,7 @@ import { readDimension, sizeLabel, sizeLineRefusal, type DimensionReading } from
 import { kindCode, leadingFinishCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { calloutKindsNamed, classifyCallout, suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
 import { billFinishLineKind } from "@/lib/bill-finish-kind";
+import { finishLineTargets } from "@/lib/boq-row-kinds";
 import {
   DIMENSION_SLOT_LABELS,
   TBC_TOKENS,
@@ -1047,6 +1048,7 @@ type PlanLine = {
   finishRaw?: string | null;
   ignored?: boolean;
   rowKind?: string;
+  rowKindSource?: string;
   finishFor?: { row: number; code?: string | null } | null;
   slotOverrides?: Readonly<Record<string, unknown>> | null;
   unitOverride?: unknown;
@@ -1068,11 +1070,14 @@ export function planSheetDescriptions(
   // reading, over the same code and words, the confirm slots it by
   // (`billFinishLineKind`), so a description's fabric is a note exactly when
   // a fabric line will take the COM.
+  // Every item the line is WRITTEN to (`finishLineTargets`), not only the one
+  // it sits under: a line naming a code on two lines gives both a COM.
+  const targetLines = lines.map((line) => ({ ...line, code: line.code ?? null }));
   const withFabric = new Set(
-    lines
+    targetLines
       .filter((line) => line.rowKind === "finish_for" && !line.ignored && line.finishFor)
-      .filter((line) => billFinishLineKind({ ...line, code: line.code ?? null }).kind === "fabric")
-      .map((line) => line.finishFor!.row),
+      .filter((line) => billFinishLineKind(line).kind === "fabric")
+      .flatMap((line) => finishLineTargets(targetLines, line).rows),
   );
   const plans = new Map<number, BillDescriptionPlan>();
   for (const line of lines) {

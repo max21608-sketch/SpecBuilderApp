@@ -41,7 +41,7 @@
 // A leaf, and pure: the review screen, the confirm and `npm run boq:gap` all
 // read the same rule, and a client component can import it.
 // ============================================================================
-import { expandZoneList, normaliseRef } from "@/lib/record-refs";
+import { endsOnSegment, expandZoneList, normaliseRef } from "@/lib/record-refs";
 import { TBC_TOKENS, containsPhrase } from "@/lib/spec-vocab";
 
 /** What a row of a bill IS. Order is the review's select order. */
@@ -432,10 +432,114 @@ export function rowKindProblems(lines: readonly KindLine[]): { lineNo: number; p
   return out;
 }
 
+// ---- which items a finish line is written to -----------------------------------
+
+/**
+ * A FINISH LINE THAT NAMES A CODE ON SEVERAL LINES GOES ON EVERY ONE OF THEM
+ * THE BILL GAVE NO FINISH OF ITS OWN (Max, 2026-10-15, the Ronnie Scott's
+ * procurement schedule: "apply it to both, no tick boxes").
+ *
+ * CH-03 is on two lines of one phase, SALON (2) and PDR MEMBERS ROOM (12), and
+ * its one fabric line `FB-CH-03` sits under the PDR line. Matthew: it is both.
+ * Written to the line above alone, the salon chairs shipped with no fabric.
+ *
+ * Three things about it are traps rather than preferences:
+ *
+ *   * ONLY WHERE THE LINE NAMES THE CODE: its bracket (`(CH-03)`), its own
+ *     code ending on the item's (`FB-CH-03`), or the model's reading of which
+ *     row it belongs to. A layout's category rule (Aman's `FBX-`, "the item
+ *     above") names no code and still writes to one line; a bracket naming
+ *     something else (a zone list) keeps it to one line too.
+ *   * A LINE THAT HAS ITS OWN FINISH LINES TAKES NONE FROM ANOTHER. The same
+ *     schedule prints CH-02 twice, each with its OWN two fabric lines (FB_06
+ *     and FB_07 under the salon, FB_08 and FB_09 under the members bar).
+ *     "Every line carrying the code" read literally would give the members-bar
+ *     chair the salon's cloth beside its own. Where the bill printed a line's
+ *     finishes, those are its finishes.
+ *   * THIS IS ABOUT A FINISH LINE'S TARGETS, NEVER ABOUT WHICH RECORD A BILL
+ *     LINE IS. An ITEM line on two lines of a phase is still SX11A at revision
+ *     pairing, and is untouched.
+ *
+ * ONE DECISION, three callers: the confirm writes to these rows, the review's
+ * plan (`planBillFabrics`) predicts the slot on each, and the description
+ * reader (`planSheetDescriptions`) treats every one as having a fabric line.
+ * Rows are in sheet order; the line's own item is one of them.
+ */
+export type FinishLineTargets = {
+  /** The item rows the line is written to, in sheet order. One row, unless it fans out. */
+  rows: number[];
+  /** The code that carried it to the other rows; null where it goes on one item. */
+  code: string | null;
+  /** What the review says, in words; null where it goes on one item. */
+  sentence: string | null;
+};
+
+/** The parts of a staged line the decision reads. Loose on purpose: the review, the confirm and the description reader each carry their own line type. */
+type TargetLine = {
+  lineNo: number;
+  code: string | null;
+  ignored?: boolean;
+  rowKind?: string | null;
+  rowKindSource?: string | null;
+  finishFor?: { row: number } | null;
+};
+
+/** How a finish line names its item's code, in words for the sentence — or null where it does not. */
+function namesItsCode(line: TargetLine, itemCode: string): string | null {
+  const fold = normaliseRef(itemCode);
+  if (!fold) return null;
+  const bracket = parseBracketCode(line.code);
+  if (bracket) return normaliseRef(bracket.itemRef) === fold ? "its bracket names it" : null;
+  const own = (line.code ?? "").trim();
+  if (own && (normaliseRef(own) === fold || endsOnSegment(own, itemCode))) return `its code ${own} names it`;
+  if (line.rowKindSource === "model") return "the model read it as that item's";
+  return null;
+}
+
+export function finishLineTargets(lines: readonly TargetLine[], line: TargetLine): FinishLineTargets {
+  const own = line.finishFor ? line.finishFor.row : null;
+  if (own === null) return { rows: [], code: null, sentence: null };
+  const single = { rows: [own], code: null, sentence: null };
+  if (line.ignored || line.rowKind !== "finish_for") return single;
+  const item = lines.find((other) => other.lineNo === own);
+  const itemCode = (item?.code ?? "").trim();
+  if (!item || !itemCode) return single;
+  const how = namesItsCode(line, itemCode);
+  if (!how) return single;
+
+  const fold = normaliseRef(itemCode);
+  const withOwnFinish = new Set(
+    lines
+      .filter((other) => !other.ignored && other.rowKind === "finish_for" && other.finishFor)
+      .map((other) => other.finishFor!.row),
+  );
+  const others = lines.filter(
+    (other) =>
+      other.lineNo !== own &&
+      !other.ignored &&
+      (other.rowKind ?? "item") === "item" &&
+      parseBracketCode(other.code) === null &&
+      normaliseRef(other.code ?? "") === fold &&
+      !withOwnFinish.has(other.lineNo),
+  );
+  if (others.length === 0) return single;
+
+  const rows = [own, ...others.map((other) => other.lineNo)].sort((a, b) => a - b);
+  const bare = others.map((other) => String(other.lineNo));
+  return {
+    rows,
+    code: itemCode,
+    sentence:
+      `For rows ${listWords(rows.map(String))} — ${itemCode}, ${rows.length === 2 ? "both" : `all ${rows.length}`}: ` +
+      `${how}, and row${bare.length === 1 ? "" : "s"} ${listWords(bare)} ${bare.length === 1 ? "carries" : "carry"} ` +
+      `${itemCode} with no finish line of ${bare.length === 1 ? "its" : "their"} own.`,
+  };
+}
+
 // ---- what a confirm will do ---------------------------------------------------
 
 /** Records, and specs from finish lines (`fabricSpecs`: every kind), a confirm writes over the LIVE sheets. */
-export function boqConfirmCounts(sheets: readonly { ignored: boolean; lines: readonly KindLine[] }[]): {
+export function boqConfirmCounts(sheets: readonly { ignored: boolean; lines: readonly TargetLine[] }[]): {
   records: number;
   fabricSpecs: number;
   phases: number;
@@ -448,7 +552,8 @@ export function boqConfirmCounts(sheets: readonly { ignored: boolean; lines: rea
     let live = 0;
     for (const line of sheet.lines) {
       if (line.ignored) continue;
-      if (line.rowKind === "finish_for") fabricSpecs += 1;
+      // A line naming a code on several lines writes one spec per line.
+      if (line.rowKind === "finish_for") fabricSpecs += Math.max(1, finishLineTargets(sheet.lines, line).rows.length);
       else {
         records += 1;
         live += 1;

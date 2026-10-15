@@ -14,7 +14,8 @@
 //   * the column map, role ← heading (letter);
 //   * lines, lines with no code, lines with no quantity, the quantity sum;
 //   * the row kinds the BRACKET RULE gives on its own — which is all the reader
-//     does without a model or a person — and the rows it flagged.
+//     does without a model or a person — and the rows it flagged;
+//   * every finish line written to more than one item (`finishLineTargets`).
 //
 // With --golden, each file is compared against a hand-checked expectation kept
 // OUTSIDE the repo (`~/dev/localstack/boq-golden/`, matched on the JSON's own
@@ -39,7 +40,7 @@ import { readSpreadsheetSheets } from "@/lib/intake-source";
 import { intakeSourceKind } from "@/lib/intake-source-types";
 import { parseBoqSheets, type BoqAlias, type BoqLayout, type ParsedBoqSheet } from "@/lib/boq-import";
 import { BOQ_ROLE_LABELS, columnLetter, isBoqReadRole, isBoqRole, type BoqReadRole } from "@/lib/boq-roles";
-import { parseRowRules } from "@/lib/boq-row-kinds";
+import { finishLineTargets, parseRowRules } from "@/lib/boq-row-kinds";
 import { billItemName } from "@/lib/bill-description";
 import { suggestCategory, type CategoryRegister } from "@/lib/boq-stage";
 
@@ -177,6 +178,12 @@ function describeSheet(sheet: ParsedBoqSheet): string[] {
   out.push(`  row kinds by the bracket rule: ${fabric.length} fabric line(s), ${items.length} other, ${flagged.length} flagged`);
   for (const line of flagged.slice(0, 12)) out.push(`    row ${line.lineNo} ${line.code ?? ""}: ${line.rowKindFlag}`);
   if (flagged.length > 12) out.push(`    … and ${flagged.length - 12} more`);
+  // A finish line naming a code on several lines goes on each of them that has
+  // no finish line of its own (`finishLineTargets`, 2026-10-15).
+  const several = fabric.map((line) => ({ line, targets: finishLineTargets(lines, line) }))
+    .filter(({ targets }) => targets.rows.length > 1);
+  out.push(`  finish lines written to more than one item: ${several.length}`);
+  for (const { line, targets } of several) out.push(`    row ${line.lineNo} ${line.code ?? ""}: ${targets.sentence}`);
   return out;
 }
 

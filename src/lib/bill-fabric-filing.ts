@@ -52,6 +52,7 @@ import {
   fabricLineIsPlaceholder,
   fabricLineState,
   fabricScheduleCode,
+  finishLineTargets,
   type RowKindFields,
 } from "@/lib/boq-row-kinds";
 import { billItemName } from "@/lib/bill-description";
@@ -409,6 +410,11 @@ export type FabricLinePlan = {
    * placement as the qualifier (`fabricLineWrite`). Absent otherwise.
    */
   writes?: { value: string; qualifier: string | null };
+  /**
+   * WHERE A LINE GOES ON MORE THAN ONE ITEM (`finishLineTargets`): the rows,
+   * and the sentence saying why. Absent where it goes on its own item alone.
+   */
+  forRows?: { rows: number[]; sentence: string };
 };
 
 /**
@@ -455,6 +461,7 @@ export function planBillFabrics(input: {
       tbc?: boolean;
       writes?: { value: string; qualifier: string | null };
       byCodeHeading?: string;
+      forRows?: { rows: number[]; sentence: string };
     }
   >();
   /** The slots each item holds as its finish lines are walked, by the item's row on the sheet. */
@@ -485,6 +492,9 @@ export function planBillFabrics(input: {
     for (const line of live.filter((entry) => entry.rowKind === "finish_for")) {
       const key = `${sheetIndex}:${line.index}`;
       const parent = line.finishFor ? sheet.lines.find((entry) => entry.lineNo === line.finishFor?.row) : undefined;
+      // EVERY ITEM IT GOES ON, by the confirm's own decision: its own, and any
+      // other line of the phase carrying the code it names with no finish of its own.
+      const targets = finishLineTargets(sheet.lines, line);
       // What the confirm will write, decided by the confirm's own function.
       const written = fabricLineWrite(line, parent ? billItemName(parent) : null);
       const says = written.value ?? "";
@@ -496,7 +506,19 @@ export function planBillFabrics(input: {
         // where they chose one, the bill's own otherwise.
         image: effectiveRowImage({ rowImages: input.rowImages }, sheet.sheetName, line),
       };
-      if (parent?.replaces && input.heldFabric(parent.replaces.recordId, kind).includes(says)) {
+      // THE SLOT ON EACH ITEM, decided as the confirm decides it: against what
+      // that item holds, then each finish line above this one on the same item.
+      // A carried item already holding these words from the bill is skipped.
+      const onRows: { row: number | null; goesTo: string }[] = [];
+      for (const row of targets.rows.length > 0 ? targets.rows : [null]) {
+        const item = row === null ? undefined : sheet.lines.find((entry) => entry.lineNo === row);
+        if (item?.replaces && input.heldFabric(item.replaces.recordId, kind).includes(says)) continue;
+        const taken = (row !== null && slotsByItem.get(row)) || new Set<number>();
+        const placement = decideBillFinishSlot(kind, taken);
+        if (placement.jsonId !== null) taken.add(placement.jsonId);
+        onRows.push({ row, goesTo: describeBillFinishSlot(placement) });
+      }
+      if (onRows.length === 0) {
         filings.set(key, {
           filing: null,
           candidate,
@@ -507,11 +529,6 @@ export function planBillFabrics(input: {
         });
         continue;
       }
-      // THE SLOT, decided as the confirm decides it: against what the item
-      // holds, then each finish line above this one under the same item.
-      const taken = (parent && slotsByItem.get(parent.lineNo)) || new Set<number>();
-      const placement = decideBillFinishSlot(kind, taken);
-      if (placement.jsonId !== null) taken.add(placement.jsonId);
       const byScheduleCode = filedByScheduleCode(line);
       const filing = decideFabricFiling({
         materialCode: fabricMaterialCode(line),
@@ -536,7 +553,8 @@ export function planBillFabrics(input: {
         candidate,
         key: finishKey,
         chosen: chosenPicture(line.picture),
-        goesTo: describeBillFinishSlot(placement),
+        goesTo: describeOnRows(onRows, targets.rows.length > 1),
+        ...(targets.sentence ? { forRows: { rows: targets.rows, sentence: targets.sentence } } : {}),
         kind,
         tbc: written.state === "tbc",
         ...(byScheduleCode && written.value && written.value !== billFinishLineWords(line)
@@ -549,7 +567,7 @@ export function planBillFabrics(input: {
 
   const swatches = planFinishSwatches(groups, input.heldSwatches);
   const out = new Map<string, FabricLinePlan>();
-  for (const [key, { filing, candidate, key: finishKey, chosen, goesTo, kind, tbc, writes, byCodeHeading }] of filings) {
+  for (const [key, { filing, candidate, key: finishKey, chosen, goesTo, kind, tbc, writes, byCodeHeading, forRows }] of filings) {
     if (filing === null) {
       out.set(key, {
         goesTo,
@@ -572,9 +590,26 @@ export function planBillFabrics(input: {
       askForShortCode: filing.outcome === "mint" && series === INTERNAL_FINISH_PREFIX,
       tbc,
       ...(writes ? { writes } : {}),
+      ...(forRows ? { forRows } : {}),
     });
   }
   return out;
+}
+
+/**
+ * The arrow for a line written to several items: "→ COM 1 on rows 17 and 18"
+ * where every item takes the same field, "→ COM 1 on row 17, COM 2 on row 18"
+ * where they differ. One item: the arrow as it always was.
+ */
+function describeOnRows(onRows: readonly { row: number | null; goesTo: string }[], several: boolean): string {
+  if (!several) return onRows[0]?.goesTo ?? "→ nothing written";
+  const rows = onRows.map((entry) => String(entry.row));
+  const first = onRows[0]?.goesTo ?? "";
+  if (onRows.every((entry) => entry.goesTo === first)) {
+    const list = rows.length <= 1 ? rows.join("") : `${rows.slice(0, -1).join(", ")} and ${rows[rows.length - 1]}`;
+    return `${first} on row${rows.length === 1 ? "" : "s"} ${list}`;
+  }
+  return `→ ${onRows.map((entry) => `${entry.goesTo.replace(/^→ /, "")} on row ${entry.row}`).join(", ")}`;
 }
 
 function pendingFinish(id: string, code: string, origin: Finish["codeOrigin"], description: string | null): Finish {

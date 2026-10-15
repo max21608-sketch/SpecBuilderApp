@@ -41,6 +41,7 @@ import {
   BOQ_ROW_KINDS,
   BOQ_ROW_KIND_LABELS,
   fabricParentOptions,
+  finishLineTargets,
   isBoqRowKind,
   type BoqRowKind,
   type RowKindFields,
@@ -70,6 +71,13 @@ const SOURCE_CHIP: Record<string, { label: string; tone: "plain" | "guess" | "in
   model: { label: "read by the model", tone: "guess" },
   person: { label: "set by you", tone: "info" },
 };
+
+/** "17", or "17 and 18" where the line names a code several lines carry (`finishLineTargets`). */
+function targetRowWords(line: KindCellLine, lines: readonly KindCellLine[] | undefined): string {
+  const rows = lines ? finishLineTargets(lines, line).rows : [];
+  const list = (rows.length > 0 ? rows : line.finishFor ? [line.finishFor.row] : []).map(String);
+  return list.length <= 1 ? list.join("") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+}
 
 function parentLabel(line: { lineNo: number; code: string | null; itemDescription: string }): string {
   const what = line.itemDescription.split(/\s+/).slice(0, 5).join(" ");
@@ -141,7 +149,7 @@ export default function BoqRowKindCell({
         )}
         {kind === "finish_for" && line.finishFor && (
           <span className={`block text-[11px] ${line.rowKindFlag ? "text-amber-800" : "text-neutral-500"}`}>
-            for {line.finishFor.row}
+            for {targetRowWords(line, lines)}
             {editable && (
               <>
                 {" · "}
@@ -219,7 +227,7 @@ export default function BoqRowKindCell({
 
       {kind === "finish_for" && line.finishFor && !choosingParent && (
         <span className="mt-1 block text-[10.5px] text-neutral-600">
-          written as a spec on row {line.finishFor.row}
+          written as a spec on row{targetRowWords(line, lines).includes(" ") ? "s" : ""} {targetRowWords(line, lines)}
         </span>
       )}
       {chip && line.rowKind && (
@@ -252,7 +260,8 @@ export default function BoqRowKindCell({
  * again in one press. The flag and the problem are NOT here: those never sit
  * behind a press, and the cell opens itself for them.
  */
-export function RowKindReasoning({ line }: { line: KindCellLine }) {
+export function RowKindReasoning({ line, lines }: { line: KindCellLine; lines?: readonly KindCellLine[] }) {
+  const rows = targetRowWords(line, lines);
   const chip = line.rowKindSource ? SOURCE_CHIP[line.rowKindSource] : null;
   return (
     <span className="mt-1 block space-y-0.5 text-[11px] text-neutral-600">
@@ -266,8 +275,9 @@ export function RowKindReasoning({ line }: { line: KindCellLine }) {
       )}
       {line.rowKind === "finish_for" && line.finishFor && (
         <span className="block">
-          Not a record — its description is written as a spec on row {line.finishFor.row}
-          {line.finishFor.code ? ` (${line.finishFor.code})` : ""}, in the next free field of its kind.
+          Not a record — its description is written as a spec on row{rows.includes(" ") ? "s" : ""} {rows}
+          {line.finishFor.code ? ` (${line.finishFor.code})` : ""}, in the next free field of its kind
+          {rows.includes(" ") ? " on each" : ""}.
         </span>
       )}
     </span>

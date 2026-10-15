@@ -2300,6 +2300,14 @@ export default function ReviewImportPage() {
                                       under and the swatch its picture becomes
                                       — computed on the server by the function
                                       the confirm decides with. */}
+                                  {/* ONE LINE, SEVERAL ITEMS: said in words,
+                                      from the decision the confirm writes
+                                      with (`finishLineTargets`). */}
+                                  {fabricFilings[line.index]?.forRows && (
+                                    <span className="mt-0.5 block text-[11px] text-neutral-700" role="note">
+                                      {fabricFilings[line.index]?.forRows?.sentence}
+                                    </span>
+                                  )}
                                   {fabricFilings[line.index] && (
                                     <FabricFilingLine
                                       plan={fabricFilings[line.index] as FabricLinePlan}
@@ -2315,7 +2323,7 @@ export default function ReviewImportPage() {
                                       {line.rowKindFlag}
                                     </span>
                                   )}
-                                  {whyOpen && <RowKindReasoning line={line} />}
+                                  {whyOpen && <RowKindReasoning line={line} lines={sheet.lines} />}
                                 </div>
                               </div>
                             </Td>

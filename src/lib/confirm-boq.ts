@@ -39,7 +39,7 @@ import {
 import { effectiveArea } from "@/lib/boq-reconcile";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
-import { rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
+import { finishLineTargets, rowKindProblems, type RowKindFields } from "@/lib/boq-row-kinds";
 import {
   BILL_FINISH_SLOT_IDS,
   billFinishNoun,
@@ -656,8 +656,11 @@ export async function confirmBoqImport(
 
     // ---- the fabric lines, onto their items -----------------------------
     for (const [order, line] of fabricLines.entries()) {
-      const parent = line.finishFor ? recordByRow.get(line.finishFor.row) : undefined;
-      if (!parent) {
+      // EVERY ITEM IT IS WRITTEN TO — its own, and any other line of this
+      // phase carrying the code it names with no finish line of its own
+      // (`finishLineTargets`, the decision the review's arrow reads).
+      const targets = finishLineTargets(sheet.lines as StagedLine[], line).rows.map((row) => recordByRow.get(row));
+      if (targets.length === 0 || targets.some((target) => !target)) {
         throw new DomainConflictError(
           "fabric_without_item",
           `Row ${line.lineNo}'s fabric belongs to a row that is not being imported. Reload the review.`,
@@ -665,8 +668,7 @@ export async function confirmBoqImport(
       }
       const parentLine = (sheet.lines as StagedLine[]).find((entry) => entry.lineNo === line.finishFor?.row);
       const written = await writeFabricLine(txn, {
-        recordId: parent.recordId,
-        carried: parent.carried,
+        targets: targets as { recordId: string; carried: boolean }[],
         line,
         parentName: parentLine ? billItemName(parentLine) : null,
         runId,
@@ -676,10 +678,8 @@ export async function confirmBoqImport(
         finishSlotFields,
         sortOrder: order,
       });
-      if (written.written) {
-        fabricSpecs += 1;
-        recomposeIds.add(parent.recordId);
-      }
+      fabricSpecs += written.written.length;
+      for (const recordId of written.written) recomposeIds.add(recordId);
       if (written.minted) inHouseFinishes += 1;
       // A PLACEHOLDER'S PICTURE IS FILED NOWHERE: it has no finish to belong to.
       if (written.finishId) {
@@ -921,15 +921,23 @@ async function giveBillPicture(
  * OF THIS KIND from a bill, and REFUSES — with a sentence — where it holds a
  * different one of this kind from a bill: replacing a fabric is a decision
  * the review has no control for yet, and a revision that quietly kept or
- * quietly replaced one would be the wrong answer either way. Returns whether
- * a row was written, the finish it links (for the swatch), and whether a code
- * was minted.
+ * quietly replaced one would be the wrong answer either way.
+ *
+ * ONE LINE, SEVERAL ITEMS (2026-10-15): a line naming a code that other lines
+ * of the phase carry with no finish of their own is written to each of them
+ * (`finishLineTargets`). The finish is filed ONCE; each record gets its own
+ * attribute in the next free slot of its kind on THAT record, so two items
+ * may hold one cloth as COM 1 and COM 2. The revision rule is applied per
+ * record, and one record refusing refuses the bill.
+ *
+ * Returns the records a row was written to, the finish it links (for the
+ * swatch), and whether a code was minted.
  */
 async function writeFabricLine(
   txn: TxnSql,
   input: {
-    recordId: string;
-    carried: boolean;
+    /** Every item the line is written to, in sheet order. */
+    targets: readonly { recordId: string; carried: boolean }[];
     line: StagedLine;
     /** The item line's name — what the bill's "Fabric @ …" lead repeats. */
     parentName: string | null;
@@ -941,48 +949,35 @@ async function writeFabricLine(
     finishSlotFields: ReadonlyMap<number, string>;
     sortOrder: number;
   },
-): Promise<{ written: boolean; finishId: string | null; minted: boolean }> {
-  const { recordId, line, runId, projectId, actor, library } = input;
+): Promise<{ written: string[]; finishId: string | null; minted: boolean }> {
+  const { line, runId, projectId, actor, library } = input;
   // THE ONE DECISION the review predicts: a placeholder is TBC, and a line
   // with no words has no value — never its code cell (2026-10-13).
   const written = fabricLineWrite(line, input.parentName);
   const value = written.value ?? "";
   const materialCode = fabricMaterialCode(line);
   const { kind } = billFinishLineKind(line);
-  const nothing = { written: false, finishId: null, minted: false };
 
-  if (input.carried) {
-    const held = ((await loadHeldBillFinishes(txn, [recordId])).get(recordId) ?? [])
-      .filter((entry) => entry.kind === kind)
-      .map((entry) => entry.value);
-    if (held.includes(value)) return nothing;
-    if (held.length > 0) {
-      const noun = billFinishNoun(kind);
-      throw new DomainConflictError(
-        "fabric_changed",
-        `Row ${line.lineNo}'s ${noun} is not the one this item's record already holds from the bill. A revision that ` +
-          `changes a ${noun} line is not supported yet — correct the ${noun} on the record's Specs tab, then confirm ` +
-          "the revision with the line as the record now reads.",
-      );
+  const writeTo: string[] = [];
+  for (const target of input.targets) {
+    if (target.carried) {
+      const held = ((await loadHeldBillFinishes(txn, [target.recordId])).get(target.recordId) ?? [])
+        .filter((entry) => entry.kind === kind)
+        .map((entry) => entry.value);
+      if (held.includes(value)) continue;
+      if (held.length > 0) {
+        const noun = billFinishNoun(kind);
+        throw new DomainConflictError(
+          "fabric_changed",
+          `Row ${line.lineNo}'s ${noun} is not the one this item's record already holds from the bill. A revision that ` +
+            `changes a ${noun} line is not supported yet — correct the ${noun} on the record's Specs tab, then confirm ` +
+            "the revision with the line as the record now reads.",
+        );
+      }
     }
+    writeTo.push(target.recordId);
   }
-
-  // What the record holds NOW, from any document and from the finish lines
-  // above this one — read under the lock, as json ids, for the pure decision.
-  const jsonIdOf = new Map([...input.finishSlotFields].map(([jsonId, fieldId]) => [fieldId, jsonId] as const));
-  const occupied = await txn`
-    select spec_field_id from record_attributes
-    where record_id = ${recordId} and status = 'active'
-      and spec_field_id = any(${[...input.finishSlotFields.values()]}::uuid[])
-  `;
-  const taken = new Set(
-    occupied.flatMap((row) => {
-      const jsonId = jsonIdOf.get(String(row.spec_field_id));
-      return jsonId === undefined ? [] : [jsonId];
-    }),
-  );
-  const placement = decideBillFinishSlot(kind, taken);
-  const fieldId = placement.jsonId === null ? null : (input.finishSlotFields.get(placement.jsonId) ?? null);
+  if (writeTo.length === 0) return { written: [], finishId: null, minted: false };
 
   const filing = decideFabricFiling({
     materialCode,
@@ -994,15 +989,33 @@ async function writeFabricLine(
   });
   const finishId = await fileFinish(txn, { projectId, filing, says: value, library, actor });
 
-  await txn`
-    insert into record_attributes
-      (record_id, attr_group, dimension_slot, label, value, qualifier, unit, material_code, finish_id, spec_field_id,
-       state, source_run_id, source_page, sort_order, created_by, updated_by)
-    values
-      (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${written.value}, ${written.qualifier ?? null}, null,
-       ${materialCode}, ${finishId}, ${fieldId}, ${written.state}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
-  `;
-  return { written: true, finishId, minted: filing.outcome === "mint" };
+  const jsonIdOf = new Map([...input.finishSlotFields].map(([jsonId, fieldId]) => [fieldId, jsonId] as const));
+  for (const recordId of writeTo) {
+    // What THIS record holds NOW, from any document and from the finish lines
+    // above this one — read under the lock, as json ids, for the pure decision.
+    const occupied = await txn`
+      select spec_field_id from record_attributes
+      where record_id = ${recordId} and status = 'active'
+        and spec_field_id = any(${[...input.finishSlotFields.values()]}::uuid[])
+    `;
+    const taken = new Set(
+      occupied.flatMap((row) => {
+        const jsonId = jsonIdOf.get(String(row.spec_field_id));
+        return jsonId === undefined ? [] : [jsonId];
+      }),
+    );
+    const placement = decideBillFinishSlot(kind, taken);
+    const fieldId = placement.jsonId === null ? null : (input.finishSlotFields.get(placement.jsonId) ?? null);
+    await txn`
+      insert into record_attributes
+        (record_id, attr_group, dimension_slot, label, value, qualifier, unit, material_code, finish_id, spec_field_id,
+         state, source_run_id, source_page, sort_order, created_by, updated_by)
+      values
+        (${recordId}, ${placement.attrGroup}, null, ${placement.label}, ${written.value}, ${written.qualifier ?? null}, null,
+         ${materialCode}, ${finishId}, ${fieldId}, ${written.state}, ${runId}, null, ${input.sortOrder}, ${actor}, ${actor})
+    `;
+  }
+  return { written: writeTo, finishId, minted: filing.outcome === "mint" };
 }
 
 /**
