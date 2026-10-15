@@ -121,7 +121,7 @@ export default function BoqRowKindCell({
   if (!open) {
     // A finish line says WHAT it is — the one reading the confirm slots it by
     // (`billFinishLineKind`) — or a timber line reads "Fabric" beside its own
-    // "→ Main timber finish" (Matthew's MBDS bill, 2026-10-06).
+    // "→ Timber finish 1" (Matthew's MBDS bill, 2026-10-06).
     const label = kind === "finish_for" ? finishLineLabel(line) : BOQ_ROW_KIND_LABELS[kind];
     return (
       <div>

@@ -51,6 +51,7 @@
 // not what it said (`oneLinePerPhase`).
 // ============================================================================
 import { endsOnSegment, findRecordsByRef, namesOnSegments, normaliseRef, type RecordEntry } from "@/lib/record-refs";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { containsPhrase, deferredToSomebody, TBC_TOKENS } from "@/lib/spec-vocab";
 import { normaliseName } from "@/lib/matching";
 import { sourceWords } from "@/lib/source-words";
@@ -4877,7 +4878,10 @@ export function crossPageClaims(
   if (readAsItems(doc)) return out;
   const plans = namedConfigurationPlans(items, doc);
   const letters = variantLettersByItem(items, doc);
-  const fieldName = (id: string) => fields.find((field) => field.id === id)?.name ?? "the same BWS field";
+  const fieldName = (id: string) => {
+    const field = fields.find((entry) => entry.id === id);
+    return field ? fieldDisplayName(field.name, field.jsonId) : "the same BWS field";
+  };
   type Claim = { item: DrawingItem; observation: DrawingObservation };
   for (const [, pages] of groupItemsByCode(items, doc)) {
     if (pages.length < 2) continue;
@@ -4958,8 +4962,8 @@ export function crossPageClaims(
           observationId: later.observation.id,
           page: later.item.page ?? null,
           fieldId: next?.id ?? null,
-          fieldName: next?.name ?? null,
-          candidates: candidates.map((entry) => ({ fieldId: entry.id, fieldName: entry.name })),
+          fieldName: next ? fieldDisplayName(next.name, next.jsonId) : null,
+          candidates: candidates.map((entry) => ({ fieldId: entry.id, fieldName: fieldDisplayName(entry.name, entry.jsonId) })),
         },
       };
       out.set(first.observation.id, { kind: "conflict", pairKey, message, clash });

@@ -27,6 +27,7 @@
 // worse than the gap, because the gap is the truth and the invention is not.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { findOpenChangeSet, openChangeSet, publishChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
@@ -309,7 +310,7 @@ export async function createAttribute(txn: TxnSql, input: CreateAttributeInput):
     if (occupant) {
       throw new DomainConflictError(
         "field_occupied",
-        `${String(occupant.field_name ?? "That BWS field")} already holds “${String(occupant.value ?? occupant.label)}” on this item. Retire it first, or record this as a note.`,
+        `${fieldDisplayName(occupant.field_name === null || occupant.field_name === undefined ? null : String(occupant.field_name)) ?? "That BWS field"} already holds “${String(occupant.value ?? occupant.label)}” on this item. Retire it first, or record this as a note.`,
         { status: 409 },
       );
     }

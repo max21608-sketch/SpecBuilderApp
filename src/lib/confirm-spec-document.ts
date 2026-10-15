@@ -22,6 +22,7 @@
 // "the proposal at index 4" a phrase nobody has to say.
 // ============================================================================
 import { DomainConflictError, type TxnSql } from "@/lib/db-transaction";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { openChangeSet } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { applyAnswerFills, applyAnswerRetractions, loadDimensionNote, planAnswerFills } from "@/lib/promote-answers";
@@ -328,7 +329,7 @@ export async function confirmSpecDocumentRecord(
   if (moved) {
     throw new DomainConflictError(
       "occupant_changed",
-      `The ${moved.dimension?.slot ?? moved.finish?.specFieldName ?? moved.note?.label ?? "spec"} this would be compared with has changed since you looked at it. Nothing was written — re-match (free) and check what is there now.`,
+      `The ${moved.dimension?.slot ?? fieldDisplayName(moved.finish?.specFieldName) ?? moved.note?.label ?? "spec"} this would be compared with has changed since you looked at it. Nothing was written — re-match (free) and check what is there now.`,
     );
   }
 
@@ -477,7 +478,7 @@ export async function confirmSpecDocumentRecord(
         if (!retired[0]) {
           throw new DomainConflictError(
             "occupant_changed",
-            `The ${dimension?.slot ?? finish?.specFieldName ?? note?.label ?? "spec"} this would replace has changed since you looked at it. Nothing was written — reload and check what is there now.`,
+            `The ${dimension?.slot ?? fieldDisplayName(finish?.specFieldName) ?? note?.label ?? "spec"} this would replace has changed since you looked at it. Nothing was written — reload and check what is there now.`,
           );
         }
       }

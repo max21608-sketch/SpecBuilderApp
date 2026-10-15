@@ -29,6 +29,7 @@
 //    and the screen would disagree about whether a card can commit.
 // ============================================================================
 import { matchName, normaliseName, type MatchCandidate } from "@/lib/matching";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import {
   containsPhrase,
   deferredToSomebody,
@@ -1100,6 +1101,8 @@ function buildFinishProposal(
       : null;
 
   const specFieldName = (registers.specFields ?? []).find((field) => field.id === specFieldId)?.name ?? null;
+  // Staged as BWS names it; the sentences below say it the way a screen does.
+  const fieldSaid = fieldDisplayName(specFieldName);
 
   return {
     id: newId(),
@@ -1119,9 +1122,9 @@ function buildFinishProposal(
       noField: finish.noField,
     },
     readingNote: exactHolding
-      ? `This item already holds ${finish.codeRaw} in ${specFieldName ?? "a field"}; this says it again, so it is aimed there rather than at the next free slot. Ignore it unless these words should replace what ${specFieldName ?? "it"} holds.`
+      ? `This item already holds ${finish.codeRaw} in ${fieldSaid ?? "a field"}; this says it again, so it is aimed there rather than at the next free slot. Ignore it unless these words should replace what ${fieldSaid ?? "it"} holds.`
       : zoneHolding
-        ? `This item already holds ${zoneHolding.materialCode} in ${specFieldName ?? "a field"}, and ${finish.codeRaw} reads as the same code under the bill's own zone, so it is aimed there rather than at the next free slot. Check they are one finish; ignore it unless these words should replace what ${specFieldName ?? "it"} holds.`
+        ? `This item already holds ${zoneHolding.materialCode} in ${fieldSaid ?? "a field"}, and ${finish.codeRaw} reads as the same code under the bill's own zone, so it is aimed there rather than at the next free slot. Check they are one finish; ignore it unless these words should replace what ${fieldSaid ?? "it"} holds.`
         : null,
     attributeTarget: occupied ? heldTargetOf(occupied) : null,
     recordLabel: record.label,
@@ -1569,7 +1572,7 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
         if (clash) {
           blockers.push({
             code: "duplicate_target",
-            message: `This document fills ${proposal.finish.specFieldName ?? "the same BWS field"} for this item more than once. Ignore the ones that are wrong.`,
+            message: `This document fills ${fieldDisplayName(proposal.finish.specFieldName) ?? "the same BWS field"} for this item more than once. Ignore the ones that are wrong.`,
           });
         }
       }
@@ -1579,7 +1582,7 @@ export function proposalBlockers(proposal: Proposal, all: Proposal[]): Blocker[]
       if (heldReading(proposal) === "replace" && !proposal.overwriteAcknowledged) {
         blockers.push({
           code: "replace",
-          message: `This item already records ${proposal.finish.specFieldName ?? "this field"} as “${proposal.attributeTarget?.value ?? "—"}”. Confirm you mean to replace it.`,
+          message: `This item already records ${fieldDisplayName(proposal.finish.specFieldName) ?? "this field"} as “${proposal.attributeTarget?.value ?? "—"}”. Confirm you mean to replace it.`,
         });
       }
       return blockers;

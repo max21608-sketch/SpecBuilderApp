@@ -49,8 +49,8 @@ describe("a bill line's description on the review screen", () => {
     render(<Harness plan={plan} />);
     // `composeDimensionCell`'s own text, carried in the plan: Dia replaces W x D.
     expect(screen.getByText("Dia.760 x H510mm")).toBeInTheDocument();
-    expect(screen.getByText("ZZ-TIM-07 → Main timber finish")).toBeInTheDocument();
-    expect(screen.getByText("ZZ-MTL-01 → Main metal finish")).toBeInTheDocument();
+    expect(screen.getByText("ZZ-TIM-07 → Timber finish 1")).toBeInTheDocument();
+    expect(screen.getByText("ZZ-MTL-01 → Metal finish 1")).toBeInTheDocument();
     expect(screen.getByText("ZZ-STN-04 → no field")).toBeInTheDocument();
     expect(screen.getByText("2 notes")).toBeInTheDocument();
   });
@@ -168,7 +168,7 @@ describe("a size part's slot, set on the review", () => {
     expect(screen.getByText("The bill's Dims column")).toBeInTheDocument();
     expect(screen.getByText("The bill's Finish column")).toBeInTheDocument();
     expect(screen.getByText("Finish: Natural oak")).toBeInTheDocument();
-    expect(screen.getByText("Main timber finish")).toBeInTheDocument();
+    expect(screen.getByText("Timber finish 1")).toBeInTheDocument();
     expect(screen.getByText(/Each column cell is written to the record/)).toBeInTheDocument();
   });
 

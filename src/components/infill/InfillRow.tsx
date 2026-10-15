@@ -36,6 +36,7 @@
 // disabled with nothing said.
 // ============================================================================
 import { inItemTgq, isProjectWideQuestion } from "@/lib/chase-grouping";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
@@ -248,7 +249,7 @@ export default function InfillRow({
             <>
               <span className="text-neutral-900">{question.prompt}</span>
               {question.fieldLabel && (
-                <span className="block text-[11px] text-neutral-500">BWS: {question.fieldLabel.trim()}</span>
+                <span className="block text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
               )}
             </>
           )}

@@ -25,6 +25,7 @@
 // same discipline as `upgradeDimensionSlots`.
 // ============================================================================
 import { z } from "zod";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { composeRowCells, BWS_EXPORT_COLUMNS } from "@/lib/bws-export";
 import { composeFinishCell } from "@/lib/finishes";
 import { describeStandard, standardInForce } from "@/lib/bw-standard";
@@ -366,7 +367,7 @@ export function diffCells(before: RecordAtoms, after: RecordAtoms): FieldChange[
   for (let index = 0; index < BWS_EXPORT_COLUMNS.length; index += 1) {
     const column = BWS_EXPORT_COLUMNS[index];
     if (!column) continue;
-    const change = compare(column.name, column.name.trim(), a[index]?.value, b[index]?.value);
+    const change = compare(column.name, fieldDisplayName(column.name, column.jsonId) ?? column.name.trim(), a[index]?.value, b[index]?.value);
     if (change) out.push(change);
   }
   return out;

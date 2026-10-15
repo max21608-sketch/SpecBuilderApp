@@ -21,6 +21,7 @@
 //    and the card says so and reloads.
 // ============================================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import { ANSWER_STATE_LABELS, type AnswerState } from "@/lib/spec-vocab";
@@ -207,7 +208,7 @@ function QuestionRows({
           <span className="mr-1.5 text-neutral-500">{open ? "▾" : "▸"}</span>
           <span className="text-neutral-900">{question.heading}</span>
           {question.fieldLabel && question.fieldLabel !== question.heading && (
-            <span className="block pl-4 text-[11px] text-neutral-500">BWS: {question.fieldLabel}</span>
+            <span className="block pl-4 text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
           )}
         </Td>
         <Td>

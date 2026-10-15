@@ -52,6 +52,7 @@
 // schemaVersion 3) is `NamedConfigurationCard`, below the same props.
 // ============================================================================
 import { Fragment, useEffect, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { measuredRows, oneLinePerPhase, toggledTargets, wasReadByModel, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
@@ -758,7 +759,10 @@ function PageConfigurationCard({
               entries: member.resolution?.billReplacements,
               prefix: card.split ? `${member.letter} · ` : undefined,
             }))}
-            fieldName={(fieldId) => specFields.find((field) => field.id === fieldId)?.name ?? null}
+            fieldName={(fieldId) => {
+              const field = specFields.find((entry) => entry.id === fieldId);
+              return field ? fieldDisplayName(field.name, field.json_id) : null;
+            }}
             busy={busyHere}
             onSave={(edits) => void onSaveObservations(edits)}
           />

@@ -24,6 +24,7 @@
 // could check against a page.
 // ============================================================================
 import type { SqlLike } from "@/lib/record-atoms";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
 import { isDimensionSlot, type AttributeState, type AttributeUnit } from "@/lib/spec-vocab";
 
@@ -123,7 +124,7 @@ export async function loadSpecSummaries(
       sortOrder: Number(row.sort_order ?? 0),
       materialCode: row.material_code === null || row.material_code === undefined ? null : String(row.material_code),
       finishCode: row.finish_code === null || row.finish_code === undefined ? null : String(row.finish_code),
-      fieldName: row.field_name === null || row.field_name === undefined ? null : String(row.field_name),
+      fieldName: fieldDisplayName(row.field_name === null || row.field_name === undefined ? null : String(row.field_name)),
     });
     byRecord.set(recordId, list);
   }

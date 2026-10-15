@@ -27,6 +27,7 @@
 // says so beside the action.
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { heldReading, type HeldTarget, type Proposal } from "@/lib/spec-document";
 import { composeDimensionCell } from "@/lib/dimensions";
 
@@ -146,7 +147,7 @@ export function describeChange(proposal: Proposal): ChangeDescription {
   }
 
   if (proposal.finish) {
-    const what = proposal.finish.specFieldName ?? "finish";
+    const what = fieldDisplayName(proposal.finish.specFieldName) ?? "finish";
     if (!proposal.recordId) return { kind: "unplaced", label: "Item not found", was: null, notable: true };
     const bill = overTheBill(proposal, what);
     if (bill) return bill;

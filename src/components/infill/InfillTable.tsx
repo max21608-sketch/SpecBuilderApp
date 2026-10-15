@@ -41,6 +41,7 @@
 // — a row nobody would know to look for.
 // ============================================================================
 import { useMemo, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
 import TgqCount from "@/components/drafts/TgqCount";
@@ -161,7 +162,7 @@ export default function InfillTable({
     return questions.filter((question) => {
       if (filters.tier !== "all" && question.tier !== filters.tier) return false;
       if (filters.state && question.state !== filters.state) return false;
-      if (text && !lineMatched && !`${question.prompt} ${question.fieldLabel ?? ""}`.toLowerCase().includes(text)) {
+      if (text && !lineMatched && !`${question.prompt} ${question.fieldLabel ?? ""} ${fieldDisplayName(question.fieldLabel) ?? ""}`.toLowerCase().includes(text)) {
         return false;
       }
       return true;

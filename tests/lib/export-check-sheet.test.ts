@@ -88,7 +88,7 @@ describe("composeCheckSheet", () => {
     expect(sheet.rows).toHaveLength(FIELDS_PER_RECORD);
     // The failure worth catching is a field the pack states and the file does
     // not carry, so a blank cell must still be a line to check.
-    expect(cell(sheet.rows, "Main timber finish")?.[7]).toBe("");
+    expect(cell(sheet.rows, "Timber finish 1 (BWS: Main timber finish)")?.[7]).toBe("");
   });
 
   it("includes a record that has nothing on it", () => {
@@ -155,7 +155,7 @@ describe("composeCheckSheet", () => {
       "Yarn YC04158", "Document", "S-100.pdf", "2",
     ]);
     // An answer is somebody filling in a checklist: there is no page to open.
-    expect(at(cell(sheet.rows, "Main timber finish"), "Exported value", "Came from", "Source document", "Page")).toEqual(
+    expect(at(cell(sheet.rows, "Timber finish 1 (BWS: Main timber finish)"), "Exported value", "Came from", "Source document", "Page")).toEqual(
       ["Walnut, satin lacquer", "Checklist", "", ""],
     );
     expect(at(cell(sheet.rows, "Client Code"), "Exported value", "Came from", "Source document", "Page")).toEqual([

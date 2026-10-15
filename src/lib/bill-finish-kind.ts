@@ -41,6 +41,7 @@ import { classifyCallout, FABRIC_SLOTS, METAL_SLOTS, TIMBER_SLOTS } from "@/lib/
 import { normaliseName } from "@/lib/matching";
 import { fabricOwnCode } from "@/lib/boq-row-kinds";
 import { BILL_FABRIC_WORDS, billFinishCodeKind } from "@/lib/material-words";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 
 export type BillFinishKind = "fabric" | "timber" | "metal" | "hardware" | "trim" | null;
 
@@ -57,7 +58,7 @@ const SLOTS: Partial<Record<Exclude<BillFinishKind, null>, readonly number[]>> =
   metal: METAL_SLOTS,
 };
 
-/** The BWS field names for the slots a finish line can fill (`db/seed/0001_spec_fields.sql`). */
+/** The BWS field names for the slots a finish line can fill (`db/seed/0001_spec_fields.sql`); a screen prints them through `fieldDisplayName`. */
 const SLOT_NAMES: Record<number, string> = {
   1: "COM 1",
   2: "COM 2",
@@ -201,7 +202,7 @@ const FULL: Partial<Record<Exclude<BillFinishKind, null>, string>> = {
 
 /** Where the review says the line goes: "→ COM 3", "→ kept, no BWS field (trim)". */
 export function describeBillFinishSlot(placement: BillFinishPlacement): string {
-  if (placement.jsonId !== null) return `→ ${SLOT_NAMES[placement.jsonId] ?? `field ${placement.jsonId}`}`;
+  if (placement.jsonId !== null) return `→ ${fieldDisplayName(SLOT_NAMES[placement.jsonId] ?? null, placement.jsonId) ?? `field ${placement.jsonId}`}`;
   if (placement.kept === "full" && placement.kind) return `→ kept, ${FULL[placement.kind] ?? "its fields are full"}`;
   if (placement.kind === null) return "→ kept, no BWS field (its code and words do not say what it is)";
   return `→ kept, no BWS field (${placement.kind})`;

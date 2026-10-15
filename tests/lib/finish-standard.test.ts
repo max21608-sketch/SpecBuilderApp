@@ -74,7 +74,7 @@ describe("which list a code's BW finish comes from — paletteForFinish", () => 
     expect(reading.palette?.key).toBe("bws_timber_finish");
     expect(reading.from).toBe("fields");
     expect(reading.mixed).toBe(false);
-    expect(reading.why).toMatch(/Main timber finish, Timber Finish 2/);
+    expect(reading.why).toMatch(/Timber finish 1, Timber Finish 2/);
   });
 
   it("metal fields read the metal list", () => {

@@ -34,6 +34,7 @@
 // reviewer's decision, taken once instead of once per row.
 // ============================================================================
 import { Fragment, useEffect, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import type { DimensionSlot, ItemLevel } from "@/lib/spec-vocab";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
@@ -694,7 +695,10 @@ export default function ItemCard({
               that confirming would replace, named before the press. */}
           <BillValuesAction
             groups={[{ item, entries: resolution?.billReplacements }]}
-            fieldName={(fieldId) => specFields.find((field) => field.id === fieldId)?.name ?? null}
+            fieldName={(fieldId) => {
+              const field = specFields.find((entry) => entry.id === fieldId);
+              return field ? fieldDisplayName(field.name, field.json_id) : null;
+            }}
             busy={busy}
             onSave={(edits) => {
               if (onSaveObservations) void onSaveObservations(edits);

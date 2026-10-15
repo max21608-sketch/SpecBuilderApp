@@ -32,6 +32,7 @@
 // no importer would accept.
 // ============================================================================
 import { compareRecordOrder } from "@/lib/record-label";
+import { fieldDisplayNameWithBws } from "@/lib/spec-field-label";
 import { describeStandard, standardInForce } from "@/lib/bw-standard";
 import {
   BWS_EXPORT_COLUMNS,
@@ -170,7 +171,7 @@ export function composeCheckSheet(scope: ExportScope): CheckSheet {
         record.itemDescription,
         record.runName,
         columnLetter(index),
-        column.name.trim(),
+        fieldDisplayNameWithBws(column.name, column.jsonId) ?? "",
         column.jsonId === null ? "" : String(column.jsonId),
         cell.value,
         cell.qualifier ?? "",

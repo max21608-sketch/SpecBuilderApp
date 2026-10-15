@@ -301,7 +301,7 @@ describe("revisionDescriptionRefusal", () => {
 
   it("never replaces a slot or a field another document filled", () => {
     expect(revisionDescriptionRefusal(result(), { fromBill: false, slots: ["W"], fieldIds: [] })).toMatch(/a W dimension/);
-    expect(revisionDescriptionRefusal(result(), { fromBill: false, slots: [], fieldIds: ["f-mtl1"] })).toMatch(/Main metal finish/);
+    expect(revisionDescriptionRefusal(result(), { fromBill: false, slots: [], fieldIds: ["f-mtl1"] })).toMatch(/Metal finish 1/);
   });
 });
 

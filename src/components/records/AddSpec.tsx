@@ -15,6 +15,7 @@
 // only way to record one that no document said.
 // ============================================================================
 import { useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
 import { ATTRIBUTE_GROUPS, ATTRIBUTE_GROUP_LABELS, ATTRIBUTE_UNITS, DIMENSION_SLOTS } from "@/lib/spec-vocab";
@@ -208,7 +209,7 @@ export default function AddSpec({
                   option's own title. */}
               {specFields.map((field) => (
                 <option key={field.id} value={field.id} title={`BWS field ${field.json_id}`}>
-                  {field.name.trim()}
+                  {fieldDisplayName(field.name, field.json_id)}
                 </option>
               ))}
             </select>

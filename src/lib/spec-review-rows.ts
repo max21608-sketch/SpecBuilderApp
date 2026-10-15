@@ -23,6 +23,7 @@
 // a fixture and the component tier only has to test what a click does.
 // ============================================================================
 import { describeChange, type ChangeDescription } from "@/lib/spec-change";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { proposalBlockers, type Blocker, type Proposal } from "@/lib/spec-document";
 
 export type SpecRowRun = {
@@ -142,7 +143,7 @@ export function groupIntoSpecRows(proposals: Proposal[], all: Proposal[]): SpecR
     // finish takes. Both say the same useful thing — where the value lands.
     const slots: string[] = [];
     for (const member of members) {
-      const label = member.dimension?.slot ?? member.finish?.specFieldName ?? null;
+      const label = member.dimension?.slot ?? fieldDisplayName(member.finish?.specFieldName) ?? null;
       if (label && !slots.includes(label)) slots.push(label);
     }
 

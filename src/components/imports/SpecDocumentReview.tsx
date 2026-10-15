@@ -25,6 +25,7 @@
 // and a key on it would remount the whole grid mid-edit.
 // ============================================================================
 import { useCallback, useMemo, useRef, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Spinner from "@/components/ui/Spinner";
@@ -781,7 +782,7 @@ export default function SpecDocumentReview({
                 {proposal.target?.recordLabel ?? proposal.recordLabel} ·{" "}
                 {proposal.target?.requirementPrompt ??
                   proposal.dimension?.slot ??
-                  proposal.finish?.specFieldName ??
+                  fieldDisplayName(proposal.finish?.specFieldName) ??
                   (proposal.note ? `note “${proposal.note.label}”` : (proposal.raw.attributeRaw ?? ""))}{" "}
                 → <span className="text-neutral-900">{proposal.applied?.value ?? "N/A"}</span>{" "}
                 <span className="text-xs">({proposal.applied?.state})</span>
@@ -1139,7 +1140,7 @@ function LandsOn({ row, members }: { row: SpecRow; members: Proposal[] }) {
   if (finish) {
     return (
       <span>
-        {finish.specFieldName ?? "no BWS field"}
+        {fieldDisplayName(finish.specFieldName) ?? "no BWS field"}
         {finish.codeRaw && (
           <Chip mono className="ml-1">
             {finish.codeRaw}
@@ -1506,7 +1507,7 @@ function DimensionRow({
 //
 // A fabric, timber, metal or piece of hardware. Like a dimension it writes an
 // ATTRIBUTE rather than an answer, because it carries a BWS FIELD — COM 1, COM
-// 2, Main timber finish — and which slot it takes depends on what the record
+// 2, Timber finish 1 (BWS: Main timber finish) — and which slot it takes depends on what the record
 // already holds. That is why an alias vocabulary was the wrong fix for these:
 // an alias would have to name one slot up front, and the next item contradicts
 // it.
@@ -1542,7 +1543,7 @@ function FinishRow({
             it keeps that palette rather than borrowing one of the eight
             meanings. Do not invent a violet tone for it. */}
         <span className="text-xs px-1.5 py-0.5 rounded border border-violet-300 bg-violet-50 text-violet-800 font-medium">
-          {finish.specFieldName ?? "no BWS field"}
+          {fieldDisplayName(finish.specFieldName) ?? "no BWS field"}
         </span>
         {finish.codeRaw && <span className="text-sm font-mono text-neutral-800">{finish.codeRaw}</span>}
         <span className="text-neutral-800">{finish.tbc ? "TBC" : (finish.value ?? "—")}</span>

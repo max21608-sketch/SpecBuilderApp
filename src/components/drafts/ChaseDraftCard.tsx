@@ -18,6 +18,7 @@
 // "I've sent this" — the one act in this app that records a communication —
 // was the same weight as Cancel.
 import { Fragment, useEffect, useRef, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { apiFetch } from "@/lib/api-fetch";
 import Link from "next/link";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
@@ -359,7 +360,7 @@ export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onC
                     {item.refs && <span className="font-mono text-neutral-900">{item.refs}</span>}
                   </Td>
                   <Td>{item.prompt}</Td>
-                  <Td muted>{item.fieldLabel?.trim() ?? "—"}</Td>
+                  <Td muted>{fieldDisplayName(item.fieldLabel) ?? "—"}</Td>
                   <Td muted>{item.currentValueText ?? "—"}</Td>
                   <Td className="text-right">
                     {item.staleReasons.length > 0 && (

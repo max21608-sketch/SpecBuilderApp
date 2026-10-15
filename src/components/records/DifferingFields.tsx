@@ -12,6 +12,7 @@
 // the same `PATCH /api/answers/[id]`. Nothing here writes a value on its own:
 // a blank stays `missing` until a person types one.
 import { useMemo } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import AnswerValue from "@/components/records/AnswerValue";
 import Chip from "@/components/ui/Chip";
 import { ANSWER_STATE_LABELS, answerStateTone, type AnswerState } from "@/lib/spec-vocab";
@@ -97,7 +98,7 @@ export default function DifferingFields<A extends DifferingAnswer>({
             key={answer.answer_id ?? `${answer.json_id}:${answer.prompt}`}
             className="grid gap-2 py-2 min-[760px]:grid-cols-[160px_minmax(0,1fr)_200px_90px] min-[760px]:items-start"
           >
-            <span className="text-[12.5px] font-medium text-neutral-900">{answer.field_name?.trim() || answer.prompt}</span>
+            <span className="text-[12.5px] font-medium text-neutral-900">{fieldDisplayName(answer.field_name, answer.json_id) || answer.prompt}</span>
             <AnswerValue
               palette={paletteFor(answer)}
               value={answer.value}
@@ -110,7 +111,7 @@ export default function DifferingFields<A extends DifferingAnswer>({
               defaultValue={answer.qualifier ?? ""}
               disabled={!answer.answer_id || savingId === answer.answer_id || !answer.value}
               placeholder="Where on the item"
-              aria-label={`Where on the item — ${answer.field_name?.trim() || answer.prompt}`}
+              aria-label={`Where on the item — ${fieldDisplayName(answer.field_name, answer.json_id) || answer.prompt}`}
               onBlur={(event) => {
                 const next = event.target.value.trim();
                 if (next === (answer.qualifier ?? "")) return;

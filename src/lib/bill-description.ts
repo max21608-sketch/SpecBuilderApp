@@ -93,6 +93,7 @@
 // PURE. No database; the BWS field register is passed in.
 // ============================================================================
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { readDimension, sizeLabel, sizeLineRefusal, type DimensionReading } from "@/lib/spec-dimensions";
 import { kindCode, leadingFinishCode, readFinishes, type FinishReading } from "@/lib/spec-finishes";
 import { calloutKindsNamed, classifyCallout, suggestSpecField, type SpecFieldEntry } from "@/lib/drawing-document";
@@ -1158,7 +1159,7 @@ export function revisionDescriptionRefusal(plan: BillDescriptionPlan, held: Held
       (attribute.specFieldId !== null && fieldIds.has(attribute.specFieldId)),
   );
   if (clash) {
-    return `The record this line continues already holds ${clash.slot ? `a ${clash.slot} dimension` : (clash.specFieldName ?? "that field")} from another document, so nothing from this description is written — replacing what a document said is a person's decision, on the record's Specs tab.`;
+    return `The record this line continues already holds ${clash.slot ? `a ${clash.slot} dimension` : (fieldDisplayName(clash.specFieldName) ?? "that field")} from another document, so nothing from this description is written — replacing what a document said is a person's decision, on the record's Specs tab.`;
   }
   return null;
 }

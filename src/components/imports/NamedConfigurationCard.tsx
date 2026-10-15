@@ -31,6 +31,7 @@
 // THE CONFIRM IS UNCHANGED: one request per PAGE, each atomic, in page order.
 // ============================================================================
 import { Fragment, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { composeDimensionCell } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { isMeasuredRow, oneLinePerPhase, toggledTargets, type DrawingItem, type DrawingObservation } from "@/lib/drawing-document";
@@ -862,7 +863,10 @@ export default function NamedConfigurationCard({
           {/* THE BILL'S VALUES, ONE PRESS FOR THE CARD (brief G). */}
           <BillValuesAction
             groups={pendingMembers.map((member) => ({ item: member.item, entries: member.resolution?.billReplacements }))}
-            fieldName={(fieldId) => specFields.find((field) => field.id === fieldId)?.name ?? null}
+            fieldName={(fieldId) => {
+              const field = specFields.find((entry) => entry.id === fieldId);
+              return field ? fieldDisplayName(field.name, field.json_id) : null;
+            }}
             busy={busyHere}
             onSave={(edits) => void onSaveObservations(edits)}
           />

@@ -20,6 +20,7 @@
 // half of the email they land in, is the server's answer and is untouched.
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import type { QuestionTier } from "@/lib/tgq";
 import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 
@@ -531,7 +532,7 @@ export function groupByQuestion<Q extends QuestionGroupable>(questions: readonly
         // The BWS field's name is what the two categories AGREE on; a prompt is
         // one sheet's wording of it. Where there is no field, the prompt is all
         // there is and the first one seen stands for the group.
-        heading: question.fieldLabel?.trim() || question.prompt.trim() || "Unnamed question",
+        heading: fieldDisplayName(question.fieldLabel) || question.prompt.trim() || "Unnamed question",
         fieldLabel: question.fieldLabel,
         toQuote: 0,
         projectWide: 0,

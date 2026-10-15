@@ -25,6 +25,7 @@
 // reload is `composeDimensionCell`'s own text again.
 // ============================================================================
 import { useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import { TONE } from "@/components/ui/tone";
@@ -73,7 +74,7 @@ function becomes(attribute: PlannedAttribute): string {
     }
     return `${DIMENSION_SLOT_LABELS[attribute.slot]} ${attribute.value}${attribute.unit ?? ""}`;
   }
-  if (isFinish(attribute)) return attribute.specFieldName ? `${attribute.specFieldName}` : "a finish in no BWS field";
+  if (isFinish(attribute)) return fieldDisplayName(attribute.specFieldName) ?? "a finish in no BWS field";
   return attribute.state === "tbc" ? "a note, TBC" : "a note";
 }
 
@@ -119,7 +120,7 @@ export function BillDescriptionSummary({
         }
         finishes={finishes.map((attribute, index) => ({
           key: `${attribute.materialCode ?? "finish"}-${index}`,
-          label: `${attribute.materialCode ?? "—"} → ${attribute.specFieldName ?? "no field"}`,
+          label: `${attribute.materialCode ?? "—"} → ${fieldDisplayName(attribute.specFieldName) ?? "no field"}`,
           tone: attribute.specFieldId ? "plain" : "blocked",
           title: attribute.value,
         }))}

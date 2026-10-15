@@ -25,6 +25,7 @@
 // Now both columns begin with a box at the same top edge.
 // ============================================================================
 import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
@@ -1358,7 +1359,7 @@ function RecordView() {
                                       attribute.json_id !== null ? `BWS field ${attribute.json_id}` : undefined
                                     }
                                   >
-                                    {attribute.field_name.trim()}
+                                    {fieldDisplayName(attribute.field_name, attribute.json_id)}
                                     {attribute.dimension_slot ? ` (${attribute.dimension_slot})` : ""}
                                   </span>
                                 ) : attribute.dimension_slot ? (

@@ -37,6 +37,7 @@
 // accept control the level picker documents.
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import {
   ANSWER_STATES,
@@ -416,7 +417,7 @@ export default function RecordChecklist({
 
   const matches = (answer: ChecklistAnswer): boolean => {
     const term = search.trim().toLowerCase();
-    if (term && !`${answer.prompt} ${answer.field_name ?? ""} ${answer.value ?? ""}`.toLowerCase().includes(term)) {
+    if (term && !`${answer.prompt} ${answer.field_name ?? ""} ${fieldDisplayName(answer.field_name, answer.json_id) ?? ""} ${answer.value ?? ""}`.toLowerCase().includes(term)) {
       return false;
     }
     if (focus === null) return true;
@@ -747,7 +748,7 @@ export default function RecordChecklist({
                           title={answer.json_id !== null ? `BWS field ${answer.json_id}` : undefined}
                           className="mt-0.5 block text-[11px] text-neutral-400"
                         >
-                          {answer.field_name.trim()}
+                          {fieldDisplayName(answer.field_name, answer.json_id)}
                         </span>
                       )}
                     </span>

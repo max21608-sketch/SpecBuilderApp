@@ -37,6 +37,7 @@
 // ============================================================================
 import type { FinishKind } from "@/lib/finishes";
 import type { Palette } from "@/lib/palettes";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 
 /** The two fields whose lists a KIND reads, by `spec_fields.json_id`. */
 export const KIND_PALETTE_FIELD: Partial<Record<FinishKind, number>> = {
@@ -63,7 +64,7 @@ export type FinishPaletteReading = {
 };
 
 function fieldList(uses: readonly FinishUse[]): string {
-  const names = [...new Set(uses.map((use) => use.fieldName?.trim()).filter((name): name is string => Boolean(name)))];
+  const names = [...new Set(uses.map((use) => fieldDisplayName(use.fieldName, use.jsonId)).filter((name): name is string => Boolean(name)))];
   return names.length > 0 ? names.join(", ") : "BWS fields";
 }
 

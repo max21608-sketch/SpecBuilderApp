@@ -53,7 +53,7 @@ export default function BillValuesAction({
   onSave,
 }: {
   groups: readonly BillValuesGroup[];
-  /** A BWS field's name, for a finish line: "Main metal finish MTL-01 → …". */
+  /** A BWS field's name as a screen prints it (`fieldDisplayName`), for a finish line: "Metal finish 1 MTL-01 → …". */
   fieldName: (fieldId: string) => string | null;
   busy: boolean;
   /** Every row's acknowledgements in ONE batched save, reloaded once. */

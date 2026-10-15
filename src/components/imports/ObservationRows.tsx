@@ -22,6 +22,7 @@
 // its own source page. Nothing here knows which of those it is doing.
 // ============================================================================
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import {
   ATTRIBUTE_GROUPS,
   ATTRIBUTE_GROUP_LABELS,
@@ -1200,7 +1201,7 @@ export function ObservationRow({
             <option value="">No BWS field</option>
             {specFields.map((field) => (
               <option key={field.id} value={field.id}>
-                {field.name}
+                {fieldDisplayName(field.name, field.json_id)}
               </option>
             ))}
           </select>
@@ -1459,7 +1460,7 @@ function ClashAnswers({
           disabled={busy}
           onClick={() => onAnswer({ kind: "move", observationId: move.observationId, fieldId: move.fieldId! })}
         >
-          Two {clash.fabric ? "fabrics" : "finishes"} — move page {page(move)} to {move.fieldName}
+          Two {clash.fabric ? "fabrics" : "finishes"} — move page {page(move)} to {fieldDisplayName(move.fieldName)}
         </Button>
       ) : (
         <span className="text-neutral-600">

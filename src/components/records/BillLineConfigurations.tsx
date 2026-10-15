@@ -32,6 +32,7 @@
 // and the screen reloads so the next attempt is against what is there.
 // ============================================================================
 import { Fragment, useMemo, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import Button from "@/components/ui/Button";
@@ -117,7 +118,7 @@ function fieldOf(row: { fieldName: string | null; dimensionSlot: DimensionSlot |
   if (row.fieldName) {
     return (
       <span title={row.jsonId !== null && row.jsonId !== undefined ? `BWS field ${row.jsonId}` : undefined}>
-        {row.fieldName.trim()}
+        {fieldDisplayName(row.fieldName, row.jsonId)}
         {row.dimensionSlot ? ` (${row.dimensionSlot})` : ""}
       </span>
     );
@@ -734,7 +735,7 @@ function AddToAll({
                   .filter((field) => field.json_id !== 3)
                   .map((field) => (
                     <option key={field.id} value={field.id}>
-                      {field.name.trim()}
+                      {fieldDisplayName(field.name, field.json_id)}
                     </option>
                   ))}
               </select>

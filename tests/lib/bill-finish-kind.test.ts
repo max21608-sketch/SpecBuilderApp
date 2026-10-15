@@ -115,7 +115,7 @@ describe("decideBillFinishSlot — the next slot of the line's kind, or kept wit
 
   it("says where each goes, in the review's words", () => {
     expect(describeBillFinishSlot(decideBillFinishSlot("fabric", taken(1, 2)))).toBe("→ COM 3");
-    expect(describeBillFinishSlot(decideBillFinishSlot("metal", taken()))).toBe("→ Main metal finish");
+    expect(describeBillFinishSlot(decideBillFinishSlot("metal", taken()))).toBe("→ Metal finish 1");
     expect(describeBillFinishSlot(decideBillFinishSlot("timber", taken(4)))).toBe("→ Timber Finish 2");
     expect(describeBillFinishSlot(decideBillFinishSlot("fabric", taken(1, 2, 14)))).toBe("→ kept, COM 1–3 are full");
     expect(describeBillFinishSlot(decideBillFinishSlot("metal", taken(5, 35)))).toBe("→ kept, both metal finishes are full");
@@ -176,9 +176,9 @@ describe("planBillFabrics says where every finish line under one item goes", () 
     expect([1, 2, 3, 4, 5, 6, 7].map((index) => out.get(`0:${index}`)?.goesTo)).toEqual([
       "→ COM 1",
       "→ COM 2",
-      "→ Main metal finish",
+      "→ Metal finish 1",
       "→ COM 3",
-      "→ Main timber finish",
+      "→ Timber finish 1",
       "→ kept, COM 1–3 are full",
       "→ kept, no BWS field (trim)",
     ]);

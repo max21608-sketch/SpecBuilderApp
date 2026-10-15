@@ -53,6 +53,7 @@
 // the draft. It is the same distinction the footer makes in words.
 // ============================================================================
 import { useMemo, useState } from "react";
+import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
 import TgqCount from "@/components/drafts/TgqCount";
@@ -276,7 +277,7 @@ export default function ChaseQuestionTable({
       if (!filters.showReadiness && question.requirementKind === "readiness") return false;
       if (!waitingValue && question.waiting) return false;
       if (filters.state && question.state !== filters.state) return false;
-      if (text && !lineHit && !`${question.prompt} ${question.fieldLabel ?? ""}`.toLowerCase().includes(text)) {
+      if (text && !lineHit && !`${question.prompt} ${question.fieldLabel ?? ""} ${fieldDisplayName(question.fieldLabel) ?? ""}`.toLowerCase().includes(text)) {
         return false;
       }
       return true;
@@ -1022,7 +1023,7 @@ function QuestionRows({
               />
               <span className="text-neutral-900">{question.prompt}</span>
               {question.fieldLabel && (
-                <span className="block pl-3.5 text-[11px] text-neutral-500">BWS: {question.fieldLabel.trim()}</span>
+                <span className="block pl-3.5 text-[11px] text-neutral-500">BWS: {fieldDisplayName(question.fieldLabel)}</span>
               )}
             </Td>
             <Td>
