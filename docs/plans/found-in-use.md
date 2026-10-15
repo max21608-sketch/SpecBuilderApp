@@ -40,6 +40,17 @@ PILOT v1.11, project *P16717 — ronnie-scotts-lbpco*, the bill review of
 `RONNIE SCOTTS ST4 Procurement Schedule (converted).xlsx`. Timestamps are into
 the recording, and each one marks a frame that was looked at.
 
+### `W3400 x D650 x H900mm SH450` reads W and D with no unit — OPEN (seen by C2's walk, local stack)
+
+When a size line ends with `SH450` after the unit, W and D come out unitless.
+Seen on an invented bill during the C2 walk. Not diagnosed.
+
+### The pack screen calls a waiting transcribed bill "Ready to review" — OPEN (seen by C2's walk)
+
+A PDF bill registered WAITING for its transcription (`pdfTranscription.state =
+"waiting"`, `sheets: []`) shows on the pack screen as "Ready to review". It
+should say that it is waiting to be transcribed.
+
 ### A Dims line stating only the seat height is dropped as "the same size again" — FIXED 2026-10-15 (`dfed295`)
 
 The bench SO-03 (frame 24:22) and the sofa SO-04 (frame 26:10) each have a

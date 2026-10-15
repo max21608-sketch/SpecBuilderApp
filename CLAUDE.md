@@ -901,9 +901,10 @@ its drawings, specs and picture over a dot; and **`.xls`, `.xlsb`, `.xlsm`,
 `.ods` and `.numbers` are refused in the browser before a byte is stored**,
 with *save as .xlsx* as the way out, while `.csv`/`.tsv` proceed and the drop
 zone says so. A bill with no quantity column proceeds with `qty` null and BOTH
-screens now say *quantity not given* — never 1. A bill inside a PDF is
-refused at classify time (`fileDocument`, the exact step; a certain answer
-only) so no charged read starts. Two bills in one pack both stage and the
+screens now say *quantity not given* — never 1. A bill inside a PDF was
+refused at classify time until 2026-10-15. **Since then it is read by its
+text, or else transcribed:** see *A PDF bill is read by its text* below. Two
+bills in one pack both stage and the
 pack screen says nothing is paired. Recorded and NOT fixed: a subtotal or
 section row that carries a description becomes a spec record with the
 subtotal's figure as its quantity — since 2026-09-23 a `section` or
@@ -2851,8 +2852,8 @@ lines beneath it — sent as PDFs printed from Excel. Four things, each a trap:
   line was noted as "the same size again", and the seat height was lost on
   pilot. **`700 DIA X 710MM` still gives the bare 710 no slot** (the
   mixed-line rule is unchanged). The note now says the line gives it no
-  letter, and the review offers a slot beside it (`placedParts`). Nothing
-  picks one.
+  letter, and since workstream E (`be090a6`) the review offers a slot for
+  EVERY figure on every size line. Nothing picks one.
 - **Bare figures placed in printed order now say so**, and name the column
   heading's own order where it prints one: this schedule heads it "L X W X H"
   and prints a sofa as `800 X 1700 X 780MM`. `L` is still not a slot; the
@@ -2910,6 +2911,64 @@ calls `fieldDisplayName`, and a test holds the map against seed 0001. The 17
 checklist questions worded "Main timber finish" DISPLAY the new name and keep
 their seeded wording, because rewording them would make every unsent chase
 draft stale.
+
+### A PDF bill is read by its text, and the workbook it makes is the bill
+
+`src/lib/pdf-bill.ts`, `src/lib/pdf-bill-source.ts`, `src/app/api/imports/route.ts`
+(`registerPdfBoq`), `src/app/api/imports/classify/route.ts`,
+`tools/pdf-schedule-to-xlsx.ts` (now a thin wrapper). Built 2026-10-15 (C1,
+`7654fdf`) from the Ronnie Scott's procurement schedules, which exist only as
+PDFs printed from Excel.
+
+- **A PDF printed from a spreadsheet is put back into cells by POSITION, by
+  code.** The header is found by its quantity heading, and rows anchor on the
+  quantity. No model reads a cell.
+- **The workbook is stored BESIDE the PDF and is the run's source.** So the
+  Columns panel, the structure read, a person's columns and the confirm are
+  all unchanged. The PDF is a second attachment (`boq_pdf`). Each line knows
+  its page through `parsed.pdfSource`, which is kept on the DOCUMENT, never on
+  the line, so that resetting columns cannot lose it. The review links each
+  line to its page.
+- **A header needs TWO MORE headings that the registers know whole, and no
+  prose in its band.** Before that rule, a spec sheet's "QUANTITY : 2" and a
+  preamble's "quantities and dimensions supplied by…" each read as a bill.
+- **The classifier files the Ronnie Scott's schedules as FF&E schedules**,
+  with certainty, and a prompt line did not move it (measured, then
+  reverted). So where the model names a schedule and the text reads as a
+  bill's table, the row is HELD with the next step in one sentence. Neither
+  reading wins.
+- Refused in ONE sentence (`pdfBillRefusal`), with the detail behind "Why".
+  Pictures are not carried.
+- Measured on the three real PDFs: 575 of 575 staged fields equal to the
+  hand-converted workbook. 47 non-bill real PDFs: none reads as a bill.
+
+### A PDF bill code cannot read is transcribed, and every line says so
+
+`src/lib/pdf-bill-transcribe.ts`, `src/lib/pdf-bill-checks.ts`,
+`src/app/api/imports/[id]/transcribe/route.ts`, `PdfTranscriptionPanel.tsx`.
+Built 2026-10-15 (C2, `a49ce76`…`6124f58`). **This is the one bill whose
+cells a model writes, and it is the ONE exception to "code reads every cell".**
+Max approved it in writing on 2026-10-15: "a PDF bill with no usable text
+layer may be transcribed by the model, every line marked transcribed with its
+page and checked by a person."
+
+- **Registration holds it WAITING, and nothing is charged.** The review starts
+  the transcription ONCE and never retries it after a failure. It reads in
+  two-page windows, six in flight, up to 24 pages; past that it is refused in
+  words.
+- **The output is the SAME grid a sheet is**, stored as a workbook beside the
+  PDF and read by the ordinary reader. So everything after it is unchanged,
+  the structure read included.
+- **Every line is marked transcribed, with its page.** Code cross-checks three
+  things: printed quantity totals, codes against any text layer, and the
+  model's own "unclear". A failure is red on the line, and in a red list
+  APART from what the confirm waits on. The confirm is unchanged, and the
+  reviewer is the gate.
+- A whole-bill total that fails points only at pages whose own total failed.
+- A scan is now classified (one small read). A scan read as a schedule, or as
+  unclear, is held with the way to Bill.
+- Measured on an invented two-page bill rendered as pictures only: 18 of 18
+  lines exact, 15 s. **A real scanned bill has not been through it.**
 
 ### A bill's own specification read resolves by ROW, and a long sheet is read in windows
 
@@ -4262,8 +4321,21 @@ checks a value. But it is not what the person reads first.
 - "Correct" is now "Edit value".
 - The blockers themselves are unchanged: the list only shortens them and
   points at them.
-- **Not yet on the two configuration cards**, whose rows sit on
-  per-configuration tabs.
+- The two configuration cards carry the list too
+  (`configurationNeedsYou`). A link opens the configuration's tab first.
+- **The dimension menu, reworked (workstream E, `be090a6`).** The bill's
+  expanded line and the drawing card show ONE row per figure, each with one
+  W · D · H · SH · Dia · note picker (`SlotPicker`), and what BWS receives in
+  large type at the top (`WhatBwsReceives`).
+  - Every figure a bill line prints can take a slot (`LineFigure`). A figure
+    not on the placed line is keyed `<line> | <part>`, and keys stored before
+    this are unchanged.
+  - Picking a slot another figure holds moves that holder to a note in the
+    same write (`slotChangeFor`, the drawing card's swap rule).
+  - The bill as printed is labelled as the document and shown last.
+  - Not reworked yet: the configuration cards' geometry tables.
+  - The mock-up (`docs/design/dimension-picker-mockup.html`) was built
+    without Max's sign-off, at his "keep going". His walk is outstanding.
 
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
@@ -4867,14 +4939,9 @@ proposed standard holding at TBC, layouts saved per specifier).
   the same sitting and the same person.
 
 **Explicitly excluded, so they are not built speculatively:** feeding preamble
-notes into later model calls; a BWS *import* file carrying job numbers; PDF bills of
-quantities (DECIDED YES by Max on 2026-10-15, NOT YET BUILT, so still refused
-at classify. They will be read by CODE from the text layer first (C1). For a
-PDF with no usable text layer, Max approved in writing on 2026-10-15 that the
-model may transcribe it, with every line marked transcribed, carrying its page,
-and checked by a person (C2, after C1). That is the ONE exception to "code reads
-every cell": `docs/plans/ronnie-scotts-followups-2026-10-15.md`); images and
-scanned documents; splitting an oversize drawing set. M6
+notes into later model calls; a BWS *import* file carrying job numbers; images
+and scanned documents OTHER than a bill (PDF bills are BUILT since 2026-10-15:
+*A PDF bill is read by its text*); splitting an oversize drawing set. M6
 VE rounds. Any write to BWS. Automatic email sending.
 SharePoint writes. (SharePoint READS as an intake source: Matthew asked about
 them on 2026-09-18 without requesting them. On 2026-10-12 he asked Max to
