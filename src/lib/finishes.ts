@@ -44,7 +44,7 @@ import { stackedTagCode } from "@/lib/material-words";
  */
 type FinishSql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
 
-export const FINISH_KINDS = ["fabric", "leather", "timber", "metal", "stone", "glass", "paint", "other"] as const;
+export const FINISH_KINDS = ["fabric", "leather", "timber", "metal", "stone", "glass", "paint", "trim", "other"] as const;
 export type FinishKind = (typeof FINISH_KINDS)[number];
 
 export const FINISH_KIND_LABELS: Record<FinishKind, string> = {
@@ -55,6 +55,7 @@ export const FINISH_KIND_LABELS: Record<FinishKind, string> = {
   stone: "Stone",
   glass: "Glass or mirror",
   paint: "Paint or lacquer",
+  trim: "Trim",
   other: "Other",
 };
 

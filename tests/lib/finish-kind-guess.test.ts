@@ -106,6 +106,30 @@ describe("suggestFinishKind on a three-part project code", () => {
   });
 });
 
+describe("suggestFinishKind: a trim (Ronnie Scott's COM list, 2026-10-15)", () => {
+  it("reads TR and a number, and a bill's F-TR, as a trim", () => {
+    // TR_03 sits under "> Please Select <" on the COM list, so its code is
+    // the only thing that says it is a trim; its words are a silk.
+    expect(suggestFinishKind({ code: "TR_03", description: "ORISSA SILK; Colour: CHESTNUT" })).toEqual({
+      kind: "trim",
+      reason: "the code TR_03 says so",
+    });
+    expect(suggestFinishKind({ code: "TR-02", description: null })?.kind).toBe("trim");
+    expect(suggestFinishKind({ code: "F-TR-01", description: null })?.kind).toBe("trim");
+  });
+
+  it("does not read every code starting TR as a trim", () => {
+    expect(suggestFinishKind({ code: "TRV-01", description: "Travertine" })?.kind).toBe("stone");
+    expect(suggestFinishKind({ code: "TR_01A2", description: null })).toBeNull();
+  });
+
+  it("reads the word trim before the material it is made of", () => {
+    expect(suggestFinishKind({ code: "X-01", description: "Leather trim, saddle stitched" })?.kind).toBe("trim");
+    // A piping named by its cloth stays the cloth: only the word trim is read.
+    expect(suggestFinishKind({ code: "X-02", description: "Swiss velvet piping" })?.kind).toBe("fabric");
+  });
+});
+
 describe("suggestKindsFor", () => {
   it("leaves a finish somebody has already filed alone", () => {
     const out = suggestKindsFor([

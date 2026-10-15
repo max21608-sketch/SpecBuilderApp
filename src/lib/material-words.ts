@@ -117,6 +117,15 @@ export const GLASS_WORDS = ["glass", "mirror", "mirrored", "smoked-glass"] as co
 export const PAINT_WORDS = ["paint", "painted", "lacquer", "lacquered", "eggshell", "ral"] as const;
 
 /**
+ * A trim says so in one word. The Ronnie Scott's COM list (P16717,
+ * 2026-10-15) files `TR_01` "Swiss velvet piping" under a section headed
+ * TRIM, and Max asked for the kind the same evening. Only the word: a cord,
+ * a gimp or a piping is named by its cloth often enough ("velvet piping")
+ * that reading those words would file a fabric as a trim.
+ */
+export const TRIM_WORDS = ["trim", "trims"] as const;
+
+/**
  * The client's own finish code, read as evidence of what the callout IS.
  *
  * The page prints the code beside the swatch, so this is the page speaking

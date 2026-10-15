@@ -54,7 +54,9 @@ import {
   PAINT_WORDS,
   STONE_WORDS,
   TIMBER_EXTRA_WORDS,
+  TRIM_WORDS,
   TIMBER_MATERIAL_WORDS,
+  billFinishCodeKind,
   projectCodeGroup,
 } from "@/lib/material-words";
 import { NO_FIELD_CODE_PREFIXES } from "@/lib/spec-reading-vocab";
@@ -77,8 +79,13 @@ export type FinishKindSuggestion = {
  * STONE, GLASS AND PAINT BEFORE THE REST, because none of them appears in the
  * callout lists at all: a BWS spec field does not distinguish them, so the
  * drawings path never needed the words.
+ *
+ * TRIM FIRST OF ALL, because a trim is described by what it is made of: a
+ * "leather trim" or a "velvet trim" is a trim, and reading the material first
+ * would file it as the cloth.
  */
 const DESCRIPTION_WORDS: { kind: FinishKind; words: readonly string[] }[] = [
+  { kind: "trim", words: TRIM_WORDS },
   { kind: "leather", words: LEATHER_WORDS },
   { kind: "stone", words: STONE_WORDS },
   { kind: "glass", words: GLASS_WORDS },
@@ -120,6 +127,9 @@ const LIBRARY_CODE_PREFIXES: readonly { prefix: string; kind: FinishKind }[] = [
   ...NO_FIELD_CODE_PREFIXES.flatMap((entry) => (isFinishKindValue(entry.what) ? [{ prefix: entry.prefix, kind: entry.what }] : [])),
 ];
 
+/** `TR` and a number: `TR_01`, `TR-02`, `TR 3`. */
+const TRIM_CODE = /^\s*TR[-_\s]?\d{1,4}[A-Za-z]?\s*$/i;
+
 /**
  * What kind this finish looks like, or null where nothing written down says.
  *
@@ -142,6 +152,16 @@ export function suggestFinishKind(finish: {
   const prefix = LIBRARY_CODE_PREFIXES.find((entry) => letters.startsWith(entry.prefix));
   if (prefix) {
     return { kind: prefix.kind, reason: `the code ${finish.code.trim()} says so` };
+  }
+
+  // 1a. A TRIM CODE: `TR` and a number and nothing else (`TR_01`, `TR-02`,
+  //     the Ronnie Scott's COM list, 2026-10-15), or a bill's `F-TR-01`
+  //     (`billFinishCodeKind`, the bill path's own reader of that shape).
+  //     EXACT, not the prefix test above: `startsWith("tr")` would read a
+  //     `TRV-01` travertine as a trim. Only trim is read off the `F-` shape
+  //     here; `F-FA` / `F-MT` / `F-WD` are not asked for yet.
+  if (TRIM_CODE.test(finish.code) || billFinishCodeKind(finish.code) === "trim") {
+    return { kind: "trim", reason: `the code ${finish.code.trim()} says so` };
   }
 
   // 1b. A THREE-PART project code says what it is in its MIDDLE group —

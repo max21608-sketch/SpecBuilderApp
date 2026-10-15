@@ -304,6 +304,8 @@ describe("the kind, suggested and never filed", () => {
       reason: "the schedule files it under “TIMBER”",
     });
     expect(suggestEntryKind({ kindRaw: "STONE", nameRaw: null, descriptionRaw: null }, "AB-STN-01")?.kind).toBe("stone");
+    // Ronnie Scott's COM list, 2026-10-15: the section heading is TRIM.
+    expect(suggestEntryKind({ kindRaw: "TRIM", nameRaw: "SWISS VELVET PIPING", descriptionRaw: null }, "TR_01")?.kind).toBe("trim");
     expect(suggestEntryKind({ kindRaw: "METAL", nameRaw: null, descriptionRaw: null }, "AB-MTL-01")?.kind).toBe("metal");
   });
 
