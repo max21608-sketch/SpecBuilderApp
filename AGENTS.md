@@ -4819,10 +4819,12 @@ proposed standard holding at TBC, layouts saved per specifier).
 **Explicitly excluded, so they are not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; PDF bills of
 quantities (DECIDED YES by Max on 2026-10-15, NOT YET BUILT, so still refused
-at classify. They will be read by CODE from the text layer first, and the model
-will transcribe only as a marked exception after Max confirms that rule change
-in writing: `docs/plans/ronnie-scotts-followups-2026-10-15.md`, C1/C2); images
-and scanned documents; splitting an oversize drawing set. M6
+at classify. They will be read by CODE from the text layer first (C1). For a
+PDF with no usable text layer, Max approved in writing on 2026-10-15 that the
+model may transcribe it, with every line marked transcribed, carrying its page,
+and checked by a person (C2, after C1). That is the ONE exception to "code reads
+every cell": `docs/plans/ronnie-scotts-followups-2026-10-15.md`); images and
+scanned documents; splitting an oversize drawing set. M6
 VE rounds. Any write to BWS. Automatic email sending.
 SharePoint writes. (SharePoint READS as an intake source: Matthew asked about
 them on 2026-09-18 without requesting them. On 2026-10-12 he asked Max to

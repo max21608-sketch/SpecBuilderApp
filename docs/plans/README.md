@@ -42,6 +42,13 @@ Anthropic Console owner.
   reworked: every figure gets the slot picker. Mock-up first.
 - **TGQ-focused intake:** think about it, do not build it now.
 - **Q4 and Q6 are left, and flagged.**
+- **`Pouf` moves to Armchairs Benches Stools Sofas** as well. Max: "Yes, move
+  Pouf to Armchairs Benches Stools Sofas too".
+- **RULE CHANGE, approved in writing:** "a PDF bill with no usable text layer
+  may be transcribed by the model, every line marked transcribed with its page
+  and checked by a person." This amends 2026-09-23's "code reads every cell"
+  for that one case only (C2, after C1). Workstreams A and B started the same
+  evening.
 
 ## 2026-10-15 — Catch-up: Ronnie Scott's confirmed on pilot with Matthew
 

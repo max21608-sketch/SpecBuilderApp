@@ -207,8 +207,10 @@ bill's own category column, and the category a person set:
   read-only tool. CLAUDE.md's *Explicitly excluded* line comes out, and the
   bill section gains "a PDF bill is read by its text layer".
 
-**C2. Otherwise the model transcribes, as a marked exception. Max must say yes
-to this change of rule first.**
+**C2. Otherwise the model transcribes, as a marked exception. APPROVED by
+Max, 2026-10-15, in writing:** *"a PDF bill with no usable text layer may be
+transcribed by the model, every line marked transcribed with its page and
+checked by a person. Add C2 to the queue after C1."*
 
 - For a PDF with no usable text (a scan, or a designer's laid-out sheet):
   the model reads it in page windows into the SAME staged row shape. **Every
@@ -220,8 +222,8 @@ to this change of rule first.**
   a PDF with no text layer is transcribed by the model, every line marked,
   and a person checks it against its page". The confirm is not changed, so
   the human review stays the gate.
-- Not started until C1 has been used on a real bill, and until Max has
-  confirmed the rule change.
+- Starts after C1 is on staging, because it reuses C1's route into the bill
+  pipeline. It is queued, and the rule change is approved.
 
 ### D — Data on pilot (Max's, Claude cannot write pilot)
 
