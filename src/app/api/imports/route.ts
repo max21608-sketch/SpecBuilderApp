@@ -73,7 +73,7 @@
 // not be tested end to end without a tunnel.
 import { z } from "zod";
 import { readSpreadsheetSheets, pdfHasTextLayer } from "@/lib/intake-source";
-import { stageBillRowImages } from "@/lib/bill-images";
+import { blobPictureStore, stageBillRowImages, type PictureStore } from "@/lib/bill-images";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind, outlookMsgAdvice, spreadsheetRefusal } from "@/lib/intake-source-types";
@@ -88,6 +88,17 @@ import { recordMessage } from "@/lib/email-ingest";
 import { assignMessage } from "@/lib/email-registration";
 import { withTransaction, transactionErrorResponse } from "@/lib/db-transaction";
 import { MAX_MODEL_PDF_BYTES } from "@/lib/upload-limits";
+import {
+  PDF_BILL_SHEET,
+  pdfBillRefusal,
+  pdfBillWorkbook,
+  pdfBillWorkbookFilename,
+  pdfBillWorkbookPathname,
+  readPdfBill,
+  type PdfBillSource,
+} from "@/lib/pdf-bill";
+
+const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export const maxDuration = 60;
 
@@ -402,8 +413,10 @@ async function registerSpecDocument(input: Registered, actor: string): Promise<R
 async function registerBlobBoq(input: Registered, actor: string): Promise<Response> {
   // A BOQ is a grid, and a client exports that grid as .xlsx or as .csv. The
   // DECLARED import type is what says this file is a bill; the extension only
-  // says how to read its bytes. A PDF still cannot be one — it has no cells.
+  // says how to read its bytes. A PDF is one too when it was printed from a
+  // spreadsheet: its cells are text, and `registerPdfBoq` puts them back.
   const kind = intakeSourceKind(input.filename, input.contentType);
+  if (kind === "pdf") return registerPdfBoq(input, actor);
   if (kind !== "xlsx" && kind !== "csv" && kind !== "tsv") {
     // `.xls` and its relations get the way out rather than only the refusal —
     // see `spreadsheetRefusal`. Nothing is parsed and nothing is staged.
@@ -428,6 +441,85 @@ async function registerBlobBoq(input: Registered, actor: string): Promise<Respon
   return parseBoqInto(input.projectId, String(attachment[0]?.id), input.filename, blob.bytes, actor, true, {
     batchId: input.batchId ?? null,
     contentType: blob.contentType || input.contentType || "",
+  });
+}
+
+// ---- BOQ, uploaded as a PDF -------------------------------------------------
+// ============================================================================
+// A BILL THAT ARRIVED AS A PDF, READ BY ITS TEXT (workstream C1, 2026-10-15).
+//
+// The PDF's text layer is put back into a grid by CODE (`pdf-bill.ts`): no
+// model reads a cell, so the rule that a bill's cells are copied exactly holds.
+// The workbook that builds is STORED BESIDE THE PDF, under the same project
+// prefix, by pathname — and it, not the PDF, is the run's source. That is the
+// whole design: from here every step is the ordinary bill path, unchanged —
+// the Columns panel, the model's structure read, a person's columns, the
+// review and the confirm all re-read "the stored spreadsheet", and there is
+// one. The PDF is kept as its own attachment, which the review links to, and
+// each staged line remembers its page (`pdfSource` on the staged document).
+//
+// REFUSED IN ONE SENTENCE where the text is not a table: a scan, a laid-out
+// sheet, a page with no quantity column. Nothing is recorded then.
+//
+// THE SEAM FOR C2. A PDF with no usable text layer is, once Max's approved
+// exception is built, transcribed by the model in page windows — every line
+// marked transcribed, with its page. It enters HERE, where `scanned` and
+// `!read.ok` refuse today, and produces the same `{ header, rows }` shape, so
+// everything below the read is shared.
+// ============================================================================
+async function registerPdfBoq(input: Registered, actor: string, store: PictureStore = blobPictureStore): Promise<Response> {
+  let blob;
+  try {
+    blob = await readTrustedBlob(input.pathname, input.projectId, { maxBytes: MAX_BOQ_BYTES });
+  } catch (cause) {
+    if (cause instanceof UntrustedBlobError) return json({ ok: false, error: cause.message }, 400);
+    throw cause;
+  }
+
+  const scanned = scannedPdfRefusal("pdf", pdfHasTextLayer(blob.bytes));
+  if (scanned) return json({ ok: false, error: scanned, field: "filename" }, 400);
+
+  const registers = await loadBoqReadingRegisters(sql);
+  const read = await readPdfBill(blob.bytes, { aliases: registers.aliases });
+  if (!read.ok) {
+    return json({ ok: false, error: pdfBillRefusal(read.code), detail: read.detail, code: read.code, field: "filename" }, 400);
+  }
+
+  const workbook = await pdfBillWorkbook(read, PDF_BILL_SHEET);
+  const workbookPathname = pdfBillWorkbookPathname(blob.pathname);
+  const workbookFilename = pdfBillWorkbookFilename(input.filename);
+  try {
+    await store(workbookPathname, workbook.bytes, XLSX_CONTENT_TYPE);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return json({ ok: false, error: `The bill was read, but its spreadsheet could not be stored: ${detail}` }, 502);
+  }
+
+  const pdfAttachment = await sql`
+    insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+    values ('project', ${input.projectId}, 'boq_pdf', ${blob.pathname}, ${input.filename},
+            ${blob.contentType || input.contentType || "application/pdf"}, ${blob.size}, ${actor})
+    returning id
+  `;
+  const workbookAttachment = await sql`
+    insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+    values ('project', ${input.projectId}, 'boq', ${workbookPathname}, ${workbookFilename},
+            ${XLSX_CONTENT_TYPE}, ${workbook.bytes.length}, ${actor})
+    returning id
+  `;
+
+  return parseBoqInto(input.projectId, String(workbookAttachment[0]?.id), workbookFilename, workbook.bytes, actor, true, {
+    batchId: input.batchId ?? null,
+    contentType: XLSX_CONTENT_TYPE,
+    // The phase is named after the PDF, not after "… (read from PDF)".
+    phaseFilename: input.filename,
+    pdfSource: {
+      attachmentId: String(pdfAttachment[0]?.id),
+      filename: input.filename,
+      sheet: PDF_BILL_SHEET,
+      firstRow: workbook.firstRow,
+      pages: workbook.rowPages,
+    },
   });
 }
 
@@ -486,7 +578,14 @@ async function parseBoqInto(
   bytes: Buffer,
   actor: string,
   sourcePreserved: boolean,
-  options: { batchId?: string | null; contentType?: string } = {},
+  options: {
+    batchId?: string | null;
+    contentType?: string;
+    /** The name a phase is proposed from, where it is not `filename` (a PDF bill). */
+    phaseFilename?: string;
+    /** The PDF a bill was read from, and each line's page. */
+    pdfSource?: PdfBillSource;
+  } = {},
 ): Promise<Response> {
   const run = await sql`
     insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, created_by, updated_by)
@@ -519,7 +618,7 @@ async function parseBoqInto(
     const suggest = await loadLineSuggester(sql);
     const stagedSheets = proposePhaseNames(
       parsed.sheets.map((sheet) => stageSheet(sheet, suggest)),
-      filename,
+      options.phaseFilename ?? filename,
     );
     const lineCount = stagedSheets.reduce((total, sheet) => total + (sheet.ignored ? 0 : sheet.lines.length), 0);
     const skippedRows = parsed.sheets.reduce((total, sheet) => total + sheet.skippedRows, 0);
@@ -530,8 +629,10 @@ async function parseBoqInto(
     // (`bill-images.ts`). Only from a workbook whose original is KEPT — a bill
     // posted straight here has no stored source for a picture to sit beside —
     // and never at the cost of the bill: a failure is a sentence, not a refusal.
+    // A workbook built from a PDF's text holds no pictures — they are not
+    // cells — and the review says so beside the PDF link.
     const pictures =
-      sourcePreserved && intakeSourceKind(filename, options.contentType ?? "") === "xlsx"
+      sourcePreserved && !options.pdfSource && intakeSourceKind(filename, options.contentType ?? "") === "xlsx"
         ? await stageBillRowImages(bytes, { projectId, runId })
         : null;
 
@@ -544,6 +645,7 @@ async function parseBoqInto(
             sourcePreserved,
             sheets: stagedSheets,
             ...(pictures ? { rowImages: pictures.rowImages, rowImagesNote: pictures.rowImagesNote } : {}),
+            ...(options.pdfSource ? { pdfSource: options.pdfSource } : {}),
           })}::jsonb,
           updated_by = ${actor}
       where id = ${runId}

@@ -166,7 +166,9 @@ export type ClassifyResult =
        * Why this document cannot be filed at all, in the words a person needs,
        * or null. A REFUSAL, not a gap: a `decision` of null with nothing here
        * means "nobody knows yet, you decide", and with a sentence here it means
-       * "this is known and it is not something this app reads".
+       * "this is known and it is not something this app reads". Nothing in
+       * this file sets it today; the classify route sets it for a scan and for
+       * a PDF bill whose text is not a table.
        */
       unsupported: string | null;
       titleText: string | null;
@@ -227,34 +229,25 @@ export function classifyFailureOf(
 }
 
 /**
- * A BILL OF QUANTITIES INSIDE A PDF IS REFUSED, NOT READ AS A DRAWING.
+ * A BILL OF QUANTITIES INSIDE A PDF IS FILED AS A BILL, NEVER READ AS A DRAWING.
  *
  * ============================================================================
- * Variance matrix §6.10.a row 8, and `CLAUDE.md`'s own excluded list: "PDF
- * bills of quantities". A bill is a GRID and this app reads one with code, out
- * of cells; a PDF has no cells. The two wrong answers are both available and
- * both expensive:
+ * Variance matrix §6.10.a row 8 refused it outright, and `CLAUDE.md` excluded
+ * "PDF bills of quantities": a bill is a GRID and this app reads one with
+ * code, out of cells. Since workstream C1 (2026-10-15, Max: yes) a PDF PRINTED
+ * FROM A SPREADSHEET still is one — its cells are text at positions, and
+ * `pdf-bill.ts` puts the grid back by code, with no model. So a certain "bill"
+ * on a PDF is filed as a bill here, and the classify route then reads its text
+ * (`readPdfBill`): a table holds, and anything else is HELD with
+ * `pdfBillRefusal`'s one sentence, before a byte is registered.
  *
- *   `unclear` — true but useless. It leaves the dropdown empty, somebody picks
- *   "Bill of quantities" by hand, and registration refuses it one screen later
- *   with a sentence about file types rather than about what they just read.
- *
- *   `shop_drawings` — the plausible wrong answer. It IS a PDF, the prompt for
- *   drawings would take it, and it would come back as a charged read of a
- *   spreadsheet printed on paper, with proposals nobody can use.
- *
- * So the model answers what the document IS, as always, and this — the exact
- * step, in code — decides it cannot be filed. It fires only on a CERTAIN
+ * The wrong answer this still exists to avoid is `shop_drawings` — it IS a
+ * PDF, the drawings prompt would take it, and it would come back as a charged
+ * read of a spreadsheet printed on paper. And it still fires only on a CERTAIN
  * answer: an uncertain "possibly a bill" on a PDF may well be a drawing set,
- * which is supported, and telling somebody to export that to Excel would be a
- * confident wrong instruction. Uncertain stays "you decide", unchanged.
+ * and stays "you decide", unchanged.
  * ============================================================================
  */
-export const BOQ_AS_PDF =
-  "This reads as a bill of quantities, and a bill inside a PDF is not supported — this app reads a bill " +
-  "from a spreadsheet's cells. Export it to .xlsx or .csv and upload that. If it is a drawing set rather " +
-  "than a bill, say so beside the file.";
-
 /**
  * A SCANNED PDF IS REFUSED BEFORE ANYTHING READS IT.
  *
@@ -264,8 +257,8 @@ export const BOQ_AS_PDF =
  * review: about four minutes and one charged read for an empty screen, and the
  * person who uploaded it has no way of telling that from a pack that failed.
  *
- * CERTAIN OR PROCEED, which is `BOQ_AS_PDF`'s rule and the harder half here.
- * `pdfHasTextLayer` answers null for anything it cannot decode, and null
+ * CERTAIN OR PROCEED, the rule a bill in a PDF is filed under too, and the
+ * harder half here. `pdfHasTextLayer` answers null for anything it cannot decode, and null
  * PROCEEDS — a refusal is a document nobody can get into the app at all, and
  * the naive version of this test (no `Tj` in the raw bytes) calls every modern
  * PDF scanned, because an exporter compresses its content streams. So only a
@@ -297,16 +290,17 @@ export function scannedPdfRefusal(
   return hasTextLayer === false ? SCANNED_PDF : null;
 }
 
-/** What to file this document as, and why it cannot be filed at all. */
-export function fileDocument(
-  answer: { genre: DocumentGenre; certain: boolean },
-  sourceType: DocumentSource["type"],
-): { decision: KindDecision | null; unsupported: string | null } {
+/**
+ * What to file this document as. `unsupported` is always null here since C1
+ * (a bill in a PDF is filed as a bill); the route's own refusals are read off
+ * the bytes, and the field is kept so the answer has one shape.
+ */
+export function fileDocument(answer: { genre: DocumentGenre; certain: boolean }): {
+  decision: KindDecision | null;
+  unsupported: string | null;
+} {
   // UNSURE FILLS NOTHING IN, and says nothing about support either.
   if (answer.genre === "unclear" || !answer.certain) return { decision: null, unsupported: null };
-  if (answer.genre === "bill_of_quantities" && sourceType === "pdf") {
-    return { decision: null, unsupported: BOQ_AS_PDF };
-  }
   return { decision: KIND_FROM_GENRE[answer.genre], unsupported: null };
 }
 
@@ -452,7 +446,7 @@ export async function classifyDocument(
   // nothing in where the model was unsure — a guess nobody is confident about
   // would spend a charged read under the wrong prompt, and the reviewer would
   // be checking output that answers a different question.
-  const filed = fileDocument({ genre, certain }, source.type);
+  const filed = fileDocument({ genre, certain });
   return {
     ok: true,
     genre,

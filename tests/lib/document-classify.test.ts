@@ -7,7 +7,6 @@
 // untestable and let it drift silently.
 import { describe, expect, it } from "vitest";
 import {
-  BOQ_AS_PDF,
   SCANNED_PDF,
   scannedPdfRefusal,
   ClassifyOutput,
@@ -90,41 +89,39 @@ describe("what comes back from the model", () => {
 // ============================================================================
 // VARIANCE MATRIX §6.10.a ROW 8 — A BILL OF QUANTITIES INSIDE A PDF.
 //
-// EXPECTED: REFUSES, at classify time, saying what it is and what to do —
-// rather than `unclear` or `shop_drawings`.
+// EXPECTED SINCE C1 (2026-10-15): FILED AS A BILL, never as `unclear` or
+// `shop_drawings`. Whether its text is a table is answered next, by the
+// classify route with `readPdfBill`, and a PDF that is not one is held with
+// `pdfBillRefusal`'s sentence (tests/lib/pdf-bill.test.ts).
 //
 // NO MODEL CALL HERE, as everywhere in this file: `fileDocument` is the exact
 // step and it is pure, so the whole rule is testable without spending a penny.
 // The model's own answer is the genre, which it already had a word for.
 // ============================================================================
 describe("a bill of quantities that arrived as a PDF", () => {
-  it("is refused with what it is and what to do about it", () => {
-    const filed = fileDocument({ genre: "bill_of_quantities", certain: true }, "pdf");
-    expect(filed.decision).toBeNull();
-    expect(filed.unsupported).toBe(BOQ_AS_PDF);
-    expect(filed.unsupported).toContain("not supported");
-    expect(filed.unsupported).toContain("Export it to .xlsx or .csv");
+  it("is filed as a bill, for its text to be read next", () => {
+    const filed = fileDocument({ genre: "bill_of_quantities", certain: true });
+    expect(filed).toEqual({ decision: KIND_FROM_GENRE.bill_of_quantities, unsupported: null });
   });
 
   it("is never filed as shop drawings — the plausible wrong answer", () => {
     // It IS a PDF, the drawings prompt would take it, and it would come back
     // as a charged read of a spreadsheet printed on paper.
-    const filed = fileDocument({ genre: "bill_of_quantities", certain: true }, "pdf");
+    const filed = fileDocument({ genre: "bill_of_quantities", certain: true });
     expect(filed.decision).not.toEqual(KIND_FROM_GENRE.shop_drawings);
-    expect(filed.decision).toBeNull();
   });
 
   it("still files a bill that arrived as a spreadsheet, exactly as before", () => {
-    const filed = fileDocument({ genre: "bill_of_quantities", certain: true }, "spreadsheet");
+    const filed = fileDocument({ genre: "bill_of_quantities", certain: true });
     expect(filed).toEqual({ decision: KIND_FROM_GENRE.bill_of_quantities, unsupported: null });
   });
 
   it("still files a real drawing set that arrived as a PDF", () => {
-    expect(fileDocument({ genre: "shop_drawings", certain: true }, "pdf")).toEqual({
+    expect(fileDocument({ genre: "shop_drawings", certain: true })).toEqual({
       decision: KIND_FROM_GENRE.shop_drawings,
       unsupported: null,
     });
-    expect(fileDocument({ genre: "specification_sheets", certain: true }, "pdf").decision).toEqual(
+    expect(fileDocument({ genre: "specification_sheets", certain: true }).decision).toEqual(
       KIND_FROM_GENRE.shop_drawings,
     );
   });
@@ -133,34 +130,21 @@ describe("a bill of quantities that arrived as a PDF", () => {
     // An uncertain "possibly a bill" on a PDF may well be a drawing set, which
     // IS supported — so "export it to Excel" would be a confident wrong
     // instruction. Unsure stays "you decide", with no advice attached.
-    expect(fileDocument({ genre: "bill_of_quantities", certain: false }, "pdf")).toEqual({
+    expect(fileDocument({ genre: "bill_of_quantities", certain: false })).toEqual({
       decision: null,
       unsupported: null,
     });
-    expect(fileDocument({ genre: "unclear", certain: true }, "pdf")).toEqual({
+    expect(fileDocument({ genre: "unclear", certain: true })).toEqual({
       decision: null,
       unsupported: null,
     });
   });
 
-  it("distinguishes a refusal from a gap by the sentence, not by the decision", () => {
-    // Both carry `decision: null`, and they mean opposite things: one asks a
-    // person, the other tells them the app does not read this.
-    const gap = fileDocument({ genre: "unclear", certain: true }, "pdf");
-    const refusal = fileDocument({ genre: "bill_of_quantities", certain: true }, "pdf");
-    expect(gap.decision).toBeNull();
-    expect(refusal.decision).toBeNull();
-    expect(gap.unsupported).toBeNull();
-    expect(refusal.unsupported).not.toBeNull();
-  });
-
-  it("files every other genre from a PDF and a spreadsheet alike", () => {
-    // The refusal is one rule about one genre, not a new class of outcome that
-    // every kind now has to be checked against.
+  it("refuses no genre: a scan and an unreadable PDF bill are refused off the bytes", () => {
+    // Both are the classify route's, which reads the file (classify-route.test.ts).
     for (const genre of DOCUMENT_GENRES) {
-      if (genre === "unclear" || genre === "bill_of_quantities") continue;
-      expect(fileDocument({ genre, certain: true }, "pdf").unsupported).toBeNull();
-      expect(fileDocument({ genre, certain: true }, "email").unsupported).toBeNull();
+      if (genre === "unclear") continue;
+      expect(fileDocument({ genre, certain: true }).unsupported).toBeNull();
     }
   });
 });
@@ -199,12 +183,11 @@ describe("a PDF with no text layer", () => {
     }
   });
 
-  it("is a different refusal from the model's own, and neither fires on unclear", () => {
+  it("is read off the bytes, and an unclear answer still refuses nothing", () => {
     // `fileDocument` reads an ANSWER and this reads the BYTES, so the two
     // cannot be folded together — and an `unclear` answer still files nothing
     // and refuses nothing, which is what makes "you decide" a real outcome.
-    expect(SCANNED_PDF).not.toBe(BOQ_AS_PDF);
-    expect(fileDocument({ genre: "unclear", certain: false }, "pdf").unsupported).toBeNull();
+    expect(fileDocument({ genre: "unclear", certain: false }).unsupported).toBeNull();
     expect(scannedPdfRefusal("pdf", true)).toBeNull();
   });
 });
@@ -253,9 +236,9 @@ describe("a tracker listing finish codes", () => {
   });
 
   it("still fills nothing in when the model is unsure", () => {
-    const filed = fileDocument({ genre: "finishes_schedule", certain: false }, "pdf");
+    const filed = fileDocument({ genre: "finishes_schedule", certain: false });
     expect(filed.decision).toBeNull();
-    const sure = fileDocument({ genre: "finishes_schedule", certain: true }, "pdf");
+    const sure = fileDocument({ genre: "finishes_schedule", certain: true });
     expect(sure.decision).toEqual({ importType: "spec_document", documentKind: "finishes_schedule" });
   });
 });

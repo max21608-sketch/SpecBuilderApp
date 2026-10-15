@@ -22,7 +22,7 @@
 // against those, and a hand-made stand-in would prove the stand-in.
 // ============================================================================
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildPdfOfPages } from "../fixtures/build-pdf.mjs";
+import { buildPdf, buildPdfOfPages } from "../fixtures/build-pdf.mjs";
 
 const create = vi.hoisted(() => vi.fn());
 
@@ -231,5 +231,83 @@ describe("the free paths are unchanged", () => {
     expect(body).toMatchObject({ ok: true, charged: false });
     expect(typeof body.unsupported).toBe("string");
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// A BILL IN A PDF (C1, 2026-10-15). The model says what the document IS; code
+// reads whether its text is a bill's table (`readPdfBill`), from the bytes
+// already in hand. Synthetic PDFs: invented codes placed the way a
+// spreadsheet prints them.
+// ============================================================================
+type Text = { x: number; y: number; str: string };
+/** A one-page schedule: FF&E CODE / DESCRIPTION / ORDER over QTY / UOM, two lines. */
+function scheduleTable(): Buffer {
+  const texts: Text[] = [
+    { x: 40, y: 530, str: "FF&E CODE" },
+    { x: 120, y: 530, str: "DESCRIPTION" },
+    { x: 400, y: 534, str: "ORDER" },
+    { x: 405, y: 526, str: "QTY" },
+    { x: 470, y: 530, str: "UOM" },
+    { x: 40, y: 490, str: "QA-CH-01" },
+    { x: 120, y: 490, str: "ARMCHAIR" },
+    { x: 411, y: 490, str: "9" },
+    { x: 470, y: 490, str: "EACH" },
+    { x: 40, y: 450, str: "QA-FB-01" },
+    { x: 120, y: 450, str: "FABRIC" },
+    { x: 411, y: 450, str: "13.5" },
+    { x: 470, y: 450, str: "METRE" },
+  ];
+  return buildPdf([{ width: 842, height: 595, texts }]);
+}
+
+describe("a bill in a PDF", () => {
+  it("files one whose text is a table as a bill, saying how many lines it read", async () => {
+    stored.bytes = scheduleTable();
+    answers({ genre: "bill_of_quantities", titleText: null, evidence: "line items with quantities", certain: true });
+    const { status, body } = await classify();
+    expect(status).toBe(200);
+    expect(body.decision).toEqual({ importType: "boq", documentKind: null });
+    expect(body.unsupported).toBeNull();
+    expect(body.pdfBill).toEqual({ lines: 2, pages: 1 });
+  });
+
+  it("holds one whose text is not a table, in one sentence with the detail beside it", async () => {
+    // A two-page PDF with a line of text per page: no header, no quantity.
+    answers({ genre: "bill_of_quantities", titleText: null, evidence: "headed BILL OF QUANTITIES", certain: true });
+    const { status, body } = await classify();
+    expect(status).toBe(200);
+    expect(body.decision).toBeNull();
+    expect(body.unsupported).toBe("This PDF bill could not be read: no quantity column was found. Upload the spreadsheet instead.");
+    expect(typeof body.unsupportedDetail).toBe("string");
+  });
+
+  it("holds one the model filed as an FF&E schedule when its text is a bill's table", async () => {
+    // The real Ronnie Scott's procurement schedules, filed as FF&E schedules
+    // with certainty: neither reading is allowed to win, and nothing is filed.
+    stored.bytes = scheduleTable();
+    answers({ genre: "ffe_schedule", titleText: "FF&E SPECIFICATION", evidence: "an FF&E specification", certain: true });
+    const { body } = await classify();
+    expect(body.decision).toBeNull();
+    expect(body.unsupported).toBeNull();
+    expect(body.held).toBe(
+      "Read as an FF&E schedule, but its text is a table of 2 lines with a quantity on each: if it is the bill, choose Bill of quantities.",
+    );
+    expect(body.genre).toBe("ffe_schedule");
+  });
+
+  it("leaves an FF&E schedule whose text is not a bill's table exactly as the model filed it", async () => {
+    answers({ genre: "ffe_schedule", titleText: null, evidence: "products by room", certain: true });
+    const { body } = await classify();
+    expect(body.decision).toEqual({ importType: "spec_document", documentKind: "ffe_schedule" });
+    expect(body.held).toBeUndefined();
+  });
+
+  it("never reads a drawing set's text as a bill", async () => {
+    stored.bytes = scheduleTable();
+    answers({ genre: "shop_drawings", titleText: null, evidence: "elevations", certain: true });
+    const { body } = await classify();
+    expect(body.decision).toEqual({ importType: "spec_document", documentKind: "shop_drawings" });
+    expect(body.held).toBeUndefined();
   });
 });

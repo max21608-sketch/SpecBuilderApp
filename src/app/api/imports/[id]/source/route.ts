@@ -24,12 +24,30 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!user) return json({ ok: false, error: "auth required" }, 401);
   const { id } = await context.params;
 
-  const rows = await sql`
-    select r.project_id, a.storage_path, a.filename, a.content_type
-    from intake_runs r
-    join attachments a on a.id = r.attachment_id
-    where r.id = ${id}
-  `;
+  // A BILL READ FROM A PDF has two documents: the run's source is the workbook
+  // its text was put back into, and `?document=pdf` is the PDF itself. Which
+  // attachment that is comes from the RUN'S OWN staged record, written by the
+  // server at registration, and must be an attachment of the run's project —
+  // the request names nothing but the run.
+  const document = new URL(request.url).searchParams.get("document");
+  if (document !== null && document !== "pdf") return json({ ok: false, error: "Unknown document." }, 400);
+
+  const rows =
+    document === "pdf"
+      ? await sql`
+          select r.project_id, a.storage_path, a.filename, a.content_type
+          from intake_runs r
+          join attachments a
+            on a.id::text = r.parsed->'pdfSource'->>'attachmentId'
+           and a.entity_type = 'project' and a.entity_id = r.project_id
+          where r.id = ${id}
+        `
+      : await sql`
+          select r.project_id, a.storage_path, a.filename, a.content_type
+          from intake_runs r
+          join attachments a on a.id = r.attachment_id
+          where r.id = ${id}
+        `;
   const run = rows[0];
   if (!run) return json({ ok: false, error: "That import has no stored document." }, 404);
 

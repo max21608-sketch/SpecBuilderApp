@@ -35,6 +35,7 @@ import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // Pure and type-only inside: the parser's own wording for what it did with a
 // sheet, so the screen cannot describe the parse differently from the parser.
 import { describeHeader, sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-import";
+import { pdfPageOfLine, type PdfBillSource } from "@/lib/pdf-bill-source";
 import { sheetWantsStructureRead } from "@/lib/boq-structure-wanted";
 import {
   NO_CODES_REVIEW_SENTENCE,
@@ -627,6 +628,8 @@ type Import = {
     // The pictures the workbook prints on its rows (`bill-images.ts`).
     rowImages?: BoqRowImages;
     rowImagesNote?: string | null;
+    // The PDF a bill was read from by its text, and each line's page (`pdf-bill.ts`).
+    pdfSource?: PdfBillSource;
   } | null;
 };
 
@@ -1410,6 +1413,25 @@ export default function ReviewImportPage() {
                 app was read by a model and charged for it; a bill is parsed by
                 code, and a reviewer who does not know that treats the figures
                 as something to second-guess. */}
+            {/* A BILL READ FROM A PDF SAYS SO FIRST, and where to check it:
+                its cells are the PDF's text put back by position, by code,
+                and a person checks a few lines against the PDF (C1). */}
+            {run.parsed?.pdfSource && (
+              <>
+                <span className={TONE.warn.text}>Read from a PDF by its text: check a few lines against the</span>{" "}
+                <a
+                  href={`/api/imports/${run.id}/source?document=pdf`}
+                  className="text-blue-700 no-underline hover:underline"
+                >
+                  PDF
+                </a>
+                <Tip>
+                  Every cell is text the PDF printed, put back into columns by position — no model read it. Each
+                  line shows the PDF page it came from. Pictures in the PDF are not carried over.
+                </Tip>
+                {". "}
+              </>
+            )}
             {Object.keys(run.model_metadata?.structureRead?.sheets ?? {}).length > 0
               ? "Every cell read by code; the model read the columns (one small read, charged)."
               : "Parsed by code, not by a model — nothing here was charged."}{" "}
@@ -2176,6 +2198,7 @@ export default function ReviewImportPage() {
                         const description = fabric ? undefined : descriptions[line.index];
                         const descriptionKey = `${sheetIndex}:${line.index}`;
                         const descriptionOpen = openDescriptions.has(descriptionKey);
+                        const pdfPage = pdfPageOfLine(run.parsed?.pdfSource, sheet.sheetName, line.lineNo);
                         return (
                           <Fragment key={line.index}>
                           <Tr
@@ -2201,7 +2224,19 @@ export default function ReviewImportPage() {
                               className={fabric ? "text-[11.5px] text-neutral-400" : undefined}
                               title={line.sourceLine ? `line ${line.sourceLine} on the bill` : undefined}
                             >
-                              {line.lineNo}
+                              {/* A PDF BILL'S LINE NAMES ITS PAGE: the workbook
+                                  row means nothing to somebody holding the PDF. */}
+                              {pdfPage !== null ? (
+                                <a
+                                  href={`/api/imports/${run.id}/source?document=pdf#page=${pdfPage}`}
+                                  className="whitespace-nowrap text-blue-700 no-underline hover:underline"
+                                  title={`Row ${line.lineNo} of the spreadsheet read from the PDF`}
+                                >
+                                  p.&nbsp;{pdfPage}
+                                </a>
+                              ) : (
+                                line.lineNo
+                              )}
                             </Td>
                             <Td>
                               <BoqRowKindCell

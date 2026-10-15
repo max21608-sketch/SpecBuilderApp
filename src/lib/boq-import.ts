@@ -86,6 +86,7 @@ import type { StructureRowReading } from "@/lib/boq-structure";
  * columns, because a code naming its item in brackets is the document
  * speaking; everything else is a model's reading or a person's choice.
  */
+import type { PdfBillSource } from "@/lib/pdf-bill-source";
 export type { BoqRowKind } from "@/lib/boq-row-kinds";
 
 export type BoqLine = {
@@ -398,6 +399,13 @@ export type BoqDocument = {
   rowImages?: BoqRowImages;
   /** Why the workbook's pictures could not be read or stored, where they could not. */
   rowImagesNote?: string | null;
+  /**
+   * THE PDF THIS BILL WAS READ FROM, by its text (`pdf-bill.ts`, 2026-10-15):
+   * the PDF's own attachment and each workbook row's page. Absent on every
+   * bill uploaded as a spreadsheet. On the document, like `rowImages`, so a
+   * sheet re-staged with a person's columns keeps its pages.
+   */
+  pdfSource?: PdfBillSource;
 };
 
 /**

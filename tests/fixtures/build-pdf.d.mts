@@ -25,6 +25,12 @@ export type SyntheticPage = {
    * UNREADABLE rather than absent: the "cannot tell" case, which proceeds.
    */
   contentFilter?: string;
+  /**
+   * Text drawn AT POSITIONS, in PDF units from the bottom left — a table
+   * printed from a spreadsheet, which `pdf-bill.ts` reads back into cells.
+   * Replaces the page's one label.
+   */
+  texts?: { x: number; y: number; str: string; size?: number }[];
 };
 
 export function buildPdf(pages: SyntheticPage[]): Buffer;

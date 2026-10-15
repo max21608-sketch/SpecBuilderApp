@@ -16,7 +16,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import IntakeBatchUpload from "@/components/projects/IntakeBatchUpload";
-import { BOQ_AS_PDF } from "@/lib/document-classify";
+import { pdfBillRefusal } from "@/lib/pdf-bill-source";
 
 const upload = vi.fn();
 // The page count before upload (upload-check.ts) is stubbed: the component
@@ -131,16 +131,15 @@ describe("an Outlook .msg is refused in the browser", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ROW 8's SCREEN HALF — a bill inside a PDF, refused after it is read.
-//
-// Unlike an `.xls`, nothing in the browser can tell a PDF bill from a PDF
-// drawing set, so this refusal necessarily arrives from the classify call. What
-// the screen has to do with it is the part worth proving: print the sentence,
-// keep the file, and register NOTHING — a registration is what dispatches the
-// charged read.
+// ROW 8's SCREEN HALF, since C1 (2026-10-15): a bill inside a PDF is read by
+// its text. Nothing in the browser can tell a PDF bill from a PDF drawing set,
+// so both answers arrive from the classify call. Where the text is not a
+// table, the row says so in ONE sentence with the detail behind "Why", keeps
+// the file and registers NOTHING. Where it is, the row says how many lines it
+// read and registers it as a bill — registration builds the workbook.
 // ---------------------------------------------------------------------------
 describe("a bill of quantities inside a PDF", () => {
-  it("prints the refusal and registers nothing", async () => {
+  it("holds one whose text is not a table, in one sentence, and registers nothing", async () => {
     upload.mockResolvedValue({ pathname: "projects/p1/uploads/bill.pdf" });
     apiFetch.mockImplementation(async (url: string) => {
       if (url.includes("/batches")) return { ok: true, status: 200, data: { batch: { id: "b1" } } };
@@ -151,7 +150,8 @@ describe("a bill of quantities inside a PDF", () => {
           data: {
             genre: "bill_of_quantities",
             decision: null,
-            unsupported: BOQ_AS_PDF,
+            unsupported: pdfBillRefusal("no_quantity_column"),
+            unsupportedDetail: "No page prints a header with one quantity column above a quantity.",
             evidence: "the first page is headed BILL OF QUANTITIES",
           },
         };
@@ -163,11 +163,95 @@ describe("a bill of quantities inside a PDF", () => {
     drop("Example bill.pdf");
     await userEvent.click(startButton());
 
-    await waitFor(() => expect(screen.getByText(/a bill inside a PDF is not supported/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/This PDF bill could not be read: no quantity column was found/)).toBeTruthy());
     expect(screen.getByText("Say which")).toBeTruthy();
-    // THE POINT: no registration, so no charged read of a spreadsheet printed
-    // on paper. The file is stored and kept, and the dropdown is still open in
-    // case the reading was wrong.
+    // The detail is one click away, not instead of the sentence.
+    expect(screen.getByText("Why")).toBeTruthy();
+    expect(screen.getByText(/No page prints a header/)).toBeTruthy();
+    // THE POINT: no registration. The file is stored and kept, and the
+    // dropdown is still open in case the reading was wrong.
     expect(apiFetch.mock.calls.some((call) => String(call[0]) === "/api/imports")).toBe(false);
+  });
+
+  it("registers one whose text is a table as a bill, saying how many lines it read", async () => {
+    upload.mockResolvedValue({ pathname: "projects/p1/uploads/bill.pdf" });
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/batches")) return { ok: true, status: 200, data: { batch: { id: "b1" } } };
+      if (url.includes("/classify")) {
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            genre: "bill_of_quantities",
+            decision: { importType: "boq", documentKind: null },
+            unsupported: null,
+            evidence: "a schedule of line items with an ORDER QTY column",
+            pdfBill: { lines: 28, pages: 3 },
+          },
+        };
+      }
+      if (url === "/api/imports") return { ok: true, status: 201, data: { importId: "r1" } };
+      return { ok: false, status: 500, error: "unexpected", data: null };
+    });
+
+    const { drop } = mount();
+    drop("Example schedule.pdf");
+    await userEvent.click(startButton());
+
+    await waitFor(() => expect(screen.getByText("Added")).toBeTruthy());
+    const registration = apiFetch.mock.calls.find((call) => String(call[0]) === "/api/imports");
+    expect(registration).toBeTruthy();
+    expect(JSON.parse(String((registration![1] as RequestInit).body))).toMatchObject({ importType: "boq", documentKind: null });
+    expect(screen.getByText(/Its text reads as a table: 28 lines on 3 pages/)).toBeTruthy();
+  });
+
+  it("holds one the model called a schedule when its text is a bill's table, and registers nothing", async () => {
+    upload.mockResolvedValue({ pathname: "projects/p1/uploads/schedule.pdf" });
+    const held =
+      "Read as an FF&E schedule, but its text is a table of 28 lines with a quantity on each: if it is the bill, choose Bill of quantities.";
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/classify")) {
+        return {
+          ok: true,
+          status: 200,
+          data: { genre: "ffe_schedule", decision: null, unsupported: null, held, evidence: "an FF&E specification" },
+        };
+      }
+      return { ok: false, status: 500, error: "nothing else should be called", data: null };
+    });
+
+    const { drop } = mount();
+    drop("Example schedule.pdf");
+    await userEvent.click(startButton());
+
+    await waitFor(() => expect(screen.getByText(held)).toBeTruthy());
+    expect(screen.getByText("Say which")).toBeTruthy();
+    expect(apiFetch.mock.calls.some((call) => String(call[0]) === "/api/imports")).toBe(false);
+  });
+
+  it("holds a hand-declared PDF bill the registration could not read, with its kind cleared", async () => {
+    upload.mockResolvedValue({ pathname: "projects/p1/uploads/bill.pdf" });
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/batches")) return { ok: true, status: 200, data: { batch: { id: "b1" } } };
+      if (url === "/api/imports") {
+        return {
+          ok: false,
+          status: 400,
+          error: pdfBillRefusal("no_rows"),
+          data: { ok: false, error: pdfBillRefusal("no_rows"), detail: "The columns A | B | QTY were found, with nothing under them." },
+        };
+      }
+      return { ok: false, status: 500, error: "unexpected", data: null };
+    });
+
+    const { drop, container } = mount();
+    drop("Example bill.pdf");
+    const select = container.querySelector("select") as HTMLSelectElement;
+    await userEvent.selectOptions(select, "boq");
+    await userEvent.click(startButton());
+
+    await waitFor(() => expect(screen.getByText(/This PDF bill could not be read: no line has a quantity/)).toBeTruthy());
+    expect(screen.getByText("Say which")).toBeTruthy();
+    expect(select.value).toBe("");
   });
 });

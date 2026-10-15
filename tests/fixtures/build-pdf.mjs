@@ -35,6 +35,21 @@ function contents(label) {
 }
 
 /**
+ * A content stream that draws each piece of text AT A POSITION — a table
+ * printed from a spreadsheet, which is what `pdf-bill.ts` reads back into
+ * cells. `x` and `y` are PDF units from the page's bottom left, as a printer
+ * would place them; the strings are invented.
+ */
+function textContents(texts) {
+  return texts
+    .map(({ x, y, str, size = 7 }) => {
+      const escaped = String(str).replace(/([\\()])/g, "\\$1");
+      return `BT /F1 ${size} Tf ${x} ${y} Td (${escaped}) Tj ET\n`;
+    })
+    .join("");
+}
+
+/**
  * A content stream that draws an IMAGE and no text — a scanned page.
  *
  * ============================================================================
@@ -59,7 +74,8 @@ const IMAGE_BYTES = "\xff\xd8\xff\xe0__QA not a real jpeg__\xff\xd9";
 
 /**
  * @param {{ width?: number, height?: number, rotate?: number, label?: string,
- *           image?: boolean, contentFilter?: string, compress?: boolean }[]} pages
+ *           image?: boolean, contentFilter?: string, compress?: boolean,
+ *           texts?: { x: number, y: number, str: string, size?: number }[] }[]} pages
  * @returns {Buffer}
  */
 export function buildPdf(pages) {
@@ -94,7 +110,11 @@ export function buildPdf(pages) {
     objects[pageId] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}]${rotate} ` +
       `${resources} /Contents ${streamId} 0 R >>`;
-    const stream = page.image ? imageContents() : contents(page.label ?? `page ${index + 1}`);
+    const stream = page.image
+      ? imageContents()
+      : page.texts
+        ? textContents(page.texts)
+        : contents(page.label ?? `page ${index + 1}`);
     // `contentFilter` names a codec this app does not decode, so the content
     // stream becomes UNREADABLE rather than absent — the "cannot tell" case,
     // which has to proceed rather than be called a scan. The payload is not

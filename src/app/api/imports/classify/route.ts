@@ -32,6 +32,8 @@ import {
 } from "@/lib/document-classify";
 import type { ClassifyFailureCode } from "@/lib/classify-failure";
 import { MAX_MODEL_PDF_BYTES, MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
+import { pdfBillRefusal, readPdfBill } from "@/lib/pdf-bill";
+import { loadBoqReadingRegisters } from "@/lib/boq-stage";
 
 // 300, not 60: a PDF over the fast model's page ceiling is identified by the
 // READING model (`classifyModelFor`), which has to take in up to 600 pages
@@ -53,6 +55,22 @@ const FAILURE_STATUS: Record<ClassifyFailureCode, number> = {
   timeout: 504,
   auth: 502,
   failed: 502,
+};
+
+/**
+ * Genres whose PDF is never a bill printed from a spreadsheet, so their text is
+ * not read as one: a drawing, a spec sheet, prose, a message. Everything else
+ * — a schedule of any kind, `unclear`, `other` — is, where the model did not
+ * already call it a bill.
+ */
+const NOT_A_BILL: ReadonlySet<string> = new Set(["shop_drawings", "specification_sheets", "preamble", "email"]);
+
+/** What the model called it, in the held sentence. `unclear` names nothing. */
+const GENRE_WORDS: Readonly<Record<string, string>> = {
+  ffe_schedule: "an FF&E schedule",
+  finishes_schedule: "a finishes schedule",
+  fabric_schedule: "a fabric schedule",
+  specification_bible: "a specification bible",
 };
 
 // The extraction ceiling (upload-limits.ts): a document larger than that
@@ -193,14 +211,90 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  // ============================================================================
+  // A BILL IN A PDF IS READ BY ITS TEXT, BY CODE, BEFORE IT IS FILED (C1).
+  //
+  // The model said what the document IS; whether its cells can be put back is
+  // code's to answer, from the bytes already in hand, and it costs nothing.
+  // A table holds and the row is filed as a bill — registration reads it
+  // again and builds the workbook (`/api/imports`). Anything else is HELD with
+  // one short sentence and the detail beside it, before a byte is registered:
+  // filing it as a bill would only fail one press later. Still nothing is
+  // written here.
+  // ============================================================================
+  let pdfBill: { lines: number; pages: number } | null = null;
+  if (result.decision?.importType === "boq" && source.type === "pdf") {
+    const registers = await loadBoqReadingRegisters(sql).catch(() => null);
+    const read = await readPdfBill(blob.bytes, registers ? { aliases: registers.aliases } : {});
+    if (!read.ok) {
+      return json(
+        {
+          ok: true,
+          genre: result.genre,
+          decision: null,
+          unsupported: pdfBillRefusal(read.code),
+          unsupportedDetail: read.detail,
+          titleText: result.titleText,
+          evidence: result.evidence,
+          certain: result.certain,
+          charged: true,
+          largeDocument: result.model !== CLASSIFY_MODEL,
+        },
+        200,
+      );
+    }
+    pdfBill = { lines: read.rows.length, pages: read.pageCount };
+  } else if (source.type === "pdf" && !NOT_A_BILL.has(result.genre)) {
+    // ==========================================================================
+    // THE MODEL AND THE TEXT DISAGREE, SO A PERSON DECIDES.
+    //
+    // The real Ronnie Scott's "Procurement Schedule" PDFs (2026-10-15) carry an
+    // ORDER QTY on every line and say "FF&E SPECIFICATION" at the top, and the
+    // fast model filed all three as FF&E schedules, certain — three charged
+    // reads and no records. Stating "a procurement schedule is a bill" in the
+    // prompt did not move it (measured the same evening), and the word
+    // "procurement" is only in the filenames. Code can see something the model
+    // reading did not weigh: the text is a table with a quantity on every line.
+    //
+    // Neither reading wins (house §5, §6): filing it as a bill on code's say
+    // would make an FF&E schedule with a Qty column a project's worth of
+    // records, and filing it as a schedule spends a read that answers the
+    // wrong question. So it is HELD with one sentence naming the next step,
+    // the model's reading beside it, and nothing is registered or charged.
+    // ==========================================================================
+    const registers = await loadBoqReadingRegisters(sql).catch(() => null);
+    const read = await readPdfBill(blob.bytes, registers ? { aliases: registers.aliases } : {});
+    if (read.ok) {
+      return json(
+        {
+          ok: true,
+          genre: result.genre,
+          decision: null,
+          unsupported: null,
+          held: `${GENRE_WORDS[result.genre] ? `Read as ${GENRE_WORDS[result.genre]}, but its` : "Its"} text is a table of ${read.rows.length} line${read.rows.length === 1 ? "" : "s"} with a quantity on each: if it is the bill, choose Bill of quantities.`,
+          pdfBill: { lines: read.rows.length, pages: read.pageCount },
+          titleText: result.titleText,
+          evidence: result.evidence,
+          certain: result.certain,
+          charged: true,
+          largeDocument: result.model !== CLASSIFY_MODEL,
+        },
+        200,
+      );
+    }
+  }
+
   return json(
     {
       ok: true,
       genre: result.genre,
       decision: result.decision,
+      // A bill in a PDF whose text reads as a table: how much of it, for the row.
+      pdfBill,
       // A REFUSAL, not a gap. `decision: null` with nothing here means "you
       // decide"; with a sentence here it means the app knows what this is and
-      // does not read it — a bill inside a PDF, today (§6.10.a row 8).
+      // does not read it — a scan, today, or a PDF bill whose text is not a
+      // table (set above).
       unsupported: result.unsupported,
       titleText: result.titleText,
       evidence: result.evidence,

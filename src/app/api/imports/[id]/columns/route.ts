@@ -222,19 +222,22 @@ async function readAgain(run: BoqRunRow, expectedVersion: number, actor: string)
       });
     }
     const suggest = await loadLineSuggester(txn);
+    const previous = (run.parsed ?? null) as Partial<BoqDocument> | null;
     const sheets = proposePhaseNames(
       parsed.sheets.map((sheet) => stageSheet(sheet, suggest)),
-      run.filename,
+      // A bill read from a PDF names its phase after the PDF, as at registration.
+      previous?.pdfSource?.filename ?? run.filename,
     );
     // The pictures stored at registration are keyed by sheet and ROW, and a
-    // re-read moves no row, so they carry over rather than being read again.
-    const previous = (run.parsed ?? null) as Partial<BoqDocument> | null;
+    // re-read moves no row, so they carry over rather than being read again —
+    // and so do a PDF bill's pages, for the same reason.
     const doc: BoqDocument = {
       schemaVersion: BOQ_SCHEMA_VERSION,
       filename: run.filename,
       sourcePreserved: true,
       sheets,
       ...(previous?.rowImages ? { rowImages: previous.rowImages, rowImagesNote: previous.rowImagesNote ?? null } : {}),
+      ...(previous?.pdfSource ? { pdfSource: previous.pdfSource } : {}),
     };
     return writeStagedBoq(txn, run, expectedVersion, doc, actor, { fromFailed: true });
   });

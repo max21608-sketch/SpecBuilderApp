@@ -140,6 +140,18 @@ type Queued = {
   progress: number;
   error: string | null;
   /**
+   * WHY, in full — one click away, never instead of `error`, which is the one
+   * short sentence (Max, 2026-10-15). Today: a PDF bill whose text is not a
+   * table, naming the page and the columns the reader saw.
+   */
+  errorDetail: string | null;
+  /**
+   * HELD BECAUSE TWO READINGS DISAGREE (C1): the model named another kind and
+   * the PDF's text is a bill's table. Amber, with the next step in it, and
+   * gone once a person has said what it is and it registers.
+   */
+  held: string | null;
+  /**
    * Stored and registered, and its read is queued behind the pack's in-flight
    * cap. NOT `error`: this is the ordinary outcome for the fourth document
    * onwards and it needs nobody, so it is said in slate beside the file rather
@@ -288,6 +300,8 @@ export default function IntakeBatchUpload({
         registrationRequestId: crypto.randomUUID(),
         progress: 0,
         error: unreadableUploadAdvice(file.name),
+        errorDetail: null,
+        held: null,
         note: null,
         warning: null,
         tooLarge: false,
@@ -450,8 +464,13 @@ export default function IntakeBatchUpload({
           update(item.key, { status: "reading", failure: null });
           const asked = await apiFetch<{
             decision: { importType: string; documentKind: string | null } | null;
-            /** Known, and not something this app reads — a bill inside a PDF. */
+            /** Known, and not something this app reads — a scan, or a PDF bill whose text is not a table. */
             unsupported?: string | null;
+            unsupportedDetail?: string | null;
+            /** A bill in a PDF whose text reads as a table: how much of it. */
+            pdfBill?: { lines: number; pages: number } | null;
+            /** Held: the model filed it as something else, and its text reads as a bill. */
+            held?: string | null;
             evidence?: string;
             titleText?: string | null;
             charged?: boolean;
@@ -482,7 +501,13 @@ export default function IntakeBatchUpload({
           }
 
           const read = choiceFor(asked.data.decision);
-          const evidence = asked.data.evidence ?? null;
+          // A PDF BILL SAYS WHAT ITS TEXT READ AS, beside why it is a bill:
+          // the lines are put back by code at registration, and the count is
+          // the first thing to check against the PDF.
+          const pdfBill = asked.data.decision ? (asked.data.pdfBill ?? null) : null;
+          const evidence = pdfBill
+            ? `${asked.data.evidence ?? ""} Its text reads as a table: ${pdfBill.lines} line${pdfBill.lines === 1 ? "" : "s"} on ${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"}.`.trim()
+            : (asked.data.evidence ?? null);
           update(item.key, {
             sentToModel: item.sentToModel || asked.data.charged !== false,
             largeDocument: asked.data.largeDocument === true,
@@ -511,7 +536,16 @@ export default function IntakeBatchUpload({
           // in it, and it is not on this screen.
           const unsupported = asked.data.unsupported ?? null;
           if (unsupported) {
-            update(item.key, { status: "needs-kind", error: unsupported });
+            update(item.key, { status: "needs-kind", error: unsupported, errorDetail: asked.data.unsupportedDetail ?? null });
+            continue;
+          }
+
+          // THE MODEL AND THE PDF'S TEXT DISAGREE (C1): the model named some
+          // other kind and the text is a bill's table. Held, in amber, with the
+          // next step in the sentence; the model's own reading stays beside it.
+          const held = asked.data.held ?? null;
+          if (held) {
+            update(item.key, { status: "needs-kind", held });
             continue;
           }
 
@@ -532,7 +566,7 @@ export default function IntakeBatchUpload({
         const id = await ensureBatch();
         if (!id) return;
 
-        update(item.key, { status: "registering", failure: null });
+        update(item.key, { status: "registering", failure: null, held: null });
         const res = await apiFetch<{
           importId: string;
           autoRead?: { dispatched: boolean; error?: string; waiting?: boolean; note?: string };
@@ -552,7 +586,15 @@ export default function IntakeBatchUpload({
           }),
         });
         if (!res.ok) {
-          update(item.key, { status: "failed", error: res.error });
+          // A BILL WHOSE PDF TEXT IS NOT A TABLE is HELD, not failed: pressing
+          // again would read the same text the same way. The kind is cleared
+          // so a person says what it is instead (C1).
+          const detail = typeof res.data?.detail === "string" ? res.data.detail : null;
+          if (res.status === 400 && detail && entry.importType === "boq") {
+            update(item.key, { status: "needs-kind", choice: "", suggested: "", error: res.error, errorDetail: detail });
+          } else {
+            update(item.key, { status: "failed", error: res.error, errorDetail: null });
+          }
           continue;
         }
         // Stored and registered, but its read did not reach the queue. NOT a
@@ -653,11 +695,13 @@ export default function IntakeBatchUpload({
         </p>
         {/* WHAT IT ACCEPTS, SAID BEFORE THE PRESS. Measured rather than
             assumed (§6.10.a row 5): a bill reads from {SPREADSHEET_EXTENSIONS}
-            — .csv included, quantities and all — and `.xls` and its relations
-            are refused, here in the browser, with the way out. */}
+            — .csv included, quantities and all — or a PDF whose text is a
+            table (`pdf-bill.ts`), and `.xls` and its relations are refused,
+            here in the browser, with the way out. */}
         <p className="mt-1 text-xs text-neutral-500">
-          A bill of quantities reads from {SPREADSHEET_EXTENSIONS.join(", ")}; drawings and specification sheets from
-          PDF; an email as a saved .eml. An older .xls has to be saved as .xlsx first.
+          A bill of quantities reads from {SPREADSHEET_EXTENSIONS.join(", ")}, or a PDF printed from a spreadsheet;
+          drawings and specification sheets from PDF; an email as a saved .eml. An older .xls has to be saved as
+          .xlsx first.
         </p>
         <input
           ref={fileInput}
@@ -890,6 +934,12 @@ export default function IntakeBatchUpload({
                   item.evidence && <p className="w-full text-xs text-neutral-500">{item.evidence}</p>
                 )}
                 {item.error && <p className="w-full text-xs text-red-700">{item.error}</p>}
+                {item.error && item.errorDetail && (
+                  <details className="w-full text-xs text-neutral-600">
+                    <summary className="cursor-pointer select-none">Why</summary>
+                    <p className="mt-1">{item.errorDetail}</p>
+                  </details>
+                )}
                 {item.failure && item.status === "needs-kind" && (
                   <div className="w-full flex flex-wrap items-center gap-2">
                     <p className="text-xs text-red-700">{item.failure.message}</p>
@@ -909,6 +959,7 @@ export default function IntakeBatchUpload({
                   </p>
                 )}
                 {item.warning && <p className="w-full text-xs text-amber-700">{item.warning}</p>}
+                {item.held && <p className="w-full text-xs text-amber-700">{item.held}</p>}
                 {item.note && <p className="w-full text-xs text-neutral-500">{item.note}</p>}
               </li>
             );
