@@ -18,6 +18,7 @@ import {
   transcribeWindowInstruction,
   transcriptionToSheet,
   transcriptionWorkbook,
+  stageTranscribedBill,
 } from "@/lib/pdf-bill-transcribe";
 import { printedNumber, transcriptionChecks, type CheckedLine, type PdfTranscription } from "@/lib/pdf-bill-checks";
 import { readSpreadsheetSheets } from "@/lib/intake-source";
@@ -188,6 +189,29 @@ describe("the sheet a transcription becomes", () => {
       [4, "ZZ-02", 6],
       [5, "ZZ-03", 2],
     ]);
+  });
+});
+
+describe("stageTranscribedBill", () => {
+  it("stages the sheet read back out of the stored workbook, the phase named after the PDF", async () => {
+    const transcription = mergeTranscription(planPageWindows(1), [
+      output({ rows: [row(1, ["ZZ-01", "Lounge chair", "14", "nr"]), row(1, ["ZZ-02", "Side table", "6", "nr"])] }),
+    ]);
+    const staged = await stageTranscribedBill({
+      transcription,
+      sheetName: "Sheet1",
+      pdfFilename: "__QA invented schedule.pdf",
+      registers: {},
+      suggest: (line, index) => ({ ...line, index, categoryId: null, categoryStatus: "none", ignored: false }),
+    });
+    expect(staged.sheets).toHaveLength(1);
+    expect(staged.sheets[0]?.proposedRunName).toBe("__QA invented schedule");
+    expect(staged.sheets[0]?.lines.map((line) => [line.lineNo, line.code, line.qty])).toEqual([
+      [2, "ZZ-01", 14],
+      [3, "ZZ-02", 6],
+    ]);
+    expect(staged.sheet.firstRow).toBe(2);
+    expect(staged.workbook.length).toBeGreaterThan(0);
   });
 });
 

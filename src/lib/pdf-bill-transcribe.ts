@@ -52,6 +52,9 @@ import { MODEL_DEADLINE_MS } from "@/lib/extraction-claim";
 import ExcelJS from "exceljs";
 import { answerRequest, readAnswer } from "@/lib/model-request";
 import type { PrintedTotal } from "@/lib/pdf-bill-checks";
+import { parseBoqSheets, proposePhaseNames, type BoqReadingRegisters, type StagedBoqSheet } from "@/lib/boq-import";
+import { readSpreadsheetSheets } from "@/lib/intake-source";
+import { stageSheet } from "@/lib/boq-stage";
 
 export { transcriptionChecks, printedNumber, type PrintedTotal, type PdfTranscription } from "@/lib/pdf-bill-checks";
 
@@ -433,6 +436,31 @@ export async function transcriptionWorkbook(sheet: TranscribedSheet, sheetName: 
   const target = book.addWorksheet(sheetName);
   for (const row of sheet.data) target.addRow(row.map((cell) => (cell === null || cell === undefined ? null : String(cell))));
   return Buffer.from(await book.xlsx.writeBuffer());
+}
+
+const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/**
+ * THE TRANSCRIPTION, STAGED AS A BILL. The workbook is built first and the
+ * sheets are read back OUT OF IT, through the same reader every later re-read
+ * of the bill uses (the Columns panel, the model's structure read), so the
+ * first staging and every re-staging read one file the one way. Nothing here
+ * touches the database: the caller stores the workbook and writes the run.
+ */
+export async function stageTranscribedBill(input: {
+  transcription: Transcription;
+  sheetName: string;
+  /** The PDF's own name, which the phase is proposed from. */
+  pdfFilename: string;
+  registers: Partial<BoqReadingRegisters>;
+  suggest: Parameters<typeof stageSheet>[1];
+}): Promise<{ sheet: TranscribedSheet; workbook: Buffer; sheets: StagedBoqSheet[] }> {
+  const sheet = transcriptionToSheet(input.transcription);
+  const workbook = await transcriptionWorkbook(sheet, input.sheetName);
+  const read = await readSpreadsheetSheets(workbook, `${input.sheetName}.xlsx`, XLSX_CONTENT_TYPE);
+  const parsed = parseBoqSheets(read, input.registers);
+  const sheets = proposePhaseNames((parsed.sheets ?? []).map((staged) => stageSheet(staged, input.suggest)), input.pdfFilename);
+  return { sheet, workbook, sheets };
 }
 
 // ---- the call ------------------------------------------------------------------
