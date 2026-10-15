@@ -21,7 +21,7 @@ import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Note from "@/components/ui/Note";
 import NeedsYou from "@/components/ui/NeedsYou";
-import { billLineId, billNeedsYou, needsYouListId, sheetColumnsId, sheetsWaiting } from "@/lib/needs-you";
+import { billLineId, billNeedsYou, needsYouListId, sheetColumnsId, sheetsWaiting, transcriptionNeedsYou } from "@/lib/needs-you";
 import { goToAndFlash } from "@/lib/go-to";
 import { TONE } from "@/components/ui/tone";
 import PageHeader from "@/components/ui/PageHeader";
@@ -36,6 +36,8 @@ import { ITEM_LEVELS, ITEM_LEVEL_LABELS, isItemLevel } from "@/lib/spec-vocab";
 // sheet, so the screen cannot describe the parse differently from the parser.
 import { describeHeader, sheetsAwaitingColumnCheck, sheetsNeedingColumns } from "@/lib/boq-import";
 import { pdfPageOfLine, type PdfBillSource } from "@/lib/pdf-bill-source";
+import { transcriptionChecks, type LineCheck, type PdfTranscription, type TranscriptionRecord } from "@/lib/pdf-bill-checks";
+import PdfTranscriptionPanel from "@/components/imports/PdfTranscriptionPanel";
 import { sheetWantsStructureRead } from "@/lib/boq-structure-wanted";
 import {
   NO_CODES_REVIEW_SENTENCE,
@@ -619,7 +621,7 @@ type Import = {
   /** Whether the original is stored, so a failed bill can be read again from it. */
   has_source?: boolean;
   /** What a model's structure read left on the run (`/suggest-columns`). */
-  model_metadata?: { structureRead?: StructureReadState } | null;
+  model_metadata?: { structureRead?: StructureReadState; transcription?: TranscriptionRecord } | null;
   parsed: {
     schemaVersion: 3 | 4;
     filename: string | null;
@@ -630,6 +632,8 @@ type Import = {
     rowImagesNote?: string | null;
     // The PDF a bill was read from by its text, and each line's page (`pdf-bill.ts`).
     pdfSource?: PdfBillSource;
+    // A PDF code could not read, transcribed by the model (C2): waiting or done, and what its checks need.
+    pdfTranscription?: PdfTranscription;
   } | null;
 };
 
@@ -1295,8 +1299,45 @@ export default function ReviewImportPage() {
   const reading = asking !== null || structurePending(structureState);
   /** A sheet as its tab names it — the words the reason beside Confirm uses, so it points at a tab you can see. */
   const tabName = (sheet: (typeof sheets)[number]) => sheet.proposedRunName || sheet.sheetName;
-  const confirmBlocker =
-    run.status === "parsed"
+  // A PDF BILL THE MODEL TRANSCRIBES (C2): waiting while it runs, then every
+  // line marked, and code's cross-checks re-run on every render — never stored,
+  // so a person changing the columns re-checks against the new mapping.
+  const transcription = run.parsed?.pdfTranscription ?? null;
+  const transcribing = transcription?.state === "waiting";
+  const transcribed = transcription?.state === "done";
+  const pageOfLine = (sheet: (typeof sheets)[number], lineNo: number) => pdfPageOfLine(run.parsed?.pdfSource, sheet.sheetName, lineNo);
+  const lineChecks = new Map<number, Map<number, LineCheck[]>>();
+  const checkSummaries: string[] = [];
+  if (transcribed && transcription) {
+    sheets.forEach((sheet, index) => {
+      if (sheet.ignored) return;
+      const result = transcriptionChecks({
+        lines: sheet.lines.map((line) => ({ lineNo: line.lineNo, code: line.code, qty: line.qty, rowKind: line.rowKind })),
+        qtyColumn: sheet.columns?.qty?.index ?? null,
+        pageOf: (lineNo) => pageOfLine(sheet, lineNo),
+        transcription,
+      });
+      lineChecks.set(index, result.byLine);
+      checkSummaries.push(...result.summary);
+    });
+  }
+  const checkNeedsYou = transcribed
+    ? sheets.flatMap((sheet, index) =>
+        sheet.ignored
+          ? []
+          : transcriptionNeedsYou({
+              sheetIndex: index,
+              tab: tabName(sheet),
+              single: sheets.length === 1,
+              lines: sheet.lines,
+              checks: lineChecks.get(index) ?? new Map(),
+              pageOf: (lineNo) => pageOfLine(sheet, lineNo),
+            }),
+      )
+    : [];
+  const confirmBlocker = transcribing
+    ? "Wait for the model to transcribe the PDF."
+    : run.status === "parsed"
       ? boqConfirmBlocker({
           single: sheets.length === 1,
           reading,
@@ -1312,7 +1353,7 @@ export default function ReviewImportPage() {
   // as `confirmBlocker`, each a link to the panel or line on its own tab, and
   // the tabs that still need somebody painted red.
   const needsYou =
-    run.status === "parsed"
+    run.status === "parsed" && !transcribing
       ? billNeedsYou({
           sheets: sheets.map((sheet, index) => ({
             index,
@@ -1416,7 +1457,21 @@ export default function ReviewImportPage() {
             {/* A BILL READ FROM A PDF SAYS SO FIRST, and where to check it:
                 its cells are the PDF's text put back by position, by code,
                 and a person checks a few lines against the PDF (C1). */}
-            {run.parsed?.pdfSource && (
+            {/* A BILL THE MODEL TRANSCRIBED SAYS SO INSTEAD (C2): the one
+                bill whose cells a model wrote, every line marked. */}
+            {transcribed && (
+              <>
+                <span className={TONE.danger.text}>Transcribed by the model from a PDF with no usable text: check every line against its page in the</span>{" "}
+                <a href={`/api/imports/${run.id}/source?document=pdf`} className="text-blue-700 no-underline hover:underline">
+                  PDF
+                </a>
+                <Tip>
+                  {`${transcription?.reason ?? ""} So the model copied the table — one charged read — and code then read that copy as it reads any spreadsheet. Every line is marked “transcribed” with its page. A line whose quantity does not add up to a total the PDF prints, whose code is not in the page's own text, or that the model said it could not read clearly, is red. Pictures in the PDF are not carried over.`.trim()}
+                </Tip>
+                {". "}
+              </>
+            )}
+            {run.parsed?.pdfSource && !run.parsed?.pdfTranscription && (
               <>
                 <span className={TONE.warn.text}>Read from a PDF by its text: check a few lines against the</span>{" "}
                 <a
@@ -1432,9 +1487,11 @@ export default function ReviewImportPage() {
                 {". "}
               </>
             )}
-            {Object.keys(run.model_metadata?.structureRead?.sheets ?? {}).length > 0
-              ? "Every cell read by code; the model read the columns (one small read, charged)."
-              : "Parsed by code, not by a model — nothing here was charged."}{" "}
+            {transcribed
+              ? null
+              : Object.keys(run.model_metadata?.structureRead?.sheets ?? {}).length > 0
+                ? "Every cell read by code; the model read the columns (one small read, charged)."
+                : "Parsed by code, not by a model — nothing here was charged."}{" "}
             {sheets.length} tab
             {sheets.length === 1 ? "" : "s"}
             {revisionLabel && <> · {revisionLabel}</>}
@@ -1555,6 +1612,40 @@ export default function ReviewImportPage() {
             }
           }}
         />
+        {/* A PDF BILL THE MODEL TRANSCRIBES (C2): the panel while it waits or
+            runs; then, RED and apart from what the confirm waits on, every
+            line code's cross-checks flagged — a mis-copied quantity looks
+            exactly like a real one. */}
+        {transcription && (
+          <PdfTranscriptionPanel
+            importId={run.id}
+            version={run.version}
+            transcription={transcription}
+            record={run.model_metadata?.transcription}
+            pdfHref={`/api/imports/${run.id}/source?document=pdf`}
+            reload={() => load(true)}
+          />
+        )}
+        <NeedsYou
+          id={needsYouListId("transcribed")}
+          items={checkNeedsYou}
+          title="Check against the PDF"
+          tone="danger"
+          className="mt-3"
+          onGo={(entry) => {
+            if (entry.sheetIndex !== undefined) setSheetTab(entry.sheetIndex);
+          }}
+        />
+        {transcribed && checkSummaries.length > 0 && (
+          <details className="mt-1 text-[11.5px] text-neutral-600">
+            <summary className="cursor-pointer">What code checked of the transcription</summary>
+            <ul className="mt-1 list-disc pl-5">
+              {[...new Set(checkSummaries)].map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </details>
+        )}
         {/* THE BILL THAT COULD NOT BE READ SAYS SO ON THIS SCREEN.
             ==================================================================
             The parser's refusal was returned by the registration route as a 422
@@ -2199,11 +2290,13 @@ export default function ReviewImportPage() {
                         const descriptionKey = `${sheetIndex}:${line.index}`;
                         const descriptionOpen = openDescriptions.has(descriptionKey);
                         const pdfPage = pdfPageOfLine(run.parsed?.pdfSource, sheet.sheetName, line.lineNo);
+                        // C2: what code's cross-checks found on this transcribed line. Red where any failed.
+                        const flags = lineChecks.get(sheetIndex)?.get(line.lineNo) ?? [];
                         return (
                           <Fragment key={line.index}>
                           <Tr
                             id={billLineId(sheetIndex, line.lineNo)}
-                            tone={duplicated ? "warn" : "plain"}
+                            tone={flags.length > 0 ? "danger" : duplicated ? "warn" : "plain"}
                             className={[
                               ROW_NO_RULE,
                               fabric ? ROW_FABRIC : "",
@@ -2259,6 +2352,19 @@ export default function ReviewImportPage() {
                               {alsoOn.length > 0 && (
                                 <span className="mt-0.5 block font-sans text-[10.5px] text-amber-800">
                                   also on row{alsoOn.length === 1 ? "" : "s"} {listOf(alsoOn)}
+                                </span>
+                              )}
+                              {/* EVERY TRANSCRIBED LINE SAYS SO (C2, Max's
+                                  condition): a few words in place, its page one
+                                  click away in the first cell, red where a check
+                                  failed, the whole sentence on hover. */}
+                              {transcribed && pdfPage !== null && (
+                                <span
+                                  className={`mt-0.5 block max-w-[15rem] whitespace-normal font-sans text-[10.5px] ${flags.length > 0 ? `font-medium ${TONE.danger.text}` : TONE.guess.text}`}
+                                  title={flags.length > 0 ? flags.map((flag) => flag.why).join("\n") : `Transcribed by the model from page ${pdfPage}: check it against the PDF.`}
+                                >
+                                  transcribed
+                                  {flags.length > 0 && ` · ${flags[0]!.words}${flags.length > 1 ? ` (+${flags.length - 1})` : ""}`}
                                 </span>
                               )}
                             </Td>

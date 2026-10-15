@@ -33,6 +33,12 @@ import {
 import type { ClassifyFailureCode } from "@/lib/classify-failure";
 import { MAX_MODEL_PDF_BYTES, MAX_MODEL_PDF_PAGES } from "@/lib/upload-limits";
 import { pdfBillRefusal, readPdfBill } from "@/lib/pdf-bill";
+import { isTranscribable, transcriptionReason, type TranscribableReason } from "@/lib/pdf-bill-checks";
+
+/** What the upload row says of a PDF bill the model will transcribe. */
+function transcribeNote(code: TranscribableReason, pages: number | null): { lines: number; pages: number; transcribe: true; reason: string } {
+  return { lines: 0, pages: pages ?? 0, transcribe: true, reason: transcriptionReason(code) };
+}
 import { loadBoqReadingRegisters } from "@/lib/boq-stage";
 
 // 300, not 60: a PDF over the fast model's page ceiling is identified by the
@@ -168,22 +174,12 @@ export async function POST(request: Request): Promise<Response> {
   // cannot decode and null proceeds, because the naive test calls every
   // compressed PDF scanned and would refuse the whole pilot pack. Nothing is
   // registered either way: this route has never created a run.
+  // SINCE C2 (2026-10-15) A SCAN IS LOOKED AT, NOT REFUSED UNSEEN: a scanned
+  // BILL is transcribed by the model, the one exception Max approved in
+  // writing. So the small look happens, and only what it calls a bill,
+  // certain, goes on; anything else is still refused with the same sentence,
+  // now after one small charged look rather than none.
   const scanned = scannedPdfRefusal(source.type, source.type === "pdf" ? pdfHasTextLayer(blob.bytes) : null);
-  if (scanned) {
-    return json(
-      {
-        ok: true,
-        genre: "unclear",
-        decision: null,
-        unsupported: scanned,
-        titleText: null,
-        evidence: "the pages carry no text, only images",
-        certain: true,
-        charged: false,
-      },
-      200,
-    );
-  }
 
   const pages =
     source.type === "pdf" ? (countPdfPages(blob.bytes) ?? input.pages ?? null) : null;
@@ -222,11 +218,49 @@ export async function POST(request: Request): Promise<Response> {
   // filing it as a bill would only fail one press later. Still nothing is
   // written here.
   // ============================================================================
-  let pdfBill: { lines: number; pages: number } | null = null;
+  if (scanned) {
+    if (result.decision?.importType === "boq") {
+      return json(
+        {
+          ok: true,
+          genre: result.genre,
+          decision: result.decision,
+          pdfBill: transcribeNote("scanned", countPdfPages(blob.bytes)),
+          unsupported: null,
+          titleText: result.titleText,
+          evidence: result.evidence,
+          certain: result.certain,
+          charged: true,
+          largeDocument: result.model !== CLASSIFY_MODEL,
+        },
+        200,
+      );
+    }
+    return json(
+      {
+        ok: true,
+        genre: "unclear",
+        decision: null,
+        unsupported: scanned,
+        titleText: null,
+        evidence: "the pages carry no text, only images",
+        certain: true,
+        charged: true,
+      },
+      200,
+    );
+  }
+
+  let pdfBill: { lines: number; pages: number; transcribe?: true; reason?: string } | null = null;
   if (result.decision?.importType === "boq" && source.type === "pdf") {
     const registers = await loadBoqReadingRegisters(sql).catch(() => null);
     const read = await readPdfBill(blob.bytes, registers ? { aliases: registers.aliases } : {});
-    if (!read.ok) {
+    // CODE COULD NOT PUT ITS TEXT BACK INTO A TABLE: the model transcribes it
+    // (C2), every line marked. Filed as a bill; the row says so and that the
+    // transcription is one charged read.
+    if (!read.ok && isTranscribable(read.code)) {
+      pdfBill = transcribeNote(read.code, countPdfPages(blob.bytes));
+    } else if (!read.ok) {
       return json(
         {
           ok: true,
@@ -242,8 +276,9 @@ export async function POST(request: Request): Promise<Response> {
         },
         200,
       );
+    } else {
+      pdfBill = { lines: read.rows.length, pages: read.pageCount };
     }
-    pdfBill = { lines: read.rows.length, pages: read.pageCount };
   } else if (source.type === "pdf" && !NOT_A_BILL.has(result.genre)) {
     // ==========================================================================
     // THE MODEL AND THE TEXT DISAGREE, SO A PERSON DECIDES.

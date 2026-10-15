@@ -228,3 +228,27 @@ export function transcriptionPending(record: TranscriptionRecord | null | undefi
   const pending = record?.pending;
   return Boolean(pending && now - new Date(pending.at).getTime() < TRANSCRIPTION_CLAIM_MS);
 }
+
+/**
+ * WHICH OF CODE'S REFUSALS THE MODEL MAY TRANSCRIBE, and the sentence that
+ * says why it had to. Everything code could not put back into a grid, and a
+ * scan; never a PDF that could not be opened at all (the model reads the same
+ * bytes, and a broken file is the uploader's to fix).
+ */
+export type TranscribableReason = "scanned" | "no_text" | "no_quantity_column" | "several_quantity_columns" | "no_rows" | "columns_change";
+
+export function isTranscribable(code: string): code is TranscribableReason {
+  return ["scanned", "no_text", "no_quantity_column", "several_quantity_columns", "no_rows", "columns_change"].includes(code);
+}
+
+export function transcriptionReason(code: TranscribableReason): string {
+  const why: Record<TranscribableReason, string> = {
+    scanned: "This PDF has no text a program can read: its pages are pictures.",
+    no_text: "This PDF has no text a program can read.",
+    no_quantity_column: "This PDF's text has no quantity column a program could find.",
+    several_quantity_columns: "This PDF's text has more than one quantity column, so a program could not tell which the lines hang on.",
+    no_rows: "No line of this PDF's text has a quantity a program could find.",
+    columns_change: "This PDF's columns change from page to page, so a program could not put them back.",
+  };
+  return why[code];
+}

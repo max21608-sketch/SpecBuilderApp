@@ -87,6 +87,7 @@ import type { StructureRowReading } from "@/lib/boq-structure";
  * speaking; everything else is a model's reading or a person's choice.
  */
 import type { PdfBillSource } from "@/lib/pdf-bill-source";
+import type { PdfTranscription } from "@/lib/pdf-bill-checks";
 export type { BoqRowKind } from "@/lib/boq-row-kinds";
 
 export type BoqLine = {
@@ -406,6 +407,13 @@ export type BoqDocument = {
    * sheet re-staged with a person's columns keeps its pages.
    */
   pdfSource?: PdfBillSource;
+  /**
+   * A PDF code could NOT read, transcribed by the model (workstream C2):
+   * waiting, or done — and then every line on the sheet was transcribed, and
+   * what the cross-checks need (`pdf-bill-checks.ts`). Absent on every other
+   * bill, including one C1 read by its text.
+   */
+  pdfTranscription?: PdfTranscription;
 };
 
 /**

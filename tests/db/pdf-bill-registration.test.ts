@@ -16,15 +16,14 @@
 // - from there it is the ordinary bill path: a person's columns re-read the
 //   stored workbook (keeping the pages), and the confirm makes the records;
 // - "open the PDF" serves the PDF, resolved from the run, never from the request;
-// - a PDF whose text is not a table, and a scan, are refused in ONE sentence
-//   and register nothing.
+// - a PDF whose text is not a table, and a scan, are registered to be
+//   TRANSCRIBED by the model (C2), waiting, with the reason in one sentence.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
 import { buildPdf } from "../fixtures/build-pdf.mjs";
-import { pdfBillRefusal } from "@/lib/pdf-bill";
-import { SCANNED_PDF } from "@/lib/document-classify";
+import { transcriptionReason } from "@/lib/pdf-bill-checks";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -250,19 +249,22 @@ describeIfDb("a bill uploaded as a PDF", () => {
     ]);
   });
 
-  it("refuses a PDF whose text is not a table in one sentence, and registers nothing", { timeout: 30_000 }, async () => {
-    const before = Number((await client.query(`select count(*) from intake_runs where project_id = $1`, [projectId])).rows[0].count);
+  // C2 (2026-10-15): code's refusals are now registered to be TRANSCRIBED by
+  // the model, waiting, with nothing read or charged at registration — the
+  // transcription itself is tests/db/pdf-bill-transcription.test.ts.
+  it("registers a PDF whose text is not a table to be transcribed, waiting, with the reason", { timeout: 30_000 }, async () => {
     const { response, body } = await register("__QA elevation.pdf", buildPdf([{ label: "__QA ELEVATION 1:10" }]));
-    expect(response.status).toBe(400);
-    expect(body.error).toBe(pdfBillRefusal("no_quantity_column"));
-    expect(body.detail).toBeTruthy();
-    const after = Number((await client.query(`select count(*) from intake_runs where project_id = $1`, [projectId])).rows[0].count);
-    expect(after).toBe(before);
+    expect(response.status, body.error).toBe(201);
+    const run = (await client.query(`select status, parsed from intake_runs where id = $1`, [body.importId])).rows[0];
+    expect(run.status).toBe("parsed");
+    expect(run.parsed.sheets).toEqual([]);
+    expect(run.parsed.pdfTranscription).toEqual({ state: "waiting", reason: transcriptionReason("no_quantity_column"), pageCount: 1 });
   });
 
-  it("refuses a scan as a scan", { timeout: 30_000 }, async () => {
+  it("registers a scan to be transcribed, saying its pages are pictures", { timeout: 30_000 }, async () => {
     const { response, body } = await register("__QA scan.pdf", buildPdf([{ image: true }]));
-    expect(response.status).toBe(400);
-    expect(body.error).toBe(SCANNED_PDF);
+    expect(response.status, body.error).toBe(201);
+    const run = (await client.query(`select parsed from intake_runs where id = $1`, [body.importId])).rows[0];
+    expect(run.parsed.pdfTranscription).toMatchObject({ state: "waiting", reason: transcriptionReason("scanned") });
   });
 });

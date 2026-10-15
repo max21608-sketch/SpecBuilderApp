@@ -224,13 +224,24 @@ describe("the free paths are unchanged", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("refuses a scanned PDF with no call", async () => {
+  it("refuses a scanned PDF that is not a bill, after one small look (C2: a scan is looked at now)", async () => {
     const { buildPdf } = await import("../fixtures/build-pdf.mjs");
     stored.bytes = buildPdf([{ image: true }]);
+    answers({ genre: "shop_drawings", titleText: null, evidence: "a drawing", certain: true });
     const { body } = await classify();
-    expect(body).toMatchObject({ ok: true, charged: false });
+    expect(body).toMatchObject({ ok: true, charged: true, decision: null });
     expect(typeof body.unsupported).toBe("string");
-    expect(create).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("files a scanned PDF the model is certain is a bill as one, to be transcribed (C2)", async () => {
+    const { buildPdf } = await import("../fixtures/build-pdf.mjs");
+    stored.bytes = buildPdf([{ image: true }, { image: true }]);
+    answers({ genre: "bill_of_quantities", titleText: null, evidence: "a table of items with quantities", certain: true });
+    const { body } = await classify();
+    expect(body.decision).toEqual({ importType: "boq", documentKind: null });
+    expect(body.unsupported).toBeNull();
+    expect(body.pdfBill).toEqual({ lines: 0, pages: 2, transcribe: true, reason: "This PDF has no text a program can read: its pages are pictures." });
   });
 });
 
@@ -272,14 +283,14 @@ describe("a bill in a PDF", () => {
     expect(body.pdfBill).toEqual({ lines: 2, pages: 1 });
   });
 
-  it("holds one whose text is not a table, in one sentence with the detail beside it", async () => {
+  it("files one whose text is not a table as a bill to be transcribed, saying why (C2)", async () => {
     // A two-page PDF with a line of text per page: no header, no quantity.
     answers({ genre: "bill_of_quantities", titleText: null, evidence: "headed BILL OF QUANTITIES", certain: true });
     const { status, body } = await classify();
     expect(status).toBe(200);
-    expect(body.decision).toBeNull();
-    expect(body.unsupported).toBe("This PDF bill could not be read: no quantity column was found. Upload the spreadsheet instead.");
-    expect(typeof body.unsupportedDetail).toBe("string");
+    expect(body.decision).toEqual({ importType: "boq", documentKind: null });
+    expect(body.unsupported).toBeNull();
+    expect(body.pdfBill).toMatchObject({ transcribe: true, reason: "This PDF's text has no quantity column a program could find." });
   });
 
   it("holds one the model filed as an FF&E schedule when its text is a bill's table", async () => {

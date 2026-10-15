@@ -238,6 +238,8 @@ async function readAgain(run: BoqRunRow, expectedVersion: number, actor: string)
       sheets,
       ...(previous?.rowImages ? { rowImages: previous.rowImages, rowImagesNote: previous.rowImagesNote ?? null } : {}),
       ...(previous?.pdfSource ? { pdfSource: previous.pdfSource } : {}),
+      // A transcribed bill stays marked: the re-read reads the same workbook the model's copy became (C2).
+      ...(previous?.pdfTranscription ? { pdfTranscription: previous.pdfTranscription } : {}),
     };
     return writeStagedBoq(txn, run, expectedVersion, doc, actor, { fromFailed: true });
   });

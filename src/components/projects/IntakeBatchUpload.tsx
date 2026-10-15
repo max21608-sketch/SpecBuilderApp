@@ -467,8 +467,12 @@ export default function IntakeBatchUpload({
             /** Known, and not something this app reads — a scan, or a PDF bill whose text is not a table. */
             unsupported?: string | null;
             unsupportedDetail?: string | null;
-            /** A bill in a PDF whose text reads as a table: how much of it. */
-            pdfBill?: { lines: number; pages: number } | null;
+            /**
+             * A bill in a PDF whose text reads as a table: how much of it. Or,
+             * with `transcribe`, one code could not read, which the model
+             * transcribes when the review opens (C2): why, and how many pages.
+             */
+            pdfBill?: { lines: number; pages: number; transcribe?: true; reason?: string } | null;
             /** Held: the model filed it as something else, and its text reads as a bill. */
             held?: string | null;
             evidence?: string;
@@ -505,9 +509,15 @@ export default function IntakeBatchUpload({
           // the lines are put back by code at registration, and the count is
           // the first thing to check against the PDF.
           const pdfBill = asked.data.decision ? (asked.data.pdfBill ?? null) : null;
-          const evidence = pdfBill
-            ? `${asked.data.evidence ?? ""} Its text reads as a table: ${pdfBill.lines} line${pdfBill.lines === 1 ? "" : "s"} on ${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"}.`.trim()
-            : (asked.data.evidence ?? null);
+          // A PDF BILL CODE COULD NOT READ says, before it is registered, that
+          // the model will transcribe it and that it is charged (C2): the
+          // statement of the charge belongs on this row, as it does for every
+          // document read on registration.
+          const evidence = pdfBill?.transcribe
+            ? `${asked.data.evidence ?? ""} ${pdfBill.reason ?? ""} The model will transcribe it when you open the review${pdfBill.pages ? ` (${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"})` : ""} — one charged read — and mark every line for you to check against its page.`.replace(/\s+/g, " ").trim()
+            : pdfBill
+              ? `${asked.data.evidence ?? ""} Its text reads as a table: ${pdfBill.lines} line${pdfBill.lines === 1 ? "" : "s"} on ${pdfBill.pages} page${pdfBill.pages === 1 ? "" : "s"}.`.trim()
+              : (asked.data.evidence ?? null);
           update(item.key, {
             sentToModel: item.sentToModel || asked.data.charged !== false,
             largeDocument: asked.data.largeDocument === true,

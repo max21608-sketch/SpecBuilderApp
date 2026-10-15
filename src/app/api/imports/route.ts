@@ -72,13 +72,14 @@
 // path on something that cannot run in development would mean the import could
 // not be tested end to end without a tunnel.
 import { z } from "zod";
-import { readSpreadsheetSheets, pdfHasTextLayer } from "@/lib/intake-source";
+import { readSpreadsheetSheets, pdfHasTextLayer, countPdfPages } from "@/lib/intake-source";
 import { blobPictureStore, stageBillRowImages, type PictureStore } from "@/lib/bill-images";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { intakeSourceKind, outlookMsgAdvice, spreadsheetRefusal } from "@/lib/intake-source-types";
 import { scannedPdfRefusal } from "@/lib/document-classify";
-import { parseBoqSheets, proposePhaseNames, BOQ_SCHEMA_VERSION } from "@/lib/boq-import";
+import { parseBoqSheets, proposePhaseNames, BOQ_SCHEMA_VERSION, type BoqDocument } from "@/lib/boq-import";
+import { isTranscribable, transcriptionReason, type PdfTranscription, type TranscribableReason } from "@/lib/pdf-bill-checks";
 import { loadBoqReadingRegisters, loadLineSuggester, stageSheet } from "@/lib/boq-stage";
 import { DOCUMENT_KINDS, type DocumentKind } from "@/lib/spec-vocab";
 import { headTrustedBlob, readTrustedBlob, UntrustedBlobError } from "@/lib/blob-source";
@@ -476,12 +477,20 @@ async function registerPdfBoq(input: Registered, actor: string, store: PictureSt
     throw cause;
   }
 
+  // A SCAN, OR TEXT THAT IS NOT A TABLE, IS TRANSCRIBED BY THE MODEL (C2).
+  // Max, 2026-10-15, in writing: "a PDF bill with no usable text layer may be
+  // transcribed by the model, every line marked transcribed with its page and
+  // checked by a person." Registered here as WAITING — nothing is read or
+  // charged yet — and the review starts the transcription
+  // (`/api/imports/[id]/transcribe`), because it takes minutes and this route
+  // has one. A PDF that could not be opened at all is still refused.
   const scanned = scannedPdfRefusal("pdf", pdfHasTextLayer(blob.bytes));
-  if (scanned) return json({ ok: false, error: scanned, field: "filename" }, 400);
+  if (scanned) return registerPdfForTranscription(input, actor, blob, "scanned");
 
   const registers = await loadBoqReadingRegisters(sql);
   const read = await readPdfBill(blob.bytes, { aliases: registers.aliases });
   if (!read.ok) {
+    if (isTranscribable(read.code)) return registerPdfForTranscription(input, actor, blob, read.code);
     return json({ ok: false, error: pdfBillRefusal(read.code), detail: read.detail, code: read.code, field: "filename" }, 400);
   }
 
@@ -521,6 +530,57 @@ async function registerPdfBoq(input: Registered, actor: string, store: PictureSt
       pages: workbook.rowPages,
     },
   });
+}
+
+/**
+ * A PDF BILL CODE COULD NOT READ, REGISTERED TO BE TRANSCRIBED (C2). The run
+ * is a bill with no sheets yet: its only attachment is the PDF, `pdfSource`
+ * names it, and `pdfTranscription` says it is waiting and why. The transcribe
+ * route stores the workbook beside the PDF and makes it the run's source, and
+ * from then on it is an ordinary bill. Nothing is charged here.
+ */
+async function registerPdfForTranscription(
+  input: Registered,
+  actor: string,
+  blob: { pathname: string; contentType: string; size: number; bytes: Buffer },
+  code: TranscribableReason,
+): Promise<Response> {
+  const pdfAttachment = await sql`
+    insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, size, uploaded_by)
+    values ('project', ${input.projectId}, 'boq_pdf', ${blob.pathname}, ${input.filename},
+            ${blob.contentType || input.contentType || "application/pdf"}, ${blob.size}, ${actor})
+    returning id
+  `;
+  const attachmentId = String(pdfAttachment[0]?.id);
+  const pageCount = countPdfPages(blob.bytes);
+  const pdfTranscription: PdfTranscription = { state: "waiting", reason: transcriptionReason(code), pageCount };
+  const staged: BoqDocument = {
+    schemaVersion: BOQ_SCHEMA_VERSION,
+    filename: input.filename,
+    sourcePreserved: true,
+    sheets: [],
+    pdfSource: { attachmentId, filename: input.filename, sheet: PDF_BILL_SHEET, firstRow: 0, pages: [] },
+    pdfTranscription,
+  };
+  const run = await sql`
+    insert into intake_runs (project_id, attachment_id, batch_id, source_kind, status, parsed, created_by, updated_by)
+    values (${input.projectId}, ${attachmentId}, ${input.batchId ?? null}, 'boq_xlsx', 'parsed', ${JSON.stringify(staged)}::jsonb, ${actor}, ${actor})
+    returning id
+  `;
+  return json(
+    {
+      ok: true,
+      importId: String(run[0]?.id),
+      lines: 0,
+      sheets: 0,
+      skippedRows: 0,
+      sourcePreserved: true,
+      needsColumns: 0,
+      // The review starts the model's transcription, one charged read; the upload row has said so.
+      transcribe: { reason: pdfTranscription.reason, pages: pageCount },
+    },
+    201,
+  );
 }
 
 // ---- BOQ, posted straight to this route ------------------------------------
