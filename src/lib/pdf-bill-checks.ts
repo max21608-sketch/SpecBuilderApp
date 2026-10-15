@@ -206,3 +206,25 @@ export function transcriptionChecks(input: {
 
   return { byLine, summary };
 }
+
+/** What `intake_runs.model_metadata.transcription` holds: the claim, and every call paid for. */
+export type TranscriptionRecord = {
+  pending?: { requestId: string; at: string } | null;
+  lastRequestId?: string | null;
+  model?: string;
+  /** The last attempt's outcome in words. */
+  outcome?: { at: string; ok: boolean; text: string; charged: boolean } | null;
+  calls?: { part: number; pages: string; ok: boolean; requestId: string | null; usage: unknown; elapsedMs: number; model: string | null; error?: string; at: string }[];
+};
+
+/**
+ * A claim this old is a request that died. The model's deadline (740 s) and a
+ * minute; a literal, because this leaf may not import the server's timings.
+ */
+export const TRANSCRIPTION_CLAIM_MS = 800_000;
+
+/** Is a transcription in flight right now, by its record? */
+export function transcriptionPending(record: TranscriptionRecord | null | undefined, now = Date.now()): boolean {
+  const pending = record?.pending;
+  return Boolean(pending && now - new Date(pending.at).getTime() < TRANSCRIPTION_CLAIM_MS);
+}
