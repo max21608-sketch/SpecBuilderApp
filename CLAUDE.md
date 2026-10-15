@@ -2838,7 +2838,11 @@ lines beneath it — sent as PDFs printed from Excel. Four things, each a trap:
   value, "REFER TO DRAWING 740 X 740 X 720MM SH: 420MM" read as D740 — the D
   of DRAWING — and a sofa's 1700mm width landed in D. A line with no figure is
   a note; the first size line is placed (`placedSizeOf`); a one-line cell
-  reads exactly as before.
+  reads exactly as before. **KNOWN DEFECT, seen 2026-10-15 on pilot:** a
+  later line giving ONLY a slot the placed line left empty (`SH: 420MM` under
+  `720 X 1400 X 720MM`) is noted as "the same size again", so the seat height
+  is lost. And `700 DIA X 710MM` composes `Dia.700mm` with no H. Both are in
+  `found-in-use.md`. "One placed line" must not be read as "drop the SH".
 - **Bare figures placed in printed order now say so**, and name the column
   heading's own order where it prints one: this schedule heads it "L X W X H"
   and prints a sofa as `800 X 1700 X 780MM`. `L` is still not a slot; the
@@ -4184,6 +4188,12 @@ as a question. He and Claudia design that screen themselves this week, so
 enquiries filed in BWS's P-number folder format. Max decides what to implement
 in a separate session; nothing from that meeting is built yet.
 
+**2026-10-15: the first new enquiry, Ronnie Scott's (P16717), went in on
+pilot with Matthew watching.** Read `docs/plans/catchup-2026-10-15.md`. The
+bill confirmed. The review screen confused both people, and in the room two
+values that had been dropped were said to have gone in. Matthew placed the
+categories for this project's lines only, and nothing is seeded from them.
+
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
 curated document set — **not** Maybourne Paris, whose documents exist in several
@@ -4787,7 +4797,10 @@ proposed standard holding at TBC, layouts saved per specifier).
 
 **Explicitly excluded, so they are not built speculatively:** feeding preamble
 notes into later model calls; a BWS *import* file carrying job numbers; PDF bills of
-quantities; images and scanned documents; splitting an oversize drawing set. M6
+quantities (ASKED FOR by Claudia on 2026-10-15 and not decided; the only route
+that keeps "code reads every cell" is the `pdf:schedule` text-layer reader, and
+it works only on PDFs printed from Excel. Max's call:
+`docs/plans/catchup-2026-10-15.md`, Q1); images and scanned documents; splitting an oversize drawing set. M6
 VE rounds. Any write to BWS. Automatic email sending.
 SharePoint writes. (SharePoint READS as an intake source: Matthew asked about
 them on 2026-09-18 without requesting them. On 2026-10-12 he asked Max to

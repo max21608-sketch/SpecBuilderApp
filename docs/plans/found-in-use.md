@@ -33,6 +33,78 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-10-15: the Ronnie Scott's procurement schedule, confirmed on pilot with Matthew
+
+Seen in the recording of the 14:30 call (`docs/plans/catchup-2026-10-15.md`).
+PILOT v1.11, project *P16717 — ronnie-scotts-lbpco*, the bill review of
+`RONNIE SCOTTS ST4 Procurement Schedule (converted).xlsx`. Timestamps are into
+the recording, and each one marks a frame that was looked at.
+
+### A Dims line stating only the seat height is dropped as "the same size again" — OPEN
+
+The bench SO-03 (frame 24:22) and the sofa SO-04 (frame 26:10) each have a
+second Dims line, `SH: 420MM`. It is written as a note: *"Not placed:
+'DIMENSIONS CM / MM L X W X H' is the size line placed, and this states the
+same size again."* The composed cell has W, D and H and no SH. Max said on
+the call that it had gone in as a note (24:22). **Cause, checked in the
+source:** `planSheetDescriptions` in `src/lib/bill-description.ts` (around line
+723) notes every later line that reads as a size. It does not check whether
+the line states only slots the placed line left empty.
+
+### `700 DIA X 710MM` composes `Dia.700mm` and the height is lost — OPEN
+
+TB-01C (frame 36:00) and TB-05C (frame 39:50). The line is kept as a note
+reading *"Not one of the five slots: 710. The line is kept as printed."* There
+is no H on either record. In the room Max said "It is going in" (36:13), and
+Matthew read "one of the five slots" off the screen. **Cause not diagnosed.**
+The note's words suggest the bare 710 became the reading's qualifier.
+
+### A fabric line naming a code on two lines goes on one, and the other gets no fabric — OPEN, needs a decision
+
+CH-03 is on two lines: SALON (2) and PDR MEMBERS ROOM (12). Its fabric line
+`FB_04` (FF&E code `FB-CH-03`) reads "for 18", the PDR line only (frame 21:05).
+Matthew: "FB CH03, which is both those… items for the salon and the PDR"
+(21:51). The confirm went through as it was.
+
+### The bill's Confirm is disabled with its reason only in a hover title — OPEN
+
+With two of three tabs still waiting on "The columns are right", Confirm was
+disabled. Max spent 29:15–33:27 looking for why ("It doesn't actually tell me
+what's blocking it") and first blamed a missing category. The reason is the
+button's `title` (`src/app/dashboard/imports/[id]/page.tsx`, around line 1416)
+and a banner at the top of the page. Max was scrolled down the first tab and
+saw neither.
+
+### The expanded bill line is read across, and the composed cell is missed — OPEN, design
+
+Both people read the expanded line's right-hand column, the bill's cells
+*as printed*, as what the app would show. Max told Matthew it was "how it's
+going to display it" (26:20). Matthew then asked for `W750 D3200 H780mm`, which
+the composed cell above already showed (frame 26:10). Matthew: "you kind of
+expect to read across… it's like a table" (24:43); "Doing it, but it's… just
+not that clear that it's done it" (36:29).
+
+### A finish cell starting with the item's name ships whole to Main metal finish — OPEN, question
+
+TB-05C: `LOUNGE CYMBAL TABLE — ROUND BRONZE ANTIQUE BRASS` is written to Main
+metal finish, *"Read as a metal from the bill's FINISH / REFERENCE column, kept
+whole"* (frame 39:50). Max described it on the call as a notes column (40:15).
+Classifying the cell whole is by design. The item name in a BWS field is not.
+
+### A client ref carries the schedule's "(TO BE CONFIRMED)" — OPEN, not discussed
+
+The phase table shows `CH-01 (TO BE CONFIRMED)` as a client ref (frame 45:48).
+The schedule's qualifier on its code became part of the pre-sale key.
+
+### Five item words found no category — OPEN, needs answers
+
+Pouffe, lounge table, bar-height table, reception counter, and DJ table. Each
+was placed by hand on the call. `Pouf` is seeded to *Ottomans Storage boxes*.
+On this bill Matthew chose *Armchairs Benches Stools Sofas* for a `POUFFE`,
+so seeding either spelling waits on him.
+
+---
+
 ## 2026-10-12 (afternoon): a read-only walk of pilot
 
 Max asked for a look over PILOT v1.9 before the fix plan: "is there anything

@@ -21,6 +21,29 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-15 — Catch-up: Ronnie Scott's confirmed on pilot with Matthew
+
+`docs/plans/catchup-2026-10-15.md`. On PILOT v1.11 Max uploaded the converted
+procurement schedule for P16717. Matthew checked it against the PDF, and it
+confirmed: 30 records and 17 fabric and finish specs on three phases.
+Matthew: "pretty good on our first effort" (27:02).
+
+- **Decided for this project's lines only (Matthew):** a pouffe → Armchairs
+  Benches Stools Sofas; the lounge and bar-height tables → Dining tables; the
+  reception counter and the DJ table → Drinks Cabinets Service Stations. **Not
+  seeded.** The pouffe answer conflicts with the seeded `Pouf` → Ottomans
+  Storage boxes (2026-09-30, "for Matthew to confirm").
+- **Asked for and not decided: PDF bills** (Claudia, 16:42). They are on the
+  *Explicitly excluded* list. Max said on the call that it was a small change.
+  The only route that keeps "code reads every cell" is the `pdf:schedule`
+  text-layer reader. Max's decision.
+- **Found and logged in `found-in-use.md`:** a Dims line giving only SH is
+  dropped; `700 DIA X 710MM` loses its height; a fabric line naming a code on
+  two lines goes on one; the Confirm's reason is only a hover title; the
+  expanded line is read across. In the room, two values that were dropped were
+  said to have gone in.
+- **Not covered:** part 2 of the call, booked for 17:00 the same day.
+
 ## 2026-10-15 — Ronnie Scott's: a COM line is filed by its COM CODE, and links to the COM list
 
 The procurement schedule (LBPCo, P16717) gives each COM, leather and trim line
