@@ -282,6 +282,10 @@ The trap to design against: a phase is a SUB-QUOTE and the export's scope
 files, and a code on two lines of one phase is SX11A. **Nothing is built
 until Max has seen the two controls drawn.**
 
+**DRAWN 2026-10-15:** `docs/design/phase-control-mockup.html` (two frames) and
+`docs/plans/phase-control-design-2026-10-15.md` (the rules, and four
+questions for Max, P1–P4).
+
 ### G — An intake that aims at TGQ (thinking, not building)
 
 Max: the first intake should let the reviewer confirm what TGQ needs:

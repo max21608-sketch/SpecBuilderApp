@@ -1,0 +1,133 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phase control — mock-up for Max (2026-10-15)</title>
+<style>
+:root{
+  --ink:#171717; --ink-2:#404040; --ink-3:#737373; --ink-4:#a3a3a3;
+  --line:#e5e5e5; --line-2:#d4d4d4; --bg:#fafaf9; --card:#fff;
+  --red:#b91c1c; --red-bg:#fef2f2; --red-line:#fecaca;
+  --amber:#a16207; --amber-bg:#fffbeb; --amber-line:#fde68a;
+  --green:#15803d; --green-bg:#f0fdf4; --green-line:#bbf7d0;
+  --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-line:#bfdbfe;
+  --sky:#0369a1; --sky-bg:#f0f9ff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.wrap{max-width:1100px;margin:0 auto;padding:0 20px 48px}
+.frame-title{max-width:1100px;margin:36px auto 10px;padding:0 20px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.frame-note{max-width:1100px;margin:0 auto 12px;padding:0 20px;color:var(--ink-2);font-size:13px}
+.topbar{background:var(--ink);color:#fff;padding:9px 20px;display:flex;gap:18px;font-size:13px}
+.env{background:#facc15;color:#000;font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px}
+.phead{background:var(--card);border-bottom:1px solid var(--line);padding:16px 0 0}
+.phead .row{max-width:1100px;margin:0 auto;padding:0 20px;display:flex;gap:14px;align-items:flex-start}
+h1{font-size:20px;font-weight:650;margin:2px 0 0}
+.sub{font-size:12.5px;color:var(--ink-3);margin:3px 0 0}
+.acts{margin-left:auto;display:flex;gap:8px;align-items:center}
+.tabs{max-width:1100px;margin:14px auto 0;padding:0 20px;display:flex;gap:2px}
+.tab{padding:8px 13px;font-size:13px;color:var(--ink-3);border-bottom:2px solid transparent;display:flex;gap:6px}
+.tab.on{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+.n{font-size:11px;color:var(--ink-4);background:#f5f5f4;border-radius:9px;padding:1px 6px}
+.btn{display:inline-flex;gap:6px;font-size:13px;font-weight:500;padding:6px 12px;border-radius:6px;border:1px solid var(--line-2);background:#fff;color:var(--ink);white-space:nowrap}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+.btn.sm{padding:3px 9px;font-size:12px}
+.btn.danger{color:var(--red);border-color:var(--red-line)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:16px}
+.card h3{margin:0;padding:12px 16px;border-bottom:1px solid var(--line);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);display:flex;gap:10px;align-items:center}
+.card .body{padding:14px 16px}
+.note{border-radius:8px;padding:10px 12px;font-size:13px;margin-top:12px}
+.note.blue{background:var(--blue-bg);border:1px solid var(--blue-line);color:#1e3a8a}
+.note.amber{background:var(--amber-bg);border:1px solid var(--amber-line);color:#713f12}
+.choice{display:grid;grid-template-columns:22px 1fr;gap:6px 8px;align-items:start;padding:8px 0}
+.choice + .choice{border-top:1px dashed var(--line)}
+.choice b{font-weight:600}
+.choice .why{grid-column:2;color:var(--ink-3);font-size:12.5px}
+select,input[type=text]{font:inherit;font-size:13px;padding:4px 8px;border:1px solid var(--line-2);border-radius:6px;background:#fff}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid #f0f0ef;vertical-align:top}
+tr.sel td{background:var(--blue-bg)}
+.chip{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:5px;border:1px solid var(--line-2);color:var(--ink-2);background:#fff}
+.chip.pkg{border-color:#c7d2fe;background:#eef2ff;color:#3730a3}
+.summary{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:13px}
+.arrow{color:var(--ink-4)}
+.dialog{max-width:620px;margin:16px auto 0;background:#fff;border:1px solid var(--line-2);border-radius:12px;box-shadow:0 10px 30px #0000001a}
+.dialog h2{font-size:16px;margin:0;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dialog .body{padding:14px 18px}
+.dialog .foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+ul.tight{margin:6px 0 0;padding-left:18px}
+ul.tight li{margin:3px 0}
+.flag{color:var(--amber);font-size:12.5px}
+</style>
+
+<div class="frame-title">Frame 1 — the bill review: where each tab goes</div>
+<p class="frame-note">The existing "This tab becomes a phase" card gains one control, <b>Goes into</b>, with three answers. The default is today's behaviour, so nothing changes unless somebody picks. A summary sits above the tabs, and the Confirm button counts phases from it.</p>
+
+<div class="topbar"><b>Project Spec Builder</b><span class="env">PILOT v1.13</span><span>Projects</span><span>Inbox</span></div>
+<div class="phead"><div class="row">
+  <div><div class="sub">Pack delivered 15 Oct 2026</div><h1>RONNIE SCOTTS ST4 Procurement Schedule</h1><div class="sub">3 tabs · every cell read by code</div></div>
+  <div class="acts"><span class="btn primary">Confirm — creates 30 records on 1 phase</span></div>
+</div>
+<div class="tabs"><span class="tab on">UPHOLSTERED <span class="n">28</span></span><span class="tab">CASEGOODS TABLES <span class="n">16</span></span><span class="tab">MIRRORS <span class="n">3</span></span></div></div>
+
+<div class="wrap">
+  <div class="card"><div class="body">
+    <div class="summary"><b>Phases this bill makes:</b>
+      <span class="chip">UPHOLSTERED</span><span class="arrow">+</span><span class="chip">CASEGOODS TABLES</span><span class="arrow">+</span><span class="chip">MIRRORS</span>
+      <span class="arrow">→</span><b>1 phase, "RSL ST4"</b> <span style="color:var(--ink-3)">· each line keeps its tab as its <b>package</b></span>
+    </div>
+  </div></div>
+
+  <div class="card">
+    <h3>This tab — UPHOLSTERED <span style="margin-left:auto"><span class="btn sm">Change columns</span> <span class="btn sm">Drop this sheet</span></span></h3>
+    <div class="body">
+      <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600">Goes into</div>
+      <div class="choice"><input type="radio" name="g1"><div><b>A new phase</b> named <input type="text" value="UPHOLSTERED" style="width:180px"></div>
+        <div class="why">Today's default: one tab, one phase.</div></div>
+      <div class="choice"><input type="radio" name="g1" checked><div><b>One phase with other tabs of this bill</b>, named <input type="text" value="RSL ST4" style="width:140px"> — with
+        <label><input type="checkbox" checked> CASEGOODS TABLES</label> <label><input type="checkbox" checked> MIRRORS</label></div>
+        <div class="why">Each line keeps its tab name as its <b>package</b>. The package is a filter on the phase table, the way area is.</div></div>
+      <div class="choice"><input type="radio" name="g1"><div><b>Add to a phase that already exists</b> <select><option>— choose —</option><option>MOCK-UP</option></select></div>
+        <div class="why">Adds lines and changes nothing already there. This is not a revision: to replace a phase's bill, use "Replaces phase…" as today.</div></div>
+      <div class="note amber">CH-03 is on 2 lines of this phase (SALON, PDR MEMBERS ROOM). Both become records. That is normal: the client's code is not our key.</div>
+    </div>
+  </div>
+</div>
+
+<div class="frame-title">Frame 2 — after confirm: move items to another phase</div>
+<p class="frame-note">On the phase table, tick rows and press <b>Move to phase…</b>. It shows what moves and what that does to the export files, and asks for a reason, the same way a retire does. One change set and one version per record. Nothing is deleted.</p>
+
+<div class="phead"><div class="row">
+  <div><div class="sub">← Projects</div><h1>P16717 — ronnie-scotts-lbpco</h1><div class="sub">RSL ST4 · 30 items</div></div>
+  <div class="acts"><span class="btn">Chase</span><span class="btn">Review the documents</span></div>
+</div>
+<div class="tabs"><span class="tab">Overview</span><span class="tab on">RSL ST4 <span class="n">30</span></span><span class="tab">MOCK-UP <span class="n">0</span></span><span class="tab">Finishes</span><span class="tab">+ Add a phase</span></div></div>
+
+<div class="wrap">
+  <div class="card">
+    <h3>3 ticked <span style="margin-left:auto"><span class="btn sm">Clear</span> <span class="btn sm primary">Move to phase…</span></span></h3>
+    <table>
+      <tr><th></th><th>No.</th><th>Client ref</th><th>Item</th><th>Package</th><th>Area</th><th>Qty</th></tr>
+      <tr><td><input type="checkbox"></td><td>1</td><td class="mono">CH-01</td><td>POUFEE</td><td><span class="chip pkg">UPHOLSTERED</span></td><td>WHISPERING CORNER</td><td>9</td></tr>
+      <tr class="sel"><td><input type="checkbox" checked></td><td>28</td><td class="mono">ACC-02</td><td>WC MIRROR</td><td><span class="chip pkg">MIRRORS</span></td><td>GUEST WC</td><td>2</td></tr>
+      <tr class="sel"><td><input type="checkbox" checked></td><td>29</td><td class="mono">ACC-05A</td><td>VANITY MIRROR</td><td><span class="chip pkg">MIRRORS</span></td><td>GUEST WC</td><td>1</td></tr>
+      <tr class="sel"><td><input type="checkbox" checked></td><td>30</td><td class="mono">ACC-05B</td><td>VANITY MIRROR</td><td><span class="chip pkg">MIRRORS</span></td><td>GUEST WC</td><td>1</td></tr>
+    </table>
+  </div>
+
+  <div class="dialog">
+    <h2>Move 3 items to another phase</h2>
+    <div class="body">
+      <label>To <select><option>A new phase…</option><option>MOCK-UP</option></select></label> named <input type="text" value="MIRRORS" style="width:140px">
+      <ul class="tight">
+        <li>They leave <b>RSL ST4</b>'s export file and join <b>MIRRORS</b>' file. A BWS file already downloaded for RSL ST4 no longer matches.</li>
+        <li>Their specs, pictures, answers and history go with them. Their numbers (P16717-028…030) do not change.</li>
+        <li>Configurations move with their bill line, never on their own.</li>
+      </ul>
+      <div class="note blue">If the phase you choose already has a line with the same code, both stay as two records. Nothing is merged, and the move says so here, naming the code.</div>
+      <div style="margin-top:12px"><label>Why <input type="text" placeholder="e.g. Mirrors are quoted separately" style="width:100%"></label></div>
+    </div>
+    <div class="foot"><span class="btn">Cancel</span><span class="btn primary">Move 3</span></div>
+  </div>
+</div>
