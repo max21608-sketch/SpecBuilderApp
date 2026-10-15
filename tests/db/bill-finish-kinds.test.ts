@@ -163,8 +163,8 @@ describeIfDb("a bill's finish lines, filed by kind", () => {
     expect((await line(5))?.goesTo).toBe("→ COM 2");
     expect((await line(6))?.goesTo).toBe("→ COM 3");
     expect(await line(7)).toMatchObject({ goesTo: "→ kept, COM 1–3 are full", filing: "new library entry F-FA-18" });
-    expect((await line(8))?.goesTo).toBe("→ Main metal finish");
-    expect((await line(9))?.goesTo).toBe("→ Main timber finish");
+    expect((await line(8))?.goesTo).toBe("→ Metal finish 1");
+    expect((await line(9))?.goesTo).toBe("→ Timber finish 1");
     expect(await line(10)).toMatchObject({ goesTo: "→ kept, no BWS field (trim)", filing: "new library entry F-TR-01" });
     expect(await line(12)).toMatchObject({
       goesTo: "→ COM 1",
