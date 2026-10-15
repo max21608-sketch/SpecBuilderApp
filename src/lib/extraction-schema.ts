@@ -2037,6 +2037,17 @@ export const FINISHES_SCHEDULE_TOOL = {
             ),
             statusRaw: finishText("The document's own status or approval wording for this finish ('APPROVED', 'SAMPLE PENDING')."),
             page: { type: ["integer", "null"], minimum: 1, description: "1-based page number the entry is printed on." },
+            // A plain array, never a nullable object: structured output allows
+            // 16 nullable/union fields and this tool already spends 16 (the
+            // twelve texts, page, otherRaw's two, documentNotes). Empty is
+            // "no chip", the v4 drawings tool's own shape.
+            swatchBox: {
+              type: "array",
+              maxItems: 4,
+              items: { type: "number", minimum: 0, maximum: 1 },
+              description:
+                "Where this entry's own swatch is printed — a fabric or material photograph, a colour chip or a sample image on the entry's row or beside its code, on the entry's page — as [x0, y0, x1, y1], fractions of the page from 0 to 1, origin top-left; approximate is fine. EMPTY when the entry prints no picture of its own.",
+            },
             otherRaw: {
               type: "array",
               maxItems: MAX_FINISH_OTHER_LINES,
@@ -2067,6 +2078,7 @@ export const FINISHES_SCHEDULE_TOOL = {
             "appliesToRaw",
             "statusRaw",
             "page",
+            "swatchBox",
             "otherRaw",
           ],
         },
@@ -2103,6 +2115,9 @@ export const RawFinishEntry = z.object({
   appliesToRaw: nullableText(MAX_SHORT),
   statusRaw: nullableText(MAX_SHORT),
   page: z.number().int().min(1).max(100_000).nullable().catch(null).default(null),
+  // The chip's box, or empty. A hint inside a paid answer: anything malformed
+  // reads as no chip (`swatchOf` then checks the box itself).
+  swatchBox: z.array(z.number()).max(4).catch([]).default([]),
   // A bare string is one UNLABELLED line, and a null line is dropped —
   // `bareValuesAsList`, for the reason it exists: this is a hint inside a paid
   // answer, and failing the read over it would charge again for one line.

@@ -19,7 +19,19 @@
 // NO MOCK-UP EXISTS FOR THIS SCREEN. It is the preamble review's pattern (the
 // same three bands, the same primitives) with the finishes page's table and
 // kind control, because those are the two jobs it is. Not accepted by anybody.
-import { useCallback, useEffect, useMemo, useState } from "react";
+//
+// A VERSION 3 READ PROPOSES A SWATCH PER CODE (2026-10-15). The drawings
+// card's own `SwatchPicker` crops the box the read reported, on arrival, and
+// shows it as proposed with Remove and Crop it again beside it. Nothing is
+// uploaded until the confirm, and only for the ticked rows; the confirm files
+// it on the code and never over a swatch the code already has, which this
+// screen says on the row instead of offering a crop. A version 2 read has no
+// picture column at all.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
+import { projectUploadPrefix } from "@/lib/blob-source";
+import type { CroppedImage } from "@/lib/pdf-crop";
+import SwatchPicker from "@/components/imports/SwatchPicker";
 import { clampText } from "@/lib/shout";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
@@ -40,6 +52,7 @@ import { WAITING_FOR_SLOT_MESSAGE } from "@/lib/intake-status";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import { FINISH_KINDS, FINISH_KIND_LABELS, type FinishKind } from "@/lib/finishes";
 import {
+  offersSwatches,
   VERDICT_LABELS,
   type FinishScheduleEntry,
   type ScheduleReviewRow,
@@ -96,6 +109,50 @@ export default function FinishScheduleReview({
   const [showApplied, setShowApplied] = useState(false);
   // The furniture half of the same file, once somebody has asked for it read.
   const [furnitureRunId, setFurnitureRunId] = useState<string | null>(null);
+  // The swatch each row holds, by entry id: a ref, not state, for the drawings
+  // screen's reason — a crop is bytes waiting for a confirm, not something to
+  // re-render on.
+  const swatches = useRef<Map<string, { image: CroppedImage; page: number | null; origin: "proposed" | "person" } | null>>(
+    new Map(),
+  );
+  const rememberSwatch = useCallback(
+    (entryId: string, image: CroppedImage | null, page: number | null, origin: "proposed" | "person") => {
+      swatches.current.set(entryId, image ? { image, page, origin } : null);
+    },
+    [],
+  );
+
+  /** The crops for the ticked rows, uploaded at confirm and not before. */
+  async function uploadSwatches(entryIds: string[]) {
+    const out: {
+      entryId: string;
+      pathname: string;
+      page: number | null;
+      width: number;
+      height: number;
+      size: number;
+      origin: "proposed" | "person";
+    }[] = [];
+    for (const entryId of entryIds) {
+      const crop = swatches.current.get(entryId);
+      if (!crop) continue;
+      const blob = await upload(
+        `${projectUploadPrefix(project.id)}finish-swatches/${entryId}-${Date.now()}.png`,
+        crop.image.blob,
+        { access: "private", handleUploadUrl: "/api/uploads/token", clientPayload: project.id, contentType: "image/png" },
+      );
+      out.push({
+        entryId,
+        pathname: blob.pathname,
+        page: crop.page,
+        width: crop.image.width,
+        height: crop.image.height,
+        size: crop.image.blob.size,
+        origin: crop.origin,
+      });
+    }
+    return out;
+  }
 
   const load = useCallback(async () => {
     const res = await apiFetch<{ import: Run; review?: ScheduleReviewRow[]; furnitureRunId?: string | null }>(
@@ -213,16 +270,32 @@ export default function FinishScheduleReview({
     setError(null);
     setNotice(null);
     try {
+      let entrySwatches: Awaited<ReturnType<typeof uploadSwatches>> = [];
+      if (action === "confirm") {
+        try {
+          entrySwatches = await uploadSwatches(entries.map((entry) => entry.id));
+        } catch (cause) {
+          setError(`The swatches could not be uploaded, so nothing was added: ${cause instanceof Error ? cause.message : String(cause)}`);
+          return;
+        }
+      }
       const res = await apiFetch<{
         created: number;
         filled: number;
         enriched?: number;
         unchanged: number;
         skipped: { code: string | null; why: string }[];
+        swatchesFiled?: number;
+        swatchesKept?: number;
+        swatchesLeftOut?: number;
       }>(`/api/imports/${importId}/confirm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, entries: entries.map((entry) => ({ id: entry.id, version: entry.version })) }),
+        body: JSON.stringify({
+          action,
+          entries: entries.map((entry) => ({ id: entry.id, version: entry.version })),
+          ...(entrySwatches.length > 0 ? { entrySwatches } : {}),
+        }),
       });
       let info: string | null = null;
       if (res.ok && action === "confirm") {
@@ -231,6 +304,12 @@ export default function FinishScheduleReview({
           res.data.filled > 0 ? `${res.data.filled} filled in` : null,
           (res.data.enriched ?? 0) > 0 ? `${res.data.enriched} given the schedule's fuller description` : null,
           res.data.unchanged > 0 ? `${res.data.unchanged} already held and agreeing` : null,
+          (res.data.swatchesFiled ?? 0) > 0
+            ? `${res.data.swatchesFiled} swatch${res.data.swatchesFiled === 1 ? "" : "es"} filed`
+            : null,
+          (res.data.swatchesKept ?? 0) > 0
+            ? `${res.data.swatchesKept} swatch${res.data.swatchesKept === 1 ? "" : "es"} not filed because the code already has one`
+            : null,
         ].filter(Boolean);
         info = `${said.join(", ")}.`;
         if (res.data.skipped.length > 0) {
@@ -382,6 +461,7 @@ export default function FinishScheduleReview({
       notice={notice}
       onKind={(entry, kind) => void fileKind(entry, kind)}
       onAct={(entries, action) => void act(entries, action)}
+      onSwatch={rememberSwatch}
       showIgnored={showIgnored}
       setShowIgnored={setShowIgnored}
       showApplied={showApplied}
@@ -405,6 +485,7 @@ export function FinishScheduleTable({
   notice,
   onKind,
   onAct,
+  onSwatch,
   showIgnored,
   setShowIgnored,
   showApplied,
@@ -420,6 +501,8 @@ export function FinishScheduleTable({
   notice: string | null;
   onKind: (entry: FinishScheduleEntry, kind: FinishKind | null) => void;
   onAct: (entries: FinishScheduleEntry[], action: "confirm" | "ignore" | "restore") => void;
+  /** Absent on a caller with no upload behind it; the picker then is not offered. */
+  onSwatch?: (entryId: string, image: CroppedImage | null, page: number | null, origin: "proposed" | "person") => void;
   showIgnored: boolean;
   setShowIgnored: (update: (value: boolean) => boolean) => void;
   showApplied: boolean;
@@ -434,6 +517,8 @@ export function FinishScheduleTable({
     return verdict && !TICKABLE.has(verdict.status);
   }).length;
   const writes = count("new") + count("fills") + count("enriches");
+  const withSwatches = offersSwatches(staged) && Boolean(onSwatch);
+  const columns = withSwatches ? 7 : 6;
 
   return (
     <>
@@ -458,6 +543,7 @@ export function FinishScheduleTable({
               <Th>What the schedule says</Th>
               <Th className="w-[16%]">Kind</Th>
               <Th className="w-[22%]">The library</Th>
+              {withSwatches && <Th className="w-[15%]">Swatch</Th>}
               <Th />
             </tr>
           </thead>
@@ -527,6 +613,18 @@ export function FinishScheduleTable({
                   <Td>
                     <VerdictCell verdict={verdict} />
                   </Td>
+                  {withSwatches && (
+                    <Td>
+                      <SwatchCell
+                        importId={importId}
+                        entry={entry}
+                        code={row?.code ?? null}
+                        verdict={verdict}
+                        disabled={busy !== null}
+                        onSwatch={onSwatch!}
+                      />
+                    </Td>
+                  )}
                   <Td>
                     <Button variant="quiet" size="xs" disabled={busy !== null} onClick={() => onAct([entry], "ignore")}>
                       Ignore
@@ -537,7 +635,7 @@ export function FinishScheduleTable({
             })}
             {pending.length === 0 && (
               <tr>
-                <Td colSpan={6} muted>
+                <Td colSpan={columns} muted>
                   Every finish in this schedule has been reviewed.
                 </Td>
               </tr>
@@ -565,7 +663,9 @@ export function FinishScheduleTable({
               ? "Adding…"
               : writes > 0
                 ? `Add ${writes} to the library`
-                : `Close ${chosen.length} already held`}
+                : withSwatches
+                  ? `Confirm ${chosen.length} already held, with their swatches`
+                  : `Close ${chosen.length} already held`}
           </Button>
         </div>
       </Card>
@@ -584,6 +684,51 @@ export function FinishScheduleTable({
         onToggle={() => setShowApplied((value) => !value)}
         entries={staged.entries.filter((entry) => entry.reviewStatus === "applied")}
         byEntry={byEntry}
+      />
+    </>
+  );
+}
+
+/**
+ * The row's swatch: the read's proposal cropped on arrival, or a crop a person
+ * makes — offered only where the confirm will file it. A code the library
+ * already pictures says so instead, because the confirm never replaces one;
+ * a row that writes nothing (a conflict, a repeat, no code) offers nothing.
+ */
+function SwatchCell({
+  importId,
+  entry,
+  code,
+  verdict,
+  disabled,
+  onSwatch,
+}: {
+  importId: string;
+  entry: FinishScheduleEntry;
+  code: string | null;
+  verdict: ScheduleVerdict | null;
+  disabled: boolean;
+  onSwatch: (entryId: string, image: CroppedImage | null, page: number | null, origin: "proposed" | "person") => void;
+}) {
+  if (!verdict || !TICKABLE.has(verdict.status)) return <span className="text-neutral-400">—</span>;
+  if ("finish" in verdict && verdict.finish.hasSwatch) {
+    return (
+      <span className="text-[11.5px] text-neutral-600">
+        {verdict.finish.code} already has a swatch — kept. Replace it on the library.
+      </span>
+    );
+  }
+  return (
+    <>
+      {!entry.swatch && <span className="block text-[11px] text-neutral-500">The read found no picture on this row.</span>}
+      <SwatchPicker
+        importId={importId}
+        observationId={entry.id}
+        page={entry.swatch?.page ?? entry.page}
+        code={code}
+        disabled={disabled}
+        proposed={entry.swatch}
+        onCropped={(image, page, origin) => onSwatch(entry.id, image, page, origin)}
       />
     </>
   );
@@ -727,6 +872,11 @@ function Collapsed({
                     : entry.applied.outcome === "enriched"
                       ? "given more detail"
                       : "already held"}
+                {entry.swatchFiled === "filed"
+                  ? " · swatch filed"
+                  : entry.swatchFiled === "kept_existing"
+                    ? " · its swatch was already there"
+                    : ""}
               </span>
             )}
             {onRestore && (

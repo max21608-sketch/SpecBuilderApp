@@ -18,6 +18,7 @@ import {
   assertStagedFinishSchedule,
   composeScheduleFinish,
   isStagedFinishSchedule,
+  offersSwatches,
   reviewFinishSchedule,
   scheduleCode,
   stageFinishSchedule,
@@ -44,6 +45,7 @@ function raw(over: Partial<RawFinishEntry> = {}): RawFinishEntry {
     appliesToRaw: null,
     statusRaw: null,
     page: null,
+    swatchBox: [],
     otherRaw: [],
     ...over,
   });
@@ -107,6 +109,22 @@ describe("the finishes schedule's tool and schema", () => {
     expect(item.properties.codeRaw.description).toMatch(/EXACTLY as printed, spacing included/);
   });
 
+  it("asks for each entry's swatch as a plain box list, inside structured output's 16 nullable fields", () => {
+    const item = FINISHES_SCHEDULE_TOOL.input_schema.properties.entries.items;
+    expect(item.required).toContain("swatchBox");
+    expect(item.properties.swatchBox.type).toBe("array");
+    // Structured output refuses a schema with more than 16 nullable or union
+    // fields. The swatch spends none, and this keeps the count honest.
+    const nullable = (node: unknown): number => {
+      if (!node || typeof node !== "object") return 0;
+      const own = node as Record<string, unknown>;
+      const here = (Array.isArray(own.type) && own.type.includes("null")) || "anyOf" in own ? 1 : 0;
+      return here + Object.values(own).reduce<number>((sum, child) => sum + nullable(child), 0);
+    };
+    expect(nullable(FINISHES_SCHEDULE_TOOL.input_schema)).toBeLessThanOrEqual(16);
+    expect(PROMPTS.finishes_schedule).toMatch(/THE SWATCH/);
+  });
+
   it("tells the model to read every entry, keep the code as printed, and never infer a kind", () => {
     expect(PROMPTS.finishes_schedule).toMatch(/Record EVERY finish entry/);
     expect(PROMPTS.finishes_schedule).toMatch(/exactly as printed, spacing included/);
@@ -148,9 +166,9 @@ describe("the finishes schedule's tool and schema", () => {
 });
 
 describe("staging", () => {
-  it("stages version 2, every field kept, nothing filed and no kind", () => {
+  it("stages version 3, every field kept, nothing filed and no kind", () => {
     const staged = stage([raw({ codeRaw: "AB TIM 01", kindRaw: "TIMBER", page: 4 })]);
-    expect(staged).toMatchObject({ schemaVersion: 2, kind: "finishes_schedule", filename: "__QA schedule.pdf" });
+    expect(staged).toMatchObject({ schemaVersion: 3, kind: "finishes_schedule", filename: "__QA schedule.pdf" });
     expect(staged.entries[0]).toMatchObject({
       id: "entry-1",
       version: 1,
@@ -162,6 +180,40 @@ describe("staging", () => {
       applied: null,
     });
     expect(isStagedFinishSchedule(staged)).toBe(true);
+  });
+
+  it("stages the chip the read found as a swatch proposal on its entry's page", () => {
+    const staged = stage([
+      raw({ codeRaw: "FB_01", page: 2, swatchBox: [0.05, 0.2, 0.15, 0.3] }),
+      raw({ codeRaw: "FB_02", page: 2, swatchBox: [] }),
+      // A box with no page cannot be cropped off a page anybody can open.
+      raw({ codeRaw: "FB_03", page: null, swatchBox: [0.05, 0.2, 0.15, 0.3] }),
+      // A sliver is not a picture of anything (`usableBox`).
+      raw({ codeRaw: "FB_04", page: 2, swatchBox: [0.05, 0.2, 0.051, 0.3] }),
+    ]);
+    expect(staged.entries.map((entry) => entry.swatch)).toEqual([
+      { page: 2, bbox: [0.05, 0.2, 0.15, 0.3] },
+      null,
+      null,
+      null,
+    ]);
+    expect(offersSwatches(staged)).toBe(true);
+  });
+
+  it("reads a malformed swatch box as no chip, never failing the paid read", () => {
+    expect(raw({ swatchBox: "top left" as unknown as number[] }).swatchBox).toEqual([]);
+    expect(RawFinishEntry.parse({ codeRaw: "FB_01" }).swatchBox).toEqual([]);
+  });
+
+  it("reads a version 2 run exactly as before: no swatch, and no swatch column", () => {
+    const v3 = stage([raw({ codeRaw: "AB TIM 01", page: 4, swatchBox: [0.1, 0.1, 0.3, 0.3] })]);
+    const entry: Record<string, unknown> = { ...v3.entries[0]! };
+    delete entry.swatch;
+    const v2 = { ...v3, schemaVersion: 2, entries: [entry] };
+    expect(isStagedFinishSchedule(v2)).toBe(true);
+    const read = assertStagedFinishSchedule(v2);
+    expect(read.entries[0]!.swatch).toBeNull();
+    expect(offersSwatches(read)).toBe(false);
   });
 
   it("tells a version 1 proposals document apart, so it keeps its own screen", () => {

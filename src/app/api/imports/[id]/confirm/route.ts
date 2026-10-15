@@ -99,8 +99,27 @@ const ConfirmBody = z
       .optional(),
     // Preamble notes.
     notes: z.array(StagedRef).min(1).max(500).optional(),
-    // Finishes schedule entries (schemaVersion 2).
+    // Finishes schedule entries (schemaVersion 2 and 3).
     entries: z.array(StagedRef).min(1).max(600).optional(),
+    // A finishes schedule's swatches (schemaVersion 3), keyed by ENTRY. The
+    // library row each lands on is resolved server-side from that entry's
+    // own code; the pathname is re-checked against the run's project.
+    entrySwatches: z
+      .array(
+        z
+          .object({
+            entryId: z.string().min(1),
+            pathname: z.string().min(1).max(1024),
+            page: z.number().int().positive().max(10_000).nullable().optional(),
+            width: z.number().int().positive().max(20_000).nullable().optional(),
+            height: z.number().int().positive().max(20_000).nullable().optional(),
+            size: z.number().int().nonnegative().max(32 * 1024 * 1024).nullable().optional(),
+            origin: z.enum(["proposed", "person"]).optional(),
+          })
+          .strict(),
+      )
+      .max(600)
+      .optional(),
   })
   .strict();
 
@@ -236,7 +255,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const result =
         body.action === "confirm"
           ? await withTransaction((txn) =>
-              confirmFinishScheduleEntries(txn, { runId: id, expectedVersion, entries, actor: user.email }),
+              confirmFinishScheduleEntries(txn, {
+                runId: id,
+                expectedVersion,
+                entries,
+                swatches: body.entrySwatches ?? [],
+                actor: user.email,
+              }),
             )
           : await withTransaction((txn) =>
               reviewFinishScheduleEntries(txn, {

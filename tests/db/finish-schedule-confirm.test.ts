@@ -13,7 +13,11 @@
 //   * a held code with no description is FILLED, and a field it already had
 //     is left exactly as it was (`editFinish` replaces the row);
 //   * a conflict and a repeat write nothing and stay for a person;
-//   * confirming the same schedule again writes nothing and opens no change.
+//   * confirming the same schedule again writes nothing and opens no change;
+//   * a version 3 read's swatch files on its code — a new one, or a held one
+//     with no picture — never over a swatch the code already has; a proposal
+//     on a row that writes nothing is left out, a person's crop there is
+//     refused in words, and a pathname outside the project is refused.
 import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import { describeIfDb, qaNumber } from "./db-tier";
 import pg from "pg";
@@ -128,6 +132,11 @@ describeIfDb("a finishes schedule confirmed into the library", () => {
   });
 
   afterAll(async () => {
+    await client.query(
+      `delete from attachments where entity_type = 'project_finishes'
+         and entity_id in (select id from project_finishes where project_id = $1)`,
+      [projectId],
+    );
     await client.query(`delete from project_finishes where project_id = $1`, [projectId]);
     await client.query(`delete from status_history where entity_id in (select id from intake_runs where project_id = $1)`, [
       projectId,
@@ -300,6 +309,90 @@ describeIfDb("a finishes schedule confirmed into the library", () => {
       state: "tbc",
     });
     expect(byCode.get("QA-MTL-02")).toMatchObject({ description: "Bronze", state: "confirmed", version: 1 });
+  });
+
+  it("files each swatch on its CODE, never over one the code already has", async () => {
+    const box = [0.05, 0.2, 0.15, 0.3];
+    const held = await addFinish("QA-FAB-02", { description: "HELD VELVET" });
+    const pictured = await addFinish("QA-FAB-03", { description: "PICTURED LINEN" });
+    await addFinish("QA-FAB-04", { description: "Something else entirely", state: "confirmed" });
+    await client.query(
+      `insert into attachments (entity_type, entity_id, kind, storage_path, filename, content_type, uploaded_by)
+       values ('project_finishes', $1, 'finish_swatch', $2, 'bill row 4.png', 'image/png', 'qa')`,
+      [pictured.rows[0].id, `projects/${projectId}/finish-swatches/held.png`],
+    );
+    const { runId, staged } = await stageRun([
+      entry({ codeRaw: "QA FAB 01", nameRaw: "NEW BOUCLE", page: 5, swatchBox: box }),
+      entry({ codeRaw: "QA FAB 02", nameRaw: "HELD VELVET", page: 5, swatchBox: box }),
+      entry({ codeRaw: "QA FAB 03", nameRaw: "PICTURED LINEN", page: 5, swatchBox: box }),
+      entry({ codeRaw: "QA FAB 04", nameRaw: "A CONFLICTING WOOL", page: 6, swatchBox: box }),
+    ]);
+    expect(staged.schemaVersion).toBe(3);
+    const got = await (await importGet(new Request("http://localhost/test"), params(runId))).json();
+    expect(got.review.map((row: { verdict: { status: string; finish?: { hasSwatch?: boolean } } | null }) => [
+      row.verdict?.status,
+      row.verdict?.finish?.hasSwatch ?? null,
+    ])).toEqual([
+      ["new", null],
+      ["agrees", false],
+      ["agrees", true],
+      ["conflict", false],
+    ]);
+
+    const crop = (index: number, origin: "proposed" | "person", pathname = `projects/${projectId}/finish-swatches/e${index}.png`) => ({
+      entryId: staged.entries[index]!.id,
+      pathname,
+      page: 5,
+      width: 40,
+      height: 40,
+      size: 900,
+      origin,
+    });
+    const refs = staged.entries.map((row) => ({ id: row.id, version: 1 }));
+
+    // A person's crop on a row that writes nothing has nowhere to go: refused, in words.
+    const refused = await post(runId, { action: "confirm", entries: refs, entrySwatches: [crop(3, "person")] });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error).toMatch(/no library row to go on/);
+    // A pathname outside the project is refused before anything is written.
+    const foreign = await post(runId, {
+      action: "confirm",
+      entries: refs,
+      entrySwatches: [crop(0, "proposed", "projects/someone-else/x.png")],
+    });
+    expect(foreign.status).toBe(400);
+    expect(await library()).not.toContainEqual(expect.objectContaining({ code: "QA-FAB-01" }));
+
+    const response = await post(runId, {
+      action: "confirm",
+      entries: refs,
+      entrySwatches: [crop(0, "proposed"), crop(1, "proposed"), crop(2, "proposed"), crop(3, "proposed")],
+    });
+    const result = await response.json();
+    expect(result).toMatchObject({ ok: true, created: 1, unchanged: 2, swatchesFiled: 2, swatchesKept: 1, swatchesLeftOut: 1 });
+
+    const swatches = (
+      await client.query(
+        `select f.code, a.storage_path, a.filename, a.superseded_at
+           from attachments a join project_finishes f on f.id = a.entity_id
+          where a.entity_type = 'project_finishes' and a.kind = 'finish_swatch' and f.project_id = $1
+            and f.code like 'QA-FAB-%'
+          order by f.code, a.created_at`,
+        [projectId],
+      )
+    ).rows;
+    expect(swatches.map((row) => [row.code, row.filename, row.superseded_at])).toEqual([
+      ["QA-FAB-01", "swatch-page-5.png", null],
+      ["QA-FAB-02", "swatch-page-5.png", null],
+      // The bill's picture stays, and nothing was superseded.
+      ["QA-FAB-03", "bill row 4.png", null],
+    ]);
+    expect(held.rows[0].id).toBeTruthy();
+    const after = await stagedOf(runId);
+    expect(after.parsed.entries.map((row) => row.swatchFiled ?? null)).toEqual(["filed", "filed", "kept_existing", null]);
+    // One change, naming the swatches with everything else.
+    const last = (await changeSets()).at(-1);
+    expect(String(last?.reason)).toMatch(/2 swatches cropped off the schedule/);
   });
 
   it("refuses a confirm sent over a version the reviewer did not see", async () => {

@@ -427,6 +427,12 @@ descriptionRaw IS ONLY WHAT THE FINISH IS. A sample column ("Control sample", "A
 an area column and a size column are not the finish's description: put each in otherRaw, with the
 column's heading as its label where the document gives one.
 
+THE SWATCH. Where an entry prints its own picture — a fabric or material photograph, a colour chip, a
+sample image, usually in an IMAGE or SAMPLE column on the entry's row — give where it sits on the
+entry's page as swatchBox [x0, y0, x1, y1], fractions of the page from 0 to 1, origin top-left. Box the
+picture only, not the row's text. Leave swatchBox empty where the entry prints no picture, and never
+give one entry the picture printed on another's row.
+
 NEVER INFER A KIND. kindRaw is the document's own word for the section or category the entry sits
 under ("TIMBER", "METAL", "STONE"), or null. Do not decide from the material what kind a finish is.
 

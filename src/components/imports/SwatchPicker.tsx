@@ -187,9 +187,11 @@ export default function SwatchPicker({
     if (actions && observationId && actions.heldSwatch(observationId)) return;
     proposalTried.current = true;
     const controller = new AbortController();
+    let settled = false;
     setBusy(true);
     void cropPdfRegion(`/api/imports/${importId}/source`, proposed.page, proposed.bbox, { signal: controller.signal })
       .then((image) => {
+        settled = true;
         setPreview(track(image.blob));
         setFromProposal(true);
         setChosen(proposed.page);
@@ -208,9 +210,17 @@ export default function SwatchPicker({
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "The proposed swatch could not be rendered.");
       })
       .finally(() => {
+        settled = true;
         if (!controller.signal.aborted) setBusy(false);
       });
-    return () => controller.abort();
+    // A crop cancelled BEFORE it finished was never tried: React's development
+    // Strict Mode mounts every effect twice, and without this the second mount
+    // found the guard set by an aborted first one and left the row reading
+    // "Opening the page…" for ever (found on the finishes schedule, 2026-10-15).
+    return () => {
+      controller.abort();
+      if (!settled) proposalTried.current = false;
+    };
     // Once per row: the proposal is a value from the staged JSON, and `actions`
     // changes identity on every render of the screen.
     // eslint-disable-next-line react-hooks/exhaustive-deps

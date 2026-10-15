@@ -38,15 +38,22 @@ import {
   type StagedFinishSchedule,
 } from "@/lib/finish-schedule";
 import type { Row } from "@/lib/db";
+import { assertProjectScopedPathname } from "@/lib/blob-source";
 
 type AnySql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
 
 /** The project's active library, with what a fill needs to send every field back. */
 export async function loadScheduleLibrary(exec: AnySql, projectId: string): Promise<LibraryFinish[]> {
   const rows = await exec`
-    select id, code, code_norm, code_origin, kind, description, supplier_raw, reference, colour, notes, state, version
-    from project_finishes where project_id = ${projectId} and status = 'active'
-    order by code_norm
+    select f.id, f.code, f.code_norm, f.code_origin, f.kind, f.description, f.supplier_raw, f.reference, f.colour,
+           f.notes, f.state, f.version,
+           exists (
+             select 1 from attachments a
+             where a.entity_type = 'project_finishes' and a.entity_id = f.id
+               and a.kind = 'finish_swatch' and a.superseded_at is null
+           ) as has_swatch
+    from project_finishes f where f.project_id = ${projectId} and f.status = 'active'
+    order by f.code_norm
   `;
   return rows.map((row) => ({
     id: String(row.id),
@@ -61,10 +68,28 @@ export async function loadScheduleLibrary(exec: AnySql, projectId: string): Prom
     notes: row.notes === null ? null : String(row.notes),
     state: row.state === "confirmed" ? "confirmed" : "tbc",
     version: Number(row.version),
+    hasSwatch: row.has_swatch === true,
   }));
 }
 
 export type EntryRef = { id: string; version: number };
+
+/**
+ * A swatch cropped off the schedule's page, already uploaded, keyed by the
+ * ENTRY it was cropped for. The finish it files under is resolved here from
+ * that entry's own code — the client never names a library row.
+ */
+export type ScheduleSwatch = {
+  entryId: string;
+  pathname: string;
+  /** The page the crop was TAKEN from; it names the stored file. */
+  page?: number | null;
+  width?: number | null;
+  height?: number | null;
+  size?: number | null;
+  /** `proposed`: the read's own crop, untouched. `person`: a reviewer cropped or kept it on purpose. */
+  origin?: "proposed" | "person";
+};
 
 export type FinishScheduleConfirmResult = {
   created: number;
@@ -79,6 +104,12 @@ export type FinishScheduleConfirmResult = {
   remainingPending: number;
   status: string;
   changeSetId: string | null;
+  /** Swatches filed onto their codes. */
+  swatchesFiled?: number;
+  /** Swatches not filed because the code already has one — never replaced from here. */
+  swatchesKept?: number;
+  /** Proposed swatches whose entry wrote nothing (a conflict, a repeat), left out. */
+  swatchesLeftOut?: number;
 };
 
 type LoadedRun = {
@@ -187,8 +218,9 @@ export async function confirmFinishScheduleEntries(
     runId,
     expectedVersion,
     entries: refs,
+    swatches = [],
     actor,
-  }: { runId: string; expectedVersion: number | null; entries: EntryRef[]; actor: string },
+  }: { runId: string; expectedVersion: number | null; entries: EntryRef[]; swatches?: ScheduleSwatch[]; actor: string },
 ): Promise<FinishScheduleConfirmResult> {
   const run = await loadRun(txn, runId, expectedVersion);
   const taken = takeEntries(run.staged, refs, ["pending"]);
@@ -229,15 +261,66 @@ export async function confirmFinishScheduleEntries(
     }
   }
 
+  // ---- which swatches will be filed, decided BEFORE anything is written ----
+  //
+  // A SWATCH BELONGS TO THE CODE. It files only where its entry is written or
+  // closed in this confirm, and NEVER over a swatch the code already has: the
+  // bill's picture or a person's upload is not replaced by a crop the read
+  // proposed. Replacing one is the finishes page's job, where a person sees
+  // the old picture. Refused in words where a PERSON's crop has nowhere to go;
+  // a proposal nobody touched is left out and counted (the drawings' brief F).
+  const takenIds = new Set(taken.map((entry) => entry.id));
+  const writtenIds = new Set([...toCreate, ...toFill, ...toEnrich].map(({ entry }) => entry.id).concat(unchanged.map((entry) => entry.id)));
+  const swatchFor = new Map<string, ScheduleSwatch>();
+  let swatchesKept = 0;
+  let swatchesLeftOut = 0;
+  const keptIds = new Set<string>();
+  for (const swatch of swatches) {
+    if (!takenIds.has(swatch.entryId)) {
+      throw new DomainConflictError(
+        "swatch_not_in_this_confirm",
+        "A swatch was sent for a finish that is not being added in this confirm. Reload before confirming.",
+      );
+    }
+    if (swatchFor.has(swatch.entryId)) {
+      throw new DomainConflictError("swatch_repeated", "Two swatches were sent for one finish. Reload before confirming.", { status: 400 });
+    }
+    const row = review.get(swatch.entryId);
+    if (!writtenIds.has(swatch.entryId)) {
+      if (swatch.origin === "proposed") {
+        swatchesLeftOut += 1;
+        continue;
+      }
+      throw new DomainConflictError(
+        "swatch_has_no_finish",
+        `The swatch for ${row?.code ?? "that finish"} has no library row to go on: ${row?.verdict ? skipReason(row.verdict) : "nothing is written for it."}`,
+      );
+    }
+    const verdict = row?.verdict;
+    const held = verdict && "finish" in verdict ? verdict.finish : null;
+    if (held?.hasSwatch) {
+      swatchesKept += 1;
+      keptIds.add(swatch.entryId);
+      continue;
+    }
+    try {
+      assertProjectScopedPathname(swatch.pathname, run.projectId);
+    } catch {
+      throw new DomainConflictError("swatch_not_this_project", "That swatch is not one of this project's files.", { status: 400 });
+    }
+    swatchFor.set(swatch.entryId, swatch);
+  }
+
   const filename = run.staged.filename ?? "the finishes schedule";
   let changeSetId: string | null = null;
   const applied = new Map<string, NonNullable<FinishScheduleEntry["applied"]>>();
 
-  if (toCreate.length + toFill.length + toEnrich.length > 0) {
+  if (toCreate.length + toFill.length + toEnrich.length + swatchFor.size > 0) {
     const parts = [
       toCreate.length > 0 ? `${toCreate.length} added` : null,
       toFill.length > 0 ? `${toFill.length} filled in` : null,
       toEnrich.length > 0 ? `${toEnrich.length} given the schedule's fuller description` : null,
+      swatchFor.size > 0 ? `${swatchFor.size} swatch${swatchFor.size === 1 ? "" : "es"} cropped off the schedule` : null,
     ].filter(Boolean);
     const reason = `Finishes library from ${filename}: ${parts.join(", ")}.`;
     changeSetId = await openChangeSet(txn, {
@@ -336,6 +419,43 @@ export async function confirmFinishScheduleEntries(
     });
   }
 
+  // ---- the swatches, onto the codes they belong to --------------------------
+  // Inside the transaction, so a refused one rolls back the library writes.
+  // Inserted only where the code STILL has no current swatch (another confirm
+  // may have filed one since the library was read), so nothing is superseded
+  // here and nothing is ever deleted.
+  const swatchFiled = new Map<string, "filed" | "kept_existing">();
+  for (const id of keptIds) swatchFiled.set(id, "kept_existing");
+  let swatchesFiled = 0;
+  for (const [entryId, swatch] of swatchFor) {
+    const finishId = applied.get(entryId)?.finishId;
+    if (!finishId) {
+      throw new DomainConflictError("swatch_has_no_finish", "A swatch's finish was not written. Nothing was saved; reload and try again.");
+    }
+    const page = typeof swatch.page === "number" && Number.isInteger(swatch.page) && swatch.page > 0 ? swatch.page : null;
+    const inserted = await txn`
+      insert into attachments
+        (entity_type, entity_id, kind, storage_path, filename, content_type, size,
+         image_width, image_height, uploaded_by)
+      select 'project_finishes', ${finishId}, 'finish_swatch', ${swatch.pathname},
+             ${page ? `swatch-page-${page}.png` : "swatch.png"}, 'image/png', ${swatch.size ?? null},
+             ${swatch.width ?? null}, ${swatch.height ?? null}, ${actor}
+      where not exists (
+        select 1 from attachments
+        where entity_type = 'project_finishes' and entity_id = ${finishId}
+          and kind = 'finish_swatch' and superseded_at is null
+      )
+      returning id
+    `;
+    if (inserted[0]) {
+      swatchesFiled += 1;
+      swatchFiled.set(entryId, "filed");
+    } else {
+      swatchesKept += 1;
+      swatchFiled.set(entryId, "kept_existing");
+    }
+  }
+
   if (applied.size === 0) {
     // Everything named was a conflict, a repeat or had no code: nothing is
     // written and the staged run is left as it was.
@@ -350,6 +470,7 @@ export async function confirmFinishScheduleEntries(
       remainingPending: run.staged.entries.filter((entry) => entry.reviewStatus === "pending").length,
       status: "parsed",
       changeSetId: null,
+      ...(swatchesLeftOut > 0 ? { swatchesLeftOut } : {}),
     };
   }
 
@@ -364,6 +485,7 @@ export async function confirmFinishScheduleEntries(
           reviewedAt: now,
           reviewedBy: actor,
           applied: outcome,
+          ...(swatchFiled.has(entry.id) ? { swatchFiled: swatchFiled.get(entry.id) } : {}),
         }
       : entry;
   });
@@ -389,6 +511,9 @@ export async function confirmFinishScheduleEntries(
     remainingPending: entries.filter((entry) => entry.reviewStatus === "pending").length,
     status,
     changeSetId,
+    swatchesFiled,
+    swatchesKept,
+    swatchesLeftOut,
   };
 }
 

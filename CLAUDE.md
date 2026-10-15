@@ -1133,6 +1133,20 @@ fills the library in one change set — a conflict still writes nothing. The pac
 reads bill → finishes schedule → drawings. The paragraphs above are the history
 of why it waited.
 
+**A schedule's swatches are cropped off it (staged `schemaVersion: 3`,
+2026-10-15).** The Ronnie Scott's COM list prints a fabric photo on every row
+and the v2 read kept only the words. Each entry now carries `swatchBox`, a
+PLAIN array and never a nullable object. The tool already spends all 16 of
+structured output's nullable fields, and a test counts them. The review crops
+the box on arrival with `SwatchPicker`, the drawings card's control, and
+uploads only the ticked rows at confirm. The confirm resolves the finish from
+the entry's own code and files the crop on it, for `agrees` rows too, so a
+schedule read again on a library it already filled adds the pictures. It never
+files over a CURRENT swatch, and the row says so instead of offering a crop. A
+proposal on a row that writes nothing is left out; a person's crop there is
+refused in words. A v2 run has no picture column. Measured on the real COM list
+(local stack, TEST T16718): 30 of 30 boxes, 30 swatches filed in one change set.
+
 **Asked for again on 2026-10-01, as a step in the pack** (D1 of
 `docs/plans/catchup-2026-10-01.md`). Matthew set the order as bill → finishes
 schedule → drawings, so that a drawing read lands on finishes already expected.
@@ -2347,7 +2361,8 @@ words so a value stays checkable against its page; the CELL renders the library.
 - **`supplier_raw` does NOT satisfy "suppliers by modelled Capsule ID".** There
   is no supplier register in this app and no Capsule data in this repo; the
   `_raw` suffix marks it as what a document said. That invariant remains unmet.
-- **Swatches arrive by hand — EXCEPT from a bill** (2026-10-05). A person
+- **Swatches arrive by hand — EXCEPT from a bill or a finishes schedule**
+  (2026-10-05; the schedule since 2026-10-15, above). A person
   uploads one and must say which document and page it came from. Asking the
   model for swatch regions is a tool-schema change, which means re-reading and
   re-paying for every document already read. A bill's fabric line is the

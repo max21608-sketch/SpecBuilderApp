@@ -29,8 +29,27 @@ import {
   type FinishKind,
 } from "@/lib/finishes";
 import { suggestFinishKind, type FinishKindSuggestion } from "@/lib/finish-kind-guess";
+import { usableBox } from "@/lib/drawing-document";
 
-export const FINISH_SCHEDULE_SCHEMA_VERSION = 2 as const;
+// ============================================================================
+// VERSION 3 (2026-10-15) ADDS THE SWATCH THE PAGE PRINTS BESIDE A CODE.
+//
+// The Ronnie Scott's COM list prints a fabric photograph in an IMAGE column on
+// every row, and the version 2 read took the words only, so the library got
+// thirty descriptions and no pictures. The read now reports where each
+// entry's chip sits (`swatch`), the review crops it on arrival as a PROPOSAL
+// (`SwatchPicker`, the drawings card's own control), and the confirm files it
+// as the code's swatch — never over a swatch the code already has.
+//
+// A version 2 run carries no `swatch` and reviews EXACTLY as before: no
+// picture column, nothing proposed, nothing filed. Nothing is upgraded in
+// place, because a box an old read never reported cannot be invented.
+// ============================================================================
+export const FINISH_SCHEDULE_SCHEMA_VERSION = 3 as const;
+const READABLE_VERSIONS: readonly number[] = [2, FINISH_SCHEDULE_SCHEMA_VERSION];
+
+/** Where the read saw the entry's printed chip: a page and a box in page fractions. */
+export type ScheduleSwatchProposal = { page: number; bbox: [number, number, number, number] };
 
 export type FinishOtherLine = { labelRaw: string | null; valueRaw: string | null };
 
@@ -52,6 +71,8 @@ export type FinishScheduleEntry = {
   appliesToRaw: string | null;
   statusRaw: string | null;
   otherRaw: FinishOtherLine[];
+  /** Version 3: the chip the read found, or null. Absent (read as null) on version 2. */
+  swatch: ScheduleSwatchProposal | null;
   /**
    * The kind a PERSON filed, by a click. Null until then, and never written
    * by the app: the suggestion is computed and shown, not stored.
@@ -62,10 +83,13 @@ export type FinishScheduleEntry = {
   reviewedBy: string | null;
   /** What the confirm did with it. `unchanged`: the library already said so. */
   applied: { outcome: "created" | "filled" | "enriched" | "unchanged"; finishId: string | null } | null;
+  /** What the confirm did with the entry's swatch, where one was sent. */
+  swatchFiled?: "filed" | "kept_existing" | null;
 };
 
 export type StagedFinishSchedule = {
-  schemaVersion: typeof FINISH_SCHEDULE_SCHEMA_VERSION;
+  /** 2 for a read with no swatch boxes, 3 since 2026-10-15. */
+  schemaVersion: 2 | typeof FINISH_SCHEDULE_SCHEMA_VERSION;
   kind: "finishes_schedule";
   filename: string | null;
   documentNotes: string | null;
@@ -106,6 +130,7 @@ export function stageFinishSchedule(
       appliesToRaw: entry.appliesToRaw,
       statusRaw: entry.statusRaw,
       otherRaw: entry.otherRaw.map((line) => ({ labelRaw: line.labelRaw, valueRaw: line.valueRaw })),
+      swatch: swatchOf(entry),
       kind: null,
       reviewStatus: "pending",
       reviewedAt: null,
@@ -115,14 +140,31 @@ export function stageFinishSchedule(
   };
 }
 
-/** A version 2 schedule. False for a version 1 proposals document, which keeps its old screen. */
+/**
+ * The entry's chip, cleaned: a bad box is dropped (`usableBox`, the drawings'
+ * own rule), and a box with no page is dropped too — a crop has to be taken
+ * off a page somebody can open.
+ */
+export function swatchOf(entry: Pick<RawFinishEntry, "swatchBox" | "page">): ScheduleSwatchProposal | null {
+  const bbox = usableBox(entry.swatchBox);
+  if (!bbox || entry.page === null) return null;
+  return { page: entry.page, bbox };
+}
+
+/** Whether the review offers a swatch per entry: a version 3 read. */
+export function offersSwatches(doc: Pick<StagedFinishSchedule, "schemaVersion">): boolean {
+  return doc.schemaVersion >= FINISH_SCHEDULE_SCHEMA_VERSION;
+}
+
+/** A version 2 or 3 schedule. False for a version 1 proposals document, which keeps its old screen. */
 export function isStagedFinishSchedule(parsed: unknown): parsed is StagedFinishSchedule {
   const doc = parsed as Partial<StagedFinishSchedule> | null;
   return Boolean(
     doc &&
       typeof doc === "object" &&
       doc.kind === "finishes_schedule" &&
-      doc.schemaVersion === FINISH_SCHEDULE_SCHEMA_VERSION &&
+      typeof doc.schemaVersion === "number" &&
+      READABLE_VERSIONS.includes(doc.schemaVersion) &&
       Array.isArray(doc.entries),
   );
 }
@@ -140,10 +182,18 @@ export function assertStagedFinishSchedule(parsed: unknown): StagedFinishSchedul
     entries: parsed.entries.map((entry) => ({
       ...entry,
       otherRaw: Array.isArray(entry.otherRaw) ? entry.otherRaw : [],
+      swatch: readSwatch(entry.swatch),
       kind: entry.kind ?? null,
       applied: entry.applied ?? null,
     })),
   };
+}
+
+function readSwatch(value: unknown): ScheduleSwatchProposal | null {
+  if (!value || typeof value !== "object") return null;
+  const { page, bbox } = value as { page?: unknown; bbox?: unknown };
+  const box = usableBox(bbox);
+  return box && typeof page === "number" && Number.isInteger(page) && page > 0 ? { page, bbox: box } : null;
 }
 
 // ============================================================================
@@ -315,7 +365,12 @@ export function suggestEntryKind(
 //                same code. Only the first is filed.
 //   no_code    — nothing to key a library row on. Listed, never filed.
 // ============================================================================
-export type LibraryFinish = Finish & { version: number; notes: string | null };
+export type LibraryFinish = Finish & {
+  version: number;
+  notes: string | null;
+  /** Whether the code already has a CURRENT swatch. A schedule's crop never replaces one. */
+  hasSwatch?: boolean;
+};
 
 export type FillField = "description" | "supplier" | "reference" | "notes" | "kind";
 
