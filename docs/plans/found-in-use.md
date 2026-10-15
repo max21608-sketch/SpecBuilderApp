@@ -96,6 +96,49 @@ Classifying the cell whole is by design. The item name in a BWS field is not.
 The phase table shows `CH-01 (TO BE CONFIRMED)` as a client ref (frame 45:48).
 The schedule's qualifier on its code became part of the pre-sale key.
 
+### The replace box is read backwards — OPEN (part 2)
+
+TB-08's drawing card, in the part 2 recording (36:36–44:38). The box says
+*"This item already holds a value here. Tick to replace it — the old one is
+kept, marked retired, and linked to this as its replacement"*, with the bill's
+`… L X W X H: 900mm` beneath it (frame 26:00). Matthew spent eight minutes on
+which way round it works: "I still don't know which way around it is"
+(42:50). His suggested fix is to word it as *this document contradicts what
+the bill says* (43:52). The rule is right ("it's great that it flags it",
+42:33). The sentence is the defect.
+
+### "Another page" counts the bill, which has no pages — OPEN (part 2)
+
+On the card, the height reads *"Already recorded from another page — the same
+figure"* when the other source is the bill (frame 26:00,
+`drawing-resolution.ts:680`). On the record, TB-08's dimensions caption reads
+*"Composed from 3 measured rows off TB-08_DINING TABLE.pdf p1 and 1 other
+page"*, and that "page" is the bill (`dimension-provenance.ts:80`). Max asked
+the same evening why TB-08's H row carries the bill's column heading as its
+label. It is the bill's own row, kept because the drawing's 710 matched it.
+
+### "Correct" reads as "mark this correct" — OPEN (part 2)
+
+The record's Specs tab. Matthew: "Is that to mark it that it is correct or is
+that to change it?" (53:30). It changes it.
+
+### The drawing card's "Checked" boxes block the confirm unseen — OPEN (part 2)
+
+TB-08, part 2 at 50:26–50:51 and 1:04:07–1:04:27. Max: "It's not very clear
+that there's a checked box there… you have to click that to be able to
+confirm." This is the bill review's hover-title problem on a second screen.
+
+### One material on three lines of a drawing became two timber finishes — OPEN, question (part 2)
+
+TB-08 names walnut as Material 1, tabletop material and base material. The
+card offered two timber finishes. Matthew: "There aren't really two timber
+finishes" (31:35).
+
+### A supplier's website link is dropped from the finishes schedule — OPEN, question (part 2)
+
+The Ronnie Scott's COM list carries a supplier URL per line. The finishes
+schedule has no field for one (11:42). Where it should go is Matthew's call.
+
 ### Five item words found no category — OPEN, needs answers
 
 Pouffe, lounge table, bar-height table, reception counter, and DJ table. Each

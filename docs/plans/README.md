@@ -42,7 +42,21 @@ Matthew: "pretty good on our first effort" (27:02).
   two lines goes on one; the Confirm's reason is only a hover title; the
   expanded line is read across. In the room, two values that were dropped were
   said to have gone in.
-- **Not covered:** part 2 of the call, booked for 17:00 the same day.
+- **Part 2 (17:00, same document, § Part 2):** the COM list was confirmed,
+  with Matthew settling each code's kind (TR-02 is a trim, TR-03 a fabric).
+  All 25 drawings were read three at a time, and TB-08 was taken to its
+  record: W3500 × D900 × H710, one walnut captured as "Sienna Walnut", brass
+  sabots as "Brass", runners as BW Supplied Hardware. **Matthew and Claudia
+  review the other 24 drawings themselves**, one at a time. Concurrent editing
+  gets a warning, not a lock, and not yet. Matthew's way of quoting: "only
+  qualify the bits you need for TGQ… but keep all the other information"
+  (59:22). Logged: the replace box is read backwards, "another page" means the
+  bill, "Correct" reads as approval, the Checked boxes block unseen.
+- **DIRECTION (Max, after the call): blockers are highlighted and directing,
+  not developer prose.** "They're very much like developer style error
+  messages… what we need is just like things to get highlighted… we get stuck
+  quite a few places, where… we don't know what the next step is." It applies
+  to every screen. The detail stays one click away, never deleted.
 
 ## 2026-10-15 — Ronnie Scott's: a COM line is filed by its COM CODE, and links to the COM list
 

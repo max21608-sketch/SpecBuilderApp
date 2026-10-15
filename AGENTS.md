@@ -4193,6 +4193,21 @@ pilot with Matthew watching.** Read `docs/plans/catchup-2026-10-15.md`. The
 bill confirmed. The review screen confused both people, and in the room two
 values that had been dropped were said to have gone in. Matthew placed the
 categories for this project's lines only, and nothing is seeded from them.
+At the 17:00 part 2, all 25 drawings were read. **Matthew and Claudia now
+review them on pilot themselves**, so what they hit next is the test. Matthew
+on quoting: "only qualify the bits you need for TGQ… but keep all the other
+information in there" (part 2, 59:22). That is the stage-by-stage capture the
+item-review screen is for.
+
+**DIRECTION, Max, 2026-10-15: a blocker is HIGHLIGHTED where it is, and says
+the next step in a few words.** "They're very much like developer style error
+messages… what we need is just like things to get highlighted… we get stuck
+quite a few places, where… we don't know what the next step is." Both calls
+that day stalled on blockers the screen did know about. One was a reason given
+only in a button's hover title. One was "Checked" boxes nobody could see. One
+was a replace box read backwards for eight minutes. The full explanation still
+exists, one click away. It is never deleted, because it is how a reviewer
+checks a value. But it is not what the person reads first.
 
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
