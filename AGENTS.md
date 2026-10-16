@@ -4336,6 +4336,22 @@ checks a value. But it is not what the person reads first.
   - Not reworked yet: the configuration cards' geometry tables.
   - The mock-up (`docs/design/dimension-picker-mockup.html`) was built
     without Max's sign-off, at his "keep going". His walk is outstanding.
+- **A size row is named by its slot** (`attributeDisplayLabel` in
+  `src/lib/attribute-label.ts`, `d0a8c2b`; Max, 2026-10-16: "the dimension
+  labels should just read height or width…"). Every size row read off a bill's
+  Dims column used to carry that column's heading as its label, so TB-08
+  showed three rows each labelled "DIMENSIONS CM / MM L X W X H".
+  - A row holding a slot now reads Width, Depth, Height, Seat height or
+    Diameter, with nothing under it. A note keeps its own label.
+  - There are five names and no Length: a bill's L is set to W or D on
+    review.
+  - `record_attributes.label` is unchanged and shows on hover
+    (`documentLabelTitle`).
+  - Every screen that lists a spec row calls the function. The export, the
+    composer and the check sheet never do.
+  - Two things keep the document's words, because they say where a figure was
+    printed: the drawing card's "where" line, and the bill review's "Figure,
+    as the bill prints it".
 
 Agreed at the review of 2026-09-14 and confirmed by the user on 2026-09-15. The
 pilot is **Project Panther** (`AP364`, BWS project `P17726`) — a manageable,
