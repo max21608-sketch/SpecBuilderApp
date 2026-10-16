@@ -36,6 +36,7 @@ import { composeDimensionCell } from "@/lib/dimensions";
 import { DISAGREEMENT_DECISION_LABELS, type Disagreement, type DisagreementDecision } from "@/lib/disagreements";
 import { isDimensionSlot, type AttributeState, type AttributeUnit } from "@/lib/spec-vocab";
 import { ConvertedChip } from "@/components/records/ItemSpecChips";
+import { attributeDisplayLabel, documentLabelTitle } from "@/lib/attribute-label";
 
 /**
  * What the other document said, as a person reads it. A dimension is its slot
@@ -64,6 +65,11 @@ export function disagreementValue(disagreement: Pick<
   }
   const text = disagreement.value ?? "";
   return { text: disagreement.state === "tbc" ? `${text}${text ? " " : ""}TBC` : text, fromImperial: false };
+}
+
+/** The other document's statement in the shape `attribute-label.ts` reads: a size is named by its slot. */
+function disagreementLabel(disagreement: Pick<Disagreement, "label" | "dimensionSlot">) {
+  return { label: disagreement.label, slot: disagreement.dimensionSlot };
 }
 
 /** "<document>, page n" as a link into this app's copy, or the plain words where there is no page. */
@@ -163,7 +169,7 @@ export function OpenDisagreementRow({
           <input
             value={reason}
             onChange={(event) => setReason(event.target.value)}
-            aria-label={`Why — ${disagreement.label}`}
+            aria-label={`Why — ${attributeDisplayLabel(disagreementLabel(disagreement))}`}
             placeholder="Why — e.g. the tracker of 24 Aug supersedes the bill"
             className="min-w-[18rem] flex-1 rounded border border-red-300 bg-white px-2 py-1 text-sm text-neutral-900"
           />
@@ -203,7 +209,9 @@ export function SettledDisagreementItem({ disagreement }: { disagreement: Disagr
   const decision = disagreement.status === "open" ? null : DISAGREEMENT_DECISION_LABELS[disagreement.status];
   return (
     <li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm text-neutral-500">
-      <span className="w-40 shrink-0">{disagreement.label}</span>
+      <span className="w-40 shrink-0" title={documentLabelTitle(disagreementLabel(disagreement))}>
+        {attributeDisplayLabel(disagreementLabel(disagreement))}
+      </span>
       <span className="min-w-[10rem] flex-1">
         <SourceLink disagreement={disagreement} /> said <span className="font-mono">{shown.text || "nothing"}</span>
       </span>

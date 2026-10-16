@@ -55,6 +55,7 @@ import {
   type AttributeUnit,
   type DimensionSlot,
 } from "@/lib/spec-vocab";
+import { attributeDisplayLabel, documentLabelTitle } from "@/lib/attribute-label";
 import { readCommonSpecs, sectionOfGroup, seenRows, type CommonGroup, type CommonSection } from "@/lib/configuration-common";
 import type { ConfigurationFamily, FamilyAttribute } from "@/lib/configuration-family";
 
@@ -326,7 +327,9 @@ export default function BillLineConfigurations({
                     return (
                       <Fragment key={group.key}>
                         <Tr>
-                          <Td>{shared.label}</Td>
+                          <Td title={documentLabelTitle({ label: shared.label, slot: group.dimensionSlot })}>
+                            {attributeDisplayLabel({ label: shared.label, slot: group.dimensionSlot })}
+                          </Td>
                           <Td>
                             <ValueCell value={shared.value} unit={shared.unit} state={shared.state} qualifier={shared.qualifier} />
                           </Td>
@@ -368,7 +371,9 @@ export default function BillLineConfigurations({
                           <tr className={open.kind === "retire" ? "bg-red-50/60" : "bg-amber-50/60"}>
                             <td colSpan={4} className="border-b border-amber-200 px-4 py-3">
                               <p className="text-sm font-medium text-neutral-900">
-                                {open.kind === "correct" ? `Edit “${shared.label}” on all ${n}` : `Retire “${shared.label}” from all ${n}`}
+                                {open.kind === "correct"
+                                  ? `Edit “${attributeDisplayLabel({ label: shared.label, slot: group.dimensionSlot })}” on all ${n}`
+                                  : `Retire “${attributeDisplayLabel({ label: shared.label, slot: group.dimensionSlot })}” from all ${n}`}
                               </p>
                               <p className="mt-0.5 text-xs text-neutral-600">
                                 {open.kind === "correct"
@@ -492,7 +497,7 @@ export default function BillLineConfigurations({
                   {groups.map((group) => (
                     <Tr key={group.key}>
                       <Td>
-                        {group.title}
+                        {attributeDisplayLabel({ label: group.title, slot: group.dimensionSlot })}
                         <span className="mt-0.5 block text-xs text-neutral-500">{fieldOf(group.members.find((member) => member.rows[0])?.rows[0] ?? { fieldName: null, dimensionSlot: group.dimensionSlot })}</span>
                       </Td>
                       <Td>
@@ -607,7 +612,9 @@ function ConfigurationTab({
                 <GroupRow span={4}>{SECTION_LABELS[section]}</GroupRow>
                 {sectionRows.map((row) => (
                   <Tr key={row.id}>
-                    <Td>{row.label}</Td>
+                    <Td title={documentLabelTitle({ label: row.label, slot: row.dimensionSlot })}>
+                      {attributeDisplayLabel({ label: row.label, slot: row.dimensionSlot })}
+                    </Td>
                     <Td>
                       <ValueCell value={row.value} unit={row.unit} state={row.state} qualifier={row.qualifier} />
                       {(row.finishCode ?? row.materialCode) && (

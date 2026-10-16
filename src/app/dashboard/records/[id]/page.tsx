@@ -45,6 +45,7 @@ import {
   normaliseItemLevel,
 } from "@/lib/spec-vocab";
 import { isFinishGroup } from "@/lib/finishes";
+import { attributeDisplayLabel, documentLabelTitle } from "@/lib/attribute-label";
 import { composeDimensionCell, toMillimetres, valueCarriesItsUnit } from "@/lib/dimensions";
 import { ComposedDimensionText } from "@/components/records/ItemSpecChips";
 import { OpenDisagreementRow, SettledDisagreementItem } from "@/components/records/DisagreementRows";
@@ -160,6 +161,11 @@ type Attribute = {
   /** 0045: BW's own finish for the linked CODE -- the one in force on a linked spec. */
   finish_standard_value?: string | null; finish_standard_state?: string | null;
 };
+
+/** A row in the shape `attribute-label.ts` reads: a slotted size is named by its slot. */
+function labelOf(attribute: Pick<Attribute, "label" | "dimension_slot">) {
+  return { label: attribute.label, slot: attribute.dimension_slot };
+}
 
 type Category = { id: string; slug: string; family: string; name: string; requirements_authored: boolean };
 
@@ -1247,7 +1253,7 @@ function RecordView() {
                           {rows.map((attribute) => (
                             <Fragment key={attribute.id}>
                             <Tr tone={openUnder(attribute.id).length > 0 ? "danger" : "plain"}>
-                              <Td>{attribute.label}</Td>
+                              <Td title={documentLabelTitle(labelOf(attribute))}>{attributeDisplayLabel(labelOf(attribute))}</Td>
                               <Td>
                                 {attribute.state === "tbc" && !attribute.value ? (
                                   <Chip tone="warn">TBC</Chip>
@@ -1443,7 +1449,7 @@ function RecordView() {
                               <tr className="bg-blue-50/50">
                                 <td colSpan={5} className="border-b border-blue-200 px-4 py-3">
                                   <p className="text-sm font-medium text-neutral-900">
-                                    Which finish is “{attribute.label}”?
+                                    Which finish is “{attributeDisplayLabel(labelOf(attribute))}”?
                                   </p>
                                   <p className="mt-0.5 text-xs text-neutral-600">
                                     A linked spec reads as the LIBRARY says it is — on this screen, in the checklist
@@ -1526,7 +1532,7 @@ function RecordView() {
                               <tr className="bg-amber-50/60">
                                 <td colSpan={5} className="border-b border-amber-200 px-4 py-3">
                                   <p className="text-sm font-medium text-neutral-900">
-                                    Edit “{attribute.label}”
+                                    Edit “{attributeDisplayLabel(labelOf(attribute))}”
                                   </p>
                                   <p className="mt-0.5 text-xs text-neutral-600">
                                     The old value is kept and marked as superseded, and the new one KEEPS the page it
@@ -1616,7 +1622,7 @@ function RecordView() {
               {retiring && (
                 <Note
                   tone="danger"
-                  title={`Take “${retiring.label}${retiring.value ? `: ${retiring.value}` : ""}” off this item?`}
+                  title={`Take “${attributeDisplayLabel(labelOf(retiring))}${retiring.value ? `: ${retiring.value}` : ""}” off this item?`}
                 >
                   <span className="block">
                     It is kept as a record that the document said it, and stops counting towards the checklist and
@@ -1694,7 +1700,9 @@ function RecordView() {
                     <ul className="mt-1 divide-y divide-neutral-200 rounded-[10px] border border-neutral-200 bg-neutral-50">
                       {retiredAttributes.map((attribute) => (
                         <li key={attribute.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm">
-                          <span className="w-40 shrink-0 text-neutral-400 line-through">{attribute.label}</span>
+                          <span className="w-40 shrink-0 text-neutral-400 line-through" title={documentLabelTitle(labelOf(attribute))}>
+                            {attributeDisplayLabel(labelOf(attribute))}
+                          </span>
                           <span className="min-w-[10rem] flex-1 text-neutral-400 line-through">
                             {attribute.value}
                             {valueCarriesItsUnit(attribute.value) ? null : attribute.unit}

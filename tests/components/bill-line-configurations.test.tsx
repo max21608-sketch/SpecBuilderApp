@@ -114,6 +114,18 @@ describe("the bill line's Specs tab", () => {
     expect(open).toHaveAttribute("href", "/dashboard/records/conf-2");
   });
 
+  // Max, 2026-10-16: a size row reads its slot's name, never the document's
+  // heading — which stays on the row's hover title.
+  it("names a common size row by its slot, with the document's label behind it", () => {
+    const shown = family();
+    for (const configuration of shown.configurations)
+      configuration.attributes[0] = { ...configuration.attributes[0]!, label: "DIMENSIONS CM / MM L X W X H" };
+    render(<BillLineConfigurations lineId="line-12" family={shown} specFields={[]} onDone={() => undefined} />);
+    expect(screen.queryByText("DIMENSIONS CM / MM L X W X H")).toBeNull();
+    const cell = screen.getByText("Seat height");
+    expect(cell.closest("td")).toHaveAttribute("title", "The document labels it “DIMENSIONS CM / MM L X W X H”");
+  });
+
   it("offers no edit on a row that differs", () => {
     render(<BillLineConfigurations lineId="line-12" family={family()} specFields={[]} onDone={() => undefined} />);
     // One common row, one Correct: the differing COM 1 has none.

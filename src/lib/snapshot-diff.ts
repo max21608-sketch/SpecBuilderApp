@@ -26,6 +26,7 @@
 // ============================================================================
 import { z } from "zod";
 import { fieldDisplayName } from "@/lib/spec-field-label";
+import { attributeDisplayLabel } from "@/lib/attribute-label";
 import { composeRowCells, BWS_EXPORT_COLUMNS } from "@/lib/bws-export";
 import { composeFinishCell } from "@/lib/finishes";
 import { describeStandard, standardInForce } from "@/lib/bw-standard";
@@ -390,7 +391,8 @@ export function diffSnapshots(before: RecordAtoms, after: RecordAtoms): Snapshot
     before.attributes,
     after.attributes,
     (attribute) => attribute.id,
-    (attribute) => attribute.label,
+    // A size is headed by its slot; its document label is still diffed below as Label.
+    (attribute) => attributeDisplayLabel({ label: attribute.label, slot: attribute.dimensionSlot }),
     attributeFields,
   );
 

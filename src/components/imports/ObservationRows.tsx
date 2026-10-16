@@ -22,6 +22,7 @@
 // its own source page. Nothing here knows which of those it is doing.
 // ============================================================================
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { attributeDisplayLabel, documentLabelTitle } from "@/lib/attribute-label";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import {
   ATTRIBUTE_GROUPS,
@@ -856,7 +857,12 @@ export function ObservationRow({
           </span>
         ) : null}
       </td>
-      <td className="px-2 py-2 align-top text-neutral-700">{observation.labelRaw ?? "—"}</td>
+      <td
+        className="px-2 py-2 align-top text-neutral-700"
+        title={documentLabelTitle({ label: observation.labelRaw, slot: observation.dimensionSlot })}
+      >
+        {attributeDisplayLabel({ label: observation.labelRaw, slot: observation.dimensionSlot }) || "—"}
+      </td>
       <td className="px-2 py-2 align-top">
         {/* A sheet's note block is many lines in one row, so it gets a box it
             fits in. Every line stays editable text: the merge joined rows, it

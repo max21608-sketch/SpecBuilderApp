@@ -336,3 +336,46 @@ describe("correcting a spec from the record", () => {
     expect(within(list).queryByRole("button", { name: "Put back" })).toBeNull();
   });
 });
+
+// Max, 2026-10-16, on TB-08: every size row read off a bill's Dims column was
+// labelled with the column's heading, so each read as the whole L x W x H. A
+// row holding a slot is named by the slot; a note keeps its label.
+describe("what a size row is called on the Specs tab", () => {
+  const HEADING = "DIMENSIONS CM / MM L X W X H";
+  const fromBill = { source_filename: "Procurement schedule.xlsx", source_document_kind: "boq", source_page: null };
+
+  it("reads Width, Depth and Height, and the note keeps the bill's label", async () => {
+    serve(
+      payload({
+        attributes: [
+          attribute({ id: "w", label: HEADING, value: "900", dimension_slot: "W", ...fromBill }),
+          attribute({ id: "d", label: HEADING, value: "3500", dimension_slot: "D", ...fromBill }),
+          attribute({ id: "h", label: HEADING, value: "710", dimension_slot: "H", ...fromBill }),
+          attribute({ id: "n", label: HEADING, value: "REFER TO DRAWING", unit: null, dimension_slot: null, attr_group: "note", ...fromBill }),
+        ],
+      }),
+    );
+    render(<RecordPage />);
+    await screen.findByText("900");
+    const table = document.body;
+    for (const [name, value] of [["Width", "900"], ["Depth", "3500"], ["Height", "710"]] as const) {
+      const row = within(table).getAllByRole("row").find((tr) => within(tr).queryByText(name, { exact: true }));
+      expect(row, name).toBeTruthy();
+      expect(within(row!).getByText(value)).toBeTruthy();
+      // The document's words are one hover away, never printed on the row.
+      expect(within(row!).getByText(name).closest("td")).toHaveAttribute("title", `The document labels it “${HEADING}”`);
+    }
+    // Printed once: on the note, which has no slot to be named by.
+    const printed = within(table).getAllByText(HEADING);
+    expect(printed).toHaveLength(1);
+    expect(printed[0]!.closest("tr")!.textContent).toContain("REFER TO DRAWING");
+  });
+
+  it("reads a drawing's row the same way", async () => {
+    serve(payload({ attributes: [attribute({ label: "OVERALL WIDTH", dimension_slot: "W" })] }));
+    render(<RecordPage />);
+    const cell = await screen.findByText("Width", { selector: "td" });
+    expect(cell).toHaveAttribute("title", "The document labels it “OVERALL WIDTH”");
+    expect(screen.queryByText("OVERALL WIDTH")).toBeNull();
+  });
+});

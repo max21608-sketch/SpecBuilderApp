@@ -22,6 +22,7 @@
 // measurement and nothing downstream questions it.
 // ============================================================================
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { attributeDisplayLabel } from "@/lib/attribute-label";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
 import { buttonClass } from "@/components/ui/Button";
@@ -1066,7 +1067,7 @@ function CollapsedList({
           <li key={observation.id} className="flex items-center gap-3 px-3 py-2 text-sm">
             <span className="text-neutral-500 w-24 truncate">{item.itemCodeRaw ?? "—"}</span>
             <span className="flex-1 text-neutral-800">
-              {observation.labelRaw}: {observation.value ?? observation.valueRaw ?? "—"}
+              {attributeDisplayLabel({ label: observation.labelRaw, slot: observation.dimensionSlot })}: {observation.value ?? observation.valueRaw ?? "—"}
               {/* Why, where the screen asked — "same as page 1". */}
               {status === "ignored" && observation.ignoredReason && (
                 <span className="ml-1 text-xs text-neutral-500">— ignored, {observation.ignoredReason}</span>
