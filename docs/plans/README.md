@@ -21,6 +21,32 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-10-18 — Promoted to pilot: the Ronnie Scott's follow-ups, at `261d730` (v1.13)
+
+- **What went:**
+  - the SH line and the `DIA X` line (`dfed295`);
+  - the needs-you list and its wording (`e888e75`);
+  - workstreams A (categories, trim, "Timber/Metal finish 1") and B (a COM
+    line on both twins);
+  - PDF bills read by text (C1) and transcribed (C2);
+  - the per-figure slot picker (E);
+  - size rows named by their slot (`d0a8c2b`).
+- **Order:** pilot was backed up first (by Claude, `pg_dump`,
+  `~/bw-backups/spec-builder/spec-builder-pilot-2026-10-16T08-34-21-931Z.sql`).
+  Max then applied 0049 (`Applied 1 migration(s); 48 already present`), and
+  Claude confirmed it read-only (`trim` is in the CHECK) before the
+  fast-forward `9d2e334..261d730`.
+- **Checks:** all four passed at `261d730` on the local stack: 3,645 tests,
+  typecheck, lint, build. The first build hung while the machine slept and was
+  re-run.
+- **Still Max's:**
+  - Re-run the seed on pilot, so the new category terms go in and Pouf moves.
+  - Confirm the Vercel deployment for `261d730` is Ready.
+  - Walk the first-session script.
+  - Fix P16717's data: the seat heights, the salon CH-03 fabric, and the
+    TB-01C and TB-05C heights.
+  - Apply 0049 to the sandbox too.
+
 ## 2026-10-15 (evening) — Max's answers to the Ronnie Scott's questions, and the plan
 
 `docs/plans/ronnie-scotts-followups-2026-10-15.md`. Max answered:
