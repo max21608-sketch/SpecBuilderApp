@@ -33,6 +33,34 @@ open. Do the same on the next pass, and say in the entry what you checked.
 
 ---
 
+## 2026-10-23: read in the source, during the spec-change audit
+
+From `docs/plans/spec-change-audit-2026-10-23.md` §3. Read in code at
+`8f64e03`; **not reproduced on a screen**.
+
+### A checklist answer typed over a field a spec holds is not what the file ships — OPEN
+
+The record's Checklist box edits any answer (`RecordChecklist.tsx:792`) and
+`editAnswer` writes it `manual`. The export takes the spec (`record_attributes`)
+first and the answer only where no spec holds the field
+(`bws-export.ts:561-571`). So correcting COM 1 on the Checklist changes the
+Checklist and not the BWS file or the check sheet, and nothing on the row says
+so. The Dimensions row has had no box since 2026-09-22; no other field has that
+guard.
+
+### "Edit value" on a library-linked finish can unlink it, and says so only after — OPEN
+
+`attribute-correct.ts:225-249` unlinks the spec where the new words conflict
+with the library's description. The message comes after saving
+(`records/[id]/page.tsx:638`).
+
+### A preamble note's Retire and Flag open no change set — OPEN
+
+`projects/[id]/notes/[noteId]` runs outside a transaction, so its audit rows
+belong to no change. Flagging a retired note re-stamps `retired_at`.
+
+---
+
 ## 2026-10-15: the Ronnie Scott's procurement schedule, confirmed on pilot with Matthew
 
 Seen in the recording of the 14:30 call (`docs/plans/catchup-2026-10-15.md`).
