@@ -51,7 +51,7 @@ describeIfDb("0054 audit excludes document columns", () => {
        values ($1, '__QA audit exclusions', 'qa', 'qa') returning id`,
       [qaNumber("P05401")],
     );
-    projectId = rows[0].id;
+    projectId = rows[0]!.id;
   });
 
   afterAll(async () => {
@@ -73,7 +73,7 @@ describeIfDb("0054 audit excludes document columns", () => {
        returning id`,
       [projectId],
     );
-    const runId = rows[0].id;
+    const runId = rows[0]!.id;
     // An autosave: only the staged document moves.
     await client.query(
       `update intake_runs set parsed = '{"lines":[{"code":"QA-2"}]}', updated_by = 'qa-reviewer' where id = $1`,
@@ -87,10 +87,10 @@ describeIfDb("0054 audit excludes document columns", () => {
       expect(keysOf(row)).not.toContain("raw_response");
     }
     // Everything else still lands, and the actor still falls back to the row.
-    expect(audit[1].old_values).toMatchObject({ source_kind: "boq_xlsx", updated_by: "qa-author" });
-    expect(audit[1].new_values).toMatchObject({ source_kind: "boq_xlsx", updated_by: "qa-reviewer" });
-    expect(audit[1].new_values?.version).toBe((audit[1].old_values?.version as number) + 1);
-    expect(audit[1].changed_by).toBe("qa-reviewer");
+    expect(audit[1]!.old_values).toMatchObject({ source_kind: "boq_xlsx", updated_by: "qa-author" });
+    expect(audit[1]!.new_values).toMatchObject({ source_kind: "boq_xlsx", updated_by: "qa-reviewer" });
+    expect(audit[1]!.new_values?.version).toBe((audit[1]!.old_values?.version as number) + 1);
+    expect(audit[1]!.changed_by).toBe("qa-reviewer");
   });
 
   it("still reads the change set from the GUC on an excluded table", async () => {
@@ -105,11 +105,11 @@ describeIfDb("0054 audit excludes document columns", () => {
         `insert into change_sets (project_id, kind, actor) values ($1, 'manual_edit', 'qa') returning id`,
         [projectId],
       );
-      await client.query(`select set_config('app.change_set_id', $1, true)`, [rows[0].id]);
-      await client.query(`update intake_runs set parsed = '{"lines":[]}' where id = $1`, [runRows[0].id]);
+      await client.query(`select set_config('app.change_set_id', $1, true)`, [rows[0]!.id]);
+      await client.query(`update intake_runs set parsed = '{"lines":[]}' where id = $1`, [runRows[0]!.id]);
       await client.query("commit");
-      const audit = await auditFor("intake_runs", runRows[0].id);
-      expect(audit.at(-1)?.change_set_id).toBe(rows[0].id);
+      const audit = await auditFor("intake_runs", runRows[0]!.id);
+      expect(audit.at(-1)?.change_set_id).toBe(rows[0]!.id);
     } catch (error) {
       await client.query("rollback");
       throw error;
@@ -126,15 +126,15 @@ describeIfDb("0054 audit excludes document columns", () => {
     );
     await client.query(
       `update email_messages set triage = 'nothing_to_record', triaged_by = 'qa', triaged_at = now() where id = $1`,
-      [rows[0].id],
+      [rows[0]!.id],
     );
-    const audit = await auditFor("email_messages", rows[0].id);
+    const audit = await auditFor("email_messages", rows[0]!.id);
     expect(audit).toHaveLength(2);
     for (const row of audit) {
       expect(keysOf(row)).not.toContain("body_text");
       expect(keysOf(row)).not.toContain("headers_raw");
     }
-    expect(audit[1].new_values).toMatchObject({ subject: "__QA invented subject", triage: "nothing_to_record" });
+    expect(audit[1]!.new_values).toMatchObject({ subject: "__QA invented subject", triage: "nothing_to_record" });
   });
 
   it("writes a user's audit rows without the password hash", async () => {
@@ -143,12 +143,12 @@ describeIfDb("0054 audit excludes document columns", () => {
        returning id`,
       [email],
     );
-    userId = rows[0].id;
+    userId = rows[0]!.id;
     await client.query(`update users set password_hash = 'scrypt$another$hash' where id = $1`, [userId]);
     const audit = await auditFor("users", userId);
     expect(audit).toHaveLength(2);
     for (const row of audit) expect(keysOf(row)).not.toContain("password_hash");
-    expect(audit[1].new_values).toMatchObject({ email, name: "__QA audit user" });
+    expect(audit[1]!.new_values).toMatchObject({ email, name: "__QA audit user" });
   });
 
   it("still writes whole rows on a table with no exclusion", async () => {
@@ -159,10 +159,10 @@ describeIfDb("0054 audit excludes document columns", () => {
     const { rows } = await client.query<{ id: string }>(
       `insert into spec_records (project_id, run_id, record_no, item_description, created_by, updated_by)
        values ($1, $2, 1, 'An invented stool', 'qa', 'qa') returning id`,
-      [projectId, runRows[0].id],
+      [projectId, runRows[0]!.id],
     );
-    await client.query(`update spec_records set item_description = 'An invented chair' where id = $1`, [rows[0].id]);
-    const audit = await auditFor("spec_records", rows[0].id);
+    await client.query(`update spec_records set item_description = 'An invented chair' where id = $1`, [rows[0]!.id]);
+    const audit = await auditFor("spec_records", rows[0]!.id);
     const update = audit.find((row) => row.action === "update");
     expect(update?.old_values).toMatchObject({ item_description: "An invented stool" });
     expect(update?.new_values).toMatchObject({ item_description: "An invented chair" });

@@ -7,10 +7,21 @@
 // was actually wrong — which is how a real failure gets mistaken for a flake.
 //
 // audit_log is deliberately untouched: it is append-only by design and a
-// cleanup that deletes from it has broken the thing under test. change_sets
-// and record_snapshots go with the project by cascade (0013, 0014), which is
-// why the project is deleted LAST.
+// cleanup that deletes from it has broken the thing under test.
+//
+// A PROJECT GOES THROUGH `db/project-delete.mjs`, the one deletion path
+// `npm run db:delete-project` uses too (0055, audit B5). This file used to
+// delete thirteen tables by hand in an order it hoped was FK-safe, and never
+// deleted `email_messages` -- so any `__QA` project that had received fake mail
+// failed the sweep on the message's own CHECK, and the next run inherited it.
+// Two copies of "how a project is deleted" is how one of them misses a table.
+//
+// Rows only. The files a swept project named stay in the store: this sweep
+// runs against the sandbox store, which holds company data, and deleting from
+// it is `db:delete-project`'s job, one named project at a time, with its dry
+// run in front of it.
 import pg from "pg";
+import { deleteProjectRows } from "../db/project-delete.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -34,30 +45,30 @@ console.log(`Target: DATABASE_ENVIRONMENT=${environment} (${new URL(databaseUrl)
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
 try {
+  // `left(..., 5)`, never `like '__QA%'`: in LIKE an underscore is a
+  // single-character wildcard, so that pattern matches anything with QA in
+  // the third and fourth places. The category sweep below learned it first.
   const projects = await client.query(
-    `select id, bws_project_number from projects where bws_project_number like '__QA%' or name like '__QA%'`,
+    `select id, bws_project_number from projects
+      where left(bws_project_number, 5) = '__QA ' or left(name, 5) = '__QA '`,
   );
   if (projects.rows.length === 0) {
     console.log("No leftover projects.");
   }
+  const failed = [];
   for (const project of projects.rows) {
-    const id = project.id;
-    await client.query(`delete from email_draft_items where draft_id in (select id from email_drafts where project_id = $1)`, [id]).catch(() => undefined);
-    await client.query(`delete from email_drafts where project_id = $1`, [id]).catch(() => undefined);
-    await client.query(`delete from project_contacts where project_id = $1`, [id]).catch(() => undefined);
-    await client.query(`delete from spec_answers where record_id in (select id from spec_records where project_id = $1)`, [id]);
-    await client.query(`delete from spec_record_refs where project_id = $1`, [id]);
-    await client.query(`delete from record_attributes where record_id in (select id from spec_records where project_id = $1)`, [id]);
-    await client.query(`delete from attachments where entity_type = 'spec_records' and entity_id in (select id from spec_records where project_id = $1)`, [id]);
-    await client.query(`delete from spec_records where project_id = $1`, [id]);
-    await client.query(`delete from project_notes where project_id = $1`, [id]).catch(() => undefined);
-    await client.query(`delete from spec_runs where project_id = $1`, [id]);
-    await client.query(`delete from intake_runs where project_id = $1`, [id]);
-    await client.query(`delete from intake_batches where project_id = $1`, [id]).catch(() => undefined);
-    await client.query(`delete from projects where id = $1`, [id]);
-    console.log(`  swept ${project.bws_project_number}`);
+    try {
+      await deleteProjectRows(client, project.id, { actor: "script:qa-clean" });
+      console.log(`  swept ${project.bws_project_number}`);
+    } catch (error) {
+      failed.push(project.bws_project_number);
+      console.error(`  could not sweep ${project.bws_project_number}: ${error instanceof Error ? error.message : error}`);
+    }
   }
-  if (projects.rows.length > 0) console.log(`Swept ${projects.rows.length} leftover project(s).`);
+  if (projects.rows.length > 0) {
+    console.log(`Swept ${projects.rows.length - failed.length} of ${projects.rows.length} leftover project(s).`);
+  }
+  if (failed.length > 0) process.exitCode = 1;
 
   // ==========================================================================
   // A `__QA ` CATEGORY IS NOT REACHABLE FROM A PROJECT, AND THAT IS WHY THIS
@@ -78,9 +89,9 @@ try {
   //
   // MATCHED ON `left(name, 5)`, NOT ON `like '__QA%'`. In SQL LIKE an
   // underscore is a single-character wildcard, so `'__QA%'` matches anything
-  // with QA in the third and fourth places. The queries above have always been
-  // written that way and are safe because they also key on a project; a DELETE
-  // against `item_categories` is not, and the seventeen cheat sheets are the
+  // with QA in the third and fourth places. The project sweep above was
+  // written that way until 2026-11-06 (audit B9) and matches on `left` now
+  // too; here it matters most, because the seventeen cheat sheets are the
   // requirement matrix this whole app reads. A sweep that could reach one would
   // be a script capable of emptying that register.
   // ==========================================================================
@@ -96,7 +107,7 @@ try {
     );
     await client.query(`delete from requirements where category_id = $1`, [id]);
     await client.query(`delete from item_category_aliases where category_id = $1`, [id]).catch(() => undefined);
-    await client.query(`delete from spec_matrix_category_map where category_id = $1`, [id]).catch(() => undefined);
+    await client.query(`delete from spec_matrix_category_map where item_category_id = $1`, [id]);
     await client.query(`delete from item_categories where id = $1`, [id]);
     console.log(`  swept category ${category.name}`);
   }
