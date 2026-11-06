@@ -47,7 +47,7 @@ one agent.
 | `npm run db:seed` | re-seeds the requirement matrix and vocabularies |
 | `npm run db:backup` · `npm run db:restore` | backups write **outside** the repo by default |
 | | every `db:*` script loads `.env.local` if present, prints the resolved host, and refuses production without `--yes-production` and PILOT without `--yes-pilot` — the flags are separate on purpose. Each names its own env file: `node --env-file=.env.production db/run-migrations.mjs --yes-production`, `node --env-file=.env.pilot.local db/run-migrations.mjs --yes-pilot` |
-| `npm run db:backfill-answers` | one-off: fills checklist answers from attributes confirmed before promotion existed. Dry run unless `--apply`; safe to re-run |
+| `npm run db:backfill-answer-provenance` | one-off after 0050 (2026-11-06): marks every answer composed from a record's specs as `source_kind = 'attribute'`, recomposes the ones that had stopped following them (a retired spec's answer goes back to missing), leaves a reviewer's own schedule answer alone, and prints what it cannot decide. Dry run unless `--apply`; safe to re-run; `--yes-pilot` / `--yes-production`; `:local` for the local stack. The decision table is `src/lib/answer-provenance-backfill.ts`. `db:backfill-answers` is RETIRED: it predated qualifiers, the library and BW standards and would have corrupted answers |
 | `npm run db:backfill-snapshots` | one-off: gives every record that predates 0012 a version 1 under a `history_begins` change. Dry run unless `--apply`; safe to re-run |
 | `npm run db:backfill-bill-swatches` | one-off: for bills confirmed before 2026-10-05, gives each fabric code the picture its bill lines printed as its swatch, and files uncoded real fabrics as in-house finishes — the same rule the bill confirm now runs (`src/lib/bill-fabric-filing.ts`). Dry run unless `--apply`; safe to re-run; `--yes-pilot` / `--yes-production` |
 | `npm run db:backfill-finish-twins` | one-off: merges library rows that are one finish under two codes (a bare code and its zone twin, `MTL-01` / `GR-MTL-01`; and `fabricOwnCode` twins, `GR-FAB-13 PL-FUR-04`) into the canonical row, re-links their specs, recomposes answers, one version per record, one change set per project. A twin holding a different description, swatch or BW standard is skipped and named; an emptied twin is retired, never deleted. Dry run unless `--apply`; safe to re-run; `--yes-pilot` / `--yes-production` |
@@ -341,6 +341,84 @@ Everything else gets NO slot and becomes a note: two bare figures could be
 W x H, W x D or Dia x H, four or more has no convention, and a line mixing
 prefixed with bare parts would let the positional half inherit the explicit
 half's credibility.
+
+### A printed number is read once, and a comma is refused, not guessed
+
+`src/lib/printed-number.ts` (`readPrintedNumber`, `readQuantity`,
+`quantityNotGiven`), `src/lib/dimensions.ts` (`parseDimensionFigure`,
+`FIGURE_TOKEN`, `ambiguousSpellings`), `src/lib/boq-import.ts` (`quantity`,
+`qtyRaw`), `src/lib/pdf-bill.ts` (`pdfBillWorkbook`), `src/lib/drawing-items.ts`
+(`rejoinFeetMark`)
+
+Six readers had six rules, and each was the plausible wrong answer somewhere
+(audit C3/C4/D10, 2026-11-06). `Number("")` is 0, so `TBC` and `N/A` in a
+quantity cell were a quantity of NOTHING rather than no quantity, and the
+tab's "the bill gave none" sentence could never fire; stripping non-digits
+joined `2 x 3` into 23 and `12 (6+6)` into 1266; `1.5` and anything past int4
+reached `spec_records.qty integer` and the confirm refused the WHOLE bill with
+"Nothing was written"; and every comma was a decimal point, so `W1,200`
+composed as `W1mm` in BWS field 3 with nothing to flag it, and on an unmarked
+drawing `1,800` voted the page into centimetres.
+
+One reader returns a NAMED outcome — `whole`, `decimal`, `ambiguous_comma`,
+`words`, `none` — because the caller's sentence depends on WHICH refusal it
+is. **`1,200` / `1.200` is ambiguous and refused everywhere (Max, 2026-11-06):**
+it composes as `[W "1,200" — thousands or decimal, not read]` with the two
+spellings offered, it never votes a page's unit, a gate slot blocks on it, and
+a quantity reads "not given". What IS unambiguous is read: a decimal comma
+with one or two digits (`1,5`), a leading zero (`0,750`), two groups
+(`1,200,000`), a group followed by the other separator (`1.200,5`). A refused
+bill quantity stages `qty: null` with `qtyRaw` (absent on a count and on a
+blank, so every bill staged before this stages byte for byte), and the review
+prints `quantityNotGiven(qtyRaw)` — "quantity not given (the bill says
+“TBC”)" — a reason computed from the text and never stored. A Date or boolean
+cell is words, never a number. `Ø`, `ø` and `⌀` reach `normaliseDimensionSlot`
+from a combined line, and a v4 drawing figure printed with `ft` or a feet mark
+rejoins its mark before the split, so it reads as inches or is refused whole
+rather than voting as 8 cm. Do not add a seventh reader; the PDF row ANCHOR
+regex is geometry, not value, and stays separate. Not yet moved onto it:
+`pdf-bill-checks.ts`'s `printedNumber`, and `DIAM` is still unknown to the slot
+normaliser.
+
+### A gate slot is settled by a figure, and a Dia stands for W and D (provisional)
+
+`src/lib/gates.ts` (`slotStatus`)
+
+A slot row was satisfied by `state = 'confirmed'` and any unit, so a confirmed
+`approx 720-740` at mm passed TGQ while the file shipped `[W "approx 720-740"
+— not a number]` (audit F5). It is now satisfied only when
+`parseDimensionFigure` — the composer's own reader — reads ONE figure, with no
+TBC printed beside it and a unit (stated, or the value's own feet and inch
+marks); `approx 720-740`, `1520 TBC` and `1,200` block, saying why. On a round
+item a Dia satisfies the W and D rows and says so (`Dia. 600`, "Diameter
+recorded. On a round item it stands for W and D."): before this a pouffe read
+"No W has been recorded" for ever and the chain held TG0 and TG1 behind it
+(F3). **That branch is PROVISIONAL pending Matthew** (Max, 2026-11-06: ship
+the code, Matthew confirms the rule; if he rules for a "round" conditional in
+the seed instead, the branch goes and the seed carries it). A Dia BESIDE a W
+or a D blocks both rows, because it is the composer's `dia_conflict`.
+
+### One line per cell, and formulas inert in the CSVs a person opens
+
+`src/lib/bws-export.ts` (`oneLineCell`, `toCsv`), the four export routes
+
+"No newline in a BWS cell" was held by a test over fixtures that carry none;
+a finish description (2,000 characters, typed in a textarea), a typed answer or
+a document's value can carry one, and nothing stripped it (audit F12).
+`oneLineCell` folds a line break to one space in the renderers and the job
+columns, BEFORE `joinQualifier`, so a `second_line` flip is never eaten; what
+the document said is untouched in the database. `toCsv({ neutraliseFormulas:
+true })` prefixes `'` to a cell opening with `=`, `+`, `-`, `@`, a tab or a CR
+(audit A17 — cell text comes from client documents and model reads, and
+`=HYPERLINK(...)` runs when the file is opened); a PLAIN NUMBER is never
+prefixed, which is how the numeric columns stay numeric without a per-sheet
+list. The check sheet, the quote and the costing sheet pass it. **The BWS CSV
+does not, deliberately:** it is imported, not opened, a leading `'` would
+reach a BWS field, and what Tim's new importer does with a formula-like cell
+is unknown until his column contract is in writing. The check sheet's "Client
+specified" column uses `valueCarriesItsUnit` like every other display path,
+and the quote's answer goes through `renderAnswerValue`, so neither can drift
+from the file.
 
 ### The export and its check sheet load ONE scope
 
@@ -1050,6 +1128,15 @@ the bill's `W 1930` is the same width; compared unrounded, the card asked to
 replace 1930 with 1930. And a value printing its own foot or inch mark shows
 no second unit (`valueCarriesItsUnit`, every display path), or `7'-3"in`.
 
+**Every code the item gives is tried exactly before an ending is read, and a
+later exact match IS the answer** (`resolveByLaterCodes`, audit D6,
+2026-11-06). A v4 read lists the title code `FUR-08` before the drawing
+number's `PL-FUR-08`, and the resolver returned an EMPTY resolution when any
+later code matched exactly, so the item read "No record carries this item code
+yet" where the code-end step alone would have placed it. Two of an item's
+codes naming DIFFERENT bill lines are offered and none is chosen
+(`matchedBy.kind = "several_codes"`, one pick per phase), never the first.
+
 ### One drawing, several runs: the item card is the unit of commit
 
 `src/lib/drawing-document.ts`, `src/lib/confirm-drawings.ts`
@@ -1080,6 +1167,30 @@ A page written to two of its three runs looks finished and is not.
 `spec_records.version` is **not** touched by any of this. An attribute is its
 own row; bumping the record would invalidate every extraction snapshot and chase
 coverage row taken against it, for a reason that has nothing to do with them.
+
+**The confirm writes to the records the card SHOWED, and a replace tick
+follows its row** (audit D2, D3, 2026-11-06). A drawings confirm carries
+`shownTargets`, the records the card displayed from the review GET's
+`ItemResolution.targets`; `confirmDrawingItem` compares them with its live
+`targetRecordIds` and refuses `targets_changed` on any difference, on a
+ticked or an UNTOUCHED card. Before this an untouched card took the LIVE
+suggestion, so a bill confirmed in another tab that put the code on a new
+phase got that drawing's specs, picture and answers unseen. A confirm without
+`shownTargets` is a 400 asking for a reload, which an un-reloaded tab gets
+once after deploy. A "Use this drawing's" tick names one attribute on one
+record: `onRowRetargeted` (`drawing-document.ts`) is the autosave's one rule —
+any change of group, slot or BWS field clears `replaces`, and a field change
+also clears the BW standard; the screen never sends `replaces: []` with a
+move, and a patch that sends both is refused (`replace_with_move`). The
+confirm's `retireOccupant` is pinned to `replaceTargetOf(observation)`, the
+slot or field the row writes; a tick that no longer names that target's
+occupant is the `replace_stale` blocker, and the retire refuses it again
+behind the blocker. Before this a ticked width moved to "Keep as a note"
+retired the bill's W, superseded by the note, and the cell and the export lost
+W silently. Files: `src/lib/drawing-document.ts` (`onRowRetargeted`,
+`replaceTargetOf`, `shownTargetsDiffer`), `src/lib/confirm-drawings.ts`,
+`src/app/api/imports/[id]/route.ts`, `confirm/route.ts`,
+`tests/db/shown-targets.ts`.
 
 ### Register-free kinds resolve at READ time, not in the worker
 
@@ -1668,6 +1779,21 @@ statement at a time; `46CM D , 48CM H` (comma-separated) is still a note; the
 bill's `W` on a bed is its LENGTH where the tracker's `W` is its width, so
 GR-FUR-08A disagrees red over a convention, which is a person's call.
 
+**A FREE target is re-read too, and a spec-document finish links** (audit E2,
+E3, E4, 2026-11-06). `annotateHeld` and the confirm (after its record lock)
+both call `occupantSince`: a slot or field another document filled since
+staging is the `slot_filled` blocker on the row and a 409 in words at
+confirm, never the partial unique index's 500 ("Nothing was written. Check
+the logs."), which is what two documents read in parallel and both proposing
+SH for one item used to produce. The spec-document confirm and
+`createAttribute` link a finish through `resolveFinishCode` over the words
+BESIDE the code (`wordsBeside`, because a schedule value like `UPH-07 Velvet
+Rose` compared whole was a conflict on every described code): matched links,
+conflict and new link nothing and create nothing. The replace path sets
+`superseded_by_id` on the retired row, as the other four retire-then-insert
+paths always did; without it the disagreement chain walk ended at a retired
+row and said "taken off this item" for a value an email had replaced.
+
 ### An attribute carries through to the checklist automatically
 
 `src/lib/promote-answers.ts`, `src/lib/confirm-drawings.ts`,
@@ -1686,12 +1812,34 @@ Four rules, each a trap rather than a preference:
   records four dimensions as TBC and a fabric code reading `TBC – Yarn
   Collective…`; promoted as confirmed, a gate reports satisfied over values
   nobody has decided.
-- **A person's answer is never overwritten.** Only an answer still `missing`,
-  or one a SHOP-DRAWINGS run wrote, is touched. `source_kind = 'document'` is
-  not enough on its own — `confirm-spec-document.ts` writes that too, so
-  matching it alone would let a shop drawing quietly beat an answer confirmed
-  off an FF&E schedule. `/api/answers/[id]` marks an edited answer `'manual'`,
-  which is what takes it out of reach for good.
+- **A person's answer is never overwritten, and provenance is RECORDED, not
+  inferred** (0050, audit E1, 2026-11-06). `spec_answers.source_kind =
+  'attribute'` means "composed by `promote-answers.ts` from the record's
+  active attributes", whatever document produced them; every fill writes it,
+  and fill and retract touch only `missing` or `attribute`. `manual` (typed),
+  `email` and `document` (since 0050 ONLY a reviewer confirming a value off a
+  specification document straight onto a question) are out of reach.
+  `/api/answers/[id]` marks an edited answer `'manual'`, which is what takes
+  it out of reach for good. **The history, because it is the trap:** until
+  0050 both kinds of row were `document` and the recompose told them apart by
+  the run behind `source_id` (`shop_drawings`, or null for a typed spec). The
+  bill (`document_kind` null), the schedules, the tracker and email all
+  recompose with their own run, so every answer they filled FROZE: a
+  correction, a retire, a library edit or a BW standard reached the Specs tab
+  and the file but never the checklist, the gates, TGQ, the chase or
+  completion, and a RETIRED bill fabric shipped through its answer because
+  the export falls through to the answer where no attribute holds the field.
+  Never key a recompose on `document_kind` again. `npm run
+  db:backfill-answer-provenance` relabels the pre-0050 rows (decision table in
+  `src/lib/answer-provenance-backfill.ts`); a relabel takes a version, because
+  `bump_version` fires. Until it has run on a database, every projected answer
+  written before 0050 is out of the recompose's reach — apply 0050, deploy,
+  run it at once.
+- **The composed Dimensions answer includes a TBC slot with no figure**
+  (`composesIntoCell`, audit F6), so its state is `tbc` whenever the file's
+  cell carries a TBC marker; before this a TBC W beside a confirmed D and H
+  gave a CONFIRMED answer `D790 x H720mm` while the file read `W TBC x D790 x
+  H720mm`.
 - **The whole record is recomposed, not the card.** A card supplying only the
   height still recomposes the cell over the width and depth an earlier document
   confirmed, so the attributes are re-read from the table rather than taken
@@ -1704,9 +1852,9 @@ Four rules, each a trap rather than a preference:
 A dimension does not reach its field by `spec_field_id` — it carries a SLOT,
 and all five compose into BWS field 3 (`json_id`, never the column letter).
 An uncategorised record has no questions, fills nothing, and that is not a
-failure. Setting a category later creates the answer rows `missing`, and only
-the next drawing confirm fills them — or `npm run db:backfill-answers`, which
-runs these same functions over attributes already on record.
+failure. Setting a category later creates the answer rows AND recomposes them
+in the same change (`setRecordCategory`, audit E5, 2026-11-06), so a bill line
+categorised after its confirm gets its bill specs' answers at once.
 
 `source_id` records WHICH document a value came from, and for a composed cell
 that is the last contributing slot: a cell built from three drawings has no
@@ -2163,6 +2311,12 @@ there are none. Where a note already carries one it stays editable, because a
 wrong `mm` on `ARM HEIGHT` must be correctable without promoting the row to a
 slot it does not belong in.
 
+**A note block is keyed on its page, its heading AND its configurations**, the
+model's and the reviewer's (`noteConfigurationKey`, audit D5, 2026-11-06). The
+merge kept the FIRST row's `configurations`, so a "Type 3" note merged into a
+shared one was written to every record. Blocks merged wrongly at staging
+before 2026-11-06 stay as they were stored; the original lines are gone.
+
 ### A change is a change set; a version is composed, never copied
 
 `db/migrations/0012_change_sets_and_snapshots.sql`, `src/lib/change-sets.ts`,
@@ -2300,6 +2454,41 @@ already exist.
 - **Retiring a run asserts its own cascade.** `spec_records.status` does not
   follow `spec_runs.status` and no constraint can make it, so `retireRun`
   retires every record and then counts, before commit.
+- **A configuration follows its line** (audit C1, 2026-11-06, found by two
+  auditors from opposite ends). It carries no bill code, so no line can pair
+  with it, and the retire step swept every configuration on the phase: revise
+  a phase holding S-301 TYPE 1–5 and the five jobs left the export, the bare
+  parent shipping in their place. The reconcile loader reads bill lines only
+  (`parent_id is null`) and names each line's live configurations beside it
+  ("12.1–12.5 follow it"); the confirm carries the configurations of every
+  line it keeps AND sweeps bill lines only, each holding alone so one can
+  change without the other; a dropped line's configurations are retired with
+  it, at the same moment, in the same change; a pairing naming a configuration
+  is refused.
+- **One tab revises a phase** (C2). Two tabs naming one `replacesRunId` meant
+  the second tab's retire step swept the first tab's new records. It is
+  refused at the sheet PATCH, naming the other tab and inside the update's own
+  WHERE so two presses cannot race, and again at confirm
+  (`phase_revised_twice`).
+- **A SUGGESTION IS NOT A PAIRING.** Found while building C1 and present since
+  `cab35f9`: the pairing select showed the reconcile's suggestion as its
+  chosen value, nothing stored it, the confirm writes only stored `replaces`,
+  and a select already showing the record fires no change when somebody
+  "agrees" — so every untouched suggested line confirmed as a NEW record and
+  the record the screen said it continued was retired with its drawings and
+  specs, while the screen read "0 no longer listed". The select shows the
+  stored decision only; a suggestion is a `SuggestButton` ("Pair with …") with
+  "Pair the n suggested" per tab; reconcile reports `accepted` and lists a
+  suggested-only record in `missing` with `suggestedFor`. The level-picker
+  trap, in a third place.
+- **A retired line can come back** (C14). A retired bill line of the phase
+  whose code is on the bill again is offered as a `restoreCandidate`, never
+  chosen (two retired on one code: both offered, SX11A); the choice is
+  `replaces.restore`, and the confirm un-retires it from `retired` at the
+  version shown, with the configurations that were retired at the same
+  moment. Before this the line became a NEW record and the old one kept its
+  drawings, retired. Files: `src/lib/boq-reconcile.ts`, `src/lib/confirm-boq.ts`,
+  `src/app/api/imports/[id]/route.ts`, `src/app/dashboard/imports/[id]/page.tsx`.
 
 ### The finishes library is the truth; the attribute is the evidence
 
@@ -2746,8 +2935,8 @@ columns are plainly there was a dead end because of the words above them. Max:
   The confirm writes the description verbatim into the next free slot OF ITS
   KIND on that record (since 2026-10-06 — see the next section; it was "the
   next free COM slot" for every line), files the code through
-  `resolveFinishCode` (CONFLICT rule), and refuses a REVISION that changes a
-  finish line rather than guessing.
+  `resolveFinishCode` (CONFLICT rule), and refuses a REVISION that no longer
+  states a finish the record held from the bill (the one planner, below).
 - **Measured on the real bill, local stack:** 101 lines, 67 items, 34 fabric
   lines, quantity total 1,241 — `boq:gap --golden` 100% on lines, codes,
   quantities and fabric parents; the structure read took 25 s; a layout saved
@@ -3515,6 +3704,28 @@ rule below is a trap rather than a preference.
 - **Slots are unchanged**: two timber or metal codes on one item fill Main,
   then 2, then 3, in the order the bill lists them (Max, same day).
 
+- **ONE PLANNER decides every finish line, and the confirm executes it**
+  (`planBillFinishWrites` and `billFinishPlanInputs` in
+  `bill-fabric-filing.ts`, audit C5, 2026-11-06). The review GET describes the
+  plan (`planBillFabrics`); the confirm plans every line once, under the lock,
+  before any write, and `writeFabricLine` decides nothing — a planned finish id
+  resolves to the row the confirm created for it, and a slot found taken after
+  all is `finish_plan_stale`, a sentence, never the unique index's 500. Before
+  this the confirm re-read the held finishes per line, INCLUDING the rows it
+  had written earlier in the same confirm, so the second fabric of one kind on
+  a carried item found the first held and refused the whole bill as
+  `fabric_changed` while the review showed "→ COM 2": the `proposalBlockers`
+  rule broken. The refusal is now: a finish the record held from the bill
+  BEFORE this confirm that none of the revision's lines of that kind for the
+  item states; a NEW finish of a held kind takes the next free slot; an item
+  given no line of a kind is not refused, because a held fabric may be a
+  description cell's, which a revision never re-writes.
+- **A deferral is a placeholder** (C11). `fabricLineIsPlaceholder` also strips
+  `DEFERRED_TO_SOMEBODY_PHRASES` (`spec-vocab.ts`: "to be selected by client",
+  "client to select", "by others", "by ID", "designer to confirm"), so such a
+  line is never minted as ONE in-house code that every later undecided fabric
+  then links to — the merge the placeholder rule exists to prevent.
+
 ### A swatch is cropped off the page it is printed on
 
 `src/components/imports/SwatchPicker.tsx`,
@@ -4143,6 +4354,12 @@ their responsibilities elsewhere without a deliberate architecture decision.
 - `db/migrations/0001_foundation.sql` — users and role check,
   `schema_migrations`, `audit_log` + `write_audit()`, immutability triggers,
   `bump_version()`, polymorphic `attachments`, `pick_lists`, `status_history`.
+- `db/migrations/0050_answer_provenance.sql` and
+  `src/lib/answer-provenance-backfill.ts` — an answer RECORDS that it is a
+  projection of the record's specs (`source_kind = 'attribute'`); the backfill's
+  five-rule decision table is the only thing that may relabel a pre-0050 row.
+- `src/lib/printed-number.ts` — the one reader of a printed number; a
+  thousands-or-decimal group is refused, never guessed.
 
 ## Stack
 
@@ -4256,6 +4473,20 @@ sweep. Not excessively many. The Panther pilot stays curated regardless.
 
 A stale status section is worse than none, because agents and people both make
 decisions from it. The full dated list is in `docs/plans/README.md`.
+
+**2026-11-06: the whole-codebase audit, and its build.** Max asked for every
+area read meticulously and a plan to green-light; `docs/plans/audit-2026-11-06.md`
+is the audit (twelve confirmed defects in its short version, five stages) and
+the same day he said "run all the stages… use your best judgment" on its
+questions. The build runs on `audit-int` with Opus coders in worktrees, every
+landing checked on the local stack with the database tier required. Stage 1
+(the file and the bill) is landed: answer provenance (0050), configurations
+follow their line, the one number reader, the replace tick follows its row,
+the finish planner, the gate slot rule. The sections above carry each rule
+under its own heading, dated 2026-11-06; §4 of the audit places the open items
+of the 12 Oct, 23 Oct and 15 Oct plans against it. Pilot needs 0050 and the
+provenance backfill before this code (the promotion notes are in
+`docs/plans/README.md`).
 
 ### M8 — the Panther pass. Still the milestone; the ORDER changed on 2026-09-18.
 
