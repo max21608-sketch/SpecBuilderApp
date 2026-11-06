@@ -97,8 +97,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 //                       guard above cannot reach, and each asks it itself:
 //                       the page renders the reason over the form, and the
 //                       route answers 503 rather than a bodyless 500.
-//   api/queues/*      - queue consumers. They have no session by design and
-//                       authenticate with the queue's own signed protocol.
+//   api/queues/*      - queue consumers. They have no session by design.
+//                       Nothing in a callback is signed: the consumer runs
+//                       only on a payload the SDK RECEIVES from the queue
+//                       service by id with the deployment's OIDC token, and
+//                       the route refuses the binary shape that would run on
+//                       the request's own body (src/lib/queue-callback.ts).
 //                       Adding them here would break every background job.
 //   api/cron/*        - same, but authenticated with CRON_SECRET.
 //   api/graph/notifications

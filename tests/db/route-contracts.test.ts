@@ -472,27 +472,19 @@ describeIfDb("route contracts", () => {
     });
 
     // ========================================================================
-    // FOUND BY 5.2 (R3). The middleware exempts `api/queues/` because a queue
-    // consumer "authenticates with the queue's own signed protocol", and
-    // `route-guards.test.ts` lists it as a non-writer route for that reason.
-    // In @vercel/queue 0.4.0 a v2beta BINARY-mode callback that carries a
-    // receipt handle is handled from the request's OWN body: `handleCallback`
-    // parses the ce-* headers, deserialises the body as the payload and calls
-    // our handler BEFORE it speaks to the queue service at all. Nothing in
-    // the request is signed. So anybody who can reach the URL can hand the
-    // consumer a message of their choosing. Whether Vercel strips these
-    // headers from a public request in front of the function is not
-    // something this repo can see; the SDK does not check.
-    //
-    // What a forged message can do today is bounded (a `document-intake`
-    // needs a live attempt id to get past the claim fence; `mail-ingest`
-    // fetches by id from Graph), and that bound is the claim protocol, not
-    // authentication. The fix is a verified signature or an OIDC check in
-    // the route before `queueHandler`.
+    // FOUND BY 5.2 (R3), FIXED BY 5.4. In @vercel/queue 0.4.0 a v2beta
+    // BINARY-mode callback that carries a receipt handle is handled from the
+    // request's OWN body: `handleCallback` deserialises it as the payload and
+    // calls our handler BEFORE it speaks to the queue service at all, and
+    // nothing in the request is signed. Measured 2026-11-06: 200
+    // {"status":"success"} and the consumer ran. Our trigger is v1beta, which
+    // sends the structured shape the SDK RECEIVES from the service by id, so
+    // the route now refuses the binary one before `handleCallback`
+    // (src/lib/queue-callback.ts).
     // ========================================================================
-    it.fails("never hands a forged binary-mode callback to the consumer (found by 5.2, R3)", async () => {
+    it("never hands a forged binary-mode callback to the consumer (found by 5.2, R3)", async () => {
       state.extractionRuns = 0;
-      await post(
+      const response = await post(
         {
           "content-type": "application/json",
           "ce-type": "com.vercel.queue.v2beta",
@@ -503,9 +495,9 @@ describeIfDb("route contracts", () => {
           "ce-vqsdeliverycount": "1",
         },
         payload,
-      ).catch(() => undefined);
-      // Measured 2026-11-06: the route answered 200 {"status":"success"} and
-      // the stubbed consumer ran once.
+      );
+      expect(response.status).toBe(400);
+      await expectJson(response, "queue");
       expect(state.extractionRuns).toBe(0);
     });
   });
