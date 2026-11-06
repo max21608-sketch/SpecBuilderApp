@@ -17,12 +17,21 @@
 // `disabled` on every deployment, and this suite only asserts what the
 // ingestion function does with a message once it has one.
 //
-// Rows are prefixed `__QA ` under project number `__QA P90211` (2.11's own
-// number, so a suite running beside this one cannot collide on it), and swept
-// FK-safe at both ends.
+// EVERY KEY THIS FILE WRITES IS THIS PROCESS'S OWN (audit H2, 2026-11-06).
+// The project numbers come from `qaNumber()`, and the project inboxes, the
+// contact, the mailbox and every Message-ID carry the same per-process suffix.
+// They used to be literals (`__QA P90211`, one inbox, one mailbox) swept by a
+// `beforeAll` — so two runs at once either died on
+// `projects_bws_project_number_key` or, worse, the second run's sweep deleted
+// the first run's fixtures mid-test. A literal ROUTING key fails more quietly
+// than a literal project number: a crashed run's project still holding the
+// same inbox or the same contact turns the next run's confident outcome into
+// an AMBIGUOUS one, and the assertion that fails reads as a routing defect.
+// Nothing is swept before the run any more; what a crashed run left is
+// `npm run db:qa-clean`'s. Each run sweeps its own rows, FK-safe, at the end.
 // ============================================================================
 import { it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { describeIfDb } from "./db-tier";
+import { describeIfDb, qaNumber, QA_RUN_SUFFIX } from "./db-tier";
 import pg from "pg";
 import { MAX_IN_FLIGHT_READS_PER_PACK } from "@/lib/extraction-claim";
 import { ROUTER_ACTOR } from "@/lib/email-routing";
@@ -63,8 +72,9 @@ vi.mock("@vercel/blob", () => ({
 }));
 
 /** One message at a time, handed to the ingestion function as Graph would. */
-const inflight: { bytes: Buffer; receivedDateTime: string; subject: string } = {
+const inflight: { bytes: Buffer; receivedDateTime: string; subject: string; internetMessageId: string } = {
   bytes: Buffer.alloc(0),
+  internetMessageId: "",
   receivedDateTime: new Date().toISOString(),
   subject: "",
 };
@@ -79,7 +89,7 @@ vi.mock("@/lib/graph-client", async (importOriginal) => {
     mailboxPath: (suffix: string) => `/users/__qa-mailbox${suffix}`,
     graphJson: async () => ({
       id: "__qa_graph_id",
-      internetMessageId: "<__qa@example.test>",
+      internetMessageId: inflight.internetMessageId,
       receivedDateTime: inflight.receivedDateTime,
       subject: inflight.subject,
       hasAttachments: false,
@@ -90,16 +100,29 @@ vi.mock("@/lib/graph-client", async (importOriginal) => {
 
 const databaseUrl = process.env.DATABASE_URL;
 
-const PROJECT_NUMBER = "__QA P90211";
-const INBOX = "__qa-p90211@example.test";
-const CONTACT = "__qa-router-contact@example.test";
-const MAILBOX = "__qa_router_mailbox";
+const PROJECT_NUMBER = qaNumber("P90211");
+const SECOND_NUMBER = qaNumber("P90212");
+const INBOX = `__qa-p90211-${QA_RUN_SUFFIX}@example.test`;
+const SECOND_INBOX = `__qa-p90212-${QA_RUN_SUFFIX}@example.test`;
+const CONTACT = `__qa-router-contact-${QA_RUN_SUFFIX}@example.test`;
+const MAILBOX = `__qa_router_mailbox_${QA_RUN_SUFFIX}`;
+// THE PROJECT CODE IS THIS RUN'S TOO. The subject signal matches a code in the
+// project NAME, so two runs naming their projects alike would each read the
+// other's as a second candidate and hold the message as ambiguous. Two letters
+// and five digits is the shape `routeMessage` reads as a code; the digits come
+// from the suffix.
+const PROJECT_CODE = `QA${String(parseInt(QA_RUN_SUFFIX, 16) % 100000).padStart(5, "0")}`;
+
+/** A Message-ID unique to this run and this delivery. */
+function messageIdFor(tag: string): string {
+  return `<__qa.router.${tag}.${QA_RUN_SUFFIX}@example.test>`;
+}
 
 /** A real RFC 5322 message, so `parseEnvelope` does the reading it always does. */
-function eml({ to, from, subject }: { to: string; from: string; subject: string }): Buffer {
+function eml({ to, from, subject, messageId }: { to: string; from: string; subject: string; messageId: string }): Buffer {
   return Buffer.from(
     [
-      "Message-ID: <__qa.router.1@example.test>",
+      `Message-ID: ${messageId}`,
       "Date: Mon, 21 Sep 2026 09:00:00 +0000",
       `From: ${from}`,
       `To: ${to}`,
@@ -120,7 +143,8 @@ describeIfDb("a confidently routed email assigns itself", () => {
 
   /** Hand one message to the real ingestion function. */
   async function ingest(graphMessageId: string, message: { to: string; from: string; subject: string }) {
-    inflight.bytes = eml(message);
+    inflight.internetMessageId = messageIdFor(graphMessageId);
+    inflight.bytes = eml({ ...message, messageId: inflight.internetMessageId });
     inflight.subject = message.subject;
     const { ingestGraphMessage } = await import("@/lib/mail-ingest");
     return ingestGraphMessage({
@@ -152,30 +176,41 @@ describeIfDb("a confidently routed email assigns itself", () => {
     return rows.rows[0];
   }
 
+  /**
+   * This run's rows, and only this run's: every message arrived in this run's
+   * mailbox, and every project carries this run's number. The `.eml`
+   * attachments belong to the MESSAGE (`entity_type = 'email_messages'`), so
+   * they are found through it; the old sweep deleted by the project's id and
+   * left every one of them behind.
+   */
   async function sweep() {
-    const stale = await client.query(`select id from projects where bws_project_number = $1`, [PROJECT_NUMBER]);
-    for (const row of stale.rows) {
+    const messages = await client.query(`select id from email_messages where mailbox = $1`, [MAILBOX]);
+    const ids = messages.rows.map((row) => String(row.id));
+    if (ids.length > 0) {
+      await client.query(`delete from email_messages where id = any($1::uuid[])`, [ids]);
+      await client.query(
+        `delete from attachments where entity_type = 'email_messages' and entity_id = any($1::uuid[])`,
+        [ids],
+      );
+    }
+    const projects = await client.query(
+      `select id from projects where bws_project_number = any($1::text[])`,
+      [[PROJECT_NUMBER, SECOND_NUMBER]],
+    );
+    for (const row of projects.rows) {
       await client.query(`delete from email_messages where project_id = $1`, [row.id]);
-      await client.query(`delete from attachments where entity_id = $1`, [row.id]);
       await client.query(`delete from intake_runs where project_id = $1`, [row.id]);
       await client.query(`delete from project_contacts where project_id = $1`, [row.id]);
       await client.query(`delete from projects where id = $1`, [row.id]);
-    }
-    // Held messages never acquire a project, so they are swept by mailbox.
-    const held = await client.query(`select id from email_messages where mailbox = $1`, [MAILBOX]);
-    for (const row of held.rows) {
-      await client.query(`delete from attachments where entity_id = $1`, [row.id]);
-      await client.query(`delete from email_messages where id = $1`, [row.id]);
     }
   }
 
   beforeAll(async () => {
     await client.connect();
-    await sweep();
     const project = await client.query(
       `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
-       values ($1, '__QA Router project QA9021', $2, 'qa', 'qa') returning id`,
-      [PROJECT_NUMBER, INBOX],
+       values ($1, $2, $3, 'qa', 'qa') returning id`,
+      [PROJECT_NUMBER, `__QA Router project ${PROJECT_CODE}`, INBOX],
     );
     projectId = project.rows[0].id;
     await client.query(
@@ -256,9 +291,10 @@ describeIfDb("a confidently routed email assigns itself", () => {
   it("assigns a message forwarded from the project inbox", async () => {
     // The redirect shape: the loop header names the project mailbox and the
     // original sender survives.
+    inflight.internetMessageId = messageIdFor("fwd");
     inflight.bytes = Buffer.from(
       [
-        "Message-ID: <__qa.router.fwd@example.test>",
+        `Message-ID: ${inflight.internetMessageId}`,
         "Date: Mon, 21 Sep 2026 09:05:00 +0000",
         "From: someone@elsewhere.test",
         "To: kam@benwhistler.test",
@@ -322,7 +358,7 @@ describeIfDb("a confidently routed email assigns itself", () => {
     const outcome = await ingest("__qa_router_subject", {
       to: "kam@benwhistler.test",
       from: "someone@elsewhere.test",
-      subject: "QA9021 lounge chair",
+      subject: `${PROJECT_CODE} lounge chair`,
     });
     expect(outcome.outcome).toBe("stored");
     if (outcome.outcome !== "stored") return;
@@ -336,12 +372,13 @@ describeIfDb("a confidently routed email assigns itself", () => {
   it("HOLDS a message addressed to two project inboxes", async () => {
     const second = await client.query(
       `insert into projects (bws_project_number, name, shared_inbox, created_by, updated_by)
-       values ('__QA P90212', '__QA Router project two', '__qa-p90212@example.test', 'qa', 'qa') returning id`,
+       values ($1, '__QA Router project two', $2, 'qa', 'qa') returning id`,
+      [SECOND_NUMBER, SECOND_INBOX],
     );
     const secondId = String(second.rows[0].id);
     try {
       const outcome = await ingest("__qa_router_ambiguous", {
-        to: `${INBOX}, __qa-p90212@example.test`,
+        to: `${INBOX}, ${SECOND_INBOX}`,
         from: "someone@elsewhere.test",
         subject: "Two projects",
       });
