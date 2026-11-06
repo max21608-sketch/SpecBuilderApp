@@ -24,6 +24,23 @@
 // its coverage, a version inside a baseline, a configuration under its bill
 // line, a spec linked to a finish, a run inside a batch, and the polymorphic
 // rows (attachments, status history, a note) no FK reaches.
+//
+// ============================================================================
+// AND THE FIX FOR THE ORDER PASSED ONLY ON THE LUCKY ORDER (0058).
+//
+// 0055 turned the six RESTRICTs into NO ACTION on the belief that NO ACTION is
+// checked at the end of the statement, after every cascade. It is checked at
+// the end of the QUERY that deleted the row, and each cascade is a query of
+// its own, run depth-first in the order the parent's RI triggers sort by
+// NAME. The names carry an oid and sort as text, so 0055's own re-created
+// `email_drafts_project_id_fkey` got oid 157631 on the shared local database
+// and fired FIRST ("1" sorts before "2"), and 171979 on a fresh one and fired
+// LAST, after the records were gone and their coverage rows were not. The
+// tests below passed on the first and failed on the second, the CI rehearsal's
+// database. So these tests no longer accept the database's order: one of them
+// re-creates the project's own foreign keys, inside a transaction it rolls
+// back, in the worst order there is, and checks that it really is that order
+// before it trusts what follows.
 // ============================================================================
 import { afterAll, beforeAll, expect, it } from "vitest";
 import pg from "pg";
@@ -31,6 +48,7 @@ import { describeIfDb, qaNumber, QA_RUN_SUFFIX } from "./db-tier";
 import { normaliseFinishCode } from "@/lib/finishes";
 import { TABLE_HANDLING } from "../../tools/lib/copy-project-core";
 import {
+  DELETE_ORDER,
   OWNED_TABLES,
   POLYMORPHIC_TABLES,
   deleteProjectRows,
@@ -63,6 +81,22 @@ describeIfDb("0055 a project is deletable", () => {
     const row = await maybe<T>(text, values);
     if (!row) throw new Error(`No row from: ${text}`);
     return row;
+  }
+
+  /**
+   * The client, with `deleteProjectRows`' own transaction run as a savepoint
+   * of the caller's, so a test can arrange the database first and roll all
+   * of it back after.
+   */
+  function insideSavepoint(inner: pg.Client): Pick<pg.Client, "query"> {
+    const mapped: Record<string, string> = {
+      begin: "savepoint delete_project",
+      commit: "release savepoint delete_project",
+      rollback: "rollback to savepoint delete_project",
+    };
+    return {
+      query: ((text: string, values?: unknown[]) => inner.query(mapped[text] ?? text, values)) as pg.Client["query"],
+    };
   }
 
   /** A project carrying every shape that used to stop a delete. */
@@ -254,16 +288,159 @@ describeIfDb("0055 a project is deletable", () => {
     expect(rows.map((row) => row.conname)).toEqual([]);
   });
 
-  it("still refuses to delete a version, a finish in use or a chased answer on its own", async () => {
+  it("still refuses to delete a version, a finish in use, a chased record or a chased answer on its own", async () => {
     const fixture = await buildProject("P05502");
+    // Immediate, as before: a trigger and a CHECK, neither deferrable.
     await expect(client.query(`delete from record_snapshots where record_id = $1`, [fixture.recordId]))
       .rejects.toThrow(/append-only/);
-    await expect(client.query(`delete from project_finishes where project_id = $1`, [fixture.projectId]))
-      .rejects.toThrow(/record_attributes_finish_id_fkey/);
-    await expect(client.query(`delete from spec_answers where record_id = $1`, [fixture.recordId]))
-      .rejects.toThrow(/email_draft_items_answer_id_fkey/);
     await expect(client.query(`update email_messages set project_id = null where id = $1`, [fixture.graphMessageId]))
       .rejects.toThrow(/email_messages_assigned_has_project/);
+
+    // At COMMIT since 0058, and asserted there on purpose rather than with
+    // `set constraints all immediate`: the app's own transactions commit with
+    // the default, so the commit is where a caller meets the refusal. The
+    // statement itself now succeeds, and that is the changed behaviour worth
+    // pinning, so each case asserts both halves.
+    async function refusedAtCommit(statement: string, values: unknown[], constraint: RegExp) {
+      await client.query("begin");
+      try {
+        await client.query(statement, values);
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+      await expect(client.query("commit")).rejects.toThrow(constraint);
+    }
+    await refusedAtCommit(`delete from project_finishes where project_id = $1`, [fixture.projectId], /record_attributes_finish_id_fkey/);
+    await refusedAtCommit(`delete from spec_answers where record_id = $1`, [fixture.recordId], /email_draft_items_answer_id_fkey/);
+    await refusedAtCommit(`delete from spec_records where id = $1`, [fixture.recordId], /email_draft_items_record_id_fkey/);
+    await refusedAtCommit(`delete from intake_batches where project_id = $1`, [fixture.projectId], /intake_runs_batch_id_fkey/);
+    await refusedAtCommit(`delete from project_contacts where project_id = $1`, [fixture.projectId], /email_drafts_contact_same_project/);
+
+    // And nothing of it went: a refused commit rolls the whole transaction back.
+    expect(await one<{ n: string }>(`select count(*) as n from spec_records where project_id = $1`, [fixture.projectId]))
+      .toEqual({ n: "2" });
+  });
+
+  it("checks every NO ACTION key between two tables a project delete empties at commit (0058)", async () => {
+    const { rows } = await client.query<{ conname: string; condeferrable: boolean; condeferred: boolean }>(`
+      with recursive owned(tbl) as (
+        select 'projects'::regclass
+        union
+        select c.conrelid::regclass from pg_constraint c join owned o on c.confrelid = o.tbl where c.contype = 'f'
+      )
+      select c.conname, c.condeferrable, c.condeferred from pg_constraint c
+       where c.contype = 'f' and c.confdeltype = 'a'
+         and c.conrelid in (select tbl from owned) and c.confrelid in (select tbl from owned)
+       order by 1`);
+    // Six today; the catalog decides, so a seventh fails here until it is deferred too.
+    expect(rows.length).toBeGreaterThanOrEqual(6);
+    expect(rows.filter((row) => !(row.condeferrable && row.condeferred)).map((row) => row.conname)).toEqual([]);
+  });
+
+  it("deletes in foreign-key order itself, so no check waits on which cascade fires first", async () => {
+    // House §12: delete in foreign-key-safe order. For every NO ACTION or
+    // RESTRICT key between two tables the delete empties, the REFERENCING rows
+    // must be gone in an earlier statement than the referenced ones. A table
+    // is emptied at its own place in DELETE_ORDER, or at the place of the
+    // earliest table it cascades from, transitively; two tables emptied by one
+    // statement are emptied in trigger order, which is the thing to avoid.
+    const { rows: edges } = await client.query<{ child: string; parent: string; action: string; conname: string }>(`
+      with recursive owned(tbl) as (
+        select 'projects'::regclass
+        union
+        select c.conrelid::regclass from pg_constraint c join owned o on c.confrelid = o.tbl where c.contype = 'f'
+      )
+      select c.conrelid::regclass::text as child, c.confrelid::regclass::text as parent,
+             c.confdeltype::text as action, c.conname
+        from pg_constraint c
+       where c.contype = 'f'
+         and c.conrelid in (select tbl from owned) and c.confrelid in (select tbl from owned)`);
+    const order = DELETE_ORDER as string[];
+    const place = new Map<string, number>(order.map((table, index) => [table, index]));
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const edge of edges.filter((e) => e.action === "c" && e.child !== e.parent)) {
+        const via = place.get(edge.parent);
+        if (via !== undefined && via < (place.get(edge.child) ?? Infinity)) {
+          place.set(edge.child, via);
+          changed = true;
+        }
+      }
+    }
+    const unsafe = edges
+      .filter((edge) => edge.action === "a" || edge.action === "r")
+      .filter((edge) => !((place.get(edge.child) ?? Infinity) < (place.get(edge.parent) ?? Infinity)))
+      .map((edge) => `${edge.conname}: ${edge.child} at ${place.get(edge.child)}, ${edge.parent} at ${place.get(edge.parent)}`);
+    expect(unsafe).toEqual([]);
+    expect(order.at(-1)).toBe("projects");
+  });
+
+  it("deletes the project whatever order its cascades fire in", async () => {
+    const fixture = await buildProject("P05504");
+    // The worst order: the project's own keys re-created, inside a transaction
+    // this test rolls back, so that every REFERENCED table's cascade fires
+    // before every table that points at it. Their new oids are consecutive,
+    // so their trigger names sort in creation order; that is checked below
+    // rather than assumed, because an oid crossing a digit boundary between
+    // two of them would sort it first.
+    const worst = [
+      "project_contacts", "intake_batches", "spec_runs", "project_finishes",
+      "spec_records", "intake_runs", "email_drafts",
+    ];
+    await client.query("begin");
+    try {
+      await client.query("set local lock_timeout = '20s'");
+      for (const table of worst) {
+        const fk = await one<{ conname: string; def: string }>(
+          `select c.conname, pg_get_constraintdef(c.oid) as def from pg_constraint c
+            where c.contype = 'f' and c.conrelid = $1::regclass and c.confrelid = 'projects'::regclass
+              and c.confdeltype = 'c'`,
+          [table],
+        );
+        await client.query(`alter table ${table} drop constraint ${fk.conname}`);
+        await client.query(`alter table ${table} add constraint ${fk.conname} ${fk.def}`);
+      }
+      const { rows: fired } = await client.query<{ tbl: string }>(
+        `select c.conrelid::regclass::text as tbl from pg_trigger t join pg_constraint c on c.oid = t.tgconstraint
+          where t.tgrelid = 'projects'::regclass and c.confdeltype = 'c' and c.conrelid = any($1::regclass[])
+            and t.tgtype & 8 = 8
+          order by t.tgname collate "C"`,
+        [worst],
+      );
+      expect(fired.map((row) => row.tbl), "the worst order could not be arranged on this database").toEqual(worst);
+
+      // The control: the arrangement really is the fault. A bare delete with
+      // every check at the end of its own query is refused.
+      await client.query("savepoint control");
+      await client.query("set constraints all immediate");
+      await expect(client.query(`delete from projects where id = $1`, [fixture.projectId]))
+        .rejects.toThrow(/violates foreign key constraint/);
+      await client.query("rollback to savepoint control");
+
+      // Deferred (0058's default): the checks wait for the end, when every
+      // cascade has run. `set constraints all immediate` fires them now,
+      // since this transaction will never commit.
+      await client.query("savepoint deferred");
+      await client.query("set constraints all deferred");
+      await client.query(`delete from projects where id = $1`, [fixture.projectId]);
+      await client.query("set constraints all immediate");
+      expect(await maybe(`select id from projects where id = $1`, [fixture.projectId])).toBeUndefined();
+      await client.query("rollback to savepoint deferred");
+
+      // Immediate, through the script: its own order leaves no check to luck.
+      await client.query("set constraints all immediate");
+      const plan = await deleteProjectRows(insideSavepoint(client), fixture.projectId);
+      for (const entry of plan.counts) {
+        const { rows } = await client.query<{ n: string }>(entry.countSql, entry.values);
+        expect(Number(rows[0]!.n), `${entry.table} still holds rows`).toBe(0);
+      }
+    } finally {
+      await client.query("rollback");
+    }
+    // The rollback put the project and the keys back; afterAll deletes it.
+    expect(await one<{ id: string }>(`select id from projects where id = $1`, [fixture.projectId]))
+      .toEqual({ id: fixture.projectId });
   });
 
   it("deletes every row of the project but its audit trail, and names the files", async () => {

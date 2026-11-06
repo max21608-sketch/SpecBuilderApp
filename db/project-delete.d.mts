@@ -22,6 +22,8 @@ export type ProjectDeletionPlan = {
   entityIds: string[];
 };
 
+/** The tables deleted by a statement of their own, in order; the last is `projects`. */
+export const DELETE_ORDER: string[];
 export const OWNED_TABLES: string[];
 export const POLYMORPHIC_TABLES: string[];
 export function projectPrefix(projectId: string): string;

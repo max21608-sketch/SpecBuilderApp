@@ -7,8 +7,10 @@
 // `house/data-safety.md` asks for a retention decision "on day one"; this app
 // had none, because the schema refused every delete (audit B5, 0055 has the
 // detail). Now one statement, `delete from projects`, takes every table that
-// hangs off a project by foreign key. What no foreign key can reach is done
-// here, around it, in ONE transaction:
+// hangs off a project by foreign key (since 0058; see DELETE_ORDER for why
+// this file does not lean on that alone, and deletes the project's tables in
+// foreign-key order itself). What no foreign key can reach is done here,
+// around it, in ONE transaction:
 //
 //   * the POLYMORPHIC rows (attachments, notes, status history, messages),
 //     which point at an entity by type and id with no constraint behind them.
@@ -118,6 +120,47 @@ const POLYMORPHIC = [
   { table: "messages", from: "messages t where t.entity_id = any($2::uuid[]) and $1::text is not null" },
 ];
 
+/**
+ * The order the project's own rows are deleted in, each table in a statement
+ * of its own, referencing tables before the tables they reference (house §12).
+ *
+ * THE CASCADE WAS NOT ENOUGH (audit 4.6, 2026-11-06). `delete from projects`
+ * alone empties every one of these, and 0055 said it would whatever order the
+ * cascades fired in. It did not: a NO ACTION key is checked at the end of the
+ * cascade query that deleted the referenced row, and the cascades run in the
+ * order their trigger names sort, which is creation order read as TEXT. On a
+ * fresh database the records went before the drafts, the coverage rows still
+ * pointed at them, and the delete was refused; on the shared one it passed.
+ * 0058 defers the six keys to commit, which makes the bare statement safe. This
+ * list makes THIS path safe without it, and under `set constraints all
+ * immediate`, so a database that has not had 0058 yet (or a restore that lost
+ * it) does not depend on the dice.
+ *
+ * Every NO ACTION or RESTRICT key between two tables the delete empties must
+ * have its referencing rows gone in an earlier statement than its referenced
+ * rows. A table not listed goes by cascade with the earliest listed table it
+ * hangs off: the answers, attributes, refs, versions and disagreements with
+ * their records, the change sets and baselines with the project. The test
+ * reads the catalog and fails on a key this order does not satisfy.
+ *
+ * `$1` is the project id.
+ */
+const ORDERED_DELETES = [
+  {
+    table: "email_draft_items",
+    sql: "delete from email_draft_items t using email_drafts d where d.id = t.draft_id and d.project_id = $1",
+  },
+  { table: "email_drafts", sql: "delete from email_drafts where project_id = $1" },
+  { table: "spec_records", sql: "delete from spec_records where project_id = $1" },
+  { table: "spec_runs", sql: "delete from spec_runs where project_id = $1" },
+  { table: "intake_runs", sql: "delete from intake_runs where project_id = $1" },
+  { table: "intake_batches", sql: "delete from intake_batches where project_id = $1" },
+  { table: "project_finishes", sql: "delete from project_finishes where project_id = $1" },
+  { table: "project_contacts", sql: "delete from project_contacts where project_id = $1" },
+  { table: "projects", sql: "delete from projects where id = $1" },
+];
+
+export const DELETE_ORDER = ORDERED_DELETES.map((entry) => entry.table);
 export const OWNED_TABLES = OWNED.map((entry) => entry.table);
 export const POLYMORPHIC_TABLES = POLYMORPHIC.map((entry) => entry.table);
 
@@ -229,10 +272,13 @@ export async function deleteProjectRows(client, projectId, { actor = "script:del
         where left(regexp_replace(coalesce(mailbox_storage_path, ''), '^https?://[^/]+/', ''), length($1)) = $1`,
       [prefix],
     );
-    await client.query("delete from projects where id = $1", [projectId]);
+    for (const step of ORDERED_DELETES) {
+      await client.query(step.sql, [projectId]);
+    }
 
     // Count again. Every table this file knows must hold nothing of the
-    // project, or the cascade did not do what 0055 says it does.
+    // project, or the deletes and cascades did not do what this file and 0055
+    // say they do.
     const left = [];
     for (const entry of OWNED) {
       const values = entry.usesPrefix ? [prefix] : [projectId];
