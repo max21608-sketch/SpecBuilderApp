@@ -54,7 +54,14 @@ export const MAX_DURATION_SECONDS = 800;
 /** The run's own abort target, leaving room to write the failure down. */
 export const RUN_ABORT_MS = 770_000;
 
-/** Passed to the model call. Preflight is subtracted from it by the caller. */
+/**
+ * The model call's own deadline, counted from when the CALL starts. Nothing
+ * subtracts preflight from it. Preflight (the blob read, parsing, the
+ * registers) is subtracted from RUN_ABORT_MS by the worker, which passes that
+ * remainder as its signal; the call combines the two, so whichever fires
+ * first stops it. On a slow preflight that is the run's abort, which is why
+ * either one reads as "ran out of time" (`classifyCallFailure`).
+ */
 export const MODEL_DEADLINE_MS = 740_000;
 
 /** After this, a `parsing` row is presumed abandoned and can be reclaimed. */
@@ -124,3 +131,37 @@ export type ExtractionRunOutcome =
   | { outcome: "failed"; error: string }
   | { outcome: "busy"; reason: string }
   | { outcome: "skipped"; reason: string };
+
+/**
+ * Whether "Start again (may be charged again)" may be offered over an attempt,
+ * and whether the route will honour it. ONE decision: the extract route and
+ * the four review screens all call this.
+ *
+ * ============================================================================
+ * THE CLAIM BUDGET BEING SPENT IS NOT THE ATTEMPT BEING OVER. Audit D7,
+ * 2026-11-06. `claim_count >= MAX_CLAIMS_PER_ATTEMPT` was written as
+ * "exhausted" in five places, and it is also true while the FOURTH delivery
+ * is reading. The red button showed over a paid read in flight; pressing it
+ * opened a new attempt, the live worker's write was fenced out, and its output
+ * was thrown away after it had been paid for. Nothing is offered over a live
+ * claim, whatever the count says.
+ *
+ * `claimLive` must come from a window built on CLAIM_EXPIRY_SECONDS (D9: the
+ * single-document GET used a literal 360 s). An UNKNOWN claim on a parsing row
+ * counts as live: unknown must never read as abandoned.
+ * ============================================================================
+ */
+export function attemptRestartable(run: {
+  status: string;
+  claimCount: number;
+  claimLive: boolean | null;
+  withinDeadline: boolean | null;
+}): boolean {
+  if (run.status === "parsed" || run.status === "confirmed") return false;
+  const reading = run.status === "parsing" && run.claimLive !== false;
+  if (reading) return false;
+  const abandonedClaim = run.status === "parsing";
+  const deadAttempt = run.status === "queued" && run.withinDeadline === false;
+  const budgetSpent = run.claimCount >= MAX_CLAIMS_PER_ATTEMPT;
+  return abandonedClaim || deadAttempt || budgetSpent;
+}

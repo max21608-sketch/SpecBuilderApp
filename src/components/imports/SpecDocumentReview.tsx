@@ -64,6 +64,7 @@ import {
   DOCUMENT_KIND_LABELS,
   type DocumentKind,
 } from "@/lib/spec-vocab";
+import { attemptRestartable } from "@/lib/extraction-claim";
 
 export type SpecImport = {
   id: string;
@@ -515,10 +516,12 @@ export default function SpecDocumentReview({
   if (waiting) {
     // An expired claim writes an error while returning the row to `queued`, so
     // an error here is NOT a failure and must not read like one.
-    const restartable =
-      (run.status === "parsing" && run.claim_live === false) ||
-      (run.status === "queued" && run.within_deadline === false) ||
-      run.claim_count >= 4;
+    const restartable = attemptRestartable({
+      status: run.status,
+      claimCount: run.claim_count,
+      claimLive: run.claim_live,
+      withinDeadline: run.within_deadline,
+    });
     const dispatchable = run.status === "queued" && run.claim_count === 0;
 
     return shell(

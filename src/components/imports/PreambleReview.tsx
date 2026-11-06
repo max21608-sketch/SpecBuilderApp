@@ -23,6 +23,7 @@ import Button from "@/components/ui/Button";
 import Link from "next/link";
 import { DOCUMENT_KIND_LABELS } from "@/lib/spec-vocab";
 import type { PreambleNote, StagedPreamble } from "@/lib/preamble-document";
+import { attemptRestartable } from "@/lib/extraction-claim";
 
 type Run = {
   id: string;
@@ -247,10 +248,12 @@ export default function PreambleReview({
   }
 
   if (waiting) {
-    const restartable =
-      (run.status === "parsing" && run.claim_live === false) ||
-      (run.status === "queued" && run.within_deadline === false) ||
-      run.claim_count >= 4;
+    const restartable = attemptRestartable({
+      status: run.status,
+      claimCount: run.claim_count,
+      claimLive: run.claim_live,
+      withinDeadline: run.within_deadline,
+    });
     // Queued, never claimed: the publish may not have landed, and re-sending
     // the SAME attempt costs nothing new and cannot disturb a worker that
     // already has it. Without this the row spins for the whole 24-hour

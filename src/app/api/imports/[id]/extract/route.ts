@@ -50,7 +50,7 @@ import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
 import { openAttempt, publishAttempt } from "@/lib/extraction-dispatch";
 import { takeReadSlot, deferRead, WAITING_FOR_SLOT_MESSAGE } from "@/lib/extraction-slots";
-import { CLAIM_EXPIRY_SECONDS, MAX_CLAIMS_PER_ATTEMPT } from "@/lib/extraction-claim";
+import { attemptRestartable, CLAIM_EXPIRY_SECONDS } from "@/lib/extraction-claim";
 
 export const dynamic = "force-dynamic";
 
@@ -151,10 +151,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
 
       if (action === "restart-expired") {
-        const expiredParsing = status === "parsing" && !run.claim_live;
-        const deadAttempt = status === "queued" && !run.within_deadline;
-        const exhausted = Number(run.claim_count) >= MAX_CLAIMS_PER_ATTEMPT && status !== "parsed" && status !== "confirmed";
-        if (!expiredParsing && !deadAttempt && !exhausted) {
+        // The screens offer the button by the same function, so the button
+        // and the refusal cannot disagree (audit D7: over a live fourth claim
+        // they used to agree on the wrong answer).
+        const restartable = attemptRestartable({
+          status,
+          claimCount: Number(run.claim_count),
+          claimLive: Boolean(run.claim_live),
+          withinDeadline: Boolean(run.within_deadline),
+        });
+        if (!restartable) {
           throw new DomainConflictError(
             "not_restartable",
             "This attempt has not been abandoned. Wait for it, or reload to see where it got to.",

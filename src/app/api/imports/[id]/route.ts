@@ -16,6 +16,7 @@ import { billSheetNotices } from "@/lib/bill-sheet-notices";
 import { numberingFromRow, recordLabel } from "@/lib/record-label";
 import { z } from "zod";
 import { sql, json, type Row } from "@/lib/db";
+import { CLAIM_EXPIRY_SECONDS } from "@/lib/extraction-claim";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError, type TxnSql } from "@/lib/db-transaction";
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
@@ -897,7 +898,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
            -- request for the file again.
            (r.attachment_id is not null) as has_source,
            (r.attempt_deadline_at > now()) as within_deadline,
-           (r.status = 'parsing' and r.processing_started_at > now() - interval '360 seconds') as claim_live,
+           -- The claim window is the worker's own constant. A literal here
+           -- (360 seconds, from before the claim went to 900) offered a
+           -- Restart the extract route then refused, from minute 6 to 15.
+           (r.status = 'parsing' and r.processing_started_at > now() - make_interval(secs => ${CLAIM_EXPIRY_SECONDS})) as claim_live,
            p.bws_project_number, p.name as project_name,
            a.filename
     from intake_runs r

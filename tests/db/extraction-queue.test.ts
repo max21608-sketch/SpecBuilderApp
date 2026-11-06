@@ -272,6 +272,49 @@ describeIfDb("extraction attempts", () => {
     expect(after.claim_token).toBeNull();
   });
 
+  // Audit D7. `claim_count >= 4` is also true while the fourth delivery is
+  // reading: a restart there fences out a paid read about to land.
+  it("refuses to restart over a LIVE fourth claim, which is a paid read in flight", async () => {
+    const attemptId = await queueAttempt({
+      status: "parsing",
+      claimToken: randomUUID(),
+      claimCount: MAX_CLAIMS_PER_ATTEMPT,
+      processingStartedAt: new Date().toISOString(),
+    });
+    const { POST } = await import("@/app/api/imports/[id]/extract/route");
+    const res = await POST(
+      post({ expectedVersion: (await row()).version, requestId: randomUUID(), action: "restart-expired" }),
+      params(runId),
+    );
+    expect((await res.json()).code).toBe("not_restartable");
+    expect((await row()).attempt_id).toBe(attemptId);
+    expect(published).toHaveLength(0);
+  });
+
+  // Audit D9. The screen read `claim_live` through a 360 s window while the
+  // claim lasts CLAIM_EXPIRY_SECONDS, so from minute 6 it offered a Restart
+  // the route refused.
+  it("the document's GET calls a claim seven minutes old live, as the route does", async () => {
+    await queueAttempt({
+      status: "parsing",
+      claimToken: randomUUID(),
+      claimCount: 1,
+      processingStartedAt: new Date(Date.now() - 7 * 60_000).toISOString(),
+    });
+    const { GET } = await import("@/app/api/imports/[id]/route");
+    const body = await (await GET(new Request("http://localhost/test"), params(runId))).json();
+    expect(body.import.claim_live).toBe(true);
+
+    await queueAttempt({
+      status: "parsing",
+      claimToken: randomUUID(),
+      claimCount: 1,
+      processingStartedAt: new Date(Date.now() - (CLAIM_EXPIRY_SECONDS + 60) * 1000).toISOString(),
+    });
+    const expired = await (await GET(new Request("http://localhost/test"), params(runId))).json();
+    expect(expired.import.claim_live).toBe(false);
+  });
+
   it("refuses to retry a dispatch a worker has already claimed", async () => {
     await queueAttempt({ claimCount: 1 });
     const { POST } = await import("@/app/api/imports/[id]/extract/route");

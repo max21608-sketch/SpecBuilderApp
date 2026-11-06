@@ -59,6 +59,7 @@ import {
   type ScheduleVerdict,
   type StagedFinishSchedule,
 } from "@/lib/finish-schedule";
+import { attemptRestartable } from "@/lib/extraction-claim";
 
 type Run = {
   id: string;
@@ -410,10 +411,12 @@ export default function FinishScheduleReview({
   }
 
   if (waiting) {
-    const restartable =
-      (run.status === "parsing" && run.claim_live === false) ||
-      (run.status === "queued" && run.within_deadline === false) ||
-      run.claim_count >= 4;
+    const restartable = attemptRestartable({
+      status: run.status,
+      claimCount: run.claim_count,
+      claimLive: run.claim_live,
+      withinDeadline: run.within_deadline,
+    });
     const dispatchable = run.status === "queued" && run.claim_count === 0 && run.within_deadline !== false;
     return shell(
       <Card title="Being read">
