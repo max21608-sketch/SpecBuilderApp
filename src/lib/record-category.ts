@@ -16,6 +16,7 @@ import { changeSetForEdit } from "@/lib/change-sets";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { recomposeAnswers } from "@/lib/attribute-retire";
 import { type ItemLevel } from "@/lib/spec-vocab";
+import { draftStateWords } from "@/lib/draft-status";
 
 export type SetCategoryResult = { recordId: string; categoryId: string; answersCreated: number; version: number };
 
@@ -52,31 +53,22 @@ export async function setRecordCategory(
     return { recordId, categoryId, answersCreated: 0, version: Number(record.version) };
   }
 
+  // The guards run BEFORE the change is opened: a refusal opens nothing.
+  if (current !== null) await assertCategoryMayChange(txn, recordId);
+
   const { changeSetId } = await changeSetForEdit(txn, {
     projectId: String(record.project_id),
     actor,
     kind: "category_set",
   });
 
-  // CHANGING a category is refused once anybody has answered anything under the
-  // old one. The answers are keyed on questions that belong to the old
-  // category; moving the record would orphan them, and silently discarding
-  // somebody's work is not a thing a dropdown should be able to do. Setting a
-  // category for the first time is always allowed.
   if (current !== null) {
-    const answered = await txn`
-      select count(*)::int as n from spec_answers
-      where record_id = ${recordId} and revision_no = 0 and state <> 'missing'
-    `;
-    if (Number(answered[0]?.n ?? 0) > 0) {
-      throw new DomainConflictError(
-        "category_has_answers",
-        `This record already has ${Number(answered[0]?.n)} answered question${Number(answered[0]?.n) === 1 ? "" : "s"} under its current category. Clear them first, or leave the category as it is.`,
-      );
-    }
-    // Only `missing` rows remain, and they belong to questions this record will
-    // no longer be asked.
-    await txn`delete from spec_answers where record_id = ${recordId} and revision_no = 0 and state = 'missing'`;
+    // Everything left is the old category's: `missing` rows nobody looked at,
+    // and the PROJECTIONS of the record's own specs (`attribute`, 0050), which
+    // `recomposeAnswers` below writes again under the new category's
+    // questions. Neither is a decision, so neither is lost. After the change
+    // is open, so the trail carries the delete under it.
+    await txn`delete from spec_answers where record_id = ${recordId} and revision_no = 0`;
   }
 
   const updated = await txn`
@@ -115,6 +107,109 @@ export async function setRecordCategory(
     answersCreated: created.length,
     version: Number(updated[0].version),
   };
+}
+
+// ---------------------------------------------------------------------------
+// WHEN A CATEGORY MAY CHANGE.
+//
+// The answers are keyed on the OLD category's questions, so changing the
+// category deletes them. Two kinds of answer must not be deleted, and each is
+// refused in words BEFORE anything is written.
+//
+// A PERSON'S ANSWER (audit, Stage 1 walk, 2026-11-06). `manual`, `email` and
+// `document` (since 0050 only a reviewer's own) are decisions, and a dropdown
+// must not discard one. The guard used to count every row that was not
+// `missing`, and since E5 recomposes a record the moment it is categorised,
+// that counted the record's OWN SPECS: every bill line with a size or a
+// fabric refused to move ("already has 2 answered questions… clear them
+// first"), and there was nothing anybody could clear. An `attribute` answer is
+// a projection; it goes with the old rows and is recomposed under the new.
+// The `missing` placeholders are `manual` too, which is why the state is read
+// as well as the kind.
+//
+// A CHASED QUESTION (audit B3). A chase's coverage row points at the answer it
+// asked about (`email_draft_items.answer_id`, 0005, NO ACTION since 0055), and
+// coverage is history: never updated, and kept when the draft is superseded or
+// its send is voided, as the record of what was asked. So once a question has
+// been chased its answer row can never be deleted, and the delete used to meet
+// the foreign key as a 23503 the reviewer read as "Nothing was written. Check
+// the logs." It is refused naming the chase.
+//
+// THAT REFUSAL HAS NO WAY ROUND IT TODAY, and the sentence says so rather than
+// inventing one. "Void the draft first" was the obvious advice and is false:
+// a voided draft keeps its coverage. Letting a chased record change category
+// needs a decision about the data (an answer that can be retired rather than
+// deleted, or coverage that can outlive its answer), which is a migration and
+// is Max's to take. Until then the item keeps its category, and its questions
+// can still be answered under it.
+// ---------------------------------------------------------------------------
+
+/** The kinds of answer a person gave. `attribute` is the checklist's copy of the specs. */
+const PERSON_SOURCES = ["manual", "email", "document"];
+
+async function assertCategoryMayChange(txn: TxnSql, recordId: string): Promise<void> {
+  const category = await txn`
+    select c.name from spec_records r join item_categories c on c.id = r.category_id where r.id = ${recordId}
+  `;
+  const under = category[0] ? `under ${String(category[0].name)}` : "under its current category";
+
+  const answered = await txn`
+    select q.prompt
+      from spec_answers a
+      join requirements q on q.id = a.requirement_id
+     where a.record_id = ${recordId} and a.revision_no = 0
+       and a.state <> 'missing'
+       and a.source_kind = any(${PERSON_SOURCES}::text[])
+     order by q.sort_order
+  `;
+  if (answered.length > 0) {
+    const prompts = answered.map((row) => `“${String(row.prompt)}”`);
+    const named = listed(prompts, 3);
+    throw new DomainConflictError(
+      "category_has_answers",
+      `${answered.length === 1 ? "Somebody has answered" : `Somebody has answered ${answered.length} questions`} ${under}: ${named}. Clear ${answered.length === 1 ? "that answer" : "those answers"} on the checklist first, or keep the category.`,
+      { diff: { answered: answered.map((row) => String(row.prompt)) } },
+    );
+  }
+
+  const chased = await txn`
+    select d.id, d.status, d.recipient_name, d.recipient_email,
+           coalesce(d.sent_at, d.generated_at)::text as on_day,
+           count(distinct i.answer_id)::int as questions
+      from email_draft_items i
+      join email_drafts d on d.id = i.draft_id
+      join spec_answers a on a.id = i.answer_id
+     where a.record_id = ${recordId} and a.revision_no = 0
+     group by d.id, d.status, d.recipient_name, d.recipient_email, d.sent_at, d.generated_at
+     order by coalesce(d.sent_at, d.generated_at)
+  `;
+  if (chased.length > 0) {
+    const chases = chased.map((row) => {
+      const who = row.recipient_name ? String(row.recipient_name) : row.recipient_email ? String(row.recipient_email) : "a contact";
+      return `the chase to ${who} of ${dayOf(String(row.on_day))}, which ${draftStateWords(String(row.status))}`;
+    });
+    const questions = chased.reduce((total, row) => Math.max(total, Number(row.questions)), 0);
+    throw new DomainConflictError(
+      "category_chased",
+      `This item's questions ${under} have been chased (${listed(chases, 2)}), and a chase keeps the questions it asked, so the category cannot change on this item. Keep it, and answer ${questions === 1 ? "that question where it is" : "those questions where they are"}.`,
+      { diff: { drafts: chased.map((row) => String(row.id)) } },
+    );
+  }
+}
+
+/** "a, b and 2 more" — a refusal names what is in the way, and a long list buries the sentence. */
+function listed(items: string[], shown: number): string {
+  if (items.length <= shown) {
+    return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  }
+  return `${items.slice(0, shown).join(", ")} and ${items.length - shown} more`;
+}
+
+/** A timestamp as a person reads it: "14 Oct 2026". */
+function dayOf(iso: string): string {
+  const date = new Date(iso.replace(" ", "T"));
+  if (Number.isNaN(date.getTime())) return "an earlier date";
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Europe/London" });
 }
 
 // ---------------------------------------------------------------------------
