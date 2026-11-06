@@ -34,9 +34,11 @@
 import { compareRecordOrder } from "@/lib/record-label";
 import { fieldDisplayNameWithBws } from "@/lib/spec-field-label";
 import { describeStandard, standardInForce } from "@/lib/bw-standard";
+import { valueCarriesItsUnit } from "@/lib/dimensions";
 import {
   BWS_EXPORT_COLUMNS,
   composeRowCells,
+  oneLineCell,
   type CellSource,
   type ExportScope,
 } from "@/lib/bws-export";
@@ -136,8 +138,13 @@ function sourceDocuments(source: CellSource): { documents: string; pages: string
 function clientAndStandard(source: CellSource): [string, string] {
   if (source.kind !== "attribute") return ["", ""];
   const attribute = source.attribute;
-  const said = attribute.value?.trim() ?? "";
-  const withUnit = said && attribute.unit ? `${said}${attribute.unit}` : said;
+  // The document's words on ONE line, folded the way the exported cell beside
+  // it is (`oneLineCell`), because this column is a spreadsheet cell too
+  // (audit F12). And no second unit after a value that prints its own feet or
+  // inch marks: `6'-4"in` says it twice (audit F14). The one test every other
+  // display path asks.
+  const said = oneLineCell(attribute.value?.trim() ?? "");
+  const withUnit = said && attribute.unit && !valueCarriesItsUnit(said) ? `${said}${attribute.unit}` : said;
   // The standard IN FORCE: on a linked spec, the code's own from the finishes
   // library (0045) -- the one the cell beside this column shipped.
   return [withUnit, describeStandard(standardInForce(attribute)) ?? ""];

@@ -8,7 +8,7 @@ import {
   pickBoilerplate,
   type QuoteBoilerplate,
 } from "@/lib/quote-lines";
-import type { ExportAttribute, ExportRecord, ExportScope } from "@/lib/bws-export";
+import { composeWorkbook, toCsv, type ExportAttribute, type ExportRecord, type ExportScope } from "@/lib/bws-export";
 
 const record = (overrides: Partial<ExportRecord> = {}): ExportRecord => ({
   id: "rec-1",
@@ -161,6 +161,36 @@ describe("the Specification block", () => {
   it("falls back to a checklist answer where no document claimed the field", () => {
     const spec = composeSpecification(record(), [], [{ specFieldJsonId: 74, value: "Required", qualifier: null }]);
     expect(spec).toContain("FR INTERLINER: Required");
+  });
+
+  it("writes an answer through the export's own renderer, placement and all", () => {
+    // AUDIT 2026-11-06, F8/F14. The answer and its placement were joined by
+    // hand with " - ", a second joinQualifier: flipping EXPORT_QUALIFIER_MODE
+    // would have left the quote behind, and a break in the answer reached the
+    // quote's one-line-per-spec block as two lines.
+    const spec = composeSpecification(
+      record(),
+      [],
+      [{ specFieldJsonId: 74, value: "Required\nto BS 5852", qualifier: "Seat\nand back" }],
+    );
+    expect(spec).toContain("FR INTERLINER: Required to BS 5852 - Seat and back");
+  });
+});
+
+describe("a formula in an item description (audit A17)", () => {
+  it("is neutralised in the quote CSV and left as composed in the BWS CSV", () => {
+    const hostile = record({ itemDescription: '=HYPERLINK("http://example.invalid","Sofa")', qty: -3 });
+    const quote = composeQuoteSheet(scope({ records: [hostile] }), register);
+    // As the quote route writes it.
+    const quoteCsv = toCsv([quote.header, ...quote.rows], { neutraliseFormulas: true });
+    expect(quoteCsv).toContain(`"'=HYPERLINK(""http://example.invalid"",""Sofa"")"`);
+    // The quantity is a number cell, and stays one.
+    expect(quoteCsv).toContain(",-3,");
+    // As the BWS export route writes it: imported, not opened.
+    const bws = composeWorkbook(scope({ records: [hostile] }));
+    const bwsCsv = toCsv([bws.jobs.headerNames, bws.jobs.headerIds, ...bws.jobs.rows]);
+    expect(bwsCsv).toContain(`"=HYPERLINK(""http://example.invalid"",""Sofa"")"`);
+    expect(bwsCsv).not.toContain("'=HYPERLINK");
   });
 });
 

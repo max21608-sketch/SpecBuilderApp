@@ -193,6 +193,33 @@ describe("composeCheckSheet", () => {
   });
 });
 
+describe("the Client specified column", () => {
+  it("prints a feet-and-inches value once, without a second unit (audit F14)", () => {
+    const sheet = composeCheckSheet(
+      scope({
+        attributes: [
+          attribute({ attrGroup: "material", dimensionSlot: null, specFieldJsonId: 1, label: "ARM", value: `6'-4"`, unit: "in" }),
+        ],
+      }),
+    );
+    const [said] = at(cell(sheet.rows, "COM 1"), "Client specified");
+    expect(said).toBe(`6'-4"`);
+  });
+
+  it("folds the document's line breaks the way the exported cell does (audit F12)", () => {
+    const sheet = composeCheckSheet(
+      scope({
+        attributes: [
+          attribute({ attrGroup: "material", dimensionSlot: null, specFieldJsonId: 1, label: "SOFA", value: "Invented velvet\nRose", unit: null }),
+        ],
+      }),
+    );
+    const [exported, said] = at(cell(sheet.rows, "COM 1"), "Exported value", "Client specified");
+    expect(exported).toBe("Invented velvet Rose");
+    expect(said).toBe("Invented velvet Rose");
+  });
+});
+
 describe("checkSheetFilename", () => {
   it("cannot be mistaken for the export", () => {
     expect(checkSheetFilename("P17726", "MAIN RUN", "xlsx")).toBe("P17726 - MAIN RUN - export check sheet.xlsx");

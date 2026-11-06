@@ -160,6 +160,126 @@ describe("gateStatus — a dimension slot is settled by an attribute, not an ans
   });
 });
 
+// ============================================================================
+// AUDIT 2026-11-06, F5: A SLOT IS SETTLED BY A FIGURE, NOT BY A STATE.
+//
+// A confirmed slot passed with any unit and any value, so `approx 720-740` at
+// mm satisfied TGQ while the BWS file shipped `[W "approx 720-740" — not a
+// number]`. The gate now asks the composer's own reader for ONE figure.
+// ============================================================================
+describe("gateStatus: a confirmed slot must carry one figure the file can write", () => {
+  const w = field({ gate: "TGQ", specFieldJsonId: 3, dimensionSlot: "W", fieldName: "Width - W" });
+  const judge = (value: string | null, unit: string | null = "mm") =>
+    only(
+      gateStatus("TGQ", [w], {
+        answers: [],
+        slots: [{ dimensionSlot: "W", state: "confirmed", value, unit }],
+        askedFieldIds: asked(3),
+      }),
+    );
+
+  it("a range is not one figure", () => {
+    expect(judge("approx 720-740")).toMatchObject({
+      outcome: "blocking",
+      reason: "W is recorded as “approx 720-740”, which is not one figure.",
+      state: "confirmed",
+    });
+  });
+
+  it("a figure the document marked TBC is not settled, whatever the row's state says", () => {
+    expect(judge("1520 TBC")).toMatchObject({
+      outcome: "blocking",
+      reason: "W is recorded as “1520 TBC”: the document marks the figure TBC.",
+    });
+  });
+
+  it("a thousands-or-decimal group is not read, so it does not settle the slot", () => {
+    expect(judge("1,200")).toMatchObject({
+      outcome: "blocking",
+      reason: "W is recorded as “1,200”, which could be 1200 or 1.2. Record it as one of those.",
+    });
+  });
+
+  it("feet and inches recorded under another unit is the row contradicting itself", () => {
+    expect(judge(`6'-4"`, "cm")).toMatchObject({ outcome: "blocking", reason: expect.stringMatching(/feet and inches/) });
+  });
+
+  it("one figure with a unit still satisfies, and so does a complete feet-and-inches value", () => {
+    expect(judge("1830").outcome).toBe("satisfied");
+    expect(judge("72,5", "cm").outcome).toBe("satisfied");
+    expect(judge(`6'-4"`, null).outcome).toBe("satisfied");
+  });
+});
+
+// ============================================================================
+// AUDIT 2026-11-06, F3: A ROUND ITEM CAN SATISFY TGQ.
+//
+// Matthew's TGQ asks for a W slot and a D slot (seed 0006 rows 4 and 5), and
+// a round stool records Dia, which REPLACES W and D in the cell. Nothing read
+// a Dia slot, so a pouffe read "No W has been recorded" for ever and TG0/TG1
+// sat behind it. PROVISIONAL, pending Matthew (Max, 2026-11-06).
+// ============================================================================
+describe("gateStatus: a diameter stands for W and D on a round item (provisional)", () => {
+  const w = field({ matrixRow: 4, gate: "TGQ", specFieldJsonId: 3, dimensionSlot: "W", fieldName: "Width - W" });
+  const d = field({ matrixRow: 5, gate: "TGQ", specFieldJsonId: 3, dimensionSlot: "D", fieldName: "Depth - D" });
+  const h = field({ matrixRow: 6, gate: "TGQ", specFieldJsonId: 3, dimensionSlot: "H", fieldName: "Height - H" });
+  const judge = (slots: Parameters<typeof gateStatus>[2]["slots"]) =>
+    gateStatus("TGQ", [w, d, h], { answers: [], slots, askedFieldIds: asked(3) });
+
+  it("a confirmed Dia at mm satisfies the W and D rows, and says it is a diameter", () => {
+    const s = judge([
+      { dimensionSlot: "DIA", state: "confirmed", value: "600", unit: "mm" },
+      { dimensionSlot: "H", state: "confirmed", value: "450", unit: "mm" },
+    ]);
+    expect(s.ownSatisfied).toBe(true);
+    expect(s.fields.map((f) => [f.field.dimensionSlot, f.outcome, f.value])).toEqual([
+      ["W", "satisfied", "Dia. 600"],
+      ["D", "satisfied", "Dia. 600"],
+      ["H", "satisfied", "450"],
+    ]);
+    expect(s.fields[0]!.reason).toBe("Diameter recorded. On a round item it stands for W and D.");
+  });
+
+  it("a Dia that is not one figure does not stand in for anything", () => {
+    const s = judge([{ dimensionSlot: "DIA", state: "confirmed", value: "approx 600", unit: "mm" }]);
+    expect(s.fields[0]).toMatchObject({ outcome: "blocking", reason: "Dia. is recorded as “approx 600”, which is not one figure." });
+    expect(s.fields[1]!.outcome).toBe("blocking");
+  });
+
+  it("a TBC Dia blocks the W and D rows as TBC", () => {
+    const s = judge([{ dimensionSlot: "DIA", state: "tbc", value: null, unit: null }]);
+    expect(s.fields[0]).toMatchObject({ outcome: "blocking", reason: "Dia. is on record as TBC." });
+  });
+
+  it("Dia beside a W is the composer's conflict, and the gate never reads it as settled", () => {
+    const s = judge([
+      { dimensionSlot: "DIA", state: "confirmed", value: "600", unit: "mm" },
+      { dimensionSlot: "W", state: "confirmed", value: "600", unit: "mm" },
+      { dimensionSlot: "H", state: "confirmed", value: "450", unit: "mm" },
+    ]);
+    expect(s.ownSatisfied).toBe(false);
+    const reason = "Dia. and W are both recorded, and Dia. replaces W and D in the cell. Retire one of them.";
+    expect(s.fields.map((f) => [f.field.dimensionSlot, f.outcome, f.reason])).toEqual([
+      ["W", "blocking", reason],
+      ["D", "blocking", reason],
+      ["H", "satisfied", "Confirmed."],
+    ]);
+  });
+
+  it("a W and D still settle a square item exactly as before", () => {
+    const s = judge([
+      { dimensionSlot: "W", state: "confirmed", value: "900", unit: "mm" },
+      { dimensionSlot: "D", state: "confirmed", value: "500", unit: "mm" },
+      { dimensionSlot: "H", state: "confirmed", value: "450", unit: "mm" },
+    ]);
+    expect(s.fields.map((f) => [f.outcome, f.reason, f.value])).toEqual([
+      ["satisfied", "Confirmed.", "900"],
+      ["satisfied", "Confirmed.", "500"],
+      ["satisfied", "Confirmed.", "450"],
+    ]);
+  });
+});
+
 describe("gateStatus — a conditional whose controller is unanswered is UNKNOWN, never satisfied", () => {
   const socket = field({
     matrixRow: 28,

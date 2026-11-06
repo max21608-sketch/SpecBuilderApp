@@ -102,7 +102,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const filename = `${loaded.projectNumber || "project"}${scope.runName ? ` - ${scope.runName}` : ""} - quote lines.csv`
     .replace(/[^A-Za-z0-9 .&-]/g, "")
     .trim();
-  return new Response(toCsv([sheet.header, ...sheet.rows]), {
+  // A CSV a person OPENS: a cell that starts like a formula is neutralised
+  // (audit A17). The BWS export does not do this; see `toCsv`.
+  return new Response(toCsv([sheet.header, ...sheet.rows], { neutraliseFormulas: true }), {
     headers: {
       "content-type": "text/csv; charset=utf-8",
       "content-disposition": `attachment; filename="${filename}"`,

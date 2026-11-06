@@ -67,6 +67,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   };
 
   if (format === "csv") {
+    // NOT neutralised, unlike the three human-read CSVs (audit A17): this file
+    // is IMPORTED into BWS, not opened, and a leading apostrophe would reach a
+    // BWS field as part of the value. Tim's importer contract is awaited; until
+    // it says how a formula-like cell is taken, the cell ships as composed.
     const csv = toCsv([workbook.jobs.headerNames, workbook.jobs.headerIds, ...workbook.jobs.rows]);
     return new Response(csv, { headers: { ...headers, "content-type": "text/csv; charset=utf-8" } });
   }

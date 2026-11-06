@@ -157,7 +157,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   };
 
   if (format === "csv") {
-    const csv = toCsv([sheet.header, ...sheet.rows.map(costingRowCells)]);
+    // A CSV a person OPENS (and pastes into the estimating sheet): a cell that
+    // starts like a formula is neutralised (audit A17). The quantity stays a
+    // number: `toCsv` never prefixes a plain number.
+    const csv = toCsv([sheet.header, ...sheet.rows.map(costingRowCells)], { neutraliseFormulas: true });
     return new Response(csv, { headers: { ...headers, "content-type": "text/csv; charset=utf-8" } });
   }
 

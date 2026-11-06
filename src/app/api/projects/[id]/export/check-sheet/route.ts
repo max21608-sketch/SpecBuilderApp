@@ -63,7 +63,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   };
 
   if (format === "csv") {
-    return new Response(toCsv([sheet.header, ...sheet.rows]), {
+    // A CSV a person OPENS: a cell that starts like a formula is neutralised
+    // (audit A17). The BWS export does not do this; see `toCsv`.
+    return new Response(toCsv([sheet.header, ...sheet.rows], { neutraliseFormulas: true }), {
       headers: { ...headers, "content-type": "text/csv; charset=utf-8" },
     });
   }

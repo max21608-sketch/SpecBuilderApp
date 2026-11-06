@@ -37,7 +37,7 @@
 // would pass a gate over fields nobody can even record.
 // ============================================================================
 import type { AnswerState } from "@/lib/spec-vocab";
-import { valueCarriesItsUnit } from "@/lib/dimensions";
+import { ambiguousSpellings, parseDimensionFigure, valueCarriesItsUnit } from "@/lib/dimensions";
 
 // ---- THE ORDER OF THIS ARRAY IS THE MODEL, NOT A PRESENTATION CHOICE -------
 //
@@ -209,6 +209,105 @@ function outcomeForState(state: AnswerState, value: string | null): { outcome: G
   return { outcome: "blocking", reason: "Nobody has answered this yet." };
 }
 
+// ---- A DIMENSION SLOT ------------------------------------------------------
+
+/** The slots a diameter replaces in the composed cell, and therefore stands for here. */
+const ROUND_REPLACES: readonly GateSlotInput["dimensionSlot"][] = ["W", "D"];
+
+/** How a slot is named in a reason: the cell's own prefix for a diameter. */
+const slotName = (slot: GateSlotInput["dimensionSlot"]): string => (slot === "DIA" ? "Dia." : slot);
+
+/**
+ * One of Matthew's slot rows (TGQ rows 4 to 7), judged off the ACTIVE
+ * attributes that carry slots, never off the composed cell.
+ *
+ * ==========================================================================
+ * A ROUND ITEM: Dia STANDS FOR W AND D. PROVISIONAL, PENDING MATTHEW.
+ *
+ * His TGQ asks for a W slot and a D slot, and a round stool has neither: it
+ * has a Dia., which REPLACES W and D in BWS field 3 (`composeDimensionCell`).
+ * Nothing here read a Dia slot, so every pouffe read "No W has been recorded"
+ * for ever and the chain held TG0 and TG1 behind it (audit F3, 2026-11-06).
+ * Max, 2026-11-06: ship the code, Matthew confirms the rule. If he rules
+ * instead for a "round" conditional in the seed, this branch goes and the
+ * seed carries it.
+ *
+ * Two things about it are not provisional. The row SAYS it is a diameter
+ * (its value prints `Dia. 600`), so the panel never shows a width nobody
+ * recorded. And a Dia BESIDE a W or a D is the composer's `dia_conflict`: the
+ * cell writes the diameter and a bracket naming the conflict, so the W and D
+ * rows block until a person retires one. A gate reading settled over a cell
+ * the composer itself flags is the app agreeing with itself.
+ * ==========================================================================
+ *
+ * A SLOT IS SETTLED BY A FIGURE, NOT BY A STATE (audit F5, 2026-11-06). A
+ * confirmed `approx 720-740` at mm passed TGQ while the file shipped
+ * `[W "approx 720-740" — not a number]`. The figure is read by
+ * `parseDimensionFigure`, the composer's own reader, so the gate and the cell
+ * cannot disagree about whether there is a number: one figure, no TBC printed
+ * beside it, and a unit (stated, or the value's own feet and inch marks).
+ */
+function slotStatus(
+  field: GateField,
+  wanted: NonNullable<GateField["dimensionSlot"]>,
+  bySlot: ReadonlyMap<GateSlotInput["dimensionSlot"], GateSlotInput>,
+): GateFieldStatus {
+  const dia = bySlot.get("DIA");
+  const standsIn = ROUND_REPLACES.includes(wanted);
+  if (standsIn && dia) {
+    const beside = ROUND_REPLACES.filter((slot) => bySlot.has(slot));
+    if (beside.length > 0) {
+      return {
+        field,
+        outcome: "blocking",
+        reason: `Dia. and ${beside.join(" and ")} are both recorded, and Dia. replaces W and D in the cell. Retire one of them.`,
+        value: bySlot.get(wanted)?.value ?? null,
+        state: "confirmed",
+      };
+    }
+  }
+  const own = bySlot.get(wanted);
+  const slot = own ?? (standsIn ? dia : undefined);
+  if (!slot) {
+    return { field, outcome: "blocking", reason: `No ${wanted} has been recorded off any document.`, value: null, state: null };
+  }
+  const name = slotName(slot.dimensionSlot);
+  if (slot.state === "tbc") {
+    return { field, outcome: "blocking", reason: `${name} is on record as TBC.`, value: slot.value, state: "tbc" };
+  }
+  const blocked = (reason: string): GateFieldStatus => ({ field, outcome: "blocking", reason, value: slot.value, state: "confirmed" });
+
+  const text = (slot.value ?? "").trim();
+  const read = parseDimensionFigure(slot.value);
+  if (text === "") return blocked(`${name} is recorded with no figure.`);
+  if (read.ambiguousComma) {
+    return blocked(`${name} is recorded as “${text}”, which could be ${ambiguousSpellings(text)}. Record it as one of those.`);
+  }
+  if (read.figure === null) return blocked(`${name} is recorded as “${text}”, which is not one figure.`);
+  if (read.tbcInline) return blocked(`${name} is recorded as “${text}”: the document marks the figure TBC.`);
+  if (read.imperial && slot.unit !== null && slot.unit !== "in") {
+    return blocked(`${name} is recorded as “${text}” in feet and inches, but its unit says ${slot.unit}. Set the unit to in.`);
+  }
+  // A FIGURE WITH NO UNIT IS NOT A SETTLED DIMENSION. Confirmed as what the
+  // document printed, and still a number nobody can convert: it blocks,
+  // saying why, until a person states the unit on the record. A value
+  // carrying its own feet-and-inch marks has stated one.
+  if (slot.unit === null && !valueCarriesItsUnit(slot.value)) return blocked(`${name} has no unit.`);
+
+  // The row asked for W or D (a gate row never names Dia) and a diameter
+  // answered it: said in words, and the value names what it is.
+  if (slot.dimensionSlot === "DIA") {
+    return {
+      field,
+      outcome: "satisfied",
+      reason: "Diameter recorded. On a round item it stands for W and D.",
+      value: `Dia. ${text}`,
+      state: "confirmed",
+    };
+  }
+  return { field, outcome: "satisfied", reason: "Confirmed.", value: slot.value, state: "confirmed" };
+}
+
 /**
  * One gate's OWN fields, for one record. Call `chainGates` to learn whether
  * the gate has actually been reached.
@@ -275,41 +374,7 @@ export function gateStatus(
     }
 
     // ---- 2. a dimension slot ----------------------------------------------
-    if (field.dimensionSlot) {
-      const slot = bySlot.get(field.dimensionSlot);
-      if (!slot) {
-        return {
-          field,
-          outcome: "blocking",
-          reason: `No ${field.dimensionSlot} has been recorded off any document.`,
-          value: null,
-          state: null,
-        };
-      }
-      if (slot.state === "tbc") {
-        return {
-          field,
-          outcome: "blocking",
-          reason: `${field.dimensionSlot} is on record as TBC.`,
-          value: slot.value,
-          state: "tbc",
-        };
-      }
-      // A FIGURE WITH NO UNIT IS NOT A SETTLED DIMENSION. Confirmed as what
-      // the document printed, and still a number nobody can convert: it
-      // blocks, saying why, until a person states the unit on the record. A
-      // value carrying its own feet-and-inch marks has stated one.
-      if (slot.unit === null && !valueCarriesItsUnit(slot.value)) {
-        return {
-          field,
-          outcome: "blocking",
-          reason: `${field.dimensionSlot} has no unit.`,
-          value: slot.value,
-          state: "confirmed",
-        };
-      }
-      return { field, outcome: "satisfied", reason: "Confirmed.", value: slot.value, state: "confirmed" };
-    }
+    if (field.dimensionSlot) return slotStatus(field, field.dimensionSlot, bySlot);
 
     // ---- 3. a BWS field with a checklist question -------------------------
     if (field.specFieldJsonId !== null) {

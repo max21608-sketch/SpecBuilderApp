@@ -312,6 +312,28 @@ export const EXPORT_QUALIFIER_MODE: "inline" | "second_line" = "inline";
 /** The one separator. */
 const QUALIFIER_SEPARATOR = " - ";
 
+/**
+ * ONE LINE PER CELL, AT RUNTIME, NOT ONLY IN THE FIXTURES (audit F12,
+ * 2026-11-06).
+ *
+ * The rule above was held by a test over fixtures that carry no line break.
+ * The values that reach a cell can: a finish description (the library allows
+ * 2,000 characters, typed in a textarea), a typed answer, a document's own
+ * value, an item's description. Nothing stripped a break, so one reached the
+ * Jobs sheet, which is the file-format change this mode exists to prevent.
+ *
+ * Folded to ONE space here, in one helper, by the renderers and the job
+ * columns, BEFORE `joinQualifier`: the fold must never eat the newline the
+ * `second_line` mode would deliberately write between value and placement, or
+ * flipping the mode would silently do nothing. What the document said is
+ * untouched in the database; only the cell is one line.
+ */
+export function oneLineCell(text: string): string;
+export function oneLineCell(text: string | null): string | null;
+export function oneLineCell(text: string | null): string | null {
+  return text === null ? null : text.replace(/[^\S\r\n]*(?:\r\n|\r|\n)\s*/g, " ");
+}
+
 /** A value and its placement, joined the way this export writes them. */
 export function joinQualifier(value: string, qualifier: string | null): string {
   const placement = qualifier?.trim();
@@ -388,7 +410,7 @@ export function renderAttributeValue(attribute: {
   // would let a placement suppress a TBC that belongs on the value.
   const marked =
     state !== "tbc" ? withUnit : !withUnit ? "TBC" : MENTIONS_TBC.test(withUnit) ? withUnit : `${withUnit} TBC`;
-  return joinQualifier(marked, attribute.qualifier ?? null);
+  return joinQualifier(oneLineCell(marked), oneLineCell(attribute.qualifier ?? null));
 }
 
 /**
@@ -401,7 +423,7 @@ export function renderAttributeValue(attribute: {
  * `composeDimensionCell` rule, in a third place. One function, so it cannot.
  */
 export function renderAnswerValue(answer: { value: string | null; qualifier?: string | null }): string {
-  return joinQualifier(answer.value?.trim() ?? "", answer.qualifier ?? null);
+  return joinQualifier(oneLineCell(answer.value?.trim() ?? ""), oneLineCell(answer.qualifier ?? null));
 }
 
 /**
@@ -420,7 +442,7 @@ export function renderAnswerValue(answer: { value: string | null; qualifier?: st
  * screens, not in the cell's own column.
  */
 export function composeDimensions(attributes: ExportAttribute[], note?: string | null): string {
-  return composeDimensionCell(
+  const cell = composeDimensionCell(
     attributes
       .filter((attribute) => attribute.attrGroup === "dimension" && attribute.dimensionSlot !== null)
       .map((attribute) => ({
@@ -434,7 +456,11 @@ export function composeDimensions(attributes: ExportAttribute[], note?: string |
     // composer rather than appended here, so the file, the quote, the costing
     // sheet's Tags and the record screen all write the bracket the same way.
     note ?? null,
-  ).text;
+  );
+  // One line: a value this cell could not derive is quoted verbatim in its
+  // bracket, and a document's value can carry a break. The note is one line by
+  // 0034's CHECK; the cell is folded anyway, because the cell is the contract.
+  return oneLineCell(cell.text);
 }
 
 /**
@@ -512,9 +538,9 @@ export function composeRowCells(
     if (column.jsonId === null) {
       switch (column.name) {
         case CLIENT_COLUMN_NAME:
-          return { value: scope.client ?? "", source: { kind: "project" }, qualifier: null };
+          return { value: oneLineCell(scope.client ?? ""), source: { kind: "project" }, qualifier: null };
         case PROJECT_REF_COLUMN_NAME:
-          return { value: scope.projectName, source: { kind: "project" }, qualifier: null };
+          return { value: oneLineCell(scope.projectName), source: { kind: "project" }, qualifier: null };
         case NAME_COLUMN_NAME:
           // THIS REPO'S JUDGEMENT, like the rest of the job columns. Two
           // variants of one bill line share the client's description exactly,
@@ -523,7 +549,9 @@ export function composeRowCells(
           // them apart; confirm it against a real BWS import before anybody
           // relies on the file.
           return {
-            value: record.variantLabel ? `${record.itemDescription} (${record.variantLabel})` : record.itemDescription,
+            value: oneLineCell(
+              record.variantLabel ? `${record.itemDescription} (${record.variantLabel})` : record.itemDescription,
+            ),
             source: { kind: "record" },
             qualifier: null,
           };
@@ -538,7 +566,7 @@ export function composeRowCells(
       }
     }
     if (column.jsonId === CLIENT_CODE_JSON_ID)
-      return { value: record.boqCodes.join(", "), source: { kind: "record" }, qualifier: null };
+      return { value: oneLineCell(record.boqCodes.join(", ")), source: { kind: "record" }, qualifier: null };
     if (column.jsonId === DIMENSIONS_JSON_ID) {
       return {
         value: dimensions,
@@ -662,10 +690,37 @@ export function composeWorkbook(scope: ExportScope): Workbook {
   };
 }
 
-/** RFC 4180 with a UTF-8 BOM, which is what the BWS export itself is. */
-export function toCsv(rows: string[][]): string {
+/** The characters a spreadsheet reads as the start of a formula in a CSV it opens. */
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+/** A plain number, which a spreadsheet takes as a number and never as a formula. */
+const PLAIN_NUMBER = /^-?\d+(?:\.\d+)?$/;
+
+/**
+ * RFC 4180 with a UTF-8 BOM, which is what the BWS export itself is.
+ *
+ * `neutraliseFormulas` (audit A17, 2026-11-06) is for a CSV a PERSON OPENS in
+ * a spreadsheet: the check sheet, the quote and the costing sheet. Their cells
+ * come from client documents and model reads, and a cell opening with `=`,
+ * `+`, `-`, `@`, a tab or a CR is run as a formula (`=HYPERLINK(...)`). Such a
+ * cell gains a leading `'`, which the spreadsheet shows as text.
+ *
+ * A PLAIN NUMBER IS LEFT ALONE, which is how a numeric column is kept numeric
+ * without a per-sheet list of columns: `-3` is read as the number -3, never as
+ * a formula, and `'-3` would turn a quantity into text. The numeric columns it
+ * protects are the quote's and the costing sheet's quantity, and the check
+ * sheet's field id and page.
+ *
+ * THE BWS CSV DOES NOT PASS IT, deliberately. That file is imported, not
+ * opened, and a leading `'` would reach a BWS field as part of the value.
+ * What Tim's new importer does with a formula-like cell is unknown until his
+ * column contract is in writing; until then the BWS file carries the value
+ * exactly as composed.
+ */
+export function toCsv(rows: string[][], options: { neutraliseFormulas?: boolean } = {}): string {
+  const neutralise = (cell: string) =>
+    options.neutraliseFormulas && FORMULA_LEAD.test(cell) && !PLAIN_NUMBER.test(cell) ? `'${cell}` : cell;
   const escape = (cell: string) => (/[",\r\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell);
-  return "﻿" + rows.map((row) => row.map(escape).join(",")).join("\r\n") + "\r\n";
+  return "﻿" + rows.map((row) => row.map((cell) => escape(neutralise(cell))).join(",")).join("\r\n") + "\r\n";
 }
 
 /**

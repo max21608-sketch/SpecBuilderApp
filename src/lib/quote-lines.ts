@@ -43,7 +43,7 @@
 // ============================================================================
 import { compareRecordOrder } from "@/lib/record-label";
 import { composeDimensionCell, type DimensionRow } from "@/lib/dimensions";
-import { renderAttributeValue, type ExportAttribute, type ExportRecord, type ExportScope } from "@/lib/bws-export";
+import { renderAnswerValue, renderAttributeValue, type ExportAttribute, type ExportRecord, type ExportScope } from "@/lib/bws-export";
 import { shippedStandardValue, standardInForce } from "@/lib/bw-standard";
 import type { AttributeUnit, DimensionSlot } from "@/lib/spec-vocab";
 
@@ -208,12 +208,11 @@ export function composeSpecification(
         if (rendered.trim()) values.push(rendered);
         continue;
       }
+      // THE EXPORT'S OWN RENDERER, never a hand-made " - " (audit F8/F14,
+      // 2026-11-06): a flip of EXPORT_QUALIFIER_MODE must move the quote with
+      // the file, and a break typed into an answer is folded the same way.
       const answer = answerByField.get(jsonId);
-      const written = answer?.value?.trim();
-      if (written) {
-        const placement = answer?.qualifier?.trim();
-        values.push(placement ? `${written} - ${placement}` : written);
-      }
+      if (answer?.value?.trim()) values.push(renderAnswerValue(answer));
     }
     if (values.length === 1) lines.push(`${label}: ${values[0]}`);
     else values.forEach((value, index) => lines.push(`${label} ${index + 1}: ${value}`));

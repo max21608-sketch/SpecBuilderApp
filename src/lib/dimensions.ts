@@ -662,8 +662,12 @@ function quoted(value: string | null): string {
   return ONE_FIGURE.test(text) && !AMBIGUOUS_GROUP.test(text) ? text : `"${text}"`;
 }
 
-/** The two unambiguous spellings of `1,200`: "1200 or 1.2". */
-function ambiguousSpellings(value: string | null): string {
+/**
+ * The two unambiguous spellings of `1,200`: "1200 or 1.2". Shared with the
+ * gate panel, so a person reads one suggestion for one value wherever it is
+ * refused.
+ */
+export function ambiguousSpellings(value: string | null): string {
   const figure = withoutTbc((value ?? "").trim());
   const [head = "", tail = ""] = figure.split(/[.,]/);
   return `${head}${tail} or ${head}.${tail.replace(/0+$/, "") || "0"}`;

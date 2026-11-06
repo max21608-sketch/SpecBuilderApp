@@ -10,6 +10,7 @@ import {
   composeWorkbook,
   EXPORT_QUALIFIER_MODE,
   composeDimensions,
+  renderAnswerValue,
   renderAttributeValue,
   toCsv,
   exportFilename,
@@ -345,6 +346,88 @@ describe("toCsv", () => {
     expect(csv.startsWith("﻿")).toBe(true);
     expect(csv).toContain('"say ""hi"""');
     expect(csv).toContain('"one,two"');
+  });
+
+  // AUDIT 2026-11-06, A17. Cell text comes from client documents and model
+  // reads; a CSV a person OPENS in a spreadsheet runs a cell that starts
+  // with = + - @ (or a tab or CR) as a formula.
+  const hostile = ["=HYPERLINK(\"http://x\",\"open\")", "+1+1", "-2+3", "@SUM(A1)", "\tTAB", "\rCR"];
+
+  it("neutralises a formula in a CSV a person opens, by a leading apostrophe", () => {
+    const csv = toCsv([hostile], { neutraliseFormulas: true });
+    const cells = csv.replace(/^\uFEFF/, "");
+    expect(cells).toContain(`"'=HYPERLINK(""http://x"",""open"")"`);
+    expect(cells).toContain("'+1+1");
+    expect(cells).toContain("'-2+3");
+    expect(cells).toContain("'@SUM(A1)");
+    expect(cells).toContain("'\tTAB");
+    expect(cells).toContain(`"'\rCR"`);
+  });
+
+  it("leaves a plain number alone, so a quantity of -3 stays a number", () => {
+    const csv = toCsv([["-3", "-1.5", "14", "-3 chairs"]], { neutraliseFormulas: true });
+    expect(csv).toBe("\uFEFF-3,-1.5,14,'-3 chairs\r\n");
+  });
+
+  it("does NOT touch the BWS file's cells: it is imported, not opened", () => {
+    // A leading apostrophe would reach a BWS field as part of the value, and
+    // Tim's importer contract is still awaited. The default is the raw cell.
+    expect(toCsv([hostile])).toContain(`"=HYPERLINK(""http://x"",""open"")"`);
+    expect(toCsv([hostile])).not.toContain("'=");
+  });
+});
+
+// ============================================================================
+// AUDIT 2026-11-06, F12: NO NEWLINE REACHES A BWS CELL AT RUNTIME.
+//
+// The guard above holds on fixtures that carry no line break. A finish
+// description (the library allows 2,000 characters), a typed answer or a
+// document's own value can carry one, and nothing stripped it, so a line break
+// reached the Jobs sheet: the file-format change EXPORT_QUALIFIER_MODE exists
+// to prevent. Every renderer folds a break to one space before the cell.
+// ============================================================================
+describe("a line break in a value never reaches a BWS cell", () => {
+  const finish = {
+    id: "fin-1",
+    code: "FB-01",
+    codeNorm: "FB-01",
+    codeOrigin: "client" as const,
+    kind: null,
+    description: "Invented velvet\r\nRose colourway\nfire rated",
+    supplierRaw: null,
+    reference: null,
+    colour: null,
+    state: "confirmed" as const,
+  };
+  const attributes = [
+    attribute({ specFieldJsonId: 1, value: "Invented velvet", finish }),
+    attribute({ id: "attr-2", specFieldJsonId: 4, attrGroup: "finish", value: "Oiled oak\nfrom the sample", qualifier: "Legs\rand rail" }),
+    attribute({
+      id: "attr-3",
+      attrGroup: "dimension",
+      dimensionSlot: "W",
+      specFieldJsonId: null,
+      value: "approx\n720",
+      unit: "mm",
+    }),
+  ];
+  const answers = [{ recordId: "rec-1", specFieldJsonId: 2, value: "Second cloth\nto follow", qualifier: "Outer\nback" }];
+  const sc = scope({ records: [record({ itemDescription: "Sofa\nthree seat" })], attributes, answers });
+
+  it("folds every break to a single space, in every cell of the Jobs sheet", () => {
+    const workbook = composeWorkbook(sc);
+    for (const row of workbook.jobs.rows) for (const cell of row) expect(cell).not.toMatch(/[\r\n]/);
+    const row = workbook.jobs.rows[0]!;
+    expect(row[indexOfField(1)]).toBe("FB-01; Invented velvet Rose colourway fire rated");
+    expect(row[indexOfField(4)]).toBe("Oiled oak from the sample - Legs and rail");
+    expect(row[indexOfField(2)]).toBe("Second cloth to follow - Outer back");
+    expect(row[indexOfName("Name")]).toBe("Sofa three seat");
+    expect(row[indexOfField(3)]).toBe('[W "approx 720" — not a number]');
+  });
+
+  it("renders the same through the two renderers the quote and the check sheet call", () => {
+    expect(renderAttributeValue(attributes[1]!)).toBe("Oiled oak from the sample - Legs and rail");
+    expect(renderAnswerValue(answers[0]!)).toBe("Second cloth to follow - Outer back");
   });
 });
 
