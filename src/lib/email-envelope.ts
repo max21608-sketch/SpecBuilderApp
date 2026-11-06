@@ -44,6 +44,13 @@ export type EmailEnvelope = {
   subject: string | null;
   /** ISO 8601, or null where the message carried no parseable Date. */
   date: string | null;
+  /**
+   * The `Date:` header exactly as it arrived, or null where there was none.
+   * Kept so a date this app could not read is still shown to whoever reads the
+   * message, rather than silently becoming "(none)". Optional: an envelope
+   * built by hand (a test, a fixture) need not carry it.
+   */
+  dateRaw?: string | null;
   /** Every header, unfolded, in the order it arrived. */
   headers: { name: string; value: string }[];
   textBody: string | null;
@@ -85,6 +92,22 @@ function addresses(value: unknown): EmailAddress[] {
   return value.map(address).filter((a): a is EmailAddress => a !== null);
 }
 
+/**
+ * A `Date:` header as ISO 8601, or null where it is not a date.
+ *
+ * NEVER `new Date(raw).toISOString()` on its own (audit E8, 2026-11-06).
+ * postal-mime hands an unparseable header back unchanged, and `toISOString`
+ * THROWS on an invalid date ("Invalid time value"), so one sender's mail
+ * client writing `Date: sometime last week` made the whole message unreadable
+ * at registration, at Graph ingestion and in the worker, where it failed a
+ * paid read with a RangeError nobody could trace to a header.
+ */
+function isoDate(value: unknown): string | null {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 /** Parses a stored `.eml`. Never throws on a malformed part — a half-read message is still worth reviewing. */
 export async function parseEnvelope(bytes: Buffer | Uint8Array): Promise<EmailEnvelope> {
   const parsed = await PostalMime.parse(bytes);
@@ -110,7 +133,8 @@ export async function parseEnvelope(bytes: Buffer | Uint8Array): Promise<EmailEn
     to: addresses(parsed.to),
     cc: addresses(parsed.cc),
     subject: parsed.subject ? String(parsed.subject) : null,
-    date: parsed.date ? new Date(String(parsed.date)).toISOString() : null,
+    date: isoDate(parsed.date),
+    dateRaw: headers.find((header) => header.name.toLowerCase() === "date")?.value || null,
     headers,
     textBody: parsed.text ? String(parsed.text) : null,
     htmlBody: parsed.html ? String(parsed.html) : null,
@@ -231,7 +255,7 @@ export function buildEmailModelText(envelope: EmailEnvelope): { text: string; tr
     `From: ${envelope.from ? list([envelope.from]) : "(none)"}`,
     `To: ${list(envelope.to) || "(none)"}`,
     envelope.cc.length ? `Cc: ${list(envelope.cc)}` : null,
-    `Date: ${envelope.date ?? "(none)"}`,
+    `Date: ${envelope.date ?? (envelope.dateRaw ? `${envelope.dateRaw} (not a date this app could read)` : "(none)")}`,
     `Subject: ${envelope.subject ?? "(none)"}`,
   ]
     .filter(Boolean)

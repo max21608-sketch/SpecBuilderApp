@@ -270,7 +270,20 @@ export async function prepareDocumentSource(bytes: Buffer, filename: string, con
   }
   if (kind === "eml") {
     const { parseEnvelope, buildEmailModelText } = await import("@/lib/email-envelope");
-    return { type: "email", text: buildEmailModelText(await parseEnvelope(bytes)).text };
+    // A message the parser cannot read fails the read with a sentence that
+    // says so, never a bare parser error (audit E8): a RangeError reading
+    // "Invalid time value" on a document's row named nothing anybody could
+    // act on. `parseEnvelope` no longer throws on a bad Date header; this is
+    // for whatever else a stranger's mail client can produce.
+    let envelope: Awaited<ReturnType<typeof parseEnvelope>>;
+    try {
+      envelope = await parseEnvelope(bytes);
+    } catch (cause) {
+      throw new Error(
+        `This email could not be read (${cause instanceof Error ? cause.message : String(cause)}). Save it again from Outlook as an .eml and upload that copy.`,
+      );
+    }
+    return { type: "email", text: buildEmailModelText(envelope).text };
   }
   if (kind === "xlsx" || kind === "csv" || kind === "tsv") {
     const sheets = await readSpreadsheetSheets(bytes, filename, contentType);
