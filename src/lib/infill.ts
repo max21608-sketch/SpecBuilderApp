@@ -113,8 +113,12 @@ export type InfillItemRow = {
   where: "checklist" | "specs" | "details";
 };
 
-/** What a line screen is handed for one record on Matthew's matrix. */
-export type RecordItemTgq = { count: number | null; projectWide: number; rows: readonly ItemTgqRow[] };
+/**
+ * What a line screen is handed for one record on Matthew's matrix. `lineId`
+ * (its parent's id for a configuration) is what lets a line count and list a
+ * record on it that no outstanding question names (audit F7).
+ */
+export type RecordItemTgq = { count: number | null; projectWide: number; rows: readonly ItemTgqRow[]; lineId?: string };
 
 /**
  * What the screen lists, from one load of the project.
@@ -132,6 +136,15 @@ export function summariseLines<Q extends GroupableQuestion & { area?: string | n
   return groupIntoLines(questions).map((line) => {
     const everything = allQuestions(line);
     const recordIds = [...new Set(everything.map((question) => question.recordId))];
+    // A MATRIX RECORD ON THIS LINE THAT NO QUESTION NAMES (audit F7): a
+    // configuration whose checklist is answered and whose W and SH are not.
+    // It is counted in the line (`countWithItemTgq` with the line id) and its
+    // rows are listed with the rest, so the count opens onto what is behind it.
+    if (tgqByRecord) {
+      for (const [recordId, item] of tgqByRecord) {
+        if (item.lineId === line.lineId && !recordIds.includes(recordId)) recordIds.push(recordId);
+      }
+    }
     const itemRows: InfillItemRow[] = [];
     for (const recordId of recordIds) {
       for (const row of tgqByRecord?.get(recordId)?.rows ?? []) {
@@ -152,7 +165,7 @@ export function summariseLines<Q extends GroupableQuestion & { area?: string | n
       // same one, so the first is the line's. A line with none is listed and
       // says so rather than being dropped by an area filter.
       area: everything.find((question) => question.area?.trim())?.area?.trim() ?? null,
-      counts: countWithItemTgq(everything, tgqByRecord),
+      counts: countWithItemTgq(everything, tgqByRecord, line.lineId),
       states: countStates(everything),
       itemRows,
       optionCount: line.optionCount,

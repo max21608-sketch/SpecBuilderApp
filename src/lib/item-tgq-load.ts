@@ -17,7 +17,13 @@ import { sql } from "@/lib/db";
 import { itemTgqForRecord, loadGateContext } from "@/lib/gate-load";
 import type { ItemTgq } from "@/lib/item-tgq";
 
-export type MatrixItemTgq = ItemTgq & { recordId: string; projectId: string };
+/**
+ * `lineId` is the bill line the record sits under: its parent's id for a
+ * configuration, its own otherwise. A line screen needs it to count a matrix
+ * record that no outstanding question names (audit F7): such a record has no
+ * question row to say which line it is on.
+ */
+export type MatrixItemTgq = ItemTgq & { recordId: string; projectId: string; lineId: string };
 
 /**
  * Every record in the export's scope whose category is on Matthew's matrix,
@@ -27,7 +33,7 @@ export async function loadMatrixItemTgq(projectIds: string[]): Promise<Map<strin
   const out = new Map<string, MatrixItemTgq>();
   if (projectIds.length === 0) return out;
   const records = await sql`
-    select r.id, r.project_id, r.category_id
+    select r.id, r.project_id, r.category_id, coalesce(r.parent_id, r.id) as line_id
       from spec_records r
       join spec_runs run on run.id = r.run_id
      where r.project_id = any(${projectIds}::uuid[])
@@ -48,7 +54,7 @@ export async function loadMatrixItemTgq(projectIds: string[]): Promise<Map<strin
     // No outstanding list is needed for the COUNT on the matrix: the gate rows
     // are the count. A screen that lists the rows passes its own.
     const tgq = itemTgqForRecord(context, { id: recordId, categoryId: String(row.category_id) }, []);
-    out.set(recordId, { ...tgq, recordId, projectId: String(row.project_id) });
+    out.set(recordId, { ...tgq, recordId, projectId: String(row.project_id), lineId: String(row.line_id) });
   }
   return out;
 }

@@ -101,8 +101,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   // reference still empty. It has no question to group, so it would have no
   // line, and the overview's total would count what this screen never lists.
   // It gets a line of its own whose rows are all "record it on the item".
-  const listed = new Set(lines.flatMap((line) => [line.lineId, ...line.options.map((option) => option.recordId)]));
-  const gateOnly = [...matrix.values()].filter((item) => (item.count ?? 0) > 0 && !listed.has(item.recordId));
+  //
+  // A record whose LINE is already listed is not given another: it is counted
+  // and its rows listed on that line (`summariseLines`, audit F7). Before that,
+  // a configuration with nothing but slots outstanding, under a line a sibling
+  // had questions on, became a second line carrying the configuration's own id,
+  // apart from the bill line it belongs to.
+  const listed = new Set(lines.map((line) => line.lineId));
+  const gateOnly = [...matrix.values()].filter((item) => (item.count ?? 0) > 0 && !listed.has(item.lineId));
   if (gateOnly.length > 0) lines.push(...(await gateOnlyLines(gateOnly)));
 
   // THE SECOND VIEW, off the same load. "Show me all the jobs with dimensions

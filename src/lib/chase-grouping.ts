@@ -382,8 +382,13 @@ export function countOutstanding(questions: readonly GroupableQuestion[]): Outst
   return { toQuote, projectWide, later, waiting };
 }
 
-/** One record's TGQ as `itemTgq` counted it — what a line screen is handed for the records on the matrix. */
-export type RecordTgq = { count: number | null; projectWide: number };
+/**
+ * One record's TGQ as `itemTgq` counted it — what a line screen is handed for
+ * the records on the matrix. `lineId` is the bill line the record sits under
+ * (its parent's id for a configuration, its own otherwise); a caller that
+ * knows it lets a line count a record no question names (audit F7).
+ */
+export type RecordTgq = { count: number | null; projectWide: number; lineId?: string };
 
 /**
  * A line's counts, where some of its records are on Matthew's matrix.
@@ -394,10 +399,21 @@ export type RecordTgq = { count: number | null; projectWide: number };
  * count stand in for what its questions would say; every other record is
  * counted by `countOutstanding`, unchanged. `later` and `waiting` are always
  * the questions' own.
+ *
+ * ---- AND THE MATRIX RECORDS NO QUESTION NAMES (audit F7, 2026-11-06) -----
+ *
+ * A matrix item whose every checklist question is answered can still owe its
+ * TGQ: W and SH unrecorded, the designer reference empty. It has no row in
+ * `loadOutstanding`, so a count that walks the questions never meets it, and
+ * the line read lower than the overview, which totals every matrix record.
+ * Given `lineId`, every matrix record on that line that the questions did not
+ * name is added too. Without it (a finish option's own count, one record) the
+ * count is the questions' records only, as before.
  */
 export function countWithItemTgq(
   questions: readonly GroupableQuestion[],
   tgqByRecord?: ReadonlyMap<string, RecordTgq> | null,
+  lineId?: string,
 ): OutstandingCounts {
   const base = countOutstanding(questions);
   if (!tgqByRecord || tgqByRecord.size === 0) return base;
@@ -420,7 +436,36 @@ export function countWithItemTgq(
       projectWide += own.projectWide;
     }
   }
+  if (lineId !== undefined) {
+    for (const [recordId, matrix] of tgqByRecord) {
+      if (matrix.lineId !== lineId || byRecord.has(recordId)) continue;
+      toQuote += matrix.count ?? 0;
+      projectWide += matrix.projectWide;
+    }
+  }
   return { ...base, toQuote, projectWide };
+}
+
+/**
+ * A whole project's item TGQ: the sum of its lines, whichever lines exist.
+ *
+ * Every record on the matrix counts its `itemTgq` whether or not a question
+ * names it, and every other record counts its own questions by `inItemTgq`.
+ * That is the overview's total (`loadProjectSummary`: the SQL placeholder half
+ * plus every matrix record), so the chase header and the overview cannot
+ * disagree about one project. It walked only the records with a question
+ * until audit F7, and a matrix item owing nothing but slots fell out of it.
+ */
+export function totalItemTgq(
+  questions: readonly (TgqCountable & { recordId: string })[],
+  tgqByRecord: ReadonlyMap<string, RecordTgq>,
+): number {
+  let sum = 0;
+  for (const question of questions) {
+    if (!tgqByRecord.has(question.recordId) && inItemTgq(question)) sum += 1;
+  }
+  for (const matrix of tgqByRecord.values()) sum += matrix.count ?? 0;
+  return sum;
 }
 
 // ---------------------------------------------------------------------------

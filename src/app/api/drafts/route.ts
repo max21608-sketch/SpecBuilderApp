@@ -17,7 +17,7 @@
 //   * Staleness is computed here, server-side, and returned per draft item.
 //     The client cannot distinguish "the record was retired" from "somebody
 //     answered it" by comparing versions, and those want different words.
-import { inChaseAsk, inItemTgq, projectWideTgqKeys } from "@/lib/chase-grouping";
+import { inChaseAsk, projectWideTgqKeys, totalItemTgq } from "@/lib/chase-grouping";
 import { loadMatrixItemTgq } from "@/lib/item-tgq-load";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
@@ -260,6 +260,9 @@ export async function GET(request: Request): Promise<Response> {
           {
             count: item.count,
             projectWide: item.projectWide,
+            // Which line the record is on, so a line's count can include a
+            // configuration on it that no outstanding question names (F7).
+            lineId: item.lineId,
             itemRows: item.rows
               .filter((row) => row.kind !== "question")
               .map((row) => ({ label: row.label, where: row.where === "details" ? "details" : "specs" })),
@@ -292,16 +295,15 @@ export async function GET(request: Request): Promise<Response> {
         // minus the project-wide section; the subset a chase asks by default;
         // and the distinct project-wide questions, answered once on the
         // project. The tile says all three in words.
-        // THE SUM OF THE LINES: each record with something outstanding counts
-        // its `itemTgq` — the gate's rows on the matrix, its own questions
-        // elsewhere — exactly as its line in the table does.
-        toQuote: (() => {
-          const own = new Map<string, number>();
-          for (const q of outstanding) own.set(q.recordId, (own.get(q.recordId) ?? 0) + (inItemTgq(q) ? 1 : 0));
-          let sum = 0;
-          for (const [recordId, n] of own) sum += matrix.get(recordId)?.count ?? n;
-          return sum;
-        })(),
+        // Each record counts its `itemTgq`: the gate's rows on the matrix, its
+        // own questions elsewhere. EVERY MATRIX RECORD counts, not only those
+        // with a question outstanding (audit F7): a matrix item with every
+        // question answered and W and SH still empty owes its TGQ and has no
+        // question row. The overview counts it, and until 2026-11-06 this
+        // header did not. The chase TABLE still lists only lines with a
+        // question to tick, so such an item is in this number and on no row
+        // there; the fill-in screen gives it a line of its own.
+        toQuote: totalItemTgq(outstanding, matrix),
         toChase: outstanding.filter(inChaseAsk).length,
         projectWide: projectWideTgqKeys(outstanding).size,
         later: outstanding.filter((q) => q.tier === "later").length,
