@@ -22,7 +22,7 @@
 import { handleCallback, type MessageMetadata } from "@vercel/queue";
 import { type ExtractionQueueMessage } from "@/lib/extraction-queue";
 import { runDocumentExtraction, recordExtractionFailure } from "@/lib/extraction-run";
-import { MAX_DELIVERIES, VISIBILITY_TIMEOUT_SECONDS } from "@/lib/extraction-claim";
+import { ClaimBusyError, MAX_DELIVERIES, redeliveryDelaySeconds, VISIBILITY_TIMEOUT_SECONDS } from "@/lib/extraction-claim";
 
 export const runtime = "nodejs";
 // A LITERAL, not MAX_DURATION_SECONDS. Next reads route segment config
@@ -63,7 +63,8 @@ const queueHandler = handleCallback<ExtractionQueueMessage>(
 
       // Not an error worth a stack trace, but not a success either: throwing
       // is what makes the platform redeliver, which is the recovery path.
-      if (outcome.outcome === "busy") throw new Error(`busy: ${outcome.reason}`);
+      // It carries how long the claim has left, so the redelivery waits it out.
+      if (outcome.outcome === "busy") throw new ClaimBusyError(outcome.reason, outcome.claimExpiresInSeconds);
     } catch (cause) {
       if (metadata.deliveryCount < MAX_DELIVERIES) throw cause;
       // Out of attempts. Write a terminal status so the screen stops waiting on
@@ -77,9 +78,9 @@ const queueHandler = handleCallback<ExtractionQueueMessage>(
     // not redelivered underneath itself -- which would have two invocations
     // racing for the same claim.
     visibilityTimeoutSeconds: VISIBILITY_TIMEOUT_SECONDS,
-    retry: (_error, metadata) => ({
-      afterSeconds: Math.min(300, 15 * 2 ** Math.min(metadata.deliveryCount, 4)),
-    }),
+    // A busy delivery waits until the claim it met has expired; anything else
+    // backs off as before. One function, so the timing test reads what runs.
+    retry: (error, metadata) => ({ afterSeconds: redeliveryDelaySeconds(error, metadata.deliveryCount) }),
   },
 );
 

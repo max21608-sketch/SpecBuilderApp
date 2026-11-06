@@ -120,7 +120,9 @@ export const MAX_IN_FLIGHT_READS_PER_PACK = 3;
  *   busy     SOMEONE ELSE HOLDS A LIVE CLAIM. Not a success: the caller throws
  *            so the message is redelivered, because by the next delivery either
  *            the work is done (and that delivery skips) or the claim has
- *            expired (and that delivery is the recovery). Acking it here would
+ *            expired (and that delivery is the recovery). That "or" is only
+ *            true because the redelivery WAITS for the claim to expire
+ *            (`redeliveryDelaySeconds`); the ordinary backoff does not. Acking it here would
  *            spend the delivery that recovery depends on and leave a killed
  *            worker's run stuck until a human noticed.
  *   skipped  nothing to do — superseded attempt, already terminal, already
@@ -129,7 +131,12 @@ export const MAX_IN_FLIGHT_READS_PER_PACK = 3;
 export type ExtractionRunOutcome =
   | { outcome: "parsed" }
   | { outcome: "failed"; error: string }
-  | { outcome: "busy"; reason: string }
+  | {
+      outcome: "busy";
+      reason: string;
+      /** How long the live claim has left. A busy redelivery waits at least this long (`redeliveryDelaySeconds`). */
+      claimExpiresInSeconds: number;
+    }
   | { outcome: "skipped"; reason: string };
 
 /**
@@ -164,4 +171,54 @@ export function attemptRestartable(run: {
   const deadAttempt = run.status === "queued" && run.withinDeadline === false;
   const budgetSpent = run.claimCount >= MAX_CLAIMS_PER_ATTEMPT;
   return abandonedClaim || deadAttempt || budgetSpent;
+}
+
+/**
+ * Thrown by the consumer on a `busy` outcome, carrying how long the claim it
+ * met has left, so the retry handler can wait that long.
+ */
+export class ClaimBusyError extends Error {
+  constructor(
+    reason: string,
+    readonly claimExpiresInSeconds: number,
+  ) {
+    super(`busy: ${reason}`);
+    this.name = "ClaimBusyError";
+  }
+}
+
+/** Past the claim's expiry by this much, so the redelivery never lands a second early and meets the same claim. */
+export const BUSY_REDELIVERY_MARGIN_SECONDS = 30;
+
+/** The queue's ceiling on a redelivery delay (`@vercel/queue`: visibility is at most 3600 s). */
+export const MAX_REDELIVERY_DELAY_SECONDS = 3600;
+
+/**
+ * How long the queue waits before redelivering a message whose handler threw.
+ *
+ * ============================================================================
+ * A BUSY REDELIVERY WAITS THE CLAIM OUT. Audit D8, 2026-11-06.
+ *
+ * The ordinary backoff is 30, 60, 120 s: right for a blob 5xx or a database
+ * blip, which clear quickly, and the claim was released before the throw. A
+ * BUSY delivery is different: it met a LIVE claim, and the claim lasts
+ * CLAIM_EXPIRY_SECONDS (900). All three backoffs land inside it, so a worker
+ * that died holding a claim (killed, or a throw nothing caught) was met by
+ * three busy deliveries and a fourth whose terminal failure could not land
+ * over the live claim either. The recovery path `busy` exists for never ran,
+ * and the row sat at `parsing` until a person pressed a Restart that charged
+ * again. So a busy redelivery waits until the claim it met has expired, plus a
+ * margin, and is then the recovery: it reclaims the attempt, or skips because
+ * the live worker finished.
+ *
+ * The alternative was a backoff schedule whose LAST step passes the claim. It
+ * was not taken: it spends three deliveries learning nothing, and it couples
+ * the schedule to the claim in a way a change to either breaks silently.
+ * ============================================================================
+ */
+export function redeliveryDelaySeconds(error: unknown, deliveryCount: number): number {
+  const backoff = Math.min(300, 15 * 2 ** Math.min(deliveryCount, 4));
+  if (!(error instanceof ClaimBusyError)) return backoff;
+  const outlast = Math.ceil(Math.max(0, error.claimExpiresInSeconds)) + BUSY_REDELIVERY_MARGIN_SECONDS;
+  return Math.min(MAX_REDELIVERY_DELAY_SECONDS, Math.max(backoff, outlast));
 }

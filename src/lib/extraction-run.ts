@@ -222,51 +222,41 @@ export async function runDocumentExtraction({
   }
 
   // ---- staging ------------------------------------------------------------
-  // One staged shape per output shape. The kind chose the prompt, the tool and
-  // the schema together; it chooses the staging too, so a drawing can never be
-  // staged as a list of proposals no reviewer can display.
+  // One staged shape per output shape (`stageOutput`, below).
+  //
+  // ==========================================================================
+  // A THROW HERE COMES AFTER THE MONEY. Audit D8, 2026-11-06. Staging is code
+  // over a read already paid for, and it used to run unguarded: a throw went
+  // past every catch, so raw_response was never written and the row stayed
+  // `parsing` under its own live claim. The redeliveries at 30, 60 and 120 s
+  // all found that claim live (busy), the last one's failure could not land
+  // over it either, and fifteen minutes later the screen offered a Restart
+  // that charged for the same read again.
+  //
+  // Terminal, not released: staging is deterministic over the model's output,
+  // so a retry would pay for a second read to fail the same way. The paid
+  // answer is written with the failure, which is what a person (or a fix to
+  // the stager) needs, and the row is red with Retry at once.
+  //
+  // ONLY `stageOutput` is inside this try. The rule in the header still holds:
+  // a release has to throw past the step that raised it, so nothing that
+  // releases is wrapped here.
+  // ==========================================================================
+  if (result.output.outputKind === "observations" && !registers) {
+    return await releaseAndThrow(claim, actor, "The registers were not loaded for this document.");
+  }
   const filename = String(attachment.filename ?? "");
-  let staged: StagedSpecDocument | StagedDrawings | StagedPreamble | StagedFinishSchedule;
+  let staged: StagedOutput["staged"];
   let stagedCount: number;
-
-  if (result.output.outputKind === "drawing_items_v4") {
-    // EVERY NEW SHOP-DRAWINGS READ (2026-10-04): the item-centric read, staged
-    // as schemaVersion 4. The page-centric branch below stays for the v3 tool,
-    // which nothing in the app asks for any more but a harness re-read can.
-    const drawings = stageDrawingsV4(result.output.data, fields, filename, projectDefaultUnit);
-    staged = drawings;
-    stagedCount = drawings.items.reduce((total, item) => total + item.observations.length, 0);
-  } else if (result.output.outputKind === "drawing_items") {
-    const drawings = stageDrawings(
-      result.output.data.items,
-      fields,
-      filename,
-      result.output.data.documentNotes,
-      projectDefaultUnit,
-      result.output.data.codeGroups ?? [],
+  try {
+    ({ staged, stagedCount } = stageOutput(result.output, { fields, filename, projectDefaultUnit, registers }));
+  } catch (cause) {
+    return await fail(
+      claim,
+      actor,
+      `The document was read, but what came back could not be staged: ${message(cause)}. Nothing was staged; the model's answer is kept with this document.`,
+      result,
     );
-    staged = drawings;
-    stagedCount = drawings.items.reduce((total, item) => total + item.observations.length, 0);
-  } else if (result.output.outputKind === "preamble_notes") {
-    const preamble = stagePreamble(result.output.data.notes, filename, result.output.data.documentNotes);
-    staged = preamble;
-    stagedCount = preamble.notes.length;
-  } else if (result.output.outputKind === "finish_entries") {
-    // A finishes schedule: a list of finishes under the client's codes. The
-    // verdict against the library is read at review time (finish-schedule.ts).
-    const schedule = stageFinishSchedule(result.output.data.entries, filename, result.output.data.documentNotes);
-    staged = schedule;
-    stagedCount = schedule.entries.length;
-  } else {
-    if (!registers) return await releaseAndThrow(claim, actor, "The registers were not loaded for this document.");
-    const document: StagedSpecDocument = {
-      schemaVersion: PROPOSAL_SCHEMA_VERSION,
-      lines: resolveProposals(result.output.data.proposals, registers, randomUUID),
-      documentNotes: result.output.data.documentNotes,
-      filename,
-    };
-    staged = document;
-    stagedCount = document.lines.length;
   }
 
   try {
@@ -311,6 +301,68 @@ export async function runDocumentExtraction({
   }
 }
 
+type StagedOutput = {
+  staged: StagedSpecDocument | StagedDrawings | StagedPreamble | StagedFinishSchedule;
+  stagedCount: number;
+};
+
+/**
+ * The model's output as the staged shape its kind reviews in. The kind chose
+ * the prompt, the tool and the schema together; it chooses the staging too, so
+ * a drawing can never be staged as a list of proposals no reviewer can display.
+ *
+ * Pure apart from minting ids, and the only thing the worker's staging
+ * try/catch wraps (audit D8): it may throw, and it never releases.
+ */
+function stageOutput(
+  output: Extract<ExtractionResult, { ok: true }>["output"],
+  context: {
+    fields: SpecFieldEntry[];
+    filename: string;
+    projectDefaultUnit: AttributeUnit | null;
+    registers: Awaited<ReturnType<typeof loadExtractionRegisters>> | null;
+  },
+): StagedOutput {
+  const { fields, filename, projectDefaultUnit, registers } = context;
+  if (output.outputKind === "drawing_items_v4") {
+    // EVERY NEW SHOP-DRAWINGS READ (2026-10-04): the item-centric read, staged
+    // as schemaVersion 4. The page-centric branch below stays for the v3 tool,
+    // which nothing in the app asks for any more but a harness re-read can.
+    const drawings = stageDrawingsV4(output.data, fields, filename, projectDefaultUnit);
+    return { staged: drawings, stagedCount: drawings.items.reduce((total, item) => total + item.observations.length, 0) };
+  }
+  if (output.outputKind === "drawing_items") {
+    const drawings = stageDrawings(
+      output.data.items,
+      fields,
+      filename,
+      output.data.documentNotes,
+      projectDefaultUnit,
+      output.data.codeGroups ?? [],
+    );
+    return { staged: drawings, stagedCount: drawings.items.reduce((total, item) => total + item.observations.length, 0) };
+  }
+  if (output.outputKind === "preamble_notes") {
+    const preamble = stagePreamble(output.data.notes, filename, output.data.documentNotes);
+    return { staged: preamble, stagedCount: preamble.notes.length };
+  }
+  if (output.outputKind === "finish_entries") {
+    // A finishes schedule: a list of finishes under the client's codes. The
+    // verdict against the library is read at review time (finish-schedule.ts).
+    const schedule = stageFinishSchedule(output.data.entries, filename, output.data.documentNotes);
+    return { staged: schedule, stagedCount: schedule.entries.length };
+  }
+  // The caller has refused this branch without registers, before the try.
+  if (!registers) throw new Error("The registers were not loaded for this document.");
+  const document: StagedSpecDocument = {
+    schemaVersion: PROPOSAL_SCHEMA_VERSION,
+    lines: resolveProposals(output.data.proposals, registers, randomUUID),
+    documentNotes: output.data.documentNotes,
+    filename,
+  };
+  return { staged: document, stagedCount: document.lines.length };
+}
+
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
@@ -320,6 +372,8 @@ async function explainFailedClaim(extractionId: string, attemptId: string): Prom
   const rows = await sql`
     select status, attempt_id, claim_count, attempt_deadline_at, processing_started_at,
            (processing_started_at > now() - make_interval(secs => ${CLAIM_EXPIRY_SECONDS})) as claim_live,
+           extract(epoch from (processing_started_at + make_interval(secs => ${CLAIM_EXPIRY_SECONDS}) - now()))::float8
+             as claim_expires_in_seconds,
            (attempt_deadline_at > now()) as within_deadline
     from intake_runs where id = ${extractionId}
   `;
@@ -330,7 +384,11 @@ async function explainFailedClaim(extractionId: string, attemptId: string): Prom
   }
   if (row.status === "parsing" && row.claim_live) {
     // NOT a success. See the note on `busy` in extraction-claim.ts.
-    return { outcome: "busy", reason: "another worker is reading this document" };
+    return {
+      outcome: "busy",
+      reason: "another worker is reading this document",
+      claimExpiresInSeconds: Math.max(0, Number(row.claim_expires_in_seconds) || 0),
+    };
   }
   if (!row.within_deadline) return { outcome: "skipped", reason: "this attempt passed its deadline" };
   if (Number(row.claim_count) >= MAX_CLAIMS_PER_ATTEMPT) {

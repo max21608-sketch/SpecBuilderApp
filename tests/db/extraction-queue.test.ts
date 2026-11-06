@@ -78,6 +78,20 @@ vi.mock("@/lib/anthropic", () => ({
   },
 }));
 
+// Staging is real code over the model's output; `throws` makes it fail AFTER a
+// paid read, the case audit D8 is about.
+const staging = { throws: false };
+vi.mock("@/lib/spec-document", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/spec-document")>();
+  return {
+    ...actual,
+    resolveProposals: (...args: Parameters<typeof actual.resolveProposals>) => {
+      if (staging.throws) throw new TypeError("__QA cannot read properties of undefined");
+      return actual.resolveProposals(...args);
+    },
+  };
+});
+
 // The queue is not exercised here: publishing is Vercel's, and what matters is
 // what the database does. A publish that "succeeds" keeps the route on its
 // happy path.
@@ -187,6 +201,7 @@ describeIfDb("extraction attempts", () => {
 
   beforeEach(() => {
     model.mode = "ok";
+    staging.throws = false;
     queueMode.mode = "ok";
     published.length = 0;
   });
@@ -450,6 +465,39 @@ describeIfDb("extraction attempts", () => {
     expect(after.error).toMatch(/__QA refused/);
     // The evidence of WHY an extraction was wrong is kept.
     expect(after.raw_response).not.toBeNull();
+  });
+
+  // Audit D8. Staging threw past every catch: raw_response was never written,
+  // the row sat at parsing under a live claim, every retry inside the 900 s
+  // claim was busy, and the last delivery's failure could not land either.
+  it("fails a read whose staging throws, at once, with what the model returned", async () => {
+    staging.throws = true;
+    const attemptId = await queueAttempt();
+    const outcome = await run(attemptId);
+    expect(outcome).toMatchObject({ outcome: "failed" });
+
+    const after = await row();
+    expect(after.status).toBe("failed");
+    expect(after.claim_token).toBeNull();
+    expect(after.error).toMatch(/could not be staged/);
+    expect(after.error).toMatch(/__QA cannot read properties/);
+    // Paid for, so kept.
+    expect(after.raw_response).toEqual({ __qa: true });
+    expect(after.model_metadata.requestId).toBe("req___qa");
+  });
+
+  it("says how long a live claim has left, so a busy redelivery can wait it out", async () => {
+    const attemptId = await queueAttempt({
+      status: "parsing",
+      claimToken: randomUUID(),
+      claimCount: 1,
+      processingStartedAt: new Date(Date.now() - 100_000).toISOString(),
+    });
+    const outcome = await run(attemptId);
+    expect(outcome.outcome).toBe("busy");
+    if (outcome.outcome !== "busy") return;
+    expect(outcome.claimExpiresInSeconds).toBeGreaterThan(CLAIM_EXPIRY_SECONDS - 110);
+    expect(outcome.claimExpiresInSeconds).toBeLessThanOrEqual(CLAIM_EXPIRY_SECONDS - 100);
   });
 
   it("does not mark an attempt failed while another claim is live", async () => {
