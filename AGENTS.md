@@ -70,6 +70,10 @@ one agent.
 | `node tools/overflow-audit.mjs` | read only, against a DEV server (`PLAYWRIGHT_DIR`, `QA_EMAIL`, `QA_PASSWORD`, `BASE` as for `first-session.mjs`): walks the projects list, a project's tabs, two records' four tabs, fill-in, the inbox and the document reviews at 1920 and 1440, and exits 1 on any box wider than itself. Run it after any screen change |
 
 Tests run in FOUR tiers — pure / component / db-gated / route. **A db-tier
+fixture never chooses a row by uuid order** (`order by id limit 1`): uuids
+differ per database, and CI's first fresh database picked a category on
+Matthew's matrix where the shared one had picked an unmapped one
+(`intake-routes.test.ts`, 2026-11-06). Choose by slug or key. **A db-tier
 fixture asks for its project number** — `qaNumber("P90010")` from
 `tests/db/db-tier.ts`, which appends a per-process suffix after the `__QA `
 prefix the sweep matches on — because two agents running the tier at once is
@@ -2893,7 +2897,7 @@ Two things are worth more than the fix:
 ### A project is deleted by one statement and one script, and the trail keeps only what it should
 
 `db/migrations/0054_audit_excludes_document_columns.sql`,
-`0055_project_deletable.sql`, `db/project-delete.mjs`, `db/delete-project.mjs`,
+`0055_project_deletable.sql`, `0058_project_delete_order.sql`, `db/project-delete.mjs`, `db/delete-project.mjs`,
 `tools/qa-clean.mjs`, `tests/db/project-delete.test.ts`,
 `tests/db/audit-excluded-columns.test.ts`
 
@@ -2920,14 +2924,29 @@ SCRIPT, never from the app.
   becomes unassigned with the reason "Its project was deleted.", by a trigger
   that recognises only the foreign key's own set-null; an `.eml` stored only
   under the project's prefix goes with the project, a mailbox arrival stays.
-- **No RESTRICT between two tables a project delete empties.** RESTRICT is
-  checked the moment a row goes, so it passes or fails on cascade order; NO
-  ACTION is checked at the end of the statement and still refuses a lone
-  delete with the same constraint name. Six were rebuilt (batch, run-same-
-  project, finish, contact-same-project, the draft item's record and answer);
+- **Every key between two tables a project delete empties is RESTRICT-free
+  AND deferred** (0055, then 0058 the same day). RESTRICT is checked the
+  moment a row goes; a plain NO ACTION is checked at the end of the cascade
+  QUERY that deleted it, and cascades run in trigger-NAME order —
+  `RI_ConstraintTrigger_a_<oid>` compared as text, so creation order, which a
+  restore re-rolls. 0055 believed NO ACTION waited for the end of the
+  statement: the delete passed on the shared local database (the re-created
+  drafts key's oid 157631 sorts before 25394) and failed on the first FRESH
+  one (171979 after 170797), which is how CI's first rehearsal found it. 0058
+  makes the six keys (batch, run-same-project, finish, contact-same-project,
+  the draft item's record and answer) `DEFERRABLE INITIALLY DEFERRED` by
+  `alter constraint` (no re-listing, no oid change): checked at COMMIT, after
+  every cascade. A lone delete is still refused by the same constraint, now at
+  commit inside a transaction — and so is an insert naming a missing batch,
+  run or finish; nothing in the app catches those mid-transaction.
   `email_drafts.project_id` cascades; the version guard allows a delete once
-  the record's project is gone. A test reads the catalog and fails on the
-  next order-sensitive RESTRICT added.
+  the record's project is gone. `deleteProjectRows` also deletes in
+  foreign-key order itself (`DELETE_ORDER`, house §12), so it is safe under
+  `set constraints all immediate`. Tests read the catalog and fail on a
+  seventh non-deferred key or an order the list does not satisfy, and one
+  re-creates the project's keys in the worst order inside a rolled-back
+  transaction (tables taken with `LOCK … NOWAIT`, so it cannot deadlock a
+  parallel test) and proves both paths pass it.
 - **One deletion path.** `deleteProjectRows` is the only one: polymorphic rows
   by prefix or entity, mail whose only copy is under the prefix, then the
   project; it counts every table again before commit, refuses to commit if
