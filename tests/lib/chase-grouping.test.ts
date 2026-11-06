@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   allQuestions,
   countOutstanding,
+  countWithItemTgq,
   finishOptionQtyLabel,
   groupByQuestion,
   groupIntoLines,
+  totalItemTgq,
   type GroupableQuestion,
 } from "@/lib/chase-grouping";
+import { PROJECT_WIDE_SECTION } from "@/lib/checklist-sections";
 
 type Q = GroupableQuestion & { requirementId: string };
 
@@ -260,5 +263,53 @@ describe("finishOptionQtyLabel", () => {
     expect(finishOptionQtyLabel(12)).toBe("qty 12");
     // A zero is a number somebody wrote down, not an absence.
     expect(finishOptionQtyLabel(0)).toBe("qty 0");
+  });
+});
+
+// ===========================================================================
+// AUDIT F7 (2026-11-06): A MATRIX ITEM WITH NOTHING ON ITS CHECKLIST STILL
+// OWES ITS TGQ.
+//
+// On Matthew's matrix an item's TGQ is its gate rows: a dimension slot and a
+// record column count, and neither is a checklist question. So an item whose
+// every question is answered and whose W and SH are still empty has NO row in
+// `loadOutstanding`. The overview counted it (it totals every matrix record);
+// the chase header and a line's count did not, because both iterated only the
+// records that had a question.
+// ===========================================================================
+describe("totalItemTgq", () => {
+  const q = (over: Partial<Q>) => question(over);
+
+  it("counts a matrix record that has no outstanding question at all", () => {
+    const matrix = new Map([
+      ["r1", { count: 2, projectWide: 0 }],
+      ["gate-only", { count: 3, projectWide: 1 }],
+    ]);
+    expect(totalItemTgq([q({ recordId: "r1" })], matrix)).toBe(5);
+  });
+
+  it("counts every other record by its own questions, by the item rule", () => {
+    const questions = [
+      q({ recordId: "p1", requirementId: "a" }),
+      q({ recordId: "p1", requirementId: "b", tier: "later" }),
+      q({ recordId: "p1", requirementId: "c", section: PROJECT_WIDE_SECTION }),
+    ];
+    expect(totalItemTgq(questions, new Map())).toBe(1);
+  });
+});
+
+describe("countWithItemTgq — the line's own gate-only records", () => {
+  it("adds a configuration on this line that the matrix holds and no question names", () => {
+    const questions = [question({ recordId: "opt-a", parentId: "line", variantLabel: "A" })];
+    const matrix = new Map([
+      ["opt-a", { count: 1, projectWide: 0, lineId: "line" }],
+      ["opt-b", { count: 4, projectWide: 1, lineId: "line" }],
+      ["elsewhere", { count: 9, projectWide: 0, lineId: "other-line" }],
+    ]);
+    const counts = countWithItemTgq(questions, matrix, "line");
+    expect(counts.toQuote).toBe(5);
+    expect(counts.projectWide).toBe(1);
+    // Without the line, the per-option call is unchanged: one record, its own count.
+    expect(countWithItemTgq(questions, matrix).toQuote).toBe(1);
   });
 });

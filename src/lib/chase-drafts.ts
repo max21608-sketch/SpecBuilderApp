@@ -26,6 +26,26 @@ import { numberingFromRow, recordLabel, recordNoLabel, recordShortLabel } from "
 import type { ChaseGroup } from "@/lib/chase-template";
 
 /**
+ * A SPLIT BILL LINE IS A HEADING, in SQL, once.
+ *
+ * `loadExportScope`'s clause: a record with an ACTIVE configuration under it
+ * is a heading whose configurations are the jobs, so nothing about it is
+ * outstanding, chaseable or counted. It is a correlated not-exists on the
+ * live configurations, never a stored has-been-split flag: retire them and
+ * the line is an item again.
+ *
+ * The driver cannot interpolate a SQL fragment (a `${}` is always a bound
+ * parameter), so every chase query writes this text out and
+ * `tests/lib/chase-heading-predicate.test.ts` reads their sources and fails
+ * on one that lacks it. The audit (2026-11-06) counted the clause written out
+ * eleven times and MISSING from three queries, one of them the chase's own
+ * `loadQuestionsByKey`. Compare it whitespace-folded; the queries lay it out
+ * over several lines.
+ */
+export const CHASE_HEADING_PREDICATE =
+  "not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')";
+
+/**
  * Either driver. `sql` from db.ts (HTTP, one request per call) and the
  * transaction-scoped executor from db-transaction.ts have the same shape, so a
  * loader can serve a screen read and a guarded write without being written
@@ -63,8 +83,10 @@ export type OutstandingQuestion = {
   /** The levels at which this question must be answered before a quote. */
   tgqLevels: string[];
   /**
-   * Whether this question holds up a quote — null when the record has no
-   * level, which is a blocker rather than a default (see tgq.ts).
+   * Whether this question holds up a quote. Null only where the category is
+   * on the 0019 placeholder AND the record has no level, which is a blocker
+   * rather than a default (see tgq.ts). A matrix category is tiered with no
+   * level at all.
    */
   tier: QuestionTier | null;
   requirementId: string;
@@ -224,7 +246,6 @@ export type StaleReason =
   | "answerRemoved"
   | "answerChanged"
   | "answerSettled"
-  | "recordChanged"
   | "recordRetired"
   | "contextChanged"
   | "questionGone";
@@ -245,7 +266,22 @@ export function coverageStaleReasons(
   const reasons: StaleReason[] = [];
 
   if (live.recordStatus === "retired") reasons.push("recordRetired");
-  if (live.recordVersion !== coverage.recordVersion) reasons.push("recordChanged");
+  // THE RECORD'S VERSION IS NOT COMPARED, and that is decided, not forgotten
+  // (audit F10, 2026-11-06). `bump_version` fires on EVERY spec_records
+  // update: an internal note, the quote description, the dimension note, a
+  // level, a category. Comparing it made editing an internal note drop every
+  // question on the record out of Waiting and refuse an unsent draft at
+  // confirm-sent ("the record changed"), with nothing the email printed having
+  // moved. That is the chased_at trap in reverse: a write unrelated to the
+  // question deciding whether the question was asked. 0039 had to switch the
+  // trigger off for one statement for the same reason.
+  //
+  // What the email PRINTS about the record (its label, refs, description,
+  // area, category) is in the context snapshot and compared below; a category
+  // that no longer asks the question makes it `questionGone` through
+  // `loadQuestionsByKey`'s category join. `record_version` is still WRITTEN on
+  // every coverage row (it is not null, and it is history), and read by
+  // nothing that decides.
 
   // An answer row appearing, vanishing, or moving all mean the same thing:
   // what the email said about this question is no longer what the app holds.
@@ -335,7 +371,8 @@ export type CoveredQuestion = {
 /**
  * A live question as a coverage row.
  *
- * Throws on a level-less record rather than inventing a tier. `groupByContact`
+ * Throws on an untiered question (a placeholder category with no level) rather
+ * than inventing a tier. `groupByContact`
  * has already blocked those, and the generate route validates again, so
  * reaching here without a tier is a bug rather than a user error.
  */
@@ -449,9 +486,11 @@ export type ContactGroup = {
  * So a contact whose `role` is `internal` gets a group of their own holding
  * EVERY outstanding question on the project. Two things about it:
  *
- *   * A LEVEL IS STILL REQUIRED. No level, no tier, and the email could not
- *     say which half of it blocks the quote — which is the whole point of the
- *     message. Blocked with the reason, exactly as for a designer.
+ *   * A TIER IS STILL REQUIRED. No tier, and the email could not say which
+ *     half of it blocks the quote, which is the whole point of the message.
+ *     Blocked with the reason, exactly as for a designer. On Matthew's matrix
+ *     a question is tiered without a level; only a placeholder category's
+ *     question lacks one (audit F1).
  *
  *   * `blocked` IS UNCHANGED, and that is deliberate. It describes the
  *     DESIGNER routing — "there is nobody to ask about this line" — and it is
@@ -496,9 +535,9 @@ export function groupByContact(
 
   for (const question of questions) {
     // A colleague can be asked about a line with no designer, so this runs
-    // before the designer routing and is not affected by its refusals. The
-    // level is the one thing it still needs, for the reason above.
-    if (question.level !== null) {
+    // before the designer routing and is not affected by its refusals. A TIER
+    // is the one thing it still needs, for the reason above.
+    if (question.tier !== null) {
       for (const colleague of colleagues) {
         const group = groups.get(colleague.id);
         if (group) group.questions.push(question);
@@ -514,10 +553,23 @@ export function groupByContact(
       continue;
     }
 
-    // A record with no level has no tier, so the email could not say which
-    // half of it blocks the quote. That is the whole point of the message, so
-    // the record is blocked with the reason rather than chased without it.
-    if (question.level === null) {
+    // A question with no TIER cannot be placed in either half of the email,
+    // which is the whole point of the message, so the record is blocked with
+    // the reason rather than chased without it.
+    //
+    // THE TEST IS THE TIER, NEVER THE LEVEL (audit F1, 2026-11-06). Matthew's
+    // matrix has no level column, so where it covers a category
+    // `questionTierOrNull` tiers the question without one; only the 0019
+    // placeholder categories need a level. This read `level === null` and
+    // blocked every seating record nobody had set a level on, while the
+    // generate route (which asks `tier === null`) would have taken it, so the
+    // only way to chase a sofa was to decide something the gate model does
+    // not read. The screen and the write boundary ask one question.
+    //
+    // The reason's WORDS are unchanged because the chase screen keys on them
+    // (`isContactBlocker`); what changed is that a matrix record never carries
+    // it.
+    if (question.tier === null) {
       block(question, "no level on the record");
       continue;
     }
@@ -775,8 +827,31 @@ function toOutstandingQuestion(row: Row, matrices: Map<string, TgqMatrix>): Outs
  * only report "questionGone", which is both imprecise and alarming when the
  * real news is good ("they replied"). This loads the covered questions
  * regardless of state so the diff can say `answerSettled` instead.
+ *
+ * ============================================================================
+ * SCOPED TO ONE PROJECT, AND TO WHAT THE RECORD ACTUALLY ASKS (audit A3/F11,
+ * 2026-11-06).
+ *
+ * It read any record id and any requirement id it was handed. There was no
+ * project predicate, and the requirement join was `q.id = any(...)` with no
+ * `q.category_id = r.category_id`, so every requirement paired with every
+ * record and read `missing`. A crafted or stale request to the generate route
+ * could therefore put ANOTHER CLIENT'S item, refs and description into a chase
+ * to this project's designer: an email a person then sends, from this
+ * project's NDA to someone outside it. A stale tab after a category change
+ * chased questions the record no longer asks, and a bill line already split
+ * into configurations (a heading the export never ships) could be chased.
+ *
+ * So it now carries `loadOutstanding`'s scope, clause for clause, minus the
+ * answer-state filter (the reason it exists): this project, an active phase,
+ * not a heading, and only a question the record's category asks. Anything
+ * else is simply ABSENT from the map, which every caller already reads as
+ * `questionGone`. Record STATUS is deliberately not filtered, so a retired
+ * record still reads `recordRetired` rather than vanishing.
+ * ============================================================================
  */
 export async function loadQuestionsByKey(
+  projectId: string,
   keys: { recordId: string; requirementId: string }[],
   // Defaults to the HTTP driver for screen reads. The generate route and the
   // send gate pass their TRANSACTION's executor instead, so the rows they
@@ -839,14 +914,20 @@ export async function loadQuestionsByKey(
       a.value         as current_value
     from spec_records r
     join projects p on p.id = r.project_id
-    -- run_id is not null on spec_records: a record on no run is on no tab and
-    -- in no export scope, so this join can never drop a row.
     join spec_runs run on run.id = r.run_id
-    left join item_categories c on c.id = r.category_id
-    join requirements q on q.id = any(${requirementIds}::uuid[])
+    join item_categories c on c.id = r.category_id
+    -- THE CATEGORY JOIN IS THE PAIRING. Without it every requirement asked of
+    -- the request paired with every record in it, and read missing.
+    join requirements q on q.category_id = r.category_id and q.id = any(${requirementIds}::uuid[])
     left join spec_fields f on f.id = q.spec_field_id
     left join spec_answers a on a.record_id = r.id and a.requirement_id = q.id and a.revision_no = 0
     where r.id = any(${recordIds}::uuid[])
+      and r.project_id = ${projectId}
+      and run.status = 'active'
+      -- A SPLIT BILL LINE IS A HEADING: loadOutstanding's clause, word for
+      -- word (CHASE_HEADING_PREDICATE). No backticks in here: one closes the
+      -- tagged template.
+      and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
   `;
 
   // Same single source for the tier as `loadOutstanding`. A second reading

@@ -17,7 +17,7 @@
 //   * Staleness is computed here, server-side, and returned per draft item.
 //     The client cannot distinguish "the record was retired" from "somebody
 //     answered it" by comparing versions, and those want different words.
-import { inChaseAsk, inItemTgq, projectWideTgqKeys } from "@/lib/chase-grouping";
+import { inChaseAsk, projectWideTgqKeys, totalItemTgq } from "@/lib/chase-grouping";
 import { loadMatrixItemTgq } from "@/lib/item-tgq-load";
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
@@ -103,6 +103,16 @@ export async function GET(request: Request): Promise<Response> {
   // Records with a category and no level. `groupByContact` already blocks the
   // ones carrying questions; this list also catches a record whose questions
   // are all answered, so the level can be set before the next document lands.
+  //
+  // ONLY WHERE THE LEVEL IS WHAT IS MISSING (audit F1, F14, 2026-11-06). A
+  // category on Matthew's matrix tiers its questions with no level
+  // (`questionTierOrNull`), so listing such a record here put it under "no
+  // level" on the chase screen for a decision no chase needs; it is chased
+  // as it stands. The level still picks the BWS boilerplate, and the record
+  // screen and the spec table still say so; this list is about chasing. And
+  // a split bill line is a heading, chased through its configurations, so it
+  // is not listed either. The matrix test is loadTgqMatrices' own: a category
+  // in spec_matrix_category_map is on the matrix.
   const levelless = await sql`
     select r.id, r.record_no, r.item_description, r.version, r.level_suggested, r.level_suggested_reason,
            p.bws_project_number, r.variant_ordinal,
@@ -112,11 +122,16 @@ export async function GET(request: Request): Promise<Response> {
     join spec_runs run on run.id = r.run_id
     where r.project_id = ${projectId} and r.status = 'active' and run.status = 'active'
       and r.category_id is not null and r.level is null
+      and r.category_id not in (select item_category_id from spec_matrix_category_map)
+      -- CHASE_HEADING_PREDICATE. (No backticks in here: one closes the template.)
+      and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
     order by r.record_no
   `;
 
   // A category nobody has authored requirements for scores 0/0 and renders
-  // green. Surface it next to the real blockers.
+  // green. Surface it next to the real blockers. In the export's scope, as
+  // every other blocker list is (audit F14): a record on a retired phase, or a
+  // split bill line, is nothing anybody can chase or ship.
   const unauthored = await sql`
     select r.id, r.record_no, r.item_description, c.name as category_name, p.bws_project_number,
            r.variant_ordinal,
@@ -124,7 +139,11 @@ export async function GET(request: Request): Promise<Response> {
     from spec_records r
     join projects p on p.id = r.project_id
     join item_categories c on c.id = r.category_id
-    where r.project_id = ${projectId} and r.status = 'active' and c.requirements_authored = false
+    join spec_runs run on run.id = r.run_id
+    where r.project_id = ${projectId} and r.status = 'active' and run.status = 'active'
+      and c.requirements_authored = false
+      -- CHASE_HEADING_PREDICATE. (No backticks in here: one closes the template.)
+      and not exists (select 1 from spec_records v where v.parent_id = r.id and v.status = 'active')
     order by r.record_no
   `;
 
@@ -157,6 +176,7 @@ export async function GET(request: Request): Promise<Response> {
   // Live state for every covered question, whatever it is now — so the diff
   // can say "they answered it" rather than "it is gone".
   const liveByKey = await loadQuestionsByKey(
+    projectId,
     itemRows.map((row) => ({ recordId: String(row.record_id), requirementId: String(row.requirement_id) })),
   );
 
@@ -260,6 +280,9 @@ export async function GET(request: Request): Promise<Response> {
           {
             count: item.count,
             projectWide: item.projectWide,
+            // Which line the record is on, so a line's count can include a
+            // configuration on it that no outstanding question names (F7).
+            lineId: item.lineId,
             itemRows: item.rows
               .filter((row) => row.kind !== "question")
               .map((row) => ({ label: row.label, where: row.where === "details" ? "details" : "specs" })),
@@ -292,16 +315,15 @@ export async function GET(request: Request): Promise<Response> {
         // minus the project-wide section; the subset a chase asks by default;
         // and the distinct project-wide questions, answered once on the
         // project. The tile says all three in words.
-        // THE SUM OF THE LINES: each record with something outstanding counts
-        // its `itemTgq` — the gate's rows on the matrix, its own questions
-        // elsewhere — exactly as its line in the table does.
-        toQuote: (() => {
-          const own = new Map<string, number>();
-          for (const q of outstanding) own.set(q.recordId, (own.get(q.recordId) ?? 0) + (inItemTgq(q) ? 1 : 0));
-          let sum = 0;
-          for (const [recordId, n] of own) sum += matrix.get(recordId)?.count ?? n;
-          return sum;
-        })(),
+        // Each record counts its `itemTgq`: the gate's rows on the matrix, its
+        // own questions elsewhere. EVERY MATRIX RECORD counts, not only those
+        // with a question outstanding (audit F7): a matrix item with every
+        // question answered and W and SH still empty owes its TGQ and has no
+        // question row. The overview counts it, and until 2026-11-06 this
+        // header did not. The chase TABLE still lists only lines with a
+        // question to tick, so such an item is in this number and on no row
+        // there; the fill-in screen gives it a line of its own.
+        toQuote: totalItemTgq(outstanding, matrix),
         toChase: outstanding.filter(inChaseAsk).length,
         projectWide: projectWideTgqKeys(outstanding).size,
         later: outstanding.filter((q) => q.tier === "later").length,

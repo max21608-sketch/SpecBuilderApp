@@ -455,3 +455,68 @@ describe("coverageStaleReasons — the tier", () => {
     expect(coverageStaleReasons(coverage, live)).toEqual([]);
   });
 });
+
+// ===========================================================================
+// AUDIT F1 (2026-11-06): A LEVEL IS NEEDED ONLY WHERE THE TIER NEEDS ONE.
+//
+// Matthew's matrix carries no level column, so where it covers a category
+// `questionTierOrNull` tiers the question without one. `groupByContact` used to
+// test `level === null` instead of `tier === null`, so every seating record
+// without an accepted level was blocked "no level on the record" while the
+// generate route would have taken it. The blocker has to ask the same question
+// the route asks: can the email say which half this belongs in?
+// ===========================================================================
+describe("groupByContact — a level is only needed where the tier needs one", () => {
+  const designer = contact();
+  const colleague = contact({ id: "c-cam", name: "Ana Whitcombe", role: "internal", designerCode: null });
+  // On the matrix: no level, and still tiered.
+  const onMatrix = (over: Partial<OutstandingQuestion> = {}) => question({ level: null, tier: "to_quote", ...over });
+
+  it("offers a matrix-category question with no level to its designer", () => {
+    const { groups, blocked } = groupByContact([onMatrix()], [designer]);
+    expect(blocked).toEqual([]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.contact.id).toBe("c-lcs");
+    expect(groups[0]?.questions).toHaveLength(1);
+  });
+
+  it("offers it to a colleague too", () => {
+    const { groups } = groupByContact([onMatrix({ tier: "later" })], [designer, colleague]);
+    expect(groups.find((g) => g.contact.id === "c-cam")?.questions).toHaveLength(1);
+  });
+
+  it("still blocks a placeholder-category question with no level, because it has no tier", () => {
+    const { groups, blocked } = groupByContact(
+      [onMatrix(), question({ recordId: "rec-2", requirementId: "req-2", level: null, tier: null })],
+      [designer, colleague],
+    );
+    expect(blocked.map((row) => [row.recordId, row.reason])).toEqual([["rec-2", "no level on the record"]]);
+    // The matrix record is chased by both; the placeholder one by neither.
+    for (const group of groups) {
+      expect(group.questions.map((q) => q.recordId)).toEqual(["rec-1"]);
+    }
+  });
+});
+
+// ===========================================================================
+// AUDIT F10 (2026-11-06): THE RECORD'S VERSION IS NOT WHAT THE EMAIL SAID.
+//
+// `bump_version` fires on every spec_records update — an internal note, the
+// quote description, the dimension note, a level, a category. Comparing it
+// made editing an internal note drop every question on that record out of
+// Waiting and refuse an unsent draft at confirm-sent, with nothing the email
+// printed having moved. The context snapshot carries every field the email
+// prints; that is the comparison.
+// ===========================================================================
+describe("coverageStaleReasons — the record's version", () => {
+  it("does not fire when only the record's version moved", () => {
+    const asked = question({ recordVersion: 3 });
+    expect(coverageStaleReasons(coverageFor(asked), question({ recordVersion: 7 }))).toEqual([]);
+  });
+
+  it("still fires when something the email PRINTED about the record moved", () => {
+    const asked = question({ recordVersion: 3 });
+    const now = question({ recordVersion: 4, itemDescription: "Lounge armchair" });
+    expect(coverageStaleReasons(coverageFor(asked), now)).toEqual(["contextChanged"]);
+  });
+});

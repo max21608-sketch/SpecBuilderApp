@@ -139,4 +139,44 @@ describeIfDb("an item's TGQ, and totals equal to their lines", () => {
     expect(body.lines.some((line) => line.lineId === placeholderId)).toBe(true);
     expect(body.lines.some((line) => line.lineId === openId)).toBe(true);
   });
+
+  // AUDIT F7 (2026-11-06): the chase header walked only the records that had
+  // an outstanding question, so the matrix item with every question answered
+  // (and slots still open) was in the overview's total and not in this one.
+  it("the chase header's TGQ is the overview's, the item no question holds included", async () => {
+    const { GET } = await import("@/app/api/drafts/route");
+    const body = (await (await GET(new Request(`http://localhost/api/drafts?projectId=${projectId}`))).json()) as {
+      inventory: { totals: { toQuote: number }; itemTgq: Record<string, { count: number | null; lineId?: string }> };
+    };
+    expect(body.inventory.totals.toQuote).toBe((await loadProjectSummary(projectId)).toQuote);
+    // The answered item is on the matrix and owes its gate rows; the payload
+    // says which line it is on, which is what lets a line count it.
+    expect(body.inventory.itemTgq[answeredId]?.count).toBeGreaterThan(0);
+    expect(body.inventory.itemTgq[answeredId]?.lineId).toBe(answeredId);
+  });
+
+  // AUDIT F1 / F14: a matrix record with no level is not a "no level" blocker
+  // on the chase screen. Every record here has a level, so take one away.
+  it("does not list a matrix record with no level as needing one; a placeholder record still is", async () => {
+    await client.query(`update spec_records set level = null, updated_by = 'qa' where id = any($1::uuid[])`, [
+      [openId, placeholderId],
+    ]);
+    try {
+      const { GET } = await import("@/app/api/drafts/route");
+      const body = (await (await GET(new Request(`http://localhost/api/drafts?projectId=${projectId}`))).json()) as {
+        inventory: { levelless: { recordId: string }[]; blocked: { recordId: string; reason: string }[] };
+      };
+      const levelless = body.inventory.levelless.map((row) => row.recordId);
+      expect(levelless).not.toContain(openId);
+      expect(levelless).toContain(placeholderId);
+      // Nobody is named on these lines, so both are blocked for that reason,
+      // and never for a level on the matrix record.
+      const matrixBlock = body.inventory.blocked.find((row) => row.recordId === openId);
+      expect(matrixBlock?.reason).not.toBe("no level on the record");
+    } finally {
+      await client.query(`update spec_records set level = 'simple', updated_by = 'qa' where id = any($1::uuid[])`, [
+        [openId, placeholderId],
+      ]);
+    }
+  });
 });

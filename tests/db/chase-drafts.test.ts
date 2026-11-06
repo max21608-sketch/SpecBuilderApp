@@ -683,6 +683,194 @@ describeIfDb("chase drafts", () => {
     }
   });
 
+  // ===========================================================================
+  // AUDIT F10 (2026-11-06): THE RECORD'S VERSION IS NOT WHAT THE EMAIL SAID.
+  //
+  // bump_version fires on every spec_records update. An internal note is the
+  // plainest case: it never leaves this app, the email printed nothing about
+  // it, and it used to drop every question on the record out of Waiting and
+  // refuse the unsent draft at confirm-sent ("the record changed").
+  // ===========================================================================
+  it("an internal-notes edit leaves an unsent draft confirmable and its questions waiting", async () => {
+    await resetAnswers();
+    const generated = await generate();
+    expect(generated.status).toBe(201);
+    const draft = (await currentDrafts("draft"))[0];
+
+    const before = await client.query(`select version from spec_records where id = $1`, [recordId]);
+    await client.query(`update spec_records set internal_notes = '__QA quoted at 4,200 last time', updated_by = 'qa' where id = $1`, [
+      recordId,
+    ]);
+    const after = await client.query(`select version from spec_records where id = $1`, [recordId]);
+    // The premise: the record's version DID move.
+    expect(Number(after.rows[0].version)).toBe(Number(before.rows[0].version) + 1);
+
+    try {
+      const { POST } = await import("@/app/api/drafts/[id]/confirm-sent/route");
+      const res = await POST(post({ version: Number(draft.version), attestation: true }), params(draft.id));
+      expect(res.status).toBe(200);
+
+      const { loadOutstanding, loadSentCoverage, waitingByQuestion } = await import("@/lib/chase-drafts");
+      const waiting = waitingByQuestion(await loadOutstanding(projectId), await loadSentCoverage(projectId));
+      expect(waiting.size).toBe(3);
+
+      // And a second note after the send changes nothing either.
+      await client.query(`update spec_records set internal_notes = '__QA and again', updated_by = 'qa' where id = $1`, [
+        recordId,
+      ]);
+      const stillWaiting = waitingByQuestion(await loadOutstanding(projectId), await loadSentCoverage(projectId));
+      expect(stillWaiting.size).toBe(3);
+    } finally {
+      await client.query(`update spec_records set internal_notes = null, updated_by = 'qa' where id = $1`, [recordId]);
+      await client.query(`delete from status_history where entity_type = 'email_draft' and entity_id = $1`, [draft.id]);
+      await resetAnswers();
+    }
+  });
+
+  // ===========================================================================
+  // AUDIT A3 / F11 (2026-11-06): A CHASE ASKS ONLY THIS PROJECT'S QUESTIONS.
+  //
+  // loadQuestionsByKey read any record id and any requirement id it was handed:
+  // no project predicate, and `join requirements q on q.id = any(...)` with no
+  // `q.category_id = r.category_id`, so any requirement paired with any record
+  // and read `missing`. A crafted or stale request could put another client's
+  // item, refs and description into an email to this project's designer.
+  // ===========================================================================
+  it("refuses a question on another project's record, and writes nothing", async () => {
+    await resetAnswers();
+    const other = await client.query(
+      `insert into projects (bws_project_number, name, created_by, updated_by)
+       values ('${qaNumber("P90002")}', '__QA Another client', 'qa', 'qa') returning id`,
+    );
+    const otherProjectId = other.rows[0].id;
+    try {
+      const otherRun = await client.query(
+        `insert into spec_runs (project_id, name, created_by, updated_by) values ($1, '__QA Their run', 'qa', 'qa') returning id`,
+        [otherProjectId],
+      );
+      const otherRecord = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, status, category_id, level, item_description, designer,
+                                   created_by, updated_by)
+         values ($1, $2, 1, 'active', $3, 'complex', '__QA Their secret sofa', 'qalcs', 'qa', 'qa') returning id`,
+        [otherProjectId, otherRun.rows[0].id, categoryId],
+      );
+      const res = await generate({}, [
+        ...allQuestions(),
+        { recordId: String(otherRecord.rows[0].id), requirementId: String(requirementIds[0]) },
+      ]);
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe("questions_ineligible");
+      expect(String(body.error)).toContain("1 selected question is no longer on this project's records");
+      // Nothing about the other project reaches the refusal either.
+      expect(JSON.stringify(body)).not.toContain("Their secret sofa");
+      expect(await currentDrafts()).toHaveLength(0);
+    } finally {
+      await client.query(`delete from spec_records where project_id = $1`, [otherProjectId]);
+      await client.query(`delete from spec_runs where project_id = $1`, [otherProjectId]);
+      await client.query(`delete from projects where id = $1`, [otherProjectId]);
+    }
+  });
+
+  it("refuses a question the record's category does not ask", async () => {
+    await resetAnswers();
+    // A question from a DIFFERENT category: the stale-tab case after somebody
+    // changed the record's category, or a crafted pair.
+    const elsewhere = await client.query(
+      `select q.id from requirements q where q.category_id <> $1 order by q.id limit 1`,
+      [categoryId],
+    );
+    const res = await generate({}, [{ recordId, requirementId: elsewhere.rows[0].id }]);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("questions_ineligible");
+    expect(await currentDrafts()).toHaveLength(0);
+  });
+
+  it("refuses a question on a split bill line, which is a heading", async () => {
+    await resetAnswers();
+    const variant = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, status, category_id, level, item_description, designer,
+                                 parent_id, depth, split_reason, variant_label, created_by, updated_by)
+       values ($1, $2, 9003, 'active', $3, 'complex', '__QA Armchair A', 'qalcs', $4, 1, 'configuration', 'A', 'qa', 'qa')
+       returning id`,
+      [projectId, runId, categoryId, recordId],
+    );
+    try {
+      const res = await generate();
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe("questions_ineligible");
+      expect(await currentDrafts()).toHaveLength(0);
+    } finally {
+      await client.query(`delete from spec_records where id = $1`, [variant.rows[0].id]);
+    }
+  });
+
+  it("refuses a question on a record whose phase was retired", async () => {
+    await resetAnswers();
+    // The phase alone, deliberately: the record stays active, which is the
+    // half-state a retire leaves for the length of its own transaction and
+    // the one only the run predicate can catch.
+    await client.query(
+      `update spec_runs set status = 'retired', retired_at = now(), retired_by = 'qa', updated_by = 'qa' where id = $1`,
+      [runId],
+    );
+    try {
+      const res = await generate();
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe("questions_ineligible");
+      expect(await currentDrafts()).toHaveLength(0);
+    } finally {
+      await client.query(
+        `update spec_runs set status = 'active', retired_at = null, retired_by = null, updated_by = 'qa' where id = $1`,
+        [runId],
+      );
+    }
+  });
+
+  it("refuses to ADD another project's question to a draft by editing it", async () => {
+    await resetAnswers();
+    expect((await generate()).status).toBe(201);
+    const draft = (await currentDrafts("draft"))[0];
+    const other = await client.query(
+      `insert into projects (bws_project_number, name, created_by, updated_by)
+       values ('${qaNumber("P90003")}', '__QA Another client', 'qa', 'qa') returning id`,
+    );
+    const otherProjectId = other.rows[0].id;
+    try {
+      const otherRun = await client.query(
+        `insert into spec_runs (project_id, name, created_by, updated_by) values ($1, '__QA Their run', 'qa', 'qa') returning id`,
+        [otherProjectId],
+      );
+      const otherRecord = await client.query(
+        `insert into spec_records (project_id, run_id, record_no, status, category_id, level, item_description,
+                                   created_by, updated_by)
+         values ($1, $2, 1, 'active', $3, 'complex', '__QA Their secret sofa', 'qa', 'qa') returning id`,
+        [otherProjectId, otherRun.rows[0].id, categoryId],
+      );
+      const { POST } = await import("@/app/api/drafts/[id]/edit/route");
+      const res = await POST(
+        post({
+          version: Number(draft.version),
+          introText: "__QA intro",
+          closingText: "__QA closing",
+          questions: [...allQuestions(), { recordId: String(otherRecord.rows[0].id), requirementId: String(requirementIds[0]) }],
+        }),
+        params(draft.id),
+      );
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe("questions_ineligible");
+      expect(String(body.error)).toContain("no longer on this project's records");
+      const items = await client.query(`select record_id from email_draft_items where draft_id = $1`, [draft.id]);
+      expect(items.rows.every((row: { record_id: string }) => row.record_id === recordId)).toBe(true);
+    } finally {
+      await client.query(`delete from spec_records where project_id = $1`, [otherProjectId]);
+      await client.query(`delete from spec_runs where project_id = $1`, [otherProjectId]);
+      await client.query(`delete from projects where id = $1`, [otherProjectId]);
+      await resetAnswers();
+    }
+  });
+
   it("refuses the whole inventory read without a session", async () => {
     vi.doMock("@/lib/session", () => ({ getSessionUser: async () => null }));
     vi.resetModules();

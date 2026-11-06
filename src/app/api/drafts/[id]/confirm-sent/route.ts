@@ -55,10 +55,9 @@ const REASON_TEXT: Record<StaleReason, string> = {
   answerRemoved: "the answer row was removed",
   answerChanged: "the answer changed after the email was written",
   answerSettled: "this has since been settled",
-  recordChanged: "the record changed after the email was written",
   recordRetired: "the record was retired",
   contextChanged: "the question or the record's details changed after the email was written",
-  questionGone: "this question no longer exists on the record",
+  questionGone: "this question is no longer asked of this record on this project",
 };
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -135,7 +134,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
       // Live state for exactly the covered questions, read through THIS
       // transaction so the rows validated are the rows locked.
+      // Scoped to the draft's project: a covered question that is no longer
+      // one this project's record asks reads `questionGone` (audit A3/F11).
       const live = await loadQuestionsByKey(
+        String(draft.project_id),
         items.map((row) => ({ recordId: String(row.record_id), requirementId: String(row.requirement_id) })),
         sql,
       );

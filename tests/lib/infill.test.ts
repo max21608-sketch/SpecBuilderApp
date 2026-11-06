@@ -109,6 +109,31 @@ describe("summariseLines", () => {
     ]);
     expect(lines[0]!.states).toEqual({ missing: 1, tbc: 2 });
   });
+  // AUDIT F7: a configuration on Matthew's matrix whose checklist is answered
+  // still owes its slots, and has no question to put it on a line. Its line is
+  // its parent's, which IS listed because a sibling has questions; it used to
+  // be counted nowhere on that line and given a separate line of its own.
+  it("counts and lists a matrix configuration on the line that no question names", () => {
+    const slot = { kind: "slot" as const, requirementId: null, label: "Width", section: null, state: "missing", where: "specs" as const };
+    const matrix = new Map([
+      ["a", { count: 1, projectWide: 0, rows: [], lineId: "line" }],
+      ["b", { count: 2, projectWide: 0, rows: [slot, { ...slot, label: "Seat height" }], lineId: "line" }],
+    ]);
+    const lines = summariseLines(
+      [
+        question({ recordId: "line", variantCount: 2 }),
+        question({ recordId: "a", parentId: "line", variantLabel: "A", requirementId: "q2", parentRefs: "S-301" }),
+      ],
+      matrix,
+    );
+    expect(lines).toHaveLength(1);
+    // The bill line's own question (1, by the item rule) + A's gate (1) + B's gate (2).
+    expect(lines[0]!.counts.toQuote).toBe(4);
+    expect(lines[0]!.itemRows?.filter((row) => row.recordId === "b").map((row) => row.label)).toEqual([
+      "Width",
+      "Seat height",
+    ]);
+  });
 });
 
 describe("countStates", () => {

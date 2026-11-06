@@ -20,7 +20,8 @@
 import { sql, json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { groupByContact, loadOutstanding, type OutstandingQuestion, type ProjectContact } from "@/lib/chase-drafts";
-import { inItemTgq } from "@/lib/chase-grouping";
+import { countWithItemTgq } from "@/lib/chase-grouping";
+import { loadMatrixItemTgq } from "@/lib/item-tgq-load";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     version: Number(row.version),
   }));
 
-  const outstanding = await loadOutstanding(id);
+  const [outstanding, matrix] = await Promise.all([loadOutstanding(id), loadMatrixItemTgq([id])]);
   const { groups, blocked } = groupByContact(outstanding, contacts);
 
   // THREE BUCKETS, BECAUSE TWO WOULD NOT ADD UP. `groupByContact` also holds
@@ -58,11 +59,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   //
   // A tier of null is its own count. `questionTierOrNull` refuses to pick a
   // reading where the fallback model has no level, so adding those into either
-  // column would be this route answering a question only a person can.
-  // TGQ IS THE ITEM RULE (`inItemTgq`): any kind, minus the project-wide
-  // section, which nobody owes per item — it is answered once on the project.
+  // column would be this route answering a question only a person can. Only a
+  // placeholder category's question can be untiered: on Matthew's matrix a
+  // record with no level is tiered and owed by its designer (audit F1).
+  //
+  // TGQ IS `itemTgq`, AS ON EVERY OTHER SCREEN (audit F14, 2026-11-06). It
+  // counted `inItemTgq` over questions, so a matrix item's dimension slots and
+  // record columns were in its line's TGQ on the chase and fill-in screens and
+  // the overview, and missing from what its designer was said to owe here.
+  // The records a contact's questions name count their gate rows where the
+  // matrix covers them; every other record counts its questions by the item
+  // rule (`countWithItemTgq`, the chase table's own count).
   const tally = (questions: OutstandingQuestion[]) => ({
-    toQuote: questions.filter(inItemTgq).length,
+    toQuote: countWithItemTgq(
+      questions.map((question) => ({ ...question, waiting: null })),
+      matrix,
+    ).toQuote,
     alsoOutstanding: questions.filter((q) => q.tier === "later").length,
     noTier: questions.filter((q) => q.tier === null).length,
   });
