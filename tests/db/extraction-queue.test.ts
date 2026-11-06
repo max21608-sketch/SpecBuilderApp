@@ -240,6 +240,66 @@ describeIfDb("extraction attempts", () => {
     expect(published).toHaveLength(1);
   });
 
+  // Audit D11. The queue drops a message whose idempotency key it has seen,
+  // and the key is (run, attempt). Opening the SAME attempt id again after it
+  // failed would publish a key the queue already holds: the row would sit
+  // queued, nothing would read it, and the sweep would find it a day later.
+  it("a new press after a recorded failure publishes under a NEW key", async () => {
+    await reset({ status: "pending" });
+    const { POST } = await import("@/app/api/imports/[id]/extract/route");
+    const first = randomUUID();
+    await POST(post({ expectedVersion: (await row()).version, requestId: first }), params(runId));
+    await client.query(`update intake_runs set status = 'failed', error = '__QA refused' where id = $1`, [runId]);
+
+    const second = randomUUID();
+    const res = await POST(post({ expectedVersion: (await row()).version, requestId: second }), params(runId));
+    expect(res.status).toBe(200);
+    expect(published.map((entry) => entry.key)).toEqual([
+      `spec-document:${runId}:${first}`,
+      `spec-document:${runId}:${second}`,
+    ]);
+  });
+
+  it("never re-opens an attempt that failed when ITS press is resent", async () => {
+    // The same request id is the same press (a lost response, retried). Its
+    // read ran and failed: reopening it would replay a key the queue drops,
+    // and minting a new one would charge twice for one press. It is answered
+    // with what that press already did.
+    await reset({ status: "pending" });
+    const { POST } = await import("@/app/api/imports/[id]/extract/route");
+    const requestId = randomUUID();
+    await POST(post({ expectedVersion: (await row()).version, requestId }), params(runId));
+    await client.query(`update intake_runs set status = 'failed', error = '__QA refused' where id = $1`, [runId]);
+
+    const again = await POST(post({ expectedVersion: (await row()).version, requestId }), params(runId));
+    const body = await again.json();
+    expect(again.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, reused: true, attemptId: requestId, status: "failed" });
+    expect(published).toHaveLength(1);
+    const after = await row();
+    expect(after.status).toBe("failed");
+    expect(after.error).toBe("__QA refused");
+  });
+
+  it("never re-opens a restart's attempt when that restart is resent", async () => {
+    const requestId = randomUUID();
+    await queueAttempt({
+      attemptId: requestId,
+      status: "parsing",
+      claimToken: randomUUID(),
+      claimCount: MAX_CLAIMS_PER_ATTEMPT,
+      processingStartedAt: new Date(Date.now() - (CLAIM_EXPIRY_SECONDS + 60) * 1000).toISOString(),
+    });
+    const { POST } = await import("@/app/api/imports/[id]/extract/route");
+    const res = await POST(
+      post({ expectedVersion: (await row()).version, requestId, action: "restart-expired" }),
+      params(runId),
+    );
+    expect((await res.json()).reused).toBe(true);
+    expect(published).toHaveLength(0);
+    expect((await row()).claim_count).toBe(MAX_CLAIMS_PER_ATTEMPT);
+  });
+
   it("refuses to start a document that is already being read", async () => {
     await queueAttempt();
     const { POST } = await import("@/app/api/imports/[id]/extract/route");

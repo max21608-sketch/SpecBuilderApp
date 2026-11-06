@@ -81,7 +81,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const { expectedVersion, requestId, action } = parsed.data;
 
-  let attempt: { attemptId: string | null; alreadyDispatched: boolean };
+  let attempt: { attemptId: string | null; alreadyDispatched: boolean; status?: string };
   try {
     attempt = await withTransaction(async (txn) => {
       // ======================================================================
@@ -150,6 +150,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         return { attemptId: currentAttempt, alreadyDispatched: false };
       }
 
+      // ======================================================================
+      // A PRESS OPENS ITS ATTEMPT ONCE. Audit D11, 2026-11-06.
+      //
+      // The attempt id IS the press's request id, and the queue's idempotency
+      // key is (run, attempt). So the same request resent after its attempt
+      // FAILED (a lost response, retried) used to open that attempt again and
+      // publish a key the queue had already taken: the message was dropped,
+      // the row sat queued, and nothing read it until the sweep a day later.
+      // Minting a fresh id there instead would charge twice for one press.
+      // The press already happened; it is answered with what it did, and a
+      // person who wants another read presses again, which mints a new id.
+      // (Every screen does mint one per press; this is the resent request.)
+      // ======================================================================
+      if (action !== "retry-dispatch" && currentAttempt === requestId) {
+        return { attemptId: currentAttempt, alreadyDispatched: true, status };
+      }
+
       if (action === "restart-expired") {
         // The screens offer the button by the same function, so the button
         // and the refusal cannot disagree (audit D7: over a live fourth claim
@@ -169,12 +186,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         return { attemptId: await opened(txn, id, requestId, user.email), alreadyDispatched: false };
       }
 
-      // action === 'start'
-      // The idempotent case: the same user action, retried after a lost
-      // response. Return the SAME attempt rather than opening a second one.
-      if (currentAttempt === requestId && status !== "pending" && status !== "failed") {
-        return { attemptId: currentAttempt, alreadyDispatched: true };
-      }
+      // action === 'start'. A resent press was answered above.
       if (status !== "pending" && status !== "failed") {
         throw new DomainConflictError(
           "already_started",
@@ -209,7 +221,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   if (attempt.alreadyDispatched) {
-    return json({ ok: true, attemptId: attempt.attemptId, status: "queued", reused: true });
+    // The run's real status: a resent press whose read has since failed says
+    // so, rather than "queued" over a red row.
+    return json({ ok: true, attemptId: attempt.attemptId, status: attempt.status ?? "queued", reused: true });
   }
 
   // Committed. Now publish — outside the transaction, because a queue publish
