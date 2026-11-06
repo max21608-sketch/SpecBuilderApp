@@ -5,8 +5,8 @@
 //
 // Source: found-in-use 2026-09-20, "An answer typed on the infill screen is
 // refused on the LOCAL dev server, and only there".
-import { describe, it, expect } from "vitest";
-import { describeTransactionFailure, isRetryablePostgresError } from "@/lib/db-transaction";
+import { describe, it, expect, vi } from "vitest";
+import { describeTransactionFailure, isRetryablePostgresError, transactionErrorResponse } from "@/lib/db-transaction";
 
 function pgError(code: string, message: string): Error & { code: string } {
   const error = new Error(message) as Error & { code: string };
@@ -50,5 +50,69 @@ describe("describeTransactionFailure", () => {
     }
     expect(isRetryablePostgresError(pgError("23505", "duplicate key"))).toBe(false);
     expect(describeTransactionFailure(pgError("23505", "duplicate key"))).toContain("unrecognised");
+  });
+});
+
+// ============================================================================
+// THE 500 PATH LOGGED THE WHOLE DRIVER ERROR (audit B9).
+//
+// `transactionErrorResponse` passed the error object itself to console.error,
+// and a Postgres error carries `detail`: "Key (code_norm)=(<the client's code>)
+// already exists", "Failing row contains (<every column of the row>)". That
+// went into the Vercel logs on every unexpected failure. The line now carries
+// what diagnoses it -- SQLSTATE, constraint, table, the statement -- and a
+// reference that ties the line to one failure.
+// ============================================================================
+describe("transactionErrorResponse on an unexpected failure", () => {
+  function constraintError(): Error & Record<string, string> {
+    const error = new Error('duplicate key value violates unique constraint "project_finishes_code_key"') as Error &
+      Record<string, string>;
+    Object.assign(error, {
+      code: "23505",
+      constraint: "project_finishes_code_key",
+      table: "project_finishes",
+      detail: "Key (project_id, code_norm)=(invented, INVENTED-CLOTH-01) already exists.",
+    });
+    return error;
+  }
+
+  it("logs the SQLSTATE, the constraint, the table and a reference, never the detail", async () => {
+    const logged: unknown[][] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args);
+    });
+    try {
+      const response = transactionErrorResponse(constraintError());
+      expect(response.status).toBe(500);
+      const body = (await response.json()) as { error: string };
+      expect(body.error).toMatch(/Nothing was written/);
+
+      expect(logged).toHaveLength(1);
+      // Strings only: an object here is serialised whole, detail and all.
+      expect(logged[0]!.every((arg) => typeof arg === "string")).toBe(true);
+      const line = logged[0]!.join(" ");
+      expect(line).toContain("23505");
+      expect(line).toContain("constraint=project_finishes_code_key");
+      expect(line).toContain("table=project_finishes");
+      expect(line).toMatch(/ref=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
+      expect(line).not.toContain("INVENTED-CLOTH-01");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("keeps the message and stack of an error that did not come from the database", async () => {
+    const logged: unknown[][] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args);
+    });
+    try {
+      transactionErrorResponse(new TypeError("Cannot read properties of undefined (reading 'id')"));
+      const line = logged[0]!.join(" ");
+      expect(line).toContain("Cannot read properties of undefined");
+      expect(line).toContain("TypeError");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

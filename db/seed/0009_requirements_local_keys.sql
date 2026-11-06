@@ -20,11 +20,14 @@
 --
 -- sort_order is 900 + his matrix row, the same band 0007 uses and disjoint
 -- from it, so both files can be re-seeded independently.
+--
+-- A re-seed matches on `seed_key` (0057), which here is `key:<local_key>`,
+-- written from the local key in the select below rather than typed twice.
 -- ==========================================================================
 
-insert into requirements (category_id, kind, spec_field_id, local_key, prompt, help_text, section, sort_order, tgq_levels, created_by, updated_by)
+insert into requirements (category_id, kind, spec_field_id, local_key, prompt, help_text, section, sort_order, tgq_levels, created_by, updated_by, seed_key)
 select c.id, 'readiness', null, v.local_key, v.prompt, v.help_text, v.section, v.sort_order,
-       '{simple,complex,hero}', 'seed', 'seed'
+       '{simple,complex,hero}', 'seed', 'seed', 'key:' || v.local_key
 from (values
   ('beds-bedbases',        'headboard_fitted',    'Headboard fitted?',
    'Yes reveals the socket and lighting specs at TG0. From Matthew''s decision matrix, 2026-09-17, row 13.',
@@ -55,10 +58,11 @@ from (values
    'Build details', 931)
 ) as v(slug, local_key, prompt, help_text, section, sort_order)
 join item_categories c on c.slug = v.slug
-on conflict (category_id, sort_order) do update set
+on conflict (category_id, seed_key) do update set
   kind       = excluded.kind,
   local_key  = excluded.local_key,
   prompt     = excluded.prompt,
+  sort_order = excluded.sort_order,
   help_text  = excluded.help_text,
   section    = excluded.section,
   tgq_levels = excluded.tgq_levels,

@@ -30,10 +30,21 @@ const GUARDED = {
   pilot: "--yes-pilot",
 };
 
-export function requireScriptEnvironment(scriptName) {
+// ONE GUARD FOR EVERY SCRIPT (audit B9). The tsx backfills each carried an
+// inline copy of this function -- six of them, already worded six ways -- so a
+// change to the rule (pilot's own flag arrived after most were written) had to
+// be remembered six times. They import it now. `usage` is the lines a script
+// prints when DATABASE_URL is missing, because "run node db/<file>" is the
+// wrong advice for a script whose real entry point is an npm script.
+export function requireScriptEnvironment(scriptName, usage = []) {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    console.error(`DATABASE_URL is not set. Run with: node --env-file=.env.local db/${scriptName}`);
+    if (usage.length === 0) {
+      console.error(`DATABASE_URL is not set. Run with: node --env-file=.env.local db/${scriptName}`);
+    } else {
+      console.error("DATABASE_URL is not set. Run with:");
+      for (const line of usage) console.error(`  ${line}`);
+    }
     process.exit(1);
   }
 
@@ -62,4 +73,28 @@ export function requireScriptEnvironment(scriptName) {
   }
 
   return { databaseUrl, environment, host };
+}
+
+// ============================================================================
+// A PASSWORD ON A COMMAND LINE IS READABLE BY EVERY USER ON THE MACHINE.
+//
+// backup.mjs and restore.mjs ran `pg_dump <url>` and `psql -d <url>` with the
+// whole DATABASE_URL as an argument (audit B9), and a process's arguments are
+// what `ps` shows anybody, for as long as a dump of a production database
+// takes. libpq reads the password from PGPASSWORD when the URL carries none,
+// so the URL goes on the command line WITHOUT it and the password goes in the
+// child's environment, which only the same user can read.
+// ============================================================================
+
+/**
+ * The connection URL with its password taken out, and the environment that
+ * carries it, for a libpq tool (`pg_dump`, `psql`) run as a child process.
+ */
+export function pgToolConnection(databaseUrl, baseEnv = process.env) {
+  const url = new URL(databaseUrl);
+  const password = url.password ? decodeURIComponent(url.password) : "";
+  url.password = "";
+  const env = { ...baseEnv };
+  if (password) env.PGPASSWORD = password;
+  return { url: url.toString(), env };
 }
