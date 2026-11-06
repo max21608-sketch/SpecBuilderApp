@@ -546,16 +546,96 @@ describeIfDb("0012 change sets and versions", () => {
     expect(snapshots.rows.map((row) => row.snapshot_no)).toEqual([1, 2]);
   }, 30_000);
 
-  it("COVERAGE: every spec-content write in the DATABASE belongs to a change that took a version", async () => {
-    // The check that catches a write path forgetting to snapshot, and the
-    // reason 0013 does not add a trigger for it.
-    //
+  // ---- COVERAGE, PER RECORD (audit 4.3) -------------------------------------
+  //
+  // The assertion this replaces was per CHANGE SET: a change with spec-content
+  // audit rows and NO version anywhere failed it. A write path that forgot to
+  // version one record inside a change that versioned another (a fan-out that
+  // missed a configuration, a second transaction in an open change that wrote
+  // and skipped the snapshot) passed, because the change had A version. So the
+  // question is now asked per record: every record a change wrote spec content
+  // to has a version under that change.
+  //
+  // Each audit row is traced to its RECORD through the live row (an answer, an
+  // attribute or a ref carries `record_id`; a record is its own). Rows whose
+  // target has since been deleted are not joined, for the reason the comment
+  // below gives: the versions went with the records, by cascade, and no write
+  // path can put them back. Rows written before 0012 carry a null
+  // change_set_id and are not joined either, so history starting at 0012 does
+  // not fail this.
+  const UNCOVERED_RECORDS = `
+    with written as (
+      select al.change_set_id, coalesce(r.id, a.record_id, ra.record_id, rf.record_id) as record_id
+        from audit_log al
+        left join spec_records r on al.table_name = 'spec_records' and r.id::text = al.row_id
+        left join spec_answers a on al.table_name = 'spec_answers' and a.id::text = al.row_id
+        left join record_attributes ra on al.table_name = 'record_attributes' and ra.id::text = al.row_id
+        left join spec_record_refs rf on al.table_name = 'spec_record_refs' and rf.id::text = al.row_id
+       where al.change_set_id is not null
+         and al.table_name = any($1::text[])
+    )
+    select cs.id as change_set_id, cs.kind, cs.actor, cs.created_at, w.record_id, count(*)::int as writes
+      from written w
+      join change_sets cs on cs.id = w.change_set_id
+     where w.record_id is not null
+       and ($2::uuid is null or cs.project_id = $2::uuid)
+       and not exists (
+         select 1 from record_snapshots s where s.change_set_id = w.change_set_id and s.record_id = w.record_id
+       )
+     group by cs.id, cs.kind, cs.actor, cs.created_at, w.record_id
+     order by cs.created_at, w.record_id`;
+
+  it("COVERAGE finds a record a change wrote to and never versioned, where the per-change test did not", async () => {
+    // The check has to be able to fail. Built inside a transaction that is
+    // rolled back, so the whole-database assertion below never sees it.
+    await client.query("begin");
+    try {
+      const changeSetId = await openChange("manual_edit");
+      await client.query(`select set_config('app.change_set_id', $1, true)`, [changeSetId]);
+      const versioned = await newRecordIn(9030, "__QA Versioned");
+      const forgotten = await newRecordIn(9031, "__QA Forgotten");
+      await client.query(
+        `insert into record_snapshots (record_id, change_set_id, snapshot_no, atoms, cells)
+         values ($1, $2, 1, '{}'::jsonb, '[]'::jsonb)`,
+        [versioned, changeSetId],
+      );
+      // A spec written to the second record under the same change, and no version.
+      await client.query(
+        `insert into record_attributes (record_id, attr_group, label, value, state, created_by, updated_by)
+         values ($1, 'note', '__QA note', '__QA said', 'confirmed', 'qa', 'qa')`,
+        [forgotten],
+      );
+
+      const perChange = await client.query(
+        `select 1 from change_sets cs
+          where cs.id = $1
+            and not exists (select 1 from record_snapshots s where s.change_set_id = cs.id)`,
+        [changeSetId],
+      );
+      // The old question: the change has a version, so it looked covered.
+      expect(perChange.rows).toEqual([]);
+
+      const perRecord = await client.query(UNCOVERED_RECORDS, [SPEC_CONTENT_TABLES, projectId]);
+      expect(perRecord.rows.map((row) => row.record_id)).toEqual([forgotten]);
+    } finally {
+      await client.query("rollback");
+    }
+  });
+
+  async function newRecordIn(recordNo: number, description: string): Promise<string> {
+    const row = await client.query(
+      `insert into spec_records (project_id, run_id, record_no, category_id, item_description, created_by, updated_by)
+       values ($1, $2, $3, $4, $5, 'qa', 'qa') returning id`,
+      [projectId, runId, recordNo, categoryId, description],
+    );
+    return row.rows[0].id;
+  }
+
+  it("COVERAGE: every record a change wrote spec content to has a version under that change, across the DATABASE", async () => {
     // Deliberately whole-database rather than scoped to this test's project:
-    // the failure worth catching is a real confirm path in the sandbox that
-    // wrote spec content and recorded no version, and a scoped query would
-    // only ever see fixtures. Rows written before 0012 carry a null
-    // change_set_id and are not joined, so history starting today does not
-    // fail this.
+    // the failure worth catching is a real confirm path that wrote spec
+    // content and recorded no version, and a scoped query would only ever see
+    // fixtures.
     //
     // ---- AND WHY THE ROW HAS TO STILL EXIST ------------------------------
     //
@@ -567,29 +647,11 @@ describeIfDb("0012 change sets and versions", () => {
     // could fix: the versions existed and went with the records.
     //
     // Found on 2026-09-17, by a browser walkthrough on a real sandbox project
-    // whose records were swept afterwards. `change_sets` refuses a delete
-    // outright while its project exists, so four of them are there for good.
-    //
-    // The property this test wants is "a LIVE write path took no version", so
-    // it now asks for at least one audit row whose target still exists. A
-    // confirm path that forgets to snapshot is caught exactly as before,
-    // because its rows are still there.
-    const uncovered = await client.query(
-      `select cs.id, cs.kind, cs.actor, cs.created_at, count(*)::int as writes
-         from change_sets cs
-         join audit_log al on al.change_set_id = cs.id
-        where al.table_name = any($1::text[])
-          and not exists (select 1 from record_snapshots s where s.change_set_id = cs.id)
-          and (
-            exists (select 1 from spec_records r where r.id::text = al.row_id)
-            or exists (select 1 from spec_answers a where a.id::text = al.row_id)
-            or exists (select 1 from record_attributes ra where ra.id::text = al.row_id)
-            or exists (select 1 from spec_record_refs rf where rf.id::text = al.row_id)
-          )
-        group by cs.id, cs.kind, cs.actor, cs.created_at
-        order by cs.created_at`,
-      [SPEC_CONTENT_TABLES],
-    );
+    // whose records were swept afterwards. The property this test wants is "a
+    // LIVE write path took no version", so it traces each audit row through
+    // the row that still exists. A confirm path that forgets to snapshot is
+    // caught exactly as before, because its rows are still there.
+    const uncovered = await client.query(UNCOVERED_RECORDS, [SPEC_CONTENT_TABLES, null]);
     expect(uncovered.rows).toEqual([]);
   });
 });
