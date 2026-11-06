@@ -61,6 +61,26 @@ export type SnapshotAnswer = {
 export type SnapshotRef = { system: string; value: string };
 
 /**
+ * An attribute as a VERSION holds it: the export's shape, plus the rows it
+ * replaced.
+ *
+ * `supersedes` is every retired row whose `superseded_by_id` chain ends at
+ * this one, nearest first (audit E6, schema 9). Since 0033 nothing corrects an
+ * attribute in place -- a correction, "use this drawing's" and the
+ * spec-document replace retire the row and insert a successor with a new id --
+ * so a diff keyed on the id read every correction as a removed line beside an
+ * added one. The link has to be carried on the SUCCESSOR: the row it replaced
+ * was still active when the older version was taken, so that version never
+ * knew it would be superseded. The whole chain, not one step, because any
+ * two versions can be compared (`compareRecordVersions`, a baseline against
+ * today), and across two corrections the older side holds the grandparent.
+ *
+ * Optional on the type for the reason `standard` is: a fixture composing a row
+ * need not know about it, and `loadRecordAtoms` always sets it.
+ */
+export type SnapshotAttribute = ExportAttribute & { supersedes?: string[] };
+
+/**
  * One record, whole. This is what a `record_snapshots.atoms` column holds, so
  * every field added here needs a `schema_version` bump and an upgrade on read
  * — the same discipline as `upgradeDimensionSlots`.
@@ -82,7 +102,7 @@ export type RecordAtoms = {
   parentId: string | null;
   splitReason: string | null;
   refs: SnapshotRef[];
-  attributes: ExportAttribute[];
+  attributes: SnapshotAttribute[];
   answers: SnapshotAnswer[];
   itemImage: { attachmentId: string; storagePath: string } | null;
 };
@@ -100,12 +120,16 @@ export type RecordAtoms = {
  *     which is the standard in force on a linked attribute. A version 7 or
  *     older is upgraded on read (`parseAtoms`): the item's own standard was
  *     the one in force that day, so it is what the finish is read as having.
+ * 9 — each attribute names the retired rows it superseded (`supersedes`), so
+ *     a diff pairs a correction with what it corrected (audit E6). Older
+ *     versions read as superseding nothing, and their corrections still show
+ *     as a removed line and an added one.
  *
  * Bumped whenever a field is added, and every addition since 1 is optional on
  * read, so an older version still parses rather than reading as "everything
  * was deleted that day".
  */
-export const RECORD_ATOMS_SCHEMA_VERSION = 8;
+export const RECORD_ATOMS_SCHEMA_VERSION = 9;
 
 function text(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
@@ -323,8 +347,31 @@ export async function loadRecordAtoms(exec: SqlLike, recordIds: string[]): Promi
     where a.record_id = any(${found}::uuid[]) and a.status = 'active'
     order by a.sort_order, a.created_at
   `;
+  // What each live row replaced, walked back through `superseded_by_id`. Only
+  // within the records loaded: a supersession never crosses records (a
+  // correction, a drawing's replacement and a document's replacement all
+  // insert on the record they retire from), and the record filter on both
+  // legs keeps the walk on the record index.
+  const lineageRows = await exec`
+    with recursive lineage(successor_id, ancestor_id, depth) as (
+      select a.superseded_by_id, a.id, 1
+        from record_attributes a
+       where a.record_id = any(${found}::uuid[]) and a.superseded_by_id is not null
+      union all
+      select l.successor_id, a.id, l.depth + 1
+        from lineage l
+        join record_attributes a on a.superseded_by_id = l.ancestor_id
+       where a.record_id = any(${found}::uuid[]) and l.depth < 50
+    )
+    select successor_id, array_agg(ancestor_id::text order by depth, ancestor_id) as ancestors
+      from lineage
+     group by successor_id
+  `;
+  const lineage = new Map(lineageRows.map((row) => [String(row.successor_id), (row.ancestors as string[]).map(String)]));
+
   for (const row of attributeRows) {
-    out.get(String(row.record_id))?.attributes.push(toExportAttribute(row));
+    const attribute: SnapshotAttribute = { ...toExportAttribute(row), supersedes: lineage.get(String(row.id)) ?? [] };
+    out.get(String(row.record_id))?.attributes.push(attribute);
   }
 
   const answerRows = await exec`

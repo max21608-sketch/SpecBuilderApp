@@ -270,4 +270,94 @@ describe("diffSnapshots — item level", () => {
       now: "hero",
     });
   });
+
+  // ---- E6: supersession is a change, and a qualifier is part of a value ----
+  //
+  // Since 0033 nothing corrects an attribute in place: a correction, "use this
+  // drawing's" and the spec-document replace each RETIRE the row and insert a
+  // successor with a new id. Keyed by id, every one of them read as a removed
+  // line beside an added one, which is the pairing the diff exists to do for
+  // the reviewer.
+
+  /** v1 holds W 1900 on page 1; v2 holds its successor, W 1830, still page 1. */
+  function corrected(): { before: RecordAtoms; after: RecordAtoms } {
+    const before = base();
+    const after = base();
+    after.attributes = [{ ...after.attributes[0]!, id: "attr-w2", value: "1830", supersedes: ["attr-w"] }];
+    return { before, after };
+  }
+
+  it("pairs a corrected spec with the row it replaced, as ONE changed line", () => {
+    const { before, after } = corrected();
+    const diff = diffSnapshots(before, after);
+    expect(diff.attributes).toHaveLength(1);
+    expect(diff.attributes[0]).toMatchObject({ change: "changed", key: "attr-w2" });
+    // Old value to new value; the page is kept, so it is not a change.
+    expect(diff.attributes[0]!.fields).toEqual([{ field: "value", label: "Value", was: "1900", now: "1830" }]);
+  });
+
+  it("pairs through a successor that never reached a version (a corrected correction)", () => {
+    // v1 holds A; B corrected A and C corrected B inside one change, so no
+    // version ever held B. C names its whole lineage, and v1 to v2 is still
+    // one line.
+    const { before, after } = corrected();
+    after.attributes[0]!.supersedes = ["attr-mid", "attr-w"];
+    const diff = diffSnapshots(before, after);
+    expect(diff.attributes.map((a) => a.change)).toEqual(["changed"]);
+  });
+
+  it("does not pair when one new row replaced two (a diameter over W and D)", () => {
+    // One-to-one only, the rule every pairing in this app keeps: a Dia that
+    // retired both W and D is not "W became Dia".
+    const before = base();
+    before.attributes.push({ ...before.attributes[0]!, id: "attr-d", label: "DEPTH", value: "790", dimensionSlot: "D" });
+    const after = base();
+    after.attributes = [
+      { ...after.attributes[0]!, id: "attr-dia", label: "DIA", value: "900", dimensionSlot: "DIA", supersedes: ["attr-w", "attr-d"] },
+    ];
+    const diff = diffSnapshots(before, after);
+    expect(diff.attributes.map((a) => a.change).sort()).toEqual(["added", "removed", "removed"]);
+  });
+
+  it("names the page on an added or removed spec, and shows a correction that moved it", () => {
+    const { before, after } = corrected();
+    after.attributes[0]!.sourcePage = 2;
+    const diff = diffSnapshots(before, after);
+    expect(diff.attributes[0]!.fields).toContainEqual({ field: "page", label: "Page", was: "1", now: "2" });
+  });
+
+  it("reads an older version with no lineage as unpaired, rather than failing", () => {
+    const old = JSON.parse(JSON.stringify({ ...base(), schemaVersion: 8 })) as RecordAtoms;
+    const parsed = parseAtoms(old);
+    expect(parsed.attributes[0]!.supersedes).toEqual([]);
+  });
+
+  it("shows an answer's qualifier changing, which used to be a version with an empty diff", () => {
+    const after = base();
+    after.answers[0]!.qualifier = "Main body & self pipe";
+    // Through the round trip, as the history screen reads it.
+    const diff = diffSnapshots(parseAtoms(base()), parseAtoms(JSON.parse(JSON.stringify(after))));
+    expect(diff.answers).toEqual([
+      {
+        key: "req-dim",
+        label: "Dimensions",
+        change: "changed",
+        fields: [{ field: "qualifier", label: "Where on the item", was: null, now: "Main body & self pipe" }],
+      },
+    ]);
+    expect(diff.isEmpty).toBe(false);
+  });
+
+  it("keeps an answer's qualifier through the round trip, so its cell recomposes as the file shipped it", () => {
+    const after = base();
+    after.answers[0]!.qualifier = "Main body & self pipe";
+    expect(parseAtoms(JSON.parse(JSON.stringify(after))).answers[0]!.qualifier).toBe("Main body & self pipe");
+  });
+
+  it("shows an attribute's qualifier changing", () => {
+    const after = base();
+    after.attributes[0]!.qualifier = "Overall";
+    const diff = diffSnapshots(base(), after);
+    expect(diff.attributes[0]!.fields).toContainEqual({ field: "qualifier", label: "Where on the item", was: null, now: "Overall" });
+  });
 });

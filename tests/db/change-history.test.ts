@@ -14,6 +14,7 @@ import { editAnswer } from "@/lib/answer-edit";
 import { withTransaction, type TxnSql } from "@/lib/db-transaction";
 import { openChangeSet } from "@/lib/change-sets";
 import { createAttribute } from "@/lib/manual-capture";
+import { correctAttribute } from "@/lib/attribute-correct";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { takeBaseline } from "@/lib/baselines";
 import { diffSnapshots, parseAtoms } from "@/lib/snapshot-diff";
@@ -545,6 +546,49 @@ describeIfDb("0012 change sets and versions", () => {
     );
     expect(snapshots.rows.map((row) => row.snapshot_no)).toEqual([1, 2]);
   }, 30_000);
+
+  it("E6: a version carries what each spec superseded, so two corrections read as one changed line", async () => {
+    const actor = "__qa-corrector@example.test";
+    const recordId = await newRecord(9023, "__QA Corrected twice");
+    await withTransaction((txn) => createAttribute(txn, dimension(recordId, "W", "1900", actor)));
+
+    async function correctTo(value: string): Promise<void> {
+      const live = await client.query(
+        `select id, version from record_attributes where record_id = $1 and status = 'active' and dimension_slot = 'W'`,
+        [recordId],
+      );
+      await withTransaction((txn) =>
+        correctAttribute(txn, {
+          attributeId: live.rows[0].id,
+          expectedVersion: live.rows[0].version,
+          value,
+          unit: "mm",
+          state: "confirmed",
+          reason: "__QA misread off the page",
+          actor,
+        }),
+      );
+    }
+    await correctTo("1820");
+    await correctTo("1830");
+
+    const versions = await versionsOf(recordId);
+    expect(versions.map((v) => v.snapshot_no)).toEqual([1, 2, 3]);
+    const first = parseAtoms(versions[0]!.atoms);
+    const last = parseAtoms(versions[2]!.atoms);
+    // The newest row names both rows behind it, nearest first.
+    expect(last.attributes[0]!.supersedes).toHaveLength(2);
+    expect(last.attributes[0]!.supersedes?.[1]).toBe(first.attributes[0]!.id);
+
+    // v1 against v3 skips the middle correction, and is still ONE line.
+    const diff = diffSnapshots(first, last);
+    expect(diff.attributes).toEqual([
+      expect.objectContaining({
+        change: "changed",
+        fields: [{ field: "value", label: "Value", was: "1900", now: "1830" }],
+      }),
+    ]);
+  });
 
   // ---- COVERAGE, PER RECORD (audit 4.3) -------------------------------------
   //

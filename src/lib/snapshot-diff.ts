@@ -15,10 +15,21 @@
 //    is always a change in the data.
 //
 // 2. EVERYTHING IS KEYED BY A STABLE ID. Attributes key on the row id and
-//    answers on the requirement id, so a value corrected in place is one
-//    "changed" line rather than a delete beside an add — which is the
-//    difference between a reviewer seeing "W1900 → W1520" and seeing two
-//    unrelated lines they have to pair up themselves.
+//    answers on the requirement id, so a changed value is one "changed" line
+//    rather than a delete beside an add — which is the difference between a
+//    reviewer seeing "W1900 → W1520" and seeing two unrelated lines they have
+//    to pair up themselves.
+//
+//    AND SINCE 0033 NOTHING IS CORRECTED IN PLACE (audit E6). A correction,
+//    "use this drawing's" and a document replacing the bill's value each
+//    RETIRE the row and insert a successor with a new id, so keying on the id
+//    alone showed every correction as removed + added, and the header above
+//    described a world that had gone. A version now carries, on each row, the
+//    rows it superseded (`supersedes`, atoms schema 9), and `pairSupersessions`
+//    re-keys the retired row onto its successor before the keyed diff runs:
+//    one "changed" line, old value to new, the page kept. One-to-one only, the
+//    pairing rule everywhere in this app: a diameter that retired both W and D
+//    is not "W became Dia", so it stays an add beside two removes.
 //
 // A snapshot's jsonb is untrusted by age: it was written by an older build
 // than the one reading it. `parseAtoms` validates with Zod and upgrades, the
@@ -94,6 +105,10 @@ const AtomAttribute = z.object({
   // and an old version disagreed with the file it described. Named at schema
   // 7, defaulted null for the versions that never carried it.
   qualifier: z.string().nullable().optional().default(null),
+  // Added at schema 9 (audit E6): the retired rows this one replaced, so a
+  // correction pairs with what it corrected. NAMED, because Zod strips what it
+  // does not name; an older version reads as superseding nothing.
+  supersedes: z.array(z.string()).optional().default([]),
   specFieldJsonId: z.number().nullable(),
   state: z.string(),
   sortOrder: z.number(),
@@ -110,6 +125,12 @@ const AtomAnswer = z.object({
   specFieldJsonId: z.number().nullable(),
   specFieldName: z.string().nullable(),
   value: z.string().nullable(),
+  // 0029's placement on an ANSWER, which this schema never named (audit E6).
+  // `toSnapshotAnswer` has always written it; Zod stripped it on every read,
+  // so a qualifier-only edit took a version whose diff was empty, and an old
+  // version's cell recomposed without the "- Main body" the file shipped.
+  // Defaulted null for versions written before answers carried one.
+  qualifier: z.string().nullable().optional().default(null),
   state: z.string(),
   sourceKind: z.string(),
   sourceId: z.string().nullable(),
@@ -278,6 +299,9 @@ export const CORE_FIELDS: { field: keyof RecordAtoms | string; label: string; re
 function attributeFields(attribute: RecordAtoms["attributes"][number]): { field: string; label: string; value: unknown }[] {
   return [
     { field: "value", label: "Value", value: attribute.value },
+    // The second line of the statement (0029). Without it here, an edit to
+    // the placement alone took a version that showed no change.
+    { field: "qualifier", label: "Where on the item", value: attribute.qualifier },
     { field: "unit", label: "Unit", value: attribute.unit },
     { field: "label", label: "Label", value: attribute.label },
     { field: "attrGroup", label: "Group", value: attribute.attrGroup },
@@ -302,12 +326,17 @@ function attributeFields(attribute: RecordAtoms["attributes"][number]): { field:
     },
     { field: "specFieldJsonId", label: "BWS field", value: attribute.specFieldJsonId },
     { field: "source", label: "Source", value: attribute.sourceFilename },
+    // The page beside the document. A correction keeps it (0033), so on a
+    // paired line it is normally no change at all; where it does move, that
+    // is the provenance moving, and a reader should see it.
+    { field: "page", label: "Page", value: attribute.sourcePage },
   ];
 }
 
 function answerFields(answer: RecordAtoms["answers"][number]): { field: string; label: string; value: unknown }[] {
   return [
     { field: "value", label: "Value", value: answer.value },
+    { field: "qualifier", label: "Where on the item", value: answer.qualifier },
     { field: "state", label: "State", value: answer.state },
     { field: "sourceKind", label: "Source", value: answer.sourceKind },
   ];
@@ -360,6 +389,34 @@ function diffKeyed<T>(
   return out;
 }
 
+/**
+ * The older version's attributes, with each retired row that has exactly one
+ * successor in the newer version re-keyed onto that successor's id.
+ *
+ * Only rows that are GONE from the newer version are candidates: a row still
+ * active in both is its own line whatever the lineage says. And only one to
+ * one: a successor naming two vanished rows, or a vanished row named by two
+ * successors, pairs nothing and reads as adds and removes, because choosing
+ * one of them would be the diff deciding which value became which.
+ */
+export function pairSupersessions(before: RecordAtoms["attributes"], after: RecordAtoms["attributes"]): RecordAtoms["attributes"] {
+  const surviving = new Set(after.map((attribute) => attribute.id));
+  const gone = new Set(before.map((attribute) => attribute.id).filter((id) => !surviving.has(id)));
+  const claims = new Map<string, string[]>();
+  const successorOf = new Map<string, string>();
+  for (const attribute of after) {
+    const replaced = (attribute.supersedes ?? []).filter((id) => gone.has(id));
+    if (replaced.length !== 1) continue;
+    const ancestor = replaced[0]!;
+    claims.set(ancestor, [...(claims.get(ancestor) ?? []), attribute.id]);
+    successorOf.set(ancestor, attribute.id);
+  }
+  return before.map((attribute) => {
+    const successor = successorOf.get(attribute.id);
+    return successor && claims.get(attribute.id)?.length === 1 ? { ...attribute, id: successor } : attribute;
+  });
+}
+
 /** The 109 export cells at both ends, composed with TODAY's rules. */
 export function diffCells(before: RecordAtoms, after: RecordAtoms): FieldChange[] {
   const a = composeRowCells(scopeForAtoms(before), before.record, before.attributes, exportAnswers(before));
@@ -388,7 +445,7 @@ export function diffSnapshots(before: RecordAtoms, after: RecordAtoms): Snapshot
   );
 
   const attributes = diffKeyed(
-    before.attributes,
+    pairSupersessions(before.attributes, after.attributes),
     after.attributes,
     (attribute) => attribute.id,
     // A size is headed by its slot; its document label is still diffed below as Label.
