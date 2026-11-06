@@ -195,8 +195,20 @@ export type BoqLine = {
 export type StagedBoqLine = BoqLine & {
   index: number;
   categoryId: string | null;
+  /**
+   * `chosen` is a person's decision and the ONLY status the confirm writes
+   * into `spec_records.category_id` (`categoryToWrite`, audit 2026-11-06, G8).
+   * `suggested` (or `confident`, on a bill staged before that word) is the
+   * app's reading, shown as a `SuggestButton` until somebody accepts it.
+   */
   categoryStatus: string;
   categoryCandidates?: { id: string; name: string }[];
+  /**
+   * What a suggested category was read from (`name matches “Pouf”`). Absent
+   * on a bill staged before 2026-11-06; the screen then says "matched on the
+   * line's name", which is all that is known.
+   */
+  categoryReason?: string | null;
   /**
    * The item's level: simple, complex or hero — guessed at parse time and
    * shown on the review table for a person to correct.

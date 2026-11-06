@@ -28,6 +28,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import NextStepAction from "@/components/ui/NextStepAction";
 import { useNextStep } from "@/lib/use-next-step";
 import SuggestButton from "@/components/ui/SuggestButton";
+import BillCategoryCell from "@/components/imports/BillCategoryCell";
+import { suggestedCategoryId } from "@/lib/bill-category";
 import { Table, Th, Td, Tr } from "@/components/ui/Table";
 import Tip from "@/components/ui/Tip";
 import { ClientRefs } from "@/components/ui/ClientRefs";
@@ -129,6 +131,8 @@ type Line = {
   // a finish line is filed under (`fabricFilingCode`).
   finishCode?: string | null;
   categoryId: string | null; categoryStatus: string;
+  // What a suggested category was read from; see `StagedBoqLine`.
+  categoryReason?: string | null;
   categoryCandidates?: { id: string; name: string }[]; ignored: boolean;
   // Guessed at parse time, corrected here. `chosen` is what makes it a
   // decision the quote gate may read; see db/migrations/0025.
@@ -682,17 +686,6 @@ function asClause(text: string): string {
   return text.trim().replace(/[.!\s]+$/, "");
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  confident: "matched",
-  ambiguous: "several possible",
-  // What the parser actually writes for a confident match. It was missing, so
-  // a suggested category rendered with NO chip and read as a decision.
-  suggested: "suggested",
-  none: "no match",
-  chosen: "chosen",
-  pending: "",
-};
-
 export default function ReviewImportPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -964,6 +957,47 @@ export default function ReviewImportPage() {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ sheetIndex, index: line.index, level: line.level }),
+        });
+        if (!res.ok) {
+          setError(res.error);
+          break;
+        }
+        carried += res.data?.carried ?? 0;
+      }
+      if (carried > 0) {
+        setNotice(
+          `Also filled in on ${carried} line${carried === 1 ? "" : "s"} on the other phases carrying the same client ` +
+            `refs. Each says where it came from and can be changed there.`,
+        );
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Accept every suggested CATEGORY on one tab (audit 2026-11-06, G8).
+   *
+   * A guess is no longer written unless somebody accepts it, so a 300-line
+   * bill must not mean 300 clicks. The set is the one the button counted
+   * (`suggestedCategoryId`, the confirm's own rule read the other way), each
+   * accepted through the same per-line PATCH a single click uses, and ONE
+   * reload at the end, for `acceptAllLevels`' reason.
+   */
+  async function acceptAllCategories(sheetIndex: number, lines: Line[]) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    let carried = 0;
+    try {
+      for (const line of lines) {
+        const categoryId = suggestedCategoryId(line);
+        if (!categoryId) continue;
+        const res = await apiFetch<{ carried?: number }>(`/api/imports/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sheetIndex, index: line.index, categoryId }),
         });
         if (!res.ok) {
           setError(res.error);
@@ -1948,6 +1982,13 @@ export default function ReviewImportPage() {
             (line) =>
               line.level && line.levelStatus !== "chosen" && !notFurnitureIds.has(line.index) && line.rowKind !== "finish_for",
           );
+          // The same three exclusions for the CATEGORY a line suggests: a
+          // fabric line is not a record, and a line asked about as packaging
+          // is not offered a sheet to accept before that cheaper question.
+          const suggestedCategories = live.filter(
+            (line) =>
+              suggestedCategoryId(line) !== null && !notFurnitureIds.has(line.index) && line.rowKind !== "finish_for",
+          );
           // A fabric line is not a record, so the code it carries is not a client
           // ref two records share: `GR-FAB-13` under six items is one fabric.
           const duplicates = duplicateGroups({ ...sheet, lines: sheet.lines.filter((line) => line.rowKind !== "finish_for") });
@@ -2279,6 +2320,12 @@ export default function ReviewImportPage() {
                           {suggested.length} {suggested.length === 1 ? "has" : "have"} a suggested level
                         </Chip>
                       )}
+                      {suggestedCategories.length > 0 && (
+                        <Chip tone="info">
+                          {suggestedCategories.length} {suggestedCategories.length === 1 ? "has" : "have"} a suggested
+                          category
+                        </Chip>
+                      )}
                       {notFurniture.length > 0 && (
                         <Chip tone="info">
                           {notFurniture.length} may not be furniture
@@ -2287,7 +2334,8 @@ export default function ReviewImportPage() {
                     </>
                   }
                   actions={
-                    run.status === "parsed" && (notFurniture.length > 0 || suggested.length > 0) ? (
+                    run.status === "parsed" &&
+                    (notFurniture.length > 0 || suggested.length > 0 || suggestedCategories.length > 0) ? (
                       <span className="inline-flex flex-wrap items-center gap-4">
                         {/* FIRST, because it is the cheaper decision: whether a
                             row belongs in the bill at all comes before how
@@ -2301,9 +2349,19 @@ export default function ReviewImportPage() {
                             onAccept={() => void ignoreAllSuggested(sheetIndex, notFurniture)}
                           />
                         )}
+                        {/* Category before level: the category decides
+                            which questions the record has at all. */}
+                        {suggestedCategories.length > 0 && (
+                          <SuggestButton
+                            value="Accept all suggested categories on this tab"
+                            evidence={`accepts ${suggestedCategories.length} suggestion${suggestedCategories.length === 1 ? "" : "s"} · each row says what it matched`}
+                            busy={busy}
+                            onAccept={() => void acceptAllCategories(sheetIndex, suggestedCategories)}
+                          />
+                        )}
                         {suggested.length > 0 && (
                           <SuggestButton
-                            value={`Accept all ${suggested.length}`}
+                            value={`Accept all ${suggested.length} suggested level${suggested.length === 1 ? "" : "s"}`}
                             evidence="each row says what it was read from"
                             busy={busy}
                             onAccept={() => void acceptAllLevels(sheetIndex, suggested)}
@@ -2875,26 +2933,17 @@ export default function ReviewImportPage() {
                               <Td colSpan={2} />
                             ) : (
                             <Td>
-                              <select
-                                value={line.categoryId ?? ""}
-                                disabled={run.status !== "parsed" || line.ignored}
-                                onChange={(e) =>
-                                  setLine(sheetIndex, line.index, { categoryId: e.target.value || null })
-                                }
-                                className="w-full max-w-[11rem] rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50"
-                              >
-                                <option value="">— not yet —</option>
-                                {data.categories.map((category) => (
-                                  <option key={category.id} value={category.id}>
-                                    {category.family === "upholstery" ? "Uph" : "Cab"} · {category.name}
-                                  </option>
-                                ))}
-                              </select>
-                              {line.categoryStatus !== "chosen" && STATUS_LABEL[line.categoryStatus] && (
-                                <span className="ml-1.5 text-xs text-neutral-500">
-                                  {STATUS_LABEL[line.categoryStatus]}
-                                </span>
-                              )}
+                              {/* A GUESS IS A SUGGESTION UNTIL SOMEBODY ACCEPTS
+                                  IT, and only an accepted one is written
+                                  (audit 2026-11-06, G8): the Level cell's
+                                  rule, in `BillCategoryCell`. */}
+                              <BillCategoryCell
+                                line={line}
+                                categories={data.categories}
+                                editable={run.status === "parsed" && !line.ignored}
+                                busy={busy}
+                                onSet={(categoryId) => void setLine(sheetIndex, line.index, { categoryId })}
+                              />
                               <CarriedFrom tab={line.categoryCarriedFrom} />
                             </Td>
                             )}

@@ -74,6 +74,7 @@ import { readMockupQty } from "@/lib/bill-sheet-notices";
 import { addToMockupPhase, MOCKUP_PHASE_NAME } from "@/lib/mockup-phase";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
 import { documentClosedSentence } from "@/lib/intake-status";
+import { categoryToWrite } from "@/lib/bill-category";
 
 type StagedLine = {
   index: number;
@@ -102,6 +103,8 @@ type StagedLine = {
    */
   finishCode?: string | null;
   categoryId: string | null;
+  /** `chosen` is the only status written; see `categoryToWrite`. */
+  categoryStatus?: string | null;
   /**
    * The level, and whether a person chose it.
    *
@@ -298,11 +301,16 @@ export async function confirmBoqImport(
   //    exists, carries its refs and its drawing specs, and simply has no
   //    checklist yet. It says so on the spec table rather than being refused
   //    here. A category that names a row we do not have is still refused —
-  //    that is a stale screen, not a deferred decision.
+  //    that is a stale screen, not a deferred decision. Only a CHOSEN one is
+  //    checked, because only a chosen one is written (`categoryToWrite`): a
+  //    stale guess nobody accepted is dropped with the rest of the guesses.
   const categories = await txn`select id from item_categories`;
   const known = new Set(categories.map((row) => String(row.id)));
   const unknownCategory = sheets.flatMap((sheet) =>
-    (sheet.lines as StagedLine[]).filter((line) => !line.ignored && line.categoryId && !known.has(line.categoryId)),
+    (sheet.lines as StagedLine[]).filter((line) => {
+      const chosen = categoryToWrite(line);
+      return !line.ignored && chosen !== null && !known.has(chosen);
+    }),
   );
   if (unknownCategory.length > 0) {
     throw new DomainConflictError(
@@ -709,7 +717,7 @@ export async function confirmBoqImport(
            qty_unit, designer, area, boq_category, level, level_suggested, level_suggested_reason,
            internal_notes, source_import_id, source_line_no, created_by, updated_by)
         values
-          (${projectId}, ${specRunId}, ${recordNo}, 'active', ${line.categoryId ?? null}, ${plan?.name ?? line.itemDescription},
+          (${projectId}, ${specRunId}, ${recordNo}, 'active', ${categoryToWrite(line)}, ${plan?.name ?? line.itemDescription},
            ${line.productReference}, ${line.qty}, ${line.qtyUnit ?? null}, ${line.designer},
            ${effectiveArea(line)}, ${line.boqCategory ?? null},
            ${decided.level}, ${decided.suggested}, ${decided.reason},
@@ -740,7 +748,11 @@ export async function confirmBoqImport(
         `;
       }
 
-      // Only where a category was chosen. An uncategorised record has no
+      // Only where a category was CHOSEN, by a person (`categoryToWrite`,
+      // audit 2026-11-06, G8): the staging's guess is not a category until
+      // somebody accepts it, and this insert is what makes a guess
+      // consequential, because a category is what creates the checklist.
+      // An uncategorised record has no
       // questions to be missing — the insert-select below writes nothing for it,
       // and `PATCH /api/records/[id]` writes them when a category is set.
       await txn`

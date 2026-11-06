@@ -168,6 +168,9 @@ export async function loadLineSuggester(exec: TxnSql): Promise<(line: SuggestInp
     if (category.status === "ambiguous") {
       return decided(null, "ambiguous", { categoryCandidates: category.candidates });
     }
+    if (category.status === "suggested") {
+      return decided(category.categoryId, category.status, { categoryReason: category.evidence });
+    }
     return decided(category.categoryId, category.status);
   };
 }
@@ -179,7 +182,12 @@ export type CategoryRegister = {
 };
 
 export type CategorySuggestion =
-  | { status: "suggested"; categoryId: string }
+  /**
+   * `evidence` is the term the name matched, in the words a reviewer reads
+   * beside the `SuggestButton` (audit 2026-11-06, G8): a suggestion with
+   * nothing to check it against is a guess accepted blind.
+   */
+  | { status: "suggested"; categoryId: string; evidence: string }
   | { status: "ambiguous"; categoryId: null; candidates: { id: string; name: string }[] }
   | { status: "none"; categoryId: null };
 
@@ -207,11 +215,18 @@ export function suggestCategory(name: string, register: CategoryRegister): Categ
     ...register.aliases.map((a) => ({ id: a.categoryId, name: a.term })),
   ];
   const match = matchName(item, candidates);
-  if (match.status === "confident") return { status: "suggested", categoryId: match.id };
+  const matched = (terms: string[]) => `name matches ${[...new Set(terms)].map((term) => `“${term}”`).join(", ")}`;
+  if (match.status === "confident") return { status: "suggested", categoryId: match.id, evidence: matched([match.name]) };
   if (match.status === "ambiguous") {
     // Several terms pointing at ONE category is agreement, not ambiguity.
     const ids = [...new Set(match.candidates.map((candidate) => candidate.id))];
-    if (ids.length === 1) return { status: "suggested", categoryId: ids[0]! };
+    if (ids.length === 1) {
+      return {
+        status: "suggested",
+        categoryId: ids[0]!,
+        evidence: matched(match.candidates.map((candidate) => candidate.name)),
+      };
+    }
     return {
       status: "ambiguous",
       categoryId: null,
