@@ -325,7 +325,9 @@ describeIfDb("a bill's finish lines, filed by kind", () => {
     ]);
     const refused = await confirmRevision(revision);
     expect(refused.status).toBe(409);
-    expect(String(refused.body.error)).toMatch(/^Row 5's timber is not the one this item's record already holds from the bill/);
+    // The item's row and the timber it holds, which the revision no longer
+    // lists (audit 2026-11-06, 1.5: the planner's sentence, the review's too).
+    expect(String(refused.body.error)).toMatch(/^Row 3's record holds the timber “.+” from the bill, and this revision no longer lists it/);
   });
 
   it("writes a revision's first line of a NEW kind, though the record holds fabrics from the bill", { timeout: 60_000 }, async () => {

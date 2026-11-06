@@ -2552,6 +2552,19 @@ export default function ReviewImportPage() {
                                       {fabricFilings[line.index]?.forRows?.sentence}
                                     </span>
                                   )}
+                                  {/* THE CONFIRM WILL REFUSE THIS, said where it is
+                                      (audit 2026-11-06, 1.5): the plan the confirm
+                                      executes found a finish the item holds from
+                                      the bill that this revision no longer lists.
+                                      A few words in red; the sentence behind Why. */}
+                                  {fabricFilings[line.index]?.refusal && (
+                                    <details className="mt-0.5 text-[11px] text-red-800" role="alert">
+                                      <summary className="cursor-pointer font-medium">
+                                        Confirm will refuse: retire the held finish on the record first. Why?
+                                      </summary>
+                                      {fabricFilings[line.index]?.refusal}
+                                    </details>
+                                  )}
                                   {fabricFilings[line.index] && (
                                     <FabricFilingLine
                                       plan={fabricFilings[line.index] as FabricLinePlan}

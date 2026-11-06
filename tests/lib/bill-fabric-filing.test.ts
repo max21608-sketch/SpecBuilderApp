@@ -11,6 +11,7 @@ import {
   fabricLineWrite,
   fabricMaterialCode,
   planBillFabrics,
+  planBillFinishWrites,
   planFinishSwatches,
   swatchDifferNotice,
   type SwatchCandidate,
@@ -579,5 +580,120 @@ describe("a finish line filed by its schedule code (the bill's COM CODE column)"
     expect(out.get("0:3")?.filing).toBe("new library entry ZB_04, with row 3, by its COM CODE");
     expect(out.get("0:5")?.filing).toBe("new library entry ZB_04, with row 3, by its COM CODE");
     expect(out.get("0:5")?.writes).toEqual({ value: "NAME: EXAMPLE VELVET CODE: 1234.56 COLOUR: IVORY", qualifier: null });
+  });
+});
+
+// ---- audit 2026-11-06, item 1.5 (C5): ONE planner for what each finish line
+// writes, where, and what refuses — read by the review's line and executed by
+// the confirm. The confirm used to re-read what a record held for every line,
+// rows it had written moments before included, so a second fabric under one
+// carried item found the first "held" and refused the whole bill, while the
+// review said "→ COM 2".
+describe("planBillFinishWrites — the one plan the review and the confirm share", () => {
+  type Line = Parameters<typeof planBillFinishWrites>[0]["sheets"][number]["lines"][number];
+  const item = (index: number, lineNo: number, code: string, over: Partial<Line> = {}): Line => ({
+    index,
+    lineNo,
+    code,
+    itemDescription: "Armchair",
+    ignored: false,
+    rowKind: "item",
+    ...over,
+  });
+  const finishLine = (index: number, lineNo: number, words: string, parentRow: number, parentCode: string): Line => ({
+    index,
+    lineNo,
+    code: null,
+    itemDescription: words,
+    ignored: false,
+    rowKind: "finish_for",
+    finishFor: { row: parentRow, code: parentCode },
+  });
+  const run = (lines: Line[], over: Partial<Parameters<typeof planBillFinishWrites>[0]> = {}) =>
+    planBillFinishWrites({
+      sheets: [{ sheetName: "Bill", ignored: false, lines }],
+      library: [],
+      prefix: "ZZA",
+      descriptionCodes: () => [],
+      heldFabric: () => [],
+      heldSlots: () => [],
+      ...over,
+    });
+  const slotsOf = (plan: ReturnType<typeof run>, key: string) =>
+    plan.lines.get(key)?.onRows.map((entry) => (entry.held ? "held" : (entry.placement?.jsonId ?? "none")));
+
+  it("gives three fabrics on one item COM 1, 2 and 3, keeps a fourth with no field, and a timber its own", () => {
+    const plan = run([
+      item(0, 2, "ZZ-CH-01"),
+      finishLine(1, 3, "Example velvet, ivory", 2, "ZZ-CH-01"),
+      finishLine(2, 4, "Example boucle, sand", 2, "ZZ-CH-01"),
+      finishLine(3, 5, "Example linen, grey", 2, "ZZ-CH-01"),
+      finishLine(4, 6, "Example mohair, rust", 2, "ZZ-CH-01"),
+      finishLine(5, 7, "Solid oak timber, natural", 2, "ZZ-CH-01"),
+    ]);
+    expect(["0:1", "0:2", "0:3", "0:4", "0:5"].map((key) => slotsOf(plan, key))).toEqual([[1], [2], [14], ["none"], [4]]);
+    expect(plan.lines.get("0:4")?.onRows[0]?.placement?.kept).toBe("full");
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it("writes a revision's second fabric of a kind the item already holds into the next slot, refusing nothing", () => {
+    const carried = item(0, 2, "ZZ-CH-01", { replaces: { recordId: "rec-1", recordVersion: 4 } });
+    const plan = run(
+      [carried, finishLine(1, 3, "Example velvet, ivory", 2, "ZZ-CH-01"), finishLine(2, 4, "Example boucle, sand", 2, "ZZ-CH-01")],
+      {
+        heldFabric: (recordId, kind) => (recordId === "rec-1" && kind === "fabric" ? ["Example velvet, ivory"] : []),
+        // COM 1 is held, by the velvet the first confirm wrote.
+        heldSlots: (_sheet, line) => (line === 0 ? [1] : []),
+      },
+    );
+    expect(slotsOf(plan, "0:1")).toEqual(["held"]);
+    expect(plan.lines.get("0:1")?.filing).toBeNull();
+    expect(slotsOf(plan, "0:2")).toEqual([2]);
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it("refuses, naming the row and the value, where the revision no longer lists a fabric the item holds", () => {
+    const carried = item(0, 2, "ZZ-CH-01", { replaces: { recordId: "rec-1", recordVersion: 4 } });
+    const plan = run([carried, finishLine(1, 3, "Example boucle, sand", 2, "ZZ-CH-01")], {
+      heldFabric: (recordId, kind) => (recordId === "rec-1" && kind === "fabric" ? ["Example velvet, ivory"] : []),
+      heldSlots: (_sheet, line) => (line === 0 ? [1] : []),
+    });
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0]).toMatchObject({ sheetIndex: 0, row: 2, kind: "fabric", held: "Example velvet, ivory", lineIndex: 1 });
+    expect(plan.refusals[0]!.sentence).toContain("Row 2");
+    expect(plan.refusals[0]!.sentence).toContain("Example velvet, ivory");
+    expect(plan.refusals[0]!.sentence).toContain("retire it");
+  });
+
+  it("refuses nothing where the revision gives the item no line of that kind at all", () => {
+    // A held fabric may have come from the item's own description cell, which
+    // a revision does not write again; with no fabric line to compare, the
+    // revision says nothing about it.
+    const carried = item(0, 2, "ZZ-CH-01", { replaces: { recordId: "rec-1", recordVersion: 4 } });
+    const plan = run([carried, finishLine(1, 3, "Solid oak timber, natural", 2, "ZZ-CH-01")], {
+      heldFabric: (recordId, kind) => (recordId === "rec-1" && kind === "fabric" ? ["Example velvet, ivory"] : []),
+    });
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it("is what the review describes: the arrow reads the plan's slot", () => {
+    const carried = item(0, 2, "ZZ-CH-01", { replaces: { recordId: "rec-1", recordVersion: 4 } });
+    const lines = [carried, finishLine(1, 3, "Example velvet, ivory", 2, "ZZ-CH-01"), finishLine(2, 4, "Example boucle, sand", 2, "ZZ-CH-01")];
+    const over = {
+      heldFabric: (recordId: string) => (recordId === "rec-1" ? ["Example velvet, ivory"] : []),
+      heldSlots: (_sheet: number, line: number) => (line === 0 ? [1] : []),
+    };
+    const review = planBillFabrics({ sheets: [{ sheetName: "Bill", ignored: false, lines }], rowImages: null, library: [], heldSwatches: new Set(), prefix: "ZZA", descriptionCodes: () => [], ...over });
+    expect(review.get("0:2")?.goesTo).toBe("→ COM 2");
+    expect(review.get("0:2")?.refusal).toBeUndefined();
+  });
+
+  it("puts a refusal on the review's line, in the confirm's own words", () => {
+    const carried = item(0, 2, "ZZ-CH-01", { replaces: { recordId: "rec-1", recordVersion: 4 } });
+    const lines = [carried, finishLine(1, 3, "Example boucle, sand", 2, "ZZ-CH-01")];
+    const heldFabric = (recordId: string) => (recordId === "rec-1" ? ["Example velvet, ivory"] : []);
+    const plan = run(lines, { heldFabric });
+    const review = planBillFabrics({ sheets: [{ sheetName: "Bill", ignored: false, lines }], rowImages: null, library: [], heldSwatches: new Set(), prefix: "ZZA", descriptionCodes: () => [], heldFabric, heldSlots: () => [] });
+    expect(review.get("0:1")?.refusal).toBe(plan.refusals[0]!.sentence);
   });
 });

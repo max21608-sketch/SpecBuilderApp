@@ -271,6 +271,24 @@ describe("fabricLineIsPlaceholder", () => {
   it("does not strip a lead before the @ that is not the bill's own lead words", () => {
     expect(fabricLineIsPlaceholder("Example Mills velvet @ seat", "Armchair")).toBe(false);
   });
+
+  // Audit 2026-11-06, C11: a line saying SOMEBODY ELSE chooses the fabric
+  // names no fabric. Read as a real one, the first was minted BW-AMB-001 and
+  // every later line with the same words linked to it: the merge of undecided
+  // fabrics the placeholder rule exists to prevent.
+  it("reads a fabric left to somebody else to choose as nothing", () => {
+    expect(fabricLineIsPlaceholder("Fabric @ Armchair – to be selected by client", "Armchair")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric TBA – client to select", "Armchair")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric by others", "Armchair")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric @ Stool: by client", "Stool")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric @ Stool - by ID", "Stool")).toBe(true);
+    expect(fabricLineIsPlaceholder("Fabric @ Sofa, designer to confirm", "Sofa")).toBe(true);
+  });
+
+  it("still reads a named cloth as a fabric, beside a deferral or not", () => {
+    expect(fabricLineIsPlaceholder("Kvadrat Hallingdal 65", "Armchair")).toBe(false);
+    expect(fabricLineIsPlaceholder("Fabric @ Armchair Example Weave 104, colour by client", "Armchair")).toBe(false);
+  });
 });
 
 // The Ronnie Scott's call, 2026-10-15: Confirm was disabled with two of three

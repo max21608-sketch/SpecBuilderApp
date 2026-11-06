@@ -90,7 +90,7 @@ const record = (id: string, label: string, over: Record<string, unknown> = {}) =
   ...over,
 });
 
-function mount(lines: unknown[], reconciliation: unknown) {
+function mount(lines: unknown[], reconciliation: unknown, fabricFilings: unknown = {}) {
   routes.current = {
     [`/api/imports/${IMPORT}`]: {
       ok: true,
@@ -127,6 +127,7 @@ function mount(lines: unknown[], reconciliation: unknown) {
       categories: [],
       runs: [{ id: RUN, name: "MAIN", status: "active", boq_revision: "A", boq_date: null, record_count: 3 }],
       reconciliation: { 0: reconciliation },
+      fabricFilings,
     },
   };
   return render(<ReviewImportPage />);
@@ -201,5 +202,26 @@ describe("the revision panel says what the confirm will write", () => {
     expect(patches()).toEqual([
       { sheetIndex: 0, index: 1, replaces: { recordId: "rec-bench", recordVersion: 8, restore: true } },
     ]);
+  });
+});
+
+describe("a finish line the confirm will refuse says so where it is (audit 1.5)", () => {
+  it("prints the refusal in red on the line, with the confirm's sentence behind Why", async () => {
+    const sentence =
+      "Row 2's record holds the fabric “Example velvet” from the bill, and this revision no longer lists it.";
+    const fabricLine = {
+      ...line(1, "F-FA-03"),
+      itemDescription: "Example linen",
+      rowKind: "finish_for",
+      finishFor: { row: 2, code: "ZZ-12" },
+    };
+    mount(
+      [line(0, "ZZ-12", { recordId: "rec-chair", recordVersion: 5 }), fabricLine],
+      { ...reconciliation, lines: [{ ...reconciliation.lines[0], accepted: true }] },
+      { 0: { 1: { goesTo: "→ COM 2", filing: "new library entry F-FA-03", swatch: null, askForShortCode: false, refusal: sentence } } },
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Confirm will refuse");
+    expect(alert.textContent).toContain(sentence);
   });
 });

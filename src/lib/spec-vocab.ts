@@ -550,3 +550,43 @@ export function pointsElsewhere(value: string | null | undefined): boolean {
 export function deferredToSomebody(normalised: string): boolean {
   return DEFERRED_TO_SOMEBODY.test(normalised);
 }
+
+/**
+ * The phrases a bill writes where SOMEBODY ELSE will choose the finish — "to
+ * be selected by client", "client to select", "by others", "by ID", "designer
+ * to confirm" — as whole words, normalised as `normaliseName` leaves them.
+ *
+ * The same meaning as `deferredToSomebody`, as a LIST, for a reader that takes
+ * phrases out of a line and asks what is left: `fabricLineIsPlaceholder`
+ * (audit 2026-11-06, C11). Read as a real fabric, "Fabric @ Armchair – to be
+ * selected by client" minted an in-house code and every later line with the
+ * same words linked to it — one invented finish standing for every undecided
+ * fabric on the bill. NOT folded into `deferredToSomebody` itself: that one is
+ * anchored at the end of a whole value and decides a STATE in the drawings and
+ * spec-document readers, which this change does not touch.
+ */
+export const DEFERRED_TO_SOMEBODY_PHRASES = [
+  "to be selected by client",
+  "to be selected by the client",
+  "to be selected",
+  "to be chosen",
+  "to be specified",
+  "selected by client",
+  "selected by the client",
+  "client to select",
+  "client to choose",
+  "client to confirm",
+  "client to advise",
+  "designer to select",
+  "designer to confirm",
+  "id to select",
+  "id to confirm",
+  "by others",
+  "by the client",
+  "by client",
+  "by the id",
+  "by id",
+  "by the designer",
+  "by designer",
+  "by interior designer",
+];

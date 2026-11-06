@@ -62,9 +62,10 @@ import {
   slotChangeFor,
   revisionDescriptionRefusal,
   type SlotOverride,
+  type BillDescriptionPlan,
 } from "@/lib/bill-description";
 import { loadDescriptionFields, loadHeldAttributes } from "@/lib/bill-description-load";
-import { descriptionFilesAFinish, planBillFabrics, type FabricLinePlan } from "@/lib/bill-fabric-filing";
+import { billFinishPlanInputs, planBillFabrics, type FabricLinePlan } from "@/lib/bill-fabric-filing";
 import {
   loadCurrentSwatches,
   loadFinishCodePrefix,
@@ -1145,10 +1146,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // confirm. A line a REVISION carries says, in the confirm's own words, when
   // its description will not be written.
   const descriptions: Record<number, Record<number, unknown>> = {};
-  /** The coded finishes each item line's description will file, for the fabric plan below. */
-  const descriptionCodes = new Map<string, { code: string; words: string | null }[]>();
-  /** The BWS slots (json ids) each item line's description will write, for the finish lines' slots below. */
-  const descriptionSlots = new Map<string, number[]>();
+  /**
+   * Per sheet, each item line's description plan and whether a revision holds
+   * it back — what the finish plan below reads, through `billFinishPlanInputs`,
+   * exactly as the confirm does.
+   */
+  const descriptionPlans: Map<number, { attributes: BillDescriptionPlan["attributes"]; held: boolean }>[] = [];
   /** The register the descriptions were planned against: field id → json id. */
   const jsonIdOfField = new Map<string, number>();
   if (parsed) {
@@ -1167,22 +1170,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         const holding = line?.replaces ? held.get(line.replaces.recordId) : undefined;
         const revisionRefusal = holding ? revisionDescriptionRefusal(plan, holding) : null;
         bySheet[index] = { ...plan, revisionRefusal };
-        if (!revisionRefusal) {
-          descriptionSlots.set(
-            `${sheetIndex}:${index}`,
-            plan.attributes.flatMap((attribute) => {
-              const jsonId = attribute.specFieldId ? jsonIdOfField.get(attribute.specFieldId) : undefined;
-              return jsonId === undefined ? [] : [jsonId];
-            }),
-          );
-          descriptionCodes.set(
-            `${sheetIndex}:${index}`,
-            plan.attributes.filter(descriptionFilesAFinish).map((attribute) => ({
-              code: attribute.materialCode as string,
-              words: attribute.finishWords,
-            })),
-          );
-        }
+        const forSheet = descriptionPlans[sheetIndex] ?? new Map();
+        forSheet.set(index, { attributes: plan.attributes, held: revisionRefusal !== null });
+        descriptionPlans[sheetIndex] = forSheet;
       }
       descriptions[sheetIndex] = bySheet;
     }
@@ -1212,26 +1202,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // WHAT EACH CARRIED RECORD ALREADY HOLDS, from any document — the slots
     // the confirm's own read will find taken before its finish lines.
     const heldOnCarried = await loadHeldAttributes(sql, carriedParents);
+    // THE ONE PLAN the confirm executes (`planBillFinishWrites`), described.
     const plans = planBillFabrics({
       sheets: parsed.sheets,
       rowImages: parsed.rowImages,
       library,
       heldSwatches,
       prefix: finishCodePrefix,
-      descriptionCodes: (sheetIndex, lineIndex) => descriptionCodes.get(`${sheetIndex}:${lineIndex}`) ?? [],
       heldFabric: (recordId, kind) =>
         (heldFinishes.get(recordId) ?? []).filter((entry) => entry.kind === kind).map((entry) => entry.value),
-      heldSlots: (sheetIndex, lineIndex) => {
-        const line = parsed.sheets[sheetIndex]?.lines.find((entry) => entry.index === lineIndex);
-        const carried = line?.replaces ? (heldOnCarried.get(line.replaces.recordId)?.fieldIds ?? []) : [];
-        return [
-          ...carried.flatMap((fieldId) => {
-            const jsonId = jsonIdOfField.get(fieldId);
-            return jsonId === undefined ? [] : [jsonId];
-          }),
-          ...(descriptionSlots.get(`${sheetIndex}:${lineIndex}`) ?? []),
-        ];
-      },
+      ...billFinishPlanInputs({
+        sheets: parsed.sheets,
+        descriptions: parsed.sheets.map((_, sheetIndex) => descriptionPlans[sheetIndex] ?? new Map()),
+        carriedFieldIds: (recordId) => heldOnCarried.get(recordId)?.fieldIds ?? [],
+        jsonIdOfField,
+      }),
     });
     for (const [key, plan] of plans) {
       const [sheetIndex, lineIndex] = key.split(":").map(Number) as [number, number];

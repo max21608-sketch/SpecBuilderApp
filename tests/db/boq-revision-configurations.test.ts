@@ -156,7 +156,10 @@ describeIfDb("A revision and the configurations under its lines", () => {
     ]);
     const { GET } = await import("@/app/api/imports/[id]/route");
     const body = (await (await GET(request("GET"), params(importId))).json()) as {
-      reconciliation: Record<number, { records: { id: string; configurations?: string[] }[]; missing: unknown[] }>;
+      reconciliation: Record<
+        number,
+        { records: { id: string; configurations?: string[] }[]; missing: { recordId: string; suggestedFor?: number }[] }
+      >;
     };
     const sheet = body.reconciliation[0]!;
     expect(sheet.records.map((record) => record.id).sort()).toEqual([parent.id, sibling.id].sort());
@@ -164,8 +167,11 @@ describeIfDb("A revision and the configurations under its lines", () => {
       `${parent.recordNo}.1`,
       `${parent.recordNo}.2`,
     ]);
-    // Nothing reads as "no longer listed": the configurations follow their line.
-    expect(sheet.missing).toEqual([]);
+    // Nothing reads as "no longer listed": the configurations follow their
+    // line, and the two lines are only OFFERED to the lines carrying their
+    // codes until somebody accepts (a suggestion is never a pairing).
+    expect(sheet.missing.filter((entry) => entry.suggestedFor === undefined)).toEqual([]);
+    expect(sheet.missing.map((entry) => entry.recordId)).not.toContain(configurationIds[0]);
     await client.query(`delete from intake_runs where id = $1`, [importId]);
   });
 
