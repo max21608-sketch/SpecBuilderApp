@@ -969,7 +969,12 @@ export default function NamedConfigurationCard({
               ),
             )}
             busy={busyHere}
-            onSet={(level) => void onSetLevel(levelForTargets.map((entry) => entry.id), level)}
+            onSet={(level) =>
+              void onSetLevel(
+                levelForTargets.map((entry) => ({ id: entry.id, version: entry.version })),
+                level,
+              )
+            }
           />
         </div>
       </div>

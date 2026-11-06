@@ -526,13 +526,21 @@ describe("the item card's level control", () => {
     expect(screen.queryByRole("combobox", { name: /level/i })).toBeNull();
   });
 
-  it("says how many records one click reaches, and sends exactly those", async () => {
+  // Each with the version the card showed it at, so a level somebody set in
+  // between is refused rather than overwritten unseen (audit A16).
+  it("says how many records one click reaches, and sends exactly those, with their versions", async () => {
     const spies = renderCard(brass());
     // The fixture resolves to the main phase and the VE phase.
     expect(screen.getByText("sets the level on 2 records")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Complex/ }));
     expect(spies.of("onSetLevel")).toHaveLength(1);
-    expect(spies.of("onSetLevel")[0]!.args).toEqual([["rec-main", "rec-ve"], "complex"]);
+    expect(spies.of("onSetLevel")[0]!.args).toEqual([
+      [
+        { id: "rec-main", version: 3 },
+        { id: "rec-ve", version: 7 },
+      ],
+      "complex",
+    ]);
   });
 
   it("shows a level that is already decided, and does not re-suggest one", () => {

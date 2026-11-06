@@ -200,15 +200,23 @@ export async function POST(request: Request): Promise<Response> {
   }
   const clientName = typeof body.client === "string" && body.client.trim() ? body.client.trim() : null;
 
-  const existing = await sql`select id from projects where bws_project_number = ${number}`;
-  if (existing[0]) {
-    return json({ ok: false, error: `Project ${number} already exists.` }, 409);
+  if (number.length > 40 || name.length > 200 || (clientName?.length ?? 0) > 200) {
+    return json(
+      { ok: false, error: "A project number is at most 40 characters, and a name or a client at most 200." },
+      400,
+    );
   }
 
+  // ONE STATEMENT, NOT A CHECK AND THEN AN INSERT (audit A16). Two people
+  // adding the same project at once both passed a `select` and the second
+  // insert hit the unique index: a bare 500. The index decides, and losing
+  // to it is the same 409 in words as finding the project already there.
   const rows = await sql`
     insert into projects (bws_project_number, name, client, created_by, updated_by)
     values (${number}, ${name}, ${clientName}, ${user.email}, ${user.email})
+    on conflict (bws_project_number) do nothing
     returning id, bws_project_number, name, client
   `;
+  if (!rows[0]) return json({ ok: false, error: `Project ${number} already exists.` }, 409);
   return json({ ok: true, project: rows[0] }, 201);
 }

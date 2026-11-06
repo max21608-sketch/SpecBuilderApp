@@ -249,31 +249,46 @@ export async function acceptSuggestedLevels(
  * many it actually wrote so the screen can say something true rather than
  * echoing the length of its own request.
  *
- * NO VERSION CHECK, deliberately, and for `acceptSuggestedLevels`' reason: the
- * request names the LEVEL rather than an edit to a value the screen read, so
- * there is nothing to be stale about. Setting hero over hero is a no-op and
- * setting hero over simple is exactly the decision the person just took. The
- * row lock is what keeps two of them from interleaving.
+ * EACH RECORD'S VERSION IS CHECKED (audit A16, 2026-11-06). This said "no
+ * version check, deliberately": the request names the level, so there was
+ * nothing to be stale about. There was. The card shows each record's level,
+ * or the app's suggestion, as it was when the card loaded; a click on a card
+ * reading "suggested: simple" then wrote over a level somebody else had
+ * DECIDED in between, unseen. The request now carries the version of every
+ * record it names, and one that moved refuses the WHOLE set with nothing
+ * written, because a level on two of three phases is the half-applied card.
+ * A record no longer live is still skipped rather than refused (it is not on
+ * the card any more), and a list naming nothing live is refused as before.
  * ============================================================================
  */
 export async function setLevelOnRecords(
   txn: TxnSql,
   {
     projectId,
-    recordIds,
+    records,
     level,
     actor,
-  }: { projectId: string; recordIds: string[]; level: ItemLevel; actor: string },
+  }: { projectId: string; records: { id: string; version: number }[]; level: ItemLevel; actor: string },
 ): Promise<{ set: number; level: ItemLevel }> {
-  const ids = [...new Set(recordIds)];
+  const shown = new Map(records.map((record) => [record.id, record.version]));
+  const ids = [...shown.keys()];
   if (ids.length === 0) return { set: 0, level };
 
   const found = await txn`
-    select id from spec_records
+    select id, version from spec_records
      where id = any(${ids}::uuid[]) and project_id = ${projectId} and status = 'active'
      order by record_no
      for update
   `;
+  const moved = found.filter((row) => Number(row.version) !== shown.get(String(row.id)));
+  if (moved.length > 0) {
+    throw new DomainConflictError(
+      "level_stale",
+      moved.length === 1
+        ? "One of these items changed since this screen loaded. Reload, look at its level, and set it again."
+        : `${moved.length} of these items changed since this screen loaded. Reload, look at their levels, and set them again.`,
+    );
+  }
   const live = found.map((row) => String(row.id));
   if (live.length === 0) {
     throw new DomainConflictError(

@@ -44,8 +44,13 @@ const Body = z
         // Named records, one level, one change set. Both halves are required
         // together: a level with no records is a request to set every level on
         // the project, which nothing should be able to ask for by leaving a
-        // field out.
-        recordIds: z.array(z.string().uuid()).min(1).max(200),
+        // field out. Each record carries the version the card showed it at,
+        // so a level somebody set in between is not overwritten unseen
+        // (audit A16).
+        records: z
+          .array(z.object({ id: z.string().uuid(), version: z.number().int().positive() }).strict())
+          .min(1)
+          .max(200),
         level: z.enum(ITEM_LEVELS),
       })
       .strict(),
@@ -80,10 +85,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const body = parsed.data;
   try {
     const result = await withTransaction(async (txn) =>
-      "recordIds" in body
+      "records" in body
         ? await setLevelOnRecords(txn, {
             projectId: id,
-            recordIds: body.recordIds,
+            records: body.records,
             level: body.level,
             actor: user.email,
           })

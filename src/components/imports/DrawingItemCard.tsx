@@ -250,7 +250,8 @@ export default function ItemCard({
    * separate from `onReview` on purpose — the card's confirm carries no level,
    * so the two writes cannot be confused.
    */
-  onSetLevel: (recordIds: string[], level: ItemLevel) => Promise<void>;
+  /** Each record with the version the card showed it at (audit A16). */
+  onSetLevel: (records: { id: string; version?: number }[], level: ItemLevel) => Promise<void>;
   /**
    * Any other change to this staged ITEM — here, a reviewer naming the
    * configurations of a page the read called one item (brief C1). Optional: a
@@ -778,7 +779,12 @@ export default function ItemCard({
             targets={levelForTargets}
             suggestion={suggestLevelFromCard(pending.map((o) => ({ ...o, page: item.page })))}
             busy={busy}
-            onSet={(level) => void onSetLevel(levelForTargets.map((entry) => entry.id), level)}
+            onSet={(level) =>
+              void onSetLevel(
+                levelForTargets.map((entry) => ({ id: entry.id, version: entry.version })),
+                level,
+              )
+            }
           />
         </div>
       </div>

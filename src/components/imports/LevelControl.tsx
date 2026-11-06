@@ -51,6 +51,8 @@ import type { RunResolution } from "@/components/imports/ObservationRows";
 /** What this control needs to know about one record the card writes to. */
 export type LevelTarget = {
   id: string;
+  /** The record's version as the card showed it; sent with the click so a level set in between is refused. */
+  version?: number;
   label: string;
   runName: string;
   /** Undefined where the payload did not carry it — see `RecordEntry`. */
@@ -212,6 +214,7 @@ export function levelTargets(
       if (!ticked.has(record.id) || out.some((entry) => entry.id === record.id)) continue;
       out.push({
         id: record.id,
+        version: record.version,
         label: record.label,
         runName: run.runName,
         level: record.level,
