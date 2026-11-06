@@ -4563,11 +4563,12 @@ their responsibilities elsewhere without a deliberate architecture decision.
   SCREEN may import. The browser never imports `db.ts` or `blob-source.ts`:
   two pages and seven upload components did, through value imports that
   dragged `@neondatabase/serverless` and `@vercel/blob` into the bundle with
-  only lazy initialisation keeping it from crashing (audit G5). `blob-source.ts`
-  is `server-only` (vitest aliases it to Next's empty module); `db.ts` cannot
-  be, because sixteen tsx scripts import it, so
-  `tests/lib/client-server-boundary.test.ts` walks every "use client" file's
-  runtime imports and fails on a path to either.
+  only lazy initialisation keeping it from crashing (audit G5). Neither may
+  carry `import "server-only"`: the package resolves only inside Next's
+  bundler, tsx scripts under db/ and tools/ import both, and when
+  `blob-source.ts` carried it for one evening four backfills failed with
+  ERR_MODULE_NOT_FOUND. `tests/lib/client-server-boundary.test.ts` walks
+  every "use client" file's runtime imports and fails on a path to either.
 - `src/lib/printed-number.ts` — the one reader of a printed number; a
   thousands-or-decimal group is refused, never guessed.
 

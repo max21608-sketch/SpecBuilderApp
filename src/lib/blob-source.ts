@@ -27,8 +27,12 @@
 // ============================================================================
 // SERVER ONLY (audit G5): this module holds the store's server SDK and the
 // helpers that read with the store's credential. The browser builds upload
-// pathnames with `upload-paths.ts`, never with this.
-import "server-only";
+// pathnames with `upload-paths.ts`, never with this. It carried
+// `import "server-only"` for one evening (2026-11-06): the package resolves
+// only inside Next's bundler, and four backfills Max runs on pilot load this
+// module through tsx and failed with ERR_MODULE_NOT_FOUND. The guard is
+// `tests/lib/client-server-boundary.test.ts`, which walks every "use client"
+// file's imports, the same guard `db.ts` has for the same reason.
 import { get, head } from "@vercel/blob";
 import { projectUploadPrefix } from "./upload-paths";
 

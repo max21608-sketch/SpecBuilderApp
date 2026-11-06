@@ -7,12 +7,12 @@
 // `projectUploadPrefix` from `blob-source.ts`, which imports `@vercel/blob`.
 // Lazy initialisation was all that kept the browser from crashing.
 //
-// `blob-source.ts` now carries `import "server-only"`, so Next's build refuses
-// a client import of it. `db.ts` CANNOT carry it: sixteen tsx scripts under
-// db/ and tools/ import it (the backfills Max runs against pilot among them),
-// and outside Next's bundler `server-only` either does not resolve or throws.
-// This walk is the guard that covers both, and it runs in the pure tier on
-// every push rather than only when somebody builds.
+// Neither `db.ts` nor `blob-source.ts` carries `import "server-only"`: the
+// package resolves only inside Next's bundler, and tsx scripts under db/ and
+// tools/ import both (the backfills Max runs against pilot among them) —
+// blob-source carried it for one evening and four backfills failed with
+// ERR_MODULE_NOT_FOUND. This walk is the guard for both, and it runs in the
+// pure tier on every push rather than only when somebody builds.
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
