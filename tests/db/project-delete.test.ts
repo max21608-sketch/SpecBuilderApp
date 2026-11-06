@@ -244,6 +244,43 @@ describeIfDb("0055 a project is deletable", () => {
     return { projectId, recordId, variantId, graphMessageId, uploadMessageId, prefix };
   }
 
+  /**
+   * Opens a transaction holding every table a project delete touches, ACCESS
+   * EXCLUSIVE, taken all at once with NOWAIT and retried, never waited for.
+   *
+   * THE FIRST VERSION OF THIS TEST DEADLOCKED OTHER TESTS. It altered the keys
+   * under an ordinary lock wait while other files ran beside it: its own
+   * `alter table intake_batches` waited for a parallel test's insert into
+   * intake_batches, which was waiting for the lock on `projects` that the
+   * first alter had already taken. Postgres killed one of the two, and twice
+   * it was the other test (extraction-cap, on the shared and on a fresh
+   * database). A test that cannot wait cannot be in a cycle: with NOWAIT it
+   * either takes everything at once or holds nothing and tries again, and
+   * once it holds everything it never waits on another session again. Other
+   * sessions wait on it for the tenth of a second it runs.
+   */
+  async function takeTheTablesToItself(): Promise<void> {
+    const { rows } = await client.query<{ tbl: string }>(`
+      with recursive owned(tbl) as (
+        select 'projects'::regclass
+        union
+        select c.conrelid::regclass from pg_constraint c join owned o on c.confrelid = o.tbl where c.contype = 'f'
+      )
+      select tbl::text from owned`);
+    const tables = [...rows.map((row) => row.tbl), ...POLYMORPHIC_TABLES];
+    for (let attempt = 1; ; attempt += 1) {
+      await client.query("begin");
+      try {
+        await client.query(`lock table ${tables.join(", ")} in access exclusive mode nowait`);
+        return;
+      } catch (error) {
+        await client.query("rollback");
+        if ((error as { code?: string }).code !== "55P03" || attempt >= 200) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 25 + Math.random() * 75));
+      }
+    }
+  }
+
   beforeAll(async () => {
     await client.connect();
   });
@@ -388,9 +425,8 @@ describeIfDb("0055 a project is deletable", () => {
       "project_contacts", "intake_batches", "spec_runs", "project_finishes",
       "spec_records", "intake_runs", "email_drafts",
     ];
-    await client.query("begin");
+    await takeTheTablesToItself();
     try {
-      await client.query("set local lock_timeout = '20s'");
       for (const table of worst) {
         const fk = await one<{ conname: string; def: string }>(
           `select c.conname, pg_get_constraintdef(c.oid) as def from pg_constraint c
