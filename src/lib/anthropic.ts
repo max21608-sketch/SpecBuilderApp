@@ -591,6 +591,8 @@ export type ExtractionFailure = {
   code:
     | "no_api_key"
     | "too_large"
+    /** Our own deadline or the run's abort fired: terminal, because the same document runs out of time again. */
+    | "timeout"
     | "transport"
     | "overloaded"
     | "rate_limited"
@@ -782,8 +784,18 @@ export async function extractSpecDocument(
     });
     response = streamed.message;
     requestId = streamed.requestId;
-  } catch (cause) {
-    return { ...classifyTransportFailure(cause, elapsed()), model };
+  } catch (thrown) {
+    // What was streamed before the failure is kept on every failure, not only
+    // a timeout: those tokens are billed, and the partial answer is the only
+    // evidence of how far the read got.
+    const partial = thrown instanceof StreamFailure ? thrown.partial : null;
+    const cause = thrown instanceof StreamFailure ? thrown.cause : thrown;
+    return {
+      ...classifyCallFailure(cause, elapsed(), signal),
+      model,
+      ...(partial ? { rawResponse: partial, usage: partial.usage } : {}),
+      ...(thrown instanceof StreamFailure ? { requestId: thrown.requestId } : {}),
+    };
   }
 
   const served = typeof response.model === "string" && response.model ? response.model : model;
@@ -850,9 +862,59 @@ function anthropicStream(anthropic: Anthropic) {
             options,
           )
         : anthropic.messages.stream(params.body as unknown as Parameters<typeof anthropic.messages.stream>[0], options);
-    const message = (await stream.finalMessage()) as unknown as ModelResponse;
-    return { message, requestId: stream.request_id ?? null };
+    try {
+      const message = (await stream.finalMessage()) as unknown as ModelResponse;
+      return { message, requestId: stream.request_id ?? null };
+    } catch (cause) {
+      // The stream's own snapshot of the message so far. `finalMessage()`
+      // rejecting throws it away, and on an abort at 740 s it is twelve
+      // minutes of paid output.
+      const partial = (stream as { currentMessage?: unknown }).currentMessage;
+      throw new StreamFailure(cause, partial ? (partial as ModelResponse) : null, stream.request_id ?? null);
+    }
   };
+}
+
+/** A stream that failed, with what it had received and the request id it carried. */
+class StreamFailure {
+  constructor(
+    readonly cause: unknown,
+    readonly partial: ModelResponse | null,
+    readonly requestId: string | null,
+  ) {}
+}
+
+// ============================================================================
+// OUR OWN DEADLINE IS NOT THE NETWORK. Audit D1, 2026-11-06.
+//
+// When MODEL_DEADLINE_MS or the run's abort fires, the SDK rejects with an
+// APIUserAbortError: no `.status`, no streamed error type. It used to fall
+// through every branch of `classifyTransportFailure` to the last one, which
+// is RETRYABLE `transport` — so the worker released the claim and the queue
+// read the whole document again, up to four times, each billed for what it
+// streamed before the abort, and the row finally said "The model could not be
+// reached", which sends a person to look at the network.
+//
+// A read that ran out of time runs out of time again: same document, same
+// model, same budget. So it is terminal, and it says what to do about it.
+// The SIGNAL decides, not the error's class: an abort can surface as the
+// SDK's class or as a bare socket error from a stream cut mid-chunk, and
+// either way it was ours. (In a windowed read a sibling window's failure also
+// aborts this signal; that result is discarded, because the first failure is
+// the one reported.) `document-classify.ts` and `pdf-bill-transcribe.ts`
+// already treat their own deadlines as terminal.
+// ============================================================================
+export function classifyCallFailure(cause: unknown, elapsedMs: number, signal: AbortSignal): ExtractionFailure {
+  if (signal.aborted) {
+    return { ok: false, retryable: false, code: "timeout", error: ranOutOfTimeSentence(elapsedMs), elapsedMs };
+  }
+  return classifyTransportFailure(cause, elapsedMs);
+}
+
+/** What a person is told about a read our own deadline stopped. */
+export function ranOutOfTimeSentence(elapsedMs: number): string {
+  const minutes = Math.max(1, Math.round(elapsedMs / 60_000));
+  return `The read ran out of time after ${minutes} minute${minutes === 1 ? "" : "s"}, so nothing was staged. Split the document into smaller parts and upload them separately.`;
 }
 
 function classifyTransportFailure(cause: unknown, elapsedMs: number): ExtractionFailure {
@@ -917,8 +979,9 @@ function classifyTransportFailure(cause: unknown, elapsedMs: number): Extraction
     return { ok: false, retryable: false, code: "invalid_request", error: refusedRequestSentence(null, streamedErrorMessage(message)), elapsedMs };
   }
 
-  // A socket, a DNS failure, an abort. Retryable: none of them says anything
-  // about the document.
+  // A socket or a DNS failure. Retryable: neither says anything about the
+  // document. (Our own abort never reaches here: `classifyCallFailure` reads
+  // the signal first.)
   return { ok: false, retryable: true, code: "transport", error: `The model could not be reached: ${message}`, elapsedMs };
 }
 
