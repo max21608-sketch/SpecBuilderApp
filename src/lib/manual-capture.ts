@@ -449,7 +449,7 @@ export async function editRecordDetails(
   if (Number(record.version) !== expectedVersion) {
     throw new DomainConflictError(
       "record_version_stale",
-      "Someone else changed this item while you had it open. Reload before saving.",
+      "This item changed since this screen loaded. Reload before saving.",
     );
   }
 
@@ -514,7 +514,7 @@ export async function editRecordDetails(
   if (!updated[0]) {
     throw new DomainConflictError(
       "record_version_stale",
-      "Someone else changed this item while you had it open. Reload before saving.",
+      "This item changed since this screen loaded. Reload before saving.",
     );
   }
 

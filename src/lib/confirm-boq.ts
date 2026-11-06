@@ -73,6 +73,7 @@ import { composeBillNotes, type BoqKeptCell } from "@/lib/boq-roles";
 import { readMockupQty } from "@/lib/bill-sheet-notices";
 import { addToMockupPhase, MOCKUP_PHASE_NAME } from "@/lib/mockup-phase";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
+import { documentClosedSentence } from "@/lib/intake-status";
 
 type StagedLine = {
   index: number;
@@ -218,12 +219,12 @@ export async function confirmBoqImport(
     throw new DomainConflictError("already_confirmed", "This import has already been confirmed.");
   }
   if (run.status !== "parsed") {
-    throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not ready to confirm.`);
+    throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { noun: "bill" }));
   }
   if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
       "import_version_stale",
-      "Someone else changed this import while you were reviewing it. Reload and check before confirming.",
+      "This bill changed since this screen loaded. Reload and check it before confirming.",
     );
   }
 
@@ -566,7 +567,7 @@ export async function confirmBoqImport(
         if (!replacesRunId) {
           throw new DomainConflictError(
             "pairing_without_revision",
-            `BOQ line ${line.lineNo} is paired to an existing record, but this sheet is not marked as revising a run. Reload the review.`,
+            `Row ${line.lineNo} is paired with an existing record, but this sheet does not say which phase it revises. Reload the review and choose the phase.`,
           );
         }
         // A RESTORE (audit 2026-11-06, C14): the reviewer chose to bring back
@@ -864,7 +865,7 @@ export async function confirmBoqImport(
     returning id
   `;
   if (!closed[0]) {
-    throw new DomainConflictError("already_confirmed", "This import was confirmed by someone else a moment ago.");
+    throw new DomainConflictError("already_confirmed", "This bill was confirmed a moment ago. Open its phase to see it.");
   }
 
   // The checklist follows the fabrics: a record that gained a COM spec

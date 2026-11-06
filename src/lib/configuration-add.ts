@@ -546,7 +546,7 @@ export async function renameConfiguration(
   if (Number(record.version) !== expectedVersion) {
     throw new DomainConflictError(
       "record_version_stale",
-      "Someone else changed this configuration while you had it open. Reload before renaming.",
+      "This configuration changed since this screen loaded. Reload before renaming.",
     );
   }
   const billLine = text(record.client_ref) ?? `#${String(record.parent_no)}`;
@@ -581,7 +581,7 @@ export async function renameConfiguration(
   if (!updated[0]) {
     throw new DomainConflictError(
       "record_version_stale",
-      "Someone else changed this configuration while you had it open. Reload before renaming.",
+      "This configuration changed since this screen loaded. Reload before renaming.",
     );
   }
   await snapshotRecords(txn, [recordId], changeSetId);
@@ -642,7 +642,7 @@ export async function setConfigurationStatus(
   if (Number(record.version) !== expectedVersion) {
     throw new DomainConflictError(
       "record_version_stale",
-      "Someone else changed this configuration while you had it open. Reload before trying again.",
+      "This configuration changed since this screen loaded. Reload before trying again.",
     );
   }
   const name = mockup
@@ -721,7 +721,7 @@ export async function setConfigurationStatus(
   if (!updated[0]) {
     throw new DomainConflictError(
       "record_version_stale",
-      "Someone else changed this configuration while you had it open. Reload before trying again.",
+      "This configuration changed since this screen loaded. Reload before trying again.",
     );
   }
   await snapshotRecords(txn, [recordId], changeSetId);

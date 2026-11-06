@@ -43,6 +43,7 @@ import {
   STRUCTURE_MODEL,
   type StructureCall,
 } from "@/lib/boq-structure";
+import { documentClosedSentence } from "@/lib/intake-status";
 
 export const maxDuration = 300;
 
@@ -89,7 +90,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return json({ ok: false, code: "wrong_kind", error: "Only a bill of quantities has columns to read." }, 400);
   }
   if (run.status !== "parsed") {
-    return json({ ok: false, error: `This bill is ${run.status}; its columns can no longer be read.` }, 409);
+    return json({ ok: false, error: documentClosedSentence(run.status, { noun: "bill", consequence: "its columns can no longer be read" }) }, 409);
   }
 
   const metaRows = await sql`select model_metadata from intake_runs where id = ${id}`;
@@ -108,7 +109,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         ok: false,
         code: "structure_read_running",
         error:
-          "The columns are being read already — in another tab, or a moment ago. This screen shows the result when it lands; nothing more is charged.",
+          "The columns are already being read: the read started a moment ago. This screen shows the result when it lands; nothing more is charged.",
       },
       409,
     );
@@ -161,7 +162,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       {
         ok: false,
         code: "structure_read_running",
-        error: "Someone else started reading this bill's columns a moment ago. Reload to see the result; nothing more is charged.",
+        error: "Reading this bill's columns started a moment ago. Reload to see the result; nothing more is charged.",
       },
       409,
     );

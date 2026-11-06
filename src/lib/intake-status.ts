@@ -55,6 +55,88 @@ export function intakeStatusLabel(status: string): string {
 }
 
 /**
+ * A document's state, as the clause of a SENTENCE the server sends a person.
+ *
+ * The labels above are for a chip; this is for a refusal. Until 2026-11-06
+ * (audit G15) ten refusals printed the column itself — "This import is
+ * parsing, not open for editing", "This bill is confirmed; nothing on it can
+ * change" — which is the database talking to somebody who never chose the word
+ * `parsing`. `tests/lib/vocabulary-guard.test.ts` now refuses a status printed
+ * into a server sentence by any other route than these helpers.
+ *
+ * `noun` is what the screen calls the thing: a bill is "this bill", anything
+ * else "this document". Never "import" and never "run": an intake run is a
+ * document READ.
+ */
+export function documentStateWords(status: string): string {
+  switch (status) {
+    case "pending":
+      return "has not been read yet";
+    case "queued":
+    case "parsing":
+      return "is still being read";
+    case "parsed":
+      return "is waiting for its review";
+    case "confirmed":
+      return "has already been confirmed";
+    case "failed":
+      return "could not be read";
+    default:
+      return "is not open for review";
+  }
+}
+
+/**
+ * The next step that goes with `documentStateWords`, in a few words.
+ *
+ * A confirmed BILL is changed on its phase; a confirmed drawing, schedule or
+ * email has written its values onto records, which is where they are changed.
+ */
+export function documentNextStep(status: string, noun: "bill" | "document" = "document"): string {
+  switch (status) {
+    case "pending":
+      return "Read it from the pack first.";
+    case "queued":
+    case "parsing":
+      return "Wait for the read to finish, then reload.";
+    case "confirmed":
+      return noun === "bill" ? "Open its phase to change anything on it." : "Change a value on its record instead.";
+    case "failed":
+      return noun === "bill" ? "Read it again from this screen." : "Try reading it again from the pack.";
+    default:
+      return "Reload to see where it stands.";
+  }
+}
+
+/**
+ * The whole refusal: `This bill has already been confirmed, so its columns can
+ * no longer be changed. Open its phase to change anything on it.`
+ *
+ * `consequence` is the part each caller knows and this does not — what the
+ * person was trying to do. Optional, because "This document is still being
+ * read. Wait for the read to finish, then reload." already says it.
+ */
+export function documentClosedSentence(
+  status: string,
+  options: { noun?: "bill" | "document"; consequence?: string } = {},
+): string {
+  const noun = options.noun ?? "document";
+  const consequence = options.consequence ? `, so ${options.consequence}` : "";
+  return `This ${noun} ${documentStateWords(status)}${consequence}. ${documentNextStep(status, noun)}`;
+}
+
+/**
+ * What a reviewed row's `reviewStatus` is called in a sentence. `applied` and
+ * `ignored` are the screens' own words for the two things a person does to a
+ * row; anything else is not a word anybody chose, so it is not printed.
+ */
+export function reviewedWord(reviewStatus: string): string {
+  if (reviewStatus === "applied") return "applied";
+  if (reviewStatus === "ignored") return "ignored";
+  return "dealt with";
+}
+
+/**
  * In flight: something is going to change without anybody clicking, so the
  * screen showing it must poll and must not offer a Read button.
  */

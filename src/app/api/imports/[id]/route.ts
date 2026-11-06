@@ -98,6 +98,7 @@ import { normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variant
 import { assertStagedFinishSchedule, isStagedFinishSchedule, reviewFinishSchedule } from "@/lib/finish-schedule";
 import { loadScheduleLibrary, setFinishScheduleEntryKind } from "@/lib/confirm-finish-schedule";
 import { isFinishKind } from "@/lib/finishes";
+import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
 
 export const dynamic = "force-dynamic";
 
@@ -144,7 +145,7 @@ async function patchBulkUnit(id: string, raw: unknown, actor: string): Promise<R
       const run = rows[0];
       if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
       if (run.status !== "parsed") {
-        throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
+        throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
       }
       // WITH ITS PALETTES, as the review GET and the confirm read it: a pick
       // made before 0041 is read as a BW standard (`upgradeStandards`), and an
@@ -360,7 +361,7 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
       const run = rows[0];
       if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
       if (run.status !== "parsed") {
-        throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
+        throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
       }
       // WITH ITS PALETTES, as the review GET and the confirm read it: a pick
       // made before 0041 is read as a BW standard (`upgradeStandards`), and an
@@ -375,7 +376,7 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
 
       if (observationId === undefined) {
         if (item.version !== expectedVersion) {
-          throw new DomainConflictError("item_version_stale", "This item was edited in another tab. Reload.");
+          throw new DomainConflictError("item_version_stale", "This item changed since this screen loaded. Reload.");
         }
         const ticked = changes.ticked ?? item.targets?.ticked ?? [];
         const unticked = changes.unticked ?? item.targets?.unticked ?? [];
@@ -459,11 +460,11 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
         if (observation.reviewStatus !== "pending") {
           throw new DomainConflictError(
             "observation_reviewed",
-            `That spec has already been ${observation.reviewStatus}. Reload to see the current state.`,
+            `That spec has already been ${reviewedWord(observation.reviewStatus)}. Reload to see where it stands.`,
           );
         }
         if (observation.version !== expectedVersion) {
-          throw new DomainConflictError("observation_version_stale", "That spec was edited in another tab. Reload.");
+          throw new DomainConflictError("observation_version_stale", "That spec changed since this screen loaded. Reload.");
         }
         if (changes.ignoreBecause !== undefined) {
           if (Object.keys(changes).length !== 1) {
@@ -723,7 +724,7 @@ function swapSlotIntoItem(
     if (seen.get(live.id) !== live.version) {
       throw new DomainConflictError(
         "swap_stale",
-        `Another row now holds ${slotWords(swap.slot)} on this item, or it was edited in another tab. Reload and point at the figure again.`,
+        `Another row now holds ${slotWords(swap.slot)} on this item, or it changed since this screen loaded. Reload and point at the figure again.`,
       );
     }
   }
@@ -807,7 +808,7 @@ async function patchPreamble(id: string, raw: unknown, actor: string): Promise<R
       const run = rows[0];
       if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
       if (run.status !== "parsed") {
-        throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
+        throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
       }
       const staged: StagedPreamble = assertStagedPreamble(run.parsed);
       const note = staged.notes.find((row) => row.id === noteId);
@@ -815,11 +816,11 @@ async function patchPreamble(id: string, raw: unknown, actor: string): Promise<R
       if (note.reviewStatus !== "pending") {
         throw new DomainConflictError(
           "note_reviewed",
-          `That note has already been ${note.reviewStatus}. Reload to see the current state.`,
+          `That note has already been ${reviewedWord(note.reviewStatus)}. Reload to see where it stands.`,
         );
       }
       if (note.version !== expectedVersion) {
-        throw new DomainConflictError("note_version_stale", "That note was edited in another tab. Reload.");
+        throw new DomainConflictError("note_version_stale", "That note changed since this screen loaded. Reload.");
       }
 
       // The reviewer's text changes; `*Raw` keeps what the document said, so a
@@ -1356,7 +1357,7 @@ async function patchBoqLine(
     // matching, and the confirm writes what the reviewer approved.
     if (body.replacesRunId !== undefined) {
       if (body.replacesRunId !== null && typeof body.replacesRunId !== "string") {
-        return json({ ok: false, error: "replacesRunId must be a run id or null." }, 400);
+        return json({ ok: false, error: "The phase this sheet revises was not recognised. Reload and choose it again." }, 400);
       }
       patch.replacesRunId = body.replacesRunId;
       clearPairings = true;
@@ -1706,7 +1707,7 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
       const run = rows[0];
       if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
       if (run.status !== "parsed") {
-        throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)} and cannot be edited.`);
+        throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
       }
 
       const staged = (run.parsed ?? null) as StagedSpecDocument | null;
@@ -1718,7 +1719,7 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
       if (proposal.reviewStatus !== "pending") {
         throw new DomainConflictError(
           "proposal_reviewed",
-          `That row has already been ${proposal.reviewStatus} and cannot be edited.`,
+          `That row has already been ${reviewedWord(proposal.reviewStatus)}, so it cannot be edited. Reload to see where it stands.`,
         );
       }
       // PER-PROPOSAL optimistic lock. The run's coarse version is bumped by
@@ -1727,7 +1728,7 @@ async function patchProposal(id: string, raw: unknown, actor: string): Promise<R
       if (proposal.version !== expectedProposalVersion) {
         throw new DomainConflictError(
           "proposal_version_stale",
-          "This row was edited in another tab. Its current value is shown; yours was not saved.",
+          "This row changed since this screen loaded. Its current value is shown; yours was not saved.",
           { diff: { proposal } },
         );
       }
@@ -1906,7 +1907,7 @@ async function patchSlotOverride(
       if (current !== expectedVersion) {
         throw new DomainConflictError(
           "slot_overrides_stale",
-          `The size on row ${line.lineNo} was changed in another tab. Reload and check it before changing it again.`,
+          `The size on row ${line.lineNo} changed since this screen loaded. Reload and check it before changing it again.`,
         );
       }
       // The description's statements AND the line's own Dims cell — the list
@@ -2018,7 +2019,7 @@ async function patchUnitOverride(
       if (current !== expectedVersion) {
         throw new DomainConflictError(
           "unit_override_stale",
-          `The unit on row ${line.lineNo} was changed in another tab. Reload and check it before changing it again.`,
+          `The unit on row ${line.lineNo} changed since this screen loaded. Reload and check it before changing it again.`,
         );
       }
       if (!needsUnit && change !== null) {
@@ -2189,7 +2190,7 @@ async function patchLinePicture(
       if (current !== expectedVersion) {
         throw new DomainConflictError(
           "picture_stale",
-          `The picture on row ${line.lineNo} was changed in another tab. Reload and look at it before changing it again.`,
+          `The picture on row ${line.lineNo} changed since this screen loaded. Reload and look at it before changing it again.`,
         );
       }
       if (crop && !rowImageFor(doc.rowImages, sheet.sheetName, line.lineNo)?.pathname) {

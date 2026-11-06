@@ -36,6 +36,7 @@ import { withTransaction, transactionErrorResponse, DomainConflictError } from "
 import { loadExtractionRegisters } from "@/lib/spec-document-registers";
 import { rematchProposals, type StagedSpecDocument } from "@/lib/spec-document";
 import { randomUUID } from "crypto";
+import { documentClosedSentence } from "@/lib/intake-status";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +73,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // proposal that never resolved was ignored rather than applied. Re-
       // matching one cannot resurrect it — an ignored row is not pending.
       if (run.status !== "parsed" && run.status !== "confirmed") {
-        throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not ready to review.`);
+        throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be matched again" }));
       }
       if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
         throw new DomainConflictError(

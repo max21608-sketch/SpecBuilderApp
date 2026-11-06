@@ -114,6 +114,7 @@ import { ensureVariant } from "@/lib/variant-create";
 import { snapshotRecords } from "@/lib/record-snapshot";
 import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { paletteOptionFor } from "@/lib/palettes";
+import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
 
 /**
  * What a stored swatch is CALLED, which is the only place its page survives.
@@ -204,7 +205,7 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
     throw new DomainConflictError("wrong_kind", "That import is not a set of shop drawings.", { status: 400 });
   }
   if (run.status !== "parsed" && run.status !== "confirmed") {
-    throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not ready to review.`);
+    throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be reviewed" }));
   }
   if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
@@ -284,13 +285,13 @@ function takeObservations(
     if (!allow.includes(observation.reviewStatus)) {
       throw new DomainConflictError(
         "observation_reviewed",
-        `“${observation.labelRaw ?? "That spec"}” has already been ${observation.reviewStatus}. Reload to see the current state.`,
+        `“${observation.labelRaw ?? "That spec"}” has already been ${reviewedWord(observation.reviewStatus)}. Reload to see where it stands.`,
       );
     }
     if (observation.version !== ref.version) {
       throw new DomainConflictError(
         "observation_version_stale",
-        `“${observation.labelRaw ?? "One of these specs"}” was edited in another tab. Reload before confirming.`,
+        `“${observation.labelRaw ?? "One of these specs"}” changed since this screen loaded. Reload before confirming.`,
       );
     }
     taken.push(observation);
@@ -450,7 +451,7 @@ export async function confirmDrawingItem(
     if (appeared.length > 0) {
       throw new DomainConflictError(
         "targets_changed",
-        `This item now also appears in ${appeared.length} record${appeared.length === 1 ? "" : "s"} you have not seen. Reload and choose which runs this drawing applies to.`,
+        `This item now also appears in ${appeared.length} record${appeared.length === 1 ? "" : "s"} you have not seen. Reload and choose which phases this drawing applies to.`,
         { diff: appeared },
       );
     }

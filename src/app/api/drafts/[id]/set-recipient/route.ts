@@ -12,6 +12,7 @@ import { z } from "zod";
 import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { DomainConflictError, transactionErrorResponse, withTransaction } from "@/lib/db-transaction";
+import { draftStateWords } from "@/lib/draft-status";
 
 const EMAIL = /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/;
 
@@ -48,7 +49,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (String(draft.status) !== "draft") {
         throw new DomainConflictError(
           "draft_not_editable",
-          `This draft is ${String(draft.status)} and can no longer be changed.`,
+          `This draft ${draftStateWords(String(draft.status))}, so it can no longer be changed. Reload to see the newest draft.`,
         );
       }
       if (Number(draft.version) !== parsed.data.version) {

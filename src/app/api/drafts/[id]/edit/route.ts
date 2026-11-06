@@ -39,6 +39,7 @@ import {
 import { TEMPLATE_VERSION, buildChaseEmail } from "@/lib/chase-template";
 import { ANSWER_STATE_LABELS } from "@/lib/spec-vocab";
 import { isQuestionTier } from "@/lib/tgq";
+import { draftStateWords } from "@/lib/draft-status";
 
 export const maxDuration = 60;
 
@@ -98,13 +99,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           "draft_not_editable",
           status === "sent"
             ? "This draft has been recorded as sent and is now history. Withdraw the confirmation first if it was a mistake."
-            : `This draft is ${status} and can no longer be edited.`,
+            : `This draft ${draftStateWords(status)}, so it can no longer be edited. Reload to see the newest draft.`,
         );
       }
       if (Number(draft.version) !== input.version) {
         throw new DomainConflictError(
           "draft_version_stale",
-          "This draft changed while you were editing. Reload before saving, so you do not overwrite someone else's change.",
+          "This draft changed since this screen loaded. Reload before saving, so nothing that changed is overwritten.",
         );
       }
 

@@ -46,6 +46,7 @@ import {
   TRANSCRIBE_MODEL,
 } from "@/lib/pdf-bill-transcribe";
 import { TRANSCRIPTION_CLAIM_MS, type PdfTranscription, type TranscriptionRecord } from "@/lib/pdf-bill-checks";
+import { documentClosedSentence } from "@/lib/intake-status";
 
 export const maxDuration = 800;
 
@@ -84,7 +85,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const run = await loadBoqRun(id);
   if (!run) return json({ ok: false, error: "No such import." }, 404);
   if (run.sourceKind !== "boq_xlsx") return json({ ok: false, code: "wrong_kind", error: "Only a bill can be transcribed." }, 400);
-  if (run.status !== "parsed") return json({ ok: false, error: `This bill is ${run.status}; it can no longer be transcribed.` }, 409);
+  if (run.status !== "parsed") return json({ ok: false, error: documentClosedSentence(run.status, { noun: "bill", consequence: "it can no longer be transcribed" }) }, 409);
 
   const staged = assertBoqDocument(run.parsed);
   const waiting = staged.pdfTranscription;
@@ -105,7 +106,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       {
         ok: false,
         code: "transcription_running",
-        error: "This PDF is being transcribed already — in another tab, or a moment ago. This screen shows the result when it lands; nothing more is charged.",
+        error: "This PDF is already being transcribed: it started a moment ago. This screen shows the result when it lands; nothing more is charged.",
       },
       409,
     );
@@ -129,7 +130,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     returning version
   `;
   if (!claimed[0]) {
-    return json({ ok: false, code: "transcription_running", error: "Someone else started transcribing this PDF a moment ago. Reload to see the result; nothing more is charged." }, 409);
+    return json({ ok: false, code: "transcription_running", error: "Transcribing this PDF started a moment ago. Reload to see the result; nothing more is charged." }, 409);
   }
   const claimVersion = Number(claimed[0].version);
 

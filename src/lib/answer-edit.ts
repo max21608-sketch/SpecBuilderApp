@@ -108,7 +108,7 @@ export async function editAnswer(
   if (Number(existing.version) !== expectedVersion) {
     throw new DomainConflictError(
       "answer_version_stale",
-      `“${String(existing.prompt)}” was changed by someone else while you were editing. Their answer stands; yours was not saved.`,
+      `“${String(existing.prompt)}” changed since this screen loaded. The answer now on record stands; yours was not saved.`,
       { diff: { version: Number(existing.version), state: existing.state, value: existing.value } },
     );
   }

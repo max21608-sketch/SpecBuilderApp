@@ -73,6 +73,17 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * Parse a `.ts` file as TypeScript and only a `.tsx` file as TSX. Read as TSX,
+ * a `.ts` file's angle-bracket cast or generic arrow (`<T>(rows) => …`) opens
+ * a JSX element, and every literal after it went unread without an error: the
+ * server scan below read six fewer refusals than the source holds until this
+ * was found.
+ */
+function scriptKind(file: string): ts.ScriptKind {
+  return file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+}
+
 /** Is this literal something a person reads, or something the machine reads? */
 function isUserFacingLiteral(node: ts.StringLiteralLike): boolean {
   const parent = node.parent;
@@ -87,7 +98,7 @@ function isUserFacingLiteral(node: ts.StringLiteralLike): boolean {
 
 function userFacingText(file: string): Hit[] {
   const src = readFileSync(file, "utf8");
-  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, scriptKind(file));
   const hits: Hit[] = [];
   const visit = (node: ts.Node) => {
     let text: string | null = null;
@@ -189,5 +200,141 @@ describe("screen vocabulary: a sub-quote is a phase", () => {
     // directories together are ~60 files; the floor only has to be non-trivial.
     const files = DIRS.flatMap((dir) => sourceFiles(path.join(ROOT, dir)));
     expect(files.length).toBeGreaterThan(40);
+  });
+});
+
+// ============================================================================
+// THE SENTENCES THE SERVER SENDS A PERSON (audit 2026-11-06, G15).
+//
+// The screens print a refused request's `error` verbatim, so the second
+// argument of every `DomainConflictError` and the `error` / `message` of every
+// `json({...})` body under `src/lib` and `src/app/api` is screen text that
+// happens to be written on the server. Four days after the rename, three of
+// them still said "run" ("not marked as revising a run", "choose which runs
+// this drawing applies to"), ten printed a raw status word nobody chose ("This
+// import is parsing, not open for editing"), and fifteen told a reviewer the
+// row was "edited in another tab" when the only other writer was usually their
+// own autosave.
+//
+// This does NOT re-open the decision above not to scan `src/lib` whole. It
+// reads only the literals INSIDE those two places — the SQL, the codes, the
+// column names and `intake_runs` are never in them — so the allowlist that
+// argument predicted does not appear. What it cannot see, stated: a message
+// built into a variable first and passed by name, and a refusal thrown as a
+// plain `Error` that a route turns into a sentence. Both are rarer than a
+// literal and both are the next place to look if "run" comes back.
+// ============================================================================
+
+const SERVER_DIRS = ["src/lib", "src/app/api"];
+
+/**
+ * The helpers that turn a status into words a person chose. A template span
+ * calling one of these is the fix, never an offence.
+ */
+const STATUS_WORD_HELPERS = new Set(["documentStateWords", "documentNextStep", "reviewedWord", "draftStateWords"]);
+
+/**
+ * The two refusals that NAME the writer, from the row's own `updated_by`, and
+ * say "someone else" only where the row holds no name. They are telling the
+ * truth about who; exact text, as the scanner joins it.
+ */
+const NAMES_THE_WRITER = new Set([
+  "… was changed by … someone else … while you were editing. Reload and try again.",
+  "This project was changed by … someone else … while you were editing. Reload and try again.",
+]);
+
+type ServerMessage = { file: string; line: number; text: string; statusSpans: string[] };
+
+function serverMessages(file: string): ServerMessage[] {
+  const src = readFileSync(file, "utf8");
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, scriptKind(file));
+  const found: ServerMessage[] = [];
+  const collect = (root: ts.Node) => {
+    const texts: string[] = [];
+    const statusSpans: string[] = [];
+    const walk = (node: ts.Node) => {
+      if (
+        ts.isStringLiteral(node) ||
+        ts.isNoSubstitutionTemplateLiteral(node) ||
+        ts.isTemplateHead(node) ||
+        ts.isTemplateMiddle(node) ||
+        ts.isTemplateTail(node)
+      ) {
+        texts.push(node.text);
+      }
+      if (ts.isTemplateSpan(node)) {
+        const expression = node.expression;
+        const helper =
+          ts.isCallExpression(expression) && STATUS_WORD_HELPERS.has(expression.expression.getText(sf));
+        // `run.status`, `entry.reviewStatus`, `String(draft.status)`, a bare
+        // `status` -- a value the database holds, printed as though a person
+        // had chosen the word.
+        if (!helper && /status/i.test(expression.getText(sf))) statusSpans.push(expression.getText(sf));
+      }
+      ts.forEachChild(node, walk);
+    };
+    walk(root);
+    const { line } = sf.getLineAndCharacterOfPosition(root.getStart(sf));
+    found.push({ file: path.relative(ROOT, file), line: line + 1, text: texts.join(" … ").replace(/\s+/g, " ").trim(), statusSpans });
+  };
+  const visit = (node: ts.Node) => {
+    if (ts.isNewExpression(node) && node.expression.getText(sf) === "DomainConflictError" && node.arguments?.[1]) {
+      collect(node.arguments[1]);
+    }
+    if (
+      ts.isPropertyAssignment(node) &&
+      ["error", "message"].includes(node.name.getText(sf)) &&
+      ts.isObjectLiteralExpression(node.parent) &&
+      ts.isCallExpression(node.parent.parent) &&
+      /(^|\.)json$/.test(node.parent.parent.expression.getText(sf))
+    ) {
+      collect(node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+const SERVER_MESSAGES = SERVER_DIRS.flatMap((dir) => sourceFiles(path.join(ROOT, dir))).sort().flatMap(serverMessages);
+const where = (hit: ServerMessage) => `  ${hit.file}:${hit.line}  ${JSON.stringify(hit.text)}`;
+
+describe("server vocabulary: what a refused request says to a person", () => {
+  it("says phase, never run", () => {
+    const offenders = SERVER_MESSAGES.filter((hit) => RUN_WORD.test(hit.text));
+    expect(
+      offenders.map(where),
+      `A refusal's sentence is screen text. A sub-quote is a PHASE; a document read is a "read" or a "document":\n${offenders.map(where).join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("never blames another tab, or a person, it cannot see", () => {
+    // The sentence knows only that the version moved since this screen loaded.
+    // Usually the other writer was the reviewer's own autosave or a second
+    // screen of their own; "another tab" sent people looking for a tab that did
+    // not exist, and "someone else" accused a colleague who was not there.
+    const offenders = SERVER_MESSAGES.filter(
+      (hit) => /another tab|someone else|somebody else/i.test(hit.text) && !NAMES_THE_WRITER.has(hit.text),
+    );
+    expect(offenders.map(where), `Say "changed since this screen loaded":\n${offenders.map(where).join("\n")}`).toEqual([]);
+  });
+
+  it("keeps no named-writer exception that has stopped matching", () => {
+    const seen = new Set(SERVER_MESSAGES.map((hit) => hit.text));
+    expect([...NAMES_THE_WRITER].filter((text) => !seen.has(text))).toEqual([]);
+  });
+
+  it("never prints a status word nobody chose", () => {
+    // "This import is parsing" is the database talking. A status goes through
+    // one of STATUS_WORD_HELPERS, which name the state and the next step.
+    const offenders = SERVER_MESSAGES.filter((hit) => hit.statusSpans.length > 0);
+    const report = offenders.map((hit) => `${where(hit)}  {${hit.statusSpans.join(", ")}}`).join("\n");
+    expect(offenders.map(where), `Print a status through a word helper in src/lib/intake-status.ts or src/lib/draft-status.ts:\n${report}`).toEqual([]);
+  });
+
+  it("reads the refusals it claims to read", () => {
+    // ~430 DomainConflictError sites when this was written. A floor, so a
+    // scanner that silently matched nothing cannot pass for ever.
+    expect(SERVER_MESSAGES.length).toBeGreaterThan(400);
   });
 });

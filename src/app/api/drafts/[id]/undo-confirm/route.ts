@@ -27,6 +27,7 @@ import { z } from "zod";
 import { json } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { DomainConflictError, transactionErrorResponse, withTransaction } from "@/lib/db-transaction";
+import { draftStateWords } from "@/lib/draft-status";
 
 const UndoInput = z.object({
   version: z.number().int(),
@@ -65,7 +66,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           "not_sent",
           status === "voided"
             ? "This send confirmation has already been withdrawn."
-            : `This draft is ${status}, so there is no send confirmation to withdraw.`,
+            : `This draft ${draftStateWords(status)}, so there is no send confirmation to withdraw.`,
         );
       }
       if (Number(draft.version) !== parsed.data.version) {

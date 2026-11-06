@@ -285,7 +285,7 @@ export function transactionErrorResponse(cause: unknown): Response {
       {
         ok: false,
         code: "contended",
-        error: "Someone else was changing this at the same moment. Nothing was written — try again.",
+        error: "Something else was changing this at the same moment. Nothing was written — try again.",
       },
       503,
     );

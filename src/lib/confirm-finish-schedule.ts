@@ -39,6 +39,7 @@ import {
 } from "@/lib/finish-schedule";
 import type { Row } from "@/lib/db";
 import { assertProjectScopedPathname } from "@/lib/blob-source";
+import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
 
 type AnySql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>;
 
@@ -131,7 +132,7 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
     throw new DomainConflictError("wrong_kind", "That import is not a finishes schedule.", { status: 400 });
   }
   if (run.status !== "parsed" && run.status !== "confirmed") {
-    throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not ready to review.`);
+    throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be reviewed" }));
   }
   if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
@@ -169,13 +170,13 @@ function takeEntries(
     if (!allow.includes(entry.reviewStatus)) {
       throw new DomainConflictError(
         "entry_reviewed",
-        `“${entryName(entry)}” has already been ${entry.reviewStatus}. Reload to see the current state.`,
+        `“${entryName(entry)}” has already been ${reviewedWord(entry.reviewStatus)}. Reload to see where it stands.`,
       );
     }
     if (entry.version !== ref.version) {
       throw new DomainConflictError(
         "entry_version_stale",
-        `“${entryName(entry)}” was changed in another tab. Reload before confirming.`,
+        `“${entryName(entry)}” changed since this screen loaded. Reload before confirming.`,
       );
     }
     taken.push(entry);
@@ -580,16 +581,16 @@ export async function setFinishScheduleEntryKind(
   const run = rows[0];
   if (!run) throw new DomainConflictError("not_found", "No such import.", { status: 404 });
   if (run.status !== "parsed") {
-    throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not open for editing.`);
+    throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be edited here" }));
   }
   const staged = assertStagedFinishSchedule(run.parsed);
   const entry = staged.entries.find((row) => row.id === entryId);
   if (!entry) throw new DomainConflictError("entry_missing", "That finish is no longer part of this import. Reload.");
   if (entry.reviewStatus !== "pending") {
-    throw new DomainConflictError("entry_reviewed", `That finish has already been ${entry.reviewStatus}. Reload.`);
+    throw new DomainConflictError("entry_reviewed", `That finish has already been ${reviewedWord(entry.reviewStatus)}. Reload.`);
   }
   if (entry.version !== expectedVersion) {
-    throw new DomainConflictError("entry_version_stale", "That finish was changed in another tab. Reload.");
+    throw new DomainConflictError("entry_version_stale", "That finish changed since this screen loaded. Reload.");
   }
   const entries = staged.entries.map((row) => (row.id === entryId ? { ...row, kind, version: row.version + 1 } : row));
   const written = await txn`

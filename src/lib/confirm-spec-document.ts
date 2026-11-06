@@ -44,6 +44,7 @@ import { wordsBeside } from "@/lib/bill-description";
 import { loadBillHeldIds } from "@/lib/attribute-from-bill";
 import { recordDisagreement, type DisagreementStatement } from "@/lib/disagreement-record";
 import { isDimensionSlot, normaliseUnit, type AttributeGroup, type AttributeState, type DimensionSlot } from "@/lib/spec-vocab";
+import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
 
 export type ProposalRef = { id: string; version: number };
 
@@ -133,7 +134,7 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
     throw new DomainConflictError("wrong_kind", "That import is not a specification document.", { status: 400 });
   }
   if (run.status !== "parsed" && run.status !== "confirmed") {
-    throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not ready to review.`);
+    throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be reviewed" }));
   }
   if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
@@ -165,13 +166,13 @@ function takePending(staged: StagedSpecDocument, refs: ProposalRef[], allow: Pro
     if (!allow.includes(proposal.reviewStatus)) {
       throw new DomainConflictError(
         "proposal_reviewed",
-        `“${proposal.raw.attributeRaw ?? "That row"}” has already been ${proposal.reviewStatus}. Reload to see the current state.`,
+        `“${proposal.raw.attributeRaw ?? "That row"}” has already been ${reviewedWord(proposal.reviewStatus)}. Reload to see where it stands.`,
       );
     }
     if (proposal.version !== ref.version) {
       throw new DomainConflictError(
         "proposal_version_stale",
-        `“${proposal.raw.attributeRaw ?? "One of these rows"}” was edited in another tab. Reload before confirming.`,
+        `“${proposal.raw.attributeRaw ?? "One of these rows"}” changed since this screen loaded. Reload before confirming.`,
       );
     }
     taken.push(proposal);
@@ -695,7 +696,7 @@ export async function confirmSpecDocumentRecord(
         // Exactly one row, or this is not the answer that was reviewed.
         throw new DomainConflictError(
           "answer_version_stale",
-          `“${String(requirement.prompt)}” was answered by someone else while you were reviewing. Nothing was written — reload.`,
+          `“${String(requirement.prompt)}” has been answered since this screen loaded. Nothing was written — reload.`,
         );
       }
       answerId = String(updated[0]?.id);
@@ -719,7 +720,7 @@ export async function confirmSpecDocumentRecord(
       if (inserted.length !== 1) {
         throw new DomainConflictError(
           "answer_appeared",
-          `“${String(requirement.prompt)}” was answered by someone else while you were reviewing. Nothing was written — reload.`,
+          `“${String(requirement.prompt)}” has been answered since this screen loaded. Nothing was written — reload.`,
         );
       }
       answerId = String(inserted[0]?.id);

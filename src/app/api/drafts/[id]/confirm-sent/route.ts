@@ -42,6 +42,7 @@ import {
   type ContextSnapshot,
   type StaleReason,
 } from "@/lib/chase-drafts";
+import { draftStateWords } from "@/lib/draft-status";
 
 const ConfirmInput = z.object({
   version: z.number().int(),
@@ -98,7 +99,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           status === "sent" ? "already_sent" : "draft_not_editable",
           status === "sent"
             ? "This draft has already been recorded as sent."
-            : `This draft is ${status} and cannot be recorded as sent.`,
+            : `This draft ${draftStateWords(status)}, so it cannot be recorded as sent. Reload to see the newest draft.`,
         );
       }
       if (Number(draft.version) !== parsed.data.version) {

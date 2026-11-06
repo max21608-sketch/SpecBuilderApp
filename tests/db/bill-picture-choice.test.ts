@@ -182,7 +182,7 @@ describeIfDb("a bill row's picture, chosen on the review", () => {
     // Somebody else's choice since this screen was drawn: refused, unchanged.
     const stale = await choose(itemRun, 3, { none: true }, 0);
     expect(stale.status).toBe(409);
-    expect(stale.body.error).toMatch(/changed in another tab/);
+    expect(stale.body.error).toMatch(/changed since this screen loaded/);
     expect((await lineAt(itemRun, 3)).pictureVersion).toBe(1);
 
     // The thumbnail shows the crop; `original=1` the bill's own, which is what the panel crops from.
