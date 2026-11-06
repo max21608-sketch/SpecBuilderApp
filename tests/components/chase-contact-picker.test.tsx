@@ -179,8 +179,8 @@ describe("a project nobody has been assigned to yet", () => {
         settledLines: 0,
         uncategorisedLines: 1,
         blocked: [
-          { recordId: "r-1", recordLabel: "P17231-001", itemDescription: "Stool", designer: null, questionCount: 40, reason: "no designer on the record" },
-          { recordId: "r-2", recordLabel: "P17231-002", itemDescription: "Drawers", designer: null, questionCount: 44, reason: "no designer on the record" },
+          { recordId: "r-1", recordLabel: "P17231-001", itemDescription: "Stool", designer: null, questionCount: 40, kind: "nobody_to_ask", reason: "no designer on the record" },
+          { recordId: "r-2", recordLabel: "P17231-002", itemDescription: "Drawers", designer: null, questionCount: 44, kind: "nobody_to_ask", reason: "no designer on the record" },
         ],
       },
     };

@@ -23,6 +23,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import Link from "next/link";
 import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import { TIER_LABELS } from "@/lib/tgq";
+import type { StaleReason } from "@/lib/chase-drafts";
 import Button, { buttonClass } from "@/components/ui/Button";
 import Card, { CardHeadingNote } from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
@@ -76,16 +77,18 @@ export type Draft = {
   staleCount: number;
 };
 
+// Keyed by `StaleReason`, so an entry for a reason the loader no longer
+// produces is a type error rather than dead text (`recordChanged` went with
+// audit F10, when a record's version stopped staling a chase).
 const STALE_TEXT: Record<string, string> = {
   answerAppeared: "now answered",
   answerRemoved: "answer removed",
   answerChanged: "answer changed",
   answerSettled: "now settled",
-  recordChanged: "record changed",
   recordRetired: "record retired",
   contextChanged: "question or record details changed",
   questionGone: "question no longer exists",
-};
+} satisfies Record<StaleReason, string>;
 
 export default function ChaseDraftCard({ draft, onChanged }: { draft: Draft; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);

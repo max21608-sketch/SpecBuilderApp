@@ -115,6 +115,8 @@ type Blocked = {
   itemDescription: string;
   designer: string | null;
   questionCount: number;
+  /** What kind of block, for code to read; `reason` is only for a person. See `BlockedRecord`. */
+  kind: "nobody_to_ask" | "no_tier";
   reason: string;
 };
 
@@ -185,8 +187,11 @@ const flatten = (payload: Payload) =>
  */
 const NOBODY = "__nobody__";
 
-/** Blocked because there is nobody to ask, as opposed to having no level. */
-const isContactBlocker = (reason: string) => reason !== "no level on the record";
+/**
+ * Blocked because there is nobody to ask, as opposed to having no tier. Read
+ * off the block's KIND: it matched the reason's words, which froze them.
+ */
+const isContactBlocker = (row: Pick<Blocked, "kind">) => row.kind === "nobody_to_ask";
 
 /**
  * The contact tab actually on screen, given what the inventory holds.
@@ -567,7 +572,7 @@ function DraftsView() {
   const preselection = selectionSummary(tableQuestions, contactTab === NOBODY ? "" : contactTab);
 
   /** Records nobody can be asked about, as opposed to records with no level. */
-  const nobody = inventory.blocked.filter((row) => isContactBlocker(row.reason));
+  const nobody = inventory.blocked.filter((row) => isContactBlocker(row));
   const nobodyQuestions = nobody.reduce((sum, row) => sum + row.questionCount, 0);
   /** Every question no designer's group holds: nobody to ask, or no level. Listed on Everyone too. */
   const blockedQuestions = inventory.blocked.reduce((sum, row) => sum + row.questionCount, 0);

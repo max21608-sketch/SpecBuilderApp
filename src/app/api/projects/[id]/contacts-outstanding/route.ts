@@ -79,10 +79,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     noTier: questions.filter((q) => q.tier === null).length,
   });
   const recordsWithNoContact = new Set(
-    blocked.filter((row) => row.reason !== "no level on the record").map((row) => row.recordId),
+    blocked.filter((row) => row.kind === "nobody_to_ask").map((row) => row.recordId),
   );
   const recordsWithNoLevel = new Set(
-    blocked.filter((row) => row.reason === "no level on the record").map((row) => row.recordId),
+    blocked.filter((row) => row.kind === "no_tier").map((row) => row.recordId),
   );
 
   return json({
@@ -95,7 +95,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       })),
       unassigned: {
         ...tally(outstanding.filter((question) => recordsWithNoContact.has(question.recordId))),
-        records: blocked.filter((row) => row.reason !== "no level on the record").length,
+        records: blocked.filter((row) => row.kind === "nobody_to_ask").length,
       },
       noLevel: {
         ...tally(outstanding.filter((question) => recordsWithNoLevel.has(question.recordId))),

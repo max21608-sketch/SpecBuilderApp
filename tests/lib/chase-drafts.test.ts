@@ -153,6 +153,9 @@ describe("groupByContact", () => {
   it("distinguishes 'no designer at all' from 'designer with no contact'", () => {
     const { blocked } = groupByContact([question({ designer: null })], [contact()]);
     expect(blocked[0]?.reason).toBe("no designer on the record");
+    // Both are "nobody to ask", the kind the Nobody assigned tab lists.
+    expect(blocked[0]?.kind).toBe("nobody_to_ask");
+    expect(groupByContact([question({ designer: "TA" })], [contact()]).blocked[0]?.kind).toBe("nobody_to_ask");
   });
 
   it("counts every blocked question but reports the record once", () => {
@@ -213,7 +216,10 @@ describe("groupByContact — a colleague", () => {
       [contact(), colleague()],
     );
     expect(groups.find((g) => g.contact.id === "c-cam")).toBeUndefined();
-    expect(blocked[0]?.reason).toBe("no level on the record");
+    // The screen and the contacts route key on the KIND, never on these
+    // words, so the words can say what is true: only a placeholder
+    // category's question needs a level (audit F1).
+    expect(blocked[0]).toMatchObject({ kind: "no_tier", reason: "no level (the placeholder categories need one)" });
   });
 
   it("does not empty the blocked list — a colleague being askable is not a designer", () => {
@@ -406,7 +412,10 @@ describe("groupByContact — the item level", () => {
     const { groups, blocked } = groupByContact([question({ level: null, tier: null })], [contact]);
     expect(groups).toEqual([]);
     expect(blocked).toHaveLength(1);
-    expect(blocked[0]?.reason).toBe("no level on the record");
+    // The screen and the contacts route key on the KIND, never on these
+    // words, so the words can say what is true: only a placeholder
+    // category's question needs a level (audit F1).
+    expect(blocked[0]).toMatchObject({ kind: "no_tier", reason: "no level (the placeholder categories need one)" });
   });
 
   it("counts every blocked question but reports the record once", () => {
@@ -490,7 +499,7 @@ describe("groupByContact — a level is only needed where the tier needs one", (
       [onMatrix(), question({ recordId: "rec-2", requirementId: "req-2", level: null, tier: null })],
       [designer, colleague],
     );
-    expect(blocked.map((row) => [row.recordId, row.reason])).toEqual([["rec-2", "no level on the record"]]);
+    expect(blocked.map((row) => [row.recordId, row.kind])).toEqual([["rec-2", "no_tier"]]);
     // The matrix record is chased by both; the placeholder one by neither.
     for (const group of groups) {
       expect(group.questions.map((q) => q.recordId)).toEqual(["rec-1"]);

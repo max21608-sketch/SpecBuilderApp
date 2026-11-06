@@ -164,7 +164,7 @@ describeIfDb("an item's TGQ, and totals equal to their lines", () => {
     try {
       const { GET } = await import("@/app/api/drafts/route");
       const body = (await (await GET(new Request(`http://localhost/api/drafts?projectId=${projectId}`))).json()) as {
-        inventory: { levelless: { recordId: string }[]; blocked: { recordId: string; reason: string }[] };
+        inventory: { levelless: { recordId: string }[]; blocked: { recordId: string; kind: string; reason: string }[] };
       };
       const levelless = body.inventory.levelless.map((row) => row.recordId);
       expect(levelless).not.toContain(openId);
@@ -172,7 +172,7 @@ describeIfDb("an item's TGQ, and totals equal to their lines", () => {
       // Nobody is named on these lines, so both are blocked for that reason,
       // and never for a level on the matrix record.
       const matrixBlock = body.inventory.blocked.find((row) => row.recordId === openId);
-      expect(matrixBlock?.reason).not.toBe("no level on the record");
+      expect(matrixBlock?.kind).toBe("nobody_to_ask");
     } finally {
       await client.query(`update spec_records set level = 'simple', updated_by = 'qa' where id = any($1::uuid[])`, [
         [openId, placeholderId],
