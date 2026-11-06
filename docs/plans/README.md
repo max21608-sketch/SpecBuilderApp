@@ -21,6 +21,37 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-06 (evening) — The audit build, Stage 1 landed on `audit-int`
+
+Max: "run all the stages… use your best judgment… go with the proposed".
+Decisions taken as the audit proposed: `1,200` refused into the bracket; one
+version per TRANSACTION while a change is open; the audit trigger stops
+copying documents, email bodies and password hashes; a project is deletable
+by SCRIPT only; sessions 24 h with sliding renewal; the automatic-read cap is
+20 a day per project; the BOQ category becomes a `SuggestButton`;
+`origin/production` is left for Max to confirm before any delete.
+
+- **Landed (Stage 1):** 0050 answer provenance + `db:backfill-answer-provenance`
+  (E1, E2, E3, E4, E5, F6, B2); the one number reader (C3, C4, C12, D10,
+  D11-ft); gates read the figure, Dia stands for W and D provisionally, one
+  line per cell, inert human CSVs (F3, F5, F12, A17, F14); configurations
+  follow their line, one tab revises a phase, a retired line can come back
+  (C1, C2, C14); the finish planner and the deferral phrases (C5, C11); the
+  replace tick follows its row, the confirm takes the shown targets, note
+  merge by configuration, a later exact code resolves (D2, D3, D5, D6). Plus
+  one defect the audit missed, found on the way: a suggested pairing was
+  never stored (`found-in-use.md`, 2026-11-06).
+- **Checks:** every landing typecheck, lint, the pure and component tiers and
+  the db tests it touched; the integration branch the four checks with the
+  database tier required on the local stack (first run 3,755 tests, build
+  clean).
+- **Pilot, in order, before this code:** re-check the live
+  `spec_answers_source_kind_check`, apply 0050, deploy, then
+  `db:backfill-answer-provenance --yes-pilot` dry run (send the "confirmed
+  over no spec" count), then `--apply` at once. Then check P16717 and any
+  revised phase for records retired by the suggested-pairing defect.
+- **Still Max's:** Matthew confirms Dia-for-W-and-D; `origin/production`.
+
 ## 2026-11-06 — The whole-codebase audit, and the plan it leaves
 
 `docs/plans/audit-2026-11-06.md`. Max asked for every area read, meticulously,

@@ -39,26 +39,39 @@ open. Do the same on the next pass, and say in the entry what you checked.
 Read in code at `2cb4630`; **none reproduced on a screen.** The ones a person
 would hit first, each OPEN:
 
-### A retired bill fabric still ships, and a bill-sourced answer never follows a change — OPEN
+### A retired bill fabric still ships, and a bill-sourced answer never follows a change — FIXED 2026-11-06 (`0224af8`, migration 0050 + `db:backfill-answer-provenance`)
 
 `promote-answers.ts:330-355` and `:446-479` admit only an answer a
 shop-drawings run wrote; the bill confirm recomposes with the bill run as
 source. From then on no correction, finish edit, BW standard or retire reaches
 the answer, and the export falls through to it. Audit E1.
 
-### A revised bill retires every configuration on the phase — OPEN
+### A revised bill retires every configuration on the phase — FIXED 2026-11-06 (`31da699`)
 
 `confirm-boq.ts:699-712` with the loader at `imports/[id]/route.ts:1064`. A
 configuration has no bill code, so nothing pairs with it. Audit C1.
 
-### `TBC` in a quantity cell is 0, and `1.5` fails the whole confirm — OPEN
+### `TBC` in a quantity cell is 0, and `1.5` fails the whole confirm — FIXED 2026-11-06 (`a703f18`)
 
 `boq-import.ts:661-665`. `Number("")` is 0; `spec_records.qty` is integer.
 Audit C3.
 
-### `W1,200` composes `W1mm` — OPEN
+### `W1,200` composes `W1mm` — FIXED 2026-11-06 (`a703f18`: refused into the bracket, Max's call)
 
 `dimensions.ts:257` reads a comma as a decimal point, in every reader. Audit C4.
+
+### A suggested pairing on the revision review was never stored; every untouched suggested line confirmed as NEW and retired its record — FIXED 2026-11-06 (`223a809`)
+
+Found by the coder building C1, present since `cab35f9`. The pairing select
+showed the reconcile's suggestion as its chosen value; the confirm writes only
+stored `replaces`; a select already showing the record fires no change when
+somebody agrees. So the record the screen said the line continued was retired
+with its drawings, specs and (until C1) its configurations, and the screen
+read "0 no longer listed". Now a `SuggestButton` per line and "Pair the n
+suggested" per tab; the select shows the stored decision only. **Pilot's
+P16717 and any revision confirmed before this should be checked for records
+retired this way** (a retired record whose code is live on a newer record of
+the same phase).
 
 ### Confirm within a second of typing reads "edited in another tab" — OPEN
 
