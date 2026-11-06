@@ -296,8 +296,12 @@ describeIfDb("0007 intake model", () => {
        values ($1, $2, 'spec_document', 'shop_drawings', 'pending', 'qa', 'qa')`,
       [projectId, batchId],
     );
+    // NO ACTION since 0055 (checked at the end of the statement, so a project
+    // delete passes whatever order its cascades fire in). A batch deleted on
+    // its own is still refused by the same constraint; only Postgres's wording
+    // dropped "RESTRICT setting of".
     await expect(client.query(`delete from intake_batches where id = $1`, [batchId])).rejects.toThrow(
-      /violates RESTRICT setting of foreign key constraint "intake_runs_batch_id_fkey"/,
+      /violates foreign key constraint "intake_runs_batch_id_fkey"/,
     );
   });
 
