@@ -112,6 +112,51 @@ export async function mintInternalFinishCode(txn: TxnSql, projectId: string): Pr
   return formatInternalFinishCode(highest + 1, series);
 }
 
+/**
+ * Refuses, in words, a finish code another ACTIVE row of this project already
+ * holds (audit E8, 2026-11-06).
+ *
+ * `project_finishes_code_key` is unique on (project, code) among active rows
+ * (0018). `createFinish` has always met it with `on conflict do nothing` and a
+ * sentence; a RENAME (`editFinish`) and a RESTORE (the library route putting a
+ * retired finish back) met it with nothing in front and reached the screen as
+ * a 500 reading "Nothing was written". Both now ask this first and are told
+ * which row holds the code, because the reviewer's next step is on THAT row:
+ * retire or rename it, or leave this one as it is.
+ *
+ * The read cannot close the race on its own (a create can land between it and
+ * the write), so `asCodeClash` turns the index's own violation into the same
+ * refusal for the write that follows.
+ */
+export async function assertFinishCodeFree(
+  txn: TxnSql,
+  { projectId, code, exceptId, putting }: { projectId: string; code: string; exceptId: string; putting: "back" | "renamed" },
+): Promise<void> {
+  const live = await txn`
+    select code, description from project_finishes
+     where project_id = ${projectId} and code_norm = ${normaliseFinishCode(code)}
+       and status = 'active' and id <> ${exceptId}
+  `;
+  if (live[0]) throw codeClash(String(live[0].code), live[0].description, putting);
+}
+
+function codeClash(code: string, description: unknown, putting: "back" | "renamed"): DomainConflictError {
+  const says = description === null || description === undefined || String(description).trim() === "" ? "" : ` (“${String(description)}”)`;
+  return new DomainConflictError(
+    "code_exists",
+    putting === "back"
+      ? `“${code}” is already in this project's library${says}. Retire or rename that one first, or leave this one retired.`
+      : `This project already has a finish called “${code}”${says}. Rename or retire that one first, or keep this finish's code.`,
+  );
+}
+
+/** The index's own refusal, read as `assertFinishCodeFree`'s: the race it cannot close. */
+export function asCodeClash(cause: unknown, code: string, putting: "back" | "renamed"): unknown {
+  const pgError = cause as { code?: unknown; constraint?: unknown } | null;
+  if (pgError?.code === "23505" && pgError.constraint === "project_finishes_code_key") return codeClash(code, null, putting);
+  return cause;
+}
+
 /** Creates a finish. Used by the library screen and by the drawings confirm. */
 export async function createFinish(
   txn: TxnSql,
@@ -216,6 +261,9 @@ export async function editFinish(
 
   const code = fields.code === undefined ? String(finish.code) : fields.code.trim();
   if (!code) throw new DomainConflictError("code_required", "A finish needs the client's own code.", { status: 400 });
+  if (normaliseFinishCode(code) !== normaliseFinishCode(String(finish.code))) {
+    await assertFinishCodeFree(txn, { projectId, code, exceptId: finishId, putting: "renamed" });
+  }
 
   const updated = await txn`
     update project_finishes
@@ -231,7 +279,9 @@ export async function editFinish(
         updated_by = ${actor}
     where id = ${finishId} and version = ${expectedVersion} and status = 'active'
     returning id
-  `;
+  `.catch((cause: unknown) => {
+    throw asCodeClash(cause, code, "renamed");
+  });
   if (!updated[0]) {
     throw new DomainConflictError("finish_version_stale", "That finish changed as you saved. Nothing was written — reload.");
   }

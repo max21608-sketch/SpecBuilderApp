@@ -11,7 +11,7 @@ import { sql, json } from "@/lib/db";
 import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { withTransaction, transactionErrorResponse, DomainConflictError } from "@/lib/db-transaction";
-import { editFinish } from "@/lib/finish-edit";
+import { asCodeClash, assertFinishCodeFree, editFinish } from "@/lib/finish-edit";
 import { changeSetForEdit } from "@/lib/change-sets";
 import { FINISH_KINDS } from "@/lib/finishes";
 
@@ -98,6 +98,12 @@ export async function PATCH(
             );
           }
         }
+        // PUTTING ONE BACK whose code a newer row now holds would make two
+        // live rows for one code; the index refuses it, and that refusal used
+        // to reach the screen as a 500. Named instead (audit E8).
+        if (!retiring) {
+          await assertFinishCodeFree(txn, { projectId: id, code: String(current.code), exceptId: finishId, putting: "back" });
+        }
         await changeSetForEdit(txn, {
           projectId: id,
           actor: user.email,
@@ -112,7 +118,9 @@ export async function PATCH(
               updated_by = ${user.email}
           where id = ${finishId} and project_id = ${id} and version = ${body.version}
           returning id
-        `;
+        `.catch((cause: unknown) => {
+          throw asCodeClash(cause, String(current.code), "back");
+        });
         if (!rows[0]) {
           throw new DomainConflictError("finish_version_stale", "That finish changed as you saved. Reload.");
         }
