@@ -46,7 +46,8 @@ import {
   RUN_STATUSES,
   SPLIT_REASONS,
 } from "@/lib/spec-vocab";
-import { GATE_VALUE_TYPES } from "@/lib/gates";
+import { GATE_CAPTURES, GATE_VALUE_TYPES, GATES } from "@/lib/gates";
+import { WRITER_ROLES } from "@/lib/roles";
 import { QUESTION_TIERS } from "@/lib/tgq";
 import { CHANGE_SET_KINDS, REASON_REQUIRED_KINDS } from "@/lib/change-sets";
 import { FINISH_CODE_ORIGINS, FINISH_KINDS } from "@/lib/finishes";
@@ -70,6 +71,11 @@ const VOCABULARIES: {
    * working for every value that IS a document kind.
    */
   otherColumns?: readonly string[];
+  /**
+   * Values the CHECK allows that the constant leaves out ON PURPOSE, each
+   * with why. Kept out of the drift report and nowhere else.
+   */
+  deliberatelyNot?: Record<string, string>;
 }[] = [
   { name: "CHANGE_SET_KINDS", constraint: "change_sets_kind_check", values: CHANGE_SET_KINDS },
   { name: "ANSWER_STATES", constraint: "spec_answers_state_check", values: ANSWER_STATES },
@@ -126,6 +132,29 @@ const VOCABULARIES: {
   { name: "GATE_VALUE_TYPES", constraint: "spec_field_gates_value_type_check", values: GATE_VALUE_TYPES },
   // The tier a chase question was asked under (0020).
   { name: "QUESTION_TIERS", constraint: "email_draft_items_tier_check", values: QUESTION_TIERS },
+
+  // ---- Seven more pairs found by 5.2 (2026-11-06): an exported constant and
+  // a CHECK on a column it feeds, re-listed by the same drop-and-recreate.
+  // Matthew's gate model (0026): the gates and how each field is captured.
+  { name: "GATES", constraint: "spec_field_gates_gate_check", values: GATES },
+  { name: "GATE_CAPTURES", constraint: "spec_field_gates_capture_check", values: GATE_CAPTURES },
+  // A guessed level (0025) and the levels at which a question blocks a quote
+  // (0019) are the same three words as a decided level.
+  { name: "ITEM_LEVELS (suggested)", constraint: "spec_records_level_suggested_check", values: ITEM_LEVELS },
+  { name: "ITEM_LEVELS (tgq_levels)", constraint: "requirements_tgq_levels_check", values: ITEM_LEVELS },
+  // A project's default dimension unit is one of the units an attribute holds.
+  { name: "ATTRIBUTE_UNITS (project default)", constraint: "projects_default_unit_check", values: ATTRIBUTE_UNITS },
+  // A finish's state is read as an attribute's (`combineFinishState`).
+  { name: "ATTRIBUTE_STATES (finishes)", constraint: "project_finishes_state_check", values: ATTRIBUTE_STATES },
+  // THE WRITE BOUNDARY'S OWN LIST. A writer role the database refuses is an
+  // account nobody can create; a mis-spelt one is the fail-open the allowlist
+  // exists to prevent.
+  {
+    name: "WRITER_ROLES",
+    constraint: "users_role_check",
+    values: [...WRITER_ROLES],
+    deliberatelyNot: { viewer: "the role that may read and may not write: never on the writer allowlist" },
+  },
 ];
 
 /** Every single-quoted literal in a constraint definition. */
@@ -238,7 +267,11 @@ describeIfDb("every controlled vocabulary matches its CHECK", () => {
     for (const vocabulary of VOCABULARIES) {
       const definition = definitions.get(vocabulary.constraint);
       if (!definition) continue;
-      const known = new Set<string>([...vocabulary.values, ...(vocabulary.otherColumns ?? [])]);
+      const known = new Set<string>([
+        ...vocabulary.values,
+        ...(vocabulary.otherColumns ?? []),
+        ...Object.keys(vocabulary.deliberatelyNot ?? {}),
+      ]);
       for (const value of allowedValues(definition)) {
         if (!known.has(value)) drift.push(`${vocabulary.name} does not know '${value}'`);
       }
