@@ -844,8 +844,12 @@ export default function ReviewImportPage() {
    * where the header's own primary is this same step; this is the other half —
    * a bill somebody comes BACK to, already confirmed, whose screen said "This
    * import has already been confirmed" and offered nothing to do about it.
+   *
+   * Re-read whenever THIS document moves: a confirm that stays on the page
+   * otherwise keeps the step computed while the bill was waiting, "Review the
+   * bill", linking here (audit 2026-11-06, G7).
    */
-  const step = useNextStep(projectId || null);
+  const step = useNextStep(projectId || null, data ? `${data.import.status}:${data.import.version}` : null);
   useEffect(() => {
     if (!projectId || !id) return;
     void apiFetch<{ batches: { id: string; created_at: string; runs: { id: string; documentKind: string | null }[] }[] }>(

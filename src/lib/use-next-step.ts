@@ -35,8 +35,23 @@ type ProjectPayload = {
   runs?: { id: string }[];
 };
 
-/** Null while loading, when there is no project yet, or when the read fails. */
-export function useNextStep(projectId: string | null | undefined): NextStep | null {
+/**
+ * Null while loading, when there is no project yet, or when the read fails.
+ *
+ * `refreshToken` is anything the calling screen holds that MOVES when its own
+ * document does: the bill review passes the run's `status:version`. It is not
+ * optional in spirit. Keyed on the project alone, the step was computed once,
+ * while the document was still waiting for review, and a screen that confirms
+ * and STAYS ("Review complete") went on offering "Review the bill" as its
+ * primary, linking to itself (audit 2026-11-06, G7). A new token is one new
+ * read of the same endpoint; a render that changes nothing reads nothing. The
+ * previous step stays on screen until the new one arrives, so the button does
+ * not blink out under the person about to press it.
+ */
+export function useNextStep(
+  projectId: string | null | undefined,
+  refreshToken: string | number | null = null,
+): NextStep | null {
   const [step, setStep] = useState<NextStep | null>(null);
 
   useEffect(() => {
@@ -80,7 +95,7 @@ export function useNextStep(projectId: string | null | undefined): NextStep | nu
     return () => {
       live = false;
     };
-  }, [projectId]);
+  }, [projectId, refreshToken]);
 
   return step;
 }
