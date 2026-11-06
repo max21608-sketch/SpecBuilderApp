@@ -21,6 +21,49 @@ and consumer before enabling the producer, then one approved small document,
 then a representative pilot schedule judged by hand. That still needs a named
 Anthropic Console owner.
 
+## 2026-11-06 (late) — The audit build, Stage 4 landed on `audit-int`; Stage 5 begun
+
+- **Landed (Stage 4, the boundary and the trail):** the write boundary in
+  every handler (`requireWriter` in 54 files, `requireUuid` in 64, the
+  matcher anchored and tested through Next's own compiler), one
+  Content-Disposition helper (a curly apostrophe used to throw inside
+  `Headers`), pictures served by their stored type and written with the
+  store's, evidence HEADed and branded, pathnames refused for what a URL
+  parser would do with them, failure text only in development, login that
+  always costs one scrypt with a per-instance throttle, security headers with
+  the full CSP Report-Only, a phase retire and a level set that carry the
+  version (A2, A6, A7, A9–A16); a single-row edit locks its record first,
+  the category guard counts only a person's answers and refuses a chased
+  record in words, one library loader, the small 500s (B3, B6, E7, E8); a
+  trail that keeps only what it should (0054), a project deletable by script
+  (0055, `db:delete-project`), two indexes and a ledger checksum (0056), the
+  requirement seed key and the guard on an answered question (0057), the
+  runner writing the ledger inside the file's transaction (B4, B5, B7, B9);
+  one version per transaction and the diff pairing supersessions (0052, B1,
+  E6); a session that can be ended (0053, A4, H3).
+- **Found and fixed on the way:** `blob-source.ts`'s `import "server-only"`
+  from Stage 2 broke four pilot backfills under tsx (removed; the import-graph
+  test is the guard).
+- **Stage 5 so far:** CI runs the database tier on a fresh Postgres 17
+  service with the blob URLs derived from the port and every spending key
+  stripped; `pilot-is-ancestor.yml`; `engines.node` 22.x; `next` floor raised
+  and two beta/driver packages pinned exactly (lock unchanged). Its FIRST
+  fresh-database rehearsal found two tests that passed only on the shared
+  database's history — the project delete depending on cascade order after
+  all, and a route fixture picking its category by uuid order — which 0058
+  (deferrable keys) and a fixture fix close (4.6, in progress).
+- **Pilot, in order, before this code:** 0052 (drops a unique), 0053 (a
+  column; deploying the code then signs everyone out ONCE), 0054 (instant),
+  0055 (seven keys, seconds), 0056 (two indexes, with the code), 0057 THEN
+  re-seed with this branch's seed files (check 797 seeded requirements),
+  0058 when it lands. Then Max turns on branch protection for `pilot`
+  (`docs/environments.md`, "What holds the order, and what Max turns on") and
+  checks Node 22 in the first staging build log.
+- **Decisions this stage leaves Max:** a chased record can never change
+  category today (retirable answers, or coverage that outlives its answer, is
+  a migration); whether to enforce the full CSP after the browser walk;
+  reclaiming pilot's existing audit-log space.
+
 ## 2026-11-06 (night) — The audit build, Stage 3 landed on `audit-int`
 
 - **Landed (Stage 3, before Graph):** an email taken off a project can be
