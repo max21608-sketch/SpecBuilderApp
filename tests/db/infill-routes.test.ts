@@ -170,7 +170,7 @@ describeIfDb("the infill routes", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
     const body = (await res.json()) as { code: string; error: string };
     expect(body.code).toBe("answer_version_stale");
-    expect(body.error).toMatch(/changed by someone else/);
+    expect(body.error).toMatch(/changed since this screen loaded/);
   }, SLOW);
 
   it("400s an override of a settled answer with no reason and no open change", async () => {

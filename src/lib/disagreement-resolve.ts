@@ -119,11 +119,12 @@ export async function resolveDisagreement(
 
   if (String(row.status) !== "open") {
     const who = row.resolved_by ? ` by ${String(row.resolved_by)}` : "";
+    // The two settled states in the words the screen's buttons use, decided
+    // before the sentence so the sentence never holds the column itself.
+    const outcome = String(row.status) === "used_this" ? "its value was used instead" : "the held value was kept";
     throw new DomainConflictError(
       "already_resolved",
-      `This disagreement has already been settled${who} — ${
-        String(row.status) === "used_this" ? "its value was used instead" : "the held value was kept"
-      }. Reload to see it.`,
+      `This disagreement has already been settled${who} — ${outcome}. Reload to see it.`,
     );
   }
   if (Number(row.version) !== expectedVersion) {

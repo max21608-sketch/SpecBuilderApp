@@ -7,7 +7,7 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import ChaseQuestionTable, { type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
+import ChaseQuestionTable, { type ChaseItemTgq, type TableQuestion } from "@/components/drafts/ChaseQuestionTable";
 import { defaultSelection } from "@/lib/chase-selection";
 
 // ===========================================================================
@@ -100,10 +100,12 @@ function Harness({
   questions,
   contactId,
   seed = false,
+  itemTgq,
 }: {
   questions: TableQuestion[];
   contactId?: string;
   seed?: boolean;
+  itemTgq?: Record<string, ChaseItemTgq>;
 }) {
   const [selected, setSelected] = useState<Set<string>>(() =>
     seed ? defaultSelection(questions, contactId ?? "") : new Set(),
@@ -135,6 +137,7 @@ function Harness({
       }
       generating={false}
       onGenerate={() => {}}
+      itemTgq={itemTgq}
     />
   );
 }
@@ -172,6 +175,27 @@ describe("the furniture line is the row", () => {
     // One blocks a quote; the later one and the readiness one are "also".
     expect(within(line()).getByText("1")).toBeTruthy();
     expect(within(line()).getByText("2")).toBeTruthy();
+  });
+
+  // AUDIT F7, THE SCREEN HALF. A configuration on Matthew's matrix whose
+  // every question is answered can still owe its TGQ (W and SH unrecorded).
+  // No outstanding question names it, so a count that walks the questions
+  // never met it and the line read lower than the overview. The loader sends
+  // each matrix record's line; the line's count takes every one on it.
+  it("counts a matrix record on the line that no outstanding question names", () => {
+    render(
+      <Harness
+        questions={[question()]}
+        itemTgq={{
+          "line-1": { count: 2, projectWide: 0, itemRows: [], lineId: "line-1" },
+          "line-1-config-b": { count: 3, projectWide: 0, itemRows: [], lineId: "line-1" },
+          "another-line": { count: 7, projectWide: 0, itemRows: [], lineId: "line-9" },
+        }}
+      />,
+    );
+    // 2 for the line's own record and 3 for its quiet configuration; the 7 on
+    // another line is not this line's.
+    expect(within(line()).getByText("5")).toBeTruthy();
   });
 
   it("sends a level-less line to its record, in a new tab, rather than asking here", () => {

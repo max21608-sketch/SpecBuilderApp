@@ -335,6 +335,6 @@ describeIfDb("adding things by hand", () => {
           actor: "qa",
         }),
       ),
-    ).rejects.toThrow(/changed this item while you had it open/);
+    ).rejects.toThrow(/This item changed since this screen loaded/);
   }, SLOW);
 });

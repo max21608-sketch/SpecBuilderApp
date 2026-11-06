@@ -460,7 +460,17 @@ export type BlockedRecord = {
   itemDescription: string;
   designer: string | null;
   questionCount: number;
-  reason: "no designer on the record" | "no contact for this designer" | "no level on the record";
+  /**
+   * WHAT KIND OF BLOCK, for code to read. `nobody_to_ask` is the designer
+   * routing finding no person (the Nobody assigned tab); `no_tier` is a
+   * question the email could not place in either half. The chase screen and
+   * the contacts route used to tell these apart by matching the REASON's
+   * words, so the words could not be corrected without breaking both (audit
+   * 2026-11-06, the 2.4 follow-up).
+   */
+  kind: "nobody_to_ask" | "no_tier";
+  /** The words a person reads. Free to change: nothing matches on them. */
+  reason: "no designer on the record" | "no contact for this designer" | "no level (the placeholder categories need one)";
 };
 
 export type ContactGroup = {
@@ -518,6 +528,8 @@ export function groupByContact(
   const blockedByRecord = new Map<string, BlockedRecord>();
 
   const block = (question: OutstandingQuestion, reason: BlockedRecord["reason"]) => {
+    const kind: BlockedRecord["kind"] =
+      reason === "no level (the placeholder categories need one)" ? "no_tier" : "nobody_to_ask";
     const existing = blockedByRecord.get(question.recordId);
     if (existing) {
       existing.questionCount += 1;
@@ -529,6 +541,7 @@ export function groupByContact(
       itemDescription: question.itemDescription,
       designer: question.designer,
       questionCount: 1,
+      kind,
       reason,
     });
   };
@@ -566,11 +579,11 @@ export function groupByContact(
     // only way to chase a sofa was to decide something the gate model does
     // not read. The screen and the write boundary ask one question.
     //
-    // The reason's WORDS are unchanged because the chase screen keys on them
-    // (`isContactBlocker`); what changed is that a matrix record never carries
-    // it.
+    // The screen and the contacts route read the block's KIND, so the words
+    // now say what is true: only a placeholder category's question needs a
+    // level, and a matrix record never carries this block.
     if (question.tier === null) {
-      block(question, "no level on the record");
+      block(question, "no level (the placeholder categories need one)");
       continue;
     }
 

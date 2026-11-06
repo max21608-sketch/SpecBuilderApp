@@ -111,6 +111,7 @@ import {
   type DemoDrawing,
   type DemoMessage,
 } from "./demo/content";
+import { suggestedCategoryId } from "@/lib/bill-category";
 
 const ACTOR = "demo-seed";
 const apply = process.argv.includes("--apply");
@@ -551,7 +552,17 @@ const boqRunId = String(boqRun[0]?.id);
     return { index, ...line, ...level, categoryId: null, categoryStatus: "none", ignored: false };
   };
 
-  const stagedSheets = parsed.sheets.map((sheet) => ({ ...sheet, lines: sheet.lines.map(suggest) }));
+  // EVERY SUGGESTED CATEGORY ACCEPTED, which is what the review's "Accept all
+  // suggested categories on this tab" does. Since audit 2026-11-06 (G8) the
+  // confirm writes a category only where a person chose it, so a demo staged
+  // with its guesses left as guesses would confirm every record with no
+  // category and no checklist, and the walkthrough would open on nothing.
+  const accepted = <T extends { categoryId: string | null; categoryStatus: string }>(line: T): T =>
+    suggestedCategoryId(line) ? { ...line, categoryStatus: "chosen" } : line;
+  const stagedSheets = parsed.sheets.map((sheet) => ({
+    ...sheet,
+    lines: sheet.lines.map(suggest).map(accepted),
+  }));
   await sql`
     update intake_runs
        set status = 'parsed',

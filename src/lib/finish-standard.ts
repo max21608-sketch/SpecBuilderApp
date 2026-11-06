@@ -93,7 +93,7 @@ async function lockFinish(
   if (Number(row.version) !== expectedVersion) {
     throw new DomainConflictError(
       "finish_version_stale",
-      `“${String(row.code)}” was changed by someone else while you had it open. Reload before setting its BW finish.`,
+      `“${String(row.code)}” changed since this screen loaded. Reload before setting its BW finish.`,
     );
   }
   return {

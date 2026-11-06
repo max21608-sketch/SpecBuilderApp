@@ -197,7 +197,7 @@ export async function editFinish(
   if (Number(finish.version) !== expectedVersion) {
     throw new DomainConflictError(
       "finish_version_stale",
-      `“${String(finish.code)}” was changed by someone else while you had it open. Reload before saving.`,
+      `“${String(finish.code)}” changed since this screen loaded. Reload before saving.`,
     );
   }
 

@@ -330,15 +330,24 @@ async function summaryRows(projectIds: string[]): Promise<SummaryRow[]> {
        group by project_id
     ),
     docs as (
-      select project_id,
-             -- pending covers a document whose read is dispatched and running.
-             -- It needs nothing from anybody, which is why the screen says so
-             -- rather than offering a button.
-             count(*) filter (where status in ('pending', 'parsing'))::int as documents_reading,
-             count(*) filter (where status = 'failed')::int as documents_failed
-        from intake_runs
-       where project_id = any(${projectIds}::uuid[])
-       group by project_id
+      select r.project_id,
+             -- IN FLIGHT, as isIntakeRunInFlight reads it: being read (queued,
+             -- which is what dispatch writes, or parsing), or promised a read
+             -- and waiting for one of the pack's slots. It needs nothing from
+             -- anybody, which is why the next step says so rather than
+             -- offering a button. A plain pending is NOT in it: nobody has
+             -- asked for that read, and counting it pinned the overview at
+             -- "Reading 1 document" with nothing to press (audit 2026-11-06,
+             -- F9). The waiting half is the expression three other queries
+             -- copy; tests/lib/intake-in-flight.test.ts holds all four equal.
+             count(*) filter (
+               where r.status in ('queued', 'parsing')
+                  or (r.status = 'pending' and r.attempt_id is null and r.attempt_deadline_at > now())
+             )::int as documents_reading,
+             count(*) filter (where r.status = 'failed')::int as documents_failed
+        from intake_runs r
+       where r.project_id = any(${projectIds}::uuid[])
+       group by r.project_id
     )
     select rec.project_id,
            rec.records, rec.uncategorised, rec.no_level, rec.level_suggested,

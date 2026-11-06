@@ -157,7 +157,7 @@ describeIfDb("a size part's slot, corrected before the confirm", () => {
     // A SCREEN DRAWN BEFORE THAT CHANGE is refused, and writes nothing.
     const stale = await patch({ sheetIndex: 0, index: 0, slotOverride: { key: "H 420", slot: "note" }, slotOverridesVersion: 0 });
     expect(stale.status).toBe(409);
-    expect(await stale.text()).toMatch(/changed in another tab/);
+    expect(await stale.text()).toMatch(/changed since this screen loaded/);
     expect(await stagedLine()).toMatchObject({ slotOverrides: { "D 400": "DIA" }, slotOverridesVersion: 1 });
 
     // A SLOT ANOTHER PART HOLDS is taken, and the holder becomes a note in the

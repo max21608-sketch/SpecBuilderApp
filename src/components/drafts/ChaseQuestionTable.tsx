@@ -63,6 +63,8 @@ import { ITEM_TGQ_WHERE_LABEL } from "@/lib/item-tgq";
 export type ChaseItemTgq = {
   count: number | null;
   projectWide: number;
+  /** The bill line the record sits under, so a line counts a record no question names (audit F7). */
+  lineId?: string;
   itemRows: { label: string; where: "specs" | "details" }[];
 };
 import Chip from "@/components/ui/Chip";
@@ -561,7 +563,10 @@ export default function ChaseQuestionTable({
             )}
             {shown.map(({ line, own, options, visibleAll, searching }) => {
               const open = openLines.has(line.lineId) || searching;
-              const total = countWithItemTgq(allQuestions(line), tgqByRecord);
+              // With the line's id, so a matrix configuration on this line that
+              // no outstanding question names still counts (audit F7): the
+              // fill-in screen's count, and the overview's total.
+              const total = countWithItemTgq(allQuestions(line), tgqByRecord, line.lineId);
               const lineRecords = [line.lineId, ...line.options.map((option) => option.recordId)];
               const itemRows = lineRecords.flatMap((recordId) =>
                 (tgqByRecord.get(recordId)?.itemRows ?? []).map((row) => ({ ...row, recordId })),

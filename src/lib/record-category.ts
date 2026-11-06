@@ -36,7 +36,7 @@ export async function setRecordCategory(
   if (Number(record.version) !== expectedVersion) {
     throw new DomainConflictError(
       "record_version_stale",
-      "Someone else changed this record while you had it open. Reload before saving.",
+      "This record changed since this screen loaded. Reload before saving.",
     );
   }
 
@@ -145,7 +145,7 @@ export async function setRecordLevel(
   if (Number(record.version) !== expectedVersion) {
     throw new DomainConflictError(
       "record_version_stale",
-      "Someone else changed this record while you had it open. Reload before saving.",
+      "This record changed since this screen loaded. Reload before saving.",
     );
   }
 

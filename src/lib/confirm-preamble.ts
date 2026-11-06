@@ -18,6 +18,7 @@ import {
   type PreambleNote,
   type StagedPreamble,
 } from "@/lib/preamble-document";
+import { documentClosedSentence, reviewedWord } from "@/lib/intake-status";
 
 export type NoteRef = { id: string; version: number };
 
@@ -43,7 +44,7 @@ async function loadRun(txn: TxnSql, runId: string, expectedVersion: number | nul
     throw new DomainConflictError("wrong_kind", "That import is not a preamble.", { status: 400 });
   }
   if (run.status !== "parsed" && run.status !== "confirmed") {
-    throw new DomainConflictError("not_reviewable", `This import is ${String(run.status)}, not ready to review.`);
+    throw new DomainConflictError("not_reviewable", documentClosedSentence(String(run.status), { consequence: "it cannot be reviewed" }));
   }
   if (expectedVersion !== null && Number(run.version) !== expectedVersion) {
     throw new DomainConflictError(
@@ -62,13 +63,13 @@ function takeNotes(staged: StagedPreamble, refs: NoteRef[], allow: PreambleNote[
     if (!allow.includes(note.reviewStatus)) {
       throw new DomainConflictError(
         "note_reviewed",
-        `“${note.title ?? "That note"}” has already been ${note.reviewStatus}. Reload to see the current state.`,
+        `“${note.title ?? "That note"}” has already been ${reviewedWord(note.reviewStatus)}. Reload to see where it stands.`,
       );
     }
     if (note.version !== ref.version) {
       throw new DomainConflictError(
         "note_version_stale",
-        `“${note.title ?? "One of these notes"}” was edited in another tab. Reload before confirming.`,
+        `“${note.title ?? "One of these notes"}” changed since this screen loaded. Reload before confirming.`,
       );
     }
     taken.push(note);

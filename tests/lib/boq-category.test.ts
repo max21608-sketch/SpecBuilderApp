@@ -23,13 +23,17 @@ const register: CategoryRegister = {
 describe("suggestCategory", () => {
   it("matches a name written `<item> @ <where>` on the item alone", () => {
     // Read whole, "Side Table @ Lounge" ties Side table with Lounge table.
-    expect(suggestCategory("Side Table @ Lounge", register)).toEqual({ status: "suggested", categoryId: "side" });
-    expect(suggestCategory("Pouf @ Bedroom", register)).toEqual({ status: "suggested", categoryId: "seat" });
-    expect(suggestCategory("Pouf @", register)).toEqual({ status: "suggested", categoryId: "seat" });
+    expect(suggestCategory("Side Table @ Lounge", register)).toEqual({ status: "suggested", categoryId: "side", evidence: "name matches “Side table”" });
+    expect(suggestCategory("Pouf @ Bedroom", register)).toEqual({ status: "suggested", categoryId: "seat", evidence: "name matches “Pouf”" });
+    expect(suggestCategory("Pouf @", register)).toEqual({ status: "suggested", categoryId: "seat", evidence: "name matches “Pouf”" });
   });
 
   it("reads a name that is only the @ part whole, as before", () => {
-    expect(suggestCategory("@ Lounge table", register)).toEqual({ status: "suggested", categoryId: "dining" });
+    expect(suggestCategory("@ Lounge table", register)).toEqual({
+      status: "suggested",
+      categoryId: "dining",
+      evidence: "name matches “Lounge table”",
+    });
   });
 
   it("leaves a tie between two sheets to a person", () => {
@@ -39,7 +43,25 @@ describe("suggestCategory", () => {
   });
 
   it("calls several terms naming ONE sheet agreement", () => {
-    expect(suggestCategory("Dining table", register)).toEqual({ status: "suggested", categoryId: "dining" });
+    expect(suggestCategory("Dining table", register)).toEqual({
+      status: "suggested",
+      categoryId: "dining",
+      evidence: "name matches “Dining table”",
+    });
+    // A tie between two terms of ONE sheet: the evidence names both, so the
+    // reviewer sees what agreed rather than one term picked at random.
+    const stools: CategoryRegister = {
+      categories: [{ id: "seat", name: "Armchairs Benches Stools Sofas" }],
+      aliases: [
+        { categoryId: "seat", term: "Bar stool" },
+        { categoryId: "seat", term: "Counter stool" },
+      ],
+    };
+    expect(suggestCategory("Stool", stools)).toEqual({
+      status: "suggested",
+      categoryId: "seat",
+      evidence: "name matches “Bar stool”, “Counter stool”",
+    });
     expect(suggestCategory("Sofa", register)).toEqual({ status: "none", categoryId: null });
   });
 });

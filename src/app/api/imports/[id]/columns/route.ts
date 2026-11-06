@@ -58,6 +58,7 @@ import {
 import { columnMappingProblem, isBoqReadRole, type BoqReadRole } from "@/lib/boq-roles";
 import { loadBoqReadingRegisters, loadLineSuggester, stageSheet } from "@/lib/boq-stage";
 import { applyStructureToLines } from "@/lib/boq-structure";
+import { documentClosedSentence } from "@/lib/intake-status";
 
 export const maxDuration = 60;
 
@@ -119,12 +120,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 // ---- one sheet, with a person's columns ------------------------------------
 async function setColumns(run: BoqRunRow, body: z.infer<typeof SetColumns>, actor: string): Promise<Response> {
   if (run.status !== "parsed") {
-    return json({ ok: false, error: `This bill is ${run.status}; its columns can no longer be changed.` }, 409);
+    return json({ ok: false, error: documentClosedSentence(run.status, { noun: "bill", consequence: "its columns can no longer be changed" }) }, 409);
   }
   if (run.version !== body.version) {
     throw new DomainConflictError(
       "import_version_stale",
-      "Someone else changed this bill while you were looking at it. Reload and check before setting its columns.",
+      "This bill changed since this screen loaded. Reload and check it before setting its columns.",
     );
   }
   const staged = assertBoqDocument(run.parsed);
@@ -204,12 +205,12 @@ async function setColumns(run: BoqRunRow, body: z.infer<typeof SetColumns>, acto
 // ---- the whole bill, again --------------------------------------------------
 async function readAgain(run: BoqRunRow, expectedVersion: number, actor: string): Promise<Response> {
   if (run.status !== "failed" && run.status !== "parsed") {
-    return json({ ok: false, error: `This bill is ${run.status}; it can no longer be read again.` }, 409);
+    return json({ ok: false, error: documentClosedSentence(run.status, { noun: "bill", consequence: "it can no longer be read again" }) }, 409);
   }
   if (run.version !== expectedVersion) {
     throw new DomainConflictError(
       "import_version_stale",
-      "Someone else changed this bill while you were looking at it. Reload before reading it again.",
+      "This bill changed since this screen loaded. Reload before reading it again.",
     );
   }
 
@@ -249,7 +250,7 @@ async function readAgain(run: BoqRunRow, expectedVersion: number, actor: string)
 // ---- the panel closed -------------------------------------------------------
 async function markChecked(run: BoqRunRow, body: z.infer<typeof Checked>, actor: string): Promise<Response> {
   if (run.status !== "parsed") {
-    return json({ ok: false, error: `This bill is ${run.status}; nothing on it can change.` }, 409);
+    return json({ ok: false, error: documentClosedSentence(run.status, { noun: "bill", consequence: "nothing on it can change here" }) }, 409);
   }
   const rows = await sql`
     update intake_runs
@@ -265,7 +266,7 @@ async function markChecked(run: BoqRunRow, body: z.infer<typeof Checked>, actor:
         ok: false,
         conflict: true,
         code: "import_version_stale",
-        error: "Someone else changed this bill while you were looking at it. Reload and check its columns again.",
+        error: "This bill changed since this screen loaded. Reload and check its columns again.",
       },
       409,
     );

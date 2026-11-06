@@ -101,7 +101,7 @@ export async function writeStagedBoq(
   if (!rows[0]) {
     throw new DomainConflictError(
       "import_version_stale",
-      "Someone else changed this bill while you were looking at it. Reload and check before setting its columns.",
+      "This bill changed since this screen loaded. Reload and check it before setting its columns.",
     );
   }
   return Number(rows[0].version);
