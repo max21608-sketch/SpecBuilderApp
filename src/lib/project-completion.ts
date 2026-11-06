@@ -45,81 +45,19 @@
 // ============================================================================
 import { sql } from "@/lib/db";
 
-export type ProjectCompletion = {
-  /** Records in the export's scope. */
-  records: number;
-  /** Of those, how many nobody has categorised. Each one blocks completion. */
-  uncategorised: number;
-  /** Questions still missing or TBC across those records. */
-  outstanding: number;
-  complete: boolean;
-};
-
-export const EMPTY_COMPLETION: ProjectCompletion = {
-  records: 0,
-  uncategorised: 0,
-  outstanding: 0,
-  complete: false,
-};
-
-/** Archived is a separate axis from finished, but one pill has to say both. */
-export type ProjectState = "archived" | "completed" | "active";
-
-export const PROJECT_STATE_LABELS: Record<ProjectState, string> = {
-  archived: "ARCHIVED",
-  completed: "COMPLETED",
-  active: "ACTIVE",
-};
-
-/**
- * Which colour each state wears, decided ONCE beside the labels.
- *
- * Green is SETTLED in this app's colour language, everywhere — a confirmed
- * answer, a satisfied gate, a finished review — so it belongs to COMPLETED.
- * ACTIVE is merely where most projects live, and gets the working-state sky.
- * The list and the project page each held their own copy of this map and had
- * them the other way round from each other, under a comment claiming parity.
- * A `Tone` name rather than a class string, so the pill component owns the
- * shades and this file owns only the meaning.
- */
-export const PROJECT_STATE_TONE: Record<ProjectState, "live" | "good" | "plain"> = {
-  active: "live",
-  completed: "good",
-  archived: "plain",
-};
-
-export function projectState(status: string | null | undefined, completion: ProjectCompletion | null): ProjectState {
-  // Archived wins: a project put away is put away whether or not its
-  // specifications were ever finished, and saying COMPLETED over it would
-  // claim something nobody checked.
-  if (status === "archived") return "archived";
-  return completion?.complete ? "completed" : "active";
-}
-
-/**
- * Why a project is not complete, in words a person can act on.
- *
- * Null when it IS complete. A pill with no explanation is a pill nobody
- * trusts, and "active" is the state that needs the explaining.
- */
-export function completionSentence(completion: ProjectCompletion | null): string | null {
-  if (!completion) return null;
-  if (completion.complete) return null;
-  if (completion.records === 0) return "No records yet — nothing has been imported.";
-  const parts: string[] = [];
-  if (completion.outstanding > 0) {
-    parts.push(
-      `${completion.outstanding} question${completion.outstanding === 1 ? "" : "s"} still missing or TBC`,
-    );
-  }
-  if (completion.uncategorised > 0) {
-    parts.push(
-      `${completion.uncategorised} record${completion.uncategorised === 1 ? "" : "s"} with no category, so nobody has decided what to ask`,
-    );
-  }
-  if (parts.length === 0) return null;
-  return `${parts.join(", and ")}.`;
-}
+// The shape, its empty reading, the state, its label and tone and the
+// sentence live in a leaf the screens can import without the database driver
+// (audit G5); one definition, re-exported here so server callers keep theirs.
+export {
+  EMPTY_COMPLETION,
+  PROJECT_STATE_LABELS,
+  PROJECT_STATE_TONE,
+  completionSentence,
+  projectState,
+  type ProjectCompletion,
+  type ProjectState,
+} from "./project-summary-shape";
+import type { ProjectCompletion } from "./project-summary-shape";
 
 /**
  * The completion of several projects at once, in ONE query.

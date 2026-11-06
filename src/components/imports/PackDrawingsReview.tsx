@@ -16,8 +16,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
+import { VersionLedger, type WrittenVersions } from "@/lib/acked-versions";
+import { draftAfterSave, type ObservationDrafts } from "@/lib/observation-drafts";
 import { upload } from "@vercel/blob/client";
-import { projectUploadPrefix } from "@/lib/blob-source";
+import { projectUploadPrefix } from "@/lib/upload-paths";
 import type { CroppedImage } from "@/lib/pdf-crop";
 import { formatDay } from "@/lib/format-day";
 
@@ -154,8 +156,13 @@ export default function PackDrawingsReview({
    */
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, Partial<DrawingObservation>>>({});
+  // A draft ends with its save (audit G10, `observation-drafts.ts`).
+  const [drafts, setDrafts] = useState<ObservationDrafts>({});
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  // THE VERSIONS THE SERVER ACKNOWLEDGED (audit G1). A closure's version is the
+  // version of its render, so every request reads this ledger when it is
+  // built, after the saves it waited for. See `acked-versions.ts`.
+  const versions = useRef(new VersionLedger()).current;
 
   // The crop each card currently holds, kept in a ref rather than state: it
   // changes on every re-render of a picker and nothing on this screen needs to
@@ -344,12 +351,22 @@ export default function PackDrawingsReview({
     const run = runOf(item.id);
     if (!run) return;
     await queueSave(async () => {
-      const res = await apiFetch(`/api/imports/${run.importId}`, {
+      const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${run.importId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ itemId: item.id, observationId: observation.id, expectedVersion: observation.version, changes }),
+        body: JSON.stringify({
+          itemId: item.id,
+          observationId: observation.id,
+          // Read inside the chain, never off the render that queued it.
+          expectedVersion: versions.row(observation.id, observation.version),
+          changes,
+        }),
       });
+      if (res.ok) versions.record(res.data.versions);
       await reloadThen(res.ok ? null : res.error);
+      setDrafts((current) =>
+        draftAfterSave(current, observation.id, changes, res.ok ? { ok: true } : { ok: false, error: res.error }),
+      );
     });
   }
 
@@ -366,22 +383,37 @@ export default function PackDrawingsReview({
     if (edits.length === 0) return;
     await queueSave(async () => {
       const failures: string[] = [];
+      const outcomes: { id: string; changes: Record<string, unknown>; error: string | null }[] = [];
       for (const edit of edits) {
         const run = runOf(edit.item.id);
         if (!run) continue;
-        const res = await apiFetch(`/api/imports/${run.importId}`, {
+        const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${run.importId}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             itemId: edit.item.id,
             observationId: edit.observation.id,
-            expectedVersion: edit.observation.version,
+            expectedVersion: versions.row(edit.observation.id, edit.observation.version),
             changes: edit.changes,
           }),
         });
-        if (!res.ok) failures.push(res.error);
+        if (res.ok) versions.record(res.data.versions);
+        else failures.push(res.error);
+        outcomes.push({ id: edit.observation.id, changes: edit.changes, error: res.ok ? null : res.error });
       }
       await reloadThen(failures.length > 0 ? failures[0]! : null);
+      setDrafts((current) =>
+        outcomes.reduce(
+          (all, outcome) =>
+            draftAfterSave(
+              all,
+              outcome.id,
+              outcome.changes,
+              outcome.error === null ? { ok: true } : { ok: false, error: outcome.error },
+            ),
+          current,
+        ),
+      );
     });
   }
 
@@ -429,11 +461,12 @@ export default function PackDrawingsReview({
     const run = runOf(item.id);
     if (!run) return;
     await queueSave(async () => {
-      const res = await apiFetch(`/api/imports/${run.importId}`, {
+      const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${run.importId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ itemId: item.id, expectedVersion: item.version, changes }),
+        body: JSON.stringify({ itemId: item.id, expectedVersion: versions.item(item.id, item.version), changes }),
       });
+      if (res.ok) versions.record(res.data.versions);
       await reloadThen(res.ok ? null : res.error);
     });
   }
@@ -447,11 +480,12 @@ export default function PackDrawingsReview({
       let failure: string | null = null;
       for (const run of targets) {
         if (!run) continue;
-        const res = await apiFetch(`/api/imports/${run.importId}`, {
+        const res = await apiFetch<{ versions?: WrittenVersions }>(`/api/imports/${run.importId}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ bulkUnit: { scope, unit, ...(itemId ? { itemId } : {}) } }),
         });
+        if (res.ok) versions.record(res.data.versions);
         if (!res.ok) {
           failure = res.error;
           break;
@@ -500,7 +534,7 @@ export default function PackDrawingsReview({
         itemId: item.id,
         ...(action === "confirm"
           ? {
-              itemVersion: item.version,
+              itemVersion: versions.item(item.id, item.version),
               // THE RECORDS THIS CARD SHOWED (audit D3), exactly as the review
               // GET resolved them for this render. The confirm refuses on any
               // difference from its live resolution, so a record that
@@ -510,7 +544,12 @@ export default function PackDrawingsReview({
               ...(swatchList.length > 0 ? { swatches: swatchList } : {}),
             }
           : {}),
-        observations: observations.map((observation) => ({ id: observation.id, version: observation.version })),
+        // The SET is the card's; each VERSION is the ledger's, read after the
+        // saves this press waited for (audit G1).
+        observations: observations.map((observation) => ({
+          id: observation.id,
+          version: versions.row(observation.id, observation.version),
+        })),
       }),
     });
     // A BILL'S PICTURE KEPT OVER THE CROP is not a failure and not silent:
@@ -597,7 +636,10 @@ export default function PackDrawingsReview({
       for (const occurrence of group.occurrences) {
         const key = `${occurrence.importId}\u0000${occurrence.itemId}`;
         const entry = byCard.get(key) ?? { importId: occurrence.importId, itemId: occurrence.itemId, refs: [] };
-        entry.refs.push({ id: occurrence.observationId, version: occurrence.version });
+        entry.refs.push({
+          id: occurrence.observationId,
+          version: versions.row(occurrence.observationId, occurrence.version),
+        });
         byCard.set(key, entry);
       }
       let failure: string | null = null;

@@ -43,14 +43,15 @@ export default function DifferingFields<A extends DifferingAnswer>({
   palettes,
   paletteByQuestion,
   savingId,
-  reloadKey,
+  refusals,
   onSave,
 }: {
   answers: A[];
   palettes: PaletteRow[];
   paletteByQuestion: { json_id: number | null; local_key: string | null; palette_key: string }[];
   savingId: string | null;
-  reloadKey: number;
+  /** Per answer, its refused saves: the only thing besides its version that remounts its boxes (audit G2). */
+  refusals: Record<string, number>;
   onSave: (answer: A, value: string, state: AnswerState, qualifier?: string | null) => void;
 }) {
   const rows = useMemo(
@@ -103,11 +104,11 @@ export default function DifferingFields<A extends DifferingAnswer>({
               palette={paletteFor(answer)}
               value={answer.value}
               disabled={!answer.answer_id || savingId === answer.answer_id}
-              inputKey={`diff:${answer.answer_id}:${answer.version}:${reloadKey}`}
+              inputKey={`diff:${answer.answer_id}:${answer.version}:${refusals[answer.answer_id ?? ""] ?? 0}`}
               onCommit={(next) => onSave(answer, next, next ? "confirmed" : "missing")}
             />
             <input
-              key={`q:${answer.answer_id}:${answer.version}:${reloadKey}`}
+              key={`q:${answer.answer_id}:${answer.version}:${refusals[answer.answer_id ?? ""] ?? 0}`}
               defaultValue={answer.qualifier ?? ""}
               disabled={!answer.answer_id || savingId === answer.answer_id || !answer.value}
               placeholder="Where on the item"

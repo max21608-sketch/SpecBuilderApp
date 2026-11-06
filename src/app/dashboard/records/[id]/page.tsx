@@ -314,7 +314,22 @@ function RecordView() {
   const [imageFailed, setImageFailed] = useState(false);
   // Bumped after every successful write, so the history list below reloads
   // under the edit that caused it instead of going stale until a page reload.
+  // NEVER part of an input's key (audit G2): see `refusals`.
   const [historyKey, setHistoryKey] = useState(0);
+  /**
+   * WHICH ANSWER BOXES MUST SHOW THE SERVER AGAIN, per answer (audit G2).
+   *
+   * The checklist's inputs were keyed on `historyKey`, so every save remounted
+   * every box: type in A, tab to B, type, and A's reload replaced B's typing
+   * with the server's value before any blur could save it. CLAUDE.md records
+   * the same trap for the details panel. A box now remounts only when its own
+   * answer's version moves, or when its own save was REFUSED, which is the one
+   * case where the version stays put and the typed words must still give way
+   * to what the server holds.
+   */
+  const [refusals, setRefusals] = useState<Record<string, number>>({});
+  const refused = (answerId: string) =>
+    setRefusals((current) => ({ ...current, [answerId]: (current[answerId] ?? 0) + 1 }));
   // NULL UNTIL THE TAB HAS LOADED ITS LIST. The count is the length of that
   // list rather than a second query in the record route: one loader decides
   // which documents count, and a tab number computed elsewhere is how the
@@ -398,13 +413,12 @@ function RecordView() {
   async function reloadQuietly() {
     await reloadThen(null);
   }
-  // Moving from a record with no picture to one with a picture reuses this
-  // component, so a sticky `true` would hide every image after the first miss.
-  // A swap is a different picture too, so the flag goes with the current id.
+  // A swap is a different picture, so the failure flag goes with the current
+  // picture. A different RECORD is a different view altogether (`RecordForId`
+  // keys it by id), so nothing here has to be reset by hand when the id moves,
+  // which is how most of this state used to be forgotten.
   const currentPictureId = data?.picture?.current?.id ?? null;
-  useEffect(() => { setImageFailed(false); }, [id, currentPictureId]);
-  // Another record's count must not stand on this one's tab.
-  useEffect(() => { setDocumentCount(null); }, [id]);
+  useEffect(() => { setImageFailed(false); }, [currentPictureId]);
 
   async function save(
     answer: Answer,
@@ -435,11 +449,22 @@ function RecordView() {
         // answer. It is asked for here rather than on every keystroke, and it
         // carries the original edit so nothing has to be retyped.
         if (res.data?.code === "reason_required") {
-          setPendingReason({ prompt: answer.prompt, answerId: answer.answer_id, value, state, version: answer.version });
+          // THE QUALIFIER TRAVELS WITH IT (audit G3). It was left out, so a
+          // qualifier-only edit was replayed without the qualifier, the route
+          // kept the old one, and the box closed as though it had saved.
+          setPendingReason({
+            prompt: answer.prompt,
+            answerId: answer.answer_id,
+            value,
+            state,
+            version: answer.version,
+            ...(qualifier !== undefined ? { qualifier } : {}),
+          });
           await reloadThen(null);
           return;
         }
         await reloadThen(res.error);
+        refused(answer.answer_id);
         return;
       }
       await reloadThen(null);
@@ -530,7 +555,7 @@ function RecordView() {
       await reloadThen("That question changed while the reason box was open. Nothing was saved — check it and try again.");
       return;
     }
-    await save(answer, pendingReason.value, pendingReason.state, reason, evidence);
+    await save(answer, pendingReason.value, pendingReason.state, reason, evidence, pendingReason.qualifier);
     setPendingReason(null);
   }
 
@@ -1102,7 +1127,11 @@ function RecordView() {
           <ReasonPrompt
             pending={pendingReason}
             projectId={record.project_id}
-            onCancel={() => setPendingReason(null)}
+            onCancel={() => {
+              // Nothing was saved, so the box shows the server's value again.
+              refused(pendingReason.answerId);
+              setPendingReason(null);
+            }}
             onSubmit={saveWithReason}
           />
         )}
@@ -1137,7 +1166,7 @@ function RecordView() {
                     palettes={data.palettes ?? []}
                     paletteByQuestion={data.paletteByQuestion ?? []}
                     savingId={savingId}
-                    reloadKey={historyKey}
+                    refusals={refusals}
                     onSave={(answer, value, state, qualifier) =>
                       void save(answer, value, state, undefined, undefined, qualifier)
                     }
@@ -2123,7 +2152,7 @@ function RecordView() {
             attributes={attributes}
             readiness={readiness}
             savingId={savingId}
-            reloadKey={historyKey}
+            refusals={refusals}
             dimensionNote={record.dimension_note}
             onSave={(answer, value, state) => void save(answer as Answer, value, state)}
             onRecordDimension={recordDimension}
@@ -2166,9 +2195,26 @@ function RecordView() {
 export default function RecordPage() {
   return (
     <Suspense fallback={<PageBody><Spinner label="Loading the record" /></PageBody>}>
-      <RecordView />
+      <RecordForId />
     </Suspense>
   );
+}
+
+/**
+ * ONE VIEW PER RECORD (audit G9).
+ *
+ * Next reuses this page's component when the id in the URL changes, so every
+ * piece of state in `RecordView` used to carry over from one record to the
+ * next: an open correction, a retire box, a pending reason, a rename, the
+ * history's picked versions. And `load()` never cleared `data`, so the previous
+ * record rendered under the new URL until the fetch landed, and an action in
+ * that window sent A's version to B's id. Keyed by the id, a new record is a
+ * new view: its state starts empty and it shows the loading state until its
+ * own data is in.
+ */
+function RecordForId() {
+  const { id } = useParams<{ id: string }>();
+  return <RecordView key={id} />;
 }
 
 /**

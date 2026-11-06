@@ -204,6 +204,9 @@ describeIfDb("the drawings review points at a figure", () => {
       changes: { swapSlot: { slot: "D", displaces: [{ id: depth.id, version: depth.version }] } },
     });
     expect(swapped.status, JSON.stringify(swapped.body)).toBe(200);
+    // THE PATCH SAYS WHICH ROWS IT MOVED (audit G1): the row named AND the row
+    // it displaced, so a screen confirming next sends both new versions.
+    expect(swapped.body.versions).toEqual({ items: {}, observations: { [section.id]: 2, [depth.id]: 2 } });
 
     const after = await live(runId);
     expect(after.version).toBe(before.version + 1);

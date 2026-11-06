@@ -94,6 +94,7 @@ import { loadFieldsWithPalettes } from "@/lib/palette-load";
 import { paletteOptionFor } from "@/lib/palettes";
 import type { StagedStandard } from "@/lib/bw-standard";
 import { normaliseVariantLabel, variantLabelProblem } from "@/lib/record-variants";
+import { versionsWritten } from "@/lib/acked-versions";
 // ---- finishes schedule (brief C) ----
 import { assertStagedFinishSchedule, isStagedFinishSchedule, reviewFinishSchedule } from "@/lib/finish-schedule";
 import { loadScheduleLibrary, setFinishScheduleEntryKind } from "@/lib/confirm-finish-schedule";
@@ -192,7 +193,9 @@ async function patchBulkUnit(id: string, raw: unknown, actor: string): Promise<R
         returning version
       `;
       if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
-      return { version: Number(written[0].version), changed };
+      // Every row this bumped, so a screen confirming next sends these and not
+      // the versions it rendered with (audit G1, `acked-versions.ts`).
+      return { version: Number(written[0].version), changed, versions: versionsWritten(staged.items, items) };
     });
     return json({ ok: true, ...result });
   } catch (cause) {
@@ -496,7 +499,8 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
             returning version
           `;
           if (!swapped[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
-          return { version: Number(swapped[0].version) };
+          // A swap moves the row it displaces too; the screen learns both.
+          return { version: Number(swapped[0].version), versions: versionsWritten(staged.items, items) };
         }
         if (changes.specFieldId) {
           const field = await txn`select id from spec_fields where id = ${changes.specFieldId}`;
@@ -686,7 +690,10 @@ async function patchDrawing(id: string, raw: unknown, actor: string): Promise<Re
         returning version
       `;
       if (!written[0]) throw new DomainConflictError("not_reviewable", "This import closed while you were editing it.");
-      return { version: Number(written[0].version) };
+      // THE VERSIONS THIS WRITE PRODUCED (audit G1). The run's own version is
+      // no use to a screen confirming next: the confirm checks each row's and
+      // the item's, so those are what it has to learn.
+      return { version: Number(written[0].version), versions: versionsWritten(staged.items, items) };
     });
     return json({ ok: true, ...result });
   } catch (cause) {

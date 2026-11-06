@@ -15,7 +15,7 @@ import { upload } from "@vercel/blob/client";
 import { apiFetch } from "@/lib/api-fetch";
 import { INTAKE_UPLOAD_ACCEPT } from "@/lib/intake-source-types";
 import { DOCUMENT_KINDS, DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/spec-vocab";
-import { projectUploadPrefix } from "@/lib/blob-source";
+import { projectUploadPrefix } from "@/lib/upload-paths";
 import { checkUpload } from "@/lib/upload-check";
 
 type ImportType = "boq" | "spec_document";

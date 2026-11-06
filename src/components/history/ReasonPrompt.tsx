@@ -23,6 +23,13 @@ export type PendingReason = {
   value: string;
   state: AnswerState;
   version: number;
+  /**
+   * The return line the refused edit carried, replayed with the reason (audit
+   * G3). ABSENT keeps the answer's own, which is how the route reads an
+   * omitted qualifier; null clears it. Leaving it out of this type is how a
+   * qualifier-only edit came to be "saved" as no change at all.
+   */
+  qualifier?: string | null;
 };
 
 export default function ReasonPrompt({

@@ -12,7 +12,7 @@
 // opens in Outlook. That is said on screen rather than left to be discovered.
 import { useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { projectUploadPrefix } from "@/lib/blob-source";
+import { projectUploadPrefix } from "@/lib/upload-paths";
 import Button from "@/components/ui/Button";
 
 export type UploadedEvidence = { pathname: string; filename: string; contentType: string; size: number };

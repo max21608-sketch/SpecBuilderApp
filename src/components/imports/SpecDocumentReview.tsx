@@ -28,6 +28,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { fieldDisplayName } from "@/lib/spec-field-label";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
+import { VersionLedger } from "@/lib/acked-versions";
 import Spinner from "@/components/ui/Spinner";
 import { usePoll } from "@/lib/use-poll";
 import EmailEnvelope, { type EmailMessage } from "@/components/imports/EmailHeader";
@@ -127,7 +128,13 @@ export default function SpecDocumentReview({
   // Acknowledged server state per proposal, held apart from what is being typed.
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Record<string, Dirty>>({});
-  const [versions, setVersions] = useState<Record<string, number>>({});
+  // THE VERSIONS THE SERVER ACKNOWLEDGED, in a ref (audit G1). They were React
+  // state, read through `save` and `versionOf`, both closures over the render
+  // the click happened in: "Confirm" flushed and awaited the save in flight and
+  // then sent the version from before it, and a second save chained behind a
+  // first sent the first one's starting version. A closure's version is the
+  // version of its render; the ledger is read when each request is built.
+  const versions = useRef(new VersionLedger()).current;
   // Which spec rows are open. The table is a summary; the per-run controls
   // that can change a value live inside the row, one click away.
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -154,9 +161,10 @@ export default function SpecDocumentReview({
   );
 
   // The version this screen believes each proposal is at: the one the server
-  // ACKNOWLEDGED, not the one first loaded.
+  // ACKNOWLEDGED, or the one rendered where that is newer (a reload brought
+  // somebody else's edit in, and the reviewer has seen it).
   const versionOf = useCallback(
-    (proposal: Proposal) => versions[proposal.id] ?? proposal.version,
+    (proposal: Proposal) => versions.row(proposal.id, proposal.version),
     [versions],
   );
 
@@ -169,7 +177,8 @@ export default function SpecDocumentReview({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             proposalId: proposal.id,
-            expectedProposalVersion: versions[proposal.id] ?? proposal.version,
+            // Read inside the chain, after the save ahead of it has landed.
+            expectedProposalVersion: versions.row(proposal.id, proposal.version),
             changes,
           }),
         });
@@ -178,7 +187,7 @@ export default function SpecDocumentReview({
           setSaveErrors((current) => ({ ...current, [proposal.id]: res.error }));
           return;
         }
-        setVersions((current) => ({ ...current, [proposal.id]: res.data.proposal.version }));
+        versions.recordRow(proposal.id, res.data.proposal.version);
         setSaveErrors((current) => {
           if (!(proposal.id in current)) return current;
           const rest = { ...current };
@@ -239,7 +248,6 @@ export default function SpecDocumentReview({
         setError(res.error);
         return;
       }
-      setVersions({});
       await reload();
     } finally {
       setBusy(null);

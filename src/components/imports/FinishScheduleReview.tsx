@@ -29,7 +29,7 @@
 // picture column at all.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { projectUploadPrefix } from "@/lib/blob-source";
+import { projectUploadPrefix } from "@/lib/upload-paths";
 import type { CroppedImage } from "@/lib/pdf-crop";
 import SwatchPicker from "@/components/imports/SwatchPicker";
 import { clampText } from "@/lib/shout";
