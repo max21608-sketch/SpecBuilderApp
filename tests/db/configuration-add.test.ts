@@ -89,7 +89,7 @@ describeIfDb("adding a configuration by hand", () => {
     comId = (
       await client.query(
         `insert into record_attributes (record_id, attr_group, label, value, spec_field_id, state, source_run_id, source_page, created_by, updated_by)
-         values ($1, 'material', 'SEAT', 'Tibor Blob Amber Fern', $2, 'confirmed', $3, 3, 'qa', 'qa') returning id`,
+         values ($1, 'material', 'SEAT', 'Meridian Drift Amber', $2, 'confirmed', $3, 3, 'qa', 'qa') returning id`,
         [billLineId, comFieldId, intakeRunId],
       )
     ).rows[0].id;

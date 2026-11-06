@@ -57,7 +57,7 @@ describe("suggestFinishKind", () => {
     // what it stands for. With no description there is nothing else to read.
     expect(suggestFinishKind({ code: "CH-01.2", description: null })).toBeNull();
     // A real code with a real description that names no material.
-    expect(suggestFinishKind({ code: "CLO003 A", description: "Tibor Blob Amber Fern" })).toBeNull();
+    expect(suggestFinishKind({ code: "CLO003 A", description: "Meridian Drift Amber" })).toBeNull();
     // TBC carries no substance.
     expect(suggestFinishKind({ code: "CLO003 B", description: "TBC" })).toBeNull();
   });

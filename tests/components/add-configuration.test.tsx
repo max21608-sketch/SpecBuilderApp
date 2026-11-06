@@ -30,7 +30,7 @@ const offer = {
   offered: [
     item({ id: "w", label: "W · Width", value: "840 mm", group: "dimension", source: { filename: "S-301.pdf", page: 3 } }),
     item({ id: "d", label: "D · Depth", value: "790 mm", group: "dimension", source: { filename: "S-301.pdf", page: 3 } }),
-    item({ id: "com1", label: "SEAT", value: "Tibor Blob Amber Fern", jsonId: 1, differing: true, source: { filename: "S-301.pdf", page: 3 } }),
+    item({ id: "com1", label: "SEAT", value: "Meridian Drift Amber", jsonId: 1, differing: true, source: { filename: "S-301.pdf", page: 3 } }),
     item({ id: "stitch", kind: "answer", label: "Stitching spec", value: "Plain stitch", version: 2 }),
   ],
   taken: [

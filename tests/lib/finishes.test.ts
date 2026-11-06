@@ -21,9 +21,9 @@ const finish = (over: Partial<Finish> = {}): Finish => ({
   codeNorm: "CH-01.1",
   codeOrigin: "client",
   kind: "fabric",
-  description: "Yarn Collective Tessarae",
+  description: "Yarn Loomworks Harbour",
   supplierRaw: null,
-  reference: "YC04158 - 01",
+  reference: "LW44102 - 01",
   colour: null,
   state: "confirmed",
   ...over,
@@ -63,8 +63,8 @@ describe("composeFinishCell", () => {
     // FMT-COM-01: the code is how the fabric is tracked on the client's
     // schedule, the reference is what gets ordered. Dropping either makes the
     // line untraceable or unorderable.
-    expect(composeFinishCell(finish({ supplierRaw: "Yarn Collective" }))).toBe(
-      "CH-01.1; Yarn Collective Tessarae Yarn Collective YC04158 - 01",
+    expect(composeFinishCell(finish({ supplierRaw: "Yarn Loomworks" }))).toBe(
+      "CH-01.1; Yarn Loomworks Harbour Yarn Loomworks LW44102 - 01",
     );
   });
 
@@ -276,13 +276,13 @@ describe("renderAttributeValue with a linked finish", () => {
       state: "confirmed",
       finish: finish(),
     });
-    expect(cell).toBe("CH-01.1; Yarn Collective Tessarae YC04158 - 01");
+    expect(cell).toBe("CH-01.1; Yarn Loomworks Harbour LW44102 - 01");
     expect(cell).not.toContain("Old fabric");
   });
 
   it("marks a TBC finish as TBC however confirmed the attribute was", () => {
     const cell = renderAttributeValue({
-      value: "Yarn Tessarae",
+      value: "Yarn Harbour",
       unit: null,
       state: "confirmed",
       finish: finish({ state: "tbc", description: null, reference: null }),
@@ -301,7 +301,7 @@ describe("resolveFinishCode", () => {
   const library = [finish()];
 
   it("matches an existing code however it was punctuated on the page", () => {
-    const result = resolveFinishCode(" ch-01.1 ", "Yarn Collective Tessarae", library);
+    const result = resolveFinishCode(" ch-01.1 ", "Yarn Loomworks Harbour", library);
     expect(result.status).toBe("matched");
   });
 
@@ -320,7 +320,7 @@ describe("resolveFinishCode", () => {
 
   it("is not a conflict when the library has not committed to anything yet", () => {
     const blank = [finish({ description: null, state: "tbc" })];
-    expect(resolveFinishCode("CH-01.1", "Yarn Tessarae", blank).status).toBe("matched");
+    expect(resolveFinishCode("CH-01.1", "Yarn Harbour", blank).status).toBe("matched");
   });
 
   // THE PREMISE THE CORRECTION VERB RESTS ON (src/lib/attribute-correct.ts).
@@ -334,8 +334,8 @@ describe("resolveFinishCode", () => {
   // the test that should have caught it passed for the wrong reason.
   it("always resolves a library row against its own code, however it is punctuated", () => {
     for (const code of ["CH-01.1", " ch-01.1 ", "__QA UPH-07", "WD  05"]) {
-      const row = finish({ code, codeNorm: normaliseFinishCode(code), description: "Yarn Tessarae" });
-      expect(resolveFinishCode(row.code, "Yarn Tessarae", [row]).status).toBe("matched");
+      const row = finish({ code, codeNorm: normaliseFinishCode(code), description: "Yarn Harbour" });
+      expect(resolveFinishCode(row.code, "Yarn Harbour", [row]).status).toBe("matched");
       expect(resolveFinishCode(row.code, "Something else entirely", [row]).status).toBe("conflict");
     }
   });

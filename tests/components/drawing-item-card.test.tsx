@@ -404,7 +404,7 @@ describe("a callout the app had to guess at", () => {
     // never certain enough to slip past unread — so it is yellow, like a
     // guessed dimension slot, and it prints its reason.
     renderCard([
-      callout("SOFA", "Tessarae YC04158 - 01", null, {
+      callout("SOFA", "Harbour LW44102 - 01", null, {
         attrGroup: "material",
         specFieldId: "field-com1",
         groupSuggested: true,

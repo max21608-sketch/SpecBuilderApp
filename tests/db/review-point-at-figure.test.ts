@@ -28,6 +28,7 @@ import { stageDrawingsV4 } from "@/lib/drawing-items";
 import { DrawingsItemsOutput } from "@/lib/extraction-schema";
 import { POST as confirmPost } from "@/app/api/imports/[id]/confirm/route";
 import { confirmingAsShown } from "./shown-targets";
+import { normaliseFinishCode } from "@/lib/finishes";
 import { GET as importGet, PATCH as importPatch } from "@/app/api/imports/[id]/route";
 
 // The drawings confirm requires the records the card showed (audit D3).
@@ -403,8 +404,8 @@ describeIfDb("the drawings review points at a figure", () => {
     const finishCode = `QA-UPH-${Date.now()}`;
     await client.query(
       `insert into project_finishes (project_id, code, code_norm, code_origin, kind, description, state, created_by, updated_by)
-       values ($1, $2, $2, 'client', 'fabric', 'Invented red linen', 'confirmed', 'qa', 'qa')`,
-      [projectId, finishCode],
+       values ($1, $2, $3, 'client', 'fabric', 'Invented red linen', 'confirmed', 'qa', 'qa')`,
+      [projectId, finishCode, normaliseFinishCode(finishCode)],
     );
     const stageOne = () =>
       stage(

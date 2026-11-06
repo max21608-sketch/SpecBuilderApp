@@ -225,8 +225,8 @@ describeIfDb("the finishes library, against the codes a client actually writes",
       // to merge two codes a client meant to keep apart, and there is no way
       // back from that: the two sets of items are now one. Merging is a button
       // somebody presses, and this app does not have one.
-      await addFinish(projectId, "__QA CH-01.1", "__QA Tessarae, dot");
-      await addFinish(projectId, "__QA CH-01-1", "__QA Tessarae, dash");
+      await addFinish(projectId, "__QA CH-01.1", "__QA Harbour, dot");
+      await addFinish(projectId, "__QA CH-01-1", "__QA Harbour, dash");
       const rows = await client.query(
         `select code, code_norm from project_finishes where project_id = $1 order by code`,
         [projectId],
@@ -239,7 +239,7 @@ describeIfDb("the finishes library, against the codes a client actually writes",
       // The other half of the same index, and the half that makes the library
       // edit-once: two rows for one code would mean correcting one and leaving
       // the items on the other reading the old words.
-      await expect(addFinish(projectId, "  __qa   ch-01.1 ", "__QA Tessarae again")).rejects.toThrow(
+      await expect(addFinish(projectId, "  __qa   ch-01.1 ", "__QA Harbour again")).rejects.toThrow(
         /project_finishes_code_key/,
       );
     });
@@ -275,7 +275,7 @@ describeIfDb("the finishes library, against the codes a client actually writes",
       firstRecord = await makeRecord("__QAE2-1", "__QA Sofa, page one");
       const staged = await stagePage({
         code: "__QAE2-1",
-        fabric: "__QA Yarn Tessarae, boucle",
+        fabric: "__QA Yarn Harbour, boucle",
         materialCode: code,
       });
       const { response } = await confirmCard(staged);
@@ -287,7 +287,7 @@ describeIfDb("the finishes library, against the codes a client actually writes",
         [projectId, normaliseFinishCode(code)],
       );
       expect(finish.rows).toHaveLength(1);
-      expect(finish.rows[0].description).toBe("__QA Yarn Tessarae, boucle");
+      expect(finish.rows[0].description).toBe("__QA Yarn Harbour, boucle");
       // TBC, because a drawing NAMING a code is not somebody confirming what
       // it is; and no kind, because the library never infers one.
       expect(finish.rows[0].state).toBe("tbc");
@@ -309,7 +309,7 @@ describeIfDb("the finishes library, against the codes a client actually writes",
       secondRecord = await makeRecord("__QAE2-2", "__QA Bench, page two");
       const staged = await stagePage({
         code: "__QAE2-2",
-        fabric: "__QA Yarn Tessarae, chenille",
+        fabric: "__QA Yarn Harbour, chenille",
         materialCode: code,
       });
       const { response } = await confirmCard(staged);
@@ -324,7 +324,7 @@ describeIfDb("the finishes library, against the codes a client actually writes",
       expect(attribute.rows[0].finish_id).toBeNull();
       // The page's own words are kept verbatim, which is what makes the value
       // re-checkable against the page it came from.
-      expect(attribute.rows[0].value).toBe("__QA Yarn Tessarae, chenille");
+      expect(attribute.rows[0].value).toBe("__QA Yarn Harbour, chenille");
 
       // And the library is UNTOUCHED: still one row, still the first page's
       // description. A confirm that quietly rewrote it would change every
@@ -335,7 +335,7 @@ describeIfDb("the finishes library, against the codes a client actually writes",
         [projectId, normaliseFinishCode(code)],
       );
       expect(finish.rows[0].n).toBe(1);
-      expect(finish.rows[0].description).toBe("__QA Yarn Tessarae, boucle");
+      expect(finish.rows[0].description).toBe("__QA Yarn Harbour, boucle");
     });
 
     it("shows up as a code needing a person, named rather than counted", async () => {

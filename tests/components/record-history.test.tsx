@@ -64,7 +64,7 @@ const COMPARISON = {
     ],
   },
   cells: [{ name: "Dimensions", jsonId: 3, value: "W1900 x D790mm" }],
-  unchanged: [{ key: "u1", label: "COM 1", value: "Yarn Tessarae" }],
+  unchanged: [{ key: "u1", label: "COM 1", value: "Yarn Harbour" }],
 };
 
 function route(url: string) {

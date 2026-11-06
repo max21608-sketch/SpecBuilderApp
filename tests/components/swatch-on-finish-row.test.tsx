@@ -112,9 +112,9 @@ describe("the swatch control, on a finish row", () => {
 
   it("is still offered where the client issued a code — that is the key and stays it", () => {
     resetIds();
-    const rows = [callout("UPHOLSTERY", "Yarn Tessarae YC04158", "UPH-07")];
+    const rows = [callout("UPHOLSTERY", "Yarn Harbour LW44102", "UPH-07")];
     renderCard(rows, {});
-    expect(cropButton("Yarn Tessarae YC04158")).toBeTruthy();
+    expect(cropButton("Yarn Harbour LW44102")).toBeTruthy();
   });
 
   it("is offered on a timber row as well as a fabric one", () => {

@@ -33,8 +33,8 @@ describe("softenShout", () => {
 
   it("keeps figures and codes exactly as printed", () => {
     expect(
-      softenShout("MANUFACTURER MUST SUBMIT A YARN TESSARAE YC04158 SAMPLE BEFORE ANY CUTTING TAKES PLACE."),
-    ).toContain("YC04158");
+      softenShout("MANUFACTURER MUST SUBMIT A YARN HARBOUR LW44102 SAMPLE BEFORE ANY CUTTING TAKES PLACE."),
+    ).toContain("LW44102");
   });
 
   it("keeps the words that mean something in capitals", () => {

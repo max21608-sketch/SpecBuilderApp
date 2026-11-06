@@ -147,12 +147,12 @@ describe("composeCheckSheet", () => {
   it("says where a non-dimension value came from", () => {
     const sheet = composeCheckSheet(
       scope({
-        attributes: [attribute({ attrGroup: "material", label: "SOFA", value: "Yarn YC04158", unit: null, dimensionSlot: null, specFieldJsonId: 1 })],
+        attributes: [attribute({ attrGroup: "material", label: "SOFA", value: "Yarn LW44102", unit: null, dimensionSlot: null, specFieldJsonId: 1 })],
         answers: [{ recordId: "rec-1", specFieldJsonId: 4, value: "Walnut, satin lacquer", qualifier: null }],
       }),
     );
     expect(at(cell(sheet.rows, "COM 1"), "Exported value", "Came from", "Source document", "Page")).toEqual([
-      "Yarn YC04158", "Document", "S-100.pdf", "2",
+      "Yarn LW44102", "Document", "S-100.pdf", "2",
     ]);
     // An answer is somebody filling in a checklist: there is no page to open.
     expect(at(cell(sheet.rows, "Timber finish 1 (BWS: Main timber finish)"), "Exported value", "Came from", "Source document", "Page")).toEqual(

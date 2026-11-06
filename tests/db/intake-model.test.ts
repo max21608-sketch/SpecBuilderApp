@@ -83,7 +83,7 @@ describeIfDb("0007 intake model", () => {
       record_id: recordId,
       attr_group: "material",
       label: "__QA FABRIC",
-      value: "__QA Yarn Tessarae",
+      value: "__QA Yarn Harbour",
       state: "confirmed",
       ...values,
     } as Record<string, unknown>;
@@ -98,8 +98,8 @@ describeIfDb("0007 intake model", () => {
   it("keeps two observations that share a label — a page can name FABRIC twice", async () => {
     // The exact case spec_answers could not hold: one drawing page listing a
     // seat fabric and a back fabric, both called FABRIC.
-    const a = await addAttribute({ value: "__QA Yarn Tessarae", spec_field_id: comOneFieldId });
-    const b = await addAttribute({ value: "__QA Tibor Blob Amber Fern", spec_field_id: comTwoFieldId });
+    const a = await addAttribute({ value: "__QA Yarn Harbour", spec_field_id: comOneFieldId });
+    const b = await addAttribute({ value: "__QA Meridian Drift Amber", spec_field_id: comTwoFieldId });
     expect(a.rows[0].id).not.toBe(b.rows[0].id);
     const rows = await client.query(
       `select count(*)::int n from record_attributes where record_id = $1 and label = '__QA FABRIC'`,

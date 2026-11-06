@@ -15,6 +15,7 @@ import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
 import { FABRIC_SWATCH_BOUCLE, fabricSwatchBillWorkbook } from "../fixtures/build-boq";
 import type { TxnSql } from "@/lib/db-transaction";
+import { normaliseFinishCode } from "@/lib/finishes";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -109,8 +110,8 @@ describeIfDb("the bill fills the finishes library", () => {
     const mohair = (
       await client.query(
         `insert into project_finishes (project_id, code, code_norm, description, state, created_by, updated_by)
-         values ($1, 'ZZ-FAB-15', 'ZZ-FAB-15', 'Fabric @ Pouf Collection: Example Mohair', 'tbc', 'qa', 'qa') returning id`,
-        [withCode],
+         values ($1, 'ZZ-FAB-15', $2, 'Fabric @ Pouf Collection: Example Mohair', 'tbc', 'qa', 'qa') returning id`,
+        [withCode, normaliseFinishCode("ZZ-FAB-15")],
       )
     ).rows[0].id;
     await client.query(

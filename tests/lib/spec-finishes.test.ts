@@ -7,7 +7,7 @@ describe("leadingFinishCode", () => {
   it("reads the client's own code off the front of a value", () => {
     expect(leadingFinishCode("UPH-07")).toBe("UPH-07");
     expect(leadingFinishCode("WD-05 ceruse finish oak")).toBe("WD-05");
-    expect(leadingFinishCode("CLO003 A (Tibor Blob Amber Fern)")).toBe("CLO003");
+    expect(leadingFinishCode("CLO003 A (Meridian Drift Amber)")).toBe("CLO003");
     expect(leadingFinishCode("CH-01.1 boucle")).toBe("CH-01.1");
   });
 
@@ -37,7 +37,7 @@ describe("readFinish", () => {
   it("reads a fabric whose code prefix nothing maps, from the label's own word", () => {
     // CLO is not a mapped prefix and deliberately is not guessed at; the label
     // saying "Fabric" is what decides.
-    const reading = readFinish("Fabric (A configuration)", "CLO003 A (Tibor Blob Amber Fern)");
+    const reading = readFinish("Fabric (A configuration)", "CLO003 A (Meridian Drift Amber)");
     expect(reading?.kind).toBe("fabric");
     expect(reading?.codeRaw).toBe("CLO003");
   });

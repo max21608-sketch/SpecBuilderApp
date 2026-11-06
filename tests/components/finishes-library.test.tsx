@@ -37,7 +37,7 @@ function finish(over: Record<string, unknown> = {}) {
     code: "MOR005",
     code_norm: "MOR005",
     kind: "fabric",
-    description: "Yarn Collective Tessarae",
+    description: "Yarn Loomworks Harbour",
     supplier_raw: null,
     reference: null,
     colour: null,
@@ -83,7 +83,7 @@ const PAYLOAD = {
       kind: "timber",
       description: "Stained oak",
       supplier_raw: "Aissa Dione",
-      reference: "YC04158 - 01",
+      reference: "LW44102 - 01",
       state: "tbc",
       used_on: [usedOn({ recordId: "rec-4", label: "AP364-004", itemDescription: "Desk chair", attributeLabel: "Timber" })],
     }),
@@ -252,7 +252,7 @@ describe("the finishes library", () => {
       kind: "timber",
       description: "Stained oak",
       supplierRaw: "Aissa Dione",
-      reference: "YC04158 - 01",
+      reference: "LW44102 - 01",
       state: "tbc",
     });
   });

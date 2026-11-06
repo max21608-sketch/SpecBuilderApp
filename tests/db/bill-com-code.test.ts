@@ -16,6 +16,7 @@ import { it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { describeIfDb, qaNumber } from "./db-tier";
 import { comCodeBillWorkbook } from "../fixtures/build-boq";
+import { normaliseFinishCode } from "@/lib/finishes";
 
 vi.mock("@/lib/session", () => ({
   getSessionUser: async () => ({
@@ -87,8 +88,8 @@ describeIfDb("a bill that names its cloths by a COM code", () => {
     // NOT in the bill's words, which is the point.
     await client.query(
       `insert into project_finishes (project_id, code, code_norm, description, state, created_by, updated_by)
-       values ($1, 'ZB_06', 'ZB_06', 'EXAMPLE PLUSH; Colour: COGNAC', 'tbc', 'qa', 'qa')`,
-      [projectId],
+       values ($1, 'ZB_06', $2, 'EXAMPLE PLUSH; Colour: COGNAC', 'tbc', 'qa', 'qa')`,
+      [projectId, normaliseFinishCode("ZB_06")],
     );
   });
 
